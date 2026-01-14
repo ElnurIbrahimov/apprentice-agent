@@ -55,7 +55,28 @@ List 3-5 key observations. Be brief."""
         """Create a plan to achieve the goal based on observations."""
         tool_descriptions = self._get_tool_descriptions(available_tools)
 
-        prompt = f"""Goal: {goal}
+        # Detect if this is a code/calculation task
+        goal_lower = goal.lower()
+        is_code_task = any(kw in goal_lower for kw in [
+            'python', 'calculate', 'compute', 'factorial', 'code', 'program',
+            'script', 'generate', 'write code', 'run', 'execute', 'math',
+            'sum', 'average', 'sort', 'algorithm', 'function'
+        ])
+
+        if is_code_task:
+            prompt = f"""Goal: {goal}
+
+This is a CODE/CALCULATION task. Use code_executor to run Python code directly.
+DO NOT search the web. Just write and run the Python code.
+
+Available tools:
+{tool_descriptions}
+
+Create a 1-2 step plan:
+1. Use code_executor with the actual Python code to solve this
+2. (Optional) Summarize if needed"""
+        else:
+            prompt = f"""Goal: {goal}
 
 Observations: {observations[:500]}
 
@@ -75,34 +96,35 @@ Create a short 3-5 step plan. Be specific about which tool to use for each step.
 Available tools:
 {tool_descriptions}
 
-Pick ONE action from the plan. Reply ONLY in this format:
+Pick ONE action. Reply ONLY in this format:
 
 TOOL: <tool_name>
-ACTION: <the query or path>
-REASONING: <one sentence why>
+ACTION: <actual code, path, or query>
+REASONING: <why>
 
-IMPORTANT:
-- filesystem -> for LOCAL files (list, read)
-- web_search -> for INTERNET searches
-- code_executor -> for running PYTHON CODE (ACTION must be actual Python code, not a description!)
-- summarize -> to summarize findings
+RULES:
+- For calculations/math/Python -> use code_executor with ACTUAL Python code
+- For local files -> use filesystem
+- For internet info -> use web_search
+- ACTION for code_executor MUST be real Python code that prints the answer!
 
 Examples:
-TOOL: filesystem
-ACTION: list C:/Users/project
-REASONING: need to see directory contents
-
-TOOL: web_search
-ACTION: latest AI news 2024
-REASONING: need information from internet
 
 TOOL: code_executor
 ACTION: import math; print(math.factorial(50))
-REASONING: calculate 50 factorial
+REASONING: calculate factorial
 
-TOOL: summarize
-ACTION: results
-REASONING: summarize findings"""
+TOOL: code_executor
+ACTION: numbers = [1,2,3,4,5]; print(sum(numbers))
+REASONING: calculate sum
+
+TOOL: filesystem
+ACTION: list C:/Users/project
+REASONING: see directory
+
+TOOL: web_search
+ACTION: latest AI news
+REASONING: search internet"""
 
         response = self.think(prompt, system_prompt=self._actor_prompt())
         return self._parse_action_response(response)
@@ -296,14 +318,15 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
         return "You analyze situations. List only key observations. Be very brief."
 
     def _planner_prompt(self) -> str:
-        return """You create simple action plans. Use numbered steps. Be brief and practical.
-For calculations or math, use code_executor with Python code.
-For local files, use filesystem.
-For online info, use web_search."""
+        return """You create simple action plans. Be brief.
+CRITICAL: For ANY calculation, math, Python, or code task -> use code_executor FIRST. Do NOT search the web for how to do it. Just write and execute the code directly.
+For local files -> filesystem.
+For internet info -> web_search."""
 
     def _actor_prompt(self) -> str:
-        return """You select actions. Follow the output format exactly.
-Do not explain or add extra text. Just output TOOL, ACTION, REASONING lines."""
+        return """You select actions. Output ONLY: TOOL, ACTION, REASONING lines.
+For code_executor: ACTION must be actual Python code with print() to show results.
+Do NOT describe code - write the actual code!"""
 
     def _evaluator_prompt(self) -> str:
         return """You evaluate results. Follow the format exactly.
