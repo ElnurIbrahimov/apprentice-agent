@@ -7,7 +7,7 @@ from typing import Any, Optional
 
 from .brain import OllamaBrain
 from .memory import MemorySystem
-from .tools import FileSystemTool, WebSearchTool
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool
 
 
 class AgentPhase(Enum):
@@ -43,7 +43,8 @@ class ApprenticeAgent:
         self.memory = MemorySystem()
         self.tools = {
             "filesystem": FileSystemTool(),
-            "web_search": WebSearchTool()
+            "web_search": WebSearchTool(),
+            "code_executor": CodeExecutorTool()
         }
         self.state = AgentState()
         self.max_iterations = 10
@@ -284,6 +285,14 @@ class ApprenticeAgent:
                 # Default to search
                 return tool.search(action)
 
+        elif tool_name == "code_executor":
+            # Extract Python code from the action
+            code = self._extract_code(action)
+            if code:
+                return tool.execute(code)
+            else:
+                return {"success": False, "error": "No code provided"}
+
         return {"success": False, "error": f"Cannot parse action for {tool_name}"}
 
     def _extract_path(self, action: str) -> Optional[str]:
@@ -323,6 +332,36 @@ class ApprenticeAgent:
         # Remove common command words
         query = re.sub(r'\b(search|find|look|for|up|query|news|about)\b', '', action, flags=re.I)
         return query.strip() or None
+
+    def _extract_code(self, action: str) -> Optional[str]:
+        """Extract Python code from action string."""
+        import re
+
+        # Look for code in triple backticks
+        triple_backtick = re.search(r'```(?:python)?\s*(.*?)```', action, re.DOTALL)
+        if triple_backtick:
+            return triple_backtick.group(1).strip()
+
+        # Look for code in single backticks
+        single_backtick = re.search(r'`([^`]+)`', action)
+        if single_backtick:
+            return single_backtick.group(1).strip()
+
+        # Look for code after common prefixes
+        prefixes = ['run:', 'execute:', 'code:', 'python:']
+        action_lower = action.lower()
+        for prefix in prefixes:
+            if prefix in action_lower:
+                idx = action_lower.index(prefix) + len(prefix)
+                return action[idx:].strip()
+
+        # If it looks like code (has print, =, import, def, etc.), use as-is
+        code_indicators = ['print(', 'import ', 'def ', 'class ', '=', 'for ', 'while ', 'if ']
+        if any(ind in action for ind in code_indicators):
+            return action.strip()
+
+        # Otherwise return the whole action as potential code
+        return action.strip() if action.strip() else None
 
     def _get_final_result(self) -> dict:
         """Compile the final result of the agent run."""

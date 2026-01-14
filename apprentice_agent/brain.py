@@ -82,14 +82,27 @@ ACTION: <the query or path>
 REASONING: <one sentence why>
 
 IMPORTANT:
-- To list/read LOCAL files -> use filesystem
-- To search the INTERNET -> use web_search
-- To summarize what you found -> use summarize
+- filesystem -> for LOCAL files (list, read)
+- web_search -> for INTERNET searches
+- code_executor -> for running PYTHON CODE (ACTION must be actual Python code, not a description!)
+- summarize -> to summarize findings
 
 Examples:
-- List local files: TOOL: filesystem / ACTION: list C:/Users/project / REASONING: need to see directory contents
-- Read a file: TOOL: filesystem / ACTION: read C:/Users/project/readme.md / REASONING: need file contents
-- Search online: TOOL: web_search / ACTION: latest AI news 2024 / REASONING: need current information from internet"""
+TOOL: filesystem
+ACTION: list C:/Users/project
+REASONING: need to see directory contents
+
+TOOL: web_search
+ACTION: latest AI news 2024
+REASONING: need information from internet
+
+TOOL: code_executor
+ACTION: import math; print(math.factorial(50))
+REASONING: calculate 50 factorial
+
+TOOL: summarize
+ACTION: results
+REASONING: summarize findings"""
 
         response = self.think(prompt, system_prompt=self._actor_prompt())
         return self._parse_action_response(response)
@@ -145,8 +158,9 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
     def _get_tool_descriptions(self, available_tools: list[str]) -> str:
         """Get clear descriptions for available tools."""
         descriptions = {
-            "filesystem": "filesystem - list or read LOCAL files on this computer. Use for any file/directory operations. ACTION: 'list <path>' or 'read <path>'",
-            "web_search": "web_search - search the INTERNET for information. Only use for online searches. ACTION: the search query",
+            "filesystem": "filesystem - list or read LOCAL files on this computer. ACTION: 'list <path>' or 'read <path>'",
+            "web_search": "web_search - search the INTERNET for information. ACTION: the search query",
+            "code_executor": "code_executor - run Python code and get the output. Use for calculations, data processing. ACTION: the Python code",
             "summarize": "summarize - summarize gathered information. ACTION: 'results'"
         }
         return "\n".join(descriptions.get(t, t) for t in available_tools)
@@ -162,7 +176,9 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
                 tool = line[5:].strip().lower()
                 # Clean up common variations
                 tool = tool.replace("**", "").replace("`", "").strip()
-                if "summar" in tool:
+                if "code" in tool or "execute" in tool or "python" in tool or "run" in tool:
+                    tool = "code_executor"
+                elif "summar" in tool:
                     tool = "summarize"
                 elif "web" in tool or "search" in tool:
                     tool = "web_search"
@@ -180,8 +196,11 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
         # Fallback: try to extract from less structured responses
         if not result["tool"]:
             response_lower = response.lower()
-            # Check for filesystem indicators first (more specific)
-            if "filesystem" in response_lower or "list " in response_lower or "read " in response_lower or "directory" in response_lower:
+            # Check for code executor indicators
+            if "code_executor" in response_lower or "python" in response_lower or "calculate" in response_lower or "factorial" in response_lower or "print(" in response:
+                result["tool"] = "code_executor"
+            # Check for filesystem indicators
+            elif "filesystem" in response_lower or "list " in response_lower or "read " in response_lower or "directory" in response_lower:
                 result["tool"] = "filesystem"
             elif "summarize" in response_lower or "summary" in response_lower:
                 result["tool"] = "summarize"
@@ -277,7 +296,10 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
         return "You analyze situations. List only key observations. Be very brief."
 
     def _planner_prompt(self) -> str:
-        return "You create simple action plans. Use numbered steps. Be brief and practical."
+        return """You create simple action plans. Use numbered steps. Be brief and practical.
+For calculations or math, use code_executor with Python code.
+For local files, use filesystem.
+For online info, use web_search."""
 
     def _actor_prompt(self) -> str:
         return """You select actions. Follow the output format exactly.
