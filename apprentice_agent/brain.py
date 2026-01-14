@@ -75,16 +75,21 @@ Create a short 3-5 step plan. Be specific about which tool to use for each step.
 Available tools:
 {tool_descriptions}
 
-Pick ONE action to do right now. Reply ONLY in this format (no other text):
+Pick ONE action from the plan. Reply ONLY in this format:
 
 TOOL: <tool_name>
 ACTION: <the query or path>
 REASONING: <one sentence why>
 
+IMPORTANT:
+- To list/read LOCAL files -> use filesystem
+- To search the INTERNET -> use web_search
+- To summarize what you found -> use summarize
+
 Examples:
-- For web search: TOOL: web_search / ACTION: latest AI news 2024 / REASONING: need current information
-- For filesystem: TOOL: filesystem / ACTION: list ./src / REASONING: need to see files
-- For reading: TOOL: filesystem / ACTION: read ./readme.md / REASONING: need file contents"""
+- List local files: TOOL: filesystem / ACTION: list C:/Users/project / REASONING: need to see directory contents
+- Read a file: TOOL: filesystem / ACTION: read C:/Users/project/readme.md / REASONING: need file contents
+- Search online: TOOL: web_search / ACTION: latest AI news 2024 / REASONING: need current information from internet"""
 
         response = self.think(prompt, system_prompt=self._actor_prompt())
         return self._parse_action_response(response)
@@ -140,9 +145,9 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
     def _get_tool_descriptions(self, available_tools: list[str]) -> str:
         """Get clear descriptions for available tools."""
         descriptions = {
-            "web_search": "web_search - search the internet. ACTION should be the search query (e.g., 'AI news 2024')",
-            "filesystem": "filesystem - read files or list directories. ACTION should be 'read <path>' or 'list <path>'",
-            "summarize": "summarize - summarize the information gathered so far. ACTION should be 'results' to summarize search results"
+            "filesystem": "filesystem - list or read LOCAL files on this computer. Use for any file/directory operations. ACTION: 'list <path>' or 'read <path>'",
+            "web_search": "web_search - search the INTERNET for information. Only use for online searches. ACTION: the search query",
+            "summarize": "summarize - summarize gathered information. ACTION: 'results'"
         }
         return "\n".join(descriptions.get(t, t) for t in available_tools)
 
@@ -175,12 +180,13 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
         # Fallback: try to extract from less structured responses
         if not result["tool"]:
             response_lower = response.lower()
-            if "summarize" in response_lower or "summary" in response_lower:
-                result["tool"] = "summarize"
-            elif "web_search" in response_lower or "search" in response_lower:
-                result["tool"] = "web_search"
-            elif "filesystem" in response_lower or "file" in response_lower:
+            # Check for filesystem indicators first (more specific)
+            if "filesystem" in response_lower or "list " in response_lower or "read " in response_lower or "directory" in response_lower:
                 result["tool"] = "filesystem"
+            elif "summarize" in response_lower or "summary" in response_lower:
+                result["tool"] = "summarize"
+            elif "web_search" in response_lower or "internet" in response_lower or "online" in response_lower:
+                result["tool"] = "web_search"
 
         if not result["action"] and result["tool"] == "web_search":
             # Try to extract a search query from the response

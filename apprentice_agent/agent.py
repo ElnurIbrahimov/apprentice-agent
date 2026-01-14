@@ -288,13 +288,21 @@ class ApprenticeAgent:
 
     def _extract_path(self, action: str) -> Optional[str]:
         """Extract file path from action string."""
-        # Look for quoted strings or path-like patterns
         import re
+        # Look for quoted strings first
         quoted = re.findall(r'["\']([^"\']+)["\']', action)
         if quoted:
             return quoted[0]
-        # Look for path patterns
-        paths = re.findall(r'[\w./\\-]+\.\w+|[\w./\\-]+/', action)
+        # Look for Windows paths (C:/... or C:\...)
+        win_paths = re.findall(r'[A-Za-z]:[/\\][\w./\\-]+', action)
+        if win_paths:
+            return win_paths[0]
+        # Look for Unix paths or relative paths
+        unix_paths = re.findall(r'(?:^|[ ])([./][\w./\\-]+)', action)
+        if unix_paths:
+            return unix_paths[0].strip()
+        # Look for path patterns with extensions
+        paths = re.findall(r'[\w./\\-]+\.\w+', action)
         return paths[0] if paths else None
 
     def _extract_pattern(self, action: str) -> Optional[str]:
