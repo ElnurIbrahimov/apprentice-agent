@@ -9,6 +9,7 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 - **Long-term memory** - ChromaDB-powered memory system for learning from past experiences
 - **Web search** - DuckDuckGo integration for gathering online information
 - **Filesystem tools** - Read files and list directories on your local machine
+- **Code execution** - Safely run Python code in a sandboxed environment
 - **Summarization** - Automatically summarize gathered information
 
 ## Requirements
@@ -87,7 +88,16 @@ Edit `apprentice_agent/config.py` to customize:
 |------|-------------|----------------|
 | `filesystem` | List/read local files | `list C:/Users/project` |
 | `web_search` | Search the internet | `AI news 2024` |
+| `code_executor` | Run Python code (sandboxed) | `import math; print(math.factorial(50))` |
 | `summarize` | Summarize gathered info | `results` |
+
+### Code Executor Safety
+
+The code executor runs Python code in a sandboxed subprocess with:
+- **Blocked imports**: `os`, `subprocess`, `sys`, `socket`, `requests`, etc.
+- **No file access**: `open()`, `file()` are blocked
+- **Timeout protection**: 30 second default limit
+- **Isolated execution**: Runs in temp directory
 
 ## Architecture
 
@@ -98,8 +108,9 @@ apprentice_agent/
 ├── memory.py     # ChromaDB-powered long-term memory
 ├── config.py     # Configuration settings
 └── tools/
-    ├── filesystem.py  # File operations
-    └── web_search.py  # DuckDuckGo search
+    ├── filesystem.py    # File operations
+    ├── web_search.py    # DuckDuckGo search
+    └── code_executor.py # Sandboxed Python execution
 ```
 
 ## License
