@@ -79,22 +79,15 @@ class AgentGUI:
 
     def run_agent(self, goal: str, history: list) -> Generator:
         """Run the agent and yield updates for the UI."""
-        print(f"[DEBUG] run_agent called with goal: {goal}")
-        print(f"[DEBUG] history type: {type(history)}, len: {len(history) if history else 0}")
-
         if not goal.strip():
-            print("[DEBUG] Empty goal, returning early")
             yield history, "", "", "", "", ""
             return
 
         self.is_running = True
-        print("[DEBUG] Creating agent with hooks...")
         self.agent = self._create_agent_with_hooks()
-        print("[DEBUG] Agent created successfully")
 
         # Add user message to history (Gradio 6.0+ format)
         history = history + [{"role": "user", "content": goal}]
-        print(f"[DEBUG] Added user message, history len: {len(history)}")
         yield history, "", "", "", "", "Starting agent..."
 
         # Run agent in background thread
@@ -102,22 +95,15 @@ class AgentGUI:
 
         def run_thread():
             try:
-                print("[DEBUG] Thread starting agent.run()...")
                 result_container["result"] = self.agent.run(goal)
-                print(f"[DEBUG] Agent finished: {result_container['result']}")
             except Exception as e:
-                import traceback
-                print(f"[DEBUG] Thread error: {e}")
-                print(f"[DEBUG] Traceback: {traceback.format_exc()}")
                 result_container["error"] = str(e)
             finally:
                 self.is_running = False
                 self.update_queue.put(("done", None, None))
-                print("[DEBUG] Thread finished, put 'done' in queue")
 
         thread = threading.Thread(target=run_thread)
         thread.start()
-        print("[DEBUG] Thread started")
 
         # Process updates
         observe_text = ""
@@ -171,16 +157,12 @@ class AgentGUI:
                 continue
 
         # Finalize response
-        print("[DEBUG] Waiting for thread to join...")
         thread.join()
-        print(f"[DEBUG] Thread joined. Error: {result_container['error']}, Result: {result_container['result'] is not None}")
 
         if result_container["error"]:
             response = f"Error: {result_container['error']}"
-            print(f"[DEBUG] Error response: {response}")
         elif result_container["result"]:
             result = result_container["result"]
-            print(f"[DEBUG] Result keys: {result.keys()}")
 
             # Extract actual outputs from history
             actual_outputs = []
@@ -241,16 +223,12 @@ class AgentGUI:
                     response += "\n" + "\n".join(actual_outputs)
                 if progress:
                     response += f"\n{progress}"
-            print(f"[DEBUG] Final response: {response}")
         else:
             response = "Agent finished without a result."
-            print("[DEBUG] No result from agent")
 
         # Add assistant response (Gradio 6.0+ format)
         history = history + [{"role": "assistant", "content": response}]
-        print(f"[DEBUG] Final history len: {len(history)}")
         yield history, observe_text, plan_text, act_text, evaluate_text, tool_log
-        print("[DEBUG] Final yield complete")
 
     def search_memory(self, query: str) -> str:
         """Search agent memory for relevant experiences."""
