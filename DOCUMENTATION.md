@@ -291,6 +291,51 @@ print(brain.get_last_model_used())  # "llama3:8b"
 - Model used is logged in `model_used` field
 - `get_stats()` returns `model_usage` breakdown
 
+### Fast-Path Responses
+
+**Location:** `agent.py` (`_is_simple_query`, `_fast_path_response`)
+
+Simple conversational queries skip the full 5-phase agent loop and respond directly using the fast model.
+
+**Triggers:**
+- Greetings: "hello", "hi", "hey", "thanks", "bye", "good morning", etc.
+- Short questions (<5 words) without tool keywords
+
+**Tool keywords that disable fast-path:**
+```
+search, find, calculate, compute, code, python, file, read, write,
+list, screenshot, image, analyze, web, pdf, clipboard, weather, news
+```
+
+**Example:**
+```bash
+# Fast-path (direct response)
+python main.py "Hello, how are you?"
+# Output: [FAST-PATH] Using qwen2:1.5b
+
+# Disable fast-path
+python main.py --no-fastpath "Hello!"
+# Output: Runs full 5-phase loop
+```
+
+**How it works:**
+1. `_is_simple_query(goal)` checks if goal is conversational
+2. If true, `_fast_path_response(goal)` responds using `qwen2:1.5b`
+3. Logs to metacognition with `tool="fast_path"`
+4. Returns immediately without observe/plan/act/evaluate
+
+**Result structure for fast-path:**
+```python
+{
+    "goal": "Hello!",
+    "completed": True,
+    "iterations": 0,
+    "fast_path": True,
+    "response": "Hi there! How can I help you?",
+    "final_evaluation": {"success": True, "confidence": 100, ...}
+}
+```
+
 ### GUI Integration
 
 **Stats Tab additions:**
@@ -309,6 +354,10 @@ print(brain.get_last_model_used())  # "llama3:8b"
 # Run with goal
 python main.py "Your goal here"
 python main.py "Goal" --max-iterations 5
+
+# Fast-path (auto for simple queries)
+python main.py "Hello!"              # Uses fast-path
+python main.py --no-fastpath "Hello" # Forces full loop
 
 # Interactive chat
 python main.py --chat
@@ -376,6 +425,12 @@ insights = dreamer.get_all_insights()  # Get stored insights
   - Routes vision to `llava`
   - Logs `model_used` in metacognition
 
+- **Fast-Path Responses** (`agent.py`)
+  - `_is_simple_query()` detects greetings and short questions
+  - `_fast_path_response()` responds directly using fast model
+  - Skips full 5-phase loop for conversational queries
+  - CLI flag `--no-fastpath` to disable
+
 - **GUI Enhancements**
   - Stats tab with metacognition statistics
   - "Run Dream Mode" button
@@ -384,9 +439,9 @@ insights = dreamer.get_all_insights()  # Get stored insights
 #### Modified
 - `config.py`: Added MODEL_FAST, MODEL_REASON, MODEL_VISION settings
 - `brain.py`: Added confidence scoring, multi-model routing, `_select_model()`
-- `agent.py`: Integrated MetacognitionLogger, displays confidence and model
+- `agent.py`: Integrated MetacognitionLogger, fast-path, displays confidence and model
 - `metacognition.py`: Added `model_used` tracking and `model_usage` stats
-- `main.py`: Added `--dream` and `--dream-date` CLI flags
+- `main.py`: Added `--dream`, `--dream-date`, `--no-fastpath` CLI flags
 - `gui.py`: Added Stats tab, dream mode button, model usage display
 
 ### Phase A - Core Agent (Initial Release)
