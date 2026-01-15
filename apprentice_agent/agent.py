@@ -8,7 +8,7 @@ from typing import Any, Optional
 
 from .brain import OllamaBrain
 from .memory import MemorySystem
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool
 
 
 class AgentPhase(Enum):
@@ -47,7 +47,9 @@ class ApprenticeAgent:
             "web_search": WebSearchTool(),
             "code_executor": CodeExecutorTool(),
             "screenshot": ScreenshotTool(),
-            "vision": VisionTool()
+            "vision": VisionTool(),
+            "pdf_reader": PDFReaderTool(),
+            "clipboard": ClipboardTool()
         }
         self.state = AgentState()
         self.max_iterations = 10
@@ -348,6 +350,57 @@ class ApprenticeAgent:
             else:
                 return tool.analyze_image(image_path)
 
+        elif tool_name == "pdf_reader":
+            # Handle PDF reading actions
+            pdf_path = self._extract_path(action)
+            if not pdf_path:
+                # Try extracting from original goal
+                pdf_path = self._extract_path(self.state.goal)
+            if not pdf_path:
+                return {"success": False, "error": "No PDF path specified"}
+
+            if "info" in action_lower or "metadata" in action_lower:
+                return tool.info(pdf_path)
+            elif "search" in action_lower or "find" in action_lower:
+                # Extract search query
+                query = self._extract_query(action)
+                if not query:
+                    return {"success": False, "error": "No search query provided"}
+                return tool.search(pdf_path, query)
+            elif "extract" in action_lower:
+                # Extract pages specification from action first, then from goal
+                pages = self._extract_pages(action)
+                if not pages:
+                    pages = self._extract_pages(self.state.goal)
+                pages = pages or "all"
+                return tool.extract_text(pdf_path, pages)
+            else:
+                # Default: read PDF
+                # Extract pages specification from action first, then from goal
+                pages = self._extract_pages(action)
+                if not pages:
+                    pages = self._extract_pages(self.state.goal)
+                pages = pages or "all"
+                summarize = "summar" in action_lower
+                return tool.read(pdf_path, pages, summarize)
+
+        elif tool_name == "clipboard":
+            # Handle clipboard actions
+            if "analyze" in action_lower or "detect" in action_lower or "type" in action_lower:
+                return tool.analyze()
+            elif "write" in action_lower or "copy" in action_lower:
+                # Extract text to copy
+                text = self._extract_clipboard_text(action)
+                if not text:
+                    # Try from original goal
+                    text = self._extract_clipboard_text(self.state.goal)
+                if text:
+                    return tool.write(text)
+                return {"success": False, "error": "No text specified to copy"}
+            else:
+                # Default: read clipboard (paste, read, what's in clipboard)
+                return tool.read()
+
         return {"success": False, "error": f"Cannot parse action for {tool_name}"}
 
     def _extract_path(self, action: str) -> Optional[str]:
@@ -417,6 +470,57 @@ class ApprenticeAgent:
 
         # Otherwise return the whole action as potential code
         return action.strip() if action.strip() else None
+
+    def _extract_pages(self, action: str) -> Optional[str]:
+        """Extract page specification from action string."""
+        import re
+        action_lower = action.lower()
+
+        # Check for "first page" or "last page" first
+        if 'first page' in action_lower or 'first' in action_lower and 'page' in action_lower:
+            return "first"
+        if 'last page' in action_lower or 'last' in action_lower and 'page' in action_lower:
+            return "last"
+        if 'all page' in action_lower:
+            return "all"
+
+        # Look for page patterns like "pages 1-3", "page 5", "pages 1,3,5"
+        # Pattern: "pages 1-3" or "page 1-3" or "pages 1, 3, 5"
+        page_patterns = [
+            r'pages?\s+([0-9]+(?:\s*[-,]\s*[0-9]+)*)',  # "pages 1-3" or "pages 1,3,5"
+            r'page\s+([0-9]+(?:\s*-\s*[0-9]+)?)',       # "page 5" or "page 1-3"
+        ]
+        for pattern in page_patterns:
+            match = re.search(pattern, action, re.IGNORECASE)
+            if match:
+                # Clean up any extra spaces in the result
+                result = re.sub(r'\s+', '', match.group(1))
+                return result
+        return None
+
+    def _extract_clipboard_text(self, action: str) -> Optional[str]:
+        """Extract text to copy to clipboard from action string."""
+        import re
+        # Look for quoted text first
+        quoted = re.findall(r'["\']([^"\']+)["\']', action)
+        if quoted:
+            return quoted[0]
+
+        # Look for text after common patterns
+        patterns = [
+            r'copy\s+(?:this\s+)?(?:to\s+clipboard)?[:\s]+(.+)',
+            r'write\s+(?:to\s+clipboard)?[:\s]+(.+)',
+            r'clipboard[:\s]+(.+)',
+            r'copy[:\s]+(.+)',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, action, re.IGNORECASE)
+            if match:
+                text = match.group(1).strip()
+                # Remove common suffixes
+                text = re.sub(r'\s+to\s+clipboard.*$', '', text, flags=re.IGNORECASE)
+                return text.strip('"\'')
+        return None
 
     def _get_final_result(self) -> dict:
         """Compile the final result of the agent run."""

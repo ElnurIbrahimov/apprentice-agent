@@ -104,15 +104,44 @@ List 3-5 key observations. Be brief."""
         ]
         is_code_task = any(kw in goal_lower for kw in code_keywords) and not is_search_task and not is_screenshot_task and not is_vision_task
 
+        # PDF keywords
+        pdf_keywords = [
+            'pdf', '.pdf', 'document', 'read pdf', 'extract pdf', 'summarize pdf',
+            'pdf file', 'open pdf', 'pdf content', 'pdf text', 'pdf pages',
+            'search pdf', 'find in pdf', 'pdf info', 'pdf metadata'
+        ]
+        is_pdf_task = any(kw in goal_lower for kw in pdf_keywords)
+
+        # Clipboard keywords - check for explicit clipboard mentions
+        clipboard_keywords = [
+            'clipboard', 'paste', 'copied', 'what\'s in my clipboard',
+            'what is in my clipboard', 'read clipboard', 'write clipboard',
+            'copy to clipboard', 'analyze clipboard', 'clipboard content'
+        ]
+        # Only mark as clipboard if "clipboard" is explicitly mentioned
+        is_clipboard_task = 'clipboard' in goal_lower
+
         # Store for use in decide_action and _generate_default_code
         self._current_goal_is_code = is_code_task
         self._current_goal_is_search = is_search_task
         self._current_goal_is_screenshot = is_screenshot_task
         self._current_goal_is_vision = is_vision_task
         self._current_goal_is_screenshot_and_vision = is_screenshot_and_vision
+        self._current_goal_is_pdf = is_pdf_task
+        self._current_goal_is_clipboard = is_clipboard_task
         self._current_goal = goal
 
-        if is_screenshot_and_vision:
+        if is_clipboard_task:
+            prompt = f"""Goal: {goal}
+
+This is a CLIPBOARD task. Use clipboard tool to read, write, or analyze clipboard content.
+
+Available tools:
+{tool_descriptions}
+
+Create a 1-step plan:
+1. Use clipboard to read/write/analyze the clipboard"""
+        elif is_screenshot_and_vision:
             prompt = f"""Goal: {goal}
 
 This is a SCREENSHOT + VISION task. First capture the screen, then analyze it.
@@ -167,6 +196,17 @@ Available tools:
 Create a 1-2 step plan:
 1. Use code_executor with the actual Python code to solve this
 2. (Optional) Summarize if needed"""
+        elif is_pdf_task:
+            prompt = f"""Goal: {goal}
+
+This is a PDF task. Use pdf_reader tool to read, extract, or search PDF content.
+
+Available tools:
+{tool_descriptions}
+
+Create a 1-2 step plan:
+1. Use pdf_reader to read/extract/search the PDF
+2. (Optional) Summarize the content if needed"""
         else:
             prompt = f"""Goal: {goal}
 
@@ -188,10 +228,36 @@ Create a short 3-5 step plan. Be specific about which tool to use for each step.
         is_search = getattr(self, '_current_goal_is_search', False)
         is_vision = getattr(self, '_current_goal_is_vision', False)
         is_screenshot_and_vision = getattr(self, '_current_goal_is_screenshot_and_vision', False)
+        is_clipboard = getattr(self, '_current_goal_is_clipboard', False)
         screenshot_path = getattr(self, '_last_screenshot_path', None)
 
-        # Check combined screenshot+vision FIRST (before screenshot alone)
-        if is_screenshot_and_vision:
+        # Check clipboard FIRST (before vision which also has "analyze")
+        if is_clipboard:
+            prompt = f"""Plan: {plan[:500]}
+
+This is a CLIPBOARD task. Use clipboard tool to read, write, or analyze clipboard content.
+
+Pick ONE action. Reply ONLY in this format:
+
+TOOL: clipboard
+ACTION: <read/write/analyze> [text to copy]
+REASONING: <why>
+
+Examples:
+
+TOOL: clipboard
+ACTION: read
+REASONING: get current clipboard content
+
+TOOL: clipboard
+ACTION: analyze
+REASONING: detect clipboard content type
+
+TOOL: clipboard
+ACTION: write "hello world"
+REASONING: copy text to clipboard"""
+        # Check combined screenshot+vision (before screenshot alone)
+        elif is_screenshot_and_vision:
             if screenshot_path:
                 # Screenshot already taken, now use vision
                 prompt = f"""Plan: {plan[:500]}
@@ -287,6 +353,35 @@ REASONING: describe what is on screen
 TOOL: vision
 ACTION: read text document.png
 REASONING: extract text from image"""
+        elif getattr(self, '_current_goal_is_pdf', False):
+            # PDF task
+            prompt = f"""Plan: {plan[:500]}
+
+This is a PDF task. Use pdf_reader tool to read, extract, or search PDF content.
+
+Pick ONE action. Reply ONLY in this format:
+
+TOOL: pdf_reader
+ACTION: <read/extract/search/info> <pdf_path> [pages/query]
+REASONING: <why>
+
+Examples:
+
+TOOL: pdf_reader
+ACTION: read C:/Documents/report.pdf
+REASONING: read entire PDF content
+
+TOOL: pdf_reader
+ACTION: read C:/Documents/report.pdf pages 1-5
+REASONING: read first 5 pages
+
+TOOL: pdf_reader
+ACTION: search C:/Documents/report.pdf "revenue"
+REASONING: find pages mentioning revenue
+
+TOOL: pdf_reader
+ACTION: info C:/Documents/report.pdf
+REASONING: get PDF metadata and page count"""
         else:
             prompt = f"""Plan: {plan[:500]}
 
@@ -391,6 +486,8 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
             "code_executor": "code_executor - run Python code and get the output. Use for calculations, data processing. ACTION: the Python code",
             "screenshot": "screenshot - capture a screenshot of the screen. ACTION: 'capture' or 'capture region x y width height'",
             "vision": "vision - analyze images using AI vision model. ACTION: 'analyze <image_path>' or 'describe screen <path>' or 'read text <path>'",
+            "pdf_reader": "pdf_reader - read, extract text, or search PDF files. ACTION: 'read <path>' or 'extract <path> pages 1-5' or 'search <path> query' or 'info <path>'",
+            "clipboard": "clipboard - read, write, or analyze clipboard content. ACTION: 'read' or 'write <text>' or 'analyze'",
             "summarize": "summarize - summarize gathered information. ACTION: 'results'"
         }
         return "\n".join(descriptions.get(t, t) for t in available_tools)
@@ -421,6 +518,10 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
                     tool = "screenshot"
                 elif "vision" in tool or "llava" in tool or "image" in tool or "analyze" in tool:
                     tool = "vision"
+                elif "pdf" in tool or "document" in tool:
+                    tool = "pdf_reader"
+                elif "clipboard" in tool or "copy" in tool or "paste" in tool:
+                    tool = "clipboard"
                 result["tool"] = tool
             elif line.upper().startswith("ACTION:"):
                 action = line[7:].strip()
@@ -447,6 +548,10 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
                 result["tool"] = "screenshot"
             elif "vision" in response_lower or "analyze image" in response_lower or "describe image" in response_lower:
                 result["tool"] = "vision"
+            elif "pdf_reader" in response_lower or "read pdf" in response_lower or "extract pdf" in response_lower:
+                result["tool"] = "pdf_reader"
+            elif "clipboard" in response_lower or "paste" in response_lower or "copy to" in response_lower:
+                result["tool"] = "clipboard"
 
         if not result["action"] and result["tool"] == "web_search":
             # Try to extract a search query from the response
@@ -473,6 +578,30 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
         if result["tool"] != "code_executor" and result["action"]:
             if any(ind in result["action"] for ind in ['print(', 'import ', 'def ', 'for i in']):
                 result["tool"] = "code_executor"
+
+        # FORCE clipboard for clipboard tasks - override tool AND action
+        is_clipboard_task = getattr(self, '_current_goal_is_clipboard', False)
+        if is_clipboard_task:
+            result["tool"] = "clipboard"
+            goal = getattr(self, '_current_goal', '').lower()
+            current_action = (result.get("action") or "").lower()
+
+            # Determine correct action based on goal keywords
+            if 'analyze' in goal or 'type' in goal or 'detect' in goal:
+                result["action"] = "analyze"
+            elif 'copy' in goal or 'write' in goal:
+                # Extract text to copy if present in action
+                if '"' in current_action:
+                    # Keep action with quoted text
+                    pass
+                elif 'write' in current_action and len(current_action) > 10:
+                    # Keep action if it has text after "write"
+                    pass
+                else:
+                    result["action"] = "write"
+            else:
+                # Default to read for "what's in clipboard", "paste", etc.
+                result["action"] = "read"
 
         return result
 
