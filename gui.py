@@ -197,8 +197,15 @@ class AgentGUI:
                     elif tool == "web_search":
                         results = item_result.get("results", [])
                         if results:
-                            snippets = [r.get("title", "") for r in results[:3]]
-                            actual_outputs.append(f"Found: {', '.join(snippets)}")
+                            search_output = "**Search Results:**\n"
+                            for r in results[:3]:
+                                title = r.get("title", "")
+                                snippet = r.get("snippet", "")
+                                if snippet:
+                                    search_output += f"- **{title}**: {snippet}\n"
+                                elif title:
+                                    search_output += f"- {title}\n"
+                            actual_outputs.append(search_output.strip())
                     elif tool == "filesystem":
                         if "content" in item_result:
                             actual_outputs.append(f"File content retrieved")
