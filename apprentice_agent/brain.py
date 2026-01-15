@@ -445,6 +445,7 @@ Result: {result_truncated}
 Reply ONLY in this format:
 
 SUCCESS: yes OR no
+CONFIDENCE: 0-100 (how confident are you the goal is fully achieved)
 PROGRESS: one sentence about progress
 NEXT: continue OR complete OR retry
 
@@ -709,7 +710,7 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
 
     def _parse_evaluation_response(self, response: str) -> dict:
         """Parse the evaluation response."""
-        result = {"success": False, "progress": None, "next": None, "raw": response}
+        result = {"success": False, "confidence": 0, "progress": None, "next": None, "raw": response}
 
         response_lower = response.lower()
 
@@ -719,6 +720,13 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
 
             if line_lower.startswith("success:"):
                 result["success"] = "yes" in line_lower or "true" in line_lower
+            elif line_lower.startswith("confidence:"):
+                # Extract numeric confidence value
+                conf_str = line_stripped[11:].strip()
+                # Extract first number found
+                conf_match = re.search(r'\d+', conf_str)
+                if conf_match:
+                    result["confidence"] = min(100, max(0, int(conf_match.group())))
             elif line_lower.startswith("progress:"):
                 result["progress"] = line_stripped[9:].strip()
             elif line_lower.startswith("next:"):

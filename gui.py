@@ -10,6 +10,8 @@ import time
 from datetime import datetime
 from typing import Generator
 from apprentice_agent import ApprenticeAgent
+from apprentice_agent.metacognition import MetacognitionLogger
+from apprentice_agent.dream import DreamMode
 
 
 class AgentGUI:
@@ -143,9 +145,10 @@ class AgentGUI:
                 elif update_type == "evaluate":
                     if isinstance(data, dict):
                         success = "Yes" if data.get("success") else "No"
+                        confidence = data.get("confidence", 0)
                         progress = data.get("progress", "")
                         next_step = data.get("next", "")
-                        evaluate_text = f"**Success:** {success}\n**Progress:** {progress}\n**Next:** {next_step}"
+                        evaluate_text = f"**Success:** {success}\n**Confidence:** {confidence}%\n**Progress:** {progress}\n**Next:** {next_step}"
                     else:
                         evaluate_text = str(data)
                 elif update_type == "remember":
@@ -285,6 +288,61 @@ class AgentGUI:
         """Clear all thinking panels."""
         return "", "", "", "", ""
 
+    def get_metacognition_stats(self, date: str = None) -> str:
+        """Get metacognition statistics for display."""
+        try:
+            logger = MetacognitionLogger()
+            stats = logger.get_stats(date if date else None)
+
+            if "error" in stats:
+                return f"*{stats['error']}*"
+
+            # Build formatted output
+            output = f"## Stats for {stats['date']}\n\n"
+            output += f"| Metric | Value |\n|--------|-------|\n"
+            output += f"| Total Actions | {stats['total_actions']} |\n"
+            output += f"| Successful | {stats['successful']} |\n"
+            output += f"| Success Rate | {stats['success_rate']}% |\n"
+            output += f"| Retried | {stats['retried']} |\n"
+            output += f"| Retry Rate | {stats['retry_rate']}% |\n"
+            output += f"| Avg Confidence | {stats['avg_confidence']}% |\n\n"
+
+            output += "### Tool Usage\n"
+            for tool, count in stats.get('tool_usage', {}).items():
+                output += f"- **{tool}**: {count} calls\n"
+
+            return output
+        except Exception as e:
+            return f"Error loading stats: {str(e)}"
+
+    def run_dream_mode(self, date: str = None) -> str:
+        """Run dream mode and return formatted results."""
+        try:
+            dreamer = DreamMode()
+            result = dreamer.dream(date if date else None)
+
+            if not result.get("success"):
+                return f"*Dream mode failed: {result.get('error', 'Unknown error')}*"
+
+            # Format output
+            output = "## Dream Mode Complete\n\n"
+            output += f"**Logs analyzed:** {result['logs_analyzed']}\n\n"
+
+            # Pattern summary
+            patterns = result.get("patterns", {})
+            output += "### Tool Performance\n"
+            for tool, stats in patterns.get("tools", {}).items():
+                output += f"- **{tool}**: {stats['success_rate']}% success, {stats['avg_confidence']}% avg confidence\n"
+
+            output += "\n### Generated Insights\n"
+            for i, insight in enumerate(result.get("insights", []), 1):
+                output += f"{i}. {insight}\n\n"
+
+            output += f"\n*Stored {len(result.get('stored_ids', []))} insights to memory*"
+            return output
+        except Exception as e:
+            return f"Error running dream mode: {str(e)}"
+
 
 def create_gui():
     """Create and return the Gradio interface."""
@@ -416,6 +474,22 @@ def create_gui():
 
                         memory_results = gr.Markdown(value="*Enter a query to search memories*")
 
+                    with gr.TabItem("Stats"):
+                        gr.Markdown("### Metacognition Stats")
+                        stats_date_input = gr.Textbox(
+                            label="Date (YYYY-MM-DD)",
+                            placeholder="Leave empty for today",
+                            value=""
+                        )
+                        with gr.Row():
+                            refresh_stats_btn = gr.Button("Refresh Stats", size="sm")
+                            dream_btn = gr.Button("Run Dream Mode", variant="primary", size="sm")
+                        metacog_stats = gr.Markdown(value="*Click 'Refresh Stats' to load*")
+
+                        gr.Markdown("---")
+                        gr.Markdown("### Dream Mode Output")
+                        dream_output = gr.Markdown(value="*Click 'Run Dream Mode' to consolidate memories and generate insights*")
+
                     with gr.TabItem("Settings"):
                         gr.Markdown("### Agent Configuration")
 
@@ -519,6 +593,18 @@ def create_gui():
             fn=gui.update_settings,
             inputs=max_iter_slider,
             outputs=settings_status
+        )
+
+        refresh_stats_btn.click(
+            fn=gui.get_metacognition_stats,
+            inputs=stats_date_input,
+            outputs=metacog_stats
+        )
+
+        dream_btn.click(
+            fn=gui.run_dream_mode,
+            inputs=stats_date_input,
+            outputs=dream_output
         )
 
     return app, theme, custom_css

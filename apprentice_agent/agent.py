@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 from .brain import OllamaBrain
 from .memory import MemorySystem
+from .metacognition import MetacognitionLogger
 from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool
 
 
@@ -53,6 +54,7 @@ class ApprenticeAgent:
         }
         self.state = AgentState()
         self.max_iterations = 10
+        self.metacognition = MetacognitionLogger()
 
     def run(self, goal: str, context: Optional[dict] = None) -> dict:
         """Run the agent loop to achieve a goal."""
@@ -60,6 +62,8 @@ class ApprenticeAgent:
         context = context or {}
         # Clear screenshot path for new task
         self.brain._last_screenshot_path = None
+        # Start metacognition tracking for this goal
+        self.metacognition.start_goal(goal)
 
         print(f"\n{'='*60}")
         print(f"Agent starting with goal: {goal}")
@@ -67,6 +71,7 @@ class ApprenticeAgent:
 
         while not self.state.completed and self.state.iteration < self.max_iterations:
             self.state.iteration += 1
+            self.metacognition.increment_iteration()
             print(f"\n--- Iteration {self.state.iteration} ---")
 
             # Phase 1: OBSERVE
@@ -154,7 +159,19 @@ class ApprenticeAgent:
         )
 
         print(f"Success: {self.state.evaluation.get('success')}")
+        print(f"Confidence: {self.state.evaluation.get('confidence', 0)}%")
         print(f"Progress: {self.state.evaluation.get('progress')}")
+
+        # Log to metacognition system
+        self.metacognition.log_evaluation(
+            tool=self.state.last_action.get('tool'),
+            action=self.state.last_action.get('action'),
+            confidence=self.state.evaluation.get('confidence', 0),
+            success=self.state.evaluation.get('success', False),
+            progress=self.state.evaluation.get('progress'),
+            next_step=self.state.evaluation.get('next'),
+            result_summary=str(self.state.last_result)[:500]
+        )
 
         # Check if goal is achieved
         if self.state.evaluation.get("success") and "complete" in self.state.evaluation.get("next", "").lower():

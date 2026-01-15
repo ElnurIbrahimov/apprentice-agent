@@ -5,6 +5,7 @@ import argparse
 import sys
 
 from apprentice_agent import ApprenticeAgent
+from apprentice_agent.dream import run_dream_mode
 
 
 def main():
@@ -27,8 +28,24 @@ def main():
         default=10,
         help="Maximum iterations for the agent loop (default: 10)"
     )
+    parser.add_argument(
+        "--dream",
+        action="store_true",
+        help="Run dream mode to consolidate memories and generate insights"
+    )
+    parser.add_argument(
+        "--dream-date",
+        type=str,
+        default=None,
+        help="Date to analyze in dream mode (YYYY-MM-DD, default: today)"
+    )
 
     args = parser.parse_args()
+
+    # Handle dream mode first (doesn't need agent)
+    if args.dream:
+        result = run_dream_mode(args.dream_date)
+        sys.exit(0 if result.get("success") else 1)
 
     agent = ApprenticeAgent()
     agent.max_iterations = args.max_iterations
