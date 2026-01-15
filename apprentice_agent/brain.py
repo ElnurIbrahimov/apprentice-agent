@@ -1,10 +1,19 @@
 """Ollama API integration as the agent's reasoning engine."""
 
 import re
+from enum import Enum
 from typing import Optional
 import ollama
 
 from .config import Config
+
+
+class TaskType(Enum):
+    """Types of tasks for model routing."""
+    SIMPLE = "simple"       # Greetings, short answers, basic queries
+    REASONING = "reasoning" # Planning, evaluation, complex decisions
+    CODE = "code"           # Code generation, calculations
+    VISION = "vision"       # Image analysis
 
 
 class OllamaBrain:
@@ -14,14 +23,27 @@ class OllamaBrain:
         self.client = ollama.Client(host=Config.OLLAMA_HOST)
         self.model = Config.MODEL_NAME
         self.conversation_history: list[dict] = []
+        self._last_model_used: str = self.model  # Track for metacognition
 
     def think(
         self,
         prompt: str,
         system_prompt: Optional[str] = None,
-        use_history: bool = True
+        use_history: bool = True,
+        task_type: Optional[TaskType] = None
     ) -> str:
-        """Generate a response using Ollama for reasoning tasks."""
+        """Generate a response using Ollama for reasoning tasks.
+
+        Args:
+            prompt: The prompt to send to the model
+            system_prompt: Optional system prompt
+            use_history: Whether to include conversation history
+            task_type: Type of task for model routing (auto-detected if None)
+        """
+        # Select model based on task type
+        model = self._select_model(prompt, task_type)
+        self._last_model_used = model
+
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
@@ -30,7 +52,7 @@ class OllamaBrain:
         messages.append({"role": "user", "content": prompt})
 
         response = self.client.chat(
-            model=self.model,
+            model=model,
             messages=messages
         )
 
@@ -41,6 +63,65 @@ class OllamaBrain:
             self.conversation_history.append({"role": "assistant", "content": assistant_message})
 
         return assistant_message
+
+    def _select_model(self, prompt: str, task_type: Optional[TaskType] = None) -> str:
+        """Select the appropriate model based on task type.
+
+        Model routing:
+        - SIMPLE (qwen2:1.5b): Greetings, short answers, basic queries
+        - REASONING (llama3:8b): Planning, evaluation, complex decisions
+        - CODE (llama3:8b): Code generation, calculations
+        - VISION (llava): Image analysis
+
+        Args:
+            prompt: The prompt to analyze
+            task_type: Explicit task type, or None for auto-detection
+
+        Returns:
+            Model name to use
+        """
+        # If task type is explicitly provided, use it
+        if task_type:
+            if task_type == TaskType.SIMPLE:
+                return Config.MODEL_FAST
+            elif task_type == TaskType.VISION:
+                return Config.MODEL_VISION
+            else:  # REASONING, CODE
+                return Config.MODEL_REASON
+
+        # Auto-detect task type from prompt
+        prompt_lower = prompt.lower()
+
+        # Vision tasks
+        if any(kw in prompt_lower for kw in ['image', 'picture', 'screenshot', 'photo', 'analyze image']):
+            return Config.MODEL_VISION
+
+        # Simple tasks - greetings, basic questions
+        simple_patterns = [
+            'hello', 'hi ', 'hey', 'good morning', 'good afternoon', 'good evening',
+            'how are you', 'what is your name', 'who are you', 'thanks', 'thank you',
+            'bye', 'goodbye', 'yes', 'no', 'ok', 'okay'
+        ]
+        if any(pattern in prompt_lower for pattern in simple_patterns):
+            # Check if it's ONLY a simple greeting (short prompt)
+            if len(prompt.split()) < 10:
+                return Config.MODEL_FAST
+
+        # Code/calculation tasks
+        code_patterns = [
+            'calculate', 'compute', 'factorial', 'fibonacci', 'prime',
+            'print(', 'import ', 'def ', 'for ', 'while ', 'python',
+            'code', 'script', 'function', 'algorithm'
+        ]
+        if any(pattern in prompt_lower for pattern in code_patterns):
+            return Config.MODEL_REASON
+
+        # Default to reasoning model for complex tasks
+        return Config.MODEL_REASON
+
+    def get_last_model_used(self) -> str:
+        """Get the model used in the last think() call."""
+        return self._last_model_used
 
     def observe(self, context: dict) -> str:
         """Process observations about the current state."""

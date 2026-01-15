@@ -162,6 +162,10 @@ class ApprenticeAgent:
         print(f"Confidence: {self.state.evaluation.get('confidence', 0)}%")
         print(f"Progress: {self.state.evaluation.get('progress')}")
 
+        # Get model used for this evaluation
+        model_used = self.brain.get_last_model_used()
+        print(f"Model: {model_used}")
+
         # Log to metacognition system
         self.metacognition.log_evaluation(
             tool=self.state.last_action.get('tool'),
@@ -170,7 +174,8 @@ class ApprenticeAgent:
             success=self.state.evaluation.get('success', False),
             progress=self.state.evaluation.get('progress'),
             next_step=self.state.evaluation.get('next'),
-            result_summary=str(self.state.last_result)[:500]
+            result_summary=str(self.state.last_result)[:500],
+            model_used=model_used
         )
 
         # Check if goal is achieved

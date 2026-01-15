@@ -311,6 +311,10 @@ class AgentGUI:
             for tool, count in stats.get('tool_usage', {}).items():
                 output += f"- **{tool}**: {count} calls\n"
 
+            output += "\n### Model Usage\n"
+            for model, count in stats.get('model_usage', {}).items():
+                output += f"- **{model}**: {count} calls\n"
+
             return output
         except Exception as e:
             return f"Error loading stats: {str(e)}"

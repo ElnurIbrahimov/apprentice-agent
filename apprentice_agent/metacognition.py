@@ -37,7 +37,8 @@ class MetacognitionLogger:
         success: bool,
         progress: Optional[str] = None,
         next_step: Optional[str] = None,
-        result_summary: Optional[str] = None
+        result_summary: Optional[str] = None,
+        model_used: Optional[str] = None
     ) -> None:
         """Log an action evaluation to the JSONL file."""
         log_entry = {
@@ -51,7 +52,8 @@ class MetacognitionLogger:
             "retried": self._retried,
             "progress": progress,
             "next_step": next_step,
-            "result_summary": result_summary[:500] if result_summary else None
+            "result_summary": result_summary[:500] if result_summary else None,
+            "model_used": model_used
         }
 
         log_file = self._get_log_file()
@@ -92,6 +94,12 @@ class MetacognitionLogger:
             tool = e.get("tool", "unknown")
             tool_counts[tool] = tool_counts.get(tool, 0) + 1
 
+        # Model usage breakdown
+        model_counts = {}
+        for e in entries:
+            model = e.get("model_used", "unknown")
+            model_counts[model] = model_counts.get(model, 0) + 1
+
         return {
             "date": date,
             "total_actions": total,
@@ -100,5 +108,6 @@ class MetacognitionLogger:
             "retried": retried,
             "retry_rate": round(retried / total * 100, 1),
             "avg_confidence": round(avg_confidence, 1),
-            "tool_usage": tool_counts
+            "tool_usage": tool_counts,
+            "model_usage": model_counts
         }

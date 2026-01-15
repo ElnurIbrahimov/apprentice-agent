@@ -92,12 +92,14 @@ User Goal
 The reasoning engine that interfaces with Ollama for all LLM operations.
 
 **Methods:**
-- `think(prompt, system_prompt, use_history)` - Generate response
+- `think(prompt, system_prompt, use_history, task_type)` - Generate response with model routing
 - `observe(context)` - Analyze current state
 - `plan(goal, observations, tools)` - Create action plan
 - `decide_action(plan, tools)` - Select next action
 - `evaluate(action, result, goal)` - Assess outcome with confidence
 - `summarize(content, goal)` - Summarize information
+- `_select_model(prompt, task_type)` - Route to appropriate model
+- `get_last_model_used()` - Get model from last call
 
 #### MemorySystem (`memory.py`)
 
@@ -195,7 +197,8 @@ Logs every action's outcome for later analysis.
   "retried": 2,
   "retry_rate": 50.0,
   "avg_confidence": 87.5,
-  "tool_usage": {"code_executor": 1, "web_search": 3}
+  "tool_usage": {"code_executor": 1, "web_search": 3},
+  "model_usage": {"llama3:8b": 3, "qwen2:1.5b": 1}
 }
 ```
 
@@ -238,6 +241,55 @@ python main.py --dream-date 2026-01-14    # Analyze specific date
 ```
 
 **Insights stored as:** `memory_type: "dream_insight"` in ChromaDB
+
+### Multi-Model Routing
+
+**Location:** `brain.py` (`_select_model` method), `config.py`
+
+Automatically routes tasks to the most appropriate model based on complexity.
+
+**Models configured:**
+
+| Model | Config Key | Use Case |
+|-------|------------|----------|
+| `qwen2:1.5b` | `MODEL_FAST` | Simple tasks, greetings, short answers |
+| `llama3:8b` | `MODEL_REASON` | Reasoning, planning, code, evaluation |
+| `llava` | `MODEL_VISION` | Image/screenshot analysis |
+
+**Task Types (enum):**
+```python
+class TaskType(Enum):
+    SIMPLE = "simple"       # Greetings, short answers
+    REASONING = "reasoning" # Planning, evaluation
+    CODE = "code"           # Code generation, calculations
+    VISION = "vision"       # Image analysis
+```
+
+**Auto-detection patterns:**
+- **SIMPLE**: "hello", "hi", "thanks", "bye" (short prompts <10 words)
+- **CODE**: "calculate", "factorial", "print(", "import", "python"
+- **VISION**: "image", "picture", "screenshot", "analyze image"
+- **REASONING**: Default for complex tasks
+
+**Usage:**
+```python
+from apprentice_agent.brain import OllamaBrain, TaskType
+
+brain = OllamaBrain()
+
+# Auto-detect model
+response = brain.think("Hello!")  # Uses qwen2:1.5b
+
+# Explicit task type
+response = brain.think("Plan a strategy", task_type=TaskType.REASONING)
+
+# Check which model was used
+print(brain.get_last_model_used())  # "llama3:8b"
+```
+
+**Metacognition logging:**
+- Model used is logged in `model_used` field
+- `get_stats()` returns `model_usage` breakdown
 
 ### GUI Integration
 
@@ -316,16 +368,26 @@ insights = dreamer.get_all_insights()  # Get stored insights
   - Stores insights in long-term memory
   - CLI: `python main.py --dream`
 
+- **Multi-Model Routing** (`brain.py`)
+  - `_select_model()` method for automatic model selection
+  - `TaskType` enum: SIMPLE, REASONING, CODE, VISION
+  - Routes simple tasks to `qwen2:1.5b` (fast)
+  - Routes reasoning/code to `llama3:8b`
+  - Routes vision to `llava`
+  - Logs `model_used` in metacognition
+
 - **GUI Enhancements**
   - Stats tab with metacognition statistics
   - "Run Dream Mode" button
   - Dream output display with generated insights
 
 #### Modified
-- `brain.py`: Added confidence to evaluate prompt and parser
-- `agent.py`: Integrated MetacognitionLogger, displays confidence
+- `config.py`: Added MODEL_FAST, MODEL_REASON, MODEL_VISION settings
+- `brain.py`: Added confidence scoring, multi-model routing, `_select_model()`
+- `agent.py`: Integrated MetacognitionLogger, displays confidence and model
+- `metacognition.py`: Added `model_used` tracking and `model_usage` stats
 - `main.py`: Added `--dream` and `--dream-date` CLI flags
-- `gui.py`: Added Stats tab, dream mode button, stats display
+- `gui.py`: Added Stats tab, dream mode button, model usage display
 
 ### Phase A - Core Agent (Initial Release)
 

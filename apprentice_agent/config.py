@@ -10,6 +10,12 @@ load_dotenv()
 class Config:
     OLLAMA_HOST: str = os.getenv("OLLAMA_HOST", "http://localhost:11434")
     CHROMADB_PATH: Path = Path(os.getenv("CHROMADB_PATH", "./data/chromadb"))
-    MODEL_NAME: str = "llama3:8b"
+
+    # Multi-model routing
+    MODEL_FAST: str = "qwen2:1.5b"      # Simple tasks, greetings, short answers
+    MODEL_REASON: str = "llama3:8b"     # Reasoning, planning, code
+    MODEL_VISION: str = "llava"         # Vision/image analysis
+    MODEL_NAME: str = MODEL_REASON      # Default model (backward compat)
+
     MEMORY_COLLECTION_NAME: str = "agent_memory"
     MAX_MEMORY_RESULTS: int = 5
