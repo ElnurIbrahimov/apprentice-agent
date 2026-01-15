@@ -89,8 +89,6 @@ Opens at `http://127.0.0.1:7860` with:
 - **Memory tab** - Search past experiences and view memory stats
 - **Settings tab** - Adjust max iterations
 
-![GUI Screenshot](docs/gui-screenshot.png)
-
 ## Configuration
 
 Edit `apprentice_agent/config.py` to customize:
