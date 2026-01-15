@@ -4,6 +4,7 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 
 ## Features
 
+- **Gradio GUI** - Modern web interface with real-time thinking process visualization
 - **Observe-Plan-Act-Evaluate-Remember loop** - Structured reasoning cycle for achieving goals
 - **Local LLM support** - Uses Ollama for privacy-friendly, offline inference
 - **Long-term memory** - ChromaDB-powered memory system for learning from past experiences
@@ -72,6 +73,24 @@ Chat mode commands:
 - `/clear` - Clear conversation history
 - `/quit` - Exit
 
+### GUI mode
+
+Launch the Gradio web interface:
+
+```bash
+python gui.py
+```
+
+Opens at `http://127.0.0.1:7860` with:
+
+- **Chat panel** - Send messages and view agent responses
+- **Thinking Process tab** - Watch observe/plan/act/evaluate phases in real-time
+- **Tool Usage tab** - Monitor tool invocations with timestamps
+- **Memory tab** - Search past experiences and view memory stats
+- **Settings tab** - Adjust max iterations
+
+![GUI Screenshot](docs/gui-screenshot.png)
+
 ## Configuration
 
 Edit `apprentice_agent/config.py` to customize:
@@ -102,15 +121,18 @@ The code executor runs Python code in a sandboxed subprocess with:
 ## Architecture
 
 ```
-apprentice_agent/
-├── agent.py      # Main agent loop (observe/plan/act/evaluate/remember)
-├── brain.py      # OllamaBrain - LLM interface and reasoning
-├── memory.py     # ChromaDB-powered long-term memory
-├── config.py     # Configuration settings
-└── tools/
-    ├── filesystem.py    # File operations
-    ├── web_search.py    # DuckDuckGo search
-    └── code_executor.py # Sandboxed Python execution
+apprentice-agent/
+├── gui.py        # Gradio web interface
+├── main.py       # CLI entry point
+└── apprentice_agent/
+    ├── agent.py      # Main agent loop (observe/plan/act/evaluate/remember)
+    ├── brain.py      # OllamaBrain - LLM interface and reasoning
+    ├── memory.py     # ChromaDB-powered long-term memory
+    ├── config.py     # Configuration settings
+    └── tools/
+        ├── filesystem.py    # File operations
+        ├── web_search.py    # DuckDuckGo search
+        └── code_executor.py # Sandboxed Python execution
 ```
 
 ## License
