@@ -6,7 +6,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
 
-from .brain import OllamaBrain
+from .brain import OllamaBrain, TaskType
 from .memory import MemorySystem
 from .metacognition import MetacognitionLogger
 from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool
@@ -55,9 +55,106 @@ class ApprenticeAgent:
         self.state = AgentState()
         self.max_iterations = 10
         self.metacognition = MetacognitionLogger()
+        self.use_fastpath = True  # Enable fast-path by default
 
-    def run(self, goal: str, context: Optional[dict] = None) -> dict:
-        """Run the agent loop to achieve a goal."""
+    def _is_simple_query(self, goal: str) -> bool:
+        """Check if the goal is a simple conversational query.
+
+        Simple queries include:
+        - Greetings (hello, hi, hey, thanks, bye, etc.)
+        - Short questions (<5 words) without tool keywords
+        """
+        goal_lower = goal.lower().strip()
+        words = goal_lower.split()
+
+        # Greeting patterns
+        greetings = [
+            'hello', 'hi', 'hey', 'greetings', 'howdy',
+            'good morning', 'good afternoon', 'good evening', 'good night',
+            'thanks', 'thank you', 'thx', 'bye', 'goodbye', 'see you',
+            'how are you', 'what\'s up', 'whats up', 'sup'
+        ]
+
+        # Check for greetings
+        for greeting in greetings:
+            if goal_lower.startswith(greeting) or goal_lower == greeting:
+                return True
+
+        # Tool keywords that indicate a task, not conversation
+        tool_keywords = [
+            'search', 'find', 'calculate', 'compute', 'code', 'python',
+            'file', 'read', 'write', 'list', 'screenshot', 'image',
+            'analyze', 'web', 'internet', 'download', 'pdf', 'clipboard',
+            'factorial', 'fibonacci', 'prime', 'weather', 'news', 'price'
+        ]
+
+        # Short questions without tool keywords
+        if len(words) < 5:
+            has_tool_keyword = any(kw in goal_lower for kw in tool_keywords)
+            if not has_tool_keyword:
+                return True
+
+        return False
+
+    def _fast_path_response(self, goal: str) -> dict:
+        """Handle simple queries without the full agent loop."""
+        print(f"\n{'='*60}")
+        print(f"Agent responding (fast-path): {goal}")
+        print(f"{'='*60}\n")
+
+        # Use fast model for simple responses
+        response = self.brain.think(
+            goal,
+            system_prompt="You are a friendly AI assistant. Respond naturally and concisely to greetings and simple questions.",
+            use_history=False,
+            task_type=TaskType.SIMPLE
+        )
+
+        model_used = self.brain.get_last_model_used()
+        print(f"[FAST-PATH] Using {model_used}")
+        print(f"Response: {response}\n")
+
+        # Log to metacognition
+        self.metacognition.start_goal(goal)
+        self.metacognition.increment_iteration()
+        self.metacognition.log_evaluation(
+            tool="fast_path",
+            action="direct_response",
+            confidence=100,
+            success=True,
+            progress="Responded directly without tool execution",
+            next_step="complete",
+            result_summary=response[:500],
+            model_used=model_used
+        )
+
+        return {
+            "goal": goal,
+            "completed": True,
+            "iterations": 0,
+            "fast_path": True,
+            "response": response,
+            "final_evaluation": {
+                "success": True,
+                "confidence": 100,
+                "progress": response
+            },
+            "history": []
+        }
+
+    def run(self, goal: str, context: Optional[dict] = None, use_fastpath: Optional[bool] = None) -> dict:
+        """Run the agent loop to achieve a goal.
+
+        Args:
+            goal: The goal to achieve
+            context: Optional context dictionary
+            use_fastpath: Override fast-path behavior (None uses self.use_fastpath)
+        """
+        # Check for fast-path eligibility
+        fastpath_enabled = use_fastpath if use_fastpath is not None else self.use_fastpath
+        if fastpath_enabled and self._is_simple_query(goal):
+            return self._fast_path_response(goal)
+
         self.state = AgentState(goal=goal)
         context = context or {}
         # Clear screenshot path for new task

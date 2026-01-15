@@ -39,6 +39,11 @@ def main():
         default=None,
         help="Date to analyze in dream mode (YYYY-MM-DD, default: today)"
     )
+    parser.add_argument(
+        "--no-fastpath",
+        action="store_true",
+        help="Disable fast-path for simple queries (always use full agent loop)"
+    )
 
     args = parser.parse_args()
 
@@ -49,12 +54,13 @@ def main():
 
     agent = ApprenticeAgent()
     agent.max_iterations = args.max_iterations
+    agent.use_fastpath = not args.no_fastpath
 
     if args.chat:
         run_chat_mode(agent)
     elif args.goal:
         result = agent.run(args.goal)
-        print_result(result)
+        print_result(result, is_fastpath=result.get("fast_path", False))
     else:
         parser.print_help()
 
@@ -112,14 +118,20 @@ def handle_command(agent: ApprenticeAgent, command: str):
         print(f"Unknown command: {cmd}")
 
 
-def print_result(result: dict):
+def print_result(result: dict, is_fastpath: bool = False):
     """Print the agent run result."""
     print("\n" + "=" * 60)
-    print("AGENT RUN COMPLETE")
+    if is_fastpath:
+        print("FAST-PATH RESPONSE COMPLETE")
+    else:
+        print("AGENT RUN COMPLETE")
     print("=" * 60)
     print(f"Goal: {result['goal']}")
     print(f"Completed: {result['completed']}")
-    print(f"Iterations: {result['iterations']}")
+    if is_fastpath:
+        print(f"Mode: Fast-path (no tool execution)")
+    else:
+        print(f"Iterations: {result['iterations']}")
     if result.get("final_evaluation"):
         print(f"Final evaluation: {result['final_evaluation'].get('progress', 'N/A')}")
 
