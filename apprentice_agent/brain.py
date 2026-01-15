@@ -58,13 +58,31 @@ List 3-5 key observations. Be brief."""
         # Detect task type from goal
         goal_lower = goal.lower()
 
-        # Screenshot keywords - check first
+        # Vision/image analysis keywords
+        vision_keywords = [
+            'analyze', 'describe', 'what do you see', 'look at this image',
+            'what\'s in this image', 'what is in this image', 'examine image',
+            'read this image', 'interpret', 'identify', 'recognize'
+        ]
+        is_vision_task = any(kw in goal_lower for kw in vision_keywords)
+
+        # Screenshot keywords
         screenshot_keywords = [
             'screenshot', 'screen shot', 'capture screen', 'screen capture',
             'take a picture of screen', 'grab screen', 'what\'s on my screen',
             'what is on my screen', 'capture my screen', 'print screen'
         ]
         is_screenshot_task = any(kw in goal_lower for kw in screenshot_keywords)
+
+        # Combined screenshot + vision task (e.g., "take a screenshot and describe it")
+        is_screenshot_and_vision = is_screenshot_task and (
+            is_vision_task or
+            'and describe' in goal_lower or
+            'and analyze' in goal_lower or
+            'and tell me' in goal_lower or
+            'then describe' in goal_lower or
+            'then analyze' in goal_lower
+        )
 
         # Search/web keywords
         search_keywords = [
@@ -73,7 +91,7 @@ List 3-5 key observations. Be brief."""
             'stock', 'bitcoin', 'crypto', 'what is the', 'who is', 'where is',
             'when did', 'how much', 'trending', 'recent', 'update'
         ]
-        is_search_task = any(kw in goal_lower for kw in search_keywords) and not is_screenshot_task
+        is_search_task = any(kw in goal_lower for kw in search_keywords) and not is_screenshot_task and not is_vision_task
 
         # Code/calculation keywords
         code_keywords = [
@@ -84,15 +102,38 @@ List 3-5 key observations. Be brief."""
             'print', 'multiply', 'divide', 'add', 'subtract', 'power',
             'square', 'root', 'modulo', 'remainder', 'even', 'odd'
         ]
-        is_code_task = any(kw in goal_lower for kw in code_keywords) and not is_search_task and not is_screenshot_task
+        is_code_task = any(kw in goal_lower for kw in code_keywords) and not is_search_task and not is_screenshot_task and not is_vision_task
 
         # Store for use in decide_action and _generate_default_code
         self._current_goal_is_code = is_code_task
         self._current_goal_is_search = is_search_task
         self._current_goal_is_screenshot = is_screenshot_task
+        self._current_goal_is_vision = is_vision_task
+        self._current_goal_is_screenshot_and_vision = is_screenshot_and_vision
         self._current_goal = goal
 
-        if is_screenshot_task:
+        if is_screenshot_and_vision:
+            prompt = f"""Goal: {goal}
+
+This is a SCREENSHOT + VISION task. First capture the screen, then analyze it.
+
+Available tools:
+{tool_descriptions}
+
+Create a 2-step plan:
+1. Use screenshot to capture the screen
+2. Use vision to analyze/describe the captured screenshot"""
+        elif is_vision_task and not is_screenshot_task:
+            prompt = f"""Goal: {goal}
+
+This is a VISION/IMAGE ANALYSIS task. Use vision tool to analyze an image.
+
+Available tools:
+{tool_descriptions}
+
+Create a 1-step plan:
+1. Use vision to analyze the image"""
+        elif is_screenshot_task:
             prompt = f"""Goal: {goal}
 
 This is a SCREENSHOT task. Use screenshot tool to capture the screen.
@@ -145,8 +186,39 @@ Create a short 3-5 step plan. Be specific about which tool to use for each step.
         # Check task type
         is_screenshot = getattr(self, '_current_goal_is_screenshot', False)
         is_search = getattr(self, '_current_goal_is_search', False)
+        is_vision = getattr(self, '_current_goal_is_vision', False)
+        is_screenshot_and_vision = getattr(self, '_current_goal_is_screenshot_and_vision', False)
+        screenshot_path = getattr(self, '_last_screenshot_path', None)
 
-        if is_screenshot:
+        # Check combined screenshot+vision FIRST (before screenshot alone)
+        if is_screenshot_and_vision:
+            if screenshot_path:
+                # Screenshot already taken, now use vision
+                prompt = f"""Plan: {plan[:500]}
+
+This is a SCREENSHOT + VISION task. Screenshot was already taken at: {screenshot_path}
+
+NOW use vision tool to analyze the captured screenshot.
+
+Reply ONLY in this format:
+
+TOOL: vision
+ACTION: analyze {screenshot_path}
+REASONING: analyze the captured screenshot"""
+            else:
+                # Need to take screenshot first
+                prompt = f"""Plan: {plan[:500]}
+
+This is a SCREENSHOT + VISION task. Take screenshot first, then analyze it.
+
+Screenshot has NOT been taken yet. Use screenshot tool first.
+
+Reply ONLY in this format:
+
+TOOL: screenshot
+ACTION: capture
+REASONING: need to capture screen first"""
+        elif is_screenshot:
             prompt = f"""Plan: {plan[:500]}
 
 This is a SCREENSHOT task. You MUST use screenshot tool.
@@ -190,6 +262,31 @@ REASONING: search for recent AI news
 TOOL: web_search
 ACTION: weather New York today
 REASONING: get current weather"""
+        elif is_vision:
+            # Vision-only task (not combined with screenshot)
+            prompt = f"""Plan: {plan[:500]}
+
+This is a VISION/IMAGE ANALYSIS task. Use vision tool to analyze an image.
+
+Pick ONE action. Reply ONLY in this format:
+
+TOOL: vision
+ACTION: <analyze/describe/read> <image_path>
+REASONING: <why>
+
+Examples:
+
+TOOL: vision
+ACTION: analyze screenshots/screenshot_20260115_152610.png
+REASONING: analyze what is in the image
+
+TOOL: vision
+ACTION: describe screen screenshots/latest.png
+REASONING: describe what is on screen
+
+TOOL: vision
+ACTION: read text document.png
+REASONING: extract text from image"""
         else:
             prompt = f"""Plan: {plan[:500]}
 
@@ -230,10 +327,23 @@ REASONING: see directory"""
         # Truncate result to avoid overwhelming the model
         result_truncated = result[:1000] if len(result) > 1000 else result
 
+        # Check for multi-step tasks (screenshot + vision)
+        goal_lower = goal.lower()
+        is_screenshot_and_vision = getattr(self, '_current_goal_is_screenshot_and_vision', False)
+
+        # If this is a combined task and we just did screenshot, continue to vision
+        if is_screenshot_and_vision and 'screenshot' in action.lower() and 'success' in result_truncated.lower():
+            extra_instruction = """
+IMPORTANT: This is a 2-step task (screenshot + describe/analyze).
+If only screenshot was done, say NEXT: continue (still need to analyze the image).
+Only say NEXT: complete if BOTH screenshot AND vision/description are done."""
+        else:
+            extra_instruction = ""
+
         prompt = f"""Goal: {goal}
 Action: {action}
 Result: {result_truncated}
-
+{extra_instruction}
 Reply ONLY in this format:
 
 SUCCESS: yes OR no
@@ -280,6 +390,7 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
             "web_search": "web_search - search the INTERNET for information. ACTION: the search query",
             "code_executor": "code_executor - run Python code and get the output. Use for calculations, data processing. ACTION: the Python code",
             "screenshot": "screenshot - capture a screenshot of the screen. ACTION: 'capture' or 'capture region x y width height'",
+            "vision": "vision - analyze images using AI vision model. ACTION: 'analyze <image_path>' or 'describe screen <path>' or 'read text <path>'",
             "summarize": "summarize - summarize gathered information. ACTION: 'results'"
         }
         return "\n".join(descriptions.get(t, t) for t in available_tools)
@@ -306,6 +417,10 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
                     tool = "web_search"
                 elif "file" in tool or "fs" in tool:
                     tool = "filesystem"
+                elif "screenshot" in tool or "screen" in tool or "capture" in tool:
+                    tool = "screenshot"
+                elif "vision" in tool or "llava" in tool or "image" in tool or "analyze" in tool:
+                    tool = "vision"
                 result["tool"] = tool
             elif line.upper().startswith("ACTION:"):
                 action = line[7:].strip()
@@ -328,6 +443,10 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
                 result["tool"] = "summarize"
             elif "web_search" in response_lower or "internet" in response_lower or "online" in response_lower:
                 result["tool"] = "web_search"
+            elif "screenshot" in response_lower or "capture screen" in response_lower:
+                result["tool"] = "screenshot"
+            elif "vision" in response_lower or "analyze image" in response_lower or "describe image" in response_lower:
+                result["tool"] = "vision"
 
         if not result["action"] and result["tool"] == "web_search":
             # Try to extract a search query from the response

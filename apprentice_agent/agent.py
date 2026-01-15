@@ -3,11 +3,12 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 from typing import Any, Optional
 
 from .brain import OllamaBrain
 from .memory import MemorySystem
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool
 
 
 class AgentPhase(Enum):
@@ -45,7 +46,8 @@ class ApprenticeAgent:
             "filesystem": FileSystemTool(),
             "web_search": WebSearchTool(),
             "code_executor": CodeExecutorTool(),
-            "screenshot": ScreenshotTool()
+            "screenshot": ScreenshotTool(),
+            "vision": VisionTool()
         }
         self.state = AgentState()
         self.max_iterations = 10
@@ -54,6 +56,8 @@ class ApprenticeAgent:
         """Run the agent loop to achieve a goal."""
         self.state = AgentState(goal=goal)
         context = context or {}
+        # Clear screenshot path for new task
+        self.brain._last_screenshot_path = None
 
         print(f"\n{'='*60}")
         print(f"Agent starting with goal: {goal}")
@@ -152,8 +156,17 @@ class ApprenticeAgent:
 
         # Check if goal is achieved
         if self.state.evaluation.get("success") and "complete" in self.state.evaluation.get("next", "").lower():
-            self.state.completed = True
-            print("Goal achieved!")
+            # Override for combined screenshot+vision tasks
+            is_screenshot_and_vision = getattr(self.brain, '_current_goal_is_screenshot_and_vision', False)
+            last_tool = self.state.last_action.get('tool', '').lower() if self.state.last_action else ''
+
+            if is_screenshot_and_vision and last_tool == 'screenshot':
+                # Don't mark as complete - still need to do vision analysis
+                print("Screenshot done, continuing to vision analysis...")
+                self.state.evaluation['next'] = 'continue'
+            else:
+                self.state.completed = True
+                print("Goal achieved!")
 
     def _remember(self) -> None:
         """Phase 5: Store important information in memory."""
@@ -215,6 +228,9 @@ class ApprenticeAgent:
             # Store successful search results for later summarization
             if tool_name == "web_search" and result.get("success"):
                 self._store_search_results(result)
+            # Store screenshot path for combined screenshot+vision tasks
+            if tool_name == "screenshot" and result.get("success"):
+                self.brain._last_screenshot_path = result.get("path")
             return result
         except Exception as e:
             return {"success": False, "error": str(e)}
@@ -309,6 +325,28 @@ class ApprenticeAgent:
             else:
                 # Default: capture full screen (primary monitor)
                 return tool.take_screenshot(monitor=1)
+
+        elif tool_name == "vision":
+            # Handle vision/image analysis actions
+            image_path = self._extract_path(action)
+            if not image_path:
+                # Check if there's a recent screenshot
+                screenshots_dir = Path("screenshots")
+                if screenshots_dir.exists():
+                    screenshots = sorted(screenshots_dir.glob("*.png"), key=lambda p: p.stat().st_mtime, reverse=True)
+                    if screenshots:
+                        image_path = str(screenshots[0])
+
+            if not image_path:
+                return {"success": False, "error": "No image path found. Take a screenshot first or specify an image path."}
+
+            # Determine question from action
+            if "read" in action_lower or "text" in action_lower:
+                return tool.read_text(image_path)
+            elif "screen" in action_lower:
+                return tool.describe_screen(image_path)
+            else:
+                return tool.analyze_image(image_path)
 
         return {"success": False, "error": f"Cannot parse action for {tool_name}"}
 
