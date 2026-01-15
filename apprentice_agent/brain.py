@@ -55,8 +55,19 @@ List 3-5 key observations. Be brief."""
         """Create a plan to achieve the goal based on observations."""
         tool_descriptions = self._get_tool_descriptions(available_tools)
 
-        # Detect if this is a code/calculation task
+        # Detect task type from goal
         goal_lower = goal.lower()
+
+        # Search/web keywords - check first since "search for X" should use web
+        search_keywords = [
+            'search', 'find', 'look up', 'lookup', 'google', 'web', 'internet',
+            'online', 'news', 'latest', 'current', 'today', 'price', 'weather',
+            'stock', 'bitcoin', 'crypto', 'what is the', 'who is', 'where is',
+            'when did', 'how much', 'trending', 'recent', 'update'
+        ]
+        is_search_task = any(kw in goal_lower for kw in search_keywords)
+
+        # Code/calculation keywords
         code_keywords = [
             'python', 'calculate', 'compute', 'factorial', 'code', 'program',
             'script', 'generate', 'write code', 'run', 'execute', 'math',
@@ -65,12 +76,26 @@ List 3-5 key observations. Be brief."""
             'print', 'multiply', 'divide', 'add', 'subtract', 'power',
             'square', 'root', 'modulo', 'remainder', 'even', 'odd'
         ]
-        is_code_task = any(kw in goal_lower for kw in code_keywords)
+        is_code_task = any(kw in goal_lower for kw in code_keywords) and not is_search_task
+
         # Store for use in decide_action and _generate_default_code
         self._current_goal_is_code = is_code_task
+        self._current_goal_is_search = is_search_task
         self._current_goal = goal
 
-        if is_code_task:
+        if is_search_task:
+            prompt = f"""Goal: {goal}
+
+This is a WEB SEARCH task. Use web_search to find information online.
+DO NOT use code_executor for web searches - it cannot access the internet.
+
+Available tools:
+{tool_descriptions}
+
+Create a 2-3 step plan:
+1. Use web_search with a clear search query
+2. Summarize the results if needed"""
+        elif is_code_task:
             prompt = f"""Goal: {goal}
 
 This is a CODE/CALCULATION task. Use code_executor to run Python code directly.
@@ -98,7 +123,39 @@ Create a short 3-5 step plan. Be specific about which tool to use for each step.
         """Decide the next action to take based on the plan."""
         tool_descriptions = self._get_tool_descriptions(available_tools)
 
-        prompt = f"""Plan: {plan[:500]}
+        # Check if this was identified as a search task
+        is_search = getattr(self, '_current_goal_is_search', False)
+
+        if is_search:
+            prompt = f"""Plan: {plan[:500]}
+
+Available tools:
+{tool_descriptions}
+
+This is a WEB SEARCH task. You MUST use web_search tool.
+DO NOT use code_executor - it cannot access the internet!
+
+Pick ONE action. Reply ONLY in this format:
+
+TOOL: web_search
+ACTION: <your search query>
+REASONING: <why>
+
+Examples:
+
+TOOL: web_search
+ACTION: Bitcoin price today USD
+REASONING: find current Bitcoin price
+
+TOOL: web_search
+ACTION: latest AI news 2024
+REASONING: search for recent AI news
+
+TOOL: web_search
+ACTION: weather New York today
+REASONING: get current weather"""
+        else:
+            prompt = f"""Plan: {plan[:500]}
 
 Available tools:
 {tool_descriptions}
@@ -112,8 +169,8 @@ REASONING: <why>
 RULES:
 - For calculations/math/Python -> use code_executor with ACTUAL Python code
 - For local files -> use filesystem
-- For internet info -> use web_search
-- ACTION for code_executor MUST be real Python code that prints the answer!
+- For internet/online info -> use web_search (NOT code_executor!)
+- code_executor CANNOT access the internet - use web_search instead!
 
 Examples:
 
@@ -121,17 +178,13 @@ TOOL: code_executor
 ACTION: import math; print(math.factorial(50))
 REASONING: calculate factorial
 
-TOOL: code_executor
-ACTION: numbers = [1,2,3,4,5]; print(sum(numbers))
-REASONING: calculate sum
+TOOL: web_search
+ACTION: Bitcoin price today
+REASONING: search internet for price
 
 TOOL: filesystem
 ACTION: list C:/Users/project
-REASONING: see directory
-
-TOOL: web_search
-ACTION: latest AI news
-REASONING: search internet"""
+REASONING: see directory"""
 
         response = self.think(prompt, system_prompt=self._actor_prompt())
         return self._parse_action_response(response)
