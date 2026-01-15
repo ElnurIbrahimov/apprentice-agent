@@ -58,14 +58,22 @@ List 3-5 key observations. Be brief."""
         # Detect task type from goal
         goal_lower = goal.lower()
 
-        # Search/web keywords - check first since "search for X" should use web
+        # Screenshot keywords - check first
+        screenshot_keywords = [
+            'screenshot', 'screen shot', 'capture screen', 'screen capture',
+            'take a picture of screen', 'grab screen', 'what\'s on my screen',
+            'what is on my screen', 'capture my screen', 'print screen'
+        ]
+        is_screenshot_task = any(kw in goal_lower for kw in screenshot_keywords)
+
+        # Search/web keywords
         search_keywords = [
             'search', 'find', 'look up', 'lookup', 'google', 'web', 'internet',
             'online', 'news', 'latest', 'current', 'today', 'price', 'weather',
             'stock', 'bitcoin', 'crypto', 'what is the', 'who is', 'where is',
             'when did', 'how much', 'trending', 'recent', 'update'
         ]
-        is_search_task = any(kw in goal_lower for kw in search_keywords)
+        is_search_task = any(kw in goal_lower for kw in search_keywords) and not is_screenshot_task
 
         # Code/calculation keywords
         code_keywords = [
@@ -76,14 +84,25 @@ List 3-5 key observations. Be brief."""
             'print', 'multiply', 'divide', 'add', 'subtract', 'power',
             'square', 'root', 'modulo', 'remainder', 'even', 'odd'
         ]
-        is_code_task = any(kw in goal_lower for kw in code_keywords) and not is_search_task
+        is_code_task = any(kw in goal_lower for kw in code_keywords) and not is_search_task and not is_screenshot_task
 
         # Store for use in decide_action and _generate_default_code
         self._current_goal_is_code = is_code_task
         self._current_goal_is_search = is_search_task
+        self._current_goal_is_screenshot = is_screenshot_task
         self._current_goal = goal
 
-        if is_search_task:
+        if is_screenshot_task:
+            prompt = f"""Goal: {goal}
+
+This is a SCREENSHOT task. Use screenshot tool to capture the screen.
+
+Available tools:
+{tool_descriptions}
+
+Create a 1-step plan:
+1. Use screenshot to capture the screen"""
+        elif is_search_task:
             prompt = f"""Goal: {goal}
 
 This is a WEB SEARCH task. Use web_search to find information online.
@@ -123,10 +142,27 @@ Create a short 3-5 step plan. Be specific about which tool to use for each step.
         """Decide the next action to take based on the plan."""
         tool_descriptions = self._get_tool_descriptions(available_tools)
 
-        # Check if this was identified as a search task
+        # Check task type
+        is_screenshot = getattr(self, '_current_goal_is_screenshot', False)
         is_search = getattr(self, '_current_goal_is_search', False)
 
-        if is_search:
+        if is_screenshot:
+            prompt = f"""Plan: {plan[:500]}
+
+This is a SCREENSHOT task. You MUST use screenshot tool.
+
+Pick ONE action. Reply ONLY in this format:
+
+TOOL: screenshot
+ACTION: capture
+REASONING: take screenshot of the screen
+
+Example:
+
+TOOL: screenshot
+ACTION: capture full screen
+REASONING: capture current screen"""
+        elif is_search:
             prompt = f"""Plan: {plan[:500]}
 
 Available tools:
@@ -243,6 +279,7 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
             "filesystem": "filesystem - list or read LOCAL files on this computer. ACTION: 'list <path>' or 'read <path>'",
             "web_search": "web_search - search the INTERNET for information. ACTION: the search query",
             "code_executor": "code_executor - run Python code and get the output. Use for calculations, data processing. ACTION: the Python code",
+            "screenshot": "screenshot - capture a screenshot of the screen. ACTION: 'capture' or 'capture region x y width height'",
             "summarize": "summarize - summarize gathered information. ACTION: 'results'"
         }
         return "\n".join(descriptions.get(t, t) for t in available_tools)

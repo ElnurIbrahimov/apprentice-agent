@@ -7,7 +7,7 @@ from typing import Any, Optional
 
 from .brain import OllamaBrain
 from .memory import MemorySystem
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool
 
 
 class AgentPhase(Enum):
@@ -44,7 +44,8 @@ class ApprenticeAgent:
         self.tools = {
             "filesystem": FileSystemTool(),
             "web_search": WebSearchTool(),
-            "code_executor": CodeExecutorTool()
+            "code_executor": CodeExecutorTool(),
+            "screenshot": ScreenshotTool()
         }
         self.state = AgentState()
         self.max_iterations = 10
@@ -292,6 +293,22 @@ class ApprenticeAgent:
                 return tool.execute(code)
             else:
                 return {"success": False, "error": "No code provided"}
+
+        elif tool_name == "screenshot":
+            # Handle screenshot actions
+            if "region" in action_lower:
+                # Extract region coordinates if specified
+                import re
+                numbers = re.findall(r'\d+', action)
+                if len(numbers) >= 4:
+                    x, y, w, h = int(numbers[0]), int(numbers[1]), int(numbers[2]), int(numbers[3])
+                    return tool.take_screenshot_region(x, y, w, h)
+                return {"success": False, "error": "Region needs x, y, width, height"}
+            elif "monitor" in action_lower or "list" in action_lower:
+                return tool.list_monitors()
+            else:
+                # Default: capture full screen (primary monitor)
+                return tool.take_screenshot(monitor=1)
 
         return {"success": False, "error": f"Cannot parse action for {tool_name}"}
 
