@@ -118,8 +118,11 @@ List 3-5 key observations. Be brief."""
             'what is in my clipboard', 'read clipboard', 'write clipboard',
             'copy to clipboard', 'analyze clipboard', 'clipboard content'
         ]
-        # Only mark as clipboard if "clipboard" is explicitly mentioned
-        is_clipboard_task = 'clipboard' in goal_lower
+        # Only mark as PURE clipboard task if clipboard is mentioned WITHOUT other tool keywords
+        # This allows multi-tool tasks like "read clipboard then search web"
+        has_clipboard = 'clipboard' in goal_lower
+        has_other_tools = is_search_task or is_code_task or is_screenshot_task or is_vision_task or is_pdf_task
+        is_clipboard_task = has_clipboard and not has_other_tools
 
         # Store for use in decide_action and _generate_default_code
         self._current_goal_is_code = is_code_task
