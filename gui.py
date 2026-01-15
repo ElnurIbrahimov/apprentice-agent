@@ -181,13 +181,47 @@ class AgentGUI:
         elif result_container["result"]:
             result = result_container["result"]
             print(f"[DEBUG] Result keys: {result.keys()}")
-            # Build response from agent's actual return format
+
+            # Extract actual outputs from history
+            actual_outputs = []
+            history_items = result.get("history", [])
+            for item in history_items:
+                item_result = item.get("result", {})
+                if item_result and item_result.get("success"):
+                    tool = item.get("action", {}).get("tool", "")
+                    # Get output based on tool type
+                    if tool == "code_executor":
+                        output = item_result.get("output", "")
+                        if output:
+                            actual_outputs.append(f"Result: {output}")
+                    elif tool == "web_search":
+                        results = item_result.get("results", [])
+                        if results:
+                            snippets = [r.get("title", "") for r in results[:3]]
+                            actual_outputs.append(f"Found: {', '.join(snippets)}")
+                    elif tool == "filesystem":
+                        if "content" in item_result:
+                            actual_outputs.append(f"File content retrieved")
+                        elif "entries" in item_result:
+                            entries = item_result.get("entries", [])
+                            actual_outputs.append(f"Listed {len(entries)} items")
+                    elif tool == "summarize":
+                        summary = item_result.get("summary", "")
+                        if summary:
+                            actual_outputs.append(summary[:200])
+
+            # Build response with actual results
             if result.get("completed"):
-                # Extract final answer from evaluation or history
                 final_eval = result.get("final_evaluation", {})
                 progress = final_eval.get("progress", "") if final_eval else ""
-                if progress:
-                    response = f"[Done] {progress}"
+
+                if actual_outputs:
+                    # Show actual output prominently
+                    response = "\n".join(actual_outputs)
+                    if progress:
+                        response += f"\n\n{progress}"
+                elif progress:
+                    response = progress
                 else:
                     response = "Task completed successfully."
             else:
@@ -195,7 +229,11 @@ class AgentGUI:
                 iterations = result.get("iterations", 0)
                 final_eval = result.get("final_evaluation", {})
                 progress = final_eval.get("progress", "") if final_eval else ""
-                response = f"Task incomplete after {iterations} iterations. {progress}"
+                response = f"Task incomplete after {iterations} iterations."
+                if actual_outputs:
+                    response += "\n" + "\n".join(actual_outputs)
+                if progress:
+                    response += f"\n{progress}"
             print(f"[DEBUG] Final response: {response}")
         else:
             response = "Agent finished without a result."
