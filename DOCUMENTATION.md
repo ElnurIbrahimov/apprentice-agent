@@ -7,6 +7,7 @@ Complete technical documentation for the Apprentice Agent project.
 - [Architecture](#architecture)
 - [Phase A: Core Agent](#phase-a-core-agent)
 - [Phase B: Self-Reflection](#phase-b-self-reflection)
+- [Phase C: Voice & Image Tools](#phase-c-voice--image-tools)
 - [API Reference](#api-reference)
 - [Changelog](#changelog)
 
@@ -24,6 +25,7 @@ apprentice-agent/
 │   └── metacognition/        # JSONL logs (YYYY-MM-DD.jsonl)
 ├── data/
 │   └── chromadb/             # Memory storage
+├── generated_images/         # [Phase C] Stable Diffusion outputs
 └── apprentice_agent/
     ├── __init__.py
     ├── agent.py              # Main agent loop
@@ -40,7 +42,9 @@ apprentice-agent/
         ├── screenshot.py     # Screen capture
         ├── vision.py         # Image analysis
         ├── pdf_reader.py     # PDF extraction
-        └── clipboard.py      # Clipboard access
+        ├── clipboard.py      # Clipboard access
+        ├── voice.py          # [Phase C] Speech-to-text & TTS
+        └── image_gen.py      # [Phase C] Stable Diffusion
 ```
 
 ### Core Loop
@@ -122,6 +126,8 @@ JSON-based memory storage with text similarity search.
 | `vision` | `vision.py` | Image analysis (LLaVA) |
 | `pdf_reader` | `pdf_reader.py` | PDF text extraction |
 | `clipboard` | `clipboard.py` | Clipboard read/write |
+| `voice` | `voice.py` | [Phase C] Speech-to-text (Whisper) & TTS (pyttsx3) |
+| `image_gen` | `image_gen.py` | [Phase C] Image generation (Stable Diffusion 1.5) |
 
 ---
 
@@ -295,16 +301,23 @@ print(brain.get_last_model_used())  # "llama3:8b"
 
 **Location:** `agent.py` (`_is_simple_query`, `_fast_path_response`)
 
-Simple conversational queries skip the full 5-phase agent loop and respond directly using the fast model.
+Simple conversational queries skip the full 5-phase agent loop and respond directly using the fast model (`qwen2:1.5b`).
 
-**Triggers:**
-- Greetings: "hello", "hi", "hey", "thanks", "bye", "good morning", etc.
-- Short questions (<5 words) without tool keywords
+**Triggers (Phase C - Expanded):**
+- **Greetings**: "hello", "hi", "hey", "thanks", "bye", "good morning", etc.
+- **Agent questions**: "who are you", "what can you do", "are you an AI", "what model are you"
+- **Yes/no questions**: "can you", "is it", "do you", "should I", "will it"
+- **Conversational starters**: "what do you think", "explain", "define", "tell me a joke"
+- **General questions**: "what is", "who is", "why is", "how many", "when is"
+- **Short queries**: Less than 8 words without tool keywords
+- **Medium queries**: 8-12 words starting with question words
 
-**Tool keywords that disable fast-path:**
+**Tool keywords that REQUIRE full agent loop:**
 ```
-search, find, calculate, compute, code, python, file, read, write,
-list, screenshot, image, analyze, web, pdf, clipboard, weather, news
+search the web, search online, google, take a screenshot, capture screen,
+read file, open file, list files, run code, execute python, calculate,
+compute, factorial, fibonacci, read pdf, clipboard, analyze image,
+current weather, weather in, news about, stock price, bitcoin price
 ```
 
 **Example:**
@@ -346,6 +359,112 @@ python main.py --no-fastpath "Hello!"
 
 ---
 
+## Phase C: Voice & Image Tools
+
+Phase C adds voice interaction and image generation capabilities.
+
+### Voice Interface
+
+**Location:** `apprentice_agent/tools/voice.py`
+
+**Classes:**
+- `VoiceTool` - Core voice functionality
+- `VoiceConversation` - Continuous voice chat loop
+
+**VoiceTool Methods:**
+
+| Method | Description |
+|--------|-------------|
+| `listen(duration, silence_threshold, silence_duration, max_duration)` | Record and transcribe speech |
+| `speak(text, block)` | Convert text to speech |
+| `set_voice(voice_id, rate, volume)` | Configure TTS settings |
+| `get_voices()` | List available TTS voices |
+| `list_audio_devices()` | List microphone devices |
+
+**Usage:**
+```python
+from apprentice_agent.tools import VoiceTool
+
+voice = VoiceTool(whisper_model="base")
+
+# Listen and transcribe
+result = voice.listen()
+print(result["text"])  # Transcribed speech
+
+# Speak text
+voice.speak("Hello, how can I help you?")
+```
+
+**CLI Voice Mode:**
+```bash
+python main.py --voice
+```
+
+**GUI Voice Mode:**
+1. Check "Voice Mode" checkbox
+2. Click "Speak" button
+3. Speak into microphone
+4. View transcription in status area
+
+**Dependencies:**
+- `openai-whisper` - Speech-to-text (local)
+- `pyttsx3` - Text-to-speech (offline)
+- `sounddevice` - Audio recording
+- `numpy` - Audio processing
+
+### Image Generation
+
+**Location:** `apprentice_agent/tools/image_gen.py`
+
+**Class:** `ImageGenerationTool`
+
+**Methods:**
+
+| Method | Description |
+|--------|-------------|
+| `generate(prompt, negative_prompt, width, height, steps, guidance_scale, seed, save)` | Generate image from prompt |
+| `generate_variations(prompt, num_images)` | Generate multiple variations |
+| `get_device_info()` | Check GPU/CPU status |
+
+**Usage:**
+```python
+from apprentice_agent.tools import ImageGenerationTool
+
+# Initialize (downloads ~4GB model on first use)
+tool = ImageGenerationTool()
+
+# Check device
+print(tool.get_device_info())
+# {'device': 'cuda', 'cuda_available': True, ...}
+
+# Generate image
+result = tool.generate(
+    prompt="a cat sitting on a rainbow",
+    negative_prompt="blurry, low quality",
+    width=512,
+    height=512,
+    num_inference_steps=50,
+    guidance_scale=7.5
+)
+
+print(result["image_path"])  # generated_images/20260116_123456_a_cat_sitting.png
+```
+
+**Quick function:**
+```python
+from apprentice_agent.tools import generate_image
+
+result = generate_image("a futuristic city at sunset")
+```
+
+**Performance:**
+- GPU (CUDA): ~10-30 seconds per image
+- CPU: ~5-10 minutes per image
+
+**Note:** Python 3.14 does not yet have PyTorch CUDA wheels. Use Python 3.11/3.12 for GPU acceleration.
+
+---
+
 ## API Reference
 
 ### CLI Commands
@@ -362,6 +481,9 @@ python main.py --no-fastpath "Hello" # Forces full loop
 # Interactive chat
 python main.py --chat
 
+# Voice conversation mode [Phase C]
+python main.py --voice
+
 # Dream mode
 python main.py --dream
 python main.py --dream --dream-date 2026-01-14
@@ -376,6 +498,7 @@ python gui.py
 from apprentice_agent import ApprenticeAgent
 from apprentice_agent.metacognition import MetacognitionLogger
 from apprentice_agent.dream import DreamMode
+from apprentice_agent.tools import VoiceTool, ImageGenerationTool
 
 # Run agent
 agent = ApprenticeAgent()
@@ -390,11 +513,66 @@ stats = logger.get_stats("2026-01-14")  # Specific date
 dreamer = DreamMode()
 result = dreamer.dream()  # Analyze today
 insights = dreamer.get_all_insights()  # Get stored insights
+
+# Voice interface [Phase C]
+voice = VoiceTool()
+result = voice.listen()  # Record and transcribe
+voice.speak("Hello!")    # Text-to-speech
+
+# Image generation [Phase C]
+img_tool = ImageGenerationTool()
+result = img_tool.generate("a sunset over mountains")
+print(result["image_path"])
 ```
 
 ---
 
 ## Changelog
+
+### Phase C - Voice, Vision & Fast-Path (2026-01-16)
+
+#### Added
+- **Improved Fast-Path Detection** (`agent.py`)
+  - Agent self-questions: "who are you", "what can you do", "are you an AI"
+  - Yes/no question detection: "can you", "is it", "should I"
+  - Conversational starters: "explain", "define", "what do you think"
+  - Increased word threshold (8 words default, 12 for question words)
+  - More specific tool keywords to avoid false positives
+  - Better system prompt with agent identity
+
+- **Voice Interface** (`tools/voice.py`)
+  - `VoiceTool` class with `listen()` and `speak()` methods
+  - Speech-to-text using OpenAI Whisper (local, "base" model)
+  - Text-to-speech using pyttsx3 (offline, no API needed)
+  - Silence detection for automatic recording stop
+  - Direct numpy array to Whisper (bypasses ffmpeg dependency)
+  - `VoiceConversation` class for continuous voice chat
+  - GUI integration: Voice Mode toggle, Speak button
+  - CLI: `python main.py --voice` for voice conversation mode
+
+- **Image Generation** (`tools/image_gen.py`)
+  - `ImageGenerationTool` using Stable Diffusion 1.5
+  - `generate(prompt)` method with customizable parameters
+  - Options: negative_prompt, width, height, steps, guidance_scale, seed
+  - `generate_variations(prompt, num_images)` for multiple outputs
+  - Auto-saves to `generated_images/` folder
+  - Lazy model loading (~4GB download on first use)
+  - GPU/CPU auto-detection
+
+#### Modified
+- `agent.py`: Expanded `_is_simple_query()` with comprehensive patterns
+- `agent.py`: Improved `_fast_path_response()` system prompt
+- `tools/__init__.py`: Added VoiceTool, VoiceConversation, ImageGenerationTool exports
+- `gui.py`: Added Voice Mode checkbox, Speak button, voice status display
+- `main.py`: Added `--voice` CLI flag for voice conversation mode
+
+#### Known Limitations
+- **Python 3.14 + CUDA**: PyTorch CUDA wheels not yet available for Python 3.14
+  - Image generation runs on CPU only (slow: ~5-10 min/image)
+  - Workaround: Use Python 3.11/3.12 venv for GPU acceleration
+- **Voice on Windows**: Requires working microphone; pyttsx3 uses Windows SAPI
+
+---
 
 ### Phase B - Self-Reflection (2026-01-15)
 
@@ -458,12 +636,14 @@ insights = dreamer.get_all_insights()  # Get stored insights
 
 ## Future Phases
 
-### Phase C - Adaptive Learning (Planned)
+### Phase D - Adaptive Learning (Planned)
 - Use dream insights to adjust planning strategies
 - Tool selection based on historical success rates
 - Confidence-based retry decisions
+- Auto-tune model routing based on task performance
 
-### Phase D - Multi-Agent (Planned)
+### Phase E - Multi-Agent (Planned)
 - Spawn sub-agents for complex tasks
 - Inter-agent communication
 - Shared memory pool
+- Task delegation and coordination
