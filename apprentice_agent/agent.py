@@ -62,36 +62,102 @@ class ApprenticeAgent:
 
         Simple queries include:
         - Greetings (hello, hi, hey, thanks, bye, etc.)
-        - Short questions (<5 words) without tool keywords
+        - Questions about the agent itself (who are you, what can you do)
+        - Yes/no questions and short conversational queries
+        - Opinion/preference questions
+        - General knowledge questions without tool needs
         """
         goal_lower = goal.lower().strip()
         words = goal_lower.split()
 
-        # Greeting patterns
+        # Greeting patterns - always fast-path
         greetings = [
-            'hello', 'hi', 'hey', 'greetings', 'howdy',
+            'hello', 'hi', 'hey', 'greetings', 'howdy', 'yo',
             'good morning', 'good afternoon', 'good evening', 'good night',
             'thanks', 'thank you', 'thx', 'bye', 'goodbye', 'see you',
-            'how are you', 'what\'s up', 'whats up', 'sup'
+            'how are you', "what's up", 'whats up', 'sup', "how's it going",
+            'nice to meet you', 'pleased to meet you'
         ]
-
-        # Check for greetings
         for greeting in greetings:
             if goal_lower.startswith(greeting) or goal_lower == greeting:
                 return True
 
-        # Tool keywords that indicate a task, not conversation
-        tool_keywords = [
-            'search', 'find', 'calculate', 'compute', 'code', 'python',
-            'file', 'read', 'write', 'list', 'screenshot', 'image',
-            'analyze', 'web', 'internet', 'download', 'pdf', 'clipboard',
-            'factorial', 'fibonacci', 'prime', 'weather', 'news', 'price'
+        # Questions about the agent itself - always fast-path
+        agent_patterns = [
+            'who are you', 'what are you', 'are you an ai', 'are you a bot',
+            'are you real', 'are you human', 'what can you do', 'what do you do',
+            'how do you work', 'what is your name', "what's your name",
+            'tell me about yourself', 'introduce yourself', 'your capabilities',
+            'what are your abilities', 'can you help', 'how can you help',
+            'what should i call you', 'who made you', 'who created you',
+            'are you chatgpt', 'are you gpt', 'are you claude', 'are you llama',
+            'what model are you', 'what llm are you'
+        ]
+        for pattern in agent_patterns:
+            if pattern in goal_lower:
+                return True
+
+        # Yes/no question starters - usually conversational
+        yesno_starters = [
+            'is it', 'is this', 'is that', 'are you', 'are there', 'are we',
+            'can you', 'can i', 'could you', 'would you', 'should i', 'should we',
+            'do you', 'does it', 'does this', 'did you', 'have you', 'has it',
+            'will you', 'will it', 'was it', 'were you', 'is there'
         ]
 
-        # Short questions without tool keywords
-        if len(words) < 5:
-            has_tool_keyword = any(kw in goal_lower for kw in tool_keywords)
-            if not has_tool_keyword:
+        # Opinion/conversational starters - usually fast-path
+        conversational_starters = [
+            'what do you think', 'what is your opinion', 'do you like',
+            'do you prefer', 'which is better', "what's the best",
+            'tell me a joke', 'tell me something', 'say something',
+            'how should i', 'what should i', 'why is', 'why do', 'why are',
+            'when is', 'when do', 'when should', 'where is', 'where do',
+            'explain', 'describe', 'define', 'what is a', 'what is the',
+            'who is', 'who was', 'how many', 'how much', 'how long',
+            'what happened', 'what does', 'what means', 'meaning of'
+        ]
+
+        # Tool keywords that REQUIRE the full agent loop
+        # Be specific - only trigger for clear tool actions
+        tool_keywords = [
+            'search the web', 'search online', 'look up online', 'google',
+            'take a screenshot', 'capture screen', 'screenshot',
+            'read file', 'open file', 'list files', 'list directory',
+            'run code', 'execute code', 'run python', 'execute python',
+            'calculate', 'compute', 'factorial', 'fibonacci',
+            'read pdf', 'open pdf', 'extract from pdf',
+            'clipboard', 'copy to clipboard', 'paste from clipboard',
+            'analyze image', 'look at image', 'describe image',
+            'current weather', 'weather in', 'news about', 'latest news',
+            'stock price', 'bitcoin price', 'crypto price'
+        ]
+
+        # Check if it clearly needs a tool
+        needs_tool = any(kw in goal_lower for kw in tool_keywords)
+        if needs_tool:
+            return False  # Use full agent loop
+
+        # Check for yes/no questions (usually don't need tools)
+        for starter in yesno_starters:
+            if goal_lower.startswith(starter):
+                # But not if it's asking to perform an action
+                action_words = ['search', 'find', 'calculate', 'screenshot', 'read', 'analyze']
+                if not any(aw in goal_lower for aw in action_words):
+                    return True
+
+        # Check for conversational starters
+        for starter in conversational_starters:
+            if goal_lower.startswith(starter):
+                return True
+
+        # Short queries (less than 8 words) without tool needs are likely conversational
+        if len(words) < 8:
+            return True
+
+        # Medium queries (8-12 words) - check for question patterns
+        if len(words) < 12:
+            question_words = ['what', 'who', 'why', 'how', 'when', 'where', 'which']
+            if any(goal_lower.startswith(qw) for qw in question_words):
                 return True
 
         return False
@@ -102,11 +168,27 @@ class ApprenticeAgent:
         print(f"Agent responding (fast-path): {goal}")
         print(f"{'='*60}\n")
 
+        # Build a context-aware system prompt
+        system_prompt = """You are the Apprentice Agent, a helpful AI assistant running locally via Ollama.
+
+About yourself:
+- You are an AI agent that can search the web, take screenshots, read files, execute Python code, and more
+- You run locally using Ollama with the Llama and Qwen models
+- You were created to help users with various tasks through conversation and tool use
+
+Guidelines:
+- Be friendly, helpful, and concise
+- For greetings, respond warmly but briefly
+- For questions about yourself, be informative but humble
+- For general knowledge questions, give accurate, helpful answers
+- Keep responses short (1-3 sentences for simple queries)
+- If asked to do something that requires tools (search, screenshot, files, code), say you can help with that"""
+
         # Use fast model for simple responses
         response = self.brain.think(
             goal,
-            system_prompt="You are a friendly AI assistant. Respond naturally and concisely to greetings and simple questions.",
-            use_history=False,
+            system_prompt=system_prompt,
+            use_history=True,  # Enable history for conversational context
             task_type=TaskType.SIMPLE
         )
 

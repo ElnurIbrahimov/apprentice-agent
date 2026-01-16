@@ -12,6 +12,7 @@ from typing import Generator
 from apprentice_agent import ApprenticeAgent
 from apprentice_agent.metacognition import MetacognitionLogger
 from apprentice_agent.dream import DreamMode
+from apprentice_agent.tools.voice import VoiceTool
 
 
 class AgentGUI:
@@ -22,6 +23,9 @@ class AgentGUI:
         self.update_queue = queue.Queue()
         self.is_running = False
         self.max_iterations = 10
+        self.voice_mode = False
+        self.voice_tool = None
+        self._voice_lock = threading.Lock()
 
     def _create_agent_with_hooks(self):
         """Create an agent with hooked methods for real-time updates."""
@@ -347,6 +351,92 @@ class AgentGUI:
         except Exception as e:
             return f"Error running dream mode: {str(e)}"
 
+    def _get_voice_tool(self):
+        """Get or create VoiceTool instance."""
+        if self.voice_tool is None:
+            self.voice_tool = VoiceTool(whisper_model="base")
+        return self.voice_tool
+
+    def toggle_voice_mode(self, enabled: bool) -> str:
+        """Toggle voice mode on/off."""
+        self.voice_mode = enabled
+        if enabled:
+            # Initialize voice tool if needed
+            try:
+                self._get_voice_tool()
+                return "Voice mode **enabled**. Click the microphone button to speak."
+            except Exception as e:
+                self.voice_mode = False
+                return f"Failed to enable voice mode: {str(e)}"
+        else:
+            return "Voice mode **disabled**. Using text input."
+
+    def record_and_transcribe(self) -> tuple:
+        """Record audio and transcribe to text."""
+        if not self.voice_mode:
+            return "", "Voice mode is not enabled. Toggle it on first."
+
+        with self._voice_lock:
+            try:
+                voice = self._get_voice_tool()
+                result = voice.listen(
+                    silence_threshold=0.01,
+                    silence_duration=1.5,
+                    max_duration=30.0
+                )
+
+                if result["success"]:
+                    text = result["text"]
+                    return text, f"Transcribed: *{text}*"
+                else:
+                    return "", f"Recording failed: {result.get('error', 'Unknown error')}"
+            except Exception as e:
+                return "", f"Error: {str(e)}"
+
+    def speak_response(self, text: str) -> str:
+        """Speak text using TTS."""
+        if not self.voice_mode or not text:
+            return ""
+
+        try:
+            voice = self._get_voice_tool()
+            # Run in background to not block UI
+            threading.Thread(
+                target=lambda: voice.speak(text, block=True),
+                daemon=True
+            ).start()
+            return "Speaking response..."
+        except Exception as e:
+            return f"TTS error: {str(e)}"
+
+    def process_voice_input(self, history: list):
+        """Record voice, transcribe, run agent, and speak response."""
+        if not self.voice_mode:
+            yield history, "", "", "", "", "", "Voice mode not enabled"
+            return
+
+        # Record and transcribe
+        text, status = self.record_and_transcribe()
+        if not text:
+            yield history, "", "", "", "", "", status
+            return
+
+        # Run agent with transcribed text
+        final_result = None
+        for result in self.run_agent(text, history):
+            final_result = result
+            yield result + (status,)
+
+        # Speak the response if we got one
+        if final_result and len(final_result) > 0:
+            new_history = final_result[0]
+            if new_history and len(new_history) > 0:
+                last_msg = new_history[-1]
+                if isinstance(last_msg, dict) and last_msg.get("role") == "assistant":
+                    response_text = last_msg.get("content", "")
+                    if response_text:
+                        self.speak_response(response_text)
+
 
 def create_gui():
     """Create and return the Gradio interface."""
@@ -414,6 +504,17 @@ def create_gui():
                 with gr.Row():
                     clear_btn = gr.Button("Clear Chat", size="sm")
                     stop_btn = gr.Button("Stop", variant="stop", size="sm")
+
+                # Voice mode controls
+                with gr.Row():
+                    voice_toggle = gr.Checkbox(
+                        label="Voice Mode",
+                        value=False,
+                        info="Enable microphone input and audio output"
+                    )
+                    mic_btn = gr.Button("Speak", variant="secondary", size="sm", interactive=False)
+
+                voice_status = gr.Markdown("*Voice mode disabled*")
 
             # Right column - Thinking Process & Settings
             with gr.Column(scale=2):
@@ -609,6 +710,50 @@ def create_gui():
             fn=gui.run_dream_mode,
             inputs=stats_date_input,
             outputs=dream_output
+        )
+
+        # Voice mode event handlers
+        def on_voice_toggle(enabled):
+            status = gui.toggle_voice_mode(enabled)
+            return status, gr.update(interactive=enabled)
+
+        voice_toggle.change(
+            fn=on_voice_toggle,
+            inputs=voice_toggle,
+            outputs=[voice_status, mic_btn]
+        )
+
+        def on_mic_click(history):
+            """Handle microphone button click."""
+            if not gui.voice_mode:
+                return history, "", "", "", "", "", "*Enable voice mode first*"
+
+            # Record and transcribe
+            text, status = gui.record_and_transcribe()
+            if not text:
+                return history, "", "", "", "", "", status
+
+            # Run agent with transcribed text
+            final_result = None
+            for result in gui.run_agent(text, history):
+                final_result = result
+
+            if final_result:
+                # Speak the response
+                new_history = final_result[0]
+                if new_history and len(new_history) > 0:
+                    last_msg = new_history[-1]
+                    if isinstance(last_msg, dict) and last_msg.get("role") == "assistant":
+                        response_text = last_msg.get("content", "")
+                        if response_text:
+                            gui.speak_response(response_text)
+                return final_result + (f"Transcribed: *{text}*",)
+            return history, "", "", "", "", "", status
+
+        mic_btn.click(
+            fn=on_mic_click,
+            inputs=[chatbot],
+            outputs=[chatbot, observe_box, plan_box, act_box, evaluate_box, tool_log, voice_status]
         )
 
     return app, theme, custom_css

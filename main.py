@@ -6,6 +6,7 @@ import sys
 
 from apprentice_agent import ApprenticeAgent
 from apprentice_agent.dream import run_dream_mode
+from apprentice_agent.tools.voice import VoiceConversation
 
 
 def main():
@@ -44,6 +45,11 @@ def main():
         action="store_true",
         help="Disable fast-path for simple queries (always use full agent loop)"
     )
+    parser.add_argument(
+        "--voice",
+        action="store_true",
+        help="Start in voice conversation mode (uses microphone and speaker)"
+    )
 
     args = parser.parse_args()
 
@@ -56,13 +62,21 @@ def main():
     agent.max_iterations = args.max_iterations
     agent.use_fastpath = not args.no_fastpath
 
-    if args.chat:
+    if args.voice:
+        run_voice_mode(agent)
+    elif args.chat:
         run_chat_mode(agent)
     elif args.goal:
         result = agent.run(args.goal)
         print_result(result, is_fastpath=result.get("fast_path", False))
     else:
         parser.print_help()
+
+
+def run_voice_mode(agent: ApprenticeAgent):
+    """Run the agent in voice conversation mode."""
+    conversation = VoiceConversation(agent, whisper_model="base")
+    conversation.start()
 
 
 def run_chat_mode(agent: ApprenticeAgent):
