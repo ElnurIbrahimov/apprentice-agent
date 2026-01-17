@@ -78,7 +78,10 @@ class MetacognitionLogger:
         with open(log_file, "r", encoding="utf-8") as f:
             for line in f:
                 if line.strip():
-                    entries.append(json.loads(line))
+                    try:
+                        entries.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue  # Skip malformed lines
 
         if not entries:
             return {"error": "No entries in log file"}

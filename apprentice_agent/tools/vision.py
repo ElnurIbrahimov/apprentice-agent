@@ -5,6 +5,8 @@ import ollama
 from pathlib import Path
 from typing import Optional
 
+from ..config import Config
+
 
 class VisionTool:
     """Tool for analyzing images using vision LLM."""
@@ -16,6 +18,7 @@ class VisionTool:
             model: Vision model to use (default: llava)
         """
         self.model = model
+        self.client = ollama.Client(host=Config.OLLAMA_HOST)
 
     def analyze_image(
         self,
@@ -59,7 +62,7 @@ class VisionTool:
                 img_data = base64.b64encode(f.read()).decode()
 
             # Call ollama with the vision model
-            response = ollama.chat(
+            response = self.client.chat(
                 model=self.model,
                 messages=[{
                     'role': 'user',

@@ -490,6 +490,7 @@ def create_gui():
                 chatbot = gr.Chatbot(
                     label="Chat",
                     height=500,
+                    type="messages",
                 )
 
                 with gr.Row():
@@ -633,17 +634,13 @@ def create_gui():
 
         # Event handlers
         def submit_message(message, history):
-            """Consume generator and return final values."""
+            """Stream agent updates to enable real-time feedback."""
             if not message.strip():
-                return history, "", "", "", "", ""
+                yield history, "", "", "", "", ""
+                return
 
-            final_result = None
             for result in gui.run_agent(message, history):
-                final_result = result
-
-            if final_result:
-                return final_result
-            return history, "", "", "", "", ""
+                yield result
 
         def clear_chat():
             return [], "", "", "", "", ""

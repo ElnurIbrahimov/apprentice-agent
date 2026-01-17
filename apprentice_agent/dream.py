@@ -135,10 +135,10 @@ class DreamMode:
             else:
                 patterns["confidence_distribution"]["high"] += 1
 
-            # Retry analysis
-            if not retried:
+            # Retry analysis - only count successful non-retried actions
+            if success and not retried:
                 patterns["retry_analysis"]["first_attempt_success"] += 1
-            else:
+            elif retried:
                 patterns["retry_analysis"]["needed_retry"] += 1
 
             # Goal tracking

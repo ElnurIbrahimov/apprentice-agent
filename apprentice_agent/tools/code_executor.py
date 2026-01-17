@@ -85,9 +85,6 @@ class CodeExecutorTool:
 
     def _run_sandboxed(self, code: str) -> dict:
         """Run code in a separate process with restrictions."""
-        # Convert semicolon-separated statements to newlines for proper indentation
-        code = code.replace('; ', '\n').replace(';', '\n')
-
         # Create a wrapper script that captures output
         wrapper_code = f'''
 import sys
