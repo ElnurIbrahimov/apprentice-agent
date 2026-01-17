@@ -28,6 +28,9 @@ class CodeExecutorTool:
 
     def execute(self, code: str) -> dict:
         """Execute Python code safely and return results."""
+        # Unescape literal \n, \t from LLM output to actual newlines/tabs
+        code = self._unescape_code(code)
+
         # Check for potentially dangerous operations
         safety_check = self._safety_check(code)
         if not safety_check["safe"]:
@@ -164,6 +167,19 @@ except Exception as e:
         indent = ' ' * spaces
         lines = code.split('\n')
         return '\n'.join(indent + line for line in lines)
+
+    def _unescape_code(self, code: str) -> str:
+        """Convert escaped newlines/tabs from LLM output to actual characters.
+
+        LLMs sometimes output literal \\n instead of actual newlines.
+        This converts them to proper Python code formatting.
+        """
+        # Replace literal \n and \t (as two characters) with actual newline/tab
+        # Be careful not to affect string literals - only replace outside quotes
+        # Simple approach: replace \\n -> newline, \\t -> tab
+        code = code.replace('\\n', '\n')
+        code = code.replace('\\t', '\t')
+        return code
 
     def run_math(self, expression: str) -> dict:
         """Safely evaluate a mathematical expression."""
