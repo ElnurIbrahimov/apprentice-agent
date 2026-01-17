@@ -13,7 +13,8 @@ class Config:
 
     # Multi-model routing
     MODEL_FAST: str = "qwen2:1.5b"      # Simple tasks, greetings, short answers
-    MODEL_REASON: str = "llama3:8b"     # Reasoning, planning, code
+    MODEL_REASON: str = "llama3:8b"     # Reasoning, planning, complex decisions
+    MODEL_CODE: str = "deepseek-coder:6.7b"  # Code generation, debugging, scripts
     MODEL_VISION: str = "llava"         # Vision/image analysis
     MODEL_NAME: str = MODEL_REASON      # Default model (backward compat)
 

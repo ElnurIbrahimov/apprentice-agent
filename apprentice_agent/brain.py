@@ -70,7 +70,7 @@ class OllamaBrain:
         Model routing:
         - SIMPLE (qwen2:1.5b): Greetings, short answers, basic queries
         - REASONING (llama3:8b): Planning, evaluation, complex decisions
-        - CODE (llama3:8b): Code generation, calculations
+        - CODE (deepseek-coder:6.7b): Code generation, debugging, scripts
         - VISION (llava): Image analysis
 
         Args:
@@ -86,7 +86,9 @@ class OllamaBrain:
                 return Config.MODEL_FAST
             elif task_type == TaskType.VISION:
                 return Config.MODEL_VISION
-            else:  # REASONING, CODE
+            elif task_type == TaskType.CODE:
+                return Config.MODEL_CODE
+            else:  # REASONING
                 return Config.MODEL_REASON
 
         # Auto-detect task type from prompt
@@ -107,14 +109,17 @@ class OllamaBrain:
             if len(prompt.split()) < 10:
                 return Config.MODEL_FAST
 
-        # Code/calculation tasks
+        # Code/calculation tasks - route to specialized code model
         code_patterns = [
             'calculate', 'compute', 'factorial', 'fibonacci', 'prime',
             'print(', 'import ', 'def ', 'for ', 'while ', 'python',
-            'code', 'script', 'function', 'algorithm'
+            'code', 'script', 'function', 'algorithm',
+            'debug', 'fix this', 'fix the', 'write a script', 'implement',
+            'refactor', 'class ', 'method', 'variable', 'loop',
+            'error', 'exception', 'traceback', 'bug', 'syntax'
         ]
         if any(pattern in prompt_lower for pattern in code_patterns):
-            return Config.MODEL_REASON
+            return Config.MODEL_CODE
 
         # Default to reasoning model for complex tasks
         return Config.MODEL_REASON
