@@ -9,6 +9,7 @@ from .pdf_reader import PDFReaderTool
 from .clipboard import ClipboardTool
 from .voice import VoiceTool, VoiceConversation
 from .image_gen import ImageGenerationTool, generate_image
+from .arxiv_search import ArxivSearchTool
 
 __all__ = [
     "FileSystemTool",
@@ -22,4 +23,5 @@ __all__ = [
     "VoiceConversation",
     "ImageGenerationTool",
     "generate_image",
+    "ArxivSearchTool",
 ]
