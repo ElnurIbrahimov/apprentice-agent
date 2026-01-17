@@ -10,6 +10,7 @@ from .clipboard import ClipboardTool
 from .voice import VoiceTool, VoiceConversation
 from .image_gen import ImageGenerationTool, generate_image
 from .arxiv_search import ArxivSearchTool
+from .browser import BrowserTool
 
 __all__ = [
     "FileSystemTool",
@@ -24,4 +25,5 @@ __all__ = [
     "ImageGenerationTool",
     "generate_image",
     "ArxivSearchTool",
+    "BrowserTool",
 ]

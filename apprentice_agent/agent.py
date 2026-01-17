@@ -9,7 +9,7 @@ from typing import Any, Optional
 from .brain import OllamaBrain, TaskType
 from .memory import MemorySystem
 from .metacognition import MetacognitionLogger
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool
 
 
 class AgentPhase(Enum):
@@ -51,7 +51,8 @@ class ApprenticeAgent:
             "vision": VisionTool(),
             "pdf_reader": PDFReaderTool(),
             "clipboard": ClipboardTool(),
-            "arxiv_search": ArxivSearchTool()
+            "arxiv_search": ArxivSearchTool(),
+            "browser": BrowserTool()
         }
         self.state = AgentState()
         self.max_iterations = 10
@@ -132,7 +133,9 @@ class ApprenticeAgent:
             'current weather', 'weather in', 'news about', 'latest news',
             'stock price', 'bitcoin price', 'crypto price',
             'arxiv', 'research paper', 'academic paper', 'find papers',
-            'download paper', 'search papers', 'summarize papers', 'compare papers'
+            'download paper', 'search papers', 'summarize papers', 'compare papers',
+            'browse', 'open website', 'go to', 'visit url', 'visit site',
+            'click', 'navigate to', 'google search', 'open page'
         ]
 
         # Check if it clearly needs a tool
@@ -650,6 +653,44 @@ Guidelines:
                     query = action  # Use the whole action as query
                 return tool.search(query)
 
+        elif tool_name == "browser":
+            # Handle browser actions
+            if "open" in action_lower or "go to" in action_lower or "navigate" in action_lower or "visit" in action_lower:
+                url = self._extract_url(action)
+                if not url:
+                    return {"success": False, "error": "No URL specified"}
+                return tool.open(url)
+            elif "screenshot" in action_lower or "capture" in action_lower:
+                return tool.screenshot()
+            elif "text" in action_lower or "content" in action_lower:
+                return tool.get_text()
+            elif "links" in action_lower:
+                return tool.get_links()
+            elif "click" in action_lower:
+                selector = self._extract_selector(action)
+                if not selector:
+                    return {"success": False, "error": "No selector specified for click"}
+                return tool.click(selector)
+            elif "fill" in action_lower or "type" in action_lower:
+                # Extract selector and text
+                parts = action.split(" ", 2)
+                if len(parts) >= 3:
+                    return tool.fill(parts[1], parts[2])
+                return {"success": False, "error": "Fill requires selector and text"}
+            elif "google" in action_lower or "search" in action_lower:
+                query = self._extract_query(action)
+                if not query:
+                    return {"success": False, "error": "No search query specified"}
+                return tool.search_google(query)
+            elif "close" in action_lower or "quit" in action_lower:
+                return tool.close()
+            else:
+                # Default: try to open as URL
+                url = self._extract_url(action)
+                if url:
+                    return tool.open(url)
+                return {"success": False, "error": f"Unknown browser action: {action}"}
+
         return {"success": False, "error": f"Cannot parse action for {tool_name}"}
 
     def _extract_path(self, action: str) -> Optional[str]:
@@ -796,6 +837,40 @@ Guidelines:
         match = re.search(r'([a-z-]+\.[a-z]{2,}(?:-[a-z]+)?)', action, re.IGNORECASE)
         if match:
             return match.group(1)
+        return None
+
+    def _extract_url(self, action: str) -> Optional[str]:
+        """Extract URL from action string."""
+        import re
+        # Look for full URLs
+        url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
+        match = re.search(url_pattern, action)
+        if match:
+            return match.group()
+        # Look for domain-like patterns
+        domain_pattern = r'(?:www\.)?[a-zA-Z0-9-]+\.[a-zA-Z]{2,}(?:/[^\s]*)?'
+        match = re.search(domain_pattern, action)
+        if match:
+            return match.group()
+        # Look for quoted text that might be a URL
+        quoted = re.findall(r'["\']([^"\']+)["\']', action)
+        for q in quoted:
+            if '.' in q and ' ' not in q:
+                return q
+        return None
+
+    def _extract_selector(self, action: str) -> Optional[str]:
+        """Extract CSS selector from action string."""
+        import re
+        # Look for quoted selectors
+        quoted = re.findall(r'["\']([^"\']+)["\']', action)
+        if quoted:
+            return quoted[0]
+        # Look for common selector patterns
+        selector_pattern = r'(#[\w-]+|\.[\w-]+|\[[\w-]+=?[^\]]*\])'
+        match = re.search(selector_pattern, action)
+        if match:
+            return match.group()
         return None
 
     def _get_final_result(self) -> dict:

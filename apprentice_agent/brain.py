@@ -109,6 +109,15 @@ class OllamaBrain:
             if len(prompt.split()) < 10:
                 return Config.MODEL_FAST
 
+        # Browser tasks - route to reasoning model
+        browser_patterns = [
+            'browse', 'open website', 'go to', 'visit url', 'visit site',
+            'navigate to', 'click', 'google search', 'open page', 'web page',
+            'browser', 'url'
+        ]
+        if any(pattern in prompt_lower for pattern in browser_patterns):
+            return Config.MODEL_REASON
+
         # Code/calculation tasks - route to specialized code model
         code_patterns = [
             'calculate', 'compute', 'factorial', 'fibonacci', 'prime',
