@@ -9,7 +9,7 @@ from typing import Any, Optional
 from .brain import OllamaBrain, TaskType
 from .memory import MemorySystem
 from .metacognition import MetacognitionLogger
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool
 
 
 class AgentPhase(Enum):
@@ -52,7 +52,8 @@ class ApprenticeAgent:
             "pdf_reader": PDFReaderTool(),
             "clipboard": ClipboardTool(),
             "arxiv_search": ArxivSearchTool(),
-            "browser": BrowserTool()
+            "browser": BrowserTool(),
+            "system_control": SystemControlTool()
         }
         self.state = AgentState()
         self.max_iterations = 10
@@ -135,7 +136,11 @@ class ApprenticeAgent:
             'arxiv', 'research paper', 'academic paper', 'find papers',
             'download paper', 'search papers', 'summarize papers', 'compare papers',
             'browse', 'open website', 'go to', 'visit url', 'visit site',
-            'click', 'navigate to', 'google search', 'open page'
+            'click', 'navigate to', 'google search', 'open page',
+            'volume', 'brightness', 'open app', 'launch app', 'open notepad',
+            'open calculator', 'open browser', 'open chrome', 'open firefox',
+            'open vscode', 'open terminal', 'system info', 'cpu usage',
+            'ram usage', 'memory usage', 'lock screen', 'set volume', 'set brightness'
         ]
 
         # Check if it clearly needs a tool
@@ -691,6 +696,35 @@ Guidelines:
                     return tool.open(url)
                 return {"success": False, "error": f"Unknown browser action: {action}"}
 
+        elif tool_name == "system_control":
+            # Handle system control actions
+            if "get" in action_lower and "volume" in action_lower:
+                return tool.get_volume()
+            elif "set" in action_lower and "volume" in action_lower:
+                level = self._extract_number(action)
+                if level is None:
+                    return {"success": False, "error": "No volume level specified"}
+                return tool.set_volume(level)
+            elif "get" in action_lower and "brightness" in action_lower:
+                return tool.get_brightness()
+            elif "set" in action_lower and "brightness" in action_lower:
+                level = self._extract_number(action)
+                if level is None:
+                    return {"success": False, "error": "No brightness level specified"}
+                return tool.set_brightness(level)
+            elif "open" in action_lower or "launch" in action_lower or "start" in action_lower:
+                app_name = self._extract_app_name(action)
+                if not app_name:
+                    return {"success": False, "error": "No app name specified"}
+                return tool.open_app(app_name)
+            elif "system" in action_lower or "info" in action_lower or "cpu" in action_lower or "ram" in action_lower or "memory" in action_lower:
+                return tool.get_system_info()
+            elif "lock" in action_lower:
+                return tool.lock_screen()
+            else:
+                # Try using the execute method for natural language
+                return tool.execute(action)
+
         return {"success": False, "error": f"Cannot parse action for {tool_name}"}
 
     def _extract_path(self, action: str) -> Optional[str]:
@@ -871,6 +905,37 @@ Guidelines:
         match = re.search(selector_pattern, action)
         if match:
             return match.group()
+        return None
+
+    def _extract_number(self, action: str) -> Optional[int]:
+        """Extract a number from action string."""
+        import re
+        numbers = re.findall(r'\d+', action)
+        if numbers:
+            return int(numbers[0])
+        return None
+
+    def _extract_app_name(self, action: str) -> Optional[str]:
+        """Extract app name from action string."""
+        import re
+        action_lower = action.lower()
+
+        # App names from SystemControlTool allowlist
+        app_names = [
+            'notepad', 'calculator', 'browser', 'chrome', 'firefox',
+            'explorer', 'vscode', 'terminal', 'cmd', 'powershell'
+        ]
+
+        # Check for each app name
+        for app_name in app_names:
+            if app_name in action_lower:
+                return app_name
+
+        # Look for quoted text
+        quoted = re.findall(r'["\']([^"\']+)["\']', action)
+        if quoted:
+            return quoted[0]
+
         return None
 
     def _get_final_result(self) -> dict:

@@ -11,6 +11,7 @@ from .voice import VoiceTool, VoiceConversation
 from .image_gen import ImageGenerationTool, generate_image
 from .arxiv_search import ArxivSearchTool
 from .browser import BrowserTool
+from .system_control import SystemControlTool
 
 __all__ = [
     "FileSystemTool",
@@ -26,4 +27,5 @@ __all__ = [
     "generate_image",
     "ArxivSearchTool",
     "BrowserTool",
+    "SystemControlTool",
 ]
