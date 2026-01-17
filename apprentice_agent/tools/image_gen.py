@@ -5,8 +5,32 @@ from pathlib import Path
 from typing import Optional
 from datetime import datetime
 
-import torch
-from PIL import Image
+# Lazy imports for torch and related libraries
+_torch = None
+_torch_available = None
+
+
+def _check_torch():
+    """Check if torch is available and import it lazily."""
+    global _torch, _torch_available
+    if _torch_available is None:
+        try:
+            import torch
+            _torch = torch
+            _torch_available = True
+        except ImportError:
+            _torch_available = False
+    return _torch_available
+
+
+def _get_torch():
+    """Get the torch module, raising an error if not available."""
+    if not _check_torch():
+        raise ImportError(
+            "torch is required for image generation. "
+            "Install it with: pip install torch"
+        )
+    return _torch
 
 
 class ImageGenerationTool:
@@ -30,19 +54,25 @@ class ImageGenerationTool:
         self._model_id = model_id
         self._output_dir = Path(output_dir)
         self._output_dir.mkdir(parents=True, exist_ok=True)
-
-        # Auto-detect device
-        if device is None:
-            self._device = "cuda" if torch.cuda.is_available() else "cpu"
-        else:
-            self._device = device
-
-        self._use_float16 = use_float16 and self._device == "cuda"
+        self._device = device
+        self._use_float16_requested = use_float16
+        self._use_float16 = None  # Resolved lazily
         self._pipeline = None
+
+    def _resolve_device(self):
+        """Resolve device setting lazily when torch is needed."""
+        if self._device is None:
+            torch = _get_torch()
+            self._device = "cuda" if torch.cuda.is_available() else "cpu"
+        if self._use_float16 is None:
+            self._use_float16 = self._use_float16_requested and self._device == "cuda"
 
     def _load_pipeline(self):
         """Lazy load the Stable Diffusion pipeline."""
         if self._pipeline is None:
+            torch = _get_torch()
+            self._resolve_device()
+
             print(f"Loading Stable Diffusion model '{self._model_id}'...")
             print(f"Device: {self._device}, Float16: {self._use_float16}")
 
@@ -99,6 +129,7 @@ class ImageGenerationTool:
             return {"success": False, "error": "No prompt provided"}
 
         try:
+            torch = _get_torch()
             pipeline = self._load_pipeline()
 
             # Set up generator for reproducibility
@@ -180,10 +211,22 @@ class ImageGenerationTool:
         Returns:
             dict with device information
         """
+        if not _check_torch():
+            return {
+                "device": self._device or "unknown",
+                "cuda_available": False,
+                "float16": self._use_float16,
+                "torch_available": False
+            }
+
+        torch = _get_torch()
+        self._resolve_device()
+
         info = {
             "device": self._device,
             "cuda_available": torch.cuda.is_available(),
-            "float16": self._use_float16
+            "float16": self._use_float16,
+            "torch_available": True
         }
 
         if torch.cuda.is_available():

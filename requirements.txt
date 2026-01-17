@@ -13,4 +13,5 @@ python-dotenv>=1.0.0
 pyttsx3>=2.90
 requests>=2.31.0
 sounddevice>=0.4.6
+torch>=2.0.0
 transformers>=4.36.0
