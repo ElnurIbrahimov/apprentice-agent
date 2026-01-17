@@ -9,7 +9,7 @@ from typing import Any, Optional
 from .brain import OllamaBrain, TaskType
 from .memory import MemorySystem
 from .metacognition import MetacognitionLogger
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool
 
 
 class AgentPhase(Enum):
@@ -50,7 +50,8 @@ class ApprenticeAgent:
             "screenshot": ScreenshotTool(),
             "vision": VisionTool(),
             "pdf_reader": PDFReaderTool(),
-            "clipboard": ClipboardTool()
+            "clipboard": ClipboardTool(),
+            "arxiv_search": ArxivSearchTool()
         }
         self.state = AgentState()
         self.max_iterations = 10
@@ -129,7 +130,9 @@ class ApprenticeAgent:
             'clipboard', 'copy to clipboard', 'paste from clipboard',
             'analyze image', 'look at image', 'describe image',
             'current weather', 'weather in', 'news about', 'latest news',
-            'stock price', 'bitcoin price', 'crypto price'
+            'stock price', 'bitcoin price', 'crypto price',
+            'arxiv', 'research paper', 'academic paper', 'find papers',
+            'download paper', 'search papers'
         ]
 
         # Check if it clearly needs a tool
@@ -602,6 +605,43 @@ Guidelines:
                 # Default: read clipboard (paste, read, what's in clipboard)
                 return tool.read()
 
+        elif tool_name == "arxiv_search":
+            # Handle arXiv search actions
+            if "download" in action_lower:
+                arxiv_id = self._extract_arxiv_id(action)
+                if not arxiv_id:
+                    return {"success": False, "error": "No arXiv ID specified for download"}
+                return tool.download_pdf(arxiv_id)
+            elif "abstract" in action_lower:
+                arxiv_id = self._extract_arxiv_id(action)
+                if not arxiv_id:
+                    return {"success": False, "error": "No arXiv ID specified"}
+                return tool.get_abstract(arxiv_id)
+            elif "paper" in action_lower and ("get" in action_lower or "details" in action_lower):
+                arxiv_id = self._extract_arxiv_id(action)
+                if not arxiv_id:
+                    return {"success": False, "error": "No arXiv ID specified"}
+                return tool.get_paper(arxiv_id)
+            elif "author" in action_lower:
+                author = self._extract_query(action)
+                if not author:
+                    return {"success": False, "error": "No author name specified"}
+                return tool.search_by_author(author)
+            elif "category" in action_lower or "recent" in action_lower:
+                category = self._extract_arxiv_category(action)
+                query = self._extract_query(action) if "category" in action_lower else None
+                if not category:
+                    return {"success": False, "error": "No category specified (e.g., cs.AI, physics.quant-ph)"}
+                if "recent" in action_lower:
+                    return tool.get_recent(category)
+                return tool.search_by_category(category, query)
+            else:
+                # Default: search by query
+                query = self._extract_query(action)
+                if not query:
+                    query = action  # Use the whole action as query
+                return tool.search(query)
+
         return {"success": False, "error": f"Cannot parse action for {tool_name}"}
 
     def _extract_path(self, action: str) -> Optional[str]:
@@ -721,6 +761,33 @@ Guidelines:
                 # Remove common suffixes
                 text = re.sub(r'\s+to\s+clipboard.*$', '', text, flags=re.IGNORECASE)
                 return text.strip('"\'')
+        return None
+
+    def _extract_arxiv_id(self, action: str) -> Optional[str]:
+        """Extract arXiv ID from action string."""
+        import re
+        # arXiv ID patterns: 2301.00001, 2301.00001v1, cs.AI/0001001
+        patterns = [
+            r'(\d{4}\.\d{4,5}(?:v\d+)?)',  # New format: 2301.00001 or 2301.00001v1
+            r'([a-z-]+(?:\.[A-Z]{2})?/\d{7})',  # Old format: cs.AI/0001001
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, action)
+            if match:
+                return match.group(1)
+        return None
+
+    def _extract_arxiv_category(self, action: str) -> Optional[str]:
+        """Extract arXiv category from action string."""
+        import re
+        # Category patterns: cs.AI, physics.quant-ph, math.CO, etc.
+        match = re.search(r'([a-z-]+\.[A-Z]{2,}(?:-[a-z]+)?)', action)
+        if match:
+            return match.group(1)
+        # Also try lowercase
+        match = re.search(r'([a-z-]+\.[a-z]{2,}(?:-[a-z]+)?)', action, re.IGNORECASE)
+        if match:
+            return match.group(1)
         return None
 
     def _get_final_result(self) -> dict:
