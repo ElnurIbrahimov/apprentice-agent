@@ -132,7 +132,7 @@ class ApprenticeAgent:
             'current weather', 'weather in', 'news about', 'latest news',
             'stock price', 'bitcoin price', 'crypto price',
             'arxiv', 'research paper', 'academic paper', 'find papers',
-            'download paper', 'search papers'
+            'download paper', 'search papers', 'summarize papers', 'compare papers'
         ]
 
         # Check if it clearly needs a tool
@@ -635,6 +635,14 @@ Guidelines:
                 if "recent" in action_lower:
                     return tool.get_recent(category)
                 return tool.search_by_category(category, query)
+            elif "summarize" in action_lower or "summary" in action_lower or "compare" in action_lower:
+                # AI-powered research summary
+                query = self._extract_query(action)
+                if not query:
+                    query = action.replace("summarize", "").replace("summary", "").replace("compare", "").strip()
+                if not query:
+                    return {"success": False, "error": "No query specified for research summary"}
+                return tool.summarize_search(query)
             else:
                 # Default: search by query
                 query = self._extract_query(action)
