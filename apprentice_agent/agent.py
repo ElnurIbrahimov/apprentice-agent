@@ -10,7 +10,7 @@ from .brain import OllamaBrain, TaskType
 from .identity import load_identity, get_identity_prompt, detect_name_change, detect_personality_change, update_name, update_personality
 from .memory import MemorySystem
 from .metacognition import MetacognitionLogger
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool
 
 
 class AgentPhase(Enum):
@@ -54,7 +54,8 @@ class ApprenticeAgent:
             "clipboard": ClipboardTool(),
             "arxiv_search": ArxivSearchTool(),
             "browser": BrowserTool(),
-            "system_control": SystemControlTool()
+            "system_control": SystemControlTool(),
+            "notifications": NotificationTool()
         }
         self.state = AgentState()
         self.max_iterations = 10
@@ -142,7 +143,11 @@ class ApprenticeAgent:
             'volume', 'brightness', 'open app', 'launch app', 'open notepad',
             'open calculator', 'open browser', 'open chrome', 'open firefox',
             'open vscode', 'open terminal', 'system info', 'cpu usage',
-            'ram usage', 'memory usage', 'lock screen', 'set volume', 'set brightness'
+            'ram usage', 'memory usage', 'lock screen', 'set volume', 'set brightness',
+            'remind', 'reminder', 'notify', 'notification', 'alert', 'schedule',
+            'every day', 'every morning', 'every evening', 'daily at', 'weekly',
+            'in 5 minutes', 'in 10 minutes', 'in 30 minutes', 'in an hour',
+            'set reminder', 'set alarm', 'remind me'
         ]
 
         # Check if it clearly needs a tool
@@ -801,6 +806,10 @@ Guidelines:
             else:
                 # Try using the execute method for natural language
                 return tool.execute(action)
+
+        elif tool_name == "notifications":
+            # Handle notification actions
+            return tool.execute(action)
 
         return {"success": False, "error": f"Cannot parse action for {tool_name}"}
 

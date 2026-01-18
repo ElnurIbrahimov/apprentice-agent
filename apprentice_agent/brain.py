@@ -52,9 +52,6 @@ class OllamaBrain:
         else:
             full_system_prompt = identity_prompt
 
-        # Debug: print system prompt to confirm identity is included
-        print(f"[DEBUG] System prompt: {full_system_prompt[:200]}...")
-
         messages = []
         if full_system_prompt:
             messages.append({"role": "system", "content": full_system_prompt})
@@ -252,6 +249,17 @@ List 3-5 key observations. Be brief."""
         ]
         is_system_control_task = any(kw in goal_lower for kw in system_control_keywords) and not is_code_task
 
+        # Notification keywords
+        notification_keywords = [
+            'remind', 'reminder', 'notify', 'notification', 'alert me',
+            'schedule', 'every day', 'every morning', 'every evening',
+            'daily at', 'weekly', 'weekdays', 'in 5 minutes', 'in 10 minutes',
+            'in 30 minutes', 'in an hour', 'in 2 hours', 'set reminder',
+            'set alarm', 'remind me', 'alert when', 'notify when',
+            'list reminders', 'show reminders', 'cancel reminder', 'clear reminders'
+        ]
+        is_notification_task = any(kw in goal_lower for kw in notification_keywords)
+
         # Store for use in decide_action and _generate_default_code
         self._current_goal_is_code = is_code_task
         self._current_goal_is_search = is_search_task
@@ -261,6 +269,7 @@ List 3-5 key observations. Be brief."""
         self._current_goal_is_pdf = is_pdf_task
         self._current_goal_is_clipboard = is_clipboard_task
         self._current_goal_is_system_control = is_system_control_task
+        self._current_goal_is_notification = is_notification_task
         self._current_goal = goal
 
         if is_clipboard_task:
@@ -349,6 +358,16 @@ Available tools:
 
 Create a 1-step plan:
 1. Use system_control to execute the system command"""
+        elif is_notification_task:
+            prompt = f"""Goal: {goal}
+
+This is a NOTIFICATION task. Use notifications tool to set reminders, schedule notifications, or create conditional alerts.
+
+Available tools:
+{tool_descriptions}
+
+Create a 1-step plan:
+1. Use notifications to add/list/remove reminder or scheduled task"""
         else:
             prompt = f"""Goal: {goal}
 
@@ -553,6 +572,35 @@ REASONING: launch notepad application
 TOOL: system_control
 ACTION: get_brightness
 REASONING: get current screen brightness"""
+        elif getattr(self, '_current_goal_is_notification', False):
+            # Notification task
+            prompt = f"""Plan: {plan[:500]}
+
+This is a NOTIFICATION task. Use notifications tool.
+
+Pick ONE action. Reply ONLY in this format:
+
+TOOL: notifications
+ACTION: <add_reminder/add_scheduled/add_condition/list/remove/clear> [args]
+REASONING: <why>
+
+Examples:
+
+TOOL: notifications
+ACTION: add_reminder "take a break" in 30 minutes
+REASONING: set a reminder for 30 minutes
+
+TOOL: notifications
+ACTION: add_scheduled "standup meeting" 9:00 AM daily
+REASONING: schedule daily notification at 9 AM
+
+TOOL: notifications
+ACTION: add_condition "high CPU alert" cpu 80
+REASONING: alert when CPU exceeds 80%
+
+TOOL: notifications
+ACTION: list
+REASONING: show all scheduled tasks"""
         else:
             prompt = f"""Plan: {plan[:500]}
 
@@ -661,6 +709,7 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
             "pdf_reader": "pdf_reader - read, extract text, or search PDF files. ACTION: 'read <path>' or 'extract <path> pages 1-5' or 'search <path> query' or 'info <path>'",
             "clipboard": "clipboard - read, write, or analyze clipboard content. ACTION: 'read' or 'write <text>' or 'analyze'",
             "system_control": "system_control - get system info (CPU, RAM, GPU, disk), control volume/brightness, open apps, lock screen. ACTION: 'get_system_info' or 'get_volume' or 'set_volume <level>' or 'open_app <name>'",
+            "notifications": "notifications - set reminders, schedule notifications, create conditional alerts. ACTION: 'add_reminder <msg> in <time>' or 'add_scheduled <msg> <time> <repeat>' or 'list' or 'remove <id>'",
             "summarize": "summarize - summarize gathered information. ACTION: 'results'"
         }
         return "\n".join(descriptions.get(t, t) for t in available_tools)
@@ -697,6 +746,8 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
                     tool = "clipboard"
                 elif "system" in tool or "control" in tool:
                     tool = "system_control"
+                elif "notif" in tool or "remind" in tool or "schedule" in tool or "alert" in tool:
+                    tool = "notifications"
                 result["tool"] = tool
             elif line.upper().startswith("ACTION:"):
                 action = line[7:].strip()
@@ -729,6 +780,8 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
                 result["tool"] = "clipboard"
             elif "system_control" in response_lower or "system info" in response_lower or "cpu" in response_lower or "ram" in response_lower or "volume" in response_lower or "brightness" in response_lower:
                 result["tool"] = "system_control"
+            elif "notification" in response_lower or "reminder" in response_lower or "remind" in response_lower or "schedule" in response_lower or "alert" in response_lower:
+                result["tool"] = "notifications"
 
         if not result["action"] and result["tool"] == "web_search":
             # Try to extract a search query from the response
@@ -805,6 +858,28 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
             else:
                 # Default to get_system_info for "system info", "cpu", "ram", etc.
                 result["action"] = "get_system_info"
+
+        # FORCE notifications for notification tasks
+        is_notification_task = getattr(self, '_current_goal_is_notification', False)
+        if is_notification_task:
+            result["tool"] = "notifications"
+            goal = getattr(self, '_current_goal', '').lower()
+            current_action = (result.get("action") or "").lower()
+
+            # Determine correct action based on goal keywords
+            if 'list' in goal or 'show' in goal or 'all' in goal:
+                result["action"] = "list"
+            elif 'remove' in goal or 'delete' in goal or 'cancel' in goal:
+                result["action"] = current_action if 'remove' in current_action else "remove"
+            elif 'clear' in goal:
+                result["action"] = "clear"
+            elif 'condition' in goal or 'alert when' in goal or 'notify when' in goal or ('cpu' in goal and ('above' in goal or 'exceed' in goal or '%' in goal)):
+                result["action"] = current_action if 'condition' in current_action else "add_condition"
+            elif 'schedule' in goal or 'every day' in goal or 'daily' in goal or 'weekday' in goal or 'weekly' in goal or 'every morning' in goal or 'every evening' in goal:
+                result["action"] = current_action if 'scheduled' in current_action else "add_scheduled"
+            else:
+                # Default to add_reminder for "remind me", "in 30 minutes", etc.
+                result["action"] = current_action if 'reminder' in current_action else "add_reminder"
 
         return result
 

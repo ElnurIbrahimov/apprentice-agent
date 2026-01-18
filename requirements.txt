@@ -21,3 +21,5 @@ screen-brightness-control>=0.22.0
 sounddevice>=0.4.6
 torch>=2.0.0
 transformers>=4.36.0
+winotify>=1.1.0
+schedule>=1.2.0

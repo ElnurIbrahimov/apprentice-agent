@@ -12,6 +12,7 @@ from .image_gen import ImageGenerationTool, generate_image
 from .arxiv_search import ArxivSearchTool
 from .browser import BrowserTool
 from .system_control import SystemControlTool
+from .notifications import NotificationTool
 
 __all__ = [
     "FileSystemTool",
@@ -28,4 +29,5 @@ __all__ = [
     "ArxivSearchTool",
     "BrowserTool",
     "SystemControlTool",
+    "NotificationTool",
 ]
