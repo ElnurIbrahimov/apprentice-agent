@@ -219,6 +219,19 @@ List 3-5 key observations. Be brief."""
         has_other_tools = is_search_task or is_code_task or is_screenshot_task or is_vision_task or is_pdf_task
         is_clipboard_task = has_clipboard and not has_other_tools
 
+        # System control keywords
+        system_control_keywords = [
+            'system info', 'system information', 'cpu usage', 'cpu', 'ram usage',
+            'ram', 'memory usage', 'gpu', 'gpu usage', 'disk usage', 'disk space',
+            'get volume', 'set volume', 'volume level', 'get brightness',
+            'set brightness', 'brightness level', 'open app', 'launch app',
+            'open notepad', 'open calculator', 'open browser', 'open chrome',
+            'open firefox', 'open vscode', 'open terminal', 'lock screen',
+            'show me system', 'what is my cpu', 'what is my ram', 'how much ram',
+            'how much memory', 'computer info', 'pc info', 'machine info'
+        ]
+        is_system_control_task = any(kw in goal_lower for kw in system_control_keywords) and not is_code_task
+
         # Store for use in decide_action and _generate_default_code
         self._current_goal_is_code = is_code_task
         self._current_goal_is_search = is_search_task
@@ -227,6 +240,7 @@ List 3-5 key observations. Be brief."""
         self._current_goal_is_screenshot_and_vision = is_screenshot_and_vision
         self._current_goal_is_pdf = is_pdf_task
         self._current_goal_is_clipboard = is_clipboard_task
+        self._current_goal_is_system_control = is_system_control_task
         self._current_goal = goal
 
         if is_clipboard_task:
@@ -305,6 +319,16 @@ Available tools:
 Create a 1-2 step plan:
 1. Use pdf_reader to read/extract/search the PDF
 2. (Optional) Summarize the content if needed"""
+        elif is_system_control_task:
+            prompt = f"""Goal: {goal}
+
+This is a SYSTEM CONTROL task. Use system_control tool to get system info, control volume/brightness, or launch apps.
+
+Available tools:
+{tool_descriptions}
+
+Create a 1-step plan:
+1. Use system_control to execute the system command"""
         else:
             prompt = f"""Goal: {goal}
 
@@ -480,6 +504,35 @@ REASONING: find pages mentioning revenue
 TOOL: pdf_reader
 ACTION: info C:/Documents/report.pdf
 REASONING: get PDF metadata and page count"""
+        elif getattr(self, '_current_goal_is_system_control', False):
+            # System control task
+            prompt = f"""Plan: {plan[:500]}
+
+This is a SYSTEM CONTROL task. Use system_control tool.
+
+Pick ONE action. Reply ONLY in this format:
+
+TOOL: system_control
+ACTION: <get_system_info/get_volume/set_volume/get_brightness/set_brightness/open_app/lock_screen> [args]
+REASONING: <why>
+
+Examples:
+
+TOOL: system_control
+ACTION: get_system_info
+REASONING: get CPU, RAM, GPU, and disk usage
+
+TOOL: system_control
+ACTION: set_volume 50
+REASONING: set volume to 50%
+
+TOOL: system_control
+ACTION: open_app notepad
+REASONING: launch notepad application
+
+TOOL: system_control
+ACTION: get_brightness
+REASONING: get current screen brightness"""
         else:
             prompt = f"""Plan: {plan[:500]}
 
@@ -587,6 +640,7 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
             "vision": "vision - analyze images using AI vision model. ACTION: 'analyze <image_path>' or 'describe screen <path>' or 'read text <path>'",
             "pdf_reader": "pdf_reader - read, extract text, or search PDF files. ACTION: 'read <path>' or 'extract <path> pages 1-5' or 'search <path> query' or 'info <path>'",
             "clipboard": "clipboard - read, write, or analyze clipboard content. ACTION: 'read' or 'write <text>' or 'analyze'",
+            "system_control": "system_control - get system info (CPU, RAM, GPU, disk), control volume/brightness, open apps, lock screen. ACTION: 'get_system_info' or 'get_volume' or 'set_volume <level>' or 'open_app <name>'",
             "summarize": "summarize - summarize gathered information. ACTION: 'results'"
         }
         return "\n".join(descriptions.get(t, t) for t in available_tools)
@@ -621,6 +675,8 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
                     tool = "pdf_reader"
                 elif "clipboard" in tool or "copy" in tool or "paste" in tool:
                     tool = "clipboard"
+                elif "system" in tool or "control" in tool:
+                    tool = "system_control"
                 result["tool"] = tool
             elif line.upper().startswith("ACTION:"):
                 action = line[7:].strip()
@@ -651,6 +707,8 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
                 result["tool"] = "pdf_reader"
             elif "clipboard" in response_lower or "paste" in response_lower or "copy to" in response_lower:
                 result["tool"] = "clipboard"
+            elif "system_control" in response_lower or "system info" in response_lower or "cpu" in response_lower or "ram" in response_lower or "volume" in response_lower or "brightness" in response_lower:
+                result["tool"] = "system_control"
 
         if not result["action"] and result["tool"] == "web_search":
             # Try to extract a search query from the response
@@ -701,6 +759,32 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
             else:
                 # Default to read for "what's in clipboard", "paste", etc.
                 result["action"] = "read"
+
+        # FORCE system_control for system control tasks
+        is_system_control_task = getattr(self, '_current_goal_is_system_control', False)
+        if is_system_control_task:
+            result["tool"] = "system_control"
+            goal = getattr(self, '_current_goal', '').lower()
+            current_action = (result.get("action") or "").lower()
+
+            # Determine correct action based on goal keywords
+            if 'volume' in goal:
+                if 'set' in goal or any(c.isdigit() for c in goal):
+                    result["action"] = current_action if 'volume' in current_action else "set_volume"
+                else:
+                    result["action"] = "get_volume"
+            elif 'brightness' in goal:
+                if 'set' in goal or any(c.isdigit() for c in goal):
+                    result["action"] = current_action if 'brightness' in current_action else "set_brightness"
+                else:
+                    result["action"] = "get_brightness"
+            elif 'open' in goal or 'launch' in goal:
+                result["action"] = current_action if 'open' in current_action else "open_app"
+            elif 'lock' in goal:
+                result["action"] = "lock_screen"
+            else:
+                # Default to get_system_info for "system info", "cpu", "ram", etc.
+                result["action"] = "get_system_info"
 
         return result
 

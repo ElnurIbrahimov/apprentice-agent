@@ -164,11 +164,53 @@ class SystemControlTool:
         except Exception as e:
             return {"success": False, "error": str(e), "app": name_lower}
 
+    def get_gpu_info(self) -> Optional[dict]:
+        """Get NVIDIA GPU information using nvidia-smi.
+
+        Returns:
+            dict with GPU name, temperature, memory, and utilization, or None if unavailable
+        """
+        try:
+            result = subprocess.run(
+                [
+                    "nvidia-smi",
+                    "--query-gpu=name,temperature.gpu,memory.used,memory.total,utilization.gpu",
+                    "--format=csv,noheader,nounits"
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+
+            if result.returncode != 0:
+                return None
+
+            output = result.stdout.strip()
+            if not output:
+                return None
+
+            # Parse CSV: name, temperature, memory_used, memory_total, utilization
+            parts = [p.strip() for p in output.split(",")]
+            if len(parts) < 5:
+                return None
+
+            return {
+                "name": parts[0],
+                "temperature": int(parts[1]),
+                "memory_used_mb": int(parts[2]),
+                "memory_total_mb": int(parts[3]),
+                "utilization_percent": int(parts[4])
+            }
+
+        except Exception:
+            # nvidia-smi not found, no NVIDIA GPU, or parse error
+            return None
+
     def get_system_info(self) -> dict:
         """Get system resource usage.
 
         Returns:
-            dict with CPU, RAM, and GPU usage
+            dict with CPU, RAM, disk, and GPU usage
         """
         try:
             import psutil
@@ -187,22 +229,18 @@ class SystemControlTool:
             disk = psutil.disk_usage('/')
             disk_percent = disk.percent
 
-            # GPU info (if available)
-            gpu_info = None
-            try:
-                import GPUtil
-                gpus = GPUtil.getGPUs()
-                if gpus:
-                    gpu = gpus[0]
-                    gpu_info = {
-                        "name": gpu.name,
-                        "load": round(gpu.load * 100),
-                        "memory_used": round(gpu.memoryUsed),
-                        "memory_total": round(gpu.memoryTotal),
-                        "temperature": gpu.temperature
-                    }
-            except:
-                pass  # GPUtil not installed or no GPU
+            # GPU info using pynvml
+            gpu_info = self.get_gpu_info()
+
+            # Build message
+            msg_parts = [f"CPU: {cpu_percent}%", f"RAM: {ram_percent}%", f"Disk: {disk_percent}%"]
+            if gpu_info:
+                gpu_util = gpu_info.get('utilization_percent')
+                gpu_temp = gpu_info.get('temperature')
+                if gpu_util is not None:
+                    msg_parts.append(f"GPU: {gpu_util}%")
+                if gpu_temp is not None:
+                    msg_parts.append(f"GPU Temp: {gpu_temp}°C")
 
             return {
                 "success": True,
@@ -219,7 +257,7 @@ class SystemControlTool:
                     "usage_percent": disk_percent
                 },
                 "gpu": gpu_info,
-                "message": f"CPU: {cpu_percent}%, RAM: {ram_percent}%, Disk: {disk_percent}%"
+                "message": ", ".join(msg_parts)
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
