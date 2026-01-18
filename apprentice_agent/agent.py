@@ -10,7 +10,7 @@ from .brain import OllamaBrain, TaskType
 from .identity import load_identity, get_identity_prompt, detect_name_change, detect_personality_change, update_name, update_personality
 from .memory import MemorySystem
 from .metacognition import MetacognitionLogger
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool
 
 
 class AgentPhase(Enum):
@@ -56,7 +56,8 @@ class ApprenticeAgent:
             "browser": BrowserTool(),
             "system_control": SystemControlTool(),
             "notifications": NotificationTool(),
-            "tool_builder": ToolBuilderTool()
+            "tool_builder": ToolBuilderTool(),
+            "marketplace": MarketplaceTool()
         }
         self.state = AgentState()
         self.max_iterations = 10
@@ -250,7 +251,10 @@ class ApprenticeAgent:
             'set reminder', 'set alarm', 'remind me',
             'create tool', 'make tool', 'build tool', 'new tool', 'i need a tool',
             'custom tool', 'generate tool', 'tool builder', 'list tools', 'test tool',
-            'enable tool', 'disable tool', 'delete tool', 'remove tool'
+            'enable tool', 'disable tool', 'delete tool', 'remove tool',
+            'marketplace', 'plugin', 'browse plugins', 'search plugins', 'install plugin',
+            'download tool', 'share tool', 'publish tool', 'uninstall plugin', 'my plugins',
+            'installed plugins', 'rate plugin', 'update plugin', 'plugin marketplace'
         ]
 
         # Check if it clearly needs a tool
@@ -516,6 +520,16 @@ Guidelines:
         """
         goal_lower = goal.lower()
 
+        # Marketplace keywords have highest priority - skip custom tool detection
+        marketplace_keywords = [
+            'publish', 'marketplace', 'browse plugins', 'install plugin',
+            'uninstall plugin', 'my plugins', 'installed plugins', 'rate plugin',
+            'update plugin', 'plugin marketplace', 'search plugins', 'download tool',
+            'share tool'
+        ]
+        if any(kw in goal_lower for kw in marketplace_keywords):
+            return None  # Let the agent route to marketplace instead
+
         # Check each custom tool's keywords
         best_match = None
         best_match_score = 0
@@ -534,14 +548,49 @@ Guidelines:
 
         return None
 
+    def _detect_marketplace_action(self, goal: str) -> Optional[tuple[str, str]]:
+        """Detect if the goal requires the marketplace tool.
+
+        Args:
+            goal: The user's goal
+
+        Returns:
+            (tool_name, action) tuple if marketplace matches, None otherwise
+        """
+        import re
+        goal_lower = goal.lower()
+
+        marketplace_keywords = [
+            'publish', 'marketplace', 'browse plugin', 'install plugin',
+            'uninstall plugin', 'my plugins', 'rate plugin', 'update plugin',
+            'search plugin', 'plugin marketplace', 'download tool', 'share tool'
+        ]
+
+        # Check if any marketplace keyword is present
+        if not any(kw in goal_lower for kw in marketplace_keywords):
+            return None
+
+        # Route to marketplace with the full goal as action
+        print(f"[MARKETPLACE] Detected marketplace action in: {goal[:50]}...")
+        return ("marketplace", goal)
+
     def _act(self) -> None:
         """Phase 3: Execute an action."""
         self.state.phase = AgentPhase.ACT
         print(f"[ACT] Deciding and executing action...")
 
-        # Check if a custom tool should be used directly
-        custom_tool_match = self._detect_custom_tool(self.state.goal)
-        if custom_tool_match and self.state.iteration == 1:
+        # PRIORITY 1: Check for marketplace actions FIRST (highest priority)
+        marketplace_match = self._detect_marketplace_action(self.state.goal)
+        if marketplace_match and self.state.iteration == 1:
+            tool_name, action = marketplace_match
+            action_decision = {
+                "tool": tool_name,
+                "action": action,
+                "reasoning": "Using marketplace tool based on goal keywords"
+            }
+        # PRIORITY 2: Check if a custom tool should be used
+        elif self._detect_custom_tool(self.state.goal) and self.state.iteration == 1:
+            custom_tool_match = self._detect_custom_tool(self.state.goal)
             tool_name, action = custom_tool_match
             print(f"[CUSTOM TOOL] Detected custom tool: {tool_name}")
             action_decision = {
@@ -598,11 +647,22 @@ Guidelines:
             model_used=model_used
         )
 
+        # Check for marketplace read-only actions - complete immediately on success
+        last_tool = self.state.last_action.get('tool', '').lower() if self.state.last_action else ''
+        last_action = self.state.last_action.get('action', '').lower() if self.state.last_action else ''
+        result_success = self.state.last_result.get('success', False) if self.state.last_result else False
+
+        if last_tool == 'marketplace' and result_success:
+            read_only_actions = ['browse', 'list', 'my_plugins', 'my plugins', 'search', 'info', 'installed']
+            if any(action_word in last_action for action_word in read_only_actions):
+                self.state.completed = True
+                print("Marketplace query completed successfully!")
+                return
+
         # Check if goal is achieved
         if self.state.evaluation.get("success") and "complete" in self.state.evaluation.get("next", "").lower():
             # Override for combined screenshot+vision tasks
             is_screenshot_and_vision = getattr(self.brain, '_current_goal_is_screenshot_and_vision', False)
-            last_tool = self.state.last_action.get('tool', '').lower() if self.state.last_action else ''
 
             if is_screenshot_and_vision and last_tool == 'screenshot':
                 # Don't mark as complete - still need to do vision analysis
@@ -1029,6 +1089,10 @@ Guidelines:
                 )
             else:
                 return tool.execute(action)
+
+        elif tool_name == "marketplace":
+            # Handle marketplace actions
+            return tool.execute(action)
 
         # Handle custom tools - they all have an execute() method
         if tool_name in self.custom_tool_keywords.values() or hasattr(tool, 'execute'):

@@ -1,0 +1,23 @@
+{
+    "id": "bmi_calculator",
+    "name": "Calculate Body Mass Index (BMI) from height and weight",
+    "description": "Calculate Body Mass Index (BMI) from height and weight",
+    "category": "utilities",
+    "author": "local",
+    "version": "1.0.0",
+    "functions": [
+        "calculate_bmi",
+        "calculate_bmi_imperial"
+    ],
+    "keywords": [
+        "bmi",
+        "body mass index",
+        "height and weight",
+        "calculate bmi",
+        "body mass",
+        "weight height",
+        "mass index",
+        "bmi calculator"
+    ],
+    "created": "2026-01-18T21:24:22.254980"
+}

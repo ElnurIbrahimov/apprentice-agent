@@ -14,6 +14,7 @@ from .browser import BrowserTool
 from .system_control import SystemControlTool
 from .notifications import NotificationTool
 from .tool_builder import ToolBuilderTool
+from .marketplace import MarketplaceTool
 
 __all__ = [
     "FileSystemTool",
@@ -32,4 +33,5 @@ __all__ = [
     "SystemControlTool",
     "NotificationTool",
     "ToolBuilderTool",
+    "MarketplaceTool",
 ]
