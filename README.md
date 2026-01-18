@@ -4,7 +4,7 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 
 ## Features
 
-- **14 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, and more
+- **15 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, and more
 - **4-Model Routing** - Automatically selects the best model for each task type
 - **Observe-Plan-Act-Evaluate-Remember Loop** - Structured reasoning cycle for achieving goals
 - **Fast-Path Responses** - Instant replies for conversational queries without full agent loop
@@ -149,6 +149,7 @@ Opens at `http://127.0.0.1:7860` with:
 | `system_control` | Volume, brightness, apps, system info | `set volume 50` |
 | `notifications` | Reminders, scheduled alerts, conditional triggers | `remind me in 30 minutes` |
 | `tool_builder` | Create, test, enable, disable custom tools | `list custom tools` |
+| `marketplace` | Browse, install, publish, rate plugins | `browse plugins` |
 
 ### Code Executor Safety
 
@@ -223,6 +224,49 @@ builder.enable_tool('bmi_calculator')
 
 **Safety:** Generated code is scanned for dangerous patterns (`eval`, `exec`, `subprocess`, `os.system`, etc.) before saving. Custom tools are stored in `tools/custom/` and registered in `data/custom_tools.json`.
 
+### Plugin Marketplace
+
+The marketplace allows browsing, installing, and sharing plugins from a remote registry:
+
+| Method | Description |
+|--------|-------------|
+| `browse(category, sort_by)` | List plugins by category, sorted by downloads/rating/newest |
+| `search(query)` | Search plugins by keyword |
+| `get_info(plugin_id)` | Get full plugin details |
+| `install(plugin_id)` | Download, scan, and enable a plugin |
+| `uninstall(plugin_id)` | Remove an installed plugin |
+| `publish(tool_name)` | Package a custom tool for sharing |
+| `rate(plugin_id, stars)` | Rate a plugin 1-5 stars |
+| `my_plugins()` | List installed plugins |
+| `update(plugin_id)` | Check for and install updates |
+
+**Example - Using the Marketplace:**
+
+```python
+from apprentice_agent.tools.marketplace import MarketplaceTool
+mp = MarketplaceTool()
+
+# Browse health plugins
+mp.browse(category="health", sort_by="rating")
+
+# Install a plugin
+mp.install("bmi_calculator")
+
+# Publish your custom tool
+mp.publish("my_custom_tool")
+```
+
+**Natural Language:**
+```
+"Browse plugins in the marketplace"
+"Install the weather_tool plugin"
+"Publish my temperature_converter to the marketplace"
+```
+
+**Safety:** Downloaded plugins are scanned for dangerous patterns before installation. Logs are stored in `logs/marketplace/`.
+
+**Registry:** Plugins are hosted at `github.com/ElnurIbrahimov/aura-plugins`
+
 ## Configuration
 
 Edit `apprentice_agent/config.py` to customize:
@@ -266,6 +310,7 @@ apprentice-agent/
         ├── notifications.py  # Reminders, scheduled, conditional alerts
         ├── tool_builder.py   # Meta-tool for creating custom tools
         ├── tool_template.py  # Templates for generated tools
+        ├── marketplace.py    # Plugin marketplace
         └── custom/           # Auto-generated custom tools
 ```
 
