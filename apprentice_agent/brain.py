@@ -260,6 +260,15 @@ List 3-5 key observations. Be brief."""
         ]
         is_notification_task = any(kw in goal_lower for kw in notification_keywords)
 
+        # Tool builder keywords
+        tool_builder_keywords = [
+            'create tool', 'make tool', 'build tool', 'new tool', 'i need a tool',
+            'custom tool', 'generate tool', 'tool builder', 'list custom tools',
+            'test tool', 'enable tool', 'disable tool', 'delete tool', 'remove tool',
+            'rollback tool', 'show custom tools'
+        ]
+        is_tool_builder_task = any(kw in goal_lower for kw in tool_builder_keywords)
+
         # Store for use in decide_action and _generate_default_code
         self._current_goal_is_code = is_code_task
         self._current_goal_is_search = is_search_task
@@ -270,6 +279,7 @@ List 3-5 key observations. Be brief."""
         self._current_goal_is_clipboard = is_clipboard_task
         self._current_goal_is_system_control = is_system_control_task
         self._current_goal_is_notification = is_notification_task
+        self._current_goal_is_tool_builder = is_tool_builder_task
         self._current_goal = goal
 
         if is_clipboard_task:
@@ -368,6 +378,16 @@ Available tools:
 
 Create a 1-step plan:
 1. Use notifications to add/list/remove reminder or scheduled task"""
+        elif is_tool_builder_task:
+            prompt = f"""Goal: {goal}
+
+This is a TOOL BUILDER task. Use tool_builder to create, test, enable, disable, or list custom tools.
+
+Available tools:
+{tool_descriptions}
+
+Create a 1-step plan:
+1. Use tool_builder to list/test/enable/disable/create custom tools"""
         else:
             prompt = f"""Goal: {goal}
 
@@ -601,6 +621,35 @@ REASONING: alert when CPU exceeds 80%
 TOOL: notifications
 ACTION: list
 REASONING: show all scheduled tasks"""
+        elif getattr(self, '_current_goal_is_tool_builder', False):
+            # Tool builder task
+            prompt = f"""Plan: {plan[:500]}
+
+This is a TOOL BUILDER task. Use tool_builder tool.
+
+Pick ONE action. Reply ONLY in this format:
+
+TOOL: tool_builder
+ACTION: <list/test/enable/disable/rollback> [tool_name]
+REASONING: <why>
+
+Examples:
+
+TOOL: tool_builder
+ACTION: list
+REASONING: list all custom tools
+
+TOOL: tool_builder
+ACTION: test my_tool
+REASONING: run tests for my_tool
+
+TOOL: tool_builder
+ACTION: enable my_tool
+REASONING: activate the tool after testing
+
+TOOL: tool_builder
+ACTION: disable my_tool
+REASONING: temporarily disable the tool"""
         else:
             prompt = f"""Plan: {plan[:500]}
 
@@ -710,6 +759,7 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
             "clipboard": "clipboard - read, write, or analyze clipboard content. ACTION: 'read' or 'write <text>' or 'analyze'",
             "system_control": "system_control - get system info (CPU, RAM, GPU, disk), control volume/brightness, open apps, lock screen. ACTION: 'get_system_info' or 'get_volume' or 'set_volume <level>' or 'open_app <name>'",
             "notifications": "notifications - set reminders, schedule notifications, create conditional alerts. ACTION: 'add_reminder <msg> in <time>' or 'add_scheduled <msg> <time> <repeat>' or 'list' or 'remove <id>'",
+            "tool_builder": "tool_builder - create, test, enable, disable, or list custom tools. ACTION: 'list' or 'test <name>' or 'enable <name>' or 'disable <name>' or 'rollback <name>'",
             "summarize": "summarize - summarize gathered information. ACTION: 'results'"
         }
         return "\n".join(descriptions.get(t, t) for t in available_tools)
@@ -748,6 +798,8 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
                     tool = "system_control"
                 elif "notif" in tool or "remind" in tool or "schedule" in tool or "alert" in tool:
                     tool = "notifications"
+                elif "tool_builder" in tool or "builder" in tool or "create tool" in tool or "custom tool" in tool:
+                    tool = "tool_builder"
                 result["tool"] = tool
             elif line.upper().startswith("ACTION:"):
                 action = line[7:].strip()
@@ -782,6 +834,8 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
                 result["tool"] = "system_control"
             elif "notification" in response_lower or "reminder" in response_lower or "remind" in response_lower or "schedule" in response_lower or "alert" in response_lower:
                 result["tool"] = "notifications"
+            elif "tool_builder" in response_lower or "create tool" in response_lower or "custom tool" in response_lower or "list tools" in response_lower:
+                result["tool"] = "tool_builder"
 
         if not result["action"] and result["tool"] == "web_search":
             # Try to extract a search query from the response
@@ -880,6 +934,28 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
             else:
                 # Default to add_reminder for "remind me", "in 30 minutes", etc.
                 result["action"] = current_action if 'reminder' in current_action else "add_reminder"
+
+        # FORCE tool_builder for tool builder tasks
+        is_tool_builder_task = getattr(self, '_current_goal_is_tool_builder', False)
+        if is_tool_builder_task:
+            result["tool"] = "tool_builder"
+            goal = getattr(self, '_current_goal', '').lower()
+            current_action = (result.get("action") or "").lower()
+
+            # Determine correct action based on goal keywords
+            if 'list' in goal or 'show' in goal:
+                result["action"] = "list"
+            elif 'test' in goal:
+                result["action"] = current_action if 'test' in current_action else "test"
+            elif 'enable' in goal or 'activate' in goal:
+                result["action"] = current_action if 'enable' in current_action else "enable"
+            elif 'disable' in goal or 'deactivate' in goal:
+                result["action"] = current_action if 'disable' in current_action else "disable"
+            elif 'rollback' in goal or 'delete' in goal or 'remove' in goal:
+                result["action"] = current_action if 'rollback' in current_action else "rollback"
+            else:
+                # Default to list for general tool builder queries
+                result["action"] = current_action if current_action else "list"
 
         return result
 

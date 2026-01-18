@@ -10,7 +10,7 @@ from .brain import OllamaBrain, TaskType
 from .identity import load_identity, get_identity_prompt, detect_name_change, detect_personality_change, update_name, update_personality
 from .memory import MemorySystem
 from .metacognition import MetacognitionLogger
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool
 
 
 class AgentPhase(Enum):
@@ -55,13 +55,57 @@ class ApprenticeAgent:
             "arxiv_search": ArxivSearchTool(),
             "browser": BrowserTool(),
             "system_control": SystemControlTool(),
-            "notifications": NotificationTool()
+            "notifications": NotificationTool(),
+            "tool_builder": ToolBuilderTool()
         }
         self.state = AgentState()
         self.max_iterations = 10
         self.metacognition = MetacognitionLogger()
         self.use_fastpath = True  # Enable fast-path by default
         self.identity = load_identity()  # Load agent identity
+        self._load_custom_tools()  # Load active custom tools
+
+    def _load_custom_tools(self) -> None:
+        """Load active custom tools from registry."""
+        import json
+        import importlib.util
+
+        registry_path = Path(__file__).parent.parent / "data" / "custom_tools.json"
+        if not registry_path.exists():
+            return
+
+        try:
+            with open(registry_path, "r", encoding="utf-8") as f:
+                registry = json.load(f)
+
+            for tool_entry in registry.get("tools", []):
+                if tool_entry.get("status") != "active":
+                    continue
+
+                tool_file = Path(tool_entry.get("file", ""))
+                if not tool_file.exists():
+                    continue
+
+                try:
+                    # Dynamic import of custom tool
+                    spec = importlib.util.spec_from_file_location(
+                        tool_entry["name"],
+                        tool_file
+                    )
+                    if spec and spec.loader:
+                        module = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(module)
+
+                        # Get the tool class
+                        class_name = tool_entry.get("class_name")
+                        if hasattr(module, class_name):
+                            tool_class = getattr(module, class_name)
+                            self.tools[tool_entry["name"]] = tool_class()
+                            print(f"[LOADED] Custom tool: {tool_entry['name']}")
+                except Exception as e:
+                    print(f"[ERROR] Failed to load custom tool {tool_entry['name']}: {e}")
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"[ERROR] Failed to load custom tools registry: {e}")
 
     def _is_simple_query(self, goal: str) -> bool:
         """Check if the goal is a simple conversational query.
@@ -147,7 +191,10 @@ class ApprenticeAgent:
             'remind', 'reminder', 'notify', 'notification', 'alert', 'schedule',
             'every day', 'every morning', 'every evening', 'daily at', 'weekly',
             'in 5 minutes', 'in 10 minutes', 'in 30 minutes', 'in an hour',
-            'set reminder', 'set alarm', 'remind me'
+            'set reminder', 'set alarm', 'remind me',
+            'create tool', 'make tool', 'build tool', 'new tool', 'i need a tool',
+            'custom tool', 'generate tool', 'tool builder', 'list tools', 'test tool',
+            'enable tool', 'disable tool', 'delete tool', 'remove tool'
         ]
 
         # Check if it clearly needs a tool
@@ -849,6 +896,28 @@ Guidelines:
                 if not message:
                     message = "Reminder"
                 return tool.add_reminder(message, time_str)
+
+        elif tool_name == "tool_builder":
+            # Handle tool builder actions
+            if "list" in action_lower:
+                return tool.list_custom_tools()
+            elif "test" in action_lower:
+                return tool.execute(action)
+            elif "enable" in action_lower:
+                return tool.execute(action)
+            elif "disable" in action_lower:
+                return tool.execute(action)
+            elif "rollback" in action_lower or "delete" in action_lower or "remove" in action_lower:
+                return tool.execute(action)
+            elif "create" in action_lower:
+                # Tool creation requires structured input
+                return {
+                    "success": False,
+                    "error": "Tool creation requires structured input with name, description, and functions_spec.",
+                    "hint": "Use tool_builder.create_tool(name, description, functions_spec) directly."
+                }
+            else:
+                return tool.execute(action)
 
         return {"success": False, "error": f"Cannot parse action for {tool_name}"}
 
