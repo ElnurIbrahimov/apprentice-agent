@@ -10,6 +10,7 @@ Complete technical documentation for the Apprentice Agent project.
 - [Phase C: Voice & Image Tools](#phase-c-voice--image-tools)
 - [API Reference](#api-reference)
 - [Changelog](#changelog)
+- [Roadmap](#roadmap)
 
 ---
 
@@ -22,9 +23,13 @@ apprentice-agent/
 ├── gui.py                    # Gradio web interface
 ├── main.py                   # CLI entry point
 ├── logs/
-│   └── metacognition/        # JSONL logs (YYYY-MM-DD.jsonl)
+│   ├── metacognition/        # JSONL logs (YYYY-MM-DD.jsonl)
+│   ├── notifications/        # Notification scheduler logs
+│   └── tool_builder/         # Tool creation logs
 ├── data/
-│   └── chromadb/             # Memory storage
+│   ├── chromadb/             # Memory storage
+│   ├── scheduled_tasks.json  # Notification tasks
+│   └── custom_tools.json     # Custom tool registry
 ├── generated_images/         # [Phase C] Stable Diffusion outputs
 └── apprentice_agent/
     ├── __init__.py
@@ -34,6 +39,7 @@ apprentice-agent/
     ├── config.py             # Configuration
     ├── metacognition.py      # [Phase B] Confidence & logging
     ├── dream.py              # [Phase B] Memory consolidation
+    ├── scheduler.py          # Notification scheduler daemon
     └── tools/
         ├── __init__.py
         ├── filesystem.py     # File operations
@@ -44,7 +50,16 @@ apprentice-agent/
         ├── pdf_reader.py     # PDF extraction
         ├── clipboard.py      # Clipboard access
         ├── voice.py          # [Phase C] Speech-to-text & TTS
-        └── image_gen.py      # [Phase C] Stable Diffusion
+        ├── image_gen.py      # [Phase C] Stable Diffusion
+        ├── arxiv_search.py   # arXiv paper search
+        ├── browser.py        # Playwright browser automation
+        ├── system_control.py # Volume, brightness, apps
+        ├── notifications.py  # Reminders & scheduled alerts
+        ├── tool_builder.py   # Meta-tool for creating tools
+        ├── tool_template.py  # Templates for generated tools
+        └── custom/           # Auto-generated custom tools
+            ├── __init__.py
+            └── tests/        # Custom tool tests
 ```
 
 ### Core Loop
@@ -115,7 +130,7 @@ JSON-based memory storage with text similarity search.
 - `count()` - Get total memory count
 - `get_recent(n)` - Get recent memories
 
-#### Tools
+#### Tools (14 Total)
 
 | Tool | File | Description |
 |------|------|-------------|
@@ -128,6 +143,11 @@ JSON-based memory storage with text similarity search.
 | `clipboard` | `clipboard.py` | Clipboard read/write |
 | `voice` | `voice.py` | [Phase C] Speech-to-text (Whisper) & TTS (pyttsx3) |
 | `image_gen` | `image_gen.py` | [Phase C] Image generation (Stable Diffusion 1.5) |
+| `arxiv_search` | `arxiv_search.py` | arXiv paper search & summarization |
+| `browser` | `browser.py` | Playwright browser automation |
+| `system_control` | `system_control.py` | Volume, brightness, apps, system info |
+| `notifications` | `notifications.py` | Reminders, scheduled alerts, conditional triggers |
+| `tool_builder` | `tool_builder.py` | Meta-tool for creating custom tools at runtime |
 
 ---
 
@@ -529,6 +549,100 @@ print(result["image_path"])
 
 ## Changelog
 
+### Self-Tool-Creation - Tool #14 (2026-01-18)
+
+#### Added
+- **Tool Builder** (`tools/tool_builder.py`)
+  - Meta-tool enabling the agent to create new tools at runtime
+  - `create_tool(name, description, functions_spec)` — generates Python file from specification
+  - `test_tool(name)` — runs auto-generated tests in isolated subprocess
+  - `enable_tool(name)` — activates tool for agent use
+  - `disable_tool(name)` — deactivates tool without deletion
+  - `rollback_tool(name)` — deletes tool and removes from registry
+  - `list_custom_tools()` — shows all agent-created tools with status
+
+- **Tool Templates** (`tools/tool_template.py`)
+  - Class templates for generated tools
+  - Method templates with proper typing and docstrings
+  - Test templates for auto-generated unit tests
+  - Blocked patterns list for security scanning
+
+- **Custom Tools Infrastructure**
+  - Custom tools saved in `tools/custom/`
+  - Tests saved in `tools/custom/tests/`
+  - Registry in `data/custom_tools.json`
+  - Logs in `logs/tool_builder/`
+
+- **Safety Features**
+  - Code scanning blocks dangerous imports: `os.system`, `subprocess`, `eval`, `exec`, `__import__`, `compile`, `open`, `socket`, `requests`
+  - Function bodies scanned before file generation
+  - Isolated test execution in subprocess
+
+- **Natural Language Tool Spec Generation** (`agent.py`)
+  - `_generate_tool_spec(user_request)` — uses LLM to parse natural language into structured JSON spec
+  - Enables commands like "Create a tool that calculates BMI"
+
+- **Custom Tool Detection** (`agent.py`)
+  - `custom_tool_keywords` dict maps keywords to tool names
+  - `_detect_custom_tool()` routes goals directly to custom tools
+  - Keywords auto-generated from tool name, description, and functions
+  - Agent bypasses planning phase for clear custom tool matches
+
+- **Example Custom Tools Created**
+  - `bmi_calculator` — calculates BMI from height/weight (metric & imperial)
+  - `temperature_converter` — converts between Celsius and Fahrenheit
+
+#### Modified
+- `agent.py`: Added custom tool loading, keyword detection, direct routing
+- `brain.py`: Added tool_builder keywords and routing
+- `tools/__init__.py`: Added ToolBuilderTool export
+- `README.md`: Updated to 14 tools, added Tool Builder section
+
+#### Usage
+```python
+from apprentice_agent.tools import ToolBuilderTool
+
+builder = ToolBuilderTool()
+
+# Create a custom tool
+builder.create_tool(
+    name='bmi_calculator',
+    description='Calculate BMI from height and weight',
+    functions_spec=[{
+        'name': 'calculate_bmi',
+        'params': ['weight_kg', 'height_m'],
+        'description': 'Calculate BMI',
+        'body': 'bmi = float(weight_kg) / (float(height_m) ** 2)\nreturn {"success": True, "bmi": round(bmi, 1)}'
+    }]
+)
+
+# Test and enable
+builder.test_tool('bmi_calculator')
+builder.enable_tool('bmi_calculator')
+
+# Use via agent
+# "Calculate my BMI - height 1.75m, weight 70kg" → bmi_calculator
+```
+
+#### Registry Format (`data/custom_tools.json`)
+```json
+{
+    "tools": [{
+        "name": "bmi_calculator",
+        "class_name": "BmiCalculatorTool",
+        "description": "Calculate BMI from height and weight",
+        "status": "active",
+        "created": "2026-01-18T18:34:03",
+        "file": "tools/custom/bmi_calculator.py",
+        "test_file": "tools/custom/tests/test_bmi_calculator.py",
+        "functions": ["calculate_bmi", "calculate_bmi_imperial"],
+        "keywords": ["bmi", "body mass index", "height and weight"]
+    }]
+}
+```
+
+---
+
 ### Phase C - Voice, Vision & Fast-Path (2026-01-16)
 
 #### Added
@@ -634,7 +748,13 @@ print(result["image_path"])
 
 ---
 
-## Future Phases
+## Roadmap
+
+### Completed Features
+- **Phase A** - Core Agent (5-phase loop, 7 tools, memory, GUI)
+- **Phase B** - Self-Reflection (confidence scoring, metacognition, dream mode, multi-model routing)
+- **Phase C** - Voice & Image Tools (Whisper STT, pyttsx3 TTS, Stable Diffusion)
+- **Tool #14** - Self-Tool-Creation (tool_builder meta-tool, custom tool registry, auto-detection)
 
 ### Phase D - Adaptive Learning (Planned)
 - Use dream insights to adjust planning strategies
