@@ -4,7 +4,7 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 
 ## Features
 
-- **13 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, and more
+- **14 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, and more
 - **4-Model Routing** - Automatically selects the best model for each task type
 - **Observe-Plan-Act-Evaluate-Remember Loop** - Structured reasoning cycle for achieving goals
 - **Fast-Path Responses** - Instant replies for conversational queries without full agent loop
@@ -148,6 +148,7 @@ Opens at `http://127.0.0.1:7860` with:
 | `browser` | Automate web browser with Playwright | `open github.com` |
 | `system_control` | Volume, brightness, apps, system info | `set volume 50` |
 | `notifications` | Reminders, scheduled alerts, conditional triggers | `remind me in 30 minutes` |
+| `tool_builder` | Create, test, enable, disable custom tools | `list custom tools` |
 
 ### Code Executor Safety
 
@@ -187,6 +188,40 @@ python -m apprentice_agent.scheduler
 ```
 
 The scheduler checks every 30 seconds and sends Windows toast notifications via `winotify`. Logs are stored in `logs/notifications/`.
+
+### Tool Builder (Self-Extension)
+
+The tool builder allows the agent to create new tools dynamically:
+
+| Method | Description |
+|--------|-------------|
+| `create_tool(name, description, functions_spec)` | Generate a new tool from specification |
+| `test_tool(name)` | Run auto-generated tests |
+| `enable_tool(name)` | Activate tool for use |
+| `disable_tool(name)` | Deactivate tool |
+| `rollback_tool(name)` | Delete tool and remove from registry |
+| `list_custom_tools()` | List all custom tools with status |
+
+**Example - Creating a BMI Calculator:**
+
+```python
+from apprentice_agent.tools.tool_builder import ToolBuilderTool
+builder = ToolBuilderTool()
+
+builder.create_tool(
+    name='bmi_calculator',
+    description='Calculate BMI from height and weight',
+    functions_spec=[{
+        'name': 'calculate_bmi',
+        'params': ['weight_kg', 'height_m'],
+        'description': 'Calculate BMI',
+        'body': 'bmi = float(weight_kg) / (float(height_m) ** 2)\nreturn {"success": True, "bmi": round(bmi, 1)}'
+    }]
+)
+builder.enable_tool('bmi_calculator')
+```
+
+**Safety:** Generated code is scanned for dangerous patterns (`eval`, `exec`, `subprocess`, `os.system`, etc.) before saving. Custom tools are stored in `tools/custom/` and registered in `data/custom_tools.json`.
 
 ## Configuration
 
@@ -228,7 +263,10 @@ apprentice-agent/
         ├── arxiv_search.py   # arXiv paper search and summarization
         ├── browser.py        # Playwright browser automation
         ├── system_control.py # Volume, brightness, apps, system info
-        └── notifications.py  # Reminders, scheduled, conditional alerts
+        ├── notifications.py  # Reminders, scheduled, conditional alerts
+        ├── tool_builder.py   # Meta-tool for creating custom tools
+        ├── tool_template.py  # Templates for generated tools
+        └── custom/           # Auto-generated custom tools
 ```
 
 ## License

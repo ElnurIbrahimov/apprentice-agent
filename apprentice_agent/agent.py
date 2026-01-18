@@ -910,12 +910,22 @@ Guidelines:
             elif "rollback" in action_lower or "delete" in action_lower or "remove" in action_lower:
                 return tool.execute(action)
             elif "create" in action_lower:
-                # Tool creation requires structured input
-                return {
-                    "success": False,
-                    "error": "Tool creation requires structured input with name, description, and functions_spec.",
-                    "hint": "Use tool_builder.create_tool(name, description, functions_spec) directly."
-                }
+                # Generate tool spec from user request using LLM
+                tool_spec = self._generate_tool_spec(self.state.goal)
+                if not tool_spec:
+                    return {
+                        "success": False,
+                        "error": "Failed to generate tool specification from request."
+                    }
+                if "error" in tool_spec:
+                    return {"success": False, "error": tool_spec["error"]}
+
+                # Create the tool with generated spec
+                return tool.create_tool(
+                    name=tool_spec["name"],
+                    description=tool_spec["description"],
+                    functions_spec=tool_spec["functions_spec"]
+                )
             else:
                 return tool.execute(action)
 
@@ -1298,6 +1308,115 @@ Guidelines:
         message = quoted[0] if quoted else None
 
         return (message, condition_type, threshold)
+
+    def _generate_tool_spec(self, user_request: str) -> Optional[dict]:
+        """Generate a tool specification from a natural language request.
+
+        Uses the LLM to parse the user's request and generate a structured
+        specification with name, description, and functions_spec.
+
+        Args:
+            user_request: The user's natural language tool creation request
+
+        Returns:
+            Dict with name, description, and functions_spec, or None if parsing fails
+        """
+        import json
+        import re
+
+        prompt = f"""You are a tool specification generator. Given a user's request, generate a JSON specification for a new tool.
+
+User request: {user_request}
+
+Generate a JSON object with EXACTLY this structure:
+{{
+    "name": "tool_name_in_snake_case",
+    "description": "Brief description of what the tool does",
+    "functions_spec": [
+        {{
+            "name": "function_name",
+            "params": ["param1", "param2"],
+            "description": "What this function does",
+            "body": "Python code that returns a dict with 'success' key"
+        }}
+    ]
+}}
+
+Rules for the code in "body":
+1. Must be valid Python code
+2. Must return a dict with "success": True/False
+3. Can use: json, re, datetime, math, random, hashlib, base64, urllib.parse
+4. CANNOT use: os, subprocess, sys, socket, requests, eval, exec, __import__
+5. Parameters are available as local variables
+6. Use float() or int() to convert numeric parameters
+
+Example for a temperature converter:
+{{
+    "name": "temperature_converter",
+    "description": "Convert temperatures between Celsius and Fahrenheit",
+    "functions_spec": [
+        {{
+            "name": "celsius_to_fahrenheit",
+            "params": ["celsius"],
+            "description": "Convert Celsius to Fahrenheit",
+            "body": "temp = float(celsius)\\nfahrenheit = (temp * 9/5) + 32\\nreturn {{\\"success\\": True, \\"fahrenheit\\": round(fahrenheit, 2)}}"
+        }},
+        {{
+            "name": "fahrenheit_to_celsius",
+            "params": ["fahrenheit"],
+            "description": "Convert Fahrenheit to Celsius",
+            "body": "temp = float(fahrenheit)\\ncelsius = (temp - 32) * 5/9\\nreturn {{\\"success\\": True, \\"celsius\\": round(celsius, 2)}}"
+        }}
+    ]
+}}
+
+Output ONLY the JSON object, no other text."""
+
+        try:
+            # Use reasoning model for this complex task
+            from .brain import TaskType
+            response = self.brain.think(
+                prompt,
+                task_type=TaskType.REASONING,
+                use_history=False
+            )
+
+            # Extract JSON from response
+            # Try to find JSON object in the response
+            json_match = re.search(r'\{[\s\S]*\}', response)
+            if not json_match:
+                return {"error": f"No JSON found in response: {response[:200]}"}
+
+            json_str = json_match.group()
+
+            # Parse the JSON
+            spec = json.loads(json_str)
+
+            # Validate required fields
+            if "name" not in spec:
+                return {"error": "Missing 'name' in tool specification"}
+            if "description" not in spec:
+                return {"error": "Missing 'description' in tool specification"}
+            if "functions_spec" not in spec or not spec["functions_spec"]:
+                return {"error": "Missing or empty 'functions_spec' in tool specification"}
+
+            # Validate each function spec
+            for func in spec["functions_spec"]:
+                if "name" not in func:
+                    return {"error": "Function missing 'name'"}
+                if "params" not in func:
+                    func["params"] = []  # Default to no params
+                if "description" not in func:
+                    func["description"] = f"Function {func['name']}"
+                if "body" not in func:
+                    return {"error": f"Function '{func['name']}' missing 'body'"}
+
+            return spec
+
+        except json.JSONDecodeError as e:
+            return {"error": f"Invalid JSON in response: {e}"}
+        except Exception as e:
+            return {"error": f"Failed to generate tool spec: {e}"}
 
     def _get_final_result(self) -> dict:
         """Compile the final result of the agent run."""
