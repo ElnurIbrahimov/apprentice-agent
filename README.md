@@ -4,7 +4,7 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 
 ## Features
 
-- **12 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, and more
+- **13 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, and more
 - **4-Model Routing** - Automatically selects the best model for each task type
 - **Observe-Plan-Act-Evaluate-Remember Loop** - Structured reasoning cycle for achieving goals
 - **Fast-Path Responses** - Instant replies for conversational queries without full agent loop
@@ -147,6 +147,7 @@ Opens at `http://127.0.0.1:7860` with:
 | `arxiv_search` | Search academic papers on arXiv | `transformer attention mechanism` |
 | `browser` | Automate web browser with Playwright | `open github.com` |
 | `system_control` | Volume, brightness, apps, system info | `set volume 50` |
+| `notifications` | Reminders, scheduled alerts, conditional triggers | `remind me in 30 minutes` |
 
 ### Code Executor Safety
 
@@ -168,6 +169,24 @@ The system control tool uses a strict allowlist for launching applications:
 - **Allowed apps**: `notepad`, `calculator`, `browser`, `chrome`, `firefox`, `explorer`, `vscode`, `terminal`, `cmd`, `powershell`
 - Volume and brightness controls are clamped to 0-100 range
 - Lock screen requires no parameters (immediate action)
+
+### Notifications
+
+The notifications tool supports three types of alerts:
+
+| Type | Description | Example |
+|------|-------------|---------|
+| **Reminders** | One-time notifications after a delay | "Remind me to take a break in 30 minutes" |
+| **Scheduled** | Recurring notifications at specific times | "Notify me every day at 9 AM for standup" |
+| **Conditional** | System threshold alerts | "Alert me when CPU exceeds 80%" |
+
+**Scheduler Daemon**: To receive notifications, run the background scheduler:
+
+```bash
+python -m apprentice_agent.scheduler
+```
+
+The scheduler checks every 30 seconds and sends Windows toast notifications via `winotify`. Logs are stored in `logs/notifications/`.
 
 ## Configuration
 
@@ -195,6 +214,7 @@ apprentice-agent/
     ├── config.py             # Configuration settings
     ├── metacognition.py      # Confidence scoring and action logging
     ├── dream.py              # Memory consolidation and pattern analysis
+    ├── scheduler.py          # Background daemon for notifications
     └── tools/
         ├── web_search.py     # DuckDuckGo search
         ├── filesystem.py     # File operations
@@ -207,7 +227,8 @@ apprentice-agent/
         ├── image_gen.py      # Stable Diffusion image generation
         ├── arxiv_search.py   # arXiv paper search and summarization
         ├── browser.py        # Playwright browser automation
-        └── system_control.py # Volume, brightness, apps, system info
+        ├── system_control.py # Volume, brightness, apps, system info
+        └── notifications.py  # Reminders, scheduled, conditional alerts
 ```
 
 ## License
