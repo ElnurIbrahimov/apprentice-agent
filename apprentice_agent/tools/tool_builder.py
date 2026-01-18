@@ -117,6 +117,72 @@ class ToolBuilderTool:
         words = self._sanitize_name(name).split('_')
         return ''.join(word.capitalize() for word in words if word) + 'Tool'
 
+    def _generate_keywords(self, name: str, description: str, functions_spec: list[dict]) -> list[str]:
+        """Generate keywords for tool detection from name, description, and functions.
+
+        Args:
+            name: Tool name
+            description: Tool description
+            functions_spec: List of function specifications
+
+        Returns:
+            List of keywords for tool detection
+        """
+        keywords = set()
+
+        # Add words from tool name (split by underscore)
+        for word in name.lower().split('_'):
+            if len(word) > 2:  # Skip very short words
+                keywords.add(word)
+
+        # Add the full tool name
+        keywords.add(name.lower().replace('_', ' '))
+
+        # Add significant words from description (skip common words)
+        stop_words = {'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been',
+                      'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
+                      'would', 'could', 'should', 'may', 'might', 'must', 'shall',
+                      'can', 'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by',
+                      'from', 'as', 'into', 'through', 'during', 'before', 'after',
+                      'above', 'below', 'between', 'under', 'again', 'further',
+                      'then', 'once', 'here', 'there', 'when', 'where', 'why',
+                      'how', 'all', 'each', 'few', 'more', 'most', 'other', 'some',
+                      'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so',
+                      'than', 'too', 'very', 'just', 'and', 'but', 'if', 'or',
+                      'because', 'until', 'while', 'this', 'that', 'these', 'those'}
+
+        desc_words = re.findall(r'\b[a-zA-Z]+\b', description.lower())
+        for word in desc_words:
+            if word not in stop_words and len(word) > 2:
+                keywords.add(word)
+
+        # Add function names (split by underscore)
+        for func in functions_spec:
+            func_name = func.get('name', '')
+            for word in func_name.lower().split('_'):
+                if len(word) > 2:
+                    keywords.add(word)
+            # Also add full function name with spaces
+            keywords.add(func_name.lower().replace('_', ' '))
+
+        # Add common phrases based on tool patterns
+        name_lower = name.lower()
+        if 'calculator' in name_lower or 'calc' in name_lower:
+            keywords.add('calculate')
+            keywords.add('compute')
+        if 'converter' in name_lower or 'convert' in name_lower:
+            keywords.add('convert')
+            keywords.add('conversion')
+        if 'bmi' in name_lower:
+            keywords.add('body mass index')
+            keywords.add('height and weight')
+        if 'temperature' in name_lower:
+            keywords.add('celsius')
+            keywords.add('fahrenheit')
+            keywords.add('temp')
+
+        return sorted(list(keywords))
+
     def _generate_method_code(self, func_spec: dict) -> tuple[str, str, str]:
         """Generate method code from function specification.
 
@@ -326,6 +392,9 @@ class ToolBuilderTool:
         if not init_file.exists():
             init_file.write_text('"""Custom tools directory."""\n')
 
+        # Generate keywords for tool detection
+        keywords = self._generate_keywords(safe_name, description, functions_spec)
+
         # Register tool
         registry = self._load_registry()
         registry["tools"].append({
@@ -336,7 +405,8 @@ class ToolBuilderTool:
             "created": created_at,
             "file": str(tool_file),
             "test_file": str(test_file),
-            "functions": [f.get("name") for f in functions_spec]
+            "functions": [f.get("name") for f in functions_spec],
+            "keywords": keywords
         })
         self._save_registry(registry)
 

@@ -63,6 +63,7 @@ class ApprenticeAgent:
         self.metacognition = MetacognitionLogger()
         self.use_fastpath = True  # Enable fast-path by default
         self.identity = load_identity()  # Load agent identity
+        self.custom_tool_keywords = {}  # Map of keyword -> tool_name for custom tools
         self._load_custom_tools()  # Load active custom tools
 
     def _load_custom_tools(self) -> None:
@@ -82,6 +83,7 @@ class ApprenticeAgent:
                 if tool_entry.get("status") != "active":
                     continue
 
+                tool_name = tool_entry["name"]
                 tool_file = Path(tool_entry.get("file", ""))
                 if not tool_file.exists():
                     continue
@@ -89,7 +91,7 @@ class ApprenticeAgent:
                 try:
                     # Dynamic import of custom tool
                     spec = importlib.util.spec_from_file_location(
-                        tool_entry["name"],
+                        tool_name,
                         tool_file
                     )
                     if spec and spec.loader:
@@ -100,12 +102,66 @@ class ApprenticeAgent:
                         class_name = tool_entry.get("class_name")
                         if hasattr(module, class_name):
                             tool_class = getattr(module, class_name)
-                            self.tools[tool_entry["name"]] = tool_class()
-                            print(f"[LOADED] Custom tool: {tool_entry['name']}")
+                            self.tools[tool_name] = tool_class()
+                            print(f"[LOADED] Custom tool: {tool_name}")
+
+                            # Load keywords for this tool
+                            keywords = tool_entry.get("keywords", [])
+                            if not keywords:
+                                # Generate default keywords from name and description
+                                keywords = self._generate_default_keywords(
+                                    tool_name,
+                                    tool_entry.get("description", ""),
+                                    tool_entry.get("functions", [])
+                                )
+                            for kw in keywords:
+                                self.custom_tool_keywords[kw.lower()] = tool_name
                 except Exception as e:
-                    print(f"[ERROR] Failed to load custom tool {tool_entry['name']}: {e}")
+                    print(f"[ERROR] Failed to load custom tool {tool_name}: {e}")
         except (json.JSONDecodeError, IOError) as e:
             print(f"[ERROR] Failed to load custom tools registry: {e}")
+
+    def _generate_default_keywords(self, name: str, description: str, functions: list) -> list[str]:
+        """Generate default keywords for a custom tool if not provided.
+
+        Args:
+            name: Tool name
+            description: Tool description
+            functions: List of function names
+
+        Returns:
+            List of keywords for tool detection
+        """
+        import re
+        keywords = set()
+
+        # Add words from tool name
+        for word in name.lower().split('_'):
+            if len(word) > 2:
+                keywords.add(word)
+        keywords.add(name.lower().replace('_', ' '))
+
+        # Add words from description
+        stop_words = {'a', 'an', 'the', 'is', 'are', 'to', 'of', 'in', 'for', 'on',
+                      'with', 'at', 'by', 'from', 'and', 'or', 'but', 'can', 'will'}
+        desc_words = re.findall(r'\b[a-zA-Z]+\b', description.lower())
+        for word in desc_words:
+            if word not in stop_words and len(word) > 2:
+                keywords.add(word)
+
+        # Add function names
+        for func in functions:
+            for word in func.lower().split('_'):
+                if len(word) > 2:
+                    keywords.add(word)
+
+        # Add common variations
+        if 'bmi' in name.lower():
+            keywords.update(['body mass index', 'height and weight'])
+        if 'temperature' in name.lower():
+            keywords.update(['celsius', 'fahrenheit', 'temp'])
+
+        return list(keywords)
 
     def _is_simple_query(self, goal: str) -> bool:
         """Check if the goal is a simple conversational query.
@@ -201,6 +257,11 @@ class ApprenticeAgent:
         needs_tool = any(kw in goal_lower for kw in tool_keywords)
         if needs_tool:
             return False  # Use full agent loop
+
+        # Check if query matches any custom tool keywords
+        for kw in self.custom_tool_keywords:
+            if kw in goal_lower:
+                return False  # Use full agent loop for custom tools
 
         # Check for yes/no questions (usually don't need tools)
         for starter in yesno_starters:
@@ -444,17 +505,57 @@ Guidelines:
         )
         print(f"Plan: {self.state.current_plan[:200]}...")
 
+    def _detect_custom_tool(self, goal: str) -> Optional[tuple[str, str]]:
+        """Detect if the goal matches a custom tool.
+
+        Args:
+            goal: The user's goal
+
+        Returns:
+            (tool_name, action) tuple if a custom tool matches, None otherwise
+        """
+        goal_lower = goal.lower()
+
+        # Check each custom tool's keywords
+        best_match = None
+        best_match_score = 0
+
+        for keyword, tool_name in self.custom_tool_keywords.items():
+            if keyword in goal_lower:
+                # Score based on keyword length (longer = more specific)
+                score = len(keyword)
+                if score > best_match_score:
+                    best_match_score = score
+                    best_match = tool_name
+
+        if best_match:
+            # Return the tool name and the goal as the action
+            return (best_match, goal)
+
+        return None
+
     def _act(self) -> None:
         """Phase 3: Execute an action."""
         self.state.phase = AgentPhase.ACT
         print(f"[ACT] Deciding and executing action...")
 
-        # Include summarize as an available tool
-        available_tools = list(self.tools.keys()) + ["summarize"]
-        action_decision = self.brain.decide_action(
-            self.state.current_plan,
-            available_tools
-        )
+        # Check if a custom tool should be used directly
+        custom_tool_match = self._detect_custom_tool(self.state.goal)
+        if custom_tool_match and self.state.iteration == 1:
+            tool_name, action = custom_tool_match
+            print(f"[CUSTOM TOOL] Detected custom tool: {tool_name}")
+            action_decision = {
+                "tool": tool_name,
+                "action": action,
+                "reasoning": f"Using custom tool {tool_name} based on goal keywords"
+            }
+        else:
+            # Include summarize as an available tool
+            available_tools = list(self.tools.keys()) + ["summarize"]
+            action_decision = self.brain.decide_action(
+                self.state.current_plan,
+                available_tools
+            )
 
         self.state.last_action = action_decision
         print(f"Action: {action_decision.get('tool')} - {action_decision.get('action')}")
@@ -928,6 +1029,10 @@ Guidelines:
                 )
             else:
                 return tool.execute(action)
+
+        # Handle custom tools - they all have an execute() method
+        if tool_name in self.custom_tool_keywords.values() or hasattr(tool, 'execute'):
+            return tool.execute(action)
 
         return {"success": False, "error": f"Cannot parse action for {tool_name}"}
 

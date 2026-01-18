@@ -90,6 +90,7 @@ class TemperatureConverterTool:
         """
         action_lower = action.lower()
 
+        # Check for explicit function names first
         if "celsius_to_fahrenheit" in action_lower:
             celsius = self._extract_param(action, "celsius", 0)
             return self.celsius_to_fahrenheit(celsius)
@@ -98,5 +99,61 @@ class TemperatureConverterTool:
             fahrenheit = self._extract_param(action, "fahrenheit", 0)
             return self.fahrenheit_to_celsius(fahrenheit)
 
+        # Natural language parsing for temperature conversion
+        if "celsius" in action_lower or "fahrenheit" in action_lower or "temperature" in action_lower:
+            # Extract the number
+            numbers = re.findall(r'-?\d+(?:\.\d+)?', action)
+            if not numbers:
+                return {"success": False, "error": "Could not find a temperature value in input"}
+
+            temp_value = float(numbers[0])
+
+            # Determine direction of conversion
+            # "X celsius to fahrenheit" or "convert X C to F"
+            # "X fahrenheit to celsius" or "convert X F to C"
+
+            # Check for explicit conversion patterns
+            c_to_f_patterns = [
+                r'celsius\s+to\s+fahrenheit',
+                r'c\s+to\s+f',
+                r'(\d+)\s*°?\s*c\b',
+                r'(\d+)\s*celsius',
+            ]
+            f_to_c_patterns = [
+                r'fahrenheit\s+to\s+celsius',
+                r'f\s+to\s+c',
+                r'(\d+)\s*°?\s*f\b',
+                r'(\d+)\s*fahrenheit',
+            ]
+
+            # Check for C to F
+            for pattern in c_to_f_patterns:
+                if re.search(pattern, action_lower):
+                    # If "to celsius" or "in celsius" follows, it's F to C
+                    if re.search(r'to\s+celsius|in\s+celsius', action_lower):
+                        continue
+                    return self.celsius_to_fahrenheit(temp_value)
+
+            # Check for F to C
+            for pattern in f_to_c_patterns:
+                if re.search(pattern, action_lower):
+                    # If "to fahrenheit" or "in fahrenheit" follows, it's C to F
+                    if re.search(r'to\s+fahrenheit|in\s+fahrenheit', action_lower):
+                        continue
+                    return self.fahrenheit_to_celsius(temp_value)
+
+            # Default heuristic based on context
+            # If "celsius" mentioned before number, likely converting FROM celsius
+            celsius_pos = action_lower.find('celsius')
+            fahrenheit_pos = action_lower.find('fahrenheit')
+            number_match = re.search(r'-?\d+(?:\.\d+)?', action_lower)
+            number_pos = number_match.start() if number_match else -1
+
+            if celsius_pos != -1 and (fahrenheit_pos == -1 or celsius_pos < fahrenheit_pos):
+                return self.celsius_to_fahrenheit(temp_value)
+            elif fahrenheit_pos != -1:
+                return self.fahrenheit_to_celsius(temp_value)
+
+            return {"success": False, "error": "Could not determine conversion direction. Please specify 'celsius to fahrenheit' or 'fahrenheit to celsius'"}
 
         return {"success": False, "error": f"Unknown action: {action}"}
