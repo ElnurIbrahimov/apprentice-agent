@@ -5,8 +5,14 @@ venv/
 # Environment variables
 .env
 
-# Data directory (chromadb)
+# Data directory (chromadb, marketplace cache, etc.)
 data/
+
+# Logs
+logs/
+
+# Generated plugin packages (marketplace publish output)
+plugins/
 
 # Python
 __pycache__/
