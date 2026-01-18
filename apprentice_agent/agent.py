@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .brain import OllamaBrain, TaskType
+from .identity import load_identity, get_identity_prompt, detect_name_change, detect_personality_change, update_name, update_personality
 from .memory import MemorySystem
 from .metacognition import MetacognitionLogger
 from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool
@@ -59,6 +60,7 @@ class ApprenticeAgent:
         self.max_iterations = 10
         self.metacognition = MetacognitionLogger()
         self.use_fastpath = True  # Enable fast-path by default
+        self.identity = load_identity()  # Load agent identity
 
     def _is_simple_query(self, goal: str) -> bool:
         """Check if the goal is a simple conversational query.
@@ -179,8 +181,11 @@ class ApprenticeAgent:
         print(f"Agent responding (fast-path): {goal}")
         print(f"{'='*60}\n")
 
-        # Build a context-aware system prompt
-        system_prompt = """You are the Apprentice Agent, a helpful AI assistant running locally via Ollama.
+        # Build a context-aware system prompt with identity
+        identity_prompt = get_identity_prompt()
+        system_prompt = f"""{identity_prompt}
+
+You are a helpful AI assistant running locally via Ollama.
 
 About yourself:
 - You are an AI agent that can search the web, take screenshots, read files, execute Python code, and more
@@ -195,12 +200,23 @@ Guidelines:
 - Keep responses short (1-3 sentences for simple queries)
 - If asked to do something that requires tools (search, screenshot, files, code), say you can help with that"""
 
-        # Use fast model for simple responses
+        # Check if this is an identity question - use reasoning model for better system prompt adherence
+        goal_lower = goal.lower()
+        identity_patterns = [
+            'what is your name', "what's your name", 'who are you', 'your name',
+            'are you called', 'what should i call you', 'introduce yourself',
+            'tell me about yourself', 'what are you', 'are you an ai', 'are you a bot',
+            'what model are you', 'are you qwen', 'are you llama', 'are you deepseek'
+        ]
+        is_identity_question = any(pattern in goal_lower for pattern in identity_patterns)
+        task_type = TaskType.REASONING if is_identity_question else TaskType.SIMPLE
+
+        # Use appropriate model based on query type
         response = self.brain.think(
             goal,
             system_prompt=system_prompt,
             use_history=True,  # Enable history for conversational context
-            task_type=TaskType.SIMPLE
+            task_type=task_type
         )
 
         model_used = self.brain.get_last_model_used()
@@ -235,6 +251,62 @@ Guidelines:
             "history": []
         }
 
+    def _check_identity_update(self, goal: str) -> Optional[dict]:
+        """Check if user is trying to update agent identity.
+
+        Args:
+            goal: The user's message/goal
+
+        Returns:
+            Response dict if identity was updated, None otherwise
+        """
+        # Check for name change
+        new_name = detect_name_change(goal)
+        if new_name:
+            self.identity = update_name(new_name)
+            response = f"Got it! I'll remember that. You can call me {new_name} from now on."
+            print(f"\n[IDENTITY] Name updated to: {new_name}")
+            return {
+                "goal": goal,
+                "completed": True,
+                "iterations": 0,
+                "fast_path": True,
+                "identity_update": True,
+                "response": response,
+                "final_evaluation": {
+                    "success": True,
+                    "confidence": 100,
+                    "progress": response
+                },
+                "history": []
+            }
+
+        # Check for personality change
+        new_personality = detect_personality_change(goal)
+        if new_personality:
+            # Append to existing personality or replace
+            current = self.identity.get("personality", "")
+            updated = f"{current}, {new_personality}" if current else new_personality
+            self.identity = update_personality(updated)
+            response = f"I'll try to be more {new_personality}. Thanks for the feedback!"
+            print(f"\n[IDENTITY] Personality updated to: {updated}")
+            return {
+                "goal": goal,
+                "completed": True,
+                "iterations": 0,
+                "fast_path": True,
+                "identity_update": True,
+                "response": response,
+                "final_evaluation": {
+                    "success": True,
+                    "confidence": 100,
+                    "progress": response
+                },
+                "history": []
+            }
+
+        return None
+
     def run(self, goal: str, context: Optional[dict] = None, use_fastpath: Optional[bool] = None) -> dict:
         """Run the agent loop to achieve a goal.
 
@@ -243,6 +315,11 @@ Guidelines:
             context: Optional context dictionary
             use_fastpath: Override fast-path behavior (None uses self.use_fastpath)
         """
+        # Check for identity updates first
+        identity_response = self._check_identity_update(goal)
+        if identity_response:
+            return identity_response
+
         # Check for fast-path eligibility
         fastpath_enabled = use_fastpath if use_fastpath is not None else self.use_fastpath
         if fastpath_enabled and self._is_simple_query(goal):

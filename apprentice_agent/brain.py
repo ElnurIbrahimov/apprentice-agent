@@ -6,6 +6,7 @@ from typing import Optional
 import ollama
 
 from .config import Config
+from .identity import get_identity_prompt
 
 
 class TaskType(Enum):
@@ -44,9 +45,19 @@ class OllamaBrain:
         model = self._select_model(prompt, task_type)
         self._last_model_used = model
 
-        messages = []
+        # Prepend identity to system prompt
+        identity_prompt = get_identity_prompt()
         if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
+            full_system_prompt = f"{identity_prompt}\n\n{system_prompt}"
+        else:
+            full_system_prompt = identity_prompt
+
+        # Debug: print system prompt to confirm identity is included
+        print(f"[DEBUG] System prompt: {full_system_prompt[:200]}...")
+
+        messages = []
+        if full_system_prompt:
+            messages.append({"role": "system", "content": full_system_prompt})
         if use_history:
             messages.extend(self.conversation_history)
         messages.append({"role": "user", "content": prompt})
@@ -98,10 +109,19 @@ class OllamaBrain:
         if any(kw in prompt_lower for kw in ['image', 'picture', 'screenshot', 'photo', 'analyze image']):
             return Config.MODEL_VISION
 
-        # Simple tasks - greetings, basic questions
+        # Identity questions - route to reasoning model (follows system prompts better)
+        identity_patterns = [
+            'what is your name', 'who are you', 'your name', 'are you called',
+            'what should i call you', 'introduce yourself', 'tell me about yourself',
+            'what are you', 'are you an ai', 'are you a bot', 'what model are you'
+        ]
+        if any(pattern in prompt_lower for pattern in identity_patterns):
+            return Config.MODEL_REASON
+
+        # Simple tasks - greetings, basic questions (excluding identity questions)
         simple_patterns = [
             'hello', 'hi ', 'hey', 'good morning', 'good afternoon', 'good evening',
-            'how are you', 'what is your name', 'who are you', 'thanks', 'thank you',
+            'how are you', 'thanks', 'thank you',
             'bye', 'goodbye', 'yes', 'no', 'ok', 'okay'
         ]
         if any(pattern in prompt_lower for pattern in simple_patterns):
