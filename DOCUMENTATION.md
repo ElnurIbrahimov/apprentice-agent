@@ -25,11 +25,14 @@ apprentice-agent/
 ├── logs/
 │   ├── metacognition/        # JSONL logs (YYYY-MM-DD.jsonl)
 │   ├── notifications/        # Notification scheduler logs
-│   └── tool_builder/         # Tool creation logs
+│   ├── tool_builder/         # Tool creation logs
+│   └── marketplace/          # Plugin install/uninstall logs
 ├── data/
 │   ├── chromadb/             # Memory storage
 │   ├── scheduled_tasks.json  # Notification tasks
-│   └── custom_tools.json     # Custom tool registry
+│   ├── custom_tools.json     # Custom tool registry
+│   ├── installed_plugins.json # Marketplace installed plugins
+│   └── marketplace_cache.json # Marketplace registry cache
 ├── generated_images/         # [Phase C] Stable Diffusion outputs
 └── apprentice_agent/
     ├── __init__.py
@@ -57,6 +60,7 @@ apprentice-agent/
         ├── notifications.py  # Reminders & scheduled alerts
         ├── tool_builder.py   # Meta-tool for creating tools
         ├── tool_template.py  # Templates for generated tools
+        ├── marketplace.py    # Plugin marketplace
         └── custom/           # Auto-generated custom tools
             ├── __init__.py
             └── tests/        # Custom tool tests
@@ -130,7 +134,7 @@ JSON-based memory storage with text similarity search.
 - `count()` - Get total memory count
 - `get_recent(n)` - Get recent memories
 
-#### Tools (14 Total)
+#### Tools (15 Total)
 
 | Tool | File | Description |
 |------|------|-------------|
@@ -148,6 +152,7 @@ JSON-based memory storage with text similarity search.
 | `system_control` | `system_control.py` | Volume, brightness, apps, system info |
 | `notifications` | `notifications.py` | Reminders, scheduled alerts, conditional triggers |
 | `tool_builder` | `tool_builder.py` | Meta-tool for creating custom tools at runtime |
+| `marketplace` | `marketplace.py` | Plugin marketplace for browsing, installing, and sharing plugins |
 
 ---
 
@@ -549,6 +554,96 @@ print(result["image_path"])
 
 ## Changelog
 
+### Plugin Marketplace - Tool #15 (2026-01-18)
+
+#### Added
+- **Marketplace Tool** (`tools/marketplace.py`)
+  - `browse(category, sort_by)` — List plugins by category (utilities/health/finance/productivity/fun/all), sorted by downloads/rating/newest
+  - `search(query)` — Search plugins by keyword in name, description, and tags
+  - `get_info(plugin_id)` — Get full plugin details including functions, author, version
+  - `install(plugin_id)` — Download from GitHub, scan for safety, copy to tools/custom/, enable
+  - `uninstall(plugin_id)` — Remove plugin files and disable
+  - `publish(tool_name)` — Package custom tool for publishing (creates plugin folder structure)
+  - `rate(plugin_id, stars)` — Rate 1-5 stars (stored locally)
+  - `my_plugins()` — List all installed marketplace plugins
+  - `update(plugin_id)` — Check for and install plugin updates
+
+- **Data Files**
+  - `data/installed_plugins.json` — Tracks installed plugins with version and source
+  - `data/marketplace_cache.json` — Cached registry data for offline browsing
+
+- **Logging**
+  - `logs/marketplace/` — Logs all install/uninstall/publish actions
+
+- **Safety Features**
+  - Code scanning using same `BLOCKED_PATTERNS` from tool_template.py
+  - Blocks plugins with dangerous imports (os.system, subprocess, eval, exec, etc.)
+  - Requires confirmation before installing plugins with functions list
+
+- **Agent Integration**
+  - `_detect_marketplace_action()` — Priority detection for marketplace keywords
+  - Marketplace keywords: publish, marketplace, browse plugins, install plugin, my plugins, etc.
+  - Marketplace actions take priority over custom tool detection
+  - Read-only actions (browse, search, my_plugins) complete immediately on success
+
+- **Publishing Workflow**
+  - Creates `plugins/<tool_name>/` folder with:
+    - `<tool_name>.py` — Tool source code
+    - `plugin.json` — Plugin metadata (name, description, functions, keywords)
+    - `README.md` — Auto-generated documentation
+    - `tests/` — Test files if available
+  - Output: Ready to push to github.com/ElnurIbrahimov/aura-plugins
+
+#### Modified
+- `agent.py`: Added MarketplaceTool, marketplace detection priority, read-only action completion
+- `tools/__init__.py`: Added MarketplaceTool export
+
+#### Remote Registry
+```
+https://raw.githubusercontent.com/ElnurIbrahimov/aura-plugins/main/registry.json
+```
+
+#### Usage
+```python
+from apprentice_agent.tools import MarketplaceTool
+
+mp = MarketplaceTool()
+
+# Browse available plugins
+result = mp.browse(category="health", sort_by="rating")
+
+# Search for plugins
+result = mp.search("calculator")
+
+# Get plugin details
+result = mp.get_info("bmi_calculator")
+
+# Install a plugin
+result = mp.install("bmi_calculator")
+
+# List installed plugins
+result = mp.my_plugins()
+
+# Publish your custom tool
+result = mp.publish("my_custom_tool")
+
+# Rate a plugin
+result = mp.rate("bmi_calculator", 5)
+```
+
+#### Natural Language Commands
+```bash
+# Via agent
+"Browse plugins in the marketplace"
+"Search for health plugins"
+"Install the bmi_calculator plugin"
+"Show my installed plugins"
+"Publish my temperature_converter tool to the marketplace"
+"Rate bmi_calculator 5 stars"
+```
+
+---
+
 ### Self-Tool-Creation - Tool #14 (2026-01-18)
 
 #### Added
@@ -755,6 +850,7 @@ builder.enable_tool('bmi_calculator')
 - **Phase B** - Self-Reflection (confidence scoring, metacognition, dream mode, multi-model routing)
 - **Phase C** - Voice & Image Tools (Whisper STT, pyttsx3 TTS, Stable Diffusion)
 - **Tool #14** - Self-Tool-Creation (tool_builder meta-tool, custom tool registry, auto-detection)
+- **Tool #15** - Plugin Marketplace (browse, install, publish, rate plugins from remote registry)
 
 ### Phase D - Adaptive Learning (Planned)
 - Use dream insights to adjust planning strategies
