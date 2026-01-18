@@ -809,7 +809,46 @@ Guidelines:
 
         elif tool_name == "notifications":
             # Handle notification actions
-            return tool.execute(action)
+            if "list" in action_lower:
+                return tool.list_tasks()
+            elif "clear" in action_lower:
+                return tool.clear_all()
+            elif "remove" in action_lower or "delete" in action_lower or "cancel" in action_lower:
+                task_id = self._extract_task_id(action)
+                if not task_id:
+                    return {"success": False, "error": "No task ID specified for removal"}
+                return tool.remove_task(task_id)
+            elif "condition" in action_lower or "alert when" in action_lower or "notify when" in action_lower:
+                # Conditional alert: "alert when CPU exceeds 80%"
+                message, condition_type, threshold = self._extract_condition_params(action)
+                if not condition_type or threshold is None:
+                    # Try extracting from goal
+                    message, condition_type, threshold = self._extract_condition_params(self.state.goal)
+                if not condition_type:
+                    return {"success": False, "error": "Could not parse condition type (cpu/ram/disk)"}
+                if threshold is None:
+                    return {"success": False, "error": "Could not parse threshold value"}
+                return tool.add_condition(message or f"High {condition_type} alert", condition_type, threshold)
+            elif "schedule" in action_lower or "every day" in action_lower or "daily" in action_lower or "weekday" in action_lower or "weekly" in action_lower:
+                # Scheduled notification: "notify every day at 9 AM for standup"
+                message, time_of_day, repeat = self._extract_scheduled_params(action)
+                if not time_of_day:
+                    # Try extracting from goal
+                    message, time_of_day, repeat = self._extract_scheduled_params(self.state.goal)
+                if not time_of_day:
+                    return {"success": False, "error": "Could not parse time of day (e.g., 9:00 AM)"}
+                return tool.add_scheduled(message or "Scheduled notification", time_of_day, repeat)
+            else:
+                # Default: reminder - "remind me in 30 minutes to take a break"
+                message, time_str = self._extract_reminder_params(action)
+                if not time_str:
+                    # Try extracting from goal
+                    message, time_str = self._extract_reminder_params(self.state.goal)
+                if not time_str:
+                    return {"success": False, "error": "Could not parse time (e.g., 'in 30 minutes')"}
+                if not message:
+                    message = "Reminder"
+                return tool.add_reminder(message, time_str)
 
         return {"success": False, "error": f"Cannot parse action for {tool_name}"}
 
@@ -1023,6 +1062,173 @@ Guidelines:
             return quoted[0]
 
         return None
+
+    def _extract_task_id(self, action: str) -> Optional[str]:
+        """Extract task ID from action string."""
+        import re
+        # Look for hex-like IDs (8 characters)
+        match = re.search(r'\b([a-f0-9]{8})\b', action, re.IGNORECASE)
+        if match:
+            return match.group(1)
+        # Look for quoted ID
+        quoted = re.findall(r'["\']([^"\']+)["\']', action)
+        if quoted:
+            return quoted[0]
+        return None
+
+    def _extract_reminder_params(self, action: str) -> tuple[Optional[str], Optional[str]]:
+        """Extract message and time_str from reminder action.
+
+        Examples:
+        - "remind me in 30 minutes to take a break" -> ("take a break", "in 30 minutes")
+        - "add_reminder 'test' in 1 minute" -> ("test", "in 1 minute")
+        - "in 5 minutes remind me to check email" -> ("check email", "in 5 minutes")
+
+        Returns:
+            (message, time_str) tuple
+        """
+        import re
+        action_lower = action.lower()
+
+        # Extract time pattern: "in X minutes/hours/seconds"
+        time_pattern = r'(in\s+\d+\s+(?:minute|minutes|min|hour|hours|hr|second|seconds|sec)s?)'
+        time_match = re.search(time_pattern, action_lower)
+        time_str = time_match.group(1) if time_match else None
+
+        # Extract message - look for quoted text first
+        quoted = re.findall(r'["\']([^"\']+)["\']', action)
+        if quoted:
+            message = quoted[0]
+        else:
+            # Try to extract message from common patterns
+            message = None
+
+            # Pattern: "remind me to <message>" or "reminder to <message>"
+            to_pattern = r'(?:remind(?:er)?(?:\s+me)?|notification)\s+to\s+(.+?)(?:\s+in\s+\d+|$)'
+            to_match = re.search(to_pattern, action_lower)
+            if to_match:
+                message = to_match.group(1).strip()
+
+            # Pattern: "in X minutes to <message>"
+            if not message:
+                in_to_pattern = r'in\s+\d+\s+\w+\s+to\s+(.+?)$'
+                in_to_match = re.search(in_to_pattern, action_lower)
+                if in_to_match:
+                    message = in_to_match.group(1).strip()
+
+            # Pattern: "<message> in X minutes" - message before time
+            if not message and time_str:
+                before_time = action_lower.split(time_str)[0].strip()
+                # Remove common prefixes
+                before_time = re.sub(r'^(add_reminder|remind(?:er)?(?:\s+me)?|set\s+(?:a\s+)?reminder)\s*', '', before_time, flags=re.IGNORECASE)
+                if before_time and len(before_time) > 2:
+                    message = before_time.strip(' "\'')
+
+            # Pattern: "in X minutes <message>" - message after time
+            if not message and time_str:
+                after_time = action_lower.split(time_str)[-1].strip()
+                # Remove common connectors
+                after_time = re.sub(r'^(to|for|about|that)\s+', '', after_time)
+                if after_time and len(after_time) > 2:
+                    message = after_time.strip(' "\'')
+
+        return (message, time_str)
+
+    def _extract_scheduled_params(self, action: str) -> tuple[Optional[str], Optional[str], str]:
+        """Extract message, time_of_day, and repeat from scheduled notification action.
+
+        Examples:
+        - "schedule notification at 9 AM daily for standup" -> ("standup", "9:00 AM", "daily")
+        - "every day at 10:30 remind me to check reports" -> ("check reports", "10:30", "daily")
+
+        Returns:
+            (message, time_of_day, repeat) tuple
+        """
+        import re
+        action_lower = action.lower()
+
+        # Extract time of day patterns
+        time_patterns = [
+            r'(\d{1,2}:\d{2}\s*(?:am|pm)?)',  # 9:00 AM, 10:30, 14:00
+            r'(\d{1,2}\s*(?:am|pm))',          # 9 AM, 10pm
+            r'at\s+(\d{1,2}(?::\d{2})?)\s*(?:am|pm)?',  # at 9, at 10:30
+        ]
+        time_of_day = None
+        for pattern in time_patterns:
+            match = re.search(pattern, action_lower)
+            if match:
+                time_of_day = match.group(1).strip()
+                break
+
+        # Determine repeat pattern
+        repeat = "daily"  # default
+        if "weekday" in action_lower:
+            repeat = "weekdays"
+        elif "weekly" in action_lower:
+            repeat = "weekly"
+
+        # Extract message - look for quoted text first
+        quoted = re.findall(r'["\']([^"\']+)["\']', action)
+        if quoted:
+            message = quoted[0]
+        else:
+            # Try to extract message from patterns
+            message = None
+
+            # Pattern: "for <message>" or "saying <message>" or "about <message>"
+            for_pattern = r'(?:for|saying|about|message)\s+(.+?)(?:\s+at\s+\d|$)'
+            for_match = re.search(for_pattern, action_lower)
+            if for_match:
+                message = for_match.group(1).strip()
+
+            # Pattern: "to <message>"
+            if not message:
+                to_pattern = r'(?:remind(?:\s+me)?|notification)\s+to\s+(.+?)(?:\s+(?:at|every|daily)|$)'
+                to_match = re.search(to_pattern, action_lower)
+                if to_match:
+                    message = to_match.group(1).strip()
+
+        return (message, time_of_day, repeat)
+
+    def _extract_condition_params(self, action: str) -> tuple[Optional[str], Optional[str], Optional[int]]:
+        """Extract message, condition_type, and threshold from conditional alert action.
+
+        Examples:
+        - "alert when CPU exceeds 80%" -> ("High CPU alert", "cpu", 80)
+        - "notify when RAM above 90%" -> ("High RAM alert", "ram", 90)
+
+        Returns:
+            (message, condition_type, threshold) tuple
+        """
+        import re
+        action_lower = action.lower()
+
+        # Extract condition type
+        condition_type = None
+        if "cpu" in action_lower:
+            condition_type = "cpu"
+        elif "ram" in action_lower or "memory" in action_lower:
+            condition_type = "ram"
+        elif "disk" in action_lower:
+            condition_type = "disk"
+
+        # Extract threshold percentage
+        threshold = None
+        threshold_patterns = [
+            r'(\d+)\s*%',           # 80%, 90 %
+            r'(?:above|over|exceeds?|greater\s+than|>)\s*(\d+)',  # above 80, exceeds 90
+        ]
+        for pattern in threshold_patterns:
+            match = re.search(pattern, action_lower)
+            if match:
+                threshold = int(match.group(1))
+                break
+
+        # Extract message - look for quoted text first
+        quoted = re.findall(r'["\']([^"\']+)["\']', action)
+        message = quoted[0] if quoted else None
+
+        return (message, condition_type, threshold)
 
     def _get_final_result(self) -> dict:
         """Compile the final result of the agent run."""
