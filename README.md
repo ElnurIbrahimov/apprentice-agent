@@ -4,8 +4,8 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 
 ## Features
 
-- **15 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, and more
-- **4-Model Routing** - Automatically selects the best model for each task type
+- **16 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, and more
+- **5-Model Routing** - Automatically selects the best model for each task type (including FluxMind for calibrated reasoning)
 - **Observe-Plan-Act-Evaluate-Remember Loop** - Structured reasoning cycle for achieving goals
 - **Fast-Path Responses** - Instant replies for conversational queries without full agent loop
 - **Long-Term Memory** - ChromaDB-powered memory system for learning from past experiences
@@ -67,6 +67,7 @@ The agent automatically selects the optimal model based on task type:
 | Code | `deepseek-coder:6.7b` | Code generation, debugging, scripts, algorithms |
 | Reasoning | `llama3:8b` | Planning, evaluation, complex decisions, browser tasks |
 | Vision | `llava` | Image analysis, screenshot description, OCR |
+| Calibrated | `FluxMind v0.75.1` | Uncertainty-aware reasoning, OOD detection, confidence checks |
 
 ## Usage
 
@@ -150,6 +151,7 @@ Opens at `http://127.0.0.1:7860` with:
 | `notifications` | Reminders, scheduled alerts, conditional triggers | `remind me in 30 minutes` |
 | `tool_builder` | Create, test, enable, disable custom tools | `list custom tools` |
 | `marketplace` | Browse, install, publish, rate plugins | `browse plugins` |
+| `fluxmind` | Calibrated reasoning with uncertainty awareness | `FluxMind status` |
 
 ### Code Executor Safety
 
@@ -267,6 +269,52 @@ mp.publish("my_custom_tool")
 
 **Registry:** Plugins are hosted at `github.com/ElnurIbrahimov/aura-plugins`
 
+### FluxMind (Calibrated Reasoning)
+
+FluxMind v0.75.1 is a calibrated uncertainty-aware reasoning engine that **knows when it doesn't know**:
+
+| Capability | Description |
+|------------|-------------|
+| **Calibrated Confidence** | Real confidence scores (not LLM hallucinations) |
+| **OOD Detection** | 1664x confidence drop on unfamiliar inputs |
+| **Sub-ms Inference** | <1ms vs 500ms+ for LLMs |
+| **Compositional Programs** | Mix reasoning strategies mid-sequence |
+
+**Performance:**
+- 99.86% accuracy on in-distribution inputs
+- 0.06% confidence on out-of-distribution inputs
+
+**Commands:**
+
+```bash
+# Check status
+python main.py "FluxMind status"
+
+# Execute a reasoning step
+python main.py "FluxMind step [5,3,7,2] op 0 context 0"
+
+# Check confidence on a state
+python main.py "Ask FluxMind about state [5,3,7,2]"
+
+# Test OOD detection (should show low confidence)
+python main.py "How confident is FluxMind about [25,25,25,25]?"
+```
+
+**Example Output:**
+```
+FluxMind Step Result:
+  Input: [5, 3, 7, 2]
+  Next State: [6, 3, 7, 2]
+  Confidence: 99.86%
+  Should Trust: True
+```
+
+**Training:** The model is pre-trained and included at `models/fluxmind_v0751.pt`. To retrain:
+```python
+from tools.fluxmind import train_fluxmind
+train_fluxmind("models/fluxmind_v0751.pt")
+```
+
 ## Configuration
 
 Edit `apprentice_agent/config.py` to customize:
@@ -286,6 +334,12 @@ Edit `apprentice_agent/config.py` to customize:
 apprentice-agent/
 ├── gui.py                    # Gradio web interface
 ├── main.py                   # CLI entry point
+├── models/
+│   └── fluxmind_v0751.pt     # Trained FluxMind model (1.5MB)
+├── tools/
+│   └── fluxmind/             # FluxMind calibrated reasoning engine
+│       ├── fluxmind_core.py  # Core model (393K params)
+│       └── fluxmind_tool.py  # Aura integration wrapper
 └── apprentice_agent/
     ├── agent.py              # Main agent loop (observe/plan/act/evaluate/remember)
     ├── brain.py              # OllamaBrain - LLM interface and 4-model routing
