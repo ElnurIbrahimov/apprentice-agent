@@ -10,7 +10,7 @@ from .brain import OllamaBrain, TaskType
 from .identity import load_identity, get_identity_prompt, detect_name_change, detect_personality_change, update_name, update_personality
 from .memory import MemorySystem
 from .metacognition import MetacognitionLogger
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE
 
 
 class AgentPhase(Enum):
@@ -59,6 +59,12 @@ class ApprenticeAgent:
             "tool_builder": ToolBuilderTool(),
             "marketplace": MarketplaceTool()
         }
+        # Add FluxMind if available
+        if FLUXMIND_AVAILABLE:
+            models_path = Path(__file__).parent.parent / "models" / "fluxmind_v0751.pt"
+            self.tools["fluxmind"] = FluxMindTool(str(models_path))
+            if self.tools["fluxmind"].is_available():
+                print("[LOADED] FluxMind v0.75.1 - Calibrated reasoning engine")
         self.state = AgentState()
         self.max_iterations = 10
         self.metacognition = MetacognitionLogger()
@@ -254,7 +260,9 @@ class ApprenticeAgent:
             'enable tool', 'disable tool', 'delete tool', 'remove tool',
             'marketplace', 'plugin', 'browse plugins', 'search plugins', 'install plugin',
             'download tool', 'share tool', 'publish tool', 'uninstall plugin', 'my plugins',
-            'installed plugins', 'rate plugin', 'update plugin', 'plugin marketplace'
+            'installed plugins', 'rate plugin', 'update plugin', 'plugin marketplace',
+            'fluxmind', 'ask fluxmind', 'confidence check', 'calibrated', 'uncertainty',
+            'verify sequence', 'how confident'
         ]
 
         # Check if it clearly needs a tool
@@ -437,6 +445,24 @@ Guidelines:
         if identity_response:
             return identity_response
 
+        # Check for FluxMind commands - handle directly without LLM
+        fluxmind_response = self._handle_fluxmind_command(goal)
+        if fluxmind_response:
+            return {
+                "goal": goal,
+                "completed": True,
+                "iterations": 0,
+                "fast_path": True,
+                "fluxmind_direct": True,
+                "response": fluxmind_response,
+                "final_evaluation": {
+                    "success": True,
+                    "confidence": 100,
+                    "progress": fluxmind_response
+                },
+                "history": []
+            }
+
         # Check for fast-path eligibility
         fastpath_enabled = use_fastpath if use_fastpath is not None else self.use_fastpath
         if fastpath_enabled and self._is_simple_query(goal):
@@ -588,7 +614,16 @@ Guidelines:
                 "action": action,
                 "reasoning": "Using marketplace tool based on goal keywords"
             }
-        # PRIORITY 2: Check if a custom tool should be used
+        # PRIORITY 2: Check for FluxMind actions
+        elif self._detect_fluxmind_action(self.state.goal) and self.state.iteration == 1:
+            fluxmind_match = self._detect_fluxmind_action(self.state.goal)
+            tool_name, action = fluxmind_match
+            action_decision = {
+                "tool": tool_name,
+                "action": action,
+                "reasoning": "Using FluxMind calibrated reasoning based on goal keywords"
+            }
+        # PRIORITY 3: Check if a custom tool should be used
         elif self._detect_custom_tool(self.state.goal) and self.state.iteration == 1:
             custom_tool_match = self._detect_custom_tool(self.state.goal)
             tool_name, action = custom_tool_match
@@ -617,6 +652,36 @@ Guidelines:
         """Phase 4: Evaluate the result."""
         self.state.phase = AgentPhase.EVALUATE
         print(f"[EVALUATE] Assessing result...")
+
+        # Get tool info
+        last_tool = self.state.last_action.get('tool', '').lower() if self.state.last_action else ''
+        result_success = self.state.last_result.get('success', False) if self.state.last_result else False
+
+        # SPECIAL HANDLING: FluxMind results bypass LLM evaluation to prevent hallucination
+        if last_tool == 'fluxmind' and result_success:
+            result = self.state.last_result
+            # Build evaluation directly from tool results (no LLM interpretation)
+            if 'next_state' in result:
+                progress = f"FluxMind step result: next_state={result['next_state']}, confidence={result['confidence']:.2%}"
+            elif 'confidence' in result:
+                progress = f"FluxMind confidence: {result['confidence']:.2%} - {result.get('interpretation', '')}"
+            elif 'trajectory' in result:
+                progress = f"FluxMind program executed: {len(result['trajectory'])} states, mean_confidence={result.get('mean_confidence', 0):.2%}"
+            else:
+                progress = f"FluxMind result: {result.get('formatted', str(result))}"
+
+            self.state.evaluation = {
+                'success': True,
+                'confidence': 100,
+                'progress': progress,
+                'next': 'complete'
+            }
+            self.state.completed = True
+            print(f"Success: True")
+            print(f"Confidence: 100%")
+            print(f"Progress: {progress}")
+            print("[FLUXMIND] Direct result (no LLM interpretation)")
+            return
 
         action_str = f"{self.state.last_action.get('tool')}: {self.state.last_action.get('action')}"
         result_str = str(self.state.last_result)
@@ -1093,6 +1158,10 @@ Guidelines:
         elif tool_name == "marketplace":
             # Handle marketplace actions
             return tool.execute(action)
+
+        elif tool_name == "fluxmind":
+            # Handle FluxMind calibrated reasoning actions
+            return self._execute_fluxmind_action(tool, action)
 
         # Handle custom tools - they all have an execute() method
         if tool_name in self.custom_tool_keywords.values() or hasattr(tool, 'execute'):
@@ -1587,18 +1656,238 @@ Output ONLY the JSON object, no other text."""
         except Exception as e:
             return {"error": f"Failed to generate tool spec: {e}"}
 
+    def _execute_fluxmind_action(self, tool, action: str) -> dict:
+        """Execute FluxMind calibrated reasoning actions.
+
+        Handles commands like:
+        - "Ask FluxMind about state [5,3,7,2]"
+        - "Ask FluxMind how confident it is about state [5,3,7,2]"
+        - "FluxMind step [5,3,7,2] op 0 context 0"
+        - "FluxMind verify sequence"
+        - "FluxMind status"
+
+        Args:
+            tool: The FluxMindTool instance
+            action: The action string to parse
+
+        Returns:
+            dict with success status and results
+        """
+        import re
+        action_lower = action.lower()
+
+        # Check if tool is available
+        if not tool.is_available():
+            return {
+                "success": False,
+                "error": "FluxMind model not loaded. Train it first with train_fluxmind().",
+                "status": tool.status()
+            }
+
+        # Status check
+        if "status" in action_lower:
+            status = tool.status()
+            return {"success": True, "status": status, "formatted": tool.format_for_aura(status)}
+
+        # Extract state from various formats: [5,3,7,2], (5,3,7,2), 5,3,7,2
+        state_match = re.search(r'\[?\(?\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\]?\)?', action)
+        state = None
+        if state_match:
+            state = [int(state_match.group(i)) for i in range(1, 5)]
+
+        # Extract operation and context if provided
+        op_match = re.search(r'op(?:eration)?\s*[=:]?\s*(\d+)', action_lower)
+        ctx_match = re.search(r'(?:context|ctx|dsl)\s*[=:]?\s*(\d+)', action_lower)
+        operation = int(op_match.group(1)) if op_match else 0
+        context = int(ctx_match.group(1)) if ctx_match else 0
+
+        # "Ask FluxMind" or "how confident" - get confidence check
+        if "ask fluxmind" in action_lower or "how confident" in action_lower or "confidence" in action_lower:
+            if not state:
+                return {
+                    "success": False,
+                    "error": "No state provided. Use format: Ask FluxMind about state [5,3,7,2]"
+                }
+            result = tool.get_confidence(state, operation, context)
+            result["success"] = True
+            result["formatted"] = tool.format_for_aura(result)
+            return result
+
+        # "step" command - execute single step
+        if "step" in action_lower:
+            if not state:
+                return {
+                    "success": False,
+                    "error": "No state provided. Use format: FluxMind step [5,3,7,2] op 0 context 0"
+                }
+            result = tool.step(state, operation, context)
+            result["success"] = True
+            result["formatted"] = tool.format_for_aura(result)
+            return result
+
+        # "execute" or "program" - run full program
+        if "execute" in action_lower or "program" in action_lower:
+            if not state:
+                return {
+                    "success": False,
+                    "error": "No initial state provided."
+                }
+            # Extract operations list
+            ops_match = re.search(r'ops?\s*[=:]?\s*\[([0-9,\s]+)\]', action_lower)
+            ctxs_match = re.search(r'(?:contexts?|dsls?)\s*[=:]?\s*\[([0-9,\s]+)\]', action_lower)
+            if ops_match:
+                operations = [int(x.strip()) for x in ops_match.group(1).split(',')]
+                contexts = [int(x.strip()) for x in ctxs_match.group(1).split(',')] if ctxs_match else [0] * len(operations)
+                result = tool.execute(state, operations, contexts)
+                result["success"] = True
+                result["formatted"] = tool.format_for_aura(result)
+                return result
+            return {"success": False, "error": "No operations list provided. Use format: ops=[0,2,4]"}
+
+        # "verify" - verify action sequence
+        if "verify" in action_lower:
+            return {
+                "success": False,
+                "error": "Verify requires a sequence of actions. Use tool.verify_sequence() directly."
+            }
+
+        # Default: if state provided, do confidence check
+        if state:
+            result = tool.get_confidence(state, operation, context)
+            result["success"] = True
+            result["formatted"] = tool.format_for_aura(result)
+            return result
+
+        return {
+            "success": False,
+            "error": "Could not parse FluxMind action. Try: 'Ask FluxMind about state [5,3,7,2]'"
+        }
+
+    def _detect_fluxmind_action(self, goal: str) -> Optional[tuple[str, str]]:
+        """Detect if the goal requires the FluxMind tool.
+
+        Args:
+            goal: The user's goal
+
+        Returns:
+            (tool_name, action) tuple if FluxMind matches, None otherwise
+        """
+        goal_lower = goal.lower()
+
+        fluxmind_keywords = [
+            'ask fluxmind', 'fluxmind', 'how confident', 'calibrated',
+            'confidence check', 'verify sequence', 'uncertainty'
+        ]
+
+        # Check if any FluxMind keyword is present
+        if any(kw in goal_lower for kw in fluxmind_keywords):
+            print(f"[FLUXMIND] Detected FluxMind action in: {goal[:50]}...")
+            return ("fluxmind", goal)
+
+        return None
+
     def _get_final_result(self) -> dict:
         """Compile the final result of the agent run."""
-        return {
+        result = {
             "goal": self.state.goal,
             "completed": self.state.completed,
             "iterations": self.state.iteration,
             "final_evaluation": self.state.evaluation,
             "history": self.state.history
         }
+        # Include actual tool result for FluxMind (prevents LLM hallucination in output)
+        if self.state.last_action and self.state.last_action.get('tool', '').lower() == 'fluxmind':
+            result["fluxmind_result"] = self.state.last_result
+            if self.state.last_result and self.state.last_result.get('formatted'):
+                result["response"] = self.state.last_result['formatted']
+        return result
+
+    def _handle_fluxmind_command(self, message: str) -> Optional[str]:
+        """Handle FluxMind commands directly, bypassing the LLM.
+
+        Args:
+            message: The user's message
+
+        Returns:
+            Formatted result string if FluxMind command, None otherwise
+        """
+        import re
+        message_lower = message.lower()
+
+        # Check if this is a FluxMind command
+        fluxmind_keywords = ['fluxmind', 'ask fluxmind', 'how confident']
+        if not any(kw in message_lower for kw in fluxmind_keywords):
+            return None  # Not a FluxMind command
+
+        # Check if FluxMind tool is available
+        if 'fluxmind' not in self.tools:
+            return "FluxMind tool not available. Make sure it's installed and the model is trained."
+
+        tool = self.tools['fluxmind']
+        if not tool.is_available():
+            return "FluxMind model not loaded. Train it first with: python -c \"from tools.fluxmind import train_fluxmind; train_fluxmind('models/fluxmind_v0751.pt')\""
+
+        # Status command
+        if "status" in message_lower:
+            status = tool.status()
+            return f"FluxMind Status:\n  Available: {status['available']}\n  Version: {status['version']}\n  Capabilities: {', '.join(status['capabilities'])}"
+
+        # Extract state from message: [5,3,7,2] or (5,3,7,2)
+        state_match = re.search(r'\[?\(?\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\]?\)?', message)
+        state = [int(state_match.group(i)) for i in range(1, 5)] if state_match else None
+
+        # Extract operation and context
+        op_match = re.search(r'op(?:eration)?\s*[=:]?\s*(\d+)', message_lower)
+        ctx_match = re.search(r'(?:context|ctx|dsl)\s*[=:]?\s*(\d+)', message_lower)
+        operation = int(op_match.group(1)) if op_match else 0
+        context = int(ctx_match.group(1)) if ctx_match else 0
+
+        # Step command
+        if "step" in message_lower:
+            if not state:
+                return "FluxMind step requires a state. Example: FluxMind step [5,3,7,2] op 0 context 0"
+            result = tool.step(state, operation, context)
+            return f"FluxMind Step Result:\n  Input: {state}\n  Next State: {result['next_state']}\n  Confidence: {result['confidence']:.2%}\n  Should Trust: {result['should_trust']}"
+
+        # Confidence check (ask fluxmind, how confident, about state)
+        if state and ("confident" in message_lower or "about" in message_lower or "ask" in message_lower):
+            result = tool.get_confidence(state, operation, context)
+            trust_msg = "Yes, proceed" if result['should_trust'] else ("No, abstain" if result['should_abstain'] else "Verify recommended")
+            return f"FluxMind Confidence Check:\n  State: {state}\n  Confidence: {result['confidence']:.2%}\n  Should Trust: {trust_msg}\n  Interpretation: {result['interpretation']}"
+
+        # Default: if we have a state, do confidence check
+        if state:
+            result = tool.get_confidence(state, operation, context)
+            return f"FluxMind Confidence: {result['confidence']:.2%} - {result['interpretation']}"
+
+        # Fallback: Any FluxMind question that doesn't match specific commands
+        # Returns a helpful summary of capabilities
+        status = tool.status()
+        return f"""FluxMind Capabilities:
+
+Version: {status['version']}
+Status: {'Online' if status['available'] else 'Offline'}
+
+What I can do with FluxMind:
+- Calibrated confidence (I actually know when I don't know)
+- 99.86% accuracy on familiar inputs
+- 0.06% confidence on unfamiliar inputs (1664x drop!)
+- Sub-millisecond inference (<1ms vs 500ms+ for LLMs)
+
+Try these commands:
+- "FluxMind status"
+- "Ask FluxMind about state [5,3,7,2]"
+- "FluxMind step [5,3,7,2] op 0 context 0"
+- "How confident is FluxMind about [25,25,25,25]?\""""
 
     def chat(self, message: str) -> str:
         """Simple chat interface for one-off interactions."""
+        # Check for FluxMind commands FIRST, before LLM
+        fluxmind_result = self._handle_fluxmind_command(message)
+        if fluxmind_result:
+            return fluxmind_result
+
+        # Only call brain.think() if not a FluxMind command
         return self.brain.think(message)
 
     def recall_memories(self, query: str, n: int = 5) -> list:

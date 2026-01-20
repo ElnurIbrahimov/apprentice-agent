@@ -16,6 +16,20 @@ from .notifications import NotificationTool
 from .tool_builder import ToolBuilderTool
 from .marketplace import MarketplaceTool
 
+# Import FluxMind from external tools directory
+import sys
+from pathlib import Path
+_tools_dir = Path(__file__).parent.parent.parent / "tools"
+if _tools_dir.exists() and str(_tools_dir) not in sys.path:
+    sys.path.insert(0, str(_tools_dir))
+
+try:
+    from fluxmind import FluxMindTool
+    FLUXMIND_AVAILABLE = True
+except ImportError:
+    FluxMindTool = None
+    FLUXMIND_AVAILABLE = False
+
 __all__ = [
     "FileSystemTool",
     "WebSearchTool",
@@ -34,4 +48,6 @@ __all__ = [
     "NotificationTool",
     "ToolBuilderTool",
     "MarketplaceTool",
+    "FluxMindTool",
+    "FLUXMIND_AVAILABLE",
 ]

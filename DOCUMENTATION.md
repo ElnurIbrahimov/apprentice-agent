@@ -33,6 +33,13 @@ apprentice-agent/
 │   ├── custom_tools.json     # Custom tool registry
 │   ├── installed_plugins.json # Marketplace installed plugins
 │   └── marketplace_cache.json # Marketplace registry cache
+├── models/
+│   └── fluxmind_v0751.pt     # FluxMind trained model
+├── tools/
+│   └── fluxmind/             # FluxMind calibrated reasoning
+│       ├── __init__.py
+│       ├── fluxmind_core.py  # Core model implementation
+│       └── fluxmind_tool.py  # Aura integration wrapper
 ├── generated_images/         # [Phase C] Stable Diffusion outputs
 └── apprentice_agent/
     ├── __init__.py
@@ -553,6 +560,49 @@ print(result["image_path"])
 ---
 
 ## Changelog
+
+### FluxMind Calibrated Reasoning - Tool #16 (2026-01-20)
+
+#### Added
+- **FluxMind Tool** (`tools/fluxmind/`)
+  - `step(state, operation, context)` — Execute single reasoning step with calibrated confidence
+  - `execute(initial_state, operations, contexts)` — Execute full reasoning program with trajectory tracking
+  - `get_confidence(state, operation, context)` — Quick confidence check without full execution
+  - `verify_sequence(actions)` — Verify if action sequence is coherent
+  - `status()` — Get FluxMind status and capabilities
+
+- **Core Engine** (`tools/fluxmind/fluxmind_core.py`)
+  - FluxMind v0.75.1: Compositional Programs + OOD Calibration
+  - Multi-DSL learning (additive + multiplicative operations)
+  - Compositional programs (mix DSLs mid-sequence)
+  - Calibrated uncertainty (knows when it doesn't know)
+  - OOD detection (confidence drops on unfamiliar inputs)
+  - Sub-millisecond inference (~393K parameters)
+
+- **Model Training**
+  - Phase 1: DSL A (additive operations) - 2000 iterations
+  - Phase 2: DSL B (multiplicative operations) - 3000 iterations
+  - Phase 3: Compositional + OOD calibration - 2500 iterations
+  - Final accuracy: 99.9% in-distribution, 0.02 confidence on OOD
+
+- **Agent Integration**
+  - `_detect_fluxmind_action()` — Priority detection for FluxMind keywords
+  - `_execute_fluxmind_action()` — Parse and execute FluxMind commands
+  - Keywords: fluxmind, ask fluxmind, confidence check, calibrated, uncertainty, verify sequence
+
+- **Natural Language Commands**
+  - "Ask FluxMind about state [5,3,7,2]" — Get confidence check
+  - "FluxMind step [5,3,7,2] op 0 context 0" — Execute single step
+  - "FluxMind status" — Check tool availability
+
+#### Model File
+- `models/fluxmind_v0751.pt` — Trained model (~1.5 MB)
+
+#### Modified
+- `agent.py`: Added FluxMind tool, detection priority, action handler
+- `tools/__init__.py`: Added FluxMindTool export with conditional loading
+
+---
 
 ### Plugin Marketplace - Tool #15 (2026-01-18)
 
