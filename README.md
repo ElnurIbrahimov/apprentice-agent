@@ -4,7 +4,7 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 
 ## Features
 
-- **17 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, and more
+- **18 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, and more
 - **5-Model Routing** - Automatically selects the best model for each task type (including FluxMind for calibrated reasoning)
 - **Observe-Plan-Act-Evaluate-Remember Loop** - Structured reasoning cycle for achieving goals
 - **Fast-Path Responses** - Instant replies for conversational queries without full agent loop
@@ -153,6 +153,7 @@ Opens at `http://127.0.0.1:7860` with:
 | `marketplace` | Browse, install, publish, rate plugins | `browse plugins` |
 | `fluxmind` | Calibrated reasoning with uncertainty awareness | `FluxMind status` |
 | `regex_builder` | Build, test, and explain regular expressions | `build regex for email` |
+| `git` | Git repository management with natural language | `what branch am I on?` |
 
 ### Code Executor Safety
 
@@ -361,6 +362,53 @@ patterns = regex.common_patterns()
 "What common regex patterns are available?"
 ```
 
+### Git Tool
+
+The git tool provides repository management with natural language support and fast-path routing that bypasses the LLM to prevent hallucination:
+
+| Method | Description |
+|--------|-------------|
+| `status(repo_path)` | Branch, staged, unstaged, untracked files |
+| `log(repo_path, count)` | Commit history with hash, author, message, date |
+| `diff(repo_path, file)` | Changes with summary and diff content |
+| `branch(repo_path)` | Local/remote branches with current marked |
+| `add(repo_path, files)` | Stage files for commit |
+| `commit(repo_path, message)` | Create commit with message |
+| `push(repo_path, remote, branch)` | Push to remote repository |
+| `pull(repo_path, remote, branch)` | Pull from remote repository |
+| `clone(url, destination)` | Clone a repository |
+| `stash(repo_path, action, message)` | Stash operations (push/pop/list/drop/clear) |
+
+**Example - Using Git Tool:**
+
+```python
+from apprentice_agent.tools.git_tool import GitTool
+git = GitTool()
+
+# Get status
+result = git.status('.')
+# → ACTUAL GIT STATUS: Branch: main, Staged: 1, Unstaged: 2...
+
+# View recent commits
+result = git.log('.', count=5)
+# → ACTUAL GIT LOG (5 commits): abc1234 Fix bug (2 hours ago)...
+
+# Show branches
+result = git.branch('.')
+# → ACTUAL GIT BRANCHES: Current branch: main
+```
+
+**Natural Language (Fast-Path):**
+```
+"what branch am I on?"      → Shows current branch
+"show recent commits"       → Shows git log
+"any unstaged files?"       → Shows git status
+"what changed?"             → Shows git status
+"show staged files"         → Shows git status
+```
+
+**Note:** Git commands use fast-path routing with "ACTUAL GIT" prefixed output to ensure real data is displayed verbatim, not hallucinated by the LLM.
+
 ## Configuration
 
 Edit `apprentice_agent/config.py` to customize:
@@ -412,6 +460,7 @@ apprentice-agent/
         ├── tool_template.py  # Templates for generated tools
         ├── marketplace.py    # Plugin marketplace
         ├── regex_builder.py  # Regex pattern building and testing
+        ├── git_tool.py       # Git repository management
         └── custom/           # Auto-generated custom tools
 ```
 
