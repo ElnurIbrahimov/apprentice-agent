@@ -15,6 +15,7 @@ from .system_control import SystemControlTool
 from .notifications import NotificationTool
 from .tool_builder import ToolBuilderTool
 from .marketplace import MarketplaceTool
+from .regex_builder import RegexBuilderTool
 
 # Import FluxMind from external tools directory
 import sys
@@ -50,4 +51,5 @@ __all__ = [
     "MarketplaceTool",
     "FluxMindTool",
     "FLUXMIND_AVAILABLE",
+    "RegexBuilderTool",
 ]

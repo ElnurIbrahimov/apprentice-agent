@@ -10,7 +10,7 @@ from .brain import OllamaBrain, TaskType
 from .identity import load_identity, get_identity_prompt, detect_name_change, detect_personality_change, update_name, update_personality
 from .memory import MemorySystem
 from .metacognition import MetacognitionLogger
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool
 
 
 class AgentPhase(Enum):
@@ -57,7 +57,8 @@ class ApprenticeAgent:
             "system_control": SystemControlTool(),
             "notifications": NotificationTool(),
             "tool_builder": ToolBuilderTool(),
-            "marketplace": MarketplaceTool()
+            "marketplace": MarketplaceTool(),
+            "regex_builder": RegexBuilderTool()
         }
         # Add FluxMind if available
         if FLUXMIND_AVAILABLE:
@@ -262,7 +263,9 @@ class ApprenticeAgent:
             'download tool', 'share tool', 'publish tool', 'uninstall plugin', 'my plugins',
             'installed plugins', 'rate plugin', 'update plugin', 'plugin marketplace',
             'fluxmind', 'ask fluxmind', 'confidence check', 'calibrated', 'uncertainty',
-            'verify sequence', 'how confident'
+            'verify sequence', 'how confident',
+            'regex', 'regular expression', 'pattern', 'match pattern', 'regex pattern',
+            'build regex', 'test regex', 'explain regex', 'validate regex'
         ]
 
         # Check if it clearly needs a tool
@@ -1162,6 +1165,10 @@ Guidelines:
         elif tool_name == "fluxmind":
             # Handle FluxMind calibrated reasoning actions
             return self._execute_fluxmind_action(tool, action)
+
+        elif tool_name == "regex_builder":
+            # Handle regex builder actions
+            return tool.execute(action)
 
         # Handle custom tools - they all have an execute() method
         if tool_name in self.custom_tool_keywords.values() or hasattr(tool, 'execute'):
