@@ -10,7 +10,7 @@ from .brain import OllamaBrain, TaskType
 from .identity import load_identity, get_identity_prompt, detect_name_change, detect_personality_change, update_name, update_personality
 from .memory import MemorySystem
 from .metacognition import MetacognitionLogger
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool
 
 
 class AgentPhase(Enum):
@@ -58,7 +58,8 @@ class ApprenticeAgent:
             "notifications": NotificationTool(),
             "tool_builder": ToolBuilderTool(),
             "marketplace": MarketplaceTool(),
-            "regex_builder": RegexBuilderTool()
+            "regex_builder": RegexBuilderTool(),
+            "git": GitTool()
         }
         # Add FluxMind if available
         if FLUXMIND_AVAILABLE:
@@ -265,7 +266,12 @@ class ApprenticeAgent:
             'fluxmind', 'ask fluxmind', 'confidence check', 'calibrated', 'uncertainty',
             'verify sequence', 'how confident',
             'regex', 'regular expression', 'pattern', 'match pattern', 'regex pattern',
-            'build regex', 'test regex', 'explain regex', 'validate regex'
+            'build regex', 'test regex', 'explain regex', 'validate regex',
+            'git', 'commit', 'push', 'pull', 'branch', 'repository', 'repo',
+            'git status', 'git log', 'git diff', 'git stash', 'clone',
+            'what branch', 'which branch', 'current branch', 'show commits',
+            'recent commits', 'staged files', 'unstaged', 'untracked',
+            'show changes', 'list branches', 'show branches'
         ]
 
         # Check if it clearly needs a tool
@@ -466,6 +472,24 @@ Guidelines:
                 "history": []
             }
 
+        # Check for Git commands - handle directly without LLM hallucination
+        git_response = self._handle_git_command(goal)
+        if git_response:
+            return {
+                "goal": goal,
+                "completed": True,
+                "iterations": 0,
+                "fast_path": True,
+                "git_direct": True,
+                "response": git_response,
+                "final_evaluation": {
+                    "success": True,
+                    "confidence": 100,
+                    "progress": git_response
+                },
+                "history": []
+            }
+
         # Check for fast-path eligibility
         fastpath_enabled = use_fastpath if use_fastpath is not None else self.use_fastpath
         if fastpath_enabled and self._is_simple_query(goal):
@@ -626,7 +650,16 @@ Guidelines:
                 "action": action,
                 "reasoning": "Using FluxMind calibrated reasoning based on goal keywords"
             }
-        # PRIORITY 3: Check if a custom tool should be used
+        # PRIORITY 3: Check for Git actions
+        elif self._detect_git_action(self.state.goal) and self.state.iteration == 1:
+            git_match = self._detect_git_action(self.state.goal)
+            tool_name, action = git_match
+            action_decision = {
+                "tool": tool_name,
+                "action": action,
+                "reasoning": "Using Git tool based on goal keywords"
+            }
+        # PRIORITY 4: Check if a custom tool should be used
         elif self._detect_custom_tool(self.state.goal) and self.state.iteration == 1:
             custom_tool_match = self._detect_custom_tool(self.state.goal)
             tool_name, action = custom_tool_match
@@ -684,6 +717,25 @@ Guidelines:
             print(f"Confidence: 100%")
             print(f"Progress: {progress}")
             print("[FLUXMIND] Direct result (no LLM interpretation)")
+            return
+
+        # SPECIAL HANDLING: Git tool results bypass LLM evaluation to prevent hallucination
+        if last_tool == 'git' and result_success:
+            result = self.state.last_result
+            # Use the 'output' field directly - it contains formatted git output
+            git_output = result.get('output', str(result))
+
+            self.state.evaluation = {
+                'success': True,
+                'confidence': 100,
+                'progress': git_output,
+                'next': 'complete'
+            }
+            self.state.completed = True
+            print(f"Success: True")
+            print(f"Confidence: 100%")
+            print(f"Git Output:\n{git_output[:500]}...")
+            print("[GIT] Direct result (no LLM interpretation)")
             return
 
         action_str = f"{self.state.last_action.get('tool')}: {self.state.last_action.get('action')}"
@@ -1168,6 +1220,10 @@ Guidelines:
 
         elif tool_name == "regex_builder":
             # Handle regex builder actions
+            return tool.execute(action)
+
+        elif tool_name == "git":
+            # Handle git operations
             return tool.execute(action)
 
         # Handle custom tools - they all have an execute() method
@@ -1791,7 +1847,92 @@ Output ONLY the JSON object, no other text."""
             print(f"[FLUXMIND] Detected FluxMind action in: {goal[:50]}...")
             return ("fluxmind", goal)
 
+    def _detect_git_action(self, goal: str) -> Optional[tuple[str, str]]:
+        """Detect if the goal requires the Git tool.
+
+        Args:
+            goal: The user's goal
+
+        Returns:
+            (tool_name, action) tuple if Git matches, None otherwise
+        """
+        goal_lower = goal.lower()
+
+        git_keywords = [
+            # Explicit git commands
+            'git status', 'git log', 'git diff', 'git branch', 'git stash',
+            'git add', 'git commit', 'git push', 'git pull', 'git clone',
+            # Branch queries
+            'what branch', 'which branch', 'current branch', 'show branches', 'list branches',
+            # Commit queries
+            'show commits', 'recent commits', 'commit history', 'last commit',
+            # Status queries
+            'staged files', 'unstaged', 'untracked', 'show changes',
+            'what changed', 'pending changes', 'working tree'
+        ]
+
+        # Check if any Git keyword is present
+        if any(kw in goal_lower for kw in git_keywords):
+            print(f"[GIT] Detected Git action in: {goal[:50]}...")
+            return ("git", goal)
+
         return None
+
+    def _handle_git_command(self, message: str) -> Optional[str]:
+        """Handle Git commands directly, bypassing the LLM.
+
+        Args:
+            message: The user's message
+
+        Returns:
+            Formatted result string if Git command, None otherwise
+        """
+        message_lower = message.lower()
+
+        # Check if this is a Git command - expanded natural language patterns
+        git_keywords = [
+            # Explicit git commands
+            'git status', 'git log', 'git diff', 'git branch', 'git stash',
+            # Branch queries
+            'what branch', 'which branch', 'current branch', 'show branches', 'list branches',
+            # Commit queries
+            'show commits', 'recent commits', 'commit history', 'last commit',
+            # Status queries
+            'staged files', 'unstaged', 'untracked', 'show changes',
+            'what changed', 'pending changes', 'working tree'
+        ]
+        if not any(kw in message_lower for kw in git_keywords):
+            return None  # Not a Git command
+
+        # Get the git tool
+        git_tool = self.tools.get('git')
+        if not git_tool:
+            return "Git tool is not available."
+
+        # Map natural language to specific git actions
+        if any(kw in message_lower for kw in ['what branch', 'which branch', 'current branch', 'show branches', 'list branches']):
+            result = git_tool.branch('.')
+        elif any(kw in message_lower for kw in ['show commits', 'recent commits', 'commit history', 'last commit', 'git log']):
+            result = git_tool.log('.', count=5)
+        elif any(kw in message_lower for kw in ['staged files', 'unstaged', 'untracked', 'git status', 'what changed', 'pending changes', 'working tree']):
+            result = git_tool.status('.')
+        elif any(kw in message_lower for kw in ['show changes', 'git diff']):
+            result = git_tool.diff('.')
+        elif 'git stash' in message_lower:
+            if 'list' in message_lower:
+                result = git_tool.stash('.', 'list')
+            elif 'pop' in message_lower:
+                result = git_tool.stash('.', 'pop')
+            else:
+                result = git_tool.stash('.', 'push')
+        else:
+            # Fallback to execute() for other commands
+            result = git_tool.execute(message)
+
+        if result.get('success'):
+            return result.get('output', str(result))
+        else:
+            return f"Git error: {result.get('error', 'Unknown error')}"
 
     def _get_final_result(self) -> dict:
         """Compile the final result of the agent run."""
@@ -1807,6 +1948,13 @@ Output ONLY the JSON object, no other text."""
             result["fluxmind_result"] = self.state.last_result
             if self.state.last_result and self.state.last_result.get('formatted'):
                 result["response"] = self.state.last_result['formatted']
+
+        # Include actual tool result for Git (prevents LLM hallucination in output)
+        if self.state.last_action and self.state.last_action.get('tool', '').lower() == 'git':
+            result["git_result"] = self.state.last_result
+            if self.state.last_result and self.state.last_result.get('output'):
+                result["response"] = self.state.last_result['output']
+
         return result
 
     def _handle_fluxmind_command(self, message: str) -> Optional[str]:
