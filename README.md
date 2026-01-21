@@ -4,7 +4,7 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 
 ## Features
 
-- **16 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, and more
+- **17 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, and more
 - **5-Model Routing** - Automatically selects the best model for each task type (including FluxMind for calibrated reasoning)
 - **Observe-Plan-Act-Evaluate-Remember Loop** - Structured reasoning cycle for achieving goals
 - **Fast-Path Responses** - Instant replies for conversational queries without full agent loop
@@ -152,6 +152,7 @@ Opens at `http://127.0.0.1:7860` with:
 | `tool_builder` | Create, test, enable, disable custom tools | `list custom tools` |
 | `marketplace` | Browse, install, publish, rate plugins | `browse plugins` |
 | `fluxmind` | Calibrated reasoning with uncertainty awareness | `FluxMind status` |
+| `regex_builder` | Build, test, and explain regular expressions | `build regex for email` |
 
 ### Code Executor Safety
 
@@ -315,6 +316,51 @@ from tools.fluxmind import train_fluxmind
 train_fluxmind("models/fluxmind_v0751.pt")
 ```
 
+### Regex Builder
+
+The regex builder tool creates, tests, and explains regular expressions using natural language:
+
+| Method | Description |
+|--------|-------------|
+| `build(description)` | Natural language to regex pattern (26 common patterns) |
+| `test(pattern, test_string)` | Test pattern with matches, groups, positions |
+| `explain(pattern)` | Human-readable breakdown of regex components |
+| `find_all(pattern, text)` | Find all matches with positions and highlighting |
+| `replace(pattern, text, replacement)` | Regex substitution with count |
+| `validate(pattern)` | Check if pattern is syntactically valid |
+| `common_patterns()` | Get 26 pre-built patterns (email, url, phone, ip, date, uuid, etc.) |
+
+**Example - Building and Testing Patterns:**
+
+```python
+from apprentice_agent.tools.regex_builder import RegexBuilderTool
+regex = RegexBuilderTool()
+
+# Build from natural language
+result = regex.build("match email addresses")
+# → pattern: [a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}
+
+# Test a pattern
+result = regex.test(r'\d+', 'abc 123 def 456')
+# → matches: ['123', '456'], positions: [{start: 4, end: 7}, ...]
+
+# Explain a pattern
+result = regex.explain(r'^[a-z]+$')
+# → "Matches lowercase letters from start to end of string"
+
+# Get common patterns
+patterns = regex.common_patterns()
+# → email, url, phone, ip_address, date_iso, uuid, hex_color, ...
+```
+
+**Natural Language:**
+```
+"Build a regex for phone numbers"
+"Test pattern \d+ against 'abc123def456'"
+"Explain this regex: ^[a-zA-Z0-9]+$"
+"What common regex patterns are available?"
+```
+
 ## Configuration
 
 Edit `apprentice_agent/config.py` to customize:
@@ -365,6 +411,7 @@ apprentice-agent/
         ├── tool_builder.py   # Meta-tool for creating custom tools
         ├── tool_template.py  # Templates for generated tools
         ├── marketplace.py    # Plugin marketplace
+        ├── regex_builder.py  # Regex pattern building and testing
         └── custom/           # Auto-generated custom tools
 ```
 
