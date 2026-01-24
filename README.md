@@ -10,7 +10,7 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 - **Fast-Path Responses** - Instant replies for conversational queries without full agent loop
 - **Long-Term Memory** - ChromaDB-powered memory system for learning from past experiences
 - **Dream Mode** - Memory consolidation and pattern analysis from metacognition logs
-- **Voice Interface** - Whisper STT and pyttsx3 TTS for hands-free interaction
+- **Voice Interface** - Whisper STT + pyttsx3 TTS or PersonaPlex real-time duplex voice
 - **Confidence Scoring** - Each action includes confidence levels for transparency
 - **Metacognition Logging** - Detailed logs in `logs/metacognition/` for analysis
 - **Gradio GUI** - Modern web interface with real-time thinking process visualization
@@ -154,6 +154,7 @@ Opens at `http://127.0.0.1:7860` with:
 | `fluxmind` | Calibrated reasoning with uncertainty awareness | `FluxMind status` |
 | `regex_builder` | Build, test, and explain regular expressions | `build regex for email` |
 | `git` | Git repository management with natural language | `what branch am I on?` |
+| `personaplex` | Real-time full-duplex voice with NVIDIA PersonaPlex | `start personaplex` |
 
 ### Code Executor Safety
 
@@ -409,6 +410,81 @@ result = git.branch('.')
 
 **Note:** Git commands use fast-path routing with "ACTUAL GIT" prefixed output to ensure real data is displayed verbatim, not hallucinated by the LLM.
 
+### PersonaPlex (Real-time Voice)
+
+PersonaPlex provides real-time full-duplex speech-to-speech conversations using NVIDIA's PersonaPlex model. It replaces the traditional Whisper+pyttsx3 pipeline for natural voice interactions.
+
+| Method | Description |
+|--------|-------------|
+| `status()` | Check if PersonaPlex server is running |
+| `start_server(voice, persona)` | Launch the voice server |
+| `stop_server()` | Shutdown the server |
+| `set_voice(voice_id)` | Change voice (16 options) |
+| `set_persona(prompt)` | Set AI personality/role |
+| `list_voices()` | Show available voices |
+| `reset_to_defaults()` | Reset to Aura persona |
+
+**Available Voices (16 total):**
+
+| Category | Voice IDs |
+|----------|-----------|
+| Natural Female | NATF0, NATF1, NATF2, NATF3 |
+| Natural Male | NATM0, NATM1 (default), NATM2, NATM3 |
+| Variety Female | VARF0, VARF1, VARF2, VARF3, VARF4 |
+| Variety Male | VARM0, VARM1, VARM2, VARM3, VARM4 |
+
+**Setup:**
+
+```bash
+# 1. Install opus codec (required)
+sudo apt install libopus-dev  # Ubuntu/Debian
+brew install opus             # macOS
+
+# 2. Set HuggingFace token (required)
+export HF_TOKEN=<your_huggingface_token>
+
+# 3. Accept the PersonaPlex license on HuggingFace model card
+```
+
+**Example - Using PersonaPlex:**
+
+```python
+from apprentice_agent.tools.personaplex import PersonaPlexTool
+pp = PersonaPlexTool()
+
+# Check status
+pp.status()
+
+# Start with default Aura persona
+pp.start_server()
+
+# Start with custom voice and persona
+pp.start_server(voice="NATF2", persona="You are a helpful coding assistant.")
+
+# Change voice while running (requires restart)
+pp.set_voice("VARM1")
+
+# Stop server
+pp.stop_server()
+```
+
+**Natural Language:**
+```
+"start personaplex"              → Launch with defaults (NATM1 voice, Aura persona)
+"personaplex status"             → Check if running
+"list personaplex voices"        → Show 16 available voices
+"set voice to NATF2"             → Change to Natural Female 2
+"set persona to helpful teacher" → Update AI personality
+"stop personaplex"               → Shutdown server
+```
+
+**Default Aura Persona:**
+> "You are Aura, an intelligent personal AI assistant. You are wise, helpful, and occasionally witty with subtle sarcasm."
+
+**Web Interface:** Once started, access the voice interface at `https://localhost:8998` (accept the self-signed certificate).
+
+**Safety:** Requires `HF_TOKEN` environment variable. Server does not auto-start.
+
 ## Configuration
 
 Edit `apprentice_agent/config.py` to customize:
@@ -421,6 +497,7 @@ Edit `apprentice_agent/config.py` to customize:
 | `MODEL_REASON` | `llama3:8b` | Model for reasoning |
 | `MODEL_VISION` | `llava` | Model for vision tasks |
 | `CHROMADB_PATH` | `./data/chromadb` | Memory storage location |
+| `PERSONAPLEX_ENABLED` | `true` | Enable PersonaPlex voice tool |
 
 ## Architecture
 
@@ -461,6 +538,8 @@ apprentice-agent/
         ├── marketplace.py    # Plugin marketplace
         ├── regex_builder.py  # Regex pattern building and testing
         ├── git_tool.py       # Git repository management
+        ├── personaplex/      # NVIDIA PersonaPlex real-time voice
+        │   └── personaplex_tool.py
         └── custom/           # Auto-generated custom tools
 ```
 
