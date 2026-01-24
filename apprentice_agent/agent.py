@@ -10,7 +10,8 @@ from .brain import OllamaBrain, TaskType
 from .identity import load_identity, get_identity_prompt, detect_name_change, detect_personality_change, update_name, update_personality
 from .memory import MemorySystem
 from .metacognition import MetacognitionLogger
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool
+from .config import Config
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool
 
 
 class AgentPhase(Enum):
@@ -61,6 +62,10 @@ class ApprenticeAgent:
             "regex_builder": RegexBuilderTool(),
             "git": GitTool()
         }
+        # Add PersonaPlex if enabled (Tool #17)
+        if Config.PERSONAPLEX_ENABLED:
+            self.tools["personaplex"] = PersonaPlexTool()
+            print("[LOADED] PersonaPlex - Real-time full-duplex voice (requires HF_TOKEN)")
         # Add FluxMind if available
         if FLUXMIND_AVAILABLE:
             models_path = Path(__file__).parent.parent / "models" / "fluxmind_v0751.pt"
@@ -271,7 +276,10 @@ class ApprenticeAgent:
             'git status', 'git log', 'git diff', 'git stash', 'clone',
             'what branch', 'which branch', 'current branch', 'show commits',
             'recent commits', 'staged files', 'unstaged', 'untracked',
-            'show changes', 'list branches', 'show branches'
+            'show changes', 'list branches', 'show branches',
+            'personaplex', 'duplex', 'realtime voice', 'real-time voice',
+            'natural voice', 'voice server', 'start voice', 'stop voice',
+            'set voice', 'change voice', 'list voices', 'set persona'
         ]
 
         # Check if it clearly needs a tool
@@ -1225,6 +1233,40 @@ Guidelines:
         elif tool_name == "git":
             # Handle git operations
             return tool.execute(action)
+
+        elif tool_name == "personaplex":
+            # Handle PersonaPlex real-time voice actions (Tool #17)
+            if "status" in action_lower or "running" in action_lower or "check" in action_lower:
+                return tool.status()
+            elif "start" in action_lower or "launch" in action_lower:
+                # Extract optional voice from action
+                voice = None
+                for v in tool.VOICES.keys():
+                    if v.lower() in action_lower:
+                        voice = v
+                        break
+                return tool.start_server(voice=voice)
+            elif "stop" in action_lower or "shutdown" in action_lower or "kill" in action_lower:
+                return tool.stop_server()
+            elif "list" in action_lower and "voice" in action_lower:
+                return tool.list_voices()
+            elif "set" in action_lower and "voice" in action_lower:
+                # Extract voice ID from action
+                for v in tool.VOICES.keys():
+                    if v.lower() in action_lower:
+                        return tool.set_voice(v)
+                return {"success": False, "error": "No voice ID found. Use list_voices to see options."}
+            elif "set" in action_lower and "persona" in action_lower:
+                # Extract persona text (everything after "persona")
+                import re
+                match = re.search(r'persona[:\s]+["\']?(.+?)["\']?$', action, re.I)
+                if match:
+                    return tool.set_persona(match.group(1).strip())
+                return {"success": False, "error": "No persona text provided."}
+            elif "reset" in action_lower or "default" in action_lower:
+                return tool.reset_to_defaults()
+            else:
+                return tool.execute(action)
 
         # Handle custom tools - they all have an execute() method
         if tool_name in self.custom_tool_keywords.values() or hasattr(tool, 'execute'):

@@ -24,3 +24,7 @@ numpy>=1.24.0
 transformers>=4.36.0
 winotify>=1.1.0
 schedule>=1.2.0
+# PersonaPlex (Tool #17) - Real-time full-duplex speech-to-speech
+# Install from: pip install moshi/. (from https://github.com/NVIDIA/personaplex)
+# Requires: libopus-dev (Linux), opus (macOS via brew), HF_TOKEN env var
+moshi @ git+https://github.com/NVIDIA/personaplex.git#subdirectory=moshi

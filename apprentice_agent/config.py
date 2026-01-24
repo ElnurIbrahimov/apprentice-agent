@@ -20,3 +20,6 @@ class Config:
 
     MEMORY_COLLECTION_NAME: str = "agent_memory"
     MAX_MEMORY_RESULTS: int = 5
+
+    # PersonaPlex Configuration (Tool #17)
+    PERSONAPLEX_ENABLED: bool = os.getenv("PERSONAPLEX_ENABLED", "true").lower() == "true"
