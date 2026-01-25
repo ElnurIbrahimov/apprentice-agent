@@ -701,7 +701,7 @@ class AuraGUI:
     # =========================================================================
 
     def get_mood_html(self) -> str:
-        """Get current mood indicator HTML."""
+        """Get current mood indicator HTML - simple colored dot."""
         try:
             agent = self._get_agent()
             if "evoemo" in agent.tools:
@@ -709,32 +709,32 @@ class AuraGUI:
                 mood = evoemo.get_current_mood()
 
                 if mood:
-                    emoji = evoemo.get_mood_emoji()
                     color = evoemo.get_mood_color()
-                    confidence = mood.confidence
+                    # Simple colored dot: 🟢🟡🔴 style
+                    dot_colors = {
+                        "calm": "🟢",
+                        "focused": "🔵",
+                        "stressed": "🟠",
+                        "frustrated": "🔴",
+                        "excited": "🟡",
+                        "tired": "🟣",
+                        "curious": "🔵"
+                    }
+                    dot = dot_colors.get(mood.emotion, "⚪")
 
-                    return f'''<div style="background: #334155; padding: 12px; border-radius: 8px; margin: 8px 0;">
-<div style="display: flex; align-items: center; gap: 8px;">
-    <span style="font-size: 24px;">{emoji}</span>
-    <div>
-        <strong style="color: {color};">{mood.emotion.title()}</strong>
-        <div style="color: #94a3b8; font-size: 11px;">{confidence}% confidence</div>
-    </div>
-</div>
+                    return f'''<div style="display: flex; align-items: center; gap: 6px; padding: 8px; background: #334155; border-radius: 6px;">
+    <span style="font-size: 16px;">{dot}</span>
+    <span style="color: {color}; font-size: 13px;">{mood.emotion.title()}</span>
+    <span style="color: #64748b; font-size: 11px;">({mood.confidence}%)</span>
 </div>'''
                 else:
-                    return '''<div style="background: #334155; padding: 12px; border-radius: 8px; margin: 8px 0;">
-<div style="display: flex; align-items: center; gap: 8px;">
-    <span style="font-size: 24px;">😐</span>
-    <div>
-        <strong style="color: #94a3b8;">No data yet</strong>
-        <div style="color: #64748b; font-size: 11px;">Start chatting</div>
-    </div>
-</div>
+                    return '''<div style="display: flex; align-items: center; gap: 6px; padding: 8px; background: #334155; border-radius: 6px;">
+    <span style="font-size: 16px;">⚪</span>
+    <span style="color: #94a3b8; font-size: 13px;">No data</span>
 </div>'''
         except Exception as e:
-            return f'''<div style="background: #334155; padding: 12px; border-radius: 8px; margin: 8px 0;">
-<span style="color: #ef4444;">EvoEmo error: {str(e)[:30]}</span>
+            return f'''<div style="padding: 8px; background: #334155; border-radius: 6px;">
+<span style="color: #ef4444; font-size: 12px;">Error: {str(e)[:20]}</span>
 </div>'''
 
     def get_mood_history_md(self) -> str:

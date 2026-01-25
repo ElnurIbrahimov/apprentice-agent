@@ -80,6 +80,33 @@ VOICE_MARKERS = {
     "quiet": ["tired", "calm", "focused"]
 }
 
+# Sarcasm indicators (reduces confidence, may flip emotion)
+SARCASM_MARKERS = {
+    "words": ["oh great", "wonderful", "fantastic", "just great", "how nice",
+              "sure", "right", "yeah right", "of course", "obviously",
+              "clearly", "totally", "absolutely", "perfect", "lovely"],
+    "patterns": [
+        r"\.\.\.$",           # Trailing ellipsis often sarcastic
+        r"(?i)^(oh|wow|gee)", # Sarcastic interjections
+        r"(?i)thanks?\s+a\s+lot",  # "thanks a lot" often sarcastic
+        r"(?i)how\s+wonderful",
+    ]
+}
+
+# Neutral/ambiguous indicators
+NEUTRAL_INDICATORS = [
+    "ok", "okay", "sure", "fine", "alright", "k", "kk",
+    "got it", "understood", "noted", "acknowledged", "yep", "yup"
+]
+
+# Mixed emotion patterns (e.g., "excited but nervous")
+MIXED_PATTERNS = [
+    (r"(?i)(excited|happy).*(but|yet|although).*(nervous|scared|worried)", ("excited", "stressed")),
+    (r"(?i)(tired|exhausted).*(but|yet).*(have to|need to|must)", ("tired", "stressed")),
+    (r"(?i)(frustrated|angry).*(but|yet).*(hopeful|optimistic)", ("frustrated", "curious")),
+    (r"(?i)(curious|interested).*(but|yet).*(confused|lost)", ("curious", "stressed")),
+]
+
 
 @dataclass
 class EmotionReading:
@@ -210,8 +237,43 @@ class EvoEmoTool:
                         scores[emotion] += 0.8
                         markers_found.append(f"voice:{marker}")
 
+        # Check for sarcasm (reduces confidence, may indicate frustration)
+        sarcasm_detected = False
+        for word in SARCASM_MARKERS.get("words", []):
+            if word in text_lower:
+                sarcasm_detected = True
+                markers_found.append(f"sarcasm:{word}")
+                # Sarcasm often masks frustration
+                scores["frustrated"] += 0.5
+        for pattern in SARCASM_MARKERS.get("patterns", []):
+            if re.search(pattern, text):
+                sarcasm_detected = True
+                markers_found.append("sarcasm:pattern")
+                scores["frustrated"] += 0.3
+
+        # Check for neutral/ambiguous responses
+        is_neutral = False
+        words = text_lower.strip().split()
+        if len(words) <= 2 and any(ind in text_lower for ind in NEUTRAL_INDICATORS):
+            is_neutral = True
+            markers_found.append("neutral_response")
+
+        # Check for mixed emotions
+        mixed_emotions = None
+        for pattern, emotions in MIXED_PATTERNS:
+            if re.search(pattern, text):
+                mixed_emotions = emotions
+                markers_found.append(f"mixed:{emotions[0]}+{emotions[1]}")
+                for emo in emotions:
+                    scores[emo] += 1.0
+
         # Determine dominant emotion
-        if max(scores.values()) == 0:
+        if is_neutral and max(scores.values()) < 1.0:
+            # Truly neutral response
+            dominant_emotion = "calm"
+            confidence = 50
+            markers_found.append("neutral_detected")
+        elif max(scores.values()) == 0:
             # Default to calm if no signals detected
             dominant_emotion = "calm"
             confidence = 60
@@ -221,6 +283,16 @@ class EvoEmoTool:
             raw_confidence = min(scores[dominant_emotion] * 20, 100)
             marker_bonus = min(len(markers_found) * 5, 20)
             confidence = int(min(raw_confidence + marker_bonus, 100))
+
+            # Reduce confidence if sarcasm detected (emotion may be opposite)
+            if sarcasm_detected:
+                confidence = max(confidence - 20, 30)
+                markers_found.append("confidence_reduced:sarcasm")
+
+            # Reduce confidence for mixed emotions
+            if mixed_emotions:
+                confidence = max(confidence - 10, 40)
+                markers_found.append("confidence_reduced:mixed")
 
         # Create reading
         reading = EmotionReading(
