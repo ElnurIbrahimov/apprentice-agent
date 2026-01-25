@@ -4,7 +4,7 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 
 ## Features
 
-- **18 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, and more
+- **19 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, Clawdbot messaging, and more
 - **5-Model Routing** - Automatically selects the best model for each task type (including FluxMind for calibrated reasoning)
 - **Observe-Plan-Act-Evaluate-Remember Loop** - Structured reasoning cycle for achieving goals
 - **Fast-Path Responses** - Instant replies for conversational queries without full agent loop
@@ -155,6 +155,7 @@ Opens at `http://127.0.0.1:7860` with:
 | `regex_builder` | Build, test, and explain regular expressions | `build regex for email` |
 | `git` | Git repository management with natural language | `what branch am I on?` |
 | `personaplex` | Real-time full-duplex voice with NVIDIA PersonaPlex | `start personaplex` |
+| `clawdbot` | Send/receive messages via WhatsApp, Telegram, Discord | `send "Hello" to +1234567890` |
 
 ### Code Executor Safety
 
@@ -485,6 +486,80 @@ pp.stop_server()
 
 **Safety:** Requires `HF_TOKEN` environment variable. Server does not auto-start.
 
+### Clawdbot (Multi-Platform Messaging)
+
+Clawdbot enables Aura to send and receive messages via WhatsApp, Telegram, Discord, Signal, and iMessage through a unified gateway.
+
+| Method | Description |
+|--------|-------------|
+| `send_message(to, message, channel)` | Send message to phone number or username |
+| `get_status()` | Check gateway status |
+| `list_channels()` | List connected messaging channels |
+| `start_gateway(port)` | Start the Clawdbot gateway |
+| `stop_gateway()` | Stop the gateway |
+| `pair_channel(channel)` | Pair a new channel (WhatsApp QR, etc.) |
+
+**Setup:**
+
+```bash
+# 1. Install Clawdbot CLI
+npm install -g clawdbot@latest
+
+# 2. Run initial setup
+clawdbot setup
+clawdbot config set gateway.mode local
+
+# 3. Enable WhatsApp plugin
+clawdbot plugins enable whatsapp
+
+# 4. Start gateway
+clawdbot gateway --port 18789
+
+# 5. Pair WhatsApp (scan QR code)
+clawdbot channels login
+```
+
+**Example - Sending Messages:**
+
+```python
+from apprentice_agent.tools.clawdbot import ClawdbotTool
+cb = ClawdbotTool()
+
+# Check status
+cb.get_status()
+
+# Send WhatsApp message
+cb.send_message("+1234567890", "Hello from Aura!", "whatsapp")
+
+# Send Telegram message
+cb.send_message("@username", "Hello!", "telegram")
+```
+
+**Natural Language:**
+```
+"send whatsapp message 'Meeting at 3pm' to +1234567890"
+"text John on telegram saying I'll be late"
+"what's the clawdbot status?"
+"start the clawdbot gateway"
+```
+
+**Aura-Clawdbot Bridge:** For two-way communication (receiving messages and auto-responding), run the bridge:
+
+```bash
+python clawdbot_bridge.py
+```
+
+This connects the gateway to Aura, allowing incoming messages to trigger agent responses.
+
+**Supported Channels:**
+- WhatsApp (via WhatsApp Web)
+- Telegram (bot token)
+- Discord (bot token)
+- Signal (signal-cli)
+- iMessage (macOS only)
+
+**GUI Integration:** The Aura GUI includes a Clawdbot panel in the sidebar for quick status checks and message sending.
+
 ## Configuration
 
 Edit `apprentice_agent/config.py` to customize:
@@ -505,6 +580,7 @@ Edit `apprentice_agent/config.py` to customize:
 apprentice-agent/
 ├── gui.py                    # Gradio web interface
 ├── main.py                   # CLI entry point
+├── clawdbot_bridge.py        # Aura-Clawdbot message bridge
 ├── models/
 │   └── fluxmind_v0751.pt     # Trained FluxMind model (1.5MB)
 ├── tools/
@@ -540,6 +616,7 @@ apprentice-agent/
         ├── git_tool.py       # Git repository management
         ├── personaplex/      # NVIDIA PersonaPlex real-time voice
         │   └── personaplex_tool.py
+        ├── clawdbot.py       # Multi-platform messaging (WhatsApp, Telegram, etc.)
         └── custom/           # Auto-generated custom tools
 ```
 

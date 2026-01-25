@@ -18,6 +18,9 @@ from .marketplace import MarketplaceTool
 from .regex_builder import RegexBuilderTool
 from .git_tool import GitTool
 from .personaplex import PersonaPlexTool
+from .sesame_tts import SesameTTS
+from .voice_manager import VoiceManager, voice_manager
+from .clawdbot import ClawdbotTool, clawdbot, send_message as clawdbot_send
 
 # Import FluxMind from external tools directory
 import sys
@@ -56,4 +59,10 @@ __all__ = [
     "RegexBuilderTool",
     "GitTool",
     "PersonaPlexTool",
+    "SesameTTS",
+    "VoiceManager",
+    "voice_manager",
+    "ClawdbotTool",
+    "clawdbot",
+    "clawdbot_send",
 ]

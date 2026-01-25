@@ -11,7 +11,7 @@ from .identity import load_identity, get_identity_prompt, detect_name_change, de
 from .memory import MemorySystem
 from .metacognition import MetacognitionLogger
 from .config import Config
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool
 
 
 class AgentPhase(Enum):
@@ -60,7 +60,8 @@ class ApprenticeAgent:
             "tool_builder": ToolBuilderTool(),
             "marketplace": MarketplaceTool(),
             "regex_builder": RegexBuilderTool(),
-            "git": GitTool()
+            "git": GitTool(),
+            "clawdbot": ClawdbotTool()
         }
         # Add PersonaPlex if enabled (Tool #17)
         if Config.PERSONAPLEX_ENABLED:
@@ -279,7 +280,10 @@ class ApprenticeAgent:
             'show changes', 'list branches', 'show branches',
             'personaplex', 'duplex', 'realtime voice', 'real-time voice',
             'natural voice', 'voice server', 'start voice', 'stop voice',
-            'set voice', 'change voice', 'list voices', 'set persona'
+            'set voice', 'change voice', 'list voices', 'set persona',
+            'clawdbot', 'send message', 'send whatsapp', 'send telegram',
+            'whatsapp message', 'telegram message', 'discord message',
+            'signal message', 'imessage', 'text to', 'message to'
         ]
 
         # Check if it clearly needs a tool
@@ -1268,6 +1272,37 @@ Guidelines:
             else:
                 return tool.execute(action)
 
+        elif tool_name == "clawdbot":
+            # Handle Clawdbot messaging (Tool #19)
+            import re
+            if "status" in action_lower or "check" in action_lower:
+                return tool.get_status()
+            elif "start" in action_lower and "gateway" in action_lower:
+                return tool.start_gateway()
+            elif "stop" in action_lower and "gateway" in action_lower:
+                return tool.stop_gateway()
+            elif "list" in action_lower and "channel" in action_lower:
+                return tool.list_channels()
+            elif "send" in action_lower or "message" in action_lower:
+                # Extract recipient and message
+                # Pattern: send "message" to +1234567890 via whatsapp
+                to_match = re.search(r'to\s+([+\d]+|\w+@\w+)', action, re.I)
+                msg_match = re.search(r'["\']([^"\']+)["\']|message[:\s]+(.+?)(?:\s+to|\s+via|$)', action, re.I)
+                channel_match = re.search(r'via\s+(\w+)', action, re.I)
+
+                to = to_match.group(1) if to_match else None
+                message = (msg_match.group(1) or msg_match.group(2)).strip() if msg_match else None
+                channel = channel_match.group(1).lower() if channel_match else "whatsapp"
+
+                if not to:
+                    return {"success": False, "error": "No recipient specified. Use: send 'message' to +1234567890"}
+                if not message:
+                    return {"success": False, "error": "No message specified. Use: send 'message' to +1234567890"}
+
+                return tool.send_message(to, message, channel)
+            else:
+                return tool.execute(action, **{})
+
         # Handle custom tools - they all have an execute() method
         if tool_name in self.custom_tool_keywords.values() or hasattr(tool, 'execute'):
             return tool.execute(action)
@@ -2077,15 +2112,44 @@ Try these commands:
 - "FluxMind step [5,3,7,2] op 0 context 0"
 - "How confident is FluxMind about [25,25,25,25]?\""""
 
-    def chat(self, message: str) -> str:
-        """Simple chat interface for one-off interactions."""
+    def chat(self, message: str, speak: bool = False) -> str:
+        """Simple chat interface for one-off interactions.
+
+        Args:
+            message: User message
+            speak: If True, speak the response using TTS
+
+        Returns:
+            Agent response text
+        """
         # Check for FluxMind commands FIRST, before LLM
         fluxmind_result = self._handle_fluxmind_command(message)
         if fluxmind_result:
+            if speak:
+                self._speak(fluxmind_result)
             return fluxmind_result
 
-        # Only call brain.think() if not a FluxMind command
-        return self.brain.think(message)
+        # Use fast model for simple queries (greetings, etc.)
+        if self._is_simple_query(message):
+            task_type = TaskType.SIMPLE
+        else:
+            task_type = None  # Let brain auto-detect
+
+        response = self.brain.think(message, task_type=task_type)
+
+        if speak:
+            self._speak(response)
+
+        return response
+
+    def _speak(self, text: str):
+        """Speak text using TTS."""
+        try:
+            from .tools.voice import VoiceTool
+            voice = VoiceTool()
+            voice.speak(text)
+        except Exception as e:
+            print(f"TTS error: {e}")
 
     def recall_memories(self, query: str, n: int = 5) -> list:
         """Recall relevant memories."""

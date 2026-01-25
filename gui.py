@@ -1,15 +1,124 @@
 """
 Aura - Apprentice Agent GUI
-Simple, readable chat interface.
+Simple, readable chat interface with Sesame CSM voice.
 """
 
+import os
+os.environ.setdefault('TORCHAO_NO_TRITON', '1')
+# HF_TOKEN should be set in environment or .env file
+
 import gradio as gr
-import time
+import threading
 from typing import Generator
 from pathlib import Path
 
 from apprentice_agent import ApprenticeAgent
 from apprentice_agent.metacognition import MetacognitionLogger
+
+
+# ============================================================================
+# TTS ENGINE - SESAME CSM 1B (Human-quality voice)
+# ============================================================================
+
+class TTSEngine:
+    """Text-to-speech engine using Sesame CSM 1B for human-quality voice."""
+    _instance = None
+    _lock = threading.Lock()
+
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
+        return cls._instance
+
+    def __init__(self):
+        if self._initialized:
+            return
+        self._initialized = True
+        self.sesame = None
+        self.pyttsx3_engine = None
+        self.available = False
+        self.using_sesame = False
+        self._init_tts()
+
+    def _init_tts(self):
+        """Initialize TTS - try Sesame first, always init pyttsx3 as backup."""
+        # Try Sesame CSM first (human-quality)
+        try:
+            from apprentice_agent.tools.sesame_tts import SesameTTS
+            self.sesame = SesameTTS()
+            self.using_sesame = True
+            print("TTS: Sesame CSM 1B available (human-quality voice)")
+        except Exception as e:
+            print(f"Sesame not available: {e}")
+            self.using_sesame = False
+
+        # Always init pyttsx3 as backup (works immediately, no loading needed)
+        try:
+            import pyttsx3
+            self.pyttsx3_engine = pyttsx3.init()
+            self.pyttsx3_engine.setProperty('rate', 175)
+            self.pyttsx3_engine.setProperty('volume', 0.9)
+            self.available = True
+            print("TTS: pyttsx3 ready (backup)")
+        except Exception as e2:
+            print(f"pyttsx3 not available: {e2}")
+            # Only fail if neither Sesame nor pyttsx3 work
+            if not self.using_sesame:
+                self.available = False
+            else:
+                self.available = True
+
+    def load_sesame(self) -> str:
+        """Load Sesame model to GPU (takes ~30s first time)."""
+        if self.sesame is None:
+            return "Sesame not initialized"
+        try:
+            result = self.sesame.load()
+            if result.get("success"):
+                self.using_sesame = True
+                return f"Sesame loaded! VRAM: {result.get('vram_used', 'N/A')}"
+            return f"Error: {result.get('error', 'Failed to load')}"
+        except Exception as e:
+            return f"Error: {e}"
+
+    def speak(self, text: str):
+        """Speak text using pyttsx3 (Sesame has CUDA issues on Windows)."""
+        if not self.available or not text:
+            return
+
+        try:
+            # Always use pyttsx3 for now - Sesame has CUDA compatibility issues
+            def _speak():
+                try:
+                    import pyttsx3
+                    engine = pyttsx3.init()
+                    engine.setProperty('rate', 175)
+                    engine.say(text)
+                    engine.runAndWait()
+                    engine.stop()
+                except Exception as e:
+                    print(f"pyttsx3 error: {e}")
+            thread = threading.Thread(target=_speak, daemon=True)
+            thread.start()
+        except Exception as e:
+            print(f"TTS error: {e}")
+
+    def get_status(self) -> str:
+        """Get TTS status string."""
+        if self.using_sesame and self.sesame:
+            if self.sesame.is_loaded():
+                return "Sesame CSM (loaded)"
+            return "Sesame CSM (not loaded)"
+        elif self.pyttsx3_engine:
+            return "pyttsx3 (fallback)"
+        return "Unavailable"
+
+
+# Global TTS instance
+tts = TTSEngine()
 
 
 # ============================================================================
@@ -138,6 +247,14 @@ input[type="range"] {
 class AuraGUI:
     def __init__(self):
         self.max_iterations = 10
+        self.voice_enabled = False
+        self.agent = None
+
+    def _get_agent(self):
+        """Get or create agent instance."""
+        if self.agent is None:
+            self.agent = ApprenticeAgent()
+        return self.agent
 
     def _check_fluxmind(self) -> dict:
         try:
@@ -165,10 +282,110 @@ class AuraGUI:
 <strong style="color: #ef4444;">FluxMind Offline</strong>
 </div>'''
 
-    def run_agent(self, message: str, history: list) -> Generator:
+    def get_voice_status_html(self) -> str:
+        """Get voice status HTML."""
+        tts_status = tts.get_status()
+        if tts.available:
+            # Check if Sesame is loaded
+            sesame_loaded = tts.using_sesame and tts.sesame and tts.sesame.is_loaded()
+
+            if sesame_loaded:
+                status_text = "Sesame Ready"
+                status_color = "#22c55e"
+                dot_class = "status-online"
+            elif tts.using_sesame:
+                status_text = "Sesame (click Load)"
+                status_color = "#f59e0b"  # Orange - needs loading
+                dot_class = "status-offline"
+            else:
+                status_text = "pyttsx3 Fallback"
+                status_color = "#94a3b8"
+                dot_class = "status-online"
+
+            voice_state = "ON" if self.voice_enabled else "OFF"
+            icon = "🔊" if self.voice_enabled else "🔇"
+
+            return f'''<div style="background: #334155; padding: 12px; border-radius: 8px; margin: 8px 0;">
+<span class="{dot_class}"></span>
+<strong style="color: {status_color};">{status_text}</strong>
+<div style="color: #94a3b8; font-size: 12px; margin-top: 4px;">{icon} Voice {voice_state}</div>
+</div>'''
+        else:
+            return '''<div style="background: #334155; padding: 12px; border-radius: 8px; margin: 8px 0;">
+<span class="status-offline"></span>
+<strong style="color: #ef4444;">Voice Unavailable</strong>
+<div style="color: #94a3b8; font-size: 12px; margin-top: 4px;">No TTS engine available</div>
+</div>'''
+
+    def toggle_voice(self, enabled: bool) -> str:
+        """Toggle voice output."""
+        self.voice_enabled = enabled
+        if enabled and tts.available:
+            # Load Sesame if not loaded
+            if tts.using_sesame and tts.sesame and not tts.sesame.is_loaded():
+                print("Loading Sesame CSM... (first time takes ~30s)")
+                tts.load_sesame()
+            tts.speak("Voice enabled")
+        return self.get_voice_status_html()
+
+    def load_sesame(self) -> str:
+        """Load Sesame model with timeout and VRAM cleanup."""
+        import threading
+
+        # Step 1: Free VRAM by unloading Ollama models
+        print("Freeing VRAM before loading Sesame...")
+        try:
+            import requests
+            requests.post("http://localhost:11434/api/generate",
+                         json={"model": "qwen2:1.5b", "keep_alive": 0}, timeout=5)
+            requests.post("http://localhost:11434/api/generate",
+                         json={"model": "llama3:8b", "keep_alive": 0}, timeout=5)
+        except Exception as e:
+            print(f"Ollama cleanup: {e}")
+
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                free, total = torch.cuda.mem_get_info()
+                print(f"VRAM free: {free/1024**3:.1f}GB / {total/1024**3:.1f}GB")
+        except Exception as e:
+            print(f"CUDA cleanup: {e}")
+
+        # Step 2: Load Sesame with timeout
+        result = {"done": False, "error": None}
+
+        def load_thread():
+            try:
+                r = tts.load_sesame()
+                print(f"Load Sesame result: {r}")
+                if "Error" in str(r) or "error" in str(r).lower():
+                    result["error"] = r
+                result["done"] = True
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                result["error"] = str(e)
+                result["done"] = True
+
+        thread = threading.Thread(target=load_thread, daemon=True)
+        thread.start()
+        thread.join(timeout=120)  # 2 minute timeout
+
+        if not result["done"]:
+            return self.get_voice_status_html()  # Still loading, will update on next check
+        elif result["error"]:
+            print(f"Sesame load error: {result['error']}")
+
+        return self.get_voice_status_html()
+
+    def run_agent(self, message: str, history: list, voice_enabled: bool) -> Generator:
+        """Run agent and optionally speak response."""
         if not message.strip():
             yield history
             return
+
+        self.voice_enabled = voice_enabled
 
         # Add user message
         history = history + [{"role": "user", "content": message}]
@@ -176,21 +393,31 @@ class AuraGUI:
 
         # Run agent
         try:
-            agent = ApprenticeAgent()
+            agent = self._get_agent()
             agent.max_iterations = self.max_iterations
-            result = agent.run(message)
 
-            # Get response
-            if result.get("fast_path"):
-                response = result.get("response", "Done.")
+            # Use chat() for simple messages (faster), run() for complex tasks
+            if agent._is_simple_query(message):
+                response = agent.chat(message)
             else:
-                response = self._build_response(result)
+                result = agent.run(message)
+                if result.get("fast_path"):
+                    response = result.get("response", "Done.")
+                else:
+                    response = self._build_response(result)
+
+            # Speak response if voice enabled
+            print(f"Voice check: enabled={self.voice_enabled}, tts.available={tts.available}")
+            if self.voice_enabled and tts.available:
+                print(f"Speaking response: {response[:50]}...")
+                tts.speak(response)
 
             history = history + [{"role": "assistant", "content": response}]
             yield history
 
         except Exception as e:
-            history = history + [{"role": "assistant", "content": f"Error: {e}"}]
+            error_msg = f"Error: {e}"
+            history = history + [{"role": "assistant", "content": error_msg}]
             yield history
 
     def _build_response(self, result: dict) -> str:
@@ -243,6 +470,101 @@ class AuraGUI:
         except Exception as e:
             return str(e)
 
+    def test_voice(self) -> str:
+        """Test TTS - uses Sesame if loaded, otherwise pyttsx3."""
+        try:
+            # Use Sesame if loaded (human-quality voice)
+            if tts.using_sesame and tts.sesame and tts.sesame.is_loaded():
+                print("Test voice: Using Sesame")
+                tts.sesame.speak("Hello! I am Aura, your AI assistant.")
+            else:
+                # Fallback to pyttsx3
+                print("Test voice: Using pyttsx3")
+                import pyttsx3
+                engine = pyttsx3.init()
+                engine.setProperty('rate', 175)
+                engine.say("Hello! I am Aura, your AI assistant.")
+                engine.runAndWait()
+                engine.stop()
+            return self.get_voice_status_html()
+        except Exception as e:
+            print(f"Test voice error: {e}")
+            return self.get_voice_status_html()
+
+    # =========================================================================
+    # CLAWDBOT INTEGRATION
+    # =========================================================================
+
+    def get_clawdbot_status_html(self) -> str:
+        """Get Clawdbot status HTML."""
+        try:
+            from apprentice_agent.tools.clawdbot import clawdbot
+            status = clawdbot.get_status()
+
+            if status.get("running"):
+                return '''<div style="background: #334155; padding: 12px; border-radius: 8px; margin: 8px 0;">
+<span class="status-online"></span>
+<strong style="color: #22c55e;">Clawdbot Online</strong>
+<div style="color: #94a3b8; font-size: 12px; margin-top: 4px;">Gateway running</div>
+</div>'''
+            else:
+                error = status.get("error", "Not running")
+                return f'''<div style="background: #334155; padding: 12px; border-radius: 8px; margin: 8px 0;">
+<span class="status-offline"></span>
+<strong style="color: #ef4444;">Clawdbot Offline</strong>
+<div style="color: #94a3b8; font-size: 12px; margin-top: 4px;">{error}</div>
+</div>'''
+        except Exception as e:
+            return f'''<div style="background: #334155; padding: 12px; border-radius: 8px; margin: 8px 0;">
+<span class="status-offline"></span>
+<strong style="color: #ef4444;">Clawdbot Error</strong>
+<div style="color: #94a3b8; font-size: 12px; margin-top: 4px;">{str(e)[:50]}</div>
+</div>'''
+
+    def start_clawdbot_gateway(self) -> str:
+        """Start Clawdbot gateway."""
+        try:
+            from apprentice_agent.tools.clawdbot import clawdbot
+            result = clawdbot.start_gateway()
+            if result.get("success"):
+                return self.get_clawdbot_status_html()
+            return self.get_clawdbot_status_html()
+        except Exception as e:
+            print(f"Clawdbot start error: {e}")
+            return self.get_clawdbot_status_html()
+
+    def send_clawdbot_message(self, to: str, message: str, channel: str) -> str:
+        """Send a message via Clawdbot."""
+        if not to or not message:
+            return "Please enter recipient and message"
+
+        try:
+            from apprentice_agent.tools.clawdbot import clawdbot
+            result = clawdbot.send_message(to, message, channel)
+
+            if result.get("success"):
+                return f"Sent to {to} via {channel}"
+            else:
+                return f"Failed: {result.get('error', 'Unknown error')}"
+        except Exception as e:
+            return f"Error: {e}"
+
+    def get_clawdbot_channels(self) -> str:
+        """Get list of connected channels."""
+        try:
+            from apprentice_agent.tools.clawdbot import clawdbot
+            result = clawdbot.list_channels()
+
+            if result.get("success"):
+                channels = result.get("channels", [])
+                if channels:
+                    return ", ".join(channels) if isinstance(channels, list) else str(channels)
+                return "No channels connected"
+            else:
+                return result.get("error", "Failed to get channels")
+        except Exception as e:
+            return f"Error: {e}"
+
 
 # ============================================================================
 # CREATE APP
@@ -251,7 +573,7 @@ class AuraGUI:
 def create_app():
     gui = AuraGUI()
 
-    with gr.Blocks(title="Aura", css=CUSTOM_CSS) as app:
+    with gr.Blocks(title="Aura") as app:
 
         gr.HTML("""<div style="text-align: center; padding: 16px; border-bottom: 1px solid #334155;">
             <h1 style="color: #ffffff; margin: 0;">Aura</h1>
@@ -266,14 +588,50 @@ def create_app():
                     <div style="color: #94a3b8; font-size: 13px;">Apprentice Agent</div>
                 </div>""")
 
-                fluxmind_html = gr.HTML(value=gui.get_status_html())
-                refresh_btn = gr.Button("Refresh", size="sm")
+                # Voice Controls
+                voice_status = gr.HTML(value=gui.get_voice_status_html())
+                voice_toggle = gr.Checkbox(label="🔊 Enable Voice", value=False)
+                with gr.Row():
+                    test_voice_btn = gr.Button("Test Voice", size="sm")
+                    load_sesame_btn = gr.Button("Load Sesame", size="sm")
+                voice_output = gr.Textbox(visible=False)
 
+                # FluxMind Status
+                fluxmind_html = gr.HTML(value=gui.get_status_html())
+                refresh_btn = gr.Button("Refresh Status", size="sm")
+
+                # Settings
                 max_iter = gr.Slider(1, 20, value=10, step=1, label="Max Iterations")
 
                 with gr.Accordion("Stats", open=False):
                     stats_md = gr.Markdown("Click Load")
                     stats_btn = gr.Button("Load", size="sm")
+
+                # Clawdbot Integration
+                with gr.Accordion("Clawdbot", open=False):
+                    clawdbot_status = gr.HTML(value=gui.get_clawdbot_status_html())
+                    with gr.Row():
+                        start_gateway_btn = gr.Button("Start Gateway", size="sm")
+                        refresh_clawdbot_btn = gr.Button("Refresh", size="sm")
+
+                    clawdbot_channel = gr.Dropdown(
+                        choices=["whatsapp", "telegram", "discord", "signal", "imessage"],
+                        value="whatsapp",
+                        label="Channel",
+                        scale=1
+                    )
+                    clawdbot_to = gr.Textbox(
+                        label="Send To",
+                        placeholder="+1234567890",
+                        scale=1
+                    )
+                    clawdbot_msg = gr.Textbox(
+                        label="Message",
+                        placeholder="Hello from Aura!",
+                        scale=1
+                    )
+                    clawdbot_send_btn = gr.Button("Send Message", size="sm")
+                    clawdbot_result = gr.Markdown("")
 
             with gr.Column(scale=4):
                 chatbot = gr.Chatbot(height=500, show_label=False)
@@ -285,21 +643,35 @@ def create_app():
                 clear = gr.Button("Clear", size="sm")
 
         # Events
-        def on_send(message, history):
-            for h in gui.run_agent(message, history):
+        def on_send(message, history, voice_enabled):
+            for h in gui.run_agent(message, history, voice_enabled):
                 yield h
 
-        send.click(on_send, [msg, chatbot], chatbot).then(lambda: "", outputs=msg)
-        msg.submit(on_send, [msg, chatbot], chatbot).then(lambda: "", outputs=msg)
+        send.click(on_send, [msg, chatbot, voice_toggle], chatbot).then(lambda: "", outputs=msg)
+        msg.submit(on_send, [msg, chatbot, voice_toggle], chatbot).then(lambda: "", outputs=msg)
         clear.click(lambda: [], outputs=chatbot)
         refresh_btn.click(gui.get_status_html, outputs=fluxmind_html)
         stats_btn.click(gui.get_stats, outputs=stats_md)
         max_iter.change(lambda v: setattr(gui, 'max_iterations', int(v)), inputs=max_iter)
+        voice_toggle.change(gui.toggle_voice, inputs=voice_toggle, outputs=voice_status)
+        test_voice_btn.click(gui.test_voice, outputs=voice_status)
+        load_sesame_btn.click(gui.load_sesame, outputs=voice_status)
+
+        # Clawdbot events
+        start_gateway_btn.click(gui.start_clawdbot_gateway, outputs=clawdbot_status)
+        refresh_clawdbot_btn.click(gui.get_clawdbot_status_html, outputs=clawdbot_status)
+        clawdbot_send_btn.click(
+            gui.send_clawdbot_message,
+            inputs=[clawdbot_to, clawdbot_msg, clawdbot_channel],
+            outputs=clawdbot_result
+        )
 
     return app
 
 
 if __name__ == "__main__":
     print("Starting Aura GUI...")
+    print(f"TTS Engine: {tts.get_status()}")
+    print(f"TTS Available: {tts.available}")
     app = create_app()
-    app.launch(server_name="127.0.0.1", server_port=7860, inbrowser=True)
+    app.launch(server_name="127.0.0.1", server_port=7860, inbrowser=True, css=CUSTOM_CSS)
