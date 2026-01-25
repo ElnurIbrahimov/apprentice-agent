@@ -4,8 +4,19 @@ Simple, readable chat interface with Sesame CSM voice.
 """
 
 import os
+from pathlib import Path
+
+# Load .env file for HF_TOKEN
+env_file = Path(__file__).parent / ".env"
+if env_file.exists():
+    with open(env_file) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('#') and '=' in line:
+                key, value = line.split('=', 1)
+                os.environ.setdefault(key.strip(), value.strip())
+
 os.environ.setdefault('TORCHAO_NO_TRITON', '1')
-# HF_TOKEN should be set in environment or .env file
 
 import gradio as gr
 import threading
@@ -84,27 +95,83 @@ class TTSEngine:
         except Exception as e:
             return f"Error: {e}"
 
-    def speak(self, text: str):
-        """Speak text using pyttsx3 (Sesame has CUDA issues on Windows)."""
+    def speak(self, text: str, use_sesame: bool = False):
+        """Speak text. Uses pyttsx3 by default (fast), Sesame on request (quality).
+
+        Args:
+            text: Text to speak
+            use_sesame: If True, use Sesame for high-quality voice (slower)
+        """
         if not self.available or not text:
             return
 
+        def _do_speak():
+            try:
+                # Use Sesame only if explicitly requested AND loaded
+                if use_sesame and self.using_sesame and self.sesame and self.sesame.is_loaded():
+                    print(f"Speaking with Sesame (high quality): {text[:50]}...")
+                    self._speak_sesame(text)
+                else:
+                    # Default: fast pyttsx3
+                    self._speak_pyttsx3(text)
+            except Exception as e:
+                print(f"TTS error: {e}")
+
+        thread = threading.Thread(target=_do_speak, daemon=True)
+        thread.start()
+
+    def _speak_sesame(self, text: str):
+        """Speak using Sesame (human-quality voice)."""
         try:
-            # Always use pyttsx3 for now - Sesame has CUDA compatibility issues
-            def _speak():
-                try:
-                    import pyttsx3
-                    engine = pyttsx3.init()
-                    engine.setProperty('rate', 175)
-                    engine.say(text)
-                    engine.runAndWait()
-                    engine.stop()
-                except Exception as e:
-                    print(f"pyttsx3 error: {e}")
-            thread = threading.Thread(target=_speak, daemon=True)
-            thread.start()
+            import tempfile
+            import numpy as np
+            import scipy.io.wavfile as wav
+            import winsound
+
+            audio = self.sesame.generate(text)
+            if audio is None:
+                print("Sesame generate returned None, falling back to pyttsx3")
+                self._speak_pyttsx3(text)
+                return
+
+            audio_np = audio.cpu().numpy().astype(np.float32)
+            if audio_np.ndim > 1:
+                audio_np = audio_np.flatten()
+
+            # Normalize
+            max_val = np.abs(audio_np).max()
+            if max_val > 0:
+                audio_np = audio_np / max_val
+
+            # Add 0.5s silence at end to prevent cutoff
+            silence = np.zeros(int(self.sesame.sample_rate * 0.5), dtype=np.float32)
+            audio_np = np.concatenate([audio_np, silence])
+
+            # Convert to int16
+            audio_int16 = (audio_np * 32767).astype(np.int16)
+
+            temp_path = tempfile.mktemp(suffix='.wav')
+            wav.write(temp_path, self.sesame.sample_rate, audio_int16)
+            winsound.PlaySound(temp_path, winsound.SND_FILENAME)
+
+            import os
+            os.remove(temp_path)
+            print("Sesame playback complete")
         except Exception as e:
-            print(f"TTS error: {e}")
+            print(f"Sesame speak error: {e}, falling back to pyttsx3")
+            self._speak_pyttsx3(text)
+
+    def _speak_pyttsx3(self, text: str):
+        """Speak using pyttsx3 (robotic fallback)."""
+        try:
+            import pyttsx3
+            engine = pyttsx3.init()
+            engine.setProperty('rate', 175)
+            engine.say(text)
+            engine.runAndWait()
+            engine.stop()
+        except Exception as e:
+            print(f"pyttsx3 error: {e}")
 
     def get_status(self) -> str:
         """Get TTS status string."""
@@ -370,7 +437,7 @@ class AuraGUI:
 
         thread = threading.Thread(target=load_thread, daemon=True)
         thread.start()
-        thread.join(timeout=120)  # 2 minute timeout
+        thread.join(timeout=300)  # 5 minute timeout for slow loading
 
         if not result["done"]:
             return self.get_voice_status_html()  # Still loading, will update on next check
@@ -379,6 +446,18 @@ class AuraGUI:
 
         return self.get_voice_status_html()
 
+    # Keywords that trigger Sesame high-quality voice
+    SESAME_KEYWORDS = [
+        "with sesame", "use sesame", "sesame voice", "high quality voice",
+        "quality voice", "nice voice", "human voice", "natural voice",
+        "read nicely", "speak nicely", "say nicely", "read this nicely"
+    ]
+
+    def _wants_sesame(self, message: str) -> bool:
+        """Check if user wants high-quality Sesame voice."""
+        msg_lower = message.lower()
+        return any(kw in msg_lower for kw in self.SESAME_KEYWORDS)
+
     def run_agent(self, message: str, history: list, voice_enabled: bool) -> Generator:
         """Run agent and optionally speak response."""
         if not message.strip():
@@ -386,6 +465,7 @@ class AuraGUI:
             return
 
         self.voice_enabled = voice_enabled
+        use_sesame = self._wants_sesame(message)
 
         # Add user message
         history = history + [{"role": "user", "content": message}]
@@ -407,10 +487,12 @@ class AuraGUI:
                     response = self._build_response(result)
 
             # Speak response if voice enabled
-            print(f"Voice check: enabled={self.voice_enabled}, tts.available={tts.available}")
             if self.voice_enabled and tts.available:
-                print(f"Speaking response: {response[:50]}...")
-                tts.speak(response)
+                if use_sesame:
+                    print(f"Speaking with Sesame (requested): {response[:50]}...")
+                else:
+                    print(f"Speaking with pyttsx3 (fast): {response[:50]}...")
+                tts.speak(response, use_sesame=use_sesame)
 
             history = history + [{"role": "assistant", "content": response}]
             yield history
@@ -473,12 +555,13 @@ class AuraGUI:
     def test_voice(self) -> str:
         """Test TTS - uses Sesame if loaded, otherwise pyttsx3."""
         try:
-            # Use Sesame if loaded (human-quality voice)
-            if tts.using_sesame and tts.sesame and tts.sesame.is_loaded():
-                print("Test voice: Using Sesame")
-                tts.sesame.speak("Hello! I am Aura, your AI assistant.")
+            sesame_loaded = tts.using_sesame and tts.sesame and tts.sesame.is_loaded()
+            print(f"Test voice: sesame_loaded={sesame_loaded}")
+
+            if sesame_loaded:
+                print("Test voice: Using Sesame...")
+                self._play_sesame("Hello! I am Aura with human quality voice.")
             else:
-                # Fallback to pyttsx3
                 print("Test voice: Using pyttsx3")
                 import pyttsx3
                 engine = pyttsx3.init()
@@ -488,8 +571,56 @@ class AuraGUI:
                 engine.stop()
             return self.get_voice_status_html()
         except Exception as e:
+            import traceback
             print(f"Test voice error: {e}")
+            traceback.print_exc()
             return self.get_voice_status_html()
+
+    def _play_sesame(self, text: str, background: bool = False):
+        """Play text using Sesame TTS."""
+        def _generate_and_play():
+            try:
+                import tempfile
+                import numpy as np
+                import scipy.io.wavfile as wav
+                import winsound
+
+                audio = tts.sesame.generate(text)
+                if audio is None:
+                    print("Sesame generate returned None")
+                    return
+
+                audio_np = audio.cpu().numpy().astype(np.float32)
+                if audio_np.ndim > 1:
+                    audio_np = audio_np.flatten()
+
+                # Normalize
+                max_val = np.abs(audio_np).max()
+                if max_val > 0:
+                    audio_np = audio_np / max_val
+
+                # Add 0.5s silence at end to prevent cutoff
+                silence = np.zeros(int(tts.sesame.sample_rate * 0.5), dtype=np.float32)
+                audio_np = np.concatenate([audio_np, silence])
+
+                # Convert to int16
+                audio_int16 = (audio_np * 32767).astype(np.int16)
+
+                temp_path = tempfile.mktemp(suffix='.wav')
+                wav.write(temp_path, tts.sesame.sample_rate, audio_int16)
+                winsound.PlaySound(temp_path, winsound.SND_FILENAME)
+
+                import os
+                os.remove(temp_path)
+            except Exception as e:
+                print(f"Sesame playback error: {e}")
+
+        if background:
+            import threading
+            thread = threading.Thread(target=_generate_and_play, daemon=True)
+            thread.start()
+        else:
+            _generate_and_play()
 
     # =========================================================================
     # CLAWDBOT INTEGRATION

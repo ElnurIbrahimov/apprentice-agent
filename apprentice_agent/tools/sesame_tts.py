@@ -229,11 +229,52 @@ class SesameTTS:
             audio: Audio tensor to play
         """
         try:
-            import sounddevice as sd
-            sd.play(audio.cpu().numpy(), self.sample_rate)
-            sd.wait()
-        except ImportError:
-            print("sounddevice not installed. Install with: pip install sounddevice")
+            import numpy as np
+
+            # Convert to numpy and ensure float32
+            audio_np = audio.cpu().numpy().astype(np.float32)
+
+            # Ensure 1D
+            if audio_np.ndim > 1:
+                audio_np = audio_np.flatten()
+
+            # Normalize if needed
+            max_val = np.abs(audio_np).max()
+            if max_val > 1.0:
+                audio_np = audio_np / max_val
+
+            print(f"Playing audio: shape={audio_np.shape}, dtype={audio_np.dtype}, max={np.abs(audio_np).max():.3f}")
+
+            # Try sounddevice first
+            try:
+                import sounddevice as sd
+                sd.play(audio_np, self.sample_rate)
+                sd.wait()
+                print("Playback complete (sounddevice)")
+                return
+            except Exception as e:
+                print(f"sounddevice failed: {e}, trying alternative...")
+
+            # Fallback: save to temp file and play with Windows
+            try:
+                import tempfile
+                import scipy.io.wavfile as wav
+
+                # Save to temp WAV file
+                temp_path = tempfile.mktemp(suffix='.wav')
+                wav.write(temp_path, self.sample_rate, (audio_np * 32767).astype(np.int16))
+
+                # Play with Windows
+                import winsound
+                winsound.PlaySound(temp_path, winsound.SND_FILENAME)
+                print("Playback complete (winsound)")
+
+                # Cleanup
+                import os
+                os.remove(temp_path)
+            except Exception as e2:
+                print(f"winsound fallback failed: {e2}")
+
         except Exception as e:
             print(f"Playback error: {e}")
 
