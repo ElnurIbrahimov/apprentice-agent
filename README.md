@@ -4,7 +4,7 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 
 ## Features
 
-- **19 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, Clawdbot messaging, and more
+- **20 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, Clawdbot messaging, EvoEmo emotional tracking, and more
 - **5-Model Routing** - Automatically selects the best model for each task type (including FluxMind for calibrated reasoning)
 - **Observe-Plan-Act-Evaluate-Remember Loop** - Structured reasoning cycle for achieving goals
 - **Fast-Path Responses** - Instant replies for conversational queries without full agent loop
@@ -156,6 +156,7 @@ Opens at `http://127.0.0.1:7860` with:
 | `git` | Git repository management with natural language | `what branch am I on?` |
 | `personaplex` | Real-time full-duplex voice with NVIDIA PersonaPlex | `start personaplex` |
 | `clawdbot` | Send/receive messages via WhatsApp, Telegram, Discord | `send "Hello" to +1234567890` |
+| `evoemo` | Emotional state tracking and adaptive responses | `my mood` or `mood history` |
 
 ### Code Executor Safety
 
@@ -560,6 +561,82 @@ This connects the gateway to Aura, allowing incoming messages to trigger agent r
 
 **GUI Integration:** The Aura GUI includes a Clawdbot panel in the sidebar for quick status checks and message sending.
 
+### EvoEmo (Emotional State Tracking)
+
+EvoEmo is Aura's emotional intelligence system that detects user emotional states and adapts responses accordingly.
+
+| Method | Description |
+|--------|-------------|
+| `analyze_text(text)` | Detect emotion from text input |
+| `get_current_mood()` | Get most recent emotional reading |
+| `get_session_summary()` | Get current session emotion stats |
+| `get_daily_summary()` | Get today's emotion summary |
+| `get_history(days)` | Get mood history for last N days |
+| `get_patterns()` | Analyze emotional patterns over time |
+| `clear_history()` | Clear all mood data (privacy) |
+| `set_enabled(bool)` | Enable/disable tracking |
+
+**Detected Emotions:**
+
+| Emotion | Indicators | Response Adaptation |
+|---------|------------|---------------------|
+| `calm` | Polite language, proper sentences | Normal responses |
+| `focused` | Direct questions, "specifically", "exactly" | Concise, no fluff |
+| `stressed` | "urgent", "ASAP", exclamation marks | Supportive, step-by-step |
+| `frustrated` | "ugh", "doesn't work", ALL CAPS | Acknowledge, solution-focused |
+| `excited` | "awesome", "can't wait", "!" | Match energy, enthusiastic |
+| `tired` | "exhausted", short responses, "meh" | Brief, gentle, suggest breaks |
+| `curious` | Questions, "how", "why", "explain" | Detailed, educational |
+
+**Example - Emotion Detection:**
+
+```python
+from apprentice_agent.tools.evoemo import EvoEmoTool
+evoemo = EvoEmoTool()
+
+# Analyze text
+reading = evoemo.analyze_text("Ugh, this STILL isn't working!!")
+# → emotion: frustrated, confidence: 85%
+
+# Get current mood
+mood = evoemo.get_current_mood()
+print(f"{evoemo.get_mood_emoji()} {mood.emotion}")
+# → 😤 frustrated
+```
+
+**Natural Language:**
+```
+"what's my mood?"           → Shows current emotional state
+"mood history"              → Shows 7-day emotion distribution
+"mood patterns"             → Analyzes stress hours, dominant emotions
+"clear mood history"        → Deletes all mood data
+"disable mood tracking"     → Turns off emotion detection
+```
+
+**Adaptive Responses:**
+
+When EvoEmo detects emotional states with high confidence (>50%), Aura automatically adjusts:
+
+1. **System Prompt** - Adds tone modifiers to guide LLM responses
+2. **Response Length** - Shorter for tired/frustrated, detailed for curious
+3. **Voice Parameters** - Slower/calmer for stressed, energetic for excited
+4. **Acknowledgments** - "I understand this is frustrating" for negative emotions
+
+**GUI Integration:**
+
+The Aura GUI shows a real-time mood indicator in the sidebar with:
+- Emoji representation of current emotion
+- Confidence percentage
+- Color-coded indicator (green=calm, red=frustrated, etc.)
+- Expandable panel for mood history and patterns
+
+**Privacy:**
+
+- All processing is local (no data sent externally)
+- History stored in `data/evoemo/mood_history.jsonl`
+- Users can disable tracking or clear history at any time
+- Rolling 7-day history by default
+
 ## Configuration
 
 Edit `apprentice_agent/config.py` to customize:
@@ -617,6 +694,8 @@ apprentice-agent/
         ├── personaplex/      # NVIDIA PersonaPlex real-time voice
         │   └── personaplex_tool.py
         ├── clawdbot.py       # Multi-platform messaging (WhatsApp, Telegram, etc.)
+        ├── evoemo.py         # Emotional state detection and tracking
+        ├── evoemo_prompts.py # Adaptive tone modifiers for emotions
         └── custom/           # Auto-generated custom tools
 ```
 

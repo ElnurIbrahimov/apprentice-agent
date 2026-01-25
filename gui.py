@@ -565,6 +565,98 @@ class AuraGUI:
         except Exception as e:
             return f"Error: {e}"
 
+    # =========================================================================
+    # EVOEMO - Emotional State Tracking (Tool #20)
+    # =========================================================================
+
+    def get_mood_html(self) -> str:
+        """Get current mood indicator HTML."""
+        try:
+            agent = self._get_agent()
+            if "evoemo" in agent.tools:
+                evoemo = agent.tools["evoemo"]
+                mood = evoemo.get_current_mood()
+
+                if mood:
+                    emoji = evoemo.get_mood_emoji()
+                    color = evoemo.get_mood_color()
+                    confidence = mood.confidence
+
+                    return f'''<div style="background: #334155; padding: 12px; border-radius: 8px; margin: 8px 0;">
+<div style="display: flex; align-items: center; gap: 8px;">
+    <span style="font-size: 24px;">{emoji}</span>
+    <div>
+        <strong style="color: {color};">{mood.emotion.title()}</strong>
+        <div style="color: #94a3b8; font-size: 11px;">{confidence}% confidence</div>
+    </div>
+</div>
+</div>'''
+                else:
+                    return '''<div style="background: #334155; padding: 12px; border-radius: 8px; margin: 8px 0;">
+<div style="display: flex; align-items: center; gap: 8px;">
+    <span style="font-size: 24px;">😐</span>
+    <div>
+        <strong style="color: #94a3b8;">No data yet</strong>
+        <div style="color: #64748b; font-size: 11px;">Start chatting</div>
+    </div>
+</div>
+</div>'''
+        except Exception as e:
+            return f'''<div style="background: #334155; padding: 12px; border-radius: 8px; margin: 8px 0;">
+<span style="color: #ef4444;">EvoEmo error: {str(e)[:30]}</span>
+</div>'''
+
+    def get_mood_history_md(self) -> str:
+        """Get mood history as markdown."""
+        try:
+            agent = self._get_agent()
+            if "evoemo" in agent.tools:
+                evoemo = agent.tools["evoemo"]
+
+                # Get session summary
+                session = evoemo.get_session_summary()
+                daily = evoemo.get_daily_summary()
+
+                md = f"**Session:** {session.get('dominant', 'calm')} ({session.get('readings', 0)} readings)\n\n"
+
+                if daily:
+                    md += f"**Today:** {daily.dominant_emotion} (avg {daily.average_confidence}% confidence)\n"
+                    md += f"Distribution: {daily.emotion_distribution}\n\n"
+
+                # Get patterns
+                patterns = evoemo.get_patterns()
+                if patterns.get("status") == "ok":
+                    md += f"**7-day dominant:** {patterns.get('dominant_emotion', 'calm')}\n"
+                    stress_hours = patterns.get("stress_hours", [])
+                    if stress_hours:
+                        md += f"Stress hours: {stress_hours}\n"
+
+                return md if md.strip() else "No mood data yet."
+        except Exception as e:
+            return f"Error: {e}"
+
+    def clear_mood_history(self) -> str:
+        """Clear mood history."""
+        try:
+            agent = self._get_agent()
+            if "evoemo" in agent.tools:
+                result = agent.tools["evoemo"].clear_history()
+                if result.get("success"):
+                    return self.get_mood_html()
+        except:
+            pass
+        return self.get_mood_html()
+
+    def toggle_mood_tracking(self, enabled: bool) -> str:
+        """Toggle mood tracking on/off."""
+        try:
+            agent = self._get_agent()
+            if "evoemo" in agent.tools:
+                agent.tools["evoemo"].set_enabled(enabled)
+        except:
+            pass
+        return self.get_mood_html()
+
 
 # ============================================================================
 # CREATE APP
@@ -587,6 +679,17 @@ def create_app():
                     <div style="color: #ffffff; font-weight: bold; font-size: 18px;">Aura</div>
                     <div style="color: #94a3b8; font-size: 13px;">Apprentice Agent</div>
                 </div>""")
+
+                # EvoEmo Mood Indicator (Tool #20)
+                gr.Markdown("**Your Mood**", elem_classes=["section-header"])
+                mood_indicator = gr.HTML(value=gui.get_mood_html())
+
+                with gr.Accordion("Mood Details", open=False):
+                    mood_history_md = gr.Markdown("No data yet")
+                    mood_tracking_toggle = gr.Checkbox(label="Enable Tracking", value=True)
+                    with gr.Row():
+                        refresh_mood_btn = gr.Button("Refresh", size="sm")
+                        clear_mood_btn = gr.Button("Clear History", size="sm")
 
                 # Voice Controls
                 voice_status = gr.HTML(value=gui.get_voice_status_html())
@@ -665,6 +768,16 @@ def create_app():
             inputs=[clawdbot_to, clawdbot_msg, clawdbot_channel],
             outputs=clawdbot_result
         )
+
+        # EvoEmo events
+        refresh_mood_btn.click(gui.get_mood_html, outputs=mood_indicator)
+        refresh_mood_btn.click(gui.get_mood_history_md, outputs=mood_history_md)
+        clear_mood_btn.click(gui.clear_mood_history, outputs=mood_indicator)
+        mood_tracking_toggle.change(gui.toggle_mood_tracking, inputs=mood_tracking_toggle, outputs=mood_indicator)
+
+        # Update mood indicator after each message
+        send.click(gui.get_mood_html, outputs=mood_indicator)
+        msg.submit(gui.get_mood_html, outputs=mood_indicator)
 
     return app
 

@@ -20,18 +20,34 @@ class TaskType(Enum):
 class OllamaBrain:
     """Handles all interactions with Ollama API for reasoning and decision-making."""
 
-    def __init__(self):
+    def __init__(self, warmup: bool = True):
         self.client = ollama.Client(host=Config.OLLAMA_HOST)
         self.model = Config.MODEL_NAME
         self.conversation_history: list[dict] = []
         self._last_model_used: str = self.model  # Track for metacognition
+
+        if warmup:
+            self._warmup_models()
+
+    def _warmup_models(self):
+        """Pre-load the fast model to reduce first-response latency."""
+        try:
+            # Keep the fast model loaded for 30 minutes
+            self.client.generate(
+                model=Config.MODEL_FAST,
+                prompt="",
+                keep_alive="30m"
+            )
+        except Exception:
+            pass  # Silently fail if warmup doesn't work
 
     def think(
         self,
         prompt: str,
         system_prompt: Optional[str] = None,
         use_history: bool = True,
-        task_type: Optional[TaskType] = None
+        task_type: Optional[TaskType] = None,
+        tone_modifier: Optional[str] = None
     ) -> str:
         """Generate a response using Ollama for reasoning tasks.
 
@@ -40,6 +56,7 @@ class OllamaBrain:
             system_prompt: Optional system prompt
             use_history: Whether to include conversation history
             task_type: Type of task for model routing (auto-detected if None)
+            tone_modifier: Optional emotional tone modifier from EvoEmo
         """
         # Select model based on task type
         model = self._select_model(prompt, task_type)
@@ -51,6 +68,10 @@ class OllamaBrain:
             full_system_prompt = f"{identity_prompt}\n\n{system_prompt}"
         else:
             full_system_prompt = identity_prompt
+
+        # Apply emotional tone modifier if provided (EvoEmo)
+        if tone_modifier:
+            full_system_prompt = f"{full_system_prompt}\n\n{tone_modifier}"
 
         messages = []
         if full_system_prompt:

@@ -21,6 +21,8 @@ from .personaplex import PersonaPlexTool
 from .sesame_tts import SesameTTS
 from .voice_manager import VoiceManager, voice_manager
 from .clawdbot import ClawdbotTool, clawdbot, send_message as clawdbot_send
+from .evoemo import EvoEmoTool, evoemo, analyze_emotion, get_current_mood, get_mood_emoji
+from .evoemo_prompts import get_tone_modifier, get_response_style, build_adaptive_system_prompt
 
 # Import FluxMind from external tools directory
 import sys
@@ -65,4 +67,12 @@ __all__ = [
     "ClawdbotTool",
     "clawdbot",
     "clawdbot_send",
+    "EvoEmoTool",
+    "evoemo",
+    "analyze_emotion",
+    "get_current_mood",
+    "get_mood_emoji",
+    "get_tone_modifier",
+    "get_response_style",
+    "build_adaptive_system_prompt",
 ]

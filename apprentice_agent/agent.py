@@ -11,7 +11,7 @@ from .identity import load_identity, get_identity_prompt, detect_name_change, de
 from .memory import MemorySystem
 from .metacognition import MetacognitionLogger
 from .config import Config
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, build_adaptive_system_prompt
 
 
 class AgentPhase(Enum):
@@ -61,7 +61,8 @@ class ApprenticeAgent:
             "marketplace": MarketplaceTool(),
             "regex_builder": RegexBuilderTool(),
             "git": GitTool(),
-            "clawdbot": ClawdbotTool()
+            "clawdbot": ClawdbotTool(),
+            "evoemo": EvoEmoTool()
         }
         # Add PersonaPlex if enabled (Tool #17)
         if Config.PERSONAPLEX_ENABLED:
@@ -283,7 +284,9 @@ class ApprenticeAgent:
             'set voice', 'change voice', 'list voices', 'set persona',
             'clawdbot', 'send message', 'send whatsapp', 'send telegram',
             'whatsapp message', 'telegram message', 'discord message',
-            'signal message', 'imessage', 'text to', 'message to'
+            'signal message', 'imessage', 'text to', 'message to',
+            'evoemo', 'mood', 'emotion', 'how am i feeling', 'my mood',
+            'mood history', 'emotional state', 'clear mood'
         ]
 
         # Check if it clearly needs a tool
@@ -2122,12 +2125,22 @@ Try these commands:
         Returns:
             Agent response text
         """
+        # Analyze emotional state (EvoEmo - Tool #20)
+        emotion_reading = self._analyze_emotion(message)
+
         # Check for FluxMind commands FIRST, before LLM
         fluxmind_result = self._handle_fluxmind_command(message)
         if fluxmind_result:
             if speak:
-                self._speak(fluxmind_result)
+                self._speak(fluxmind_result, emotion=emotion_reading.emotion if emotion_reading else None)
             return fluxmind_result
+
+        # Check for EvoEmo commands
+        evoemo_result = self._handle_evoemo_command(message)
+        if evoemo_result:
+            if speak:
+                self._speak(evoemo_result)
+            return evoemo_result
 
         # Use fast model for simple queries (greetings, etc.)
         if self._is_simple_query(message):
@@ -2135,19 +2148,121 @@ Try these commands:
         else:
             task_type = None  # Let brain auto-detect
 
-        response = self.brain.think(message, task_type=task_type)
+        # Apply emotional tone modifier if detected with high confidence
+        tone_modifier = None
+        if emotion_reading and emotion_reading.confidence >= 50:
+            tone_modifier = get_tone_modifier(emotion_reading.emotion)
+
+        response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier)
 
         if speak:
-            self._speak(response)
+            self._speak(response, emotion=emotion_reading.emotion if emotion_reading else None)
 
         return response
 
-    def _speak(self, text: str):
-        """Speak text using TTS."""
+    def _analyze_emotion(self, message: str):
+        """Analyze emotional state from user message."""
+        try:
+            if "evoemo" in self.tools and self.tools["evoemo"].is_enabled():
+                return self.tools["evoemo"].analyze_text(message)
+        except Exception as e:
+            print(f"[EvoEmo] Analysis error: {e}")
+        return None
+
+    def _handle_evoemo_command(self, message: str) -> Optional[str]:
+        """Handle EvoEmo-specific commands."""
+        message_lower = message.lower()
+
+        evoemo_commands = [
+            "my mood", "how am i feeling", "current mood", "mood status",
+            "mood history", "emotion history", "clear mood", "disable mood",
+            "enable mood", "mood patterns"
+        ]
+
+        if not any(cmd in message_lower for cmd in evoemo_commands):
+            return None
+
+        try:
+            evoemo = self.tools.get("evoemo")
+            if not evoemo:
+                return None
+
+            if "clear" in message_lower:
+                result = evoemo.clear_history()
+                return "Mood history cleared." if result.get("success") else "Failed to clear history."
+
+            elif "disable" in message_lower:
+                evoemo.set_enabled(False)
+                return "Mood tracking disabled."
+
+            elif "enable" in message_lower:
+                evoemo.set_enabled(True)
+                return "Mood tracking enabled."
+
+            elif "history" in message_lower:
+                history = evoemo.get_history(days=7)
+                if not history:
+                    return "No mood history yet."
+                # Summarize
+                from collections import Counter
+                emotions = [h["emotion"] for h in history]
+                dist = Counter(emotions)
+                summary = ", ".join(f"{e}: {c}" for e, c in dist.most_common())
+                return f"Mood history (7 days, {len(history)} readings): {summary}"
+
+            elif "pattern" in message_lower:
+                patterns = evoemo.get_patterns()
+                if patterns.get("status") == "insufficient_data":
+                    return f"Not enough data for patterns yet ({patterns.get('readings', 0)} readings)."
+                dominant = patterns.get("dominant_emotion", "calm")
+                stress_hours = patterns.get("stress_hours", [])
+                stress_info = f" Stress tends to peak around: {stress_hours}" if stress_hours else ""
+                return f"Your dominant mood: {dominant}.{stress_info}"
+
+            else:
+                # Current mood
+                mood = evoemo.get_current_mood()
+                if mood:
+                    emoji = evoemo.get_mood_emoji()
+                    return f"Current mood: {emoji} {mood.emotion} ({mood.confidence}% confidence)"
+                return "No mood data yet. Keep chatting and I'll pick up on how you're feeling."
+
+        except Exception as e:
+            print(f"[EvoEmo] Command error: {e}")
+            return None
+
+    def get_current_mood(self):
+        """Get current emotional state (for external use)."""
+        try:
+            if "evoemo" in self.tools:
+                return self.tools["evoemo"].get_current_mood()
+        except:
+            pass
+        return None
+
+    def get_mood_emoji(self) -> str:
+        """Get emoji for current mood (for GUI)."""
+        try:
+            if "evoemo" in self.tools:
+                return self.tools["evoemo"].get_mood_emoji()
+        except:
+            pass
+        return "😐"
+
+    def _speak(self, text: str, emotion: Optional[str] = None):
+        """Speak text using TTS with optional emotional adaptation."""
         try:
             from .tools.voice import VoiceTool
             voice = VoiceTool()
-            voice.speak(text)
+
+            # Adapt voice parameters based on emotion if available
+            if emotion:
+                from .tools.evoemo_prompts import get_voice_params
+                params = get_voice_params(emotion)
+                # Voice tools may support rate/pitch adjustment
+                voice.speak(text, rate=params.get("rate", 1.0))
+            else:
+                voice.speak(text)
         except Exception as e:
             print(f"TTS error: {e}")
 
