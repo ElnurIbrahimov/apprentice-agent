@@ -10,7 +10,7 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 - **Fast-Path Responses** - Instant replies for conversational queries without full agent loop
 - **Long-Term Memory** - ChromaDB-powered memory system for learning from past experiences
 - **Dream Mode** - Memory consolidation and pattern analysis from metacognition logs
-- **Voice Interface** - Whisper STT + pyttsx3 TTS or PersonaPlex real-time duplex voice
+- **Voice Interface** - Whisper STT + Sesame CSM 1B TTS (human-quality) or pyttsx3 fallback
 - **Confidence Scoring** - Each action includes confidence levels for transparency
 - **Metacognition Logging** - Detailed logs in `logs/metacognition/` for analysis
 - **Gradio GUI** - Modern web interface with real-time thinking process visualization
@@ -104,7 +104,41 @@ python main.py --voice
 
 Hands-free interaction using:
 - **Whisper** for speech-to-text
-- **pyttsx3** for text-to-speech
+- **Sesame CSM 1B** for high-quality text-to-speech (or pyttsx3 fallback)
+
+### Sesame CSM 1B (Human-Quality TTS)
+
+Aura uses [Sesame CSM 1B](https://github.com/SesameAILabs/csm), an open-source conversational speech model that produces remarkably human-like voice output.
+
+**Features:**
+- Human-quality conversational TTS
+- ~4.5GB VRAM on CUDA
+- Pipeline mode for low latency
+- Falls back to pyttsx3 if unavailable
+
+**Setup:**
+
+```bash
+# 1. Clone Sesame CSM
+git clone https://github.com/SesameAILabs/csm ~/sesame-csm
+cd ~/sesame-csm && pip install -e .
+
+# 2. Set HuggingFace token (required for model access)
+export HF_TOKEN=<your_huggingface_token>
+
+# 3. Accept model licenses on HuggingFace:
+#    - sesame/csm-1b
+#    - meta-llama/Llama-3.2-1B
+```
+
+**GUI Usage:**
+
+1. Launch `python gui.py`
+2. Click **Load Sesame** in the sidebar (takes ~30s first time)
+3. Enable **Voice** checkbox
+4. Aura now speaks with human-quality voice
+
+**Note:** On Windows, Sesame requires CUDA. If unavailable, Aura automatically uses pyttsx3 as fallback.
 
 ### Dream mode
 
@@ -144,6 +178,7 @@ Opens at `http://127.0.0.1:7860` with:
 | `pdf_reader` | Read and search PDF files | `read document.pdf pages 1-5` |
 | `clipboard` | Read/write system clipboard | `read` or `write "text"` |
 | `voice` | Speech-to-text and text-to-speech | `speak "Hello world"` |
+| `sesame_tts` | High-quality TTS using Sesame CSM 1B (open-source) | GUI: Load Sesame button |
 | `image_gen` | Generate images with Stable Diffusion | `a sunset over mountains` |
 | `arxiv_search` | Search academic papers on arXiv | `transformer attention mechanism` |
 | `browser` | Automate web browser with Playwright | `open github.com` |
@@ -694,6 +729,8 @@ apprentice-agent/
         ├── personaplex/      # NVIDIA PersonaPlex real-time voice
         │   └── personaplex_tool.py
         ├── clawdbot.py       # Multi-platform messaging (WhatsApp, Telegram, etc.)
+        ├── sesame_tts.py     # Sesame CSM 1B high-quality TTS
+        ├── voice_manager.py  # Hybrid voice system (Sesame + PersonaPlex)
         ├── evoemo.py         # Emotional state detection and tracking
         ├── evoemo_prompts.py # Adaptive tone modifiers for emotions
         └── custom/           # Auto-generated custom tools

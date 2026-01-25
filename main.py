@@ -50,6 +50,11 @@ def main():
         action="store_true",
         help="Start in voice conversation mode (uses microphone and speaker)"
     )
+    parser.add_argument(
+        "--speak",
+        action="store_true",
+        help="Enable text-to-speech for agent responses in chat mode"
+    )
 
     args = parser.parse_args()
 
@@ -65,7 +70,7 @@ def main():
     if args.voice:
         run_voice_mode(agent)
     elif args.chat:
-        run_chat_mode(agent)
+        run_chat_mode(agent, speak=args.speak)
     elif args.goal:
         result = agent.run(args.goal)
         print_result(result, is_fastpath=result.get("fast_path", False))
@@ -79,9 +84,16 @@ def run_voice_mode(agent: ApprenticeAgent):
     conversation.start()
 
 
-def run_chat_mode(agent: ApprenticeAgent):
-    """Run the agent in interactive chat mode."""
+def run_chat_mode(agent: ApprenticeAgent, speak: bool = False):
+    """Run the agent in interactive chat mode.
+
+    Args:
+        agent: The agent instance
+        speak: If True, speak responses using TTS
+    """
     print("Apprentice Agent - Interactive Mode")
+    if speak:
+        print("Voice output ENABLED")
     print("Commands: /goal <text>, /recall <query>, /clear, /quit")
     print("-" * 40)
 
@@ -96,13 +108,13 @@ def run_chat_mode(agent: ApprenticeAgent):
             continue
 
         if user_input.startswith("/"):
-            handle_command(agent, user_input)
+            handle_command(agent, user_input, speak=speak)
         else:
-            response = agent.chat(user_input)
+            response = agent.chat(user_input, speak=speak)
             print(f"\nAgent: {response}")
 
 
-def handle_command(agent: ApprenticeAgent, command: str):
+def handle_command(agent: ApprenticeAgent, command: str, speak: bool = False):
     """Handle special commands in chat mode."""
     parts = command.split(maxsplit=1)
     cmd = parts[0].lower()
@@ -128,6 +140,12 @@ def handle_command(agent: ApprenticeAgent, command: str):
     elif cmd == "/clear":
         agent.brain.clear_history()
         print("Conversation history cleared.")
+    elif cmd == "/speak" or cmd == "/say":
+        if arg:
+            agent._speak(arg)
+            print(f"[Spoke: {arg}]")
+        else:
+            print("Usage: /speak <text to speak>")
     else:
         print(f"Unknown command: {cmd}")
 
