@@ -1131,6 +1131,86 @@ class AuraGUI:
             return f"Error: {e}"
         return "Consolidation unavailable"
 
+    # ========================================================================
+    # METACOGNITIVE GUARDIAN (Tool #23)
+    # ========================================================================
+
+    def get_guardian_stats(self) -> dict:
+        """Get guardian statistics."""
+        try:
+            agent = self._get_agent()
+            if hasattr(agent, 'guardian') and agent.guardian:
+                return agent.guardian.get_stats()
+        except Exception:
+            pass
+        return {
+            "session_predictions": 0,
+            "interventions_triggered": 0,
+            "failure_patterns_learned": 0,
+            "monitoring_level": "medium",
+            "thresholds": {"warning": 0.3, "intervention": 0.6, "abort": 0.9}
+        }
+
+    def get_guardian_status_html(self) -> str:
+        """Get guardian status HTML."""
+        stats = self.get_guardian_stats()
+        return f'''<div style="background: #334155; padding: 12px; border-radius: 8px; margin: 8px 0;">
+<span class="status-online"></span>
+<strong style="color: #22c55e;">Guardian Active</strong>
+<div style="color: #94a3b8; font-size: 12px; margin-top: 4px;">Monitoring: {stats["monitoring_level"]}</div>
+</div>'''
+
+    def set_guardian_level(self, level: str) -> dict:
+        """Set guardian monitoring level."""
+        try:
+            agent = self._get_agent()
+            if hasattr(agent, 'guardian') and agent.guardian:
+                agent.guardian.set_monitoring_level(level)
+                return agent.guardian.get_stats()["thresholds"]
+        except Exception:
+            pass
+        return {"warning": 0.3, "intervention": 0.6, "abort": 0.9}
+
+    def get_guardian_predictions(self) -> str:
+        """Get recent predictions as markdown."""
+        try:
+            agent = self._get_agent()
+            if hasattr(agent, 'guardian') and agent.guardian:
+                predictions = agent.guardian.session_predictions
+                if not predictions:
+                    return "No predictions this session."
+                lines = []
+                for p in predictions[-5:]:
+                    emoji = "⚠️" if p.probability >= 0.6 else "💡"
+                    lines.append(f"{emoji} **{p.failure_type.value}** ({p.probability:.0%})")
+                    lines.append(f"   {p.reasoning[:60]}...")
+                return "\n".join(lines)
+        except Exception:
+            pass
+        return "Guardian unavailable."
+
+    def reset_guardian_session(self) -> str:
+        """Reset guardian session stats."""
+        try:
+            agent = self._get_agent()
+            if hasattr(agent, 'guardian') and agent.guardian:
+                agent.guardian.reset_session()
+                return "Session reset."
+        except Exception:
+            pass
+        return "Reset unavailable."
+
+    def record_feedback(self, was_helpful: bool) -> str:
+        """Record user feedback for guardian learning."""
+        try:
+            agent = self._get_agent()
+            if hasattr(agent, 'record_user_feedback'):
+                agent.record_user_feedback(was_helpful)
+                return "Feedback recorded." if was_helpful else "Feedback recorded - will improve."
+        except Exception:
+            pass
+        return "Feedback unavailable."
+
 
 # ============================================================================
 # CREATE APP
@@ -1281,6 +1361,59 @@ def create_app():
                             kg_path_btn = gr.Button("Find", size="sm")
                         kg_path_result = gr.Markdown("")
 
+                # Metacognitive Guardian Panel (Tool #23)
+                with gr.Accordion("\U0001F52E Metacognitive Guardian", open=False) as guardian_panel:
+                    gr.Markdown("### Self-Aware Failure Prediction")
+
+                    with gr.Row():
+                        guardian_status = gr.HTML(value=gui.get_guardian_status_html())
+                        guardian_level = gr.Dropdown(
+                            label="Monitoring Level",
+                            choices=["low", "medium", "high", "critical"],
+                            value="medium",
+                            scale=1
+                        )
+
+                    with gr.Row():
+                        guardian_interventions = gr.Number(
+                            label="Interventions",
+                            value=0,
+                            interactive=False
+                        )
+                        guardian_patterns = gr.Number(
+                            label="Patterns Learned",
+                            value=0,
+                            interactive=False
+                        )
+                        guardian_predictions = gr.Number(
+                            label="Session Predictions",
+                            value=0,
+                            interactive=False
+                        )
+
+                    with gr.Row():
+                        refresh_guardian_btn = gr.Button("\U0001F504 Refresh", size="sm")
+                        reset_guardian_btn = gr.Button("\U0001F5D1 Reset Session", size="sm")
+
+                    with gr.Accordion("\U00002699\uFE0F Thresholds", open=False):
+                        gr.Markdown("""
+- **Warning** (yellow): Show caution message
+- **Intervention** (orange): Take action (clarify, switch tool)
+- **Abort** (red): Stop and hand off to user
+""")
+                        guardian_thresholds = gr.JSON(
+                            label="Current Thresholds",
+                            value={"warning": 0.3, "intervention": 0.6, "abort": 0.9}
+                        )
+
+                    with gr.Accordion("\U0001F4CA Recent Predictions", open=False):
+                        guardian_predictions_md = gr.Markdown("No predictions yet.")
+
+                    with gr.Row():
+                        feedback_helpful_btn = gr.Button("\U0001F44D Helpful", size="sm", variant="primary")
+                        feedback_unhelpful_btn = gr.Button("\U0001F44E Not Helpful", size="sm")
+                        feedback_status = gr.Textbox(value="", show_label=False, interactive=False, scale=2)
+
                 with gr.Row():
                     msg = gr.Textbox(placeholder="Type message...", show_label=False, scale=5)
                     send = gr.Button("Send", variant="primary", scale=1)
@@ -1351,6 +1484,49 @@ def create_app():
 
         # Update knowledge graph after messages (learn from conversation)
         send.click(lambda: gui.get_knowledge_graph_html("", 2), outputs=kg_graph_html)
+
+        # Metacognitive Guardian events (Tool #23)
+        def refresh_guardian():
+            stats = gui.get_guardian_stats()
+            return (
+                stats["interventions_triggered"],
+                stats["failure_patterns_learned"],
+                stats["session_predictions"],
+                stats["thresholds"],
+                gui.get_guardian_predictions(),
+                gui.get_guardian_status_html()
+            )
+
+        refresh_guardian_btn.click(
+            refresh_guardian,
+            outputs=[guardian_interventions, guardian_patterns, guardian_predictions,
+                    guardian_thresholds, guardian_predictions_md, guardian_status]
+        )
+
+        guardian_level.change(
+            gui.set_guardian_level,
+            inputs=[guardian_level],
+            outputs=[guardian_thresholds]
+        )
+
+        reset_guardian_btn.click(
+            gui.reset_guardian_session,
+            outputs=[feedback_status]
+        )
+
+        feedback_helpful_btn.click(
+            lambda: gui.record_feedback(True),
+            outputs=[feedback_status]
+        )
+
+        feedback_unhelpful_btn.click(
+            lambda: gui.record_feedback(False),
+            outputs=[feedback_status]
+        )
+
+        # Update guardian stats after each message
+        send.click(refresh_guardian, outputs=[guardian_interventions, guardian_patterns,
+                  guardian_predictions, guardian_thresholds, guardian_predictions_md, guardian_status])
 
     return app
 

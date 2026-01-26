@@ -11,7 +11,7 @@ from .identity import load_identity, get_identity_prompt, detect_name_change, de
 from .memory import MemorySystem
 from .metacognition import MetacognitionLogger
 from .config import Config
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, build_adaptive_system_prompt, get_monologue, KnowledgeGraphTool, get_knowledge_graph
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, build_adaptive_system_prompt, get_monologue, KnowledgeGraphTool, get_knowledge_graph, MetacognitiveGuardian, GuardianConfig
 
 
 class AgentPhase(Enum):
@@ -87,6 +87,16 @@ class ApprenticeAgent:
         self.identity = load_identity()  # Load agent identity
         self.custom_tool_keywords = {}  # Map of keyword -> tool_name for custom tools
         self._load_custom_tools()  # Load active custom tools
+
+        # Initialize Metacognitive Guardian (Tool #23)
+        self.guardian = MetacognitiveGuardian(
+            inner_monologue=self.monologue,
+            evoemo=self.tools.get("evoemo"),
+            knowledge_graph=self.tools.get("knowledge_graph"),
+            config=GuardianConfig(monitoring_level="medium")
+        )
+        self._pending_prediction = None  # Track for outcome recording
+        print("[LOADED] Metacognitive Guardian - Failure prediction system")
 
     def _load_custom_tools(self) -> None:
         """Load active custom tools from registry."""
@@ -549,6 +559,55 @@ Guidelines:
                 },
                 "history": []
             }
+
+        # Check for Guardian commands - handle directly
+        guardian_response = self._handle_guardian_command(goal)
+        if guardian_response:
+            return {
+                "goal": goal,
+                "completed": True,
+                "iterations": 0,
+                "fast_path": True,
+                "guardian_direct": True,
+                "response": guardian_response,
+                "final_evaluation": {
+                    "success": True,
+                    "confidence": 100,
+                    "progress": guardian_response
+                },
+                "history": []
+            }
+
+        # === METACOGNITIVE GUARDIAN PRE-CHECK ===
+        # Assess risk before processing (works with or without FluxMind)
+        if hasattr(self, 'guardian') and self.guardian:
+            prediction = self.guardian.assess_risk(
+                task=goal,
+                tool=None,  # No tool selected yet
+                context=context or {}
+            )
+
+            if prediction:
+                self._pending_prediction = prediction
+
+                # If very high risk, intervene before even starting
+                if prediction.probability >= self.guardian.config.intervention_threshold:
+                    intervention = self.guardian.execute_intervention(prediction)
+
+                    if intervention["should_abort"]:
+                        return {
+                            "goal": goal,
+                            "completed": False,
+                            "iterations": 0,
+                            "guardian_abort": True,
+                            "response": intervention["message"],
+                            "final_evaluation": {
+                                "success": False,
+                                "confidence": int((1 - prediction.probability) * 100),
+                                "progress": f"Guardian intervention: {prediction.failure_type.value}"
+                            },
+                            "history": []
+                        }
 
         # Check for fast-path eligibility
         fastpath_enabled = use_fastpath if use_fastpath is not None else self.use_fastpath
@@ -2224,6 +2283,96 @@ Output ONLY the JSON object, no other text."""
             return str(result)
 
         return result.get("error", "Unknown error")
+
+    def _handle_guardian_command(self, message: str) -> Optional[str]:
+        """Handle Metacognitive Guardian commands directly.
+
+        Args:
+            message: The user's message
+
+        Returns:
+            Formatted result string if guardian command, None otherwise
+        """
+        msg_lower = message.lower()
+
+        guardian_keywords = [
+            'guardian stats', 'guardian status', 'guardian level',
+            'set guardian', 'monitoring level', 'show predictions',
+            'how confident', 'failure patterns', 'reset guardian'
+        ]
+
+        if not any(kw in msg_lower for kw in guardian_keywords):
+            return None
+
+        if not hasattr(self, 'guardian') or self.guardian is None:
+            return "Metacognitive Guardian not available."
+
+        # Handle specific patterns
+        if "guardian stats" in msg_lower or "guardian status" in msg_lower:
+            stats = self.guardian.get_stats()
+            return (f"**Metacognitive Guardian Status**\n"
+                   f"- Monitoring Level: {stats['monitoring_level']}\n"
+                   f"- Session Predictions: {stats['session_predictions']}\n"
+                   f"- Interventions Triggered: {stats['interventions_triggered']}\n"
+                   f"- Failure Patterns Learned: {stats['failure_patterns_learned']}\n"
+                   f"- Thresholds: Warning={stats['thresholds']['warning']:.0%}, "
+                   f"Intervention={stats['thresholds']['intervention']:.0%}, "
+                   f"Abort={stats['thresholds']['abort']:.0%}")
+
+        if "set guardian" in msg_lower or "monitoring level" in msg_lower:
+            for level in ["low", "medium", "high", "critical"]:
+                if level in msg_lower:
+                    self.guardian.set_monitoring_level(level)
+                    return f"Guardian monitoring level set to **{level}**."
+            return ("Available monitoring levels:\n"
+                   "- **low**: Only critical risks\n"
+                   "- **medium**: Balanced monitoring (default)\n"
+                   "- **high**: Sensitive monitoring\n"
+                   "- **critical**: Maximum sensitivity")
+
+        if "show predictions" in msg_lower:
+            predictions = self.guardian.session_predictions
+            if not predictions:
+                return "No predictions made in this session yet."
+            recent = predictions[-5:]
+            lines = ["**Recent Predictions:**"]
+            for p in recent:
+                lines.append(f"- [{p.failure_type.value}] {p.probability:.0%} - {p.reasoning[:50]}...")
+            return "\n".join(lines)
+
+        if "failure patterns" in msg_lower:
+            patterns = self.guardian.failure_patterns
+            if not patterns:
+                return "No failure patterns learned yet."
+            return f"Guardian has learned from **{len(patterns)}** past failures."
+
+        if "reset guardian" in msg_lower:
+            self.guardian.reset_session()
+            return "Guardian session stats reset."
+
+        if "how confident" in msg_lower:
+            stats = self.guardian.get_stats()
+            level = stats['monitoring_level']
+            return (f"I'm monitoring at **{level}** sensitivity. "
+                   f"This session: {stats['session_predictions']} risk assessments, "
+                   f"{stats['interventions_triggered']} interventions.")
+
+        return None
+
+    def record_user_feedback(self, was_helpful: bool, feedback_text: str = None):
+        """Record user feedback to improve guardian predictions.
+
+        Args:
+            was_helpful: Whether the response was helpful
+            feedback_text: Optional text feedback
+        """
+        if self._pending_prediction and hasattr(self, 'guardian'):
+            self.guardian.record_outcome(
+                prediction_id=self._pending_prediction.id,
+                was_successful=was_helpful,
+                user_feedback=feedback_text
+            )
+            self._pending_prediction = None
 
     def _handle_git_command(self, message: str) -> Optional[str]:
         """Handle Git commands directly, bypassing the LLM.

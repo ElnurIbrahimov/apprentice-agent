@@ -34,6 +34,14 @@ from .inner_monologue import InnerMonologueTool, get_monologue, THOUGHT_TYPES, T
 from .knowledge_graph import KnowledgeGraphTool, get_knowledge_graph, seed_initial_knowledge, Node, Edge, NODE_TYPES, EDGE_TYPES
 from .kg_extractor import KnowledgeExtractor, create_extractor
 from .hybrid_memory import HybridMemory, create_hybrid_memory, MemoryResult
+from .metacog_guardian import (
+    MetacognitiveGuardian,
+    GuardianConfig,
+    FailureType,
+    InterventionType,
+    FailurePrediction,
+    get_guardian
+)
 
 # Import FluxMind from external tools directory
 import sys
@@ -104,4 +112,11 @@ __all__ = [
     "HybridMemory",
     "create_hybrid_memory",
     "MemoryResult",
+    # Metacognitive Guardian
+    "MetacognitiveGuardian",
+    "GuardianConfig",
+    "FailureType",
+    "InterventionType",
+    "FailurePrediction",
+    "get_guardian",
 ]
