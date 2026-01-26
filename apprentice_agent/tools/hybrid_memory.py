@@ -8,8 +8,14 @@ Created: 2025-01-26
 
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
-from .knowledge_graph import KnowledgeGraphTool, get_knowledge_graph, Node
-from .kg_extractor import KnowledgeExtractor
+
+# Support both relative and absolute imports
+try:
+    from .knowledge_graph import KnowledgeGraphTool, get_knowledge_graph, Node
+    from .kg_extractor import KnowledgeExtractor
+except ImportError:
+    from knowledge_graph import KnowledgeGraphTool, get_knowledge_graph, Node
+    from kg_extractor import KnowledgeExtractor
 
 
 @dataclass

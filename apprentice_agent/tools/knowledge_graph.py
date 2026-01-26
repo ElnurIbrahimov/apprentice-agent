@@ -160,8 +160,8 @@ class KnowledgeGraphTool:
         # Label to ID index for fast lookups
         self._label_index: Dict[str, str] = {}
 
-        # Thread safety
-        self._lock = threading.Lock()
+        # Thread safety (RLock allows reentrant locking for nested method calls)
+        self._lock = threading.RLock()
 
         # File paths
         self.nodes_file = self.db_path / "nodes.jsonl"
@@ -398,13 +398,9 @@ class KnowledgeGraphTool:
 
             # Add to storage
             self._edges[edge_id] = edge
-            self.graph.add_edge(
-                source_id, target_id,
-                id=edge_id,
-                type=edge_type,
-                weight=weight,
-                **edge.to_dict()
-            )
+            # Note: edge.to_dict() already contains id, type, weight
+            edge_attrs = edge.to_dict()
+            self.graph.add_edge(source_id, target_id, **edge_attrs)
 
             # Persist
             self._append_edge(edge)

@@ -9,7 +9,12 @@ Created: 2025-01-26
 import json
 import re
 from typing import Dict, List, Any, Optional
-from .knowledge_graph import NODE_TYPES, EDGE_TYPES
+
+# Support both relative and absolute imports
+try:
+    from .knowledge_graph import NODE_TYPES, EDGE_TYPES
+except ImportError:
+    from knowledge_graph import NODE_TYPES, EDGE_TYPES
 
 
 class KnowledgeExtractor:
