@@ -305,7 +305,10 @@ class ApprenticeAgent:
             'mood history', 'emotional state', 'clear mood',
             'inner monologue', 'show thoughts', 'think aloud', 'verbosity',
             'why did you do that', 'export thoughts', 'your thoughts',
-            'reasoning chain', 'what were you thinking'
+            'reasoning chain', 'what were you thinking',
+            'guardian stats', 'guardian status', 'guardian level',
+            'set guardian', 'monitoring level', 'show predictions',
+            'failure patterns', 'reset guardian'
         ]
 
         # Check if it clearly needs a tool
