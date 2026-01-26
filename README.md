@@ -4,7 +4,7 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 
 ## Features
 
-- **22 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, Clawdbot messaging, EvoEmo emotional tracking, Inner Monologue, Knowledge Graph Memory, and more
+- **23 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, Clawdbot messaging, EvoEmo emotional tracking, Inner Monologue, Knowledge Graph Memory, Metacognitive Guardian, and more
 - **5-Model Routing** - Automatically selects the best model for each task type (including FluxMind for calibrated reasoning)
 - **Observe-Plan-Act-Evaluate-Remember Loop** - Structured reasoning cycle for achieving goals
 - **Fast-Path Responses** - Instant replies for conversational queries without full agent loop
@@ -196,6 +196,7 @@ Opens at `http://127.0.0.1:7860` with:
 | `evoemo` | Emotional state tracking and adaptive responses | `my mood` or `mood history` |
 | `inner_monologue` | Real-time thought visualization and Think Aloud | `show thoughts` or `why did you do that?` |
 | `knowledge_graph` | Relationship-based memory with semantic understanding | `what do you know about X?` |
+| `metacog_guardian` | Self-aware failure prediction and proactive intervention | `guardian stats` or `set guardian level high` |
 
 ### Code Executor Safety
 
@@ -882,6 +883,110 @@ result = seed_initial_knowledge(kg)
 
 This seeds core knowledge about Aura, Elnur, tools, and foundational concepts.
 
+### Metacognitive Guardian (Self-Aware Failure Prediction)
+
+The Metacognitive Guardian is a meta-layer that monitors Aura's reasoning and predicts failures BEFORE they happen, enabling proactive intervention rather than reactive error handling.
+
+| Method | Description |
+|--------|-------------|
+| `assess_risk(task, tool, context)` | Predict failure probability for task/tool |
+| `execute_intervention(prediction)` | Execute recommended intervention |
+| `record_outcome(prediction_id, success)` | Learn from actual outcomes |
+| `get_stats()` | Get guardian statistics |
+| `set_monitoring_level(level)` | Adjust sensitivity (low/medium/high/critical) |
+
+**Failure Types (9):**
+
+| Type | Description | Intervention |
+|------|-------------|--------------|
+| `knowledge_gap` | Missing information | Request clarification |
+| `tool_mismatch` | Wrong tool for task | Suggest alternative |
+| `ambiguous_request` | Unclear user intent | Ask for clarification |
+| `confidence_drop` | Sudden confidence loss | Pause and explain |
+| `emotional_mismatch` | Tone doesn't match mood | Emotional adjustment |
+| `skill_boundary` | Task beyond capabilities | Human handoff |
+| `hallucination_risk` | High fabrication risk | Confidence warning |
+| `context_overflow` | Too much context | Summarize/truncate |
+| `loop_detected` | Repeated failed attempts | Abort with explanation |
+
+**Monitoring Levels:**
+
+| Level | Warning | Intervention | Abort | Use Case |
+|-------|---------|--------------|-------|----------|
+| `low` | 50% | 75% | 95% | Autonomous operation |
+| `medium` | 30% | 60% | 90% | Balanced (default) |
+| `high` | 20% | 45% | 80% | Learning/unfamiliar tasks |
+| `critical` | 10% | 30% | 60% | High-stakes operations |
+
+**Example - Using Metacognitive Guardian:**
+
+```python
+from apprentice_agent.tools.metacog_guardian import get_guardian, GuardianConfig
+
+guardian = get_guardian(config=GuardianConfig(monitoring_level="medium"))
+
+# Assess risk before action
+prediction = guardian.assess_risk(
+    task="delete all files in directory",
+    tool="filesystem",
+    context={"user_mood": "frustrated"}
+)
+
+if prediction and prediction.probability > 0.6:
+    intervention = guardian.execute_intervention(prediction)
+    print(intervention["message"])
+    # → "I want to make sure I understand correctly..."
+
+# Record outcome for learning
+guardian.record_outcome(prediction.id, was_successful=True)
+```
+
+**Natural Language:**
+```
+"guardian stats"              → Show monitoring level, predictions, interventions
+"guardian status"             → Same as above
+"set guardian level high"     → Increase sensitivity
+"show predictions"            → Recent failure predictions
+"failure patterns"            → Learned patterns from history
+"reset guardian"              → Clear session data
+```
+
+**Integration with Agent Loop:**
+
+The Guardian automatically monitors every task in `agent.run()`:
+
+1. **Pre-check**: Before processing, assess risk of the incoming task
+2. **Tool Selection**: Detect tool mismatches before execution
+3. **Confidence Monitoring**: Track confidence drops during reasoning
+4. **Post-execution**: Record outcomes to improve future predictions
+
+**GUI Integration:**
+
+The Aura GUI includes a Metacognitive Guardian panel with:
+- Guardian status indicator (Active/Inactive)
+- Monitoring level dropdown (low/medium/high/critical)
+- Stats display (interventions, patterns learned, predictions)
+- Threshold configuration accordion
+- Recent predictions accordion
+- Helpful/Not Helpful feedback buttons
+
+**Learning System:**
+
+The Guardian learns from outcomes:
+- Stores failure patterns in `data/metacog_guardian/patterns/`
+- Records outcomes in `data/metacog_guardian/outcomes/`
+- Improves prediction accuracy over time
+- Patterns are keyed by failure type for targeted learning
+
+**Integration Points:**
+
+| System | Integration |
+|--------|-------------|
+| Inner Monologue | Monitors thought confidence levels |
+| EvoEmo | Detects emotional mismatch risks |
+| Knowledge Graph | Checks for knowledge gaps |
+| FluxMind | Leverages calibrated confidence |
+
 ## Configuration
 
 Edit `apprentice_agent/config.py` to customize:
@@ -947,6 +1052,7 @@ apprentice-agent/
         ├── knowledge_graph.py # Relationship-based memory with NetworkX
         ├── kg_extractor.py   # Knowledge extraction from text
         ├── hybrid_memory.py  # Combined vector + graph memory
+        ├── metacog_guardian.py # Self-aware failure prediction system
         └── custom/           # Auto-generated custom tools
 ```
 
