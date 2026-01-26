@@ -23,6 +23,7 @@ from .voice_manager import VoiceManager, voice_manager
 from .clawdbot import ClawdbotTool, clawdbot, send_message as clawdbot_send
 from .evoemo import EvoEmoTool, evoemo, analyze_emotion, get_current_mood, get_mood_emoji
 from .evoemo_prompts import get_tone_modifier, get_response_style, build_adaptive_system_prompt
+from .inner_monologue import InnerMonologueTool, get_monologue, THOUGHT_TYPES, THOUGHT_ICONS
 
 # Import FluxMind from external tools directory
 import sys
@@ -75,4 +76,8 @@ __all__ = [
     "get_tone_modifier",
     "get_response_style",
     "build_adaptive_system_prompt",
+    "InnerMonologueTool",
+    "get_monologue",
+    "THOUGHT_TYPES",
+    "THOUGHT_ICONS",
 ]

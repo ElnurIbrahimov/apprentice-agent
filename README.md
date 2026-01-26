@@ -4,7 +4,7 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 
 ## Features
 
-- **20 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, Clawdbot messaging, EvoEmo emotional tracking, and more
+- **21 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, Clawdbot messaging, EvoEmo emotional tracking, Inner Monologue, and more
 - **5-Model Routing** - Automatically selects the best model for each task type (including FluxMind for calibrated reasoning)
 - **Observe-Plan-Act-Evaluate-Remember Loop** - Structured reasoning cycle for achieving goals
 - **Fast-Path Responses** - Instant replies for conversational queries without full agent loop
@@ -14,6 +14,7 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 - **Confidence Scoring** - Each action includes confidence levels for transparency
 - **Metacognition Logging** - Detailed logs in `logs/metacognition/` for analysis
 - **Gradio GUI** - Modern web interface with real-time thinking process visualization
+- **Inner Monologue** - Real-time visualization and vocalization of Aura's thought process (perceive, recall, reason, decide, execute, reflect)
 
 ## Requirements
 
@@ -192,6 +193,7 @@ Opens at `http://127.0.0.1:7860` with:
 | `personaplex` | Real-time full-duplex voice with NVIDIA PersonaPlex | `start personaplex` |
 | `clawdbot` | Send/receive messages via WhatsApp, Telegram, Discord | `send "Hello" to +1234567890` |
 | `evoemo` | Emotional state tracking and adaptive responses | `my mood` or `mood history` |
+| `inner_monologue` | Real-time thought visualization and Think Aloud | `show thoughts` or `why did you do that?` |
 
 ### Code Executor Safety
 
@@ -672,6 +674,99 @@ The Aura GUI shows a real-time mood indicator in the sidebar with:
 - Users can disable tracking or clear history at any time
 - Rolling 7-day history by default
 
+### Inner Monologue (Thought Visualization)
+
+The Inner Monologue system makes Aura's thinking visible and audible in real-time, providing transparency into the agent's reasoning process.
+
+| Method | Description |
+|--------|-------------|
+| `start_session()` | Begin a new monologue session |
+| `think(type, content, confidence)` | Emit a thought |
+| `get_recent_thoughts(n)` | Get last N thoughts |
+| `get_reasoning_chain()` | Get formatted reasoning for "why?" queries |
+| `set_verbosity(level)` | Set detail level (0=silent, 3=debug) |
+| `end_session()` | Finalize and save session |
+
+**Thought Types:**
+
+| Type | Icon | Description |
+|------|------|-------------|
+| `perceive` | 🔍 | Understanding user input |
+| `recall` | 💾 | Memory retrieval |
+| `reason` | 🧠 | Logic and planning |
+| `decide` | ⚡ | Tool/action selection |
+| `execute` | 🔧 | Running tool |
+| `reflect` | 🪞 | Evaluating result |
+| `uncertain` | ❓ | Low confidence moment |
+| `eureka` | 💡 | Insight/breakthrough |
+
+**Example - Using Inner Monologue:**
+
+```python
+from apprentice_agent.tools.inner_monologue import get_monologue
+
+monologue = get_monologue()
+monologue.start_session()
+
+# Emit thoughts during agent execution
+monologue.think("perceive", "Received query about weather", confidence=95)
+monologue.think("reason", "User wants current conditions. Should use web_search.", confidence=85)
+monologue.think("decide", "Selected tool: web_search", confidence=90)
+
+# Get reasoning chain
+chain = monologue.get_reasoning_chain()
+print(chain)
+
+monologue.end_session()
+```
+
+**Natural Language:**
+```
+"show thoughts"           → Display recent thoughts
+"why did you do that?"    → Show reasoning chain
+"think aloud on"          → Enable spoken thoughts
+"verbosity 3"             → Set debug level
+"export thoughts"         → Save session to file
+```
+
+**Think Aloud Mode:**
+
+When enabled, Aura speaks her thoughts aloud using TTS (Sesame or pyttsx3 fallback):
+
+1. Enable **Voice** in the GUI sidebar
+2. Check **Think Aloud** in the Inner Monologue panel
+3. Send a query that triggers the agent loop
+4. Hear Aura narrate: "Perceiving... Received user query" → "Reasoning..." → "Deciding..."
+
+**GUI Integration:**
+
+The Aura GUI includes an "Aura's Thoughts" accordion panel with:
+- Real-time thought stream with emoji icons and confidence scores
+- Verbosity slider (0=silent to 3=debug)
+- Think Aloud toggle
+- Refresh, Clear, Export, and Why? buttons
+- "Aura's Recent Reasoning" chain display
+
+**Session Logging:**
+
+All thoughts are persisted to `logs/inner_monologue/`:
+- `sessions/YYYY-MM-DD_session_<id>.jsonl` - Individual session thoughts
+- `summaries/YYYY-MM-DD_summary.json` - Daily aggregate statistics
+
+**Integration with Agent Loop:**
+
+The Inner Monologue is automatically integrated into the agent's OBSERVE → PLAN → ACT → EVALUATE → REMEMBER cycle:
+
+| Phase | Thought Type |
+|-------|--------------|
+| OBSERVE | `perceive` - User input received |
+| OBSERVE | `recall` - Memory search results |
+| PLAN | `reason` - Planning approach |
+| PLAN | `decide` - Tool selection |
+| ACT | `execute` - Running tool |
+| EVALUATE | `reflect` - Result assessment |
+| EVALUATE | `eureka` or `uncertain` - Confidence-based |
+
 ## Configuration
 
 Edit `apprentice_agent/config.py` to customize:
@@ -733,6 +828,7 @@ apprentice-agent/
         ├── voice_manager.py  # Hybrid voice system (Sesame + PersonaPlex)
         ├── evoemo.py         # Emotional state detection and tracking
         ├── evoemo_prompts.py # Adaptive tone modifiers for emotions
+        ├── inner_monologue.py # Real-time thought visualization and Think Aloud
         └── custom/           # Auto-generated custom tools
 ```
 

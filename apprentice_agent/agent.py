@@ -11,7 +11,7 @@ from .identity import load_identity, get_identity_prompt, detect_name_change, de
 from .memory import MemorySystem
 from .metacognition import MetacognitionLogger
 from .config import Config
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, build_adaptive_system_prompt
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, build_adaptive_system_prompt, get_monologue
 
 
 class AgentPhase(Enum):
@@ -62,8 +62,13 @@ class ApprenticeAgent:
             "regex_builder": RegexBuilderTool(),
             "git": GitTool(),
             "clawdbot": ClawdbotTool(),
-            "evoemo": EvoEmoTool()
+            "evoemo": EvoEmoTool(),
+            "inner_monologue": get_monologue()
         }
+        # Connect inner monologue to EvoEmo for emotional awareness
+        self.monologue = self.tools["inner_monologue"]
+        if "evoemo" in self.tools:
+            self.monologue.connect_evoemo(self.tools["evoemo"])
         # Add PersonaPlex if enabled (Tool #17)
         if Config.PERSONAPLEX_ENABLED:
             self.tools["personaplex"] = PersonaPlexTool()
@@ -286,7 +291,10 @@ class ApprenticeAgent:
             'whatsapp message', 'telegram message', 'discord message',
             'signal message', 'imessage', 'text to', 'message to',
             'evoemo', 'mood', 'emotion', 'how am i feeling', 'my mood',
-            'mood history', 'emotional state', 'clear mood'
+            'mood history', 'emotional state', 'clear mood',
+            'inner monologue', 'show thoughts', 'think aloud', 'verbosity',
+            'why did you do that', 'export thoughts', 'your thoughts',
+            'reasoning chain', 'what were you thinking'
         ]
 
         # Check if it clearly needs a tool
@@ -505,6 +513,24 @@ Guidelines:
                 "history": []
             }
 
+        # Check for Inner Monologue commands - handle directly
+        monologue_response = self._handle_monologue_command(goal)
+        if monologue_response:
+            return {
+                "goal": goal,
+                "completed": True,
+                "iterations": 0,
+                "fast_path": True,
+                "monologue_direct": True,
+                "response": monologue_response,
+                "final_evaluation": {
+                    "success": True,
+                    "confidence": 100,
+                    "progress": monologue_response
+                },
+                "history": []
+            }
+
         # Check for fast-path eligibility
         fastpath_enabled = use_fastpath if use_fastpath is not None else self.use_fastpath
         if fastpath_enabled and self._is_simple_query(goal):
@@ -516,6 +542,23 @@ Guidelines:
         self.brain._last_screenshot_path = None
         # Start metacognition tracking for this goal
         self.metacognition.start_goal(goal)
+
+        # Start inner monologue session
+        self.monologue.start_session()
+        self.monologue.think("perceive", f"Received: '{goal[:80]}{'...' if len(goal) > 80 else ''}'")
+
+        # Check for user emotional state if EvoEmo available
+        if "evoemo" in self.tools:
+            try:
+                evoemo = self.tools["evoemo"]
+                mood_result = evoemo.analyze_text(goal)
+                if mood_result.get("success"):
+                    user_mood = mood_result.get("emotion", "calm")
+                    confidence = mood_result.get("confidence", 50)
+                    if user_mood in ["frustrated", "stressed"]:
+                        self.monologue.think("perceive", f"User seems {user_mood} ({confidence}% confidence). Being careful and clear.")
+            except Exception:
+                pass
 
         print(f"\n{'='*60}")
         print(f"Agent starting with goal: {goal}")
@@ -551,6 +594,11 @@ Guidelines:
         # Gather context including relevant memories
         relevant_memories = self.memory.recall(self.state.goal, n_results=3)
 
+        # Emit recall thought if memories found
+        if relevant_memories:
+            memory_preview = ", ".join([m["content"][:30] for m in relevant_memories[:2]])
+            self.monologue.think("recall", f"Found {len(relevant_memories)} relevant memories: {memory_preview}...")
+
         observation_context = {
             "goal": self.state.goal,
             "iteration": self.state.iteration,
@@ -575,6 +623,11 @@ Guidelines:
             self.state.observations,
             available_tools
         )
+
+        # Emit reasoning thought about the plan
+        plan_preview = self.state.current_plan[:100].replace('\n', ' ')
+        self.monologue.think("reason", f"Planning approach: {plan_preview}...")
+
         print(f"Plan: {self.state.current_plan[:200]}...")
 
     def _detect_custom_tool(self, goal: str) -> Optional[tuple[str, str]]:
@@ -684,6 +737,15 @@ Guidelines:
                 "action": action,
                 "reasoning": f"Using custom tool {tool_name} based on goal keywords"
             }
+        # PRIORITY 5: Check for Inner Monologue actions
+        elif self._detect_monologue_action(self.state.goal) and self.state.iteration == 1:
+            monologue_match = self._detect_monologue_action(self.state.goal)
+            tool_name, action = monologue_match
+            action_decision = {
+                "tool": tool_name,
+                "action": action,
+                "reasoning": "Using inner monologue tool based on goal keywords"
+            }
         else:
             # Include summarize as an available tool
             available_tools = list(self.tools.keys()) + ["summarize"]
@@ -693,7 +755,21 @@ Guidelines:
             )
 
         self.state.last_action = action_decision
-        print(f"Action: {action_decision.get('tool')} - {action_decision.get('action')}")
+        tool_name = action_decision.get('tool', 'unknown')
+        action_str = action_decision.get('action', '')[:50]
+
+        # Emit decision thought
+        self.monologue.think(
+            "decide",
+            f"Selected tool: {tool_name}",
+            confidence=85,  # Default high confidence for tool selection
+            metadata={"tool": tool_name, "action_preview": action_str}
+        )
+
+        print(f"Action: {tool_name} - {action_decision.get('action')}")
+
+        # Emit execute thought
+        self.monologue.think("execute", f"Running {tool_name}...")
 
         # Execute the action
         self.state.last_result = self._execute_action(action_decision)
@@ -762,9 +838,38 @@ Guidelines:
             self.state.goal
         )
 
-        print(f"Success: {self.state.evaluation.get('success')}")
-        print(f"Confidence: {self.state.evaluation.get('confidence', 0)}%")
+        eval_success = self.state.evaluation.get('success', False)
+        eval_confidence = self.state.evaluation.get('confidence', 0)
+        eval_progress = self.state.evaluation.get('progress', '')[:100]
+
+        print(f"Success: {eval_success}")
+        print(f"Confidence: {eval_confidence}%")
         print(f"Progress: {self.state.evaluation.get('progress')}")
+
+        # Emit reflection thought
+        if eval_success:
+            self.monologue.think(
+                "reflect",
+                f"Result looks good: {eval_progress}...",
+                confidence=eval_confidence
+            )
+            # Check for eureka moment (high confidence success)
+            if eval_confidence >= 90:
+                self.monologue.think("eureka", "High confidence result achieved!")
+        else:
+            # Low confidence or failure
+            if eval_confidence < 60:
+                self.monologue.think(
+                    "uncertain",
+                    f"Low confidence ({eval_confidence}%). May need to try different approach.",
+                    confidence=eval_confidence
+                )
+            else:
+                self.monologue.think(
+                    "reflect",
+                    f"Result needs work: {eval_progress}...",
+                    confidence=eval_confidence
+                )
 
         # Get model used for this evaluation
         model_used = self.brain.get_last_model_used()
@@ -1958,6 +2063,70 @@ Output ONLY the JSON object, no other text."""
 
         return None
 
+    def _detect_monologue_action(self, goal: str) -> Optional[tuple[str, str]]:
+        """Detect if the goal requires the Inner Monologue tool.
+
+        Args:
+            goal: The user's goal
+
+        Returns:
+            (tool_name, action) tuple if monologue matches, None otherwise
+        """
+        goal_lower = goal.lower()
+
+        monologue_keywords = [
+            'show thoughts', 'your thoughts', 'recent thoughts',
+            'think aloud on', 'think aloud off',
+            'verbosity 0', 'verbosity 1', 'verbosity 2', 'verbosity 3',
+            'why did you do that', 'explain your reasoning', 'reasoning chain',
+            'what were you thinking', 'how did you decide',
+            'export thoughts', 'inner monologue'
+        ]
+
+        # Check if any monologue keyword is present
+        if any(kw in goal_lower for kw in monologue_keywords):
+            print(f"[MONOLOGUE] Detected monologue action in: {goal[:50]}...")
+            return ("inner_monologue", goal)
+
+        return None
+
+    def _handle_monologue_command(self, message: str) -> Optional[str]:
+        """Handle inner monologue commands directly, bypassing the LLM.
+
+        Args:
+            message: The user's message
+
+        Returns:
+            Formatted result string if monologue command, None otherwise
+        """
+        msg_lower = message.lower()
+
+        monologue_keywords = [
+            'show thoughts', 'your thoughts', 'recent thoughts',
+            'think aloud', 'verbosity', 'why did you do that',
+            'explain your reasoning', 'reasoning chain', 'export thoughts'
+        ]
+
+        if not any(kw in msg_lower for kw in monologue_keywords):
+            return None
+
+        if "inner_monologue" not in self.tools:
+            return "Inner monologue not available."
+
+        monologue = self.tools["inner_monologue"]
+        result = monologue.execute(message)
+
+        if result.get("success"):
+            if "thoughts" in result:
+                return result["thoughts"]
+            if "reasoning_chain" in result:
+                return result["reasoning_chain"]
+            if "message" in result:
+                return result["message"]
+            return str(result)
+
+        return result.get("error", "Unknown error")
+
     def _handle_git_command(self, message: str) -> Optional[str]:
         """Handle Git commands directly, bypassing the LLM.
 
@@ -2016,12 +2185,20 @@ Output ONLY the JSON object, no other text."""
 
     def _get_final_result(self) -> dict:
         """Compile the final result of the agent run."""
+        # End inner monologue session
+        if self.state.completed:
+            self.monologue.think("reflect", "Task completed successfully!")
+        else:
+            self.monologue.think("reflect", f"Stopping after {self.state.iteration} iterations.")
+        session_summary = self.monologue.end_session()
+
         result = {
             "goal": self.state.goal,
             "completed": self.state.completed,
             "iterations": self.state.iteration,
             "final_evaluation": self.state.evaluation,
-            "history": self.state.history
+            "history": self.state.history,
+            "monologue_summary": session_summary.get("summary", {})
         }
         # Include actual tool result for FluxMind (prevents LLM hallucination in output)
         if self.state.last_action and self.state.last_action.get('tool', '').lower() == 'fluxmind':

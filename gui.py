@@ -304,6 +304,38 @@ input[type="range"] {
     border-radius: 50%;
     margin-right: 8px;
 }
+
+/* Inner Monologue Panel */
+#thought-stream {
+    font-family: 'Consolas', 'Fira Code', monospace !important;
+    font-size: 12px !important;
+    max-height: 200px;
+    overflow-y: auto;
+    background: #1a1a2e !important;
+    padding: 10px;
+    border-radius: 8px;
+    border-left: 3px solid #00d9ff;
+}
+
+#thought-stream .thought-line {
+    padding: 4px 0;
+    border-bottom: 1px solid #2a2a4a;
+}
+
+#thought-stream .thought-perceive { color: #60a5fa; }
+#thought-stream .thought-recall { color: #a78bfa; }
+#thought-stream .thought-reason { color: #f472b6; }
+#thought-stream .thought-decide { color: #fbbf24; }
+#thought-stream .thought-execute { color: #34d399; }
+#thought-stream .thought-reflect { color: #38bdf8; }
+#thought-stream .thought-uncertain { color: #fb7185; }
+#thought-stream .thought-eureka { color: #facc15; }
+
+.monologue-header {
+    color: #00d9ff !important;
+    font-weight: bold;
+    margin-bottom: 8px;
+}
 """
 
 
@@ -788,6 +820,128 @@ class AuraGUI:
             pass
         return self.get_mood_html()
 
+    # =========================================================================
+    # INNER MONOLOGUE - Thought Visualization (Tool #21)
+    # =========================================================================
+
+    def get_thoughts_html(self) -> str:
+        """Get formatted thoughts for display."""
+        try:
+            agent = self._get_agent()
+            if "inner_monologue" in agent.tools:
+                monologue = agent.tools["inner_monologue"]
+                thoughts = monologue.get_recent_thoughts(15)
+
+                if not thoughts:
+                    return '''<div id="thought-stream" style="color: #64748b; font-style: italic;">
+                        Waiting for Aura to think...
+                    </div>'''
+
+                # Format thoughts
+                thought_icons = {
+                    "perceive": "\U0001F50D",
+                    "recall": "\U0001F4BE",
+                    "reason": "\U0001F9E0",
+                    "decide": "\u26A1",
+                    "execute": "\U0001F527",
+                    "reflect": "\U0001FA9E",
+                    "uncertain": "\u2753",
+                    "eureka": "\U0001F4A1",
+                }
+
+                lines = []
+                for t in thoughts:
+                    icon = thought_icons.get(t.type, "\U0001F4AD")
+                    conf = f" [{t.confidence}%]" if t.confidence else ""
+                    css_class = f"thought-{t.type}"
+                    content = t.content[:80] + "..." if len(t.content) > 80 else t.content
+                    lines.append(f'<div class="thought-line {css_class}">{icon} <strong>{t.type.upper()}</strong>{conf}: {content}</div>')
+
+                return f'<div id="thought-stream">{"".join(lines)}</div>'
+        except Exception as e:
+            return f'<div id="thought-stream" style="color: #ef4444;">Error: {str(e)[:50]}</div>'
+
+        return '<div id="thought-stream" style="color: #64748b;">Inner monologue not available</div>'
+
+    def get_reasoning_chain(self) -> str:
+        """Get the reasoning chain for 'why did you do that?' queries."""
+        try:
+            agent = self._get_agent()
+            if "inner_monologue" in agent.tools:
+                return agent.tools["inner_monologue"].get_reasoning_chain()
+        except Exception as e:
+            return f"Error: {e}"
+        return "No reasoning chain available."
+
+    def set_monologue_verbosity(self, level: int) -> str:
+        """Set inner monologue verbosity level."""
+        try:
+            agent = self._get_agent()
+            if "inner_monologue" in agent.tools:
+                result = agent.tools["inner_monologue"].set_verbosity(int(level))
+                return result
+        except Exception as e:
+            return f"Error: {e}"
+        return "Monologue not available"
+
+    def toggle_think_aloud(self, enabled: bool) -> str:
+        """Toggle think-aloud mode (Sesame voice for thoughts)."""
+        try:
+            agent = self._get_agent()
+            if "inner_monologue" in agent.tools:
+                monologue = agent.tools["inner_monologue"]
+                monologue.think_aloud_enabled = enabled
+
+                # Connect TTS if enabling
+                if enabled and tts.using_sesame:
+                    monologue.connect_tts(tts)
+
+                status = "enabled" if enabled else "disabled"
+                return f"Think aloud {status}"
+        except Exception as e:
+            return f"Error: {e}"
+        return "Monologue not available"
+
+    def clear_thoughts(self) -> str:
+        """Clear the thought display."""
+        try:
+            agent = self._get_agent()
+            if "inner_monologue" in agent.tools:
+                agent.tools["inner_monologue"].stream.clear()
+        except:
+            pass
+        return self.get_thoughts_html()
+
+    def export_thoughts(self) -> str:
+        """Export current thoughts to file."""
+        try:
+            agent = self._get_agent()
+            if "inner_monologue" in agent.tools:
+                result = agent.tools["inner_monologue"].export_session()
+                if result.get("success"):
+                    return f"Exported to: {result.get('filepath', 'unknown')}"
+                return f"Export failed: {result.get('error', 'unknown')}"
+        except Exception as e:
+            return f"Error: {e}"
+        return "Monologue not available"
+
+    def get_monologue_status(self) -> str:
+        """Get inner monologue status."""
+        try:
+            agent = self._get_agent()
+            if "inner_monologue" in agent.tools:
+                monologue = agent.tools["inner_monologue"]
+                status = monologue.execute("status")
+                if status.get("success"):
+                    session = status.get("active_session", "None")
+                    verbosity = status.get("verbosity", 2)
+                    think_aloud = "ON" if status.get("think_aloud") else "OFF"
+                    count = status.get("thought_count", 0)
+                    return f"Session: {session} | Verbosity: {verbosity} | Think Aloud: {think_aloud} | Thoughts: {count}"
+        except Exception as e:
+            return f"Error: {e}"
+        return "Monologue not available"
+
 
 # ============================================================================
 # CREATE APP
@@ -870,6 +1024,32 @@ def create_app():
             with gr.Column(scale=4):
                 chatbot = gr.Chatbot(height=500, show_label=False)
 
+                # Inner Monologue Panel (Tool #21)
+                with gr.Accordion("\U0001F9E0 Aura's Thoughts", open=False) as thoughts_panel:
+                    thought_display = gr.HTML(
+                        value=gui.get_thoughts_html(),
+                        elem_id="thought-stream-container"
+                    )
+                    monologue_status = gr.Markdown(gui.get_monologue_status())
+
+                    with gr.Row():
+                        verbosity_slider = gr.Slider(
+                            minimum=0, maximum=3, step=1, value=2,
+                            label="Verbosity (0=silent, 3=debug)",
+                            scale=2
+                        )
+                        think_aloud_toggle = gr.Checkbox(
+                            label="\U0001F50A Think Aloud",
+                            value=False,
+                            scale=1
+                        )
+                    with gr.Row():
+                        refresh_thoughts_btn = gr.Button("Refresh", size="sm")
+                        clear_thoughts_btn = gr.Button("Clear", size="sm")
+                        export_thoughts_btn = gr.Button("Export", size="sm")
+                        why_btn = gr.Button("Why?", size="sm")
+                    reasoning_output = gr.Markdown(visible=False)
+
                 with gr.Row():
                     msg = gr.Textbox(placeholder="Type message...", show_label=False, scale=5)
                     send = gr.Button("Send", variant="primary", scale=1)
@@ -909,6 +1089,23 @@ def create_app():
         # Update mood indicator after each message
         send.click(gui.get_mood_html, outputs=mood_indicator)
         msg.submit(gui.get_mood_html, outputs=mood_indicator)
+
+        # Inner Monologue events (Tool #21)
+        refresh_thoughts_btn.click(gui.get_thoughts_html, outputs=thought_display)
+        refresh_thoughts_btn.click(gui.get_monologue_status, outputs=monologue_status)
+        clear_thoughts_btn.click(gui.clear_thoughts, outputs=thought_display)
+        export_thoughts_btn.click(gui.export_thoughts, outputs=monologue_status)
+        verbosity_slider.change(gui.set_monologue_verbosity, inputs=verbosity_slider, outputs=monologue_status)
+        think_aloud_toggle.change(gui.toggle_think_aloud, inputs=think_aloud_toggle, outputs=monologue_status)
+
+        # Why button shows reasoning chain
+        def show_reasoning():
+            return gr.update(visible=True, value=gui.get_reasoning_chain())
+        why_btn.click(show_reasoning, outputs=reasoning_output)
+
+        # Update thoughts after each message
+        send.click(gui.get_thoughts_html, outputs=thought_display)
+        msg.submit(gui.get_thoughts_html, outputs=thought_display)
 
     return app
 
