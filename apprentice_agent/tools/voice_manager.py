@@ -13,16 +13,31 @@ from typing import Optional
 # Disable triton on Windows
 os.environ.setdefault('TORCHAO_NO_TRITON', '1')
 
-import torch
 import requests
 
+# Torch is optional - only needed for GPU voice features
+try:
+    import torch
+    TORCH_AVAILABLE = True
+except ImportError:
+    torch = None
+    TORCH_AVAILABLE = False
+
 # Handle both package and standalone imports
+# These are also optional since they require torch
 try:
     from .sesame_tts import SesameTTS
     from .personaplex.personaplex_tool import PersonaPlexTool
+    VOICE_MODELS_AVAILABLE = True
 except ImportError:
-    from sesame_tts import SesameTTS
-    from personaplex.personaplex_tool import PersonaPlexTool
+    try:
+        from sesame_tts import SesameTTS
+        from personaplex.personaplex_tool import PersonaPlexTool
+        VOICE_MODELS_AVAILABLE = True
+    except ImportError:
+        SesameTTS = None
+        PersonaPlexTool = None
+        VOICE_MODELS_AVAILABLE = False
 
 
 class VoiceManager:
@@ -44,9 +59,10 @@ class VoiceManager:
         self.name = "voice_manager"
         self.description = "Hybrid voice system manager (Sesame + PersonaPlex)"
         self.current_mode: Optional[str] = None
-        self.sesame = SesameTTS()
-        self.personaplex = PersonaPlexTool()
+        self.sesame = SesameTTS() if SesameTTS else None
+        self.personaplex = PersonaPlexTool() if PersonaPlexTool else None
         self._ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        self.available = VOICE_MODELS_AVAILABLE
 
     def switch_to_pipeline(self) -> dict:
         """Switch to pipeline mode: Whisper STT -> LLM -> Sesame TTS.
@@ -61,7 +77,8 @@ class VoiceManager:
             if self.current_mode == "duplex":
                 print("Stopping PersonaPlex server...")
                 self.personaplex.stop_server()
-                torch.cuda.empty_cache()
+                if TORCH_AVAILABLE and torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
             # Load Sesame
             print("Loading Sesame CSM 1B...")
@@ -102,7 +119,8 @@ class VoiceManager:
 
             # Unload Ollama models to free VRAM (PersonaPlex needs full 8GB)
             self._unload_ollama_models()
-            torch.cuda.empty_cache()
+            if TORCH_AVAILABLE and torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
             # Start PersonaPlex server
             print("Starting PersonaPlex server...")
@@ -235,7 +253,7 @@ class VoiceManager:
                 results.append(f"Sesame: {result.get('message', 'unloaded')}")
 
             # Clear CUDA cache
-            if torch.cuda.is_available():
+            if TORCH_AVAILABLE and torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
             self.current_mode = None
@@ -259,7 +277,7 @@ class VoiceManager:
             vram_free = "N/A"
             vram_total = "N/A"
 
-            if torch.cuda.is_available():
+            if TORCH_AVAILABLE and torch.cuda.is_available():
                 free, total = torch.cuda.mem_get_info()
                 vram_free = f"{free / 1024**3:.1f}GB"
                 vram_total = f"{total / 1024**3:.1f}GB"

@@ -18,7 +18,14 @@ from .marketplace import MarketplaceTool
 from .regex_builder import RegexBuilderTool
 from .git_tool import GitTool
 from .personaplex import PersonaPlexTool
-from .sesame_tts import SesameTTS
+# SesameTTS requires torch - make import optional
+try:
+    from .sesame_tts import SesameTTS
+    SESAME_AVAILABLE = True
+except ImportError:
+    SesameTTS = None
+    SESAME_AVAILABLE = False
+
 from .voice_manager import VoiceManager, voice_manager
 from .clawdbot import ClawdbotTool, clawdbot, send_message as clawdbot_send
 from .evoemo import EvoEmoTool, evoemo, analyze_emotion, get_current_mood, get_mood_emoji
@@ -66,6 +73,7 @@ __all__ = [
     "GitTool",
     "PersonaPlexTool",
     "SesameTTS",
+    "SESAME_AVAILABLE",
     "VoiceManager",
     "voice_manager",
     "ClawdbotTool",
