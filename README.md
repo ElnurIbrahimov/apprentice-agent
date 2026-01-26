@@ -4,11 +4,12 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 
 ## Features
 
-- **21 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, Clawdbot messaging, EvoEmo emotional tracking, Inner Monologue, and more
+- **22 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, Clawdbot messaging, EvoEmo emotional tracking, Inner Monologue, Knowledge Graph Memory, and more
 - **5-Model Routing** - Automatically selects the best model for each task type (including FluxMind for calibrated reasoning)
 - **Observe-Plan-Act-Evaluate-Remember Loop** - Structured reasoning cycle for achieving goals
 - **Fast-Path Responses** - Instant replies for conversational queries without full agent loop
 - **Long-Term Memory** - ChromaDB-powered memory system for learning from past experiences
+- **Knowledge Graph** - Relationship-based memory with semantic understanding (nodes, edges, paths)
 - **Dream Mode** - Memory consolidation and pattern analysis from metacognition logs
 - **Voice Interface** - Whisper STT + Sesame CSM 1B TTS (human-quality) or pyttsx3 fallback
 - **Confidence Scoring** - Each action includes confidence levels for transparency
@@ -194,6 +195,7 @@ Opens at `http://127.0.0.1:7860` with:
 | `clawdbot` | Send/receive messages via WhatsApp, Telegram, Discord | `send "Hello" to +1234567890` |
 | `evoemo` | Emotional state tracking and adaptive responses | `my mood` or `mood history` |
 | `inner_monologue` | Real-time thought visualization and Think Aloud | `show thoughts` or `why did you do that?` |
+| `knowledge_graph` | Relationship-based memory with semantic understanding | `what do you know about X?` |
 
 ### Code Executor Safety
 
@@ -767,6 +769,119 @@ The Inner Monologue is automatically integrated into the agent's OBSERVE → PLA
 | EVALUATE | `reflect` - Result assessment |
 | EVALUATE | `eureka` or `uncertain` - Confidence-based |
 
+### Knowledge Graph (Relationship Memory)
+
+The Knowledge Graph provides semantic memory that stores entities and relationships, allowing Aura to answer questions like "what do you know about X?" and "how is X related to Y?"
+
+| Method | Description |
+|--------|-------------|
+| `add_node(type, label, properties)` | Add entity/concept to graph |
+| `add_edge(source, target, type)` | Create relationship |
+| `find_nodes(query, type)` | Search for nodes |
+| `get_related(node_id, depth)` | Get neighborhood |
+| `find_path(source, target)` | Find connection path |
+| `query(question)` | Natural language graph query |
+| `consolidate()` | Dream mode: merge similar, prune weak |
+| `get_stats()` | Graph statistics |
+
+**Node Types (10):**
+
+| Type | Icon | Description |
+|------|------|-------------|
+| `concept` | 💡 | Ideas, topics, domains |
+| `entity` | 📌 | Specific things |
+| `person` | 👤 | People |
+| `project` | 📁 | Projects |
+| `tool` | 🔧 | Aura's tools |
+| `event` | 📅 | Things that happened |
+| `emotion` | 💚 | Emotional associations |
+| `skill` | ⚡ | Learned capabilities |
+| `location` | 📍 | Places |
+| `file` | 📄 | Files |
+
+**Edge Types (16):**
+
+`relates_to`, `is_a`, `part_of`, `causes`, `solves`, `created_by`, `uses`, `triggers`, `learned_from`, `preceded_by`, `followed_by`, `conflicts_with`, `strengthens`, `weakens`, `knows`, `works_on`, `located_at`
+
+**Example - Using Knowledge Graph:**
+
+```python
+from apprentice_agent.tools.knowledge_graph import get_knowledge_graph
+
+kg = get_knowledge_graph()
+
+# Add nodes
+aura = kg.add_node("entity", "Aura", {"role": "AI assistant"})
+python = kg.add_node("concept", "Python", {"type": "language"})
+
+# Add relationship
+kg.add_edge(aura.id, python.id, "knows", weight=0.9)
+
+# Query
+results = kg.query("what do you know about Aura?")
+# → [💡 Aura [100%], 🔧 web_search [80%], ...]
+
+# Find path
+path = kg.find_path("Aura", "Python")
+# → Aura --knows--> Python
+```
+
+**Natural Language:**
+```
+"what do you know about X?"     → Search for X and related concepts
+"how is X related to Y?"        → Find connection path
+"remember that X uses Y"        → Add relationship
+"show graph stats"              → Display node/edge counts
+"consolidate memory"            → Run dream mode optimization
+```
+
+**GUI Integration:**
+
+The Aura GUI includes a Knowledge Graph panel with:
+- Interactive vis.js graph visualization
+- Search and center on node
+- Depth slider for neighborhood expansion
+- Add Knowledge form (type, label, related to)
+- Find Path between concepts
+- Consolidate button for dream mode
+
+**Persistence:**
+
+- Nodes stored in `data/knowledge_graph/nodes.jsonl`
+- Edges stored in `data/knowledge_graph/edges.jsonl`
+- Stats in `data/knowledge_graph/stats.json`
+- Append-only format for durability
+
+**Hybrid Memory:**
+
+The Knowledge Graph integrates with ChromaDB for hybrid retrieval:
+
+```python
+from apprentice_agent.tools.hybrid_memory import create_hybrid_memory
+
+memory = create_hybrid_memory(chromadb=my_chromadb)
+
+# Store with relationships
+memory.remember("Aura is an AI assistant", relations=[
+    {"target": "Elnur", "type": "created_by"}
+])
+
+# Recall with both vector search and graph traversal
+results = memory.recall("AI assistant", use_graph=True, use_vectors=True)
+```
+
+**Seeding Initial Knowledge:**
+
+```python
+from apprentice_agent.tools.knowledge_graph import get_knowledge_graph, seed_initial_knowledge
+
+kg = get_knowledge_graph()
+result = seed_initial_knowledge(kg)
+# → {"nodes_created": 18, "edges_created": 15, "status": "seeded"}
+```
+
+This seeds core knowledge about Aura, Elnur, tools, and foundational concepts.
+
 ## Configuration
 
 Edit `apprentice_agent/config.py` to customize:
@@ -829,6 +944,9 @@ apprentice-agent/
         ├── evoemo.py         # Emotional state detection and tracking
         ├── evoemo_prompts.py # Adaptive tone modifiers for emotions
         ├── inner_monologue.py # Real-time thought visualization and Think Aloud
+        ├── knowledge_graph.py # Relationship-based memory with NetworkX
+        ├── kg_extractor.py   # Knowledge extraction from text
+        ├── hybrid_memory.py  # Combined vector + graph memory
         └── custom/           # Auto-generated custom tools
 ```
 

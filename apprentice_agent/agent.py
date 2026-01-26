@@ -11,7 +11,7 @@ from .identity import load_identity, get_identity_prompt, detect_name_change, de
 from .memory import MemorySystem
 from .metacognition import MetacognitionLogger
 from .config import Config
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, build_adaptive_system_prompt, get_monologue
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, build_adaptive_system_prompt, get_monologue, KnowledgeGraphTool, get_knowledge_graph
 
 
 class AgentPhase(Enum):
@@ -63,7 +63,8 @@ class ApprenticeAgent:
             "git": GitTool(),
             "clawdbot": ClawdbotTool(),
             "evoemo": EvoEmoTool(),
-            "inner_monologue": get_monologue()
+            "inner_monologue": get_monologue(),
+            "knowledge_graph": get_knowledge_graph()
         }
         # Connect inner monologue to EvoEmo for emotional awareness
         self.monologue = self.tools["inner_monologue"]
@@ -527,6 +528,24 @@ Guidelines:
                     "success": True,
                     "confidence": 100,
                     "progress": monologue_response
+                },
+                "history": []
+            }
+
+        # Check for Knowledge Graph commands - handle directly
+        kg_response = self._handle_knowledge_graph_command(goal)
+        if kg_response:
+            return {
+                "goal": goal,
+                "completed": True,
+                "iterations": 0,
+                "fast_path": True,
+                "kg_direct": True,
+                "response": kg_response,
+                "final_evaluation": {
+                    "success": True,
+                    "confidence": 100,
+                    "progress": kg_response
                 },
                 "history": []
             }
@@ -2123,6 +2142,85 @@ Output ONLY the JSON object, no other text."""
                 return result["reasoning_chain"]
             if "message" in result:
                 return result["message"]
+            return str(result)
+
+        return result.get("error", "Unknown error")
+
+    def _detect_knowledge_graph_action(self, goal: str) -> Optional[Tuple[str, str]]:
+        """Detect knowledge graph commands in user goals."""
+        goal_lower = goal.lower()
+
+        kg_keywords = [
+            'knowledge graph', 'show graph', 'what do you know about',
+            'how is', 'related to', 'connected to', 'find path',
+            'show knowledge', 'graph memory', 'what have you learned',
+            'consolidate memory', 'forget about'
+        ]
+
+        if any(kw in goal_lower for kw in kg_keywords):
+            print(f"[KG] Detected knowledge graph action in: {goal[:50]}...")
+            return ("knowledge_graph", goal)
+
+        return None
+
+    def _handle_knowledge_graph_command(self, message: str) -> Optional[str]:
+        """Handle knowledge graph commands directly, bypassing the LLM.
+
+        Args:
+            message: The user's message
+
+        Returns:
+            Formatted result string if KG command, None otherwise
+        """
+        msg_lower = message.lower()
+
+        kg_keywords = [
+            'what do you know about', 'knowledge graph', 'show graph',
+            'how is', 'related to', 'connected to', 'find path between',
+            'what have you learned', 'consolidate memory', 'graph stats'
+        ]
+
+        if not any(kw in msg_lower for kw in kg_keywords):
+            return None
+
+        if "knowledge_graph" not in self.tools:
+            return "Knowledge graph not available."
+
+        kg = self.tools["knowledge_graph"]
+
+        # Handle specific patterns
+        if "what do you know about" in msg_lower:
+            topic = msg_lower.split("what do you know about")[-1].strip().rstrip("?")
+            result = kg.execute(f"query {topic}")
+            if result.get("success") and result.get("results"):
+                return "Here's what I know:\n" + "\n".join(result["results"])
+            return f"I don't have much knowledge about '{topic}' yet."
+
+        if "how is" in msg_lower and "related to" in msg_lower:
+            # Extract "how is X related to Y"
+            parts = msg_lower.replace("?", "").split("related to")
+            if len(parts) == 2:
+                source = parts[0].replace("how is", "").strip()
+                target = parts[1].strip()
+                result = kg.execute(f"path {source} to {target}")
+                if result.get("success") and result.get("path"):
+                    return f"Connection: {result['path']}"
+                return f"No direct connection found between '{source}' and '{target}'."
+
+        if "consolidate memory" in msg_lower:
+            result = kg.execute("consolidate")
+            return f"Memory consolidated: {result.get('merged_nodes', 0)} nodes merged, {result.get('pruned_edges', 0)} edges pruned."
+
+        if "graph stats" in msg_lower or "knowledge graph" in msg_lower:
+            result = kg.execute("stats")
+            if result.get("success"):
+                return f"Knowledge Graph: {result['total_nodes']} nodes, {result['total_edges']} edges, {result['clusters']} clusters"
+
+        # Generic query
+        result = kg.execute(message)
+        if result.get("success"):
+            if result.get("results"):
+                return "\n".join(result["results"])
             return str(result)
 
         return result.get("error", "Unknown error")

@@ -24,6 +24,9 @@ from .clawdbot import ClawdbotTool, clawdbot, send_message as clawdbot_send
 from .evoemo import EvoEmoTool, evoemo, analyze_emotion, get_current_mood, get_mood_emoji
 from .evoemo_prompts import get_tone_modifier, get_response_style, build_adaptive_system_prompt
 from .inner_monologue import InnerMonologueTool, get_monologue, THOUGHT_TYPES, THOUGHT_ICONS
+from .knowledge_graph import KnowledgeGraphTool, get_knowledge_graph, seed_initial_knowledge, Node, Edge, NODE_TYPES, EDGE_TYPES
+from .kg_extractor import KnowledgeExtractor, create_extractor
+from .hybrid_memory import HybridMemory, create_hybrid_memory, MemoryResult
 
 # Import FluxMind from external tools directory
 import sys
@@ -80,4 +83,17 @@ __all__ = [
     "get_monologue",
     "THOUGHT_TYPES",
     "THOUGHT_ICONS",
+    # Knowledge Graph
+    "KnowledgeGraphTool",
+    "get_knowledge_graph",
+    "seed_initial_knowledge",
+    "Node",
+    "Edge",
+    "NODE_TYPES",
+    "EDGE_TYPES",
+    "KnowledgeExtractor",
+    "create_extractor",
+    "HybridMemory",
+    "create_hybrid_memory",
+    "MemoryResult",
 ]

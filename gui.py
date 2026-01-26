@@ -942,6 +942,195 @@ class AuraGUI:
             return f"Error: {e}"
         return "Monologue not available"
 
+    # =========================================================================
+    # KNOWLEDGE GRAPH - Graph Memory Visualization (Tool #22)
+    # =========================================================================
+
+    def get_knowledge_graph_html(self, center_node: str = "", depth: int = 2) -> str:
+        """Generate vis.js graph visualization."""
+        try:
+            agent = self._get_agent()
+            if "knowledge_graph" not in agent.tools:
+                return '<div style="color: #64748b;">Knowledge graph not available</div>'
+
+            kg = agent.tools["knowledge_graph"]
+
+            # Get nodes and edges to display
+            if center_node and center_node.strip():
+                related = kg.get_related(center_node.strip(), depth=depth, min_weight=0.2)
+                nodes = related.get("nodes", [])
+                edges = related.get("edges", [])
+            else:
+                nodes = kg.get_recent_nodes(limit=30)
+                # Get edges between these nodes
+                node_ids = {n.id for n in nodes}
+                edges = []
+                for edge in kg._edges.values():
+                    if edge.source_id in node_ids and edge.target_id in node_ids:
+                        edges.append(edge)
+
+            if not nodes:
+                return '''<div style="color: #64748b; padding: 20px; text-align: center;">
+                    No nodes in knowledge graph yet. Start chatting to build knowledge!
+                </div>'''
+
+            # Build vis.js data
+            import json
+            nodes_js = []
+            node_colors = {
+                "concept": "#00d9ff",
+                "entity": "#ff6b6b",
+                "project": "#4ecdc4",
+                "tool": "#ffe66d",
+                "person": "#95e1d3",
+                "emotion": "#f38181",
+                "event": "#aa96da",
+                "skill": "#fcbad3",
+                "location": "#a8d8ea",
+                "file": "#dfe6e9",
+            }
+
+            for node in nodes:
+                color = node_colors.get(node.type, "#888888")
+                icon = {
+                    "concept": "\U0001F4A1",
+                    "entity": "\U0001F4CC",
+                    "project": "\U0001F4C1",
+                    "tool": "\U0001F527",
+                    "person": "\U0001F464",
+                    "emotion": "\U0001F49A",
+                    "event": "\U0001F4C5",
+                    "skill": "\u26A1",
+                    "location": "\U0001F4CD",
+                    "file": "\U0001F4C4",
+                }.get(node.type, "\U0001F4AD")
+
+                nodes_js.append({
+                    "id": node.id,
+                    "label": f"{icon} {node.label[:20]}",
+                    "title": f"{node.type}: {node.label}\\nConfidence: {int(node.confidence * 100)}%",
+                    "color": color,
+                    "shape": "dot",
+                    "size": 15 + (node.access_count * 2),
+                })
+
+            edges_js = []
+            for edge in edges:
+                edges_js.append({
+                    "from": edge.source_id,
+                    "to": edge.target_id,
+                    "label": edge.type,
+                    "width": max(1, edge.weight * 3),
+                    "arrows": "to",
+                    "color": {"opacity": 0.6 + edge.weight * 0.4},
+                })
+
+            return f'''
+            <div id="kg-graph" style="height: 350px; border: 1px solid #334155; border-radius: 8px; background: #1e293b;"></div>
+            <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+            <script>
+                (function() {{
+                    var nodes = new vis.DataSet({json.dumps(nodes_js)});
+                    var edges = new vis.DataSet({json.dumps(edges_js)});
+                    var container = document.getElementById('kg-graph');
+                    if (!container) return;
+                    var data = {{ nodes: nodes, edges: edges }};
+                    var options = {{
+                        nodes: {{
+                            font: {{ color: '#fff', size: 12 }},
+                            borderWidth: 2,
+                        }},
+                        edges: {{
+                            font: {{ color: '#94a3b8', size: 10, align: 'middle' }},
+                            smooth: {{ type: 'curvedCW', roundness: 0.2 }},
+                        }},
+                        physics: {{
+                            stabilization: {{ iterations: 100 }},
+                            barnesHut: {{ gravitationalConstant: -2000, springLength: 100 }}
+                        }},
+                        interaction: {{
+                            hover: true,
+                            tooltipDelay: 200,
+                        }}
+                    }};
+                    new vis.Network(container, data, options);
+                }})();
+            </script>
+            '''
+        except Exception as e:
+            return f'<div style="color: #ef4444;">Error: {str(e)[:100]}</div>'
+
+    def get_kg_stats(self) -> str:
+        """Get knowledge graph statistics."""
+        try:
+            agent = self._get_agent()
+            if "knowledge_graph" in agent.tools:
+                kg = agent.tools["knowledge_graph"]
+                stats = kg.get_stats()
+                return f"**Nodes:** {stats['total_nodes']} | **Edges:** {stats['total_edges']} | **Clusters:** {stats['clusters']} | **Avg Confidence:** {stats['avg_confidence']}"
+        except Exception as e:
+            return f"Error: {e}"
+        return "Stats unavailable"
+
+    def kg_search(self, query: str) -> str:
+        """Search the knowledge graph."""
+        try:
+            agent = self._get_agent()
+            if "knowledge_graph" in agent.tools:
+                kg = agent.tools["knowledge_graph"]
+                nodes = kg.find_nodes(query, limit=10)
+                if not nodes:
+                    return "No matching nodes found."
+                lines = []
+                for node in nodes:
+                    lines.append(f"- {node.format_display()}")
+                return "\n".join(lines)
+        except Exception as e:
+            return f"Error: {e}"
+        return "Search unavailable"
+
+    def kg_find_path(self, source: str, target: str) -> str:
+        """Find path between two concepts."""
+        try:
+            agent = self._get_agent()
+            if "knowledge_graph" in agent.tools:
+                kg = agent.tools["knowledge_graph"]
+                path = kg.find_path(source.strip(), target.strip())
+                if not path:
+                    return f"No path found between '{source}' and '{target}'"
+                path_parts = []
+                for n1, edge, n2 in path:
+                    path_parts.append(f"{n1.label} --{edge.type}--> {n2.label}")
+                return " | ".join(path_parts)
+        except Exception as e:
+            return f"Error: {e}"
+        return "Path search unavailable"
+
+    def kg_add_node(self, node_type: str, label: str) -> str:
+        """Add a node to the knowledge graph."""
+        try:
+            agent = self._get_agent()
+            if "knowledge_graph" in agent.tools:
+                kg = agent.tools["knowledge_graph"]
+                node = kg.add_node(node_type, label, source="gui")
+                return f"Added: {node.format_display()}"
+        except Exception as e:
+            return f"Error: {e}"
+        return "Add node unavailable"
+
+    def kg_consolidate(self) -> str:
+        """Run knowledge graph consolidation."""
+        try:
+            agent = self._get_agent()
+            if "knowledge_graph" in agent.tools:
+                kg = agent.tools["knowledge_graph"]
+                result = kg.consolidate()
+                kg.save()
+                return f"Consolidated: {result['merged_nodes']} merged, {result['pruned_edges']} edges pruned"
+        except Exception as e:
+            return f"Error: {e}"
+        return "Consolidation unavailable"
+
 
 # ============================================================================
 # CREATE APP
@@ -1050,6 +1239,48 @@ def create_app():
                         why_btn = gr.Button("Why?", size="sm")
                     reasoning_output = gr.Markdown(visible=False)
 
+                # Knowledge Graph Panel (Tool #22)
+                with gr.Accordion("\U0001F578\uFE0F Knowledge Graph", open=False) as kg_panel:
+                    kg_graph_html = gr.HTML(
+                        value=gui.get_knowledge_graph_html(),
+                        elem_id="knowledge-graph-container"
+                    )
+                    kg_stats = gr.Markdown(gui.get_kg_stats())
+
+                    with gr.Row():
+                        kg_search_input = gr.Textbox(
+                            label="Search/Center Node",
+                            placeholder="e.g., FluxMind, Python...",
+                            scale=3
+                        )
+                        kg_depth_slider = gr.Slider(
+                            minimum=1, maximum=4, step=1, value=2,
+                            label="Depth",
+                            scale=1
+                        )
+                    with gr.Row():
+                        kg_refresh_btn = gr.Button("\U0001F504 Refresh", size="sm")
+                        kg_consolidate_btn = gr.Button("\U0001F9F9 Consolidate", size="sm")
+
+                    with gr.Accordion("Add Knowledge", open=False):
+                        with gr.Row():
+                            kg_node_type = gr.Dropdown(
+                                choices=["concept", "entity", "person", "project", "tool", "event", "skill", "location", "file"],
+                                value="concept",
+                                label="Type",
+                                scale=1
+                            )
+                            kg_node_label = gr.Textbox(label="Label", scale=2)
+                            kg_add_btn = gr.Button("Add", size="sm", scale=1)
+                        kg_add_result = gr.Markdown("")
+
+                    with gr.Accordion("Find Path", open=False):
+                        with gr.Row():
+                            kg_path_source = gr.Textbox(label="From", scale=1)
+                            kg_path_target = gr.Textbox(label="To", scale=1)
+                            kg_path_btn = gr.Button("Find", size="sm")
+                        kg_path_result = gr.Markdown("")
+
                 with gr.Row():
                     msg = gr.Textbox(placeholder="Type message...", show_label=False, scale=5)
                     send = gr.Button("Send", variant="primary", scale=1)
@@ -1106,6 +1337,20 @@ def create_app():
         # Update thoughts after each message
         send.click(gui.get_thoughts_html, outputs=thought_display)
         msg.submit(gui.get_thoughts_html, outputs=thought_display)
+
+        # Knowledge Graph events (Tool #22)
+        def refresh_kg(search_query, depth):
+            return gui.get_knowledge_graph_html(search_query, int(depth))
+
+        kg_refresh_btn.click(refresh_kg, inputs=[kg_search_input, kg_depth_slider], outputs=kg_graph_html)
+        kg_refresh_btn.click(gui.get_kg_stats, outputs=kg_stats)
+        kg_search_input.submit(refresh_kg, inputs=[kg_search_input, kg_depth_slider], outputs=kg_graph_html)
+        kg_consolidate_btn.click(gui.kg_consolidate, outputs=kg_stats)
+        kg_add_btn.click(gui.kg_add_node, inputs=[kg_node_type, kg_node_label], outputs=kg_add_result)
+        kg_path_btn.click(gui.kg_find_path, inputs=[kg_path_source, kg_path_target], outputs=kg_path_result)
+
+        # Update knowledge graph after messages (learn from conversation)
+        send.click(lambda: gui.get_knowledge_graph_html("", 2), outputs=kg_graph_html)
 
     return app
 
