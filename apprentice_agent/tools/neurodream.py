@@ -333,12 +333,23 @@ class NeuroDreamEngine:
 
         start_time = time.time()
 
-        # Get recent memories from ChromaDB
-        recent_memories = self._get_recent_memories(hours=24)
+        # Get recent memories from ChromaDB (with timeout protection)
+        try:
+            recent_memories = self._get_recent_memories(hours=24)
+        except Exception as e:
+            print(f"[NeuroDream] Error getting memories: {e}")
+            recent_memories = []
+
         results["memories_replayed"] = len(recent_memories)
 
-        # Replay and strengthen in Knowledge Graph
-        for memory in recent_memories:
+        # Quick return if no memories to process
+        if not recent_memories:
+            results["duration_seconds"] = time.time() - start_time
+            self._log_dream("light", "Light sleep: No recent memories to consolidate.")
+            return results
+
+        # Replay and strengthen in Knowledge Graph (limit to 50 for speed)
+        for memory in recent_memories[:50]:
             if self._interrupt_flag.is_set():
                 break
 
@@ -346,8 +357,8 @@ class NeuroDreamEngine:
             strengthened = self._strengthen_memory_connections(memory)
             results["memories_strengthened"] += strengthened
 
-            # Small delay to prevent resource hogging
-            time.sleep(0.1)
+            # Minimal delay
+            time.sleep(0.01)
 
         results["duration_seconds"] = time.time() - start_time
 
@@ -377,42 +388,61 @@ class NeuroDreamEngine:
         }
 
         start_time = time.time()
+        temporal_patterns = []
+        topical_patterns = []
+        emotional_patterns = []
 
         # Find temporal patterns (when does user ask what)
-        temporal_patterns = self._find_temporal_patterns()
-        results["patterns_found"] += len(temporal_patterns)
+        try:
+            temporal_patterns = self._find_temporal_patterns()
+            results["patterns_found"] += len(temporal_patterns)
+        except Exception as e:
+            print(f"[NeuroDream] Temporal patterns error: {e}")
 
         # Find topical patterns (recurring themes)
         if not self._interrupt_flag.is_set():
-            topical_patterns = self._find_topical_patterns()
-            results["patterns_found"] += len(topical_patterns)
+            try:
+                topical_patterns = self._find_topical_patterns()
+                results["patterns_found"] += len(topical_patterns)
+            except Exception as e:
+                print(f"[NeuroDream] Topical patterns error: {e}")
 
         # Find emotional patterns from EvoEmo
         if not self._interrupt_flag.is_set() and self.evoemo:
-            emotional_patterns = self._find_emotional_patterns()
-            results["patterns_found"] += len(emotional_patterns)
+            try:
+                emotional_patterns = self._find_emotional_patterns()
+                results["patterns_found"] += len(emotional_patterns)
+            except Exception as e:
+                print(f"[NeuroDream] Emotional patterns error: {e}")
 
         # Prune weak edges in Knowledge Graph
         if not self._interrupt_flag.is_set() and self.kg:
-            pruned = self._prune_weak_edges()
-            results["edges_pruned"] = pruned
+            try:
+                pruned = self._prune_weak_edges()
+                results["edges_pruned"] = pruned
+            except Exception as e:
+                print(f"[NeuroDream] Prune edges error: {e}")
 
         # Strengthen frequently used edges
         if not self._interrupt_flag.is_set() and self.kg:
-            strengthened = self._strengthen_frequent_edges()
-            results["edges_strengthened"] = strengthened
+            try:
+                strengthened = self._strengthen_frequent_edges()
+                results["edges_strengthened"] = strengthened
+            except Exception as e:
+                print(f"[NeuroDream] Strengthen edges error: {e}")
 
         # Merge similar nodes
         if not self._interrupt_flag.is_set() and self.kg:
-            merged = self._merge_similar_nodes()
-            results["nodes_merged"] = merged
+            try:
+                merged = self._merge_similar_nodes()
+                results["nodes_merged"] = merged
+            except Exception as e:
+                print(f"[NeuroDream] Merge nodes error: {e}")
 
         results["duration_seconds"] = time.time() - start_time
 
         # Save consolidated patterns
-        all_patterns = temporal_patterns + topical_patterns
-        if self.evoemo:
-            all_patterns += emotional_patterns
+        all_patterns = temporal_patterns + topical_patterns + emotional_patterns
         self._save_consolidated_patterns(all_patterns)
 
         # Log dream thought

@@ -347,12 +347,13 @@ class AuraGUI:
     def __init__(self):
         self.max_iterations = 10
         self.voice_enabled = False
-        self.agent = None
+        # Pre-initialize agent to avoid delay on first use
+        print("Initializing Aura agent...")
+        self.agent = ApprenticeAgent()
+        print("Agent ready!")
 
     def _get_agent(self):
-        """Get or create agent instance."""
-        if self.agent is None:
-            self.agent = ApprenticeAgent()
+        """Get agent instance (already initialized)."""
         return self.agent
 
     def _check_fluxmind(self) -> dict:
