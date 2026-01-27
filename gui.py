@@ -357,15 +357,36 @@ class AuraGUI:
         return self.agent
 
     def _check_fluxmind(self) -> dict:
+        """Check FluxMind status - load lazily if needed."""
         try:
-            from apprentice_agent.tools import FluxMindTool, FLUXMIND_AVAILABLE
-            if FLUXMIND_AVAILABLE:
-                models_path = Path(__file__).parent / "models" / "fluxmind_v0751.pt"
-                tool = FluxMindTool(str(models_path))
+            agent = self._get_agent()
+
+            # Check if already loaded in agent
+            if "fluxmind" in agent.tools:
+                tool = agent.tools["fluxmind"]
                 if tool.is_available():
                     return {"available": True, "version": "0.75.1"}
+
+            # Try to load FluxMind lazily
+            from apprentice_agent.tools import FluxMindTool, FLUXMIND_AVAILABLE
+
+            if FLUXMIND_AVAILABLE and "fluxmind" not in agent.tools:
+                # Try multiple possible paths
+                possible_paths = [
+                    Path(__file__).parent / "models" / "fluxmind_v0751.pt",
+                    Path("models/fluxmind_v0751.pt"),
+                    Path(__file__).parent.parent / "models" / "fluxmind_v0751.pt",
+                ]
+                for models_path in possible_paths:
+                    if models_path.exists():
+                        agent.tools["fluxmind"] = FluxMindTool(str(models_path))
+                        if agent.tools["fluxmind"].is_available():
+                            return {"available": True, "version": "0.75.1"}
+                        break
+
             return {"available": False}
-        except:
+        except Exception as e:
+            print(f"[FluxMind] Check error: {e}")
             return {"available": False}
 
     def get_status_html(self) -> str:
