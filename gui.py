@@ -1249,14 +1249,22 @@ class AuraGUI:
 </div>'''
 
     def start_sleep(self) -> str:
-        """Manually trigger sleep cycle."""
+        """Manually trigger sleep cycle (non-blocking)."""
         try:
             agent = self._get_agent()
             if hasattr(agent, 'neurodream') and agent.neurodream:
+                # Just trigger sleep and return immediately - don't wait
                 result = agent.neurodream.enter_sleep(trigger="manual_gui")
                 if result.get("success"):
-                    return self.get_neurodream_status_html()
+                    session_id = result.get("session_id", "")
+                    return f'''<div style="display: flex; align-items: center; gap: 8px;">
+<span style="width: 10px; height: 10px; background: #3b82f6; border-radius: 50%; animation: pulse 1s infinite;"></span>
+<span style="color: #60a5fa;">😴 Sleeping</span>
+<span style="color: #94a3b8; font-size: 12px;">Session: {session_id[:20]}...</span>
+</div>
+<style>@keyframes pulse {{ 0%, 100% {{ opacity: 1; }} 50% {{ opacity: 0.5; }} }}</style>'''
                 return f"Error: {result.get('error', 'Failed to start')}"
+            return "NeuroDream not available"
         except Exception as e:
             return f"Error: {e}"
 

@@ -525,8 +525,9 @@ class NeuroDreamEngine:
         # Set interrupt flag to stop any running phases
         self._interrupt_flag.set()
 
-        # Wait for sleep thread to finish
-        if self._sleep_thread and self._sleep_thread.is_alive():
+        # Wait for sleep thread to finish (but not if we're calling from within the thread)
+        current_thread = threading.current_thread()
+        if self._sleep_thread and self._sleep_thread.is_alive() and self._sleep_thread != current_thread:
             self._sleep_thread.join(timeout=5)
 
         self._set_phase(SleepPhase.WAKING)
@@ -1129,6 +1130,15 @@ class NeuroDreamEngine:
         return patterns[-n:]
 
     # ==================== Utilities ====================
+
+    def _log_dream(self, phase: str, message: str):
+        """Log dream activity to inner monologue."""
+        if self.monologue:
+            try:
+                self.monologue.think("reflect", f"[{phase}] {message}", confidence=70)
+            except:
+                pass
+        print(f"[NeuroDream] {phase}: {message}")
 
     def _get_stopwords(self) -> set:
         """Get common stopwords to filter."""
