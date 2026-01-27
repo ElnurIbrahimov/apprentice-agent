@@ -4,7 +4,7 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 
 ## Features
 
-- **23 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, Clawdbot messaging, EvoEmo emotional tracking, Inner Monologue, Knowledge Graph Memory, Metacognitive Guardian, and more
+- **24 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, Clawdbot messaging, EvoEmo emotional tracking, Inner Monologue, Knowledge Graph Memory, Metacognitive Guardian, NeuroDream sleep/dream memory consolidation, and more
 - **5-Model Routing** - Automatically selects the best model for each task type (including FluxMind for calibrated reasoning)
 - **Observe-Plan-Act-Evaluate-Remember Loop** - Structured reasoning cycle for achieving goals
 - **Fast-Path Responses** - Instant replies for conversational queries without full agent loop
@@ -987,6 +987,116 @@ The Guardian learns from outcomes:
 | Knowledge Graph | Checks for knowledge gaps |
 | FluxMind | Leverages calibrated confidence |
 
+### NeuroDream (Sleep/Dream Memory Consolidation)
+
+NeuroDream is a sleep/dream memory consolidation system inspired by biological sleep cycles and the research paper "NeuroDream: A Biologically-Inspired Sleep Architecture for Lifelong Learning" (which showed 38% reduction in catastrophic forgetting and 17.6% increase in zero-shot transfer).
+
+**Sleep Phases:**
+
+| Phase | Duration | Purpose |
+|-------|----------|---------|
+| Light | 30-60s | Recent memory replay, working memory transfer |
+| Deep | 60-120s | Pattern abstraction, knowledge graph strengthening |
+| REM | 30-90s | Creative synthesis, novel connections, insight generation |
+
+**Triggers:**
+
+- **Scheduled**: Configurable intervals (default: every 4 hours)
+- **Idle Detection**: When user is inactive (default: 30 minutes)
+- **Manual**: User-initiated via commands
+- **Memory Threshold**: When memory buffer reaches capacity
+
+**Commands:**
+
+```
+# Enter sleep mode
+"go to sleep"
+"sleep now"
+"enter sleep mode"
+
+# Check sleep status
+"dream status"
+"sleep status"
+"neurodream status"
+
+# Wake up (interrupt sleep)
+"wake up"
+"stop sleeping"
+
+# View dream journal
+"dream journal"
+"show dreams"
+"recent dreams"
+
+# View insights
+"dream insights"
+"show insights"
+
+# View consolidated patterns
+"sleep patterns"
+"consolidated patterns"
+```
+
+**Example Session:**
+
+```
+User: go to sleep
+Aura: Entering sleep mode...
+
+  Phase 1: LIGHT SLEEP
+  - Replaying 15 recent memories
+  - Strengthening 8 connections
+
+  Phase 2: DEEP SLEEP
+  - Abstracting patterns from 47 memories
+  - Found 3 new patterns
+  - Consolidated 12 memory clusters
+
+  Phase 3: REM SLEEP
+  - Creative synthesis in progress
+  - Generated 2 novel insights
+  - Connected 4 distant concepts
+
+Sleep cycle complete!
+Duration: 3m 24s
+Insights generated: 2
+Patterns consolidated: 3
+```
+
+**Safety Features:**
+
+- **Interruptible**: User activity or commands wake the system
+- **Resource-Limited**: Caps VRAM usage (default: 2GB)
+- **Read-Only Operations**: Only writes to memory stores
+- **Scheduled Downtime**: Respects user activity patterns
+
+**GUI Integration:**
+
+The Aura GUI includes a NeuroDream panel with:
+- Sleep status indicator (Awake/Dreaming with phase)
+- Session and insight counters
+- Sleep Now / Wake Up buttons
+- Dream Journal accordion (recent dream entries)
+- Dream Insights accordion (generated insights)
+- Consolidated Patterns accordion (pattern summaries)
+
+**Storage:**
+
+- Dream journal: `data/neurodream/dream_journal.jsonl`
+- Insights: `data/neurodream/insights.jsonl`
+- Consolidated patterns: `data/neurodream/consolidated/`
+- Session logs: `data/neurodream/sessions/`
+
+**Integration Points:**
+
+| System | Integration |
+|--------|-------------|
+| ChromaDB | Replays and consolidates vector memories |
+| Knowledge Graph | Strengthens edges, finds new paths, abstracts patterns |
+| EvoEmo | Emotional tagging of memories influences consolidation priority |
+| Inner Monologue | Dreams appear as special "dream" thought type |
+| Metacognitive Guardian | Learns from sleep-discovered patterns |
+
 ## Configuration
 
 Edit `apprentice_agent/config.py` to customize:
@@ -1053,6 +1163,7 @@ apprentice-agent/
         ├── kg_extractor.py   # Knowledge extraction from text
         ├── hybrid_memory.py  # Combined vector + graph memory
         ├── metacog_guardian.py # Self-aware failure prediction system
+        ├── neurodream.py     # Sleep/dream memory consolidation system
         └── custom/           # Auto-generated custom tools
 ```
 

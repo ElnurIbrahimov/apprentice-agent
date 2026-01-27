@@ -42,6 +42,16 @@ from .metacog_guardian import (
     FailurePrediction,
     get_guardian
 )
+from .neurodream import (
+    NeuroDreamEngine,
+    SleepPhase,
+    DreamTrigger,
+    DreamInsight,
+    SleepSession,
+    ConsolidatedPattern,
+    get_neurodream,
+    create_neurodream
+)
 
 # Import FluxMind from external tools directory
 import sys
@@ -119,4 +129,13 @@ __all__ = [
     "InterventionType",
     "FailurePrediction",
     "get_guardian",
+    # NeuroDream
+    "NeuroDreamEngine",
+    "SleepPhase",
+    "DreamTrigger",
+    "DreamInsight",
+    "SleepSession",
+    "ConsolidatedPattern",
+    "get_neurodream",
+    "create_neurodream",
 ]

@@ -1211,6 +1211,136 @@ class AuraGUI:
             pass
         return "Feedback unavailable."
 
+    # ========================================================================
+    # NEURODREAM - Sleep/Dream Memory Consolidation (Tool #24)
+    # ========================================================================
+
+    def get_neurodream_status_html(self) -> str:
+        """Get NeuroDream sleep status HTML."""
+        try:
+            agent = self._get_agent()
+            if hasattr(agent, 'neurodream') and agent.neurodream:
+                nd = agent.neurodream
+                status = nd.get_status()
+
+                if status.get("is_sleeping"):
+                    phase = status.get("current_phase", "unknown")
+                    phase_icons = {"light": "🌙", "deep": "💤", "rem": "🌈"}
+                    icon = phase_icons.get(phase, "😴")
+                    return f'''<div style="background: #334155; padding: 12px; border-radius: 8px; margin: 8px 0;">
+<span class="status-online" style="background: #8b5cf6;"></span>
+<strong style="color: #a78bfa;">{icon} Dreaming ({phase.upper()})</strong>
+<div style="color: #94a3b8; font-size: 12px; margin-top: 4px;">Memory consolidation in progress...</div>
+</div>'''
+                else:
+                    sessions = status.get("total_sessions", 0)
+                    insights = status.get("total_insights", 0)
+                    return f'''<div style="background: #334155; padding: 12px; border-radius: 8px; margin: 8px 0;">
+<span class="status-online"></span>
+<strong style="color: #22c55e;">☀️ Awake</strong>
+<div style="color: #94a3b8; font-size: 12px; margin-top: 4px;">{sessions} sessions, {insights} insights</div>
+</div>'''
+        except Exception as e:
+            return f'''<div style="background: #334155; padding: 12px; border-radius: 8px; margin: 8px 0;">
+<span class="status-offline"></span>
+<strong style="color: #ef4444;">NeuroDream Error</strong>
+<div style="color: #94a3b8; font-size: 12px; margin-top: 4px;">{str(e)[:30]}</div>
+</div>'''
+
+    def start_sleep(self) -> str:
+        """Manually trigger sleep cycle."""
+        try:
+            agent = self._get_agent()
+            if hasattr(agent, 'neurodream') and agent.neurodream:
+                result = agent.neurodream.enter_sleep(trigger="manual_gui")
+                if result.get("success"):
+                    return self.get_neurodream_status_html()
+                return f"Error: {result.get('error', 'Failed to start')}"
+        except Exception as e:
+            return f"Error: {e}"
+
+    def wake_up(self) -> str:
+        """Wake up from sleep cycle."""
+        try:
+            agent = self._get_agent()
+            if hasattr(agent, 'neurodream') and agent.neurodream:
+                result = agent.neurodream.wake_up(reason="user_gui")
+                return self.get_neurodream_status_html()
+        except Exception as e:
+            return f"Error: {e}"
+
+    def get_dream_journal_md(self) -> str:
+        """Get recent dream journal entries as markdown."""
+        try:
+            agent = self._get_agent()
+            if hasattr(agent, 'neurodream') and agent.neurodream:
+                entries = agent.neurodream.get_dream_journal(n=5)
+                if not entries:
+                    return "No dreams recorded yet. Try 'go to sleep' to start a sleep cycle."
+
+                lines = []
+                for entry in entries:
+                    phase = entry.get("phase", "unknown")
+                    phase_icons = {"light": "🌙", "deep": "💤", "rem": "🌈"}
+                    icon = phase_icons.get(phase, "💭")
+                    timestamp = entry.get("timestamp", "")[:16]
+                    content = entry.get("content", "")[:100]
+                    lines.append(f"**{icon} {phase.upper()}** ({timestamp})")
+                    lines.append(f"> {content}...")
+                    lines.append("")
+                return "\n".join(lines) if lines else "No dreams yet."
+        except Exception as e:
+            return f"Error: {e}"
+
+    def get_dream_insights_md(self) -> str:
+        """Get dream insights as markdown."""
+        try:
+            agent = self._get_agent()
+            if hasattr(agent, 'neurodream') and agent.neurodream:
+                insights = agent.neurodream.get_insights()
+                if not insights:
+                    return "No insights yet. Sleep cycles generate insights during memory consolidation."
+
+                lines = []
+                for insight in insights[-5:]:
+                    itype = insight.get("type", "pattern")
+                    content = insight.get("content", "")[:80]
+                    confidence = insight.get("confidence", 0)
+                    icon = {"pattern": "🔮", "connection": "🔗", "creative": "💡", "memory": "🧠"}.get(itype, "✨")
+                    lines.append(f"{icon} **{itype.title()}** ({confidence}%): {content}")
+                return "\n".join(lines) if lines else "No insights yet."
+        except Exception as e:
+            return f"Error: {e}"
+
+    def get_sleep_patterns_md(self) -> str:
+        """Get consolidated patterns as markdown."""
+        try:
+            agent = self._get_agent()
+            if hasattr(agent, 'neurodream') and agent.neurodream:
+                patterns = agent.neurodream.get_patterns()
+                if not patterns:
+                    return "No patterns consolidated yet."
+
+                lines = []
+                for p in patterns[-5:]:
+                    name = p.get("pattern_name", "Unknown")
+                    strength = p.get("strength", 0)
+                    memories = p.get("memories_consolidated", 0)
+                    lines.append(f"🔄 **{name}** (strength: {strength:.0%}, {memories} memories)")
+                return "\n".join(lines) if lines else "No patterns yet."
+        except Exception as e:
+            return f"Error: {e}"
+
+    def get_neurodream_stats(self) -> dict:
+        """Get NeuroDream statistics."""
+        try:
+            agent = self._get_agent()
+            if hasattr(agent, 'neurodream') and agent.neurodream:
+                return agent.neurodream.get_status()
+        except Exception:
+            pass
+        return {"total_sessions": 0, "total_insights": 0, "is_sleeping": False}
+
 
 # ============================================================================
 # CREATE APP
@@ -1414,6 +1544,39 @@ def create_app():
                         feedback_unhelpful_btn = gr.Button("\U0001F44E Not Helpful", size="sm")
                         feedback_status = gr.Textbox(value="", show_label=False, interactive=False, scale=2)
 
+                # NeuroDream Panel (Tool #24) - Sleep/Dream Memory Consolidation
+                with gr.Accordion("😴 NeuroDream", open=False) as neurodream_panel:
+                    gr.Markdown("### Sleep/Dream Memory Consolidation")
+
+                    with gr.Row():
+                        neurodream_status = gr.HTML(value=gui.get_neurodream_status_html())
+
+                    with gr.Row():
+                        neurodream_sessions = gr.Number(
+                            label="Sleep Sessions",
+                            value=0,
+                            interactive=False
+                        )
+                        neurodream_insights = gr.Number(
+                            label="Insights Generated",
+                            value=0,
+                            interactive=False
+                        )
+
+                    with gr.Row():
+                        sleep_btn = gr.Button("🌙 Sleep Now", size="sm", variant="primary")
+                        wake_btn = gr.Button("☀️ Wake Up", size="sm")
+                        refresh_neurodream_btn = gr.Button("🔄 Refresh", size="sm")
+
+                    with gr.Accordion("📖 Dream Journal", open=False):
+                        dream_journal_md = gr.Markdown("No dreams recorded yet.")
+
+                    with gr.Accordion("💡 Dream Insights", open=False):
+                        dream_insights_md = gr.Markdown("No insights yet.")
+
+                    with gr.Accordion("🔄 Consolidated Patterns", open=False):
+                        sleep_patterns_md = gr.Markdown("No patterns yet.")
+
                 with gr.Row():
                     msg = gr.Textbox(placeholder="Type message...", show_label=False, scale=5)
                     send = gr.Button("Send", variant="primary", scale=1)
@@ -1527,6 +1690,38 @@ def create_app():
         # Update guardian stats after each message
         send.click(refresh_guardian, outputs=[guardian_interventions, guardian_patterns,
                   guardian_predictions, guardian_thresholds, guardian_predictions_md, guardian_status])
+
+        # NeuroDream events (Tool #24)
+        def refresh_neurodream():
+            stats = gui.get_neurodream_stats()
+            return (
+                stats.get("total_sessions", 0),
+                stats.get("total_insights", 0),
+                gui.get_neurodream_status_html(),
+                gui.get_dream_journal_md(),
+                gui.get_dream_insights_md(),
+                gui.get_sleep_patterns_md()
+            )
+
+        refresh_neurodream_btn.click(
+            refresh_neurodream,
+            outputs=[neurodream_sessions, neurodream_insights, neurodream_status,
+                    dream_journal_md, dream_insights_md, sleep_patterns_md]
+        )
+
+        sleep_btn.click(
+            gui.start_sleep,
+            outputs=[neurodream_status]
+        )
+
+        wake_btn.click(
+            gui.wake_up,
+            outputs=[neurodream_status]
+        )
+
+        # Update neurodream status after messages (may trigger idle sleep)
+        send.click(gui.get_neurodream_status_html, outputs=neurodream_status)
+        msg.submit(gui.get_neurodream_status_html, outputs=neurodream_status)
 
     return app
 

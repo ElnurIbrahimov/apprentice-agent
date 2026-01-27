@@ -11,7 +11,7 @@ from .identity import load_identity, get_identity_prompt, detect_name_change, de
 from .memory import MemorySystem
 from .metacognition import MetacognitionLogger
 from .config import Config
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, build_adaptive_system_prompt, get_monologue, KnowledgeGraphTool, get_knowledge_graph, MetacognitiveGuardian, GuardianConfig
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, build_adaptive_system_prompt, get_monologue, KnowledgeGraphTool, get_knowledge_graph, MetacognitiveGuardian, GuardianConfig, NeuroDreamEngine, SleepPhase
 
 
 class AgentPhase(Enum):
@@ -97,6 +97,17 @@ class ApprenticeAgent:
         )
         self._pending_prediction = None  # Track for outcome recording
         print("[LOADED] Metacognitive Guardian - Failure prediction system")
+
+        # Initialize NeuroDream (Tool #24) - Sleep/Dream Memory Consolidation
+        self.neurodream = NeuroDreamEngine(
+            knowledge_graph=self.tools.get("knowledge_graph"),
+            hybrid_memory=None,  # Will be set if hybrid_memory is available
+            evoemo=self.tools.get("evoemo"),
+            inner_monologue=self.monologue,
+            chromadb=self.memory.collection if hasattr(self.memory, 'collection') else None,
+            idle_threshold_minutes=30
+        )
+        print("[LOADED] NeuroDream - Sleep/dream memory consolidation")
 
     def _load_custom_tools(self) -> None:
         """Load active custom tools from registry."""
@@ -308,7 +319,14 @@ class ApprenticeAgent:
             'reasoning chain', 'what were you thinking',
             'guardian stats', 'guardian status', 'guardian level',
             'set guardian', 'monitoring level', 'show predictions',
-            'failure patterns', 'reset guardian'
+            'failure patterns', 'reset guardian',
+            # NeuroDream keywords (Tool #24)
+            'go to sleep', 'sleep now', 'enter sleep', 'start sleep',
+            'dream status', 'sleep status', 'neurodream status',
+            'wake up', 'stop sleeping', 'interrupt sleep',
+            'dream journal', 'show dreams', 'recent dreams',
+            'dream insights', 'show insights', 'sleep insights',
+            'sleep patterns', 'consolidated patterns'
         ]
 
         # Check if it clearly needs a tool
@@ -486,6 +504,10 @@ Guidelines:
             context: Optional context dictionary
             use_fastpath: Override fast-path behavior (None uses self.use_fastpath)
         """
+        # Record user activity for NeuroDream idle detection
+        if hasattr(self, 'neurodream') and self.neurodream:
+            self.neurodream.record_activity()
+
         # Check for identity updates first
         identity_response = self._check_identity_update(goal)
         if identity_response:
@@ -577,6 +599,24 @@ Guidelines:
                     "success": True,
                     "confidence": 100,
                     "progress": guardian_response
+                },
+                "history": []
+            }
+
+        # Check for NeuroDream commands - handle directly
+        neurodream_response = self._handle_neurodream_command(goal)
+        if neurodream_response:
+            return {
+                "goal": goal,
+                "completed": True,
+                "iterations": 0,
+                "fast_path": True,
+                "neurodream_direct": True,
+                "response": neurodream_response,
+                "final_evaluation": {
+                    "success": True,
+                    "confidence": 100,
+                    "progress": neurodream_response
                 },
                 "history": []
             }
@@ -2376,6 +2416,98 @@ Output ONLY the JSON object, no other text."""
                 user_feedback=feedback_text
             )
             self._pending_prediction = None
+
+    def _handle_neurodream_command(self, message: str) -> Optional[str]:
+        """Handle NeuroDream sleep/dream commands directly.
+
+        Args:
+            message: The user's message
+
+        Returns:
+            Formatted result string if NeuroDream command, None otherwise
+        """
+        msg_lower = message.lower()
+
+        neurodream_keywords = [
+            'go to sleep', 'sleep now', 'start sleeping', 'enter sleep',
+            'dream status', 'sleep status', 'neurodream status',
+            'wake up', 'stop sleeping',
+            'dream journal', 'show dreams', 'recent dreams',
+            'dream insights', 'show insights',
+            'sleep patterns', 'consolidated patterns'
+        ]
+
+        if not any(kw in msg_lower for kw in neurodream_keywords):
+            return None
+
+        if not hasattr(self, 'neurodream') or self.neurodream is None:
+            return "NeuroDream not available."
+
+        # Handle specific patterns
+        if any(kw in msg_lower for kw in ['go to sleep', 'sleep now', 'start sleeping', 'enter sleep']):
+            if self.neurodream.current_phase != SleepPhase.AWAKE:
+                return f"Already in {self.neurodream.current_phase.value} phase."
+            result = self.neurodream.enter_sleep(trigger="manual")
+            if result.get("success"):
+                return "Entering sleep mode... Beginning memory consolidation cycle."
+            return f"Could not enter sleep: {result.get('error', 'Unknown error')}"
+
+        if any(kw in msg_lower for kw in ['dream status', 'sleep status', 'neurodream status']):
+            status = self.neurodream.get_status()
+            phase_emoji = {
+                "awake": "Awake",
+                "light": "Light Sleep",
+                "deep": "Deep Sleep",
+                "rem": "REM Sleep",
+                "waking": "Waking Up"
+            }
+            return (f"**NeuroDream Status**\n"
+                   f"- Phase: {phase_emoji.get(status['phase'], status['phase'])}\n"
+                   f"- Total Sessions: {status['total_sessions']}\n"
+                   f"- Total Insights: {status['total_insights']}\n"
+                   f"- Idle Minutes: {status['idle_minutes']:.1f}\n"
+                   f"- Last Sleep: {status['last_sleep'] or 'Never'}")
+
+        if any(kw in msg_lower for kw in ['wake up', 'stop sleeping']):
+            if self.neurodream.current_phase == SleepPhase.AWAKE:
+                return "Already awake."
+            result = self.neurodream.wake_up(reason="manual")
+            summary = result.get("summary", {})
+            return (f"Waking up...\n"
+                   f"- Phases completed: {', '.join(summary.get('phases_completed', []))}\n"
+                   f"- Insights generated: {summary.get('insights_generated', 0)}\n"
+                   f"- Patterns found: {summary.get('patterns_found', 0)}")
+
+        if any(kw in msg_lower for kw in ['dream journal', 'show dreams', 'recent dreams']):
+            entries = self.neurodream.get_dream_journal(n=5)
+            if not entries:
+                return "No dream journal entries yet."
+            lines = ["**Recent Dream Sessions:**"]
+            for entry in entries[-5:]:
+                phases = ', '.join(entry.get('phases_completed', []))
+                insights = entry.get('insights_generated', 0)
+                lines.append(f"- {entry.get('start_time', 'Unknown')[:16]}: {phases} ({insights} insights)")
+            return '\n'.join(lines)
+
+        if any(kw in msg_lower for kw in ['dream insights', 'show insights']):
+            insights = self.neurodream.get_insights(n=5)
+            if not insights:
+                return "No dream insights generated yet."
+            lines = ["**Recent Dream Insights:**"]
+            for insight in insights[-5:]:
+                lines.append(f"- [{insight.get('insight_type', 'unknown')}] {insight.get('content', '')[:100]}...")
+            return '\n'.join(lines)
+
+        if any(kw in msg_lower for kw in ['sleep patterns', 'consolidated patterns']):
+            patterns = self.neurodream.get_patterns(n=5)
+            if not patterns:
+                return "No patterns consolidated yet."
+            lines = ["**Consolidated Patterns:**"]
+            for pattern in patterns[-5:]:
+                lines.append(f"- [{pattern.get('pattern_type', 'unknown')}] {pattern.get('description', '')[:80]}...")
+            return '\n'.join(lines)
+
+        return None
 
     def _handle_git_command(self, message: str) -> Optional[str]:
         """Handle Git commands directly, bypassing the LLM.
