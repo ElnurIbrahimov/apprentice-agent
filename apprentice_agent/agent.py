@@ -42,30 +42,52 @@ class AgentState:
 class ApprenticeAgent:
     """An AI agent that learns and acts using observe/plan/act/evaluate/remember."""
 
-    def __init__(self):
-        self.brain = OllamaBrain()
+    def __init__(self, fast_init: bool = False):
+        """Initialize the agent.
+
+        Args:
+            fast_init: If True, skip slow initialization (warmup, heavy tools).
+                      Use for GUI where you want fast startup.
+        """
+        # Skip Ollama warmup for fast init
+        self.brain = OllamaBrain(warmup=not fast_init)
         self.memory = MemorySystem()
+
+        # Core lightweight tools (always load)
         self.tools = {
             "filesystem": FileSystemTool(),
             "web_search": WebSearchTool(),
             "code_executor": CodeExecutorTool(),
-            "screenshot": ScreenshotTool(),
-            "vision": VisionTool(),
-            "pdf_reader": PDFReaderTool(),
             "clipboard": ClipboardTool(),
-            "arxiv_search": ArxivSearchTool(),
-            "browser": BrowserTool(),
-            "system_control": SystemControlTool(),
             "notifications": NotificationTool(),
-            "tool_builder": ToolBuilderTool(),
-            "marketplace": MarketplaceTool(),
             "regex_builder": RegexBuilderTool(),
             "git": GitTool(),
-            "clawdbot": ClawdbotTool(),
             "evoemo": EvoEmoTool(),
             "inner_monologue": get_monologue(),
-            "knowledge_graph": get_knowledge_graph()
         }
+
+        # Heavier tools - load lazily or skip for fast init
+        if not fast_init:
+            self.tools.update({
+                "screenshot": ScreenshotTool(),
+                "vision": VisionTool(),
+                "pdf_reader": PDFReaderTool(),
+                "arxiv_search": ArxivSearchTool(),
+                "browser": BrowserTool(),
+                "system_control": SystemControlTool(),
+                "tool_builder": ToolBuilderTool(),
+                "marketplace": MarketplaceTool(),
+                "clawdbot": ClawdbotTool(),
+                "knowledge_graph": get_knowledge_graph()
+            })
+        else:
+            # Placeholder for lazy loading
+            self._lazy_tools = [
+                "screenshot", "vision", "pdf_reader", "arxiv_search",
+                "browser", "system_control", "tool_builder", "marketplace",
+                "clawdbot", "knowledge_graph"
+            ]
+
         # Connect inner monologue to EvoEmo for emotional awareness
         self.monologue = self.tools["inner_monologue"]
         if "evoemo" in self.tools:
@@ -74,8 +96,8 @@ class ApprenticeAgent:
         if Config.PERSONAPLEX_ENABLED:
             self.tools["personaplex"] = PersonaPlexTool()
             print("[LOADED] PersonaPlex - Real-time full-duplex voice (requires HF_TOKEN)")
-        # Add FluxMind if available
-        if FLUXMIND_AVAILABLE:
+        # Add FluxMind if available (skip for fast init)
+        if FLUXMIND_AVAILABLE and not fast_init:
             models_path = Path(__file__).parent.parent / "models" / "fluxmind_v0751.pt"
             self.tools["fluxmind"] = FluxMindTool(str(models_path))
             if self.tools["fluxmind"].is_available():
@@ -87,6 +109,7 @@ class ApprenticeAgent:
         self.identity = load_identity()  # Load agent identity
         self.custom_tool_keywords = {}  # Map of keyword -> tool_name for custom tools
         self._load_custom_tools()  # Load active custom tools
+        self._fast_init = fast_init
 
         # Initialize Metacognitive Guardian (Tool #23)
         self.guardian = MetacognitiveGuardian(
@@ -108,6 +131,35 @@ class ApprenticeAgent:
             idle_threshold_minutes=30
         )
         print("[LOADED] NeuroDream - Sleep/dream memory consolidation")
+
+    def _ensure_tool(self, tool_name: str):
+        """Lazily load a tool if not already loaded."""
+        if tool_name in self.tools:
+            return self.tools[tool_name]
+
+        # Lazy load heavy tools
+        if tool_name == "knowledge_graph":
+            self.tools["knowledge_graph"] = get_knowledge_graph()
+        elif tool_name == "screenshot":
+            self.tools["screenshot"] = ScreenshotTool()
+        elif tool_name == "vision":
+            self.tools["vision"] = VisionTool()
+        elif tool_name == "pdf_reader":
+            self.tools["pdf_reader"] = PDFReaderTool()
+        elif tool_name == "arxiv_search":
+            self.tools["arxiv_search"] = ArxivSearchTool()
+        elif tool_name == "browser":
+            self.tools["browser"] = BrowserTool()
+        elif tool_name == "system_control":
+            self.tools["system_control"] = SystemControlTool()
+        elif tool_name == "tool_builder":
+            self.tools["tool_builder"] = ToolBuilderTool()
+        elif tool_name == "marketplace":
+            self.tools["marketplace"] = MarketplaceTool()
+        elif tool_name == "clawdbot":
+            self.tools["clawdbot"] = ClawdbotTool()
+
+        return self.tools.get(tool_name)
 
     def _load_custom_tools(self) -> None:
         """Load active custom tools from registry."""

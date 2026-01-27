@@ -347,9 +347,9 @@ class AuraGUI:
     def __init__(self):
         self.max_iterations = 10
         self.voice_enabled = False
-        # Pre-initialize agent to avoid delay on first use
-        print("Initializing Aura agent...")
-        self.agent = ApprenticeAgent()
+        # Fast-initialize agent (skip heavy tools like KG, FluxMind)
+        print("Initializing Aura agent (fast mode)...")
+        self.agent = ApprenticeAgent(fast_init=True)
         print("Agent ready!")
 
     def _get_agent(self):
