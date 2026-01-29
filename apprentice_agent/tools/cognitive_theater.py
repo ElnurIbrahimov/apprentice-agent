@@ -327,11 +327,16 @@ DECISION_KEYWORDS = [
     " or ",
     "better to",
     "worth it",
+    "is it worth",
+    "worth learning",
+    "worth using",
     "good idea",
     "bad idea",
     "recommend",
     "trade-off",
     "tradeoff",
+    "advantages",
+    "disadvantages",
 ]
 
 
