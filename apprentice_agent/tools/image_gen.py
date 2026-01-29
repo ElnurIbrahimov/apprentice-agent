@@ -92,8 +92,8 @@ class ImageGenerationTool:
             if self._device == "cuda":
                 try:
                     self._pipeline.enable_attention_slicing()
-                except Exception:
-                    pass  # Not all pipelines support this
+                except AttributeError:
+                    pass  # Not all pipelines support attention slicing
 
             print("Model loaded successfully.")
 
@@ -205,6 +205,59 @@ class ImageGenerationTool:
             results.append(result)
         return results
 
+    def is_loaded(self) -> bool:
+        """Check if the pipeline is loaded.
+
+        Returns:
+            True if pipeline is loaded, False otherwise
+        """
+        return self._pipeline is not None
+
+    def unload(self) -> dict:
+        """Unload the Stable Diffusion pipeline and free VRAM.
+
+        Returns:
+            dict with success status and memory freed info
+        """
+        try:
+            if self._pipeline is None:
+                return {
+                    "success": True,
+                    "message": "Pipeline not loaded, nothing to unload"
+                }
+
+            # Get memory before unload (if CUDA available)
+            memory_before = None
+            if _check_torch():
+                torch = _get_torch()
+                if torch.cuda.is_available():
+                    memory_before = torch.cuda.memory_allocated() / 1024**3
+
+            # Delete the pipeline
+            del self._pipeline
+            self._pipeline = None
+
+            # Clear CUDA cache if available
+            memory_freed = 0
+            if _check_torch():
+                torch = _get_torch()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                    if memory_before is not None:
+                        memory_after = torch.cuda.memory_allocated() / 1024**3
+                        memory_freed = memory_before - memory_after
+
+            print("Stable Diffusion pipeline unloaded, VRAM freed")
+            return {
+                "success": True,
+                "message": "Pipeline unloaded successfully",
+                "memory_freed_gb": f"{memory_freed:.2f}" if memory_freed else "N/A"
+            }
+
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     def get_device_info(self) -> dict:
         """Get information about the device being used.
 
@@ -216,7 +269,8 @@ class ImageGenerationTool:
                 "device": self._device or "unknown",
                 "cuda_available": False,
                 "float16": self._use_float16,
-                "torch_available": False
+                "torch_available": False,
+                "pipeline_loaded": self.is_loaded()
             }
 
         torch = _get_torch()
@@ -226,12 +280,14 @@ class ImageGenerationTool:
             "device": self._device,
             "cuda_available": torch.cuda.is_available(),
             "float16": self._use_float16,
-            "torch_available": True
+            "torch_available": True,
+            "pipeline_loaded": self.is_loaded()
         }
 
         if torch.cuda.is_available():
             info["cuda_device_name"] = torch.cuda.get_device_name(0)
             info["cuda_memory_total"] = f"{torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB"
+            info["cuda_memory_allocated"] = f"{torch.cuda.memory_allocated() / 1e9:.2f} GB"
 
         return info
 

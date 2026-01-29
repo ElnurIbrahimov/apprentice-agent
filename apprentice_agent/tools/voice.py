@@ -53,6 +53,45 @@ class VoiceTool:
             print("Whisper model loaded.")
         return self._whisper_model
 
+    def is_whisper_loaded(self) -> bool:
+        """Check if Whisper model is loaded."""
+        return self._whisper_model is not None
+
+    def unload_whisper(self) -> dict:
+        """Unload Whisper model and free memory/VRAM.
+
+        Returns:
+            dict with success status
+        """
+        try:
+            if self._whisper_model is None:
+                return {
+                    "success": True,
+                    "message": "Whisper model not loaded, nothing to unload"
+                }
+
+            # Delete the model
+            del self._whisper_model
+            self._whisper_model = None
+
+            # Try to clear CUDA cache if torch is available
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+            except ImportError:
+                pass  # torch not available
+
+            print("Whisper model unloaded")
+            return {
+                "success": True,
+                "message": "Whisper model unloaded successfully"
+            }
+
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     def _get_tts_engine(self):
         """Get or create TTS engine."""
         if self._tts_engine is None:
