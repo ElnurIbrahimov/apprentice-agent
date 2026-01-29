@@ -53,6 +53,7 @@ from .neurodream import (
     create_neurodream
 )
 from .mirrormind import MirrorMind, CritiqueResult
+from .cognitive_theater import CognitiveTheater, Deliberation, is_decision_question
 
 # Import FluxMind from external tools directory
 import sys
@@ -142,4 +143,8 @@ __all__ = [
     # MirrorMind
     "MirrorMind",
     "CritiqueResult",
+    # CognitiveTheater
+    "CognitiveTheater",
+    "Deliberation",
+    "is_decision_question",
 ]

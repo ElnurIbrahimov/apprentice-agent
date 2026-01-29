@@ -13,6 +13,7 @@ from .metacognition import MetacognitionLogger
 from .config import Config
 from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, build_adaptive_system_prompt, get_monologue, KnowledgeGraphTool, get_knowledge_graph, MetacognitiveGuardian, GuardianConfig, NeuroDreamEngine, SleepPhase
 from .tools.mirrormind import MirrorMind
+from .tools.cognitive_theater import CognitiveTheater, is_decision_question
 
 
 class AgentPhase(Enum):
@@ -143,6 +144,15 @@ class ApprenticeAgent:
         self.mirrormind_enabled = getattr(Config, 'MIRRORMIND_ENABLED', False)
         if self.mirrormind_enabled:
             print("[LOADED] MirrorMind - Self-critique response improvement")
+
+        # Initialize CognitiveTheater (Tool #22) - Multi-Perspective Reasoning
+        self.theater = CognitiveTheater(
+            ollama_url=Config.OLLAMA_HOST,
+            model=Config.MODEL_FAST
+        )
+        self.theater_enabled = getattr(Config, 'COGNITIVE_THEATER_ENABLED', True)
+        if self.theater_enabled:
+            print("[LOADED] CognitiveTheater - Multi-perspective reasoning")
 
     def _ensure_tool(self, tool_name: str):
         """Lazily load a tool if not already loaded."""
@@ -2764,6 +2774,17 @@ Try these commands:
             if speak:
                 self._speak(evoemo_result)
             return evoemo_result
+
+        # Check for decision questions - use CognitiveTheater (Tool #22)
+        if self.theater_enabled and is_decision_question(message):
+            try:
+                response = self.theater.quick_debate(message)
+                if speak:
+                    self._speak(response, emotion=emotion_reading.emotion if emotion_reading else None)
+                return response
+            except Exception as e:
+                # Fall through to normal processing on error
+                print(f"[CognitiveTheater] Error: {e}")
 
         # Use fast model for simple queries (greetings, etc.)
         if self._is_simple_query(message):

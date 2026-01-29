@@ -29,6 +29,9 @@ class Config:
     MIRRORMIND_THRESHOLD: float = float(os.getenv("MIRRORMIND_THRESHOLD", "0.75"))
     MIRRORMIND_MAX_ITERATIONS: int = int(os.getenv("MIRRORMIND_MAX_ITERATIONS", "2"))
 
+    # CognitiveTheater Configuration (Tool #22) - Multi-Perspective Reasoning
+    COGNITIVE_THEATER_ENABLED: bool = os.getenv("COGNITIVE_THEATER_ENABLED", "true").lower() == "true"
+
     # Voice Configuration (Hybrid System)
     VOICE_CONFIG = {
         "default_mode": "pipeline",  # "pipeline" (Sesame) or "duplex" (PersonaPlex)
