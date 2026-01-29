@@ -4,7 +4,7 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 
 ## Features
 
-- **25 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, Clawdbot messaging, EvoEmo emotional tracking, Inner Monologue, Knowledge Graph Memory, Metacognitive Guardian, NeuroDream sleep/dream memory consolidation, MirrorMind self-critique, and more
+- **26 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, Clawdbot messaging, EvoEmo emotional tracking, Inner Monologue, Knowledge Graph Memory, Metacognitive Guardian, NeuroDream sleep/dream memory consolidation, MirrorMind self-critique, CognitiveTheater multi-perspective reasoning, and more
 - **5-Model Routing** - Automatically selects the best model for each task type (including FluxMind for calibrated reasoning)
 - **Observe-Plan-Act-Evaluate-Remember Loop** - Structured reasoning cycle for achieving goals
 - **Fast-Path Responses** - Instant replies for conversational queries without full agent loop
@@ -198,6 +198,7 @@ Opens at `http://127.0.0.1:7860` with:
 | `knowledge_graph` | Relationship-based memory with semantic understanding | `what do you know about X?` |
 | `metacog_guardian` | Self-aware failure prediction and proactive intervention | `guardian stats` or `set guardian level high` |
 | `mirrormind` | Self-critique system that evaluates and improves responses | `enable mirrormind` or set `MIRRORMIND_ENABLED=true` |
+| `cognitive_theater` | Multi-perspective reasoning for decision questions | `Should I use X or Y?` or `Compare A vs B` |
 
 ### Code Executor Safety
 
@@ -1179,6 +1180,86 @@ print(f"Was Improved: {result.was_improved()}")
 
 **Note:** MirrorMind adds latency (1-2 LLM calls per iteration) and is disabled by default. Enable it for high-quality responses when latency is acceptable.
 
+### CognitiveTheater (Multi-Perspective Reasoning)
+
+CognitiveTheater analyzes questions from multiple perspectives in a SINGLE LLM call, then synthesizes a balanced recommendation. It automatically activates for decision-type questions.
+
+**Flow:**
+```
+User Question → Single LLM Call → 4 Perspectives → Synthesis → Balanced Answer
+```
+
+**Four Perspectives:**
+
+| Perspective | Role | Focus |
+|-------------|------|-------|
+| **Advocate** | Argues IN FAVOR | Benefits, opportunities, why it's a good idea |
+| **Critic** | Argues AGAINST | Risks, flaws, what could go wrong |
+| **Analyst** | Neutral analysis | Data, facts, evidence-based assessment |
+| **Integrator** | Synthesizes all | Balanced recommendation considering all views |
+
+**Auto-Detection Keywords:**
+
+Questions containing these phrases automatically trigger CognitiveTheater:
+- "should I", "should we"
+- "compare", "pros and cons"
+- "vs", "or" (in context of choices)
+- "decide", "decision"
+- "worth it", "good idea", "recommend"
+
+**Example:**
+
+```
+User: Should I use microservices or monolith?
+
+**Multi-Perspective Analysis**
+
+**Pro:** Microservices scale teams independently, enable polyglot
+persistence, and allow independent deployments...
+
+**Con:** But you're a 2-person team - complexity will kill velocity.
+You'll spend more time on infrastructure than features...
+
+**Analysis:** Data shows startups under 10 engineers ship 3x faster
+with monoliths. Netflix didn't start with microservices...
+
+**Recommendation:** Start with a well-structured monolith. Extract
+services only when you hit real scale problems or team boundaries.
+
+Confidence: 85%
+```
+
+**Configuration:**
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `COGNITIVE_THEATER_ENABLED` | `true` | Enable multi-perspective reasoning |
+
+**Python API:**
+
+```python
+from apprentice_agent.tools.cognitive_theater import CognitiveTheater
+
+theater = CognitiveTheater()
+
+# Full deliberation with structured output
+result = theater.deliberate("Should I use PostgreSQL or MongoDB?")
+print(result.perspectives["advocate"])
+print(result.perspectives["critic"])
+print(result.synthesis)
+print(result.confidence)
+
+# Quick formatted string for chat
+output = theater.quick_debate("Should I learn Rust or Go?")
+print(output)
+```
+
+**Disable:**
+
+```bash
+export COGNITIVE_THEATER_ENABLED=false
+```
+
 ## Configuration
 
 Edit `apprentice_agent/config.py` to customize:
@@ -1195,6 +1276,7 @@ Edit `apprentice_agent/config.py` to customize:
 | `MIRRORMIND_ENABLED` | `false` | Enable self-critique response improvement |
 | `MIRRORMIND_THRESHOLD` | `0.75` | Minimum quality score to accept (0.0-1.0) |
 | `MIRRORMIND_MAX_ITERATIONS` | `2` | Maximum improvement iterations |
+| `COGNITIVE_THEATER_ENABLED` | `true` | Enable multi-perspective reasoning for decisions |
 
 ## Architecture
 
@@ -1250,6 +1332,7 @@ apprentice-agent/
         ├── metacog_guardian.py # Self-aware failure prediction system
         ├── neurodream.py     # Sleep/dream memory consolidation system
         ├── mirrormind.py     # Self-critique response improvement system
+        ├── cognitive_theater.py # Multi-perspective reasoning system
         └── custom/           # Auto-generated custom tools
 ```
 
