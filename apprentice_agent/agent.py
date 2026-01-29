@@ -66,6 +66,7 @@ class ApprenticeAgent:
             "git": GitTool(),
             "evoemo": EvoEmoTool(),
             "inner_monologue": get_monologue(),
+            "clawdbot": ClawdbotTool(),
         }
 
         # Heavier tools - load lazily or skip for fast init
@@ -79,7 +80,6 @@ class ApprenticeAgent:
                 "system_control": SystemControlTool(),
                 "tool_builder": ToolBuilderTool(),
                 "marketplace": MarketplaceTool(),
-                "clawdbot": ClawdbotTool(),
                 "knowledge_graph": get_knowledge_graph()
             })
         else:
@@ -87,7 +87,7 @@ class ApprenticeAgent:
             self._lazy_tools = [
                 "screenshot", "vision", "pdf_reader", "arxiv_search",
                 "browser", "system_control", "tool_builder", "marketplace",
-                "clawdbot", "knowledge_graph"
+                "knowledge_graph"
             ]
 
         # Connect inner monologue to EvoEmo for emotional awareness
