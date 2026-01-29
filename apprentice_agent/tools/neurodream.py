@@ -234,39 +234,54 @@ class NeuroDreamEngine:
         Returns:
             Status dict with session info
         """
-        if self.current_phase != SleepPhase.AWAKE:
-            return {
-                "success": False,
-                "error": f"Already in {self.current_phase.value} phase"
-            }
+        with self._phase_lock:
+            if self.current_phase != SleepPhase.AWAKE:
+                return {
+                    "success": False,
+                    "error": f"Already in {self.current_phase.value} phase"
+                }
 
-        # Create new session
-        self.current_session = SleepSession(
-            session_id=self._generate_id("session"),
-            start_time=datetime.now().isoformat(),
-            end_time=None,
-            trigger=trigger,
-            phases_completed=[]
-        )
+            # Check if previous thread is still running
+            if self._sleep_thread is not None and self._sleep_thread.is_alive():
+                return {
+                    "success": False,
+                    "error": "Previous sleep cycle still running"
+                }
 
-        # Log to inner monologue if available
-        if self.monologue:
-            self.monologue.think(
-                "reflect",
-                f"Entering sleep mode (trigger: {trigger}). Beginning memory consolidation...",
-                confidence=100
+            # Create new session
+            self.current_session = SleepSession(
+                session_id=self._generate_id("session"),
+                start_time=datetime.now().isoformat(),
+                end_time=None,
+                trigger=trigger,
+                phases_completed=[]
             )
 
-        # Start sleep thread
-        self._interrupt_flag.clear()
-        self._sleep_thread = threading.Thread(target=self._run_sleep_cycle, daemon=True)
-        self._sleep_thread.start()
+            # Log to inner monologue if available
+            if self.monologue:
+                try:
+                    self.monologue.think(
+                        "reflect",
+                        f"Entering sleep mode (trigger: {trigger}). Beginning memory consolidation...",
+                        confidence=100
+                    )
+                except (AttributeError, TypeError):
+                    pass  # Monologue not properly initialized
 
-        return {
-            "success": True,
-            "session_id": self.current_session.session_id,
-            "message": f"Entering sleep mode (trigger: {trigger})"
-        }
+            # Start sleep thread
+            self._interrupt_flag.clear()
+            self._sleep_thread = threading.Thread(
+                target=self._run_sleep_cycle,
+                daemon=True,
+                name=f"NeuroDream-{self.current_session.session_id}"
+            )
+            self._sleep_thread.start()
+
+            return {
+                "success": True,
+                "session_id": self.current_session.session_id,
+                "message": f"Entering sleep mode (trigger: {trigger})"
+            }
 
     def _run_sleep_cycle(self):
         """Run the complete sleep cycle in background thread."""
@@ -527,8 +542,11 @@ class NeuroDreamEngine:
 
         # Wait for sleep thread to finish (but not if we're calling from within the thread)
         current_thread = threading.current_thread()
-        if self._sleep_thread and self._sleep_thread.is_alive() and self._sleep_thread != current_thread:
-            self._sleep_thread.join(timeout=5)
+        sleep_thread = self._sleep_thread  # Local reference for thread safety
+        if sleep_thread is not None and sleep_thread.is_alive() and sleep_thread != current_thread:
+            sleep_thread.join(timeout=5)
+            if not sleep_thread.is_alive():
+                self._sleep_thread = None  # Clear reference after thread finishes
 
         self._set_phase(SleepPhase.WAKING)
 
@@ -1166,6 +1184,42 @@ class NeuroDreamEngine:
         """Set callback functions for events."""
         self._on_phase_change = on_phase_change
         self._on_insight = on_insight
+
+    def shutdown(self, timeout: float = 10.0) -> Dict[str, Any]:
+        """Gracefully shutdown the NeuroDream engine.
+
+        Args:
+            timeout: Maximum seconds to wait for thread to finish
+
+        Returns:
+            Dict with shutdown status
+        """
+        result = {"success": True, "was_sleeping": False}
+
+        # If sleeping, wake up first
+        if self.current_phase != SleepPhase.AWAKE:
+            result["was_sleeping"] = True
+            self.wake_up("shutdown")
+
+        # Wait for thread to finish
+        if self._sleep_thread is not None and self._sleep_thread.is_alive():
+            self._interrupt_flag.set()
+            self._sleep_thread.join(timeout=timeout)
+
+            if self._sleep_thread.is_alive():
+                result["success"] = False
+                result["error"] = "Thread did not terminate within timeout"
+            else:
+                self._sleep_thread = None
+
+        return result
+
+    def __del__(self):
+        """Cleanup on deletion."""
+        try:
+            self.shutdown(timeout=2.0)
+        except Exception:
+            pass  # Best effort cleanup
 
 
 # ==================== Singleton Access ====================
