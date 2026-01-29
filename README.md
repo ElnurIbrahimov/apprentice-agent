@@ -4,7 +4,7 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 
 ## Features
 
-- **24 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, Clawdbot messaging, EvoEmo emotional tracking, Inner Monologue, Knowledge Graph Memory, Metacognitive Guardian, NeuroDream sleep/dream memory consolidation, and more
+- **25 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, Clawdbot messaging, EvoEmo emotional tracking, Inner Monologue, Knowledge Graph Memory, Metacognitive Guardian, NeuroDream sleep/dream memory consolidation, MirrorMind self-critique, and more
 - **5-Model Routing** - Automatically selects the best model for each task type (including FluxMind for calibrated reasoning)
 - **Observe-Plan-Act-Evaluate-Remember Loop** - Structured reasoning cycle for achieving goals
 - **Fast-Path Responses** - Instant replies for conversational queries without full agent loop
@@ -197,6 +197,7 @@ Opens at `http://127.0.0.1:7860` with:
 | `inner_monologue` | Real-time thought visualization and Think Aloud | `show thoughts` or `why did you do that?` |
 | `knowledge_graph` | Relationship-based memory with semantic understanding | `what do you know about X?` |
 | `metacog_guardian` | Self-aware failure prediction and proactive intervention | `guardian stats` or `set guardian level high` |
+| `mirrormind` | Self-critique system that evaluates and improves responses | `enable mirrormind` or set `MIRRORMIND_ENABLED=true` |
 
 ### Code Executor Safety
 
@@ -1097,6 +1098,87 @@ The Aura GUI includes a NeuroDream panel with:
 | Inner Monologue | Dreams appear as special "dream" thought type |
 | Metacognitive Guardian | Learns from sleep-discovered patterns |
 
+### MirrorMind (Self-Critique System)
+
+MirrorMind is a self-critique system that evaluates Aura's responses and improves them before showing to the user. It implements an iterative refinement loop that scores responses on multiple dimensions.
+
+**Flow:**
+```
+User Query → Generate Response → Critique → Score Too Low? → Improve → Repeat
+                                      ↓
+                               Score Good? → Return Final Response
+```
+
+**Critique Dimensions (weighted):**
+
+| Dimension | Weight | Description |
+|-----------|--------|-------------|
+| Accuracy | 25% | Is the information correct? |
+| Completeness | 25% | Does it fully answer the question? |
+| Clarity | 20% | Is it easy to understand? |
+| Actionable | 15% | Does it provide clear next steps? |
+| Tone | 15% | Is the tone appropriate? |
+
+**Configuration:**
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `MIRRORMIND_ENABLED` | `false` | Enable self-critique (adds latency) |
+| `MIRRORMIND_THRESHOLD` | `0.75` | Minimum quality score to accept |
+| `MIRRORMIND_MAX_ITERATIONS` | `2` | Maximum improvement rounds |
+
+**Example - Before/After:**
+
+```
+Query: "How do I center a div in CSS?"
+
+BEFORE (Score: 0.38):
+  "Use margin auto."
+
+AFTER (Score: 0.93):
+  "To center a div in CSS, use the `position` property
+   with either `relative`, `absolute`, or `fixed`.
+   Set its margins to auto:
+
+   #myDiv {
+       margin-left: auto;
+       margin-right: auto;
+   }
+
+   This will center your div on both sides of the page."
+```
+
+**Enable:**
+
+```bash
+# Environment variable
+export MIRRORMIND_ENABLED=true
+
+# Or in .env file
+MIRRORMIND_ENABLED=true
+MIRRORMIND_THRESHOLD=0.75
+MIRRORMIND_MAX_ITERATIONS=2
+```
+
+**Python API:**
+
+```python
+from apprentice_agent.tools.mirrormind import MirrorMind
+
+mirror = MirrorMind(quality_threshold=0.75, max_iterations=2)
+
+# Refine a weak response
+result = mirror.refine("How do I X?", "Just do Y.")
+
+print(f"Original: {result.original}")
+print(f"Improved: {result.improved}")
+print(f"Score: {result.quality_score}")
+print(f"Iterations: {result.iterations}")
+print(f"Was Improved: {result.was_improved()}")
+```
+
+**Note:** MirrorMind adds latency (1-2 LLM calls per iteration) and is disabled by default. Enable it for high-quality responses when latency is acceptable.
+
 ## Configuration
 
 Edit `apprentice_agent/config.py` to customize:
@@ -1110,6 +1192,9 @@ Edit `apprentice_agent/config.py` to customize:
 | `MODEL_VISION` | `llava` | Model for vision tasks |
 | `CHROMADB_PATH` | `./data/chromadb` | Memory storage location |
 | `PERSONAPLEX_ENABLED` | `true` | Enable PersonaPlex voice tool |
+| `MIRRORMIND_ENABLED` | `false` | Enable self-critique response improvement |
+| `MIRRORMIND_THRESHOLD` | `0.75` | Minimum quality score to accept (0.0-1.0) |
+| `MIRRORMIND_MAX_ITERATIONS` | `2` | Maximum improvement iterations |
 
 ## Architecture
 
@@ -1164,6 +1249,7 @@ apprentice-agent/
         ├── hybrid_memory.py  # Combined vector + graph memory
         ├── metacog_guardian.py # Self-aware failure prediction system
         ├── neurodream.py     # Sleep/dream memory consolidation system
+        ├── mirrormind.py     # Self-critique response improvement system
         └── custom/           # Auto-generated custom tools
 ```
 
