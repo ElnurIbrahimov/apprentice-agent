@@ -146,6 +146,10 @@ class KnowledgeGraphTool:
     name = "knowledge_graph"
     description = "Query and manage Aura's knowledge graph memory"
 
+    # Quota limits to prevent unbounded memory growth
+    MAX_NODES = 50000  # Maximum number of nodes allowed
+    MAX_EDGES = 100000  # Maximum number of edges allowed
+
     def __init__(self, db_path: str = "data/knowledge_graph/"):
         self.db_path = Path(db_path)
         self.db_path.mkdir(parents=True, exist_ok=True)
@@ -198,8 +202,18 @@ class KnowledgeGraphTool:
 
         Returns:
             Created Node object
+
+        Raises:
+            ValueError: If node quota exceeded
         """
         with self._lock:
+            # Check quota before adding new node
+            if len(self._nodes) >= self.MAX_NODES:
+                # Try to prune old, low-confidence nodes first
+                self._prune_lowest_confidence_nodes(count=100)
+                if len(self._nodes) >= self.MAX_NODES:
+                    raise ValueError(f"Node quota exceeded ({self.MAX_NODES}). Run consolidate() to free space.")
+
             # Check if node with same label exists
             existing_id = self._label_index.get(label.lower())
             if existing_id and existing_id in self._nodes:
@@ -362,9 +376,17 @@ class KnowledgeGraphTool:
             properties: Additional context
 
         Returns:
-            Created Edge object or None if nodes don't exist
+            Created Edge object or None if nodes don't exist or quota exceeded
         """
         with self._lock:
+            # Check edge quota before adding
+            if len(self._edges) >= self.MAX_EDGES:
+                # Try to prune weak edges first
+                self._prune_weak_edges(min_weight=0.2, count=200)
+                if len(self._edges) >= self.MAX_EDGES:
+                    print(f"[KG] Edge quota exceeded ({self.MAX_EDGES}). Run consolidate().")
+                    return None
+
             # Resolve labels to IDs if needed
             if not source_id.startswith("node_"):
                 source_id = self._label_index.get(source_id.lower(), source_id)
@@ -772,6 +794,59 @@ class KnowledgeGraphTool:
             "pruned_edges": pruned,
             "strengthened_edges": strengthened
         }
+
+    def _prune_lowest_confidence_nodes(self, count: int = 100):
+        """Remove lowest confidence nodes to free quota space.
+
+        Args:
+            count: Number of nodes to prune
+        """
+        if not self._nodes:
+            return
+
+        # Sort by confidence (ascending) and access_count
+        sorted_nodes = sorted(
+            self._nodes.values(),
+            key=lambda n: (n.confidence, n.access_count)
+        )
+
+        # Prune the lowest confidence nodes
+        pruned = 0
+        for node in sorted_nodes[:count]:
+            if node.confidence < 0.5 and node.access_count < 3:
+                self.delete_node(node.id)
+                pruned += 1
+
+        if pruned > 0:
+            print(f"[KG] Auto-pruned {pruned} low-confidence nodes")
+
+    def _prune_weak_edges(self, min_weight: float = 0.2, count: int = 200):
+        """Remove weak edges to free quota space.
+
+        Args:
+            min_weight: Edges below this weight are candidates for pruning
+            count: Maximum number of edges to prune
+        """
+        if not self._edges:
+            return
+
+        # Find weak edges
+        weak_edges = [
+            edge for edge in self._edges.values()
+            if edge.weight < min_weight
+        ]
+
+        # Sort by weight (ascending)
+        weak_edges.sort(key=lambda e: e.weight)
+
+        # Prune weakest edges
+        pruned = 0
+        for edge in weak_edges[:count]:
+            self.delete_edge(edge.id)
+            pruned += 1
+
+        if pruned > 0:
+            print(f"[KG] Auto-pruned {pruned} weak edges")
 
     def _merge_nodes(self, keeper_id: str, remove_id: str):
         """Merge remove_id node into keeper_id."""

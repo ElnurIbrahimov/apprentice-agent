@@ -20,6 +20,9 @@ class TaskType(Enum):
 class OllamaBrain:
     """Handles all interactions with Ollama API for reasoning and decision-making."""
 
+    # Limit conversation history to prevent unbounded memory growth
+    MAX_HISTORY_LENGTH = 20  # Keep last 20 messages (10 exchanges)
+
     def __init__(self, warmup: bool = True):
         self.client = ollama.Client(host=Config.OLLAMA_HOST)
         self.model = Config.MODEL_NAME
@@ -90,6 +93,9 @@ class OllamaBrain:
         if use_history:
             self.conversation_history.append({"role": "user", "content": prompt})
             self.conversation_history.append({"role": "assistant", "content": assistant_message})
+            # Enforce history limit to prevent unbounded memory growth
+            if len(self.conversation_history) > self.MAX_HISTORY_LENGTH:
+                self.conversation_history = self.conversation_history[-self.MAX_HISTORY_LENGTH:]
 
         return assistant_message
 
@@ -752,6 +758,39 @@ Outcome: {episode.get('outcome', 'N/A')}"""
     def clear_history(self) -> None:
         """Clear conversation history."""
         self.conversation_history = []
+
+    def unload_model(self, model: str = None) -> bool:
+        """Unload a model from Ollama to free VRAM.
+
+        Args:
+            model: Model name to unload. If None, unloads the last used model.
+
+        Returns:
+            True if successful, False otherwise.
+        """
+        model_to_unload = model or self._last_model_used
+        try:
+            # Send empty generate with keep_alive=0 to unload
+            self.client.generate(
+                model=model_to_unload,
+                prompt="",
+                keep_alive="0s"
+            )
+            return True
+        except Exception:
+            return False
+
+    def unload_all_models(self) -> dict:
+        """Unload all commonly used models to free VRAM.
+
+        Returns:
+            Dict with unload status for each model.
+        """
+        models = [Config.MODEL_FAST, Config.MODEL_REASON, Config.MODEL_CODE, Config.MODEL_VISION]
+        results = {}
+        for model in models:
+            results[model] = self.unload_model(model)
+        return results
 
     def _format_context(self, context: dict) -> str:
         """Format context dictionary for prompts."""
