@@ -107,6 +107,21 @@ MIXED_PATTERNS = [
     (r"(?i)(curious|interested).*(but|yet).*(confused|lost)", ("curious", "stressed")),
 ]
 
+# Pre-compile regex patterns at module load time for performance
+_COMPILED_EMOTION_PATTERNS: Dict[str, List[re.Pattern]] = {}
+for _emotion, _markers in EMOTION_MARKERS.items():
+    _COMPILED_EMOTION_PATTERNS[_emotion] = [
+        re.compile(p, re.IGNORECASE) for p in _markers.get("patterns", [])
+    ]
+
+_COMPILED_SARCASM_PATTERNS: List[re.Pattern] = [
+    re.compile(p) for p in SARCASM_MARKERS.get("patterns", [])
+]
+
+_COMPILED_MIXED_PATTERNS: List[Tuple[re.Pattern, Tuple[str, str]]] = [
+    (re.compile(pattern), emotions) for pattern, emotions in MIXED_PATTERNS
+]
+
 
 @dataclass
 class EmotionReading:
@@ -210,11 +225,11 @@ class EvoEmoTool:
                     scores[emotion] += markers.get("weight", 1.0)
                     markers_found.append(f"word:{word}")
 
-            # Pattern matching
-            for pattern in markers.get("patterns", []):
-                if re.search(pattern, text, re.IGNORECASE):
+            # Pattern matching (using pre-compiled patterns)
+            for compiled_pattern in _COMPILED_EMOTION_PATTERNS.get(emotion, []):
+                if compiled_pattern.search(text):
                     scores[emotion] += markers.get("weight", 1.0) * 0.5
-                    markers_found.append(f"pattern:{pattern[:20]}")
+                    markers_found.append(f"pattern:{compiled_pattern.pattern[:20]}")
 
             # Caps analysis for frustration
             if emotion == "frustrated" and len(text) > 10:
@@ -245,8 +260,8 @@ class EvoEmoTool:
                 markers_found.append(f"sarcasm:{word}")
                 # Sarcasm often masks frustration
                 scores["frustrated"] += 0.5
-        for pattern in SARCASM_MARKERS.get("patterns", []):
-            if re.search(pattern, text):
+        for compiled_pattern in _COMPILED_SARCASM_PATTERNS:
+            if compiled_pattern.search(text):
                 sarcasm_detected = True
                 markers_found.append("sarcasm:pattern")
                 scores["frustrated"] += 0.3
@@ -258,10 +273,10 @@ class EvoEmoTool:
             is_neutral = True
             markers_found.append("neutral_response")
 
-        # Check for mixed emotions
+        # Check for mixed emotions (using pre-compiled patterns)
         mixed_emotions = None
-        for pattern, emotions in MIXED_PATTERNS:
-            if re.search(pattern, text):
+        for compiled_pattern, emotions in _COMPILED_MIXED_PATTERNS:
+            if compiled_pattern.search(text):
                 mixed_emotions = emotions
                 markers_found.append(f"mixed:{emotions[0]}+{emotions[1]}")
                 for emo in emotions:
