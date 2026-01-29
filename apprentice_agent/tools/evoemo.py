@@ -38,7 +38,7 @@ EMOTION_MARKERS = {
         "words": ["awesome", "amazing", "great", "love", "fantastic", "wonderful", "perfect",
                   "excited", "can't wait", "yes", "finally", "brilliant", "incredible",
                   "wow", "cool", "nice", "sweet", "yay", "woohoo"],
-        "patterns": [r"!{1,}", r":D", r":)", r"<3", r"\byes\b"],
+        "patterns": [r"!{1,}", r":D", r":\)", r"<3", r"\byes\b"],
         "weight": 1.2
     },
     "tired": {
