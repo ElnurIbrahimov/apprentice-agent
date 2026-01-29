@@ -12,6 +12,7 @@ from .memory import MemorySystem
 from .metacognition import MetacognitionLogger
 from .config import Config
 from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, build_adaptive_system_prompt, get_monologue, KnowledgeGraphTool, get_knowledge_graph, MetacognitiveGuardian, GuardianConfig, NeuroDreamEngine, SleepPhase
+from .tools.mirrormind import MirrorMind
 
 
 class AgentPhase(Enum):
@@ -131,6 +132,17 @@ class ApprenticeAgent:
             idle_threshold_minutes=30
         )
         print("[LOADED] NeuroDream - Sleep/dream memory consolidation")
+
+        # Initialize MirrorMind (Tool #21) - Self-Critique System
+        self.mirrormind = MirrorMind(
+            ollama_url=Config.OLLAMA_HOST,
+            model=Config.MODEL_FAST,
+            quality_threshold=getattr(Config, 'MIRRORMIND_THRESHOLD', 0.75),
+            max_iterations=getattr(Config, 'MIRRORMIND_MAX_ITERATIONS', 2)
+        )
+        self.mirrormind_enabled = getattr(Config, 'MIRRORMIND_ENABLED', False)
+        if self.mirrormind_enabled:
+            print("[LOADED] MirrorMind - Self-critique response improvement")
 
     def _ensure_tool(self, tool_name: str):
         """Lazily load a tool if not already loaded."""
@@ -2765,6 +2777,16 @@ Try these commands:
             tone_modifier = get_tone_modifier(emotion_reading.emotion)
 
         response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier)
+
+        # Apply MirrorMind self-critique if enabled (Tool #21)
+        if self.mirrormind_enabled and not self._is_simple_query(message):
+            try:
+                critique_result = self.mirrormind.refine(message, response)
+                if critique_result.was_improved():
+                    response = critique_result.improved
+            except Exception as e:
+                # Never crash on MirrorMind failure, just use original response
+                print(f"[MirrorMind] Error: {e}")
 
         if speak:
             self._speak(response, emotion=emotion_reading.emotion if emotion_reading else None)

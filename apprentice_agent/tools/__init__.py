@@ -52,6 +52,7 @@ from .neurodream import (
     get_neurodream,
     create_neurodream
 )
+from .mirrormind import MirrorMind, CritiqueResult
 
 # Import FluxMind from external tools directory
 import sys
@@ -138,4 +139,7 @@ __all__ = [
     "ConsolidatedPattern",
     "get_neurodream",
     "create_neurodream",
+    # MirrorMind
+    "MirrorMind",
+    "CritiqueResult",
 ]

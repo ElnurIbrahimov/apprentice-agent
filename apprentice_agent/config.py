@@ -24,6 +24,11 @@ class Config:
     # PersonaPlex Configuration (Tool #17)
     PERSONAPLEX_ENABLED: bool = os.getenv("PERSONAPLEX_ENABLED", "true").lower() == "true"
 
+    # MirrorMind Configuration (Tool #21) - Self-Critique System
+    MIRRORMIND_ENABLED: bool = os.getenv("MIRRORMIND_ENABLED", "false").lower() == "true"
+    MIRRORMIND_THRESHOLD: float = float(os.getenv("MIRRORMIND_THRESHOLD", "0.75"))
+    MIRRORMIND_MAX_ITERATIONS: int = int(os.getenv("MIRRORMIND_MAX_ITERATIONS", "2"))
+
     # Voice Configuration (Hybrid System)
     VOICE_CONFIG = {
         "default_mode": "pipeline",  # "pipeline" (Sesame) or "duplex" (PersonaPlex)
