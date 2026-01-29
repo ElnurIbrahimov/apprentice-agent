@@ -2880,3 +2880,104 @@ Try these commands:
     def recall_memories(self, query: str, n: int = 5) -> list:
         """Recall relevant memories."""
         return self.memory.recall(query, n_results=n)
+
+    def shutdown(self) -> dict:
+        """Gracefully shutdown the agent and free all resources.
+
+        This method should be called when the agent is being terminated
+        to ensure proper cleanup of VRAM, file handles, and background threads.
+
+        Returns:
+            dict with shutdown status and details
+        """
+        results = {
+            "success": True,
+            "freed_resources": [],
+            "errors": []
+        }
+
+        # 1. Shutdown NeuroDream if sleeping
+        try:
+            if hasattr(self, 'neurodream') and self.neurodream:
+                if self.neurodream.current_phase != SleepPhase.AWAKE:
+                    self.neurodream.wake_up(reason="shutdown")
+                    results["freed_resources"].append("neurodream_sleep_thread")
+                if hasattr(self.neurodream, 'shutdown'):
+                    self.neurodream.shutdown()
+        except Exception as e:
+            results["errors"].append(f"NeuroDream shutdown: {e}")
+
+        # 2. Unload Ollama models to free VRAM
+        try:
+            if hasattr(self, 'brain') and self.brain:
+                unload_result = self.brain.unload_all_models()
+                for model, success in unload_result.items():
+                    if success:
+                        results["freed_resources"].append(f"ollama:{model}")
+        except Exception as e:
+            results["errors"].append(f"Ollama unload: {e}")
+
+        # 3. Close browser if open
+        try:
+            if "browser" in self.tools and hasattr(self.tools["browser"], 'close'):
+                self.tools["browser"].close()
+                results["freed_resources"].append("browser")
+        except Exception as e:
+            results["errors"].append(f"Browser close: {e}")
+
+        # 4. Unload voice/TTS models
+        try:
+            for tool_name in ["sesame_tts", "voice", "voice_manager"]:
+                if tool_name in self.tools:
+                    tool = self.tools[tool_name]
+                    if hasattr(tool, 'unload'):
+                        tool.unload()
+                        results["freed_resources"].append(tool_name)
+                    elif hasattr(tool, 'unload_whisper'):
+                        tool.unload_whisper()
+                        results["freed_resources"].append(f"{tool_name}:whisper")
+        except Exception as e:
+            results["errors"].append(f"Voice unload: {e}")
+
+        # 5. Stop PersonaPlex server if running
+        try:
+            if "personaplex" in self.tools:
+                if hasattr(self.tools["personaplex"], 'stop_server'):
+                    self.tools["personaplex"].stop_server()
+                    results["freed_resources"].append("personaplex_server")
+        except Exception as e:
+            results["errors"].append(f"PersonaPlex stop: {e}")
+
+        # 6. Save knowledge graph
+        try:
+            if "knowledge_graph" in self.tools:
+                self.tools["knowledge_graph"].save()
+                results["freed_resources"].append("knowledge_graph:saved")
+        except Exception as e:
+            results["errors"].append(f"KG save: {e}")
+
+        # 7. Clear conversation history
+        try:
+            if hasattr(self, 'brain') and self.brain:
+                self.brain.clear_history()
+                results["freed_resources"].append("conversation_history")
+        except Exception as e:
+            results["errors"].append(f"History clear: {e}")
+
+        # 8. Reset guardian session
+        try:
+            if hasattr(self, 'guardian') and self.guardian:
+                self.guardian.reset_session()
+                results["freed_resources"].append("guardian_session")
+        except Exception as e:
+            results["errors"].append(f"Guardian reset: {e}")
+
+        results["success"] = len(results["errors"]) == 0
+        return results
+
+    def __del__(self):
+        """Destructor - attempt graceful shutdown."""
+        try:
+            self.shutdown()
+        except Exception:
+            pass  # Ignore errors during destruction
