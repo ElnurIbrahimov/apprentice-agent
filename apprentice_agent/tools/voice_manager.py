@@ -159,8 +159,8 @@ class VoiceManager:
                         json={"model": model, "keep_alive": 0},
                         timeout=5
                     )
-                except:
-                    pass  # Model might not be loaded
+                except (requests.RequestException, ConnectionError, TimeoutError):
+                    pass  # Model might not be loaded or Ollama not running
             print("Ollama models unloaded")
         except Exception as e:
             print(f"Warning: Could not unload Ollama models: {e}")

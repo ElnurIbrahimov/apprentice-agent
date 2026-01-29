@@ -159,8 +159,8 @@ except Exception as e:
             # Clean up temp file
             try:
                 os.unlink(temp_path)
-            except:
-                pass
+            except (OSError, FileNotFoundError):
+                pass  # File already deleted or doesn't exist
 
     def _indent_code(self, code: str, spaces: int) -> str:
         """Indent code by specified number of spaces."""

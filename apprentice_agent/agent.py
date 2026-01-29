@@ -2847,8 +2847,8 @@ Try these commands:
         try:
             if "evoemo" in self.tools:
                 return self.tools["evoemo"].get_current_mood()
-        except:
-            pass
+        except (AttributeError, KeyError, TypeError):
+            pass  # EvoEmo tool not properly initialized
         return None
 
     def get_mood_emoji(self) -> str:
@@ -2856,8 +2856,8 @@ Try these commands:
         try:
             if "evoemo" in self.tools:
                 return self.tools["evoemo"].get_mood_emoji()
-        except:
-            pass
+        except (AttributeError, KeyError, TypeError):
+            pass  # EvoEmo tool not properly initialized
         return "😐"
 
     def _speak(self, text: str, emotion: Optional[str] = None):

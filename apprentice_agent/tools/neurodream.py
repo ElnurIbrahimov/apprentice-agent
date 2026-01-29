@@ -316,8 +316,8 @@ class NeuroDreamEngine:
             if self._on_phase_change:
                 try:
                     self._on_phase_change(phase)
-                except:
-                    pass
+                except Exception as e:
+                    print(f"[NeuroDream] Phase change callback error: {e}")
 
     def run_light_phase(self) -> Dict[str, Any]:
         """Light Sleep: Replay recent memories (last 24h).
@@ -496,8 +496,8 @@ class NeuroDreamEngine:
             if self._on_insight:
                 try:
                     self._on_insight(insight)
-                except:
-                    pass
+                except Exception as e:
+                    print(f"[NeuroDream] Insight callback error: {e}")
 
         self._total_insights += results["insights_generated"]
         results["duration_seconds"] = time.time() - start_time
@@ -648,7 +648,8 @@ class NeuroDreamEngine:
                                 })
                             except json.JSONDecodeError:
                                 continue
-            except Exception:
+            except (ValueError, IOError, OSError) as e:
+                print(f"[NeuroDream] Error reading log file {log_file}: {e}")
                 continue
 
         return memories
@@ -680,8 +681,8 @@ class NeuroDreamEngine:
                                 new_weight = min(1.0, edge[2]['weight'] + 0.05)
                                 self.kg.graph.edges[edge[0], edge[1]]['weight'] = new_weight
                                 strengthened += 1
-            except Exception:
-                continue
+            except (AttributeError, KeyError, TypeError):
+                continue  # Skip if KG structure doesn't support this operation
 
         return strengthened
 
@@ -711,10 +712,10 @@ class NeuroDreamEngine:
                                 # Extract topic keywords
                                 words = re.findall(r'\b[A-Za-z]{5,}\b', content.lower())
                                 hour_topics[hour].extend(words[:5])
-                        except:
-                            continue
-            except:
-                continue
+                        except (json.JSONDecodeError, ValueError, KeyError, TypeError):
+                            continue  # Skip malformed entries
+            except (IOError, OSError):
+                continue  # Skip unreadable files
 
         # Find patterns in hour-topic relationships
         for hour, topics in hour_topics.items():
@@ -805,8 +806,8 @@ class NeuroDreamEngine:
                     try:
                         hour = datetime.fromisoformat(ts).hour
                         hour_emotions[hour].append(emotion)
-                    except:
-                        pass
+                    except (ValueError, TypeError):
+                        pass  # Skip entries with invalid timestamps
 
             # Dominant emotion pattern
             if emotion_counts:
@@ -1020,8 +1021,8 @@ class NeuroDreamEngine:
                 with open(patterns_file, 'r') as f:
                     for line in f:
                         patterns.append(json.loads(line.strip()))
-            except:
-                pass
+            except (IOError, OSError, json.JSONDecodeError) as e:
+                print(f"[NeuroDream] Error reading patterns file: {e}")
 
         # Generate hypotheses from patterns
         for pattern in patterns[-10:]:  # Recent patterns
@@ -1094,8 +1095,8 @@ class NeuroDreamEngine:
                 for line in f:
                     try:
                         entries.append(json.loads(line.strip()))
-                    except:
-                        continue
+                    except json.JSONDecodeError:
+                        continue  # Skip malformed JSON lines
 
         return entries[-n:]
 
@@ -1109,8 +1110,8 @@ class NeuroDreamEngine:
                 for line in f:
                     try:
                         insights.append(json.loads(line.strip()))
-                    except:
-                        continue
+                    except json.JSONDecodeError:
+                        continue  # Skip malformed JSON lines
 
         return insights[-n:]
 
@@ -1124,8 +1125,8 @@ class NeuroDreamEngine:
                 for line in f:
                     try:
                         patterns.append(json.loads(line.strip()))
-                    except:
-                        continue
+                    except json.JSONDecodeError:
+                        continue  # Skip malformed JSON lines
 
         return patterns[-n:]
 
@@ -1136,8 +1137,8 @@ class NeuroDreamEngine:
         if self.monologue:
             try:
                 self.monologue.think("reflect", f"[{phase}] {message}", confidence=70)
-            except:
-                pass
+            except (AttributeError, TypeError) as e:
+                pass  # Monologue not properly initialized
         print(f"[NeuroDream] {phase}: {message}")
 
     def _get_stopwords(self) -> set:

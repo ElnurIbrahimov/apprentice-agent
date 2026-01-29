@@ -828,8 +828,8 @@ class AuraGUI:
                 result = agent.tools["evoemo"].clear_history()
                 if result.get("success"):
                     return self.get_mood_html()
-        except:
-            pass
+        except (AttributeError, KeyError, TypeError):
+            pass  # Agent or tool not available
         return self.get_mood_html()
 
     def toggle_mood_tracking(self, enabled: bool) -> str:
@@ -838,8 +838,8 @@ class AuraGUI:
             agent = self._get_agent()
             if "evoemo" in agent.tools:
                 agent.tools["evoemo"].set_enabled(enabled)
-        except:
-            pass
+        except (AttributeError, KeyError, TypeError):
+            pass  # Agent or tool not available
         return self.get_mood_html()
 
     # =========================================================================
@@ -930,8 +930,8 @@ class AuraGUI:
             agent = self._get_agent()
             if "inner_monologue" in agent.tools:
                 agent.tools["inner_monologue"].stream.clear()
-        except:
-            pass
+        except (AttributeError, KeyError, TypeError):
+            pass  # Agent or tool not available
         return self.get_thoughts_html()
 
     def export_thoughts(self) -> str:

@@ -245,8 +245,8 @@ class BrowserTool:
             # Accept cookies if prompted (for EU users)
             try:
                 self._page.click("button:has-text('Accept all')", timeout=3000)
-            except:
-                pass  # No cookie prompt
+            except (TimeoutError, Exception):
+                pass  # No cookie prompt or element not found
 
             # Fill search box and submit
             self._page.fill("textarea[name='q'], input[name='q']", query)

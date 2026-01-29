@@ -169,8 +169,8 @@ class EvoEmoTool:
         if self.settings_file.exists():
             try:
                 return json.loads(self.settings_file.read_text())
-            except:
-                pass
+            except (json.JSONDecodeError, IOError, OSError):
+                pass  # Return defaults on parse/read error
         return {"enabled": True, "history_days": 7}
 
     def _save_settings(self):
@@ -391,9 +391,9 @@ class EvoEmoTool:
                         data = json.loads(line.strip())
                         if data["timestamp"].startswith(target_date):
                             readings.append(data)
-                    except:
-                        continue
-        except Exception as e:
+                    except (json.JSONDecodeError, KeyError, TypeError):
+                        continue  # Skip malformed entries
+        except (IOError, OSError) as e:
             print(f"[EvoEmo] Error reading history: {e}")
             return None
 
@@ -443,9 +443,9 @@ class EvoEmoTool:
                         timestamp = datetime.fromisoformat(data["timestamp"])
                         if timestamp >= cutoff:
                             history.append(data)
-                    except:
-                        continue
-        except Exception as e:
+                    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+                        continue  # Skip malformed entries
+        except (IOError, OSError) as e:
             print(f"[EvoEmo] Error reading history: {e}")
 
         return history
@@ -464,8 +464,8 @@ class EvoEmoTool:
                 if hour not in hour_emotions:
                     hour_emotions[hour] = []
                 hour_emotions[hour].append(reading["emotion"])
-            except:
-                continue
+            except (KeyError, TypeError, ValueError):
+                continue  # Skip malformed entries
 
         # Find stress hours
         stress_hours = []

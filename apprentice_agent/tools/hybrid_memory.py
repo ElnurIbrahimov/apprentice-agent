@@ -384,8 +384,8 @@ class HybridMemory:
                 stats["vector_db"] = {
                     "count": self.vector_db.count() if hasattr(self.vector_db, 'count') else "unknown"
                 }
-            except:
-                pass
+            except (AttributeError, TypeError, RuntimeError):
+                pass  # Vector DB not properly initialized
 
         return stats
 

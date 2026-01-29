@@ -735,8 +735,8 @@ class KnowledgeGraphTool:
                 try:
                     last_reinforced = datetime.fromisoformat(edge.last_reinforced)
                     age_days = (now - last_reinforced).days
-                except:
-                    age_days = 0
+                except (ValueError, TypeError, AttributeError):
+                    age_days = 0  # Default to 0 if timestamp is invalid
 
                 # Prune weak edges older than 7 days
                 if edge.weight < 0.2 and age_days > 7:
@@ -816,8 +816,8 @@ class KnowledgeGraphTool:
                     if hours_since > hours_passed:
                         edge.weight = max(0.0, edge.weight - decay_amount)
                         weakened += 1
-                except:
-                    pass
+                except (ValueError, TypeError, AttributeError):
+                    pass  # Skip edges with invalid timestamps
 
         return weakened
 
