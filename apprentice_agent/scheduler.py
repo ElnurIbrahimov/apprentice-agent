@@ -283,9 +283,13 @@ class NotificationScheduler:
                 time.sleep(self.check_interval)
         except KeyboardInterrupt:
             logger.info("Scheduler stopped by user")
+        except (IOError, OSError, json.JSONDecodeError) as e:
+            logger.error(f"Scheduler I/O error: {e}")
+            raise RuntimeError(f"Scheduler failed due to I/O error: {e}") from e
         except Exception as e:
-            logger.error(f"Scheduler error: {e}")
-            raise
+            logger.error(f"Scheduler unexpected error: {e}")
+            # Re-raise with context for debugging
+            raise RuntimeError(f"Scheduler failed unexpectedly: {e}") from e
 
     def stop(self) -> None:
         """Stop the scheduler daemon."""

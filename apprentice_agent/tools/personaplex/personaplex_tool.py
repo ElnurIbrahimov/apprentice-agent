@@ -180,8 +180,13 @@ class PersonaPlexTool:
                 env={**os.environ, "HF_TOKEN": os.getenv("HF_TOKEN", "")}
             )
 
-            # Give it a moment to start
-            time.sleep(2)
+            # Wait for startup with short polling intervals (max 3 seconds total)
+            startup_wait = 0.0
+            while startup_wait < 3.0:
+                time.sleep(0.3)
+                startup_wait += 0.3
+                if self._server_process.poll() is not None:
+                    break  # Process exited early (error)
 
             # Check if it started successfully
             if self._server_process.poll() is not None:
