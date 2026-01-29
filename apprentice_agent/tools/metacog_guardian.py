@@ -169,8 +169,8 @@ class MetacognitiveGuardian:
                                f"({prediction.probability:.0%} probability). "
                                f"{prediction.reasoning}"
                     )
-                except Exception:
-                    pass
+                except (AttributeError, TypeError):
+                    pass  # Monologue interface not available
 
             return prediction
 
@@ -195,8 +195,8 @@ class MetacognitiveGuardian:
                     thought_type="decide",
                     content=f"Executing {prediction.recommended_intervention.value} intervention"
                 )
-            except Exception:
-                pass
+            except (AttributeError, TypeError):
+                pass  # Monologue interface not available
 
         result = {
             "message": prediction.intervention_message,
@@ -269,8 +269,8 @@ class MetacognitiveGuardian:
                            f"{'correct' if outcome['prediction_correct'] else 'incorrect'}. "
                            f"Task {'failed' if not was_successful else 'succeeded'}."
                 )
-            except Exception:
-                pass
+            except (AttributeError, TypeError):
+                pass  # Monologue interface not available
 
     # ==================== INDICATOR GATHERING ====================
 
@@ -297,7 +297,7 @@ class MetacognitiveGuardian:
                     indicators["uncertainty_ratio"] = uncertain_count / len(recent_thoughts)
                 else:
                     indicators["uncertainty_ratio"] = 0.0
-            except Exception:
+            except (AttributeError, TypeError, KeyError):
                 indicators["uncertainty_ratio"] = 0.0
         else:
             indicators["uncertainty_ratio"] = 0.0
@@ -316,7 +316,7 @@ class MetacognitiveGuardian:
                 indicators["user_frustration"] = state.get("frustrated", 0.0)
                 indicators["user_stress"] = state.get("stressed", 0.0)
                 indicators["user_confusion"] = state.get("curious", 0.0) * 0.5
-            except Exception:
+            except (AttributeError, TypeError, KeyError):
                 indicators["user_frustration"] = 0.0
                 indicators["user_stress"] = 0.0
                 indicators["user_confusion"] = 0.0
@@ -433,7 +433,7 @@ class MetacognitiveGuardian:
                             total += 1
                             if outcome.get("actual_success"):
                                 successes += 1
-        except Exception:
+        except (IOError, OSError, json.JSONDecodeError):
             return 0.7
 
         if total == 0:
@@ -470,8 +470,8 @@ class MetacognitiveGuardian:
 
                 if nodes:
                     found += 1
-            except Exception:
-                pass
+            except (AttributeError, TypeError, ValueError):
+                pass  # KG method not available or returned unexpected type
 
         return found / len(check_words) if check_words else 0.7
 
@@ -824,8 +824,8 @@ class MetacognitiveGuardian:
                                 "timestamp": datetime.now().isoformat()
                             }
                         )
-                except Exception:
-                    pass
+                except (AttributeError, TypeError, ValueError):
+                    pass  # KG interface not available or quota exceeded
 
     # ==================== PERSISTENCE ====================
 
@@ -840,8 +840,8 @@ class MetacognitiveGuardian:
                     for line in f:
                         if line.strip():
                             patterns.append(json.loads(line))
-            except Exception:
-                pass
+            except (IOError, OSError, json.JSONDecodeError) as e:
+                print(f"[Guardian] Failed to load failure patterns: {e}")
 
         return patterns
 
@@ -853,8 +853,8 @@ class MetacognitiveGuardian:
             with open(patterns_file, 'w', encoding='utf-8') as f:
                 for pattern in self.failure_patterns[-100:]:  # Keep last 100
                     f.write(json.dumps(pattern) + '\n')
-        except Exception:
-            pass
+        except (IOError, OSError) as e:
+            print(f"[Guardian] Failed to save failure patterns: {e}")
 
     def _save_outcome(self, outcome: Dict):
         """Save outcome to disk."""
@@ -863,8 +863,8 @@ class MetacognitiveGuardian:
         try:
             with open(outcomes_file, 'a', encoding='utf-8') as f:
                 f.write(json.dumps(outcome) + '\n')
-        except Exception:
-            pass
+        except (IOError, OSError) as e:
+            print(f"[Guardian] Failed to save outcome: {e}")
 
     # ==================== STATS & MONITORING ====================
 
