@@ -15,6 +15,8 @@ from typing import List, Tuple, Optional
 
 import requests
 
+from ..config import Config
+
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +88,7 @@ Only output the improved response, nothing else."""
     def __init__(
         self,
         ollama_url: str = "http://localhost:11434",
-        model: str = "qwen2:7b",
+        model: str = None,
         quality_threshold: float = 0.75,
         max_iterations: int = 2
     ):
@@ -94,12 +96,12 @@ Only output the improved response, nothing else."""
 
         Args:
             ollama_url: Ollama API base URL
-            model: Model to use for critique and improvement
+            model: Model to use for critique and improvement (default: Config.MODEL_FAST)
             quality_threshold: Minimum score to accept (0.0-1.0)
             max_iterations: Maximum improvement rounds
         """
         self.ollama_url = ollama_url.rstrip("/")
-        self.model = model
+        self.model = model or Config.MODEL_FAST
         self.quality_threshold = max(0.0, min(1.0, quality_threshold))
         self.max_iterations = max(1, min(5, max_iterations))
         self.name = "mirrormind"

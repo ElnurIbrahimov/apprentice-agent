@@ -14,6 +14,8 @@ from typing import Dict, Optional
 
 import requests
 
+from ..config import Config
+
 
 logger = logging.getLogger(__name__)
 
@@ -78,16 +80,16 @@ Begin:"""
     def __init__(
         self,
         ollama_url: str = "http://localhost:11434",
-        model: str = "qwen2:1.5b"
+        model: str = None
     ):
         """Initialize CognitiveTheater.
 
         Args:
             ollama_url: Ollama API base URL
-            model: Model to use for deliberation
+            model: Model to use for deliberation (default: Config.MODEL_FAST)
         """
         self.ollama_url = ollama_url.rstrip("/")
-        self.model = model
+        self.model = model or Config.MODEL_FAST
         self.name = "cognitive_theater"
         self.description = "Multi-perspective reasoning and deliberation"
 
