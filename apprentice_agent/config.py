@@ -36,6 +36,9 @@ class Config:
     REFLEXION_ENABLED: bool = os.getenv("REFLEXION_ENABLED", "true").lower() == "true"
     REFLEXION_MAX_ATTEMPTS: int = int(os.getenv("REFLEXION_MAX_ATTEMPTS", "3"))
 
+    # SynapseForge Configuration (Tool #26) - Dynamic Tool Creation
+    SYNAPSEFORGE_ENABLED: bool = os.getenv("SYNAPSEFORGE_ENABLED", "true").lower() == "true"
+
     # Voice Configuration (Hybrid System)
     VOICE_CONFIG = {
         "default_mode": "pipeline",  # "pipeline" (Sesame) or "duplex" (PersonaPlex)

@@ -63,6 +63,7 @@ from .reflexion import (
     json_evaluator,
     answer_completeness_evaluator
 )
+from .synapseforge import SynapseForge, SynthesizedTool
 
 # Import FluxMind from external tools directory
 import sys
@@ -164,4 +165,7 @@ __all__ = [
     "function_evaluator",
     "json_evaluator",
     "answer_completeness_evaluator",
+    # SynapseForge - Dynamic Tool Creation
+    "SynapseForge",
+    "SynthesizedTool",
 ]

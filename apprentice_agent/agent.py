@@ -11,7 +11,7 @@ from .identity import load_identity, get_identity_prompt, detect_name_change, de
 from .memory import MemorySystem
 from .metacognition import MetacognitionLogger
 from .config import Config
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, build_adaptive_system_prompt, get_monologue, KnowledgeGraphTool, get_knowledge_graph, MetacognitiveGuardian, GuardianConfig, NeuroDreamEngine, SleepPhase, ReflexionEngine, code_syntax_evaluator
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, build_adaptive_system_prompt, get_monologue, KnowledgeGraphTool, get_knowledge_graph, MetacognitiveGuardian, GuardianConfig, NeuroDreamEngine, SleepPhase, ReflexionEngine, code_syntax_evaluator, SynapseForge
 from .tools.mirrormind import MirrorMind
 from .tools.cognitive_theater import CognitiveTheater, is_decision_question
 
@@ -165,6 +165,17 @@ class ApprenticeAgent:
             print(f"[LOADED] Reflexion - Learn from mistakes ({len(self.reflexion.reflections)} lessons)")
         else:
             self.reflexion = None
+
+        # Initialize SynapseForge (Tool #26) - Dynamic Tool Creation
+        self.synapseforge_enabled = getattr(Config, 'SYNAPSEFORGE_ENABLED', True)
+        if self.synapseforge_enabled:
+            self.forge = SynapseForge(
+                ollama_url=Config.OLLAMA_HOST,
+                model=Config.MODEL_CODE  # Use code model for tool synthesis
+            )
+            print(f"[LOADED] SynapseForge - Dynamic tool creation ({len(self.forge.registry)} tools)")
+        else:
+            self.forge = None
 
     def _ensure_tool(self, tool_name: str):
         """Lazily load a tool if not already loaded."""
@@ -1165,6 +1176,11 @@ Guidelines:
             return self._execute_summarize()
 
         if tool_name not in self.tools:
+            # Try SynapseForge to create a dynamic tool
+            if self.synapseforge_enabled and self.forge:
+                synth_result = self._try_synthesize_tool(tool_name, action)
+                if synth_result:
+                    return synth_result
             return {
                 "success": False,
                 "error": f"Unknown tool: {tool_name}",
@@ -1784,6 +1800,83 @@ Guidelines:
                 "success": False,
                 "error": f"Original error: {error}. Reflexion error: {str(e)}"
             }
+
+    def _try_synthesize_tool(self, tool_name: str, action: str) -> Optional[dict]:
+        """
+        Try to synthesize a new tool using SynapseForge.
+
+        Args:
+            tool_name: The requested tool name
+            action: The action/capability description
+
+        Returns:
+            Execution result if successful, None if synthesis failed
+        """
+        # Build capability description from tool name and action
+        capability = f"{tool_name.replace('_', ' ')}: {action}"
+
+        # First check if we already have a matching tool
+        existing = self.forge.find_tool(capability)
+        if existing:
+            # Parse kwargs from action if possible
+            kwargs = self._parse_tool_kwargs(action)
+            result = self.forge.execute_tool(existing.name, **kwargs)
+            result["synthesized_tool"] = existing.name
+            result["tool_reused"] = True
+            return result
+
+        # Try to synthesize a new tool
+        print(f"  SynapseForge: Attempting to create tool for '{capability}'...")
+        tool = self.forge.synthesize(capability)
+
+        if tool and tool.test_passed:
+            # Parse kwargs from action
+            kwargs = self._parse_tool_kwargs(action)
+            result = self.forge.execute_tool(tool.name, **kwargs)
+            result["synthesized_tool"] = tool.name
+            result["tool_created"] = True
+            return result
+
+        return None
+
+    def _parse_tool_kwargs(self, action: str) -> dict:
+        """Extract keyword arguments from action string."""
+        import re
+        kwargs = {}
+
+        # Look for patterns like "key=value" or "key: value"
+        patterns = [
+            r'(\w+)\s*=\s*(["\']?)([^"\',\s]+)\2',  # key=value or key="value"
+            r'(\w+)\s*:\s*(["\']?)([^"\',\s]+)\2',  # key: value or key: "value"
+        ]
+
+        for pattern in patterns:
+            for match in re.finditer(pattern, action):
+                key = match.group(1).lower()
+                value = match.group(3)
+                # Try to convert to appropriate type
+                try:
+                    if '.' in value:
+                        kwargs[key] = float(value)
+                    else:
+                        kwargs[key] = int(value)
+                except ValueError:
+                    kwargs[key] = value
+
+        # If no kwargs found, try to extract the main argument
+        if not kwargs:
+            # For simple cases like "100 celsius" or "convert 100"
+            numbers = re.findall(r'[-+]?\d*\.?\d+', action)
+            if numbers:
+                # Use the first number as input
+                kwargs['input'] = float(numbers[0]) if '.' in numbers[0] else int(numbers[0])
+
+            # Also try to capture text after common patterns
+            text_match = re.search(r'(?:text|string|input)[:\s]+["\']?(.+?)["\']?$', action, re.I)
+            if text_match:
+                kwargs['text'] = text_match.group(1).strip()
+
+        return kwargs
 
     def _extract_pages(self, action: str) -> Optional[str]:
         """Extract page specification from action string."""
