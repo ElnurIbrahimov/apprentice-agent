@@ -64,6 +64,7 @@ from .reflexion import (
     answer_completeness_evaluator
 )
 from .synapseforge import SynapseForge, SynthesizedTool
+from .worldsim import WorldSim, RiskLevel, SimulationResult, quick_check
 
 # Import FluxMind from external tools directory
 import sys
@@ -168,4 +169,9 @@ __all__ = [
     # SynapseForge - Dynamic Tool Creation
     "SynapseForge",
     "SynthesizedTool",
+    # WorldSim - Consequence Simulation
+    "WorldSim",
+    "RiskLevel",
+    "SimulationResult",
+    "quick_check",
 ]

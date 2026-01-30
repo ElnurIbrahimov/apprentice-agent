@@ -11,7 +11,7 @@ from .identity import load_identity, get_identity_prompt, detect_name_change, de
 from .memory import MemorySystem
 from .metacognition import MetacognitionLogger
 from .config import Config
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, build_adaptive_system_prompt, get_monologue, KnowledgeGraphTool, get_knowledge_graph, MetacognitiveGuardian, GuardianConfig, NeuroDreamEngine, SleepPhase, ReflexionEngine, code_syntax_evaluator, SynapseForge
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, build_adaptive_system_prompt, get_monologue, KnowledgeGraphTool, get_knowledge_graph, MetacognitiveGuardian, GuardianConfig, NeuroDreamEngine, SleepPhase, ReflexionEngine, code_syntax_evaluator, SynapseForge, WorldSim, RiskLevel
 from .tools.mirrormind import MirrorMind
 from .tools.cognitive_theater import CognitiveTheater, is_decision_question
 
@@ -176,6 +176,17 @@ class ApprenticeAgent:
             print(f"[LOADED] SynapseForge - Dynamic tool creation ({len(self.forge.registry)} tools)")
         else:
             self.forge = None
+
+        # Initialize WorldSim (Tool #27) - Consequence Simulation
+        self.worldsim_enabled = getattr(Config, 'WORLDSIM_ENABLED', True)
+        if self.worldsim_enabled:
+            self.worldsim = WorldSim(
+                ollama_url=Config.OLLAMA_HOST,
+                model=Config.MODEL_REASON  # Use reasoning model for safety analysis
+            )
+            print("[LOADED] WorldSim - Consequence simulation")
+        else:
+            self.worldsim = None
 
     def _ensure_tool(self, tool_name: str):
         """Lazily load a tool if not already loaded."""
@@ -1877,6 +1888,44 @@ Guidelines:
                 kwargs['text'] = text_match.group(1).strip()
 
         return kwargs
+
+    def check_action_safety(self, action: str, context: str = "") -> Optional[str]:
+        """
+        Check action safety using WorldSim before execution.
+
+        Args:
+            action: The action to check
+            context: Additional context about the action
+
+        Returns:
+            Warning message if action is risky, None if safe to proceed
+        """
+        if not self.worldsim_enabled or not self.worldsim:
+            return None
+
+        result = self.worldsim.simulate(action, context)
+
+        # Blocked -> Return blocking message
+        if result.risk_level == RiskLevel.BLOCKED:
+            return self.worldsim.format_warning(result)
+
+        # Dangerous -> Return strong warning
+        if result.risk_level == RiskLevel.DANGEROUS:
+            warning = self.worldsim.format_warning(result)
+            if result.safer_alternative:
+                warning += f"\n\n💡 Suggested: {result.safer_alternative}"
+            return warning
+
+        # Caution -> Log but allow
+        if result.risk_level == RiskLevel.CAUTION:
+            if hasattr(self, 'monologue') and self.monologue:
+                self.monologue.think(
+                    "reflect",
+                    f"WorldSim: {result.consequences[0] if result.consequences else 'Proceeding with caution'}",
+                    confidence=70
+                )
+
+        return None
 
     def _extract_pages(self, action: str) -> Optional[str]:
         """Extract page specification from action string."""

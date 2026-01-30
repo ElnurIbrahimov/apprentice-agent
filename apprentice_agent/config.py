@@ -39,6 +39,9 @@ class Config:
     # SynapseForge Configuration (Tool #26) - Dynamic Tool Creation
     SYNAPSEFORGE_ENABLED: bool = os.getenv("SYNAPSEFORGE_ENABLED", "true").lower() == "true"
 
+    # WorldSim Configuration (Tool #27) - Consequence Simulation
+    WORLDSIM_ENABLED: bool = os.getenv("WORLDSIM_ENABLED", "true").lower() == "true"
+
     # Voice Configuration (Hybrid System)
     VOICE_CONFIG = {
         "default_mode": "pipeline",  # "pipeline" (Sesame) or "duplex" (PersonaPlex)
