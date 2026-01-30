@@ -4,7 +4,7 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 
 ## Features
 
-- **28 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, Clawdbot messaging, EvoEmo emotional tracking, Inner Monologue, Knowledge Graph Memory, Metacognitive Guardian, NeuroDream sleep/dream memory consolidation, MirrorMind self-critique, CognitiveTheater multi-perspective reasoning, Reflexion learning-from-mistakes, SynapseForge dynamic tool creation, and more
+- **29 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, Clawdbot messaging, EvoEmo emotional tracking, Inner Monologue, Knowledge Graph Memory, Metacognitive Guardian, NeuroDream sleep/dream memory consolidation, MirrorMind self-critique, CognitiveTheater multi-perspective reasoning, Reflexion learning-from-mistakes, SynapseForge dynamic tool creation, WorldSim consequence simulation, and more
 - **5-Model Routing** - Automatically selects the best model for each task type (including FluxMind for calibrated reasoning)
 - **Observe-Plan-Act-Evaluate-Remember Loop** - Structured reasoning cycle for achieving goals
 - **Fast-Path Responses** - Instant replies for conversational queries without full agent loop
@@ -201,6 +201,7 @@ Opens at `http://127.0.0.1:7860` with:
 | `cognitive_theater` | Multi-perspective reasoning for decision questions | `Should I use X or Y?` or `Compare A vs B` |
 | `reflexion` | Learn from mistakes - retry failed tasks with accumulated lessons | Automatic for code execution failures |
 | `synapseforge` | Dynamic tool creation - synthesizes new tools at runtime | Automatic when capability gaps detected |
+| `worldsim` | Consequence simulation - previews risky actions before execution | Automatic for dangerous commands |
 
 ### Code Executor Safety
 
@@ -1488,6 +1489,101 @@ Tools are persisted to `data/synapseforge/registry.json`:
 export SYNAPSEFORGE_ENABLED=false
 ```
 
+### WorldSim (Consequence Simulation)
+
+WorldSim simulates consequences BEFORE executing risky actions. Shows what could happen, whether it's reversible, and suggests safer alternatives.
+
+**Flow:**
+```
+Action Detected -> Check Risk Level -> Simulate Consequences -> Show Preview -> Confirm
+```
+
+**Example:**
+```
+User: "Delete all files in /tmp/old_project"
+
+WorldSim Simulation:
+|- Action: rm -rf /tmp/old_project
+|- Risk Level: CAUTION
+|- Consequences:
+|   - Files will be permanently deleted
+|   - Cannot be undone (no trash)
+|- Reversible: No
+|- Safer Alternative: "Move to /tmp/trash first?"
+|- Proceed? [Yes / Use Alternative / Cancel]
+```
+
+**Risk Levels:**
+
+| Level | Icon | Behavior |
+|-------|------|----------|
+| `SAFE` | ✅ | No concerns, proceed |
+| `CAUTION` | ⚠️ | Show warning, ask confirmation |
+| `DANGEROUS` | 🚨 | Strong warning, suggest alternative |
+| `BLOCKED` | 🚫 | Refuse to execute |
+
+**Blocked Patterns (Instant Block):**
+
+- `rm -rf /` - Delete root filesystem
+- `rm -rf ~` - Delete home directory
+- `:(){ :|:& };:` - Fork bomb
+- `curl ... | bash` - Pipe untrusted script to shell
+- `dd if=... of=/dev/sda` - Overwrite disk
+- `mkfs.*` - Format filesystem
+
+**Caution Patterns (Trigger LLM Analysis):**
+
+- File deletion (`rm`, `del`)
+- Elevated privileges (`sudo`)
+- Permission changes (`chmod`, `chown`)
+- Database modifications (`DROP`, `DELETE FROM`)
+- Git destructive operations (`reset --hard`, `push --force`)
+- Service control (`systemctl stop`)
+
+**Python API:**
+
+```python
+from apprentice_agent.tools.worldsim import WorldSim, RiskLevel
+
+sim = WorldSim()
+
+# Simulate an action
+result = sim.simulate("rm -rf /tmp/old_logs")
+
+print(f"Risk: {result.risk_level.value}")       # caution
+print(f"Consequences: {result.consequences}")   # ['Files will be deleted']
+print(f"Reversible: {result.reversible}")       # False
+print(f"Proceed: {result.should_proceed}")      # True (with caution)
+
+# Check if blocked
+if result.risk_level == RiskLevel.BLOCKED:
+    print("Action blocked for safety!")
+
+# Get formatted warning
+warning = sim.format_warning(result)
+print(warning)
+```
+
+**Integration with Agent:**
+
+```python
+# In agent.py - automatic safety check
+warning = agent.check_action_safety("rm -rf /important")
+
+if warning:
+    print(warning)  # Shows WorldSim warning
+    # Wait for user confirmation
+else:
+    # Safe to proceed
+    execute_action()
+```
+
+**Disable:**
+
+```bash
+export WORLDSIM_ENABLED=false
+```
+
 ## Configuration
 
 Edit `apprentice_agent/config.py` to customize:
@@ -1508,6 +1604,7 @@ Edit `apprentice_agent/config.py` to customize:
 | `REFLEXION_ENABLED` | `true` | Enable learning from mistakes for code execution |
 | `REFLEXION_MAX_ATTEMPTS` | `3` | Maximum retry attempts when learning |
 | `SYNAPSEFORGE_ENABLED` | `true` | Enable dynamic tool creation at runtime |
+| `WORLDSIM_ENABLED` | `true` | Enable consequence simulation for risky actions |
 
 ## Architecture
 
@@ -1566,6 +1663,7 @@ apprentice-agent/
         ├── cognitive_theater.py # Multi-perspective reasoning system
         ├── reflexion.py      # Learn from mistakes system
         ├── synapseforge.py   # Dynamic tool creation system
+        ├── worldsim.py       # Consequence simulation system
         ├── synthesized/      # Runtime-generated tools
         └── custom/           # Auto-generated custom tools
 ```
