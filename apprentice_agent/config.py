@@ -32,6 +32,10 @@ class Config:
     # CognitiveTheater Configuration (Tool #22) - Multi-Perspective Reasoning
     COGNITIVE_THEATER_ENABLED: bool = os.getenv("COGNITIVE_THEATER_ENABLED", "true").lower() == "true"
 
+    # Reflexion Configuration (Tool #25) - Learn From Mistakes
+    REFLEXION_ENABLED: bool = os.getenv("REFLEXION_ENABLED", "true").lower() == "true"
+    REFLEXION_MAX_ATTEMPTS: int = int(os.getenv("REFLEXION_MAX_ATTEMPTS", "3"))
+
     # Voice Configuration (Hybrid System)
     VOICE_CONFIG = {
         "default_mode": "pipeline",  # "pipeline" (Sesame) or "duplex" (PersonaPlex)

@@ -54,6 +54,15 @@ from .neurodream import (
 )
 from .mirrormind import MirrorMind, CritiqueResult
 from .cognitive_theater import CognitiveTheater, Deliberation, is_decision_question
+from .reflexion import (
+    ReflexionEngine,
+    Reflection,
+    ReflexionResult,
+    code_syntax_evaluator,
+    function_evaluator,
+    json_evaluator,
+    answer_completeness_evaluator
+)
 
 # Import FluxMind from external tools directory
 import sys
@@ -147,4 +156,12 @@ __all__ = [
     "CognitiveTheater",
     "Deliberation",
     "is_decision_question",
+    # Reflexion - Learn From Mistakes
+    "ReflexionEngine",
+    "Reflection",
+    "ReflexionResult",
+    "code_syntax_evaluator",
+    "function_evaluator",
+    "json_evaluator",
+    "answer_completeness_evaluator",
 ]

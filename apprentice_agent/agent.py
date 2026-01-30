@@ -11,7 +11,7 @@ from .identity import load_identity, get_identity_prompt, detect_name_change, de
 from .memory import MemorySystem
 from .metacognition import MetacognitionLogger
 from .config import Config
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, build_adaptive_system_prompt, get_monologue, KnowledgeGraphTool, get_knowledge_graph, MetacognitiveGuardian, GuardianConfig, NeuroDreamEngine, SleepPhase
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, build_adaptive_system_prompt, get_monologue, KnowledgeGraphTool, get_knowledge_graph, MetacognitiveGuardian, GuardianConfig, NeuroDreamEngine, SleepPhase, ReflexionEngine, code_syntax_evaluator
 from .tools.mirrormind import MirrorMind
 from .tools.cognitive_theater import CognitiveTheater, is_decision_question
 
@@ -153,6 +153,18 @@ class ApprenticeAgent:
         self.theater_enabled = getattr(Config, 'COGNITIVE_THEATER_ENABLED', True)
         if self.theater_enabled:
             print("[LOADED] CognitiveTheater - Multi-perspective reasoning")
+
+        # Initialize Reflexion Engine (Tool #25) - Learn From Mistakes
+        self.reflexion_enabled = getattr(Config, 'REFLEXION_ENABLED', True)
+        if self.reflexion_enabled:
+            self.reflexion = ReflexionEngine(
+                ollama_url=Config.OLLAMA_HOST,
+                model=Config.MODEL_CODE,  # Use code model for code tasks
+                max_attempts=getattr(Config, 'REFLEXION_MAX_ATTEMPTS', 3)
+            )
+            print(f"[LOADED] Reflexion - Learn from mistakes ({len(self.reflexion.reflections)} lessons)")
+        else:
+            self.reflexion = None
 
     def _ensure_tool(self, tool_name: str):
         """Lazily load a tool if not already loaded."""
@@ -1245,6 +1257,9 @@ Guidelines:
             # Extract Python code from the action
             code = self._extract_code(action)
             if code:
+                # Use Reflexion for code execution if enabled
+                if self.reflexion_enabled and self.reflexion:
+                    return self._execute_code_with_reflexion(code, tool)
                 return tool.execute(code)
             else:
                 return {"success": False, "error": "No code provided"}
@@ -1679,6 +1694,96 @@ Guidelines:
 
         # Otherwise return the whole action as potential code
         return action.strip() if action.strip() else None
+
+    def _execute_code_with_reflexion(self, code: str, tool) -> dict:
+        """Execute code with Reflexion learning from mistakes.
+
+        If the code fails to execute, uses Reflexion to:
+        1. Analyze what went wrong
+        2. Generate improved code
+        3. Retry with lessons learned
+
+        Args:
+            code: The Python code to execute
+            tool: The CodeExecutorTool instance
+
+        Returns:
+            Execution result dict with success/error and reflexion metadata
+        """
+        # First, try direct execution
+        result = tool.execute(code)
+
+        if result.get("success"):
+            return result
+
+        # Execution failed - use Reflexion to learn and retry
+        error = result.get("error", "Unknown error")
+
+        # Create an evaluator that checks if code executes successfully
+        def code_execution_evaluator(task: str, output: str) -> tuple:
+            # Extract code from output if wrapped in markdown
+            code_to_run = output
+            if "```python" in output:
+                import re
+                match = re.search(r'```python\s*(.*?)```', output, re.DOTALL)
+                if match:
+                    code_to_run = match.group(1).strip()
+            elif "```" in output:
+                import re
+                match = re.search(r'```\s*(.*?)```', output, re.DOTALL)
+                if match:
+                    code_to_run = match.group(1).strip()
+
+            exec_result = tool.execute(code_to_run)
+            if exec_result.get("success"):
+                return True, exec_result.get("output", "Success")
+            return False, exec_result.get("error", "Execution failed")
+
+        # Build task description with original code and error
+        task = f"Fix this Python code that failed with error: {error}\n\nOriginal code:\n{code}"
+
+        try:
+            reflexion_result = self.reflexion.execute(task, code_execution_evaluator)
+
+            if reflexion_result.success:
+                # Extract the working code from the final output
+                final_code = reflexion_result.final_output
+                if "```python" in final_code:
+                    import re
+                    match = re.search(r'```python\s*(.*?)```', final_code, re.DOTALL)
+                    if match:
+                        final_code = match.group(1).strip()
+                elif "```" in final_code:
+                    import re
+                    match = re.search(r'```\s*(.*?)```', final_code, re.DOTALL)
+                    if match:
+                        final_code = match.group(1).strip()
+
+                # Execute the fixed code
+                final_result = tool.execute(final_code)
+                final_result["reflexion"] = {
+                    "attempts": reflexion_result.attempts,
+                    "lessons_used": reflexion_result.reflections_used,
+                    "learned": True
+                }
+                return final_result
+            else:
+                # All retries failed
+                return {
+                    "success": False,
+                    "error": f"Original error: {error}. Reflexion could not fix after {reflexion_result.attempts} attempts.",
+                    "reflexion": {
+                        "attempts": reflexion_result.attempts,
+                        "new_lesson": reflexion_result.new_reflection,
+                        "learned": False
+                    }
+                }
+        except Exception as e:
+            # Reflexion failed, return original error
+            return {
+                "success": False,
+                "error": f"Original error: {error}. Reflexion error: {str(e)}"
+            }
 
     def _extract_pages(self, action: str) -> Optional[str]:
         """Extract page specification from action string."""
