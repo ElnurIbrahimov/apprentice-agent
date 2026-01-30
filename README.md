@@ -4,7 +4,7 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 
 ## Features
 
-- **26 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, Clawdbot messaging, EvoEmo emotional tracking, Inner Monologue, Knowledge Graph Memory, Metacognitive Guardian, NeuroDream sleep/dream memory consolidation, MirrorMind self-critique, CognitiveTheater multi-perspective reasoning, and more
+- **27 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, Clawdbot messaging, EvoEmo emotional tracking, Inner Monologue, Knowledge Graph Memory, Metacognitive Guardian, NeuroDream sleep/dream memory consolidation, MirrorMind self-critique, CognitiveTheater multi-perspective reasoning, Reflexion learning-from-mistakes, and more
 - **5-Model Routing** - Automatically selects the best model for each task type (including FluxMind for calibrated reasoning)
 - **Observe-Plan-Act-Evaluate-Remember Loop** - Structured reasoning cycle for achieving goals
 - **Fast-Path Responses** - Instant replies for conversational queries without full agent loop
@@ -199,6 +199,7 @@ Opens at `http://127.0.0.1:7860` with:
 | `metacog_guardian` | Self-aware failure prediction and proactive intervention | `guardian stats` or `set guardian level high` |
 | `mirrormind` | Self-critique system that evaluates and improves responses | `enable mirrormind` or set `MIRRORMIND_ENABLED=true` |
 | `cognitive_theater` | Multi-perspective reasoning for decision questions | `Should I use X or Y?` or `Compare A vs B` |
+| `reflexion` | Learn from mistakes - retry failed tasks with accumulated lessons | Automatic for code execution failures |
 
 ### Code Executor Safety
 
@@ -1260,6 +1261,121 @@ print(output)
 export COGNITIVE_THEATER_ENABLED=false
 ```
 
+### Reflexion (Learn From Mistakes)
+
+Reflexion enables Aura to learn from task failures by reflecting on what went wrong, storing lessons, and using past lessons to improve future attempts. It's automatically integrated with code execution.
+
+**Flow:**
+```
+Task → Check Past Lessons → Attempt → Failed? → Reflect → Store Lesson → Retry
+                                         ↓
+                                    Success? → Done (with lessons used)
+```
+
+**Example - Code Execution:**
+
+```
+Original code (broken):
+  def greet(name)      # Missing colon
+      print(f"Hello!")
+
+Attempt 1: Execute → SyntaxError: expected ':'
+Reflect: "Missing colon after function definition. Always check syntax."
+Store lesson.
+
+Attempt 2: Fixed code with colon → SUCCESS
+Output: "Hello!"
+Reflexion metadata: {attempts: 2, learned: true, lessons_used: 1}
+```
+
+**Configuration:**
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `REFLEXION_ENABLED` | `true` | Enable learning from mistakes |
+| `REFLEXION_MAX_ATTEMPTS` | `3` | Maximum retry attempts |
+
+**How It Works:**
+
+1. **Past Lessons**: Before attempting a task, Reflexion searches for relevant lessons using keyword matching
+2. **Attempt with Context**: Generates attempt using past lessons as context
+3. **Evaluate**: Uses an evaluator function to check success/failure
+4. **Reflect on Failure**: If failed, generates a reflection on what went wrong
+5. **Store Lesson**: Saves the lesson to `data/reflexion/memories.jsonl`
+6. **Retry**: Next attempt includes the new lesson
+
+**Memory Storage (JSONL):**
+
+```json
+{"task": "parse CSV", "attempt": "used read_csv", "outcome": "failure", "feedback": "encoding error", "reflection": "Always detect encoding first for CSVs", "timestamp": "2026-01-30T10:00:00"}
+```
+
+**Built-in Evaluators:**
+
+| Evaluator | Checks |
+|-----------|--------|
+| `code_syntax_evaluator` | Valid Python syntax |
+| `function_evaluator` | Has `def` + `return` statement |
+| `json_evaluator` | Valid JSON output |
+| `answer_completeness_evaluator` | Response length and completeness |
+
+**Python API:**
+
+```python
+from apprentice_agent.tools.reflexion import ReflexionEngine, code_syntax_evaluator
+
+engine = ReflexionEngine(model="llama3:8b", max_attempts=3)
+
+# Custom evaluator
+def my_evaluator(task, output):
+    if "expected_output" in output:
+        return True, "Success"
+    return False, "Missing expected output"
+
+result = engine.execute("Generate a greeting", my_evaluator)
+
+print(f"Success: {result.success}")
+print(f"Attempts: {result.attempts}")
+print(f"Lessons used: {result.reflections_used}")
+print(f"New lesson: {result.new_reflection}")
+```
+
+**Integration with Agent:**
+
+Reflexion is automatically used when code execution fails:
+
+```python
+# In agent.py - automatic integration
+result = agent._execute_code_with_reflexion(code, tool)
+
+# Result includes reflexion metadata
+{
+    "success": True,
+    "output": "15",
+    "reflexion": {
+        "attempts": 2,
+        "lessons_used": ["Check variable initialization"],
+        "learned": True
+    }
+}
+```
+
+**View Stored Lessons:**
+
+```python
+engine = ReflexionEngine()
+print(engine.get_lessons_summary())
+# Total lessons: 8
+# Failures learned from: 6
+# Successes recorded: 2
+```
+
+**Disable:**
+
+```bash
+export REFLEXION_ENABLED=false
+```
+
 ## Configuration
 
 Edit `apprentice_agent/config.py` to customize:
@@ -1277,6 +1393,8 @@ Edit `apprentice_agent/config.py` to customize:
 | `MIRRORMIND_THRESHOLD` | `0.75` | Minimum quality score to accept (0.0-1.0) |
 | `MIRRORMIND_MAX_ITERATIONS` | `2` | Maximum improvement iterations |
 | `COGNITIVE_THEATER_ENABLED` | `true` | Enable multi-perspective reasoning for decisions |
+| `REFLEXION_ENABLED` | `true` | Enable learning from mistakes for code execution |
+| `REFLEXION_MAX_ATTEMPTS` | `3` | Maximum retry attempts when learning |
 
 ## Architecture
 
@@ -1333,6 +1451,7 @@ apprentice-agent/
         ├── neurodream.py     # Sleep/dream memory consolidation system
         ├── mirrormind.py     # Self-critique response improvement system
         ├── cognitive_theater.py # Multi-perspective reasoning system
+        ├── reflexion.py      # Learn from mistakes system
         └── custom/           # Auto-generated custom tools
 ```
 
