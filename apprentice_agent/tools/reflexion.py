@@ -18,6 +18,8 @@ from typing import Callable, List, Optional, Tuple
 
 import requests
 
+from ..config import Config
+
 logger = logging.getLogger(__name__)
 
 
@@ -56,7 +58,7 @@ class ReflexionEngine:
     def __init__(
         self,
         ollama_url: str = "http://localhost:11434",
-        model: str = "llama3.2",
+        model: str = None,
         memory_path: Optional[str] = None,
         max_attempts: int = 3
     ):
@@ -65,12 +67,12 @@ class ReflexionEngine:
 
         Args:
             ollama_url: URL for Ollama API
-            model: Model to use for generation
+            model: Model to use for generation (default: Config.MODEL_CODE)
             memory_path: Path to memories.jsonl file
             max_attempts: Maximum retry attempts
         """
         self.ollama_url = ollama_url.rstrip("/")
-        self.model = model
+        self.model = model or Config.MODEL_CODE
         self.max_attempts = max_attempts
 
         # Set up memory path

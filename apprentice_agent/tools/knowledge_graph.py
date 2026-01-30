@@ -7,6 +7,7 @@ Created: 2025-01-26
 """
 
 import json
+import logging
 import uuid
 import threading
 from datetime import datetime, timedelta
@@ -15,6 +16,8 @@ from typing import Optional, Dict, List, Any, Tuple
 from dataclasses import dataclass, asdict, field
 import networkx as nx
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 # Node types in Aura's mind
@@ -96,7 +99,9 @@ class Node:
 
     def format_display(self) -> str:
         """Format for display."""
-        icon = NODE_TYPES.get(self.type, "\U0001F4AD")
+        # Handle case where type might be corrupted (dict instead of str)
+        node_type = self.type if isinstance(self.type, str) else "unknown"
+        icon = NODE_TYPES.get(node_type, "\U0001F4AD")
         conf = f" [{int(self.confidence * 100)}%]" if self.confidence < 1.0 else ""
         return f"{icon} {self.label}{conf}"
 
@@ -206,6 +211,11 @@ class KnowledgeGraphTool:
         Raises:
             ValueError: If node quota exceeded
         """
+        # Validate node_type is a string
+        if not isinstance(node_type, str):
+            logger.warning(f"Invalid node_type {type(node_type)}, defaulting to 'concept'")
+            node_type = "concept"
+
         with self._lock:
             # Check quota before adding new node
             if len(self._nodes) >= self.MAX_NODES:
@@ -996,10 +1006,13 @@ class KnowledgeGraphTool:
             edge_types = {}
 
             for node in self._nodes.values():
-                node_types[node.type] = node_types.get(node.type, 0) + 1
+                # Handle corrupted type (dict instead of str)
+                ntype = node.type if isinstance(node.type, str) else "corrupted"
+                node_types[ntype] = node_types.get(ntype, 0) + 1
 
             for edge in self._edges.values():
-                edge_types[edge.type] = edge_types.get(edge.type, 0) + 1
+                etype = edge.type if isinstance(edge.type, str) else "corrupted"
+                edge_types[etype] = edge_types.get(etype, 0) + 1
 
             # Calculate average confidence
             avg_confidence = 0.0
