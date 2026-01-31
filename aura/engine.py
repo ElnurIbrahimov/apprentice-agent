@@ -2,30 +2,35 @@
 AURAEngine - Main Orchestrator for AURA v3.0 ALIVE System
 
 Brings all ALIVE components together:
-- Memory (MarkdownStore)
-- Emotion (EmotionalEngine)
-- Proactive (HeartbeatMonitor)
-- Patterns (PatternProphet)
-- Thinking (VisibleThinking)
-- Humanization (ResponseHumanizer)
-- Soul (SoulLoader)
+- LLM (OllamaClient) - The brain that generates responses
+- Memory (MarkdownStore + MemoryRetriever) - What AURA remembers
+- Emotion (EmotionalEngine) - How AURA feels
+- Proactive (HeartbeatMonitor) - AURA messaging first
+- Patterns (PatternProphet) - Behavioral patterns
+- Thinking (VisibleThinking) - Show AURA's thought process
+- Humanization (ResponseHumanizer) - Natural speech
+- Soul (SoulLoader) - Personality configuration
+- FastPath - Quick command handling
 
 This is the entry point for AURA's "aliveness".
 """
 
 import logging
 from pathlib import Path
-from typing import Dict, Optional, List, Any
+from typing import Dict, Optional, List, Any, Callable
 from dataclasses import dataclass, field
 
 # Import all ALIVE components
 from .memory import MarkdownStore
+from .memory.retriever import MemoryRetriever
 from .emotion import EmotionalEngine, Mood
 from .proactive import HeartbeatMonitor, Notification
 from .patterns import PatternProphet
 from .thinking import VisibleThinking, ThoughtType
 from .humanize import ResponseHumanizer, ResponseTone
 from .soul import SoulLoader, SoulConfig
+from .fast_path import FastPathHandler
+from .llm import OllamaClient
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +61,8 @@ class AURAEngine:
         soul_name: str = "SOUL_PERSONAL",
         enable_proactive: bool = True,
         enable_thinking: bool = True,
-        enable_humanization: bool = True
+        enable_humanization: bool = True,
+        model: str = "llama3:8b"
     ):
         """
         Initialize the AURA engine.
@@ -67,6 +73,7 @@ class AURAEngine:
             enable_proactive: Enable proactive notifications
             enable_thinking: Show visible thinking
             enable_humanization: Humanize responses
+            model: LLM model to use (default: llama3:8b)
         """
         if data_dir is None:
             data_dir = Path(__file__).parent / "data"
@@ -81,42 +88,67 @@ class AURAEngine:
         # Initialize all components
         logger.info("Initializing AURA ALIVE System...")
 
+        # LLM Client - The brain
+        self.llm = OllamaClient(model=model)
+        logger.info(f"  [OK] LLM client ready (model: {model})")
+
         # Memory system
         self.memory = MarkdownStore(data_dir=self.data_dir / "memory")
-        logger.info("  ✓ Memory system ready")
+        logger.info("  [OK] Memory system ready")
+
+        # Memory retriever - Makes AURA actually remember
+        self.memory_retriever = MemoryRetriever(
+            memory_store=self.memory,
+            data_dir=self.data_dir / "memory"
+        )
+        logger.info("  [OK] Memory retriever ready")
 
         # Emotional engine
         self.emotion = EmotionalEngine(state_file=self.data_dir / "emotional_state.json")
-        logger.info(f"  ✓ Emotion engine ready (mood: {self.emotion.state.mood.value})")
+        logger.info(f"  [OK] Emotion engine ready (mood: {self.emotion.state.mood.value})")
+
+        # Fast path - Only explicit commands
+        self.fast_path = FastPathHandler(
+            memory_store=self.memory,
+            emotional_engine=self.emotion
+        )
+        logger.info("  [OK] Fast path ready (minimal - only commands)")
 
         # Proactive system
         self.proactive = HeartbeatMonitor(data_dir=self.data_dir)
         if enable_proactive:
             self.proactive.start()
-            logger.info("  ✓ Proactive system started")
+            logger.info("  [OK] Proactive system started")
         else:
-            logger.info("  - Proactive system disabled")
+            logger.info("  [--] Proactive system disabled")
 
         # Pattern recognition
         self.patterns = PatternProphet(data_dir=self.data_dir)
-        logger.info(f"  ✓ Pattern recognition ready ({len(self.patterns.patterns)} patterns)")
+        logger.info(f"  [OK] Pattern recognition ready ({len(self.patterns.patterns)} patterns)")
 
         # Visible thinking
         self.thinking = VisibleThinking(show_thoughts=enable_thinking)
-        logger.info("  ✓ Thinking system ready")
+        logger.info("  [OK] Thinking system ready")
 
         # Response humanizer
         self.humanizer = ResponseHumanizer()
-        logger.info("  ✓ Humanizer ready")
+        logger.info("  [OK] Humanizer ready")
 
         # Soul configuration
         self.soul_loader = SoulLoader()
         self.soul = self.soul_loader.load(soul_name)
-        logger.info(f"  ✓ Soul loaded: {self.soul.name}")
+        logger.info(f"  [OK] Soul loaded: {self.soul.name}")
 
         # Track conversation state
         self._last_topic: Optional[str] = None
         self._turn_count: int = 0
+        self._conversation_history: List[Dict] = []
+
+        # Telegram callback for proactive messaging
+        self._send_message_callback: Optional[Callable] = None
+
+        # Initial sync to populate markdown files
+        self.sync_to_markdown()
 
         logger.info("AURA ALIVE System initialized!")
 
@@ -154,6 +186,9 @@ class AURAEngine:
 
         # Record user activity
         self.proactive.record_activity()
+
+        # Extract profile information from message
+        self.memory.extract_and_store_profile(user_input)
 
         # Process through emotion engine
         self.emotion.process_interaction(user_input)
@@ -247,6 +282,10 @@ class AURAEngine:
                 importance=0.5
             )
 
+        # Sync to markdown periodically (every 5 turns)
+        if self._turn_count % 5 == 0:
+            self.sync_to_markdown()
+
         return AURAResponse(
             content=final_response,
             thinking=thinking_output,
@@ -301,6 +340,147 @@ class AURAEngine:
             importance=importance
         )
 
+    def generate_response(
+        self,
+        user_message: str,
+        chat_id: Optional[str] = None
+    ) -> str:
+        """
+        Generate response with FULL context injection.
+
+        This is the MAIN method - it:
+        1. Tries fast-path (only for explicit commands)
+        2. Retrieves relevant memories
+        3. Gets emotional context
+        4. Calls LLM with all context
+        5. Stores interaction for future memory
+        6. Checks for follow-up triggers
+
+        Args:
+            user_message: What the user said
+            chat_id: Optional chat identifier for multi-user support
+
+        Returns:
+            AURA's response
+        """
+        self._turn_count += 1
+
+        # Record user activity for proactive system
+        self.proactive.record_activity()
+
+        # 1. Try fast-path (only explicit commands)
+        fast_response = self.fast_path.try_fast_path(user_message)
+        if fast_response:
+            logger.debug(f"Fast-path handled: {user_message[:50]}...")
+            return fast_response
+
+        # 2. Retrieve relevant memories
+        memories = self.memory_retriever.get_relevant_memories(user_message)
+        logger.debug(f"Retrieved {len(memories)} relevant memories")
+
+        # 3. Get user profile
+        user_profile = self.memory_retriever.get_user_profile()
+
+        # 4. Get emotional context and react to message
+        self.emotion.process_interaction(user_message)
+        emotional_context = {
+            "mood": self.emotion.state.mood.value,
+            "energy": getattr(self.emotion.state, 'energy', 0.5),
+            "warmth": getattr(self.emotion.state, 'warmth', 0.5)
+        }
+
+        # 5. Extract profile information from message
+        self.memory.extract_and_store_profile(user_message)
+
+        # 6. Generate with LLM + full context
+        response = self.llm.generate(
+            user_message=user_message,
+            conversation_history=self._conversation_history[-10:],
+            memories=memories,
+            emotional_context=emotional_context,
+            user_profile=user_profile,
+            additional_context=self.soul.get_system_prompt_addition() if self.soul else None
+        )
+
+        # 7. Optional humanization (light touch, LLM already has personality)
+        if self.enable_humanization and len(response) > 50:
+            tone = self._determine_tone()
+            result = self.humanizer.humanize(response, tone=tone, query=user_message)
+            # Only use humanized if it's not too different
+            if len(result.modifications) <= 2:
+                response = result.humanized
+
+        # 8. Store interaction for future memory
+        self.memory_retriever.store_interaction(user_message, response, chat_id)
+
+        # 9. Update conversation history
+        self._conversation_history.append({"role": "user", "content": user_message})
+        self._conversation_history.append({"role": "assistant", "content": response})
+
+        # Keep history bounded
+        if len(self._conversation_history) > 20:
+            self._conversation_history = self._conversation_history[-20:]
+
+        # 10. Check for follow-up triggers (interview, meeting, etc.)
+        self._check_follow_up_triggers(user_message, chat_id)
+
+        # 11. Sync to markdown periodically
+        if self._turn_count % 5 == 0:
+            self.sync_to_markdown()
+
+        return response
+
+    def _check_follow_up_triggers(self, message: str, chat_id: Optional[str]) -> None:
+        """Check if message mentions something to follow up on."""
+
+        if not chat_id:
+            return
+
+        msg_lower = message.lower()
+
+        # Interview detection
+        if "interview" in msg_lower:
+            if "tomorrow" in msg_lower:
+                self._schedule_follow_up(chat_id, "the interview", days=2)
+            elif "next week" in msg_lower:
+                self._schedule_follow_up(chat_id, "the interview", days=8)
+            elif any(day in msg_lower for day in ["monday", "tuesday", "wednesday", "thursday", "friday"]):
+                self._schedule_follow_up(chat_id, "the interview", days=3)
+
+        # Meeting detection
+        if "meeting" in msg_lower:
+            if "tomorrow" in msg_lower:
+                self._schedule_follow_up(chat_id, "that meeting", days=2)
+
+        # Important event detection
+        important_events = ["exam", "presentation", "deadline", "surgery", "appointment"]
+        for event in important_events:
+            if event in msg_lower and "tomorrow" in msg_lower:
+                self._schedule_follow_up(chat_id, f"the {event}", days=2)
+                break
+
+    def _schedule_follow_up(self, chat_id: str, topic: str, days: int) -> None:
+        """Schedule a follow-up notification."""
+        try:
+            from datetime import datetime, timedelta
+            follow_up_date = datetime.now() + timedelta(days=days)
+            message = f"Hey! How did {topic} go?"
+
+            # Add to proactive notifications
+            self.proactive.add_notification(
+                message=message,
+                category="follow_up",
+                action_hint=f"Ask about {topic}"
+            )
+            logger.info(f"Scheduled follow-up about '{topic}' in {days} days")
+        except Exception as e:
+            logger.warning(f"Failed to schedule follow-up: {e}")
+
+    def set_send_callback(self, callback: Callable) -> None:
+        """Set the callback for sending proactive messages (e.g., Telegram)."""
+        self._send_message_callback = callback
+        logger.info("Proactive messaging callback set")
+
     def get_greeting(self) -> str:
         """Get an appropriate greeting based on current state."""
         base_greeting = self.emotion.get_greeting_style()
@@ -314,14 +494,42 @@ class AURAEngine:
 
         return base_greeting
 
+    def sync_to_markdown(self) -> bool:
+        """
+        Sync JSON state to markdown files for human readability.
+
+        Returns:
+            True if sync was successful
+        """
+        success = True
+
+        # Sync emotional state
+        try:
+            state_data = self.emotion.state.to_dict()
+            success = success and self.memory.sync_emotional_state(state_data)
+        except Exception as e:
+            logger.error(f"Error syncing emotional state: {e}")
+            success = False
+
+        # Sync patterns
+        try:
+            patterns_data = {name: p.to_dict() for name, p in self.patterns.patterns.items()}
+            success = success and self.memory.sync_patterns(patterns_data)
+        except Exception as e:
+            logger.error(f"Error syncing patterns: {e}")
+            success = False
+
+        return success
+
     def shutdown(self) -> None:
         """Gracefully shutdown the ALIVE system."""
         logger.info("Shutting down AURA ALIVE System...")
 
+        # Sync state to markdown before shutdown
+        self.sync_to_markdown()
+
         if self.enable_proactive:
             self.proactive.stop()
-
-        # Could persist additional state here
 
         logger.info("AURA ALIVE System shutdown complete")
 
@@ -387,7 +595,7 @@ if __name__ == "__main__":
         context = engine.process_input(user_input)
 
         # Simulate LLM response (in real use, this comes from the LLM)
-        mock_response = "I would be happy to help you with that. Let me explain..."
+        mock_response = "Sure! Let me explain how this works..."
 
         # Process response
         response = engine.process_response(mock_response, context)

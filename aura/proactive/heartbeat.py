@@ -342,15 +342,28 @@ class HeartbeatMonitor:
         self.notification_history.append(notification)
 
     def _monitor_loop(self) -> None:
-        """Background monitoring loop."""
+        """Background monitoring loop with exponential backoff on errors."""
+        error_count = 0
+        max_errors = 5
+
         while self.running:
             try:
                 self.run_checks()
                 self._save_state()
+                error_count = 0  # Reset on success
                 time.sleep(self.check_interval)
             except Exception as e:
-                logger.error(f"Monitor loop error: {e}")
-                time.sleep(10)  # Back off on error
+                error_count += 1
+                logger.error(f"Monitor loop error ({error_count}/{max_errors}): {e}")
+
+                if error_count >= max_errors:
+                    logger.critical("Too many monitor errors, stopping proactive system")
+                    self.running = False
+                    break
+
+                # Exponential backoff: 10, 20, 40, 80, 160 seconds
+                backoff = min(160, 10 * (2 ** (error_count - 1)))
+                time.sleep(backoff)
 
     def start(self) -> None:
         """Start background monitoring."""

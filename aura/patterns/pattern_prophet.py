@@ -329,16 +329,24 @@ class PatternProphet:
         # Find keywords that frequently appear together
         for keyword, cowords in self._keyword_cooccurrence.items():
             if len(cowords) >= 5:  # Enough co-occurrences
-                # Find the strongest connections
-                top_related = sorted(cowords, key=lambda w: len(self._keyword_cooccurrence.get(w, set()) & cowords))[-5:]
+                # Find the strongest connections (exclude the keyword itself)
+                related_words = [w for w in cowords if w != keyword]
+                top_related = sorted(related_words, key=lambda w: len(self._keyword_cooccurrence.get(w, set()) & cowords))[-5:]
 
                 if len(top_related) >= 3:
                     name = f"cluster_{keyword}"
+                    # Create clean description without redundancy
+                    unique_related = [w for w in top_related[:3] if w != keyword]
+                    if unique_related:
+                        description = f"Interest in '{keyword}' often comes with: {', '.join(unique_related)}"
+                    else:
+                        description = f"Recurring interest in '{keyword}'"
+
                     if name not in self.patterns:
                         self.patterns[name] = Pattern(
                             name=name,
                             pattern_type="cluster",
-                            description=f"Interest cluster around: {keyword}, {', '.join(top_related[:3])}",
+                            description=description,
                             confidence=0.6,
                             occurrences=len(cowords),
                             triggers=[keyword],

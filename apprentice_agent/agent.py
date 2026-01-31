@@ -1,10 +1,20 @@
 """Main agent implementation with observe/plan/act/evaluate/remember loop."""
 
+import time
+import logging
+import concurrent.futures
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Tuple, Callable
+
+logger = logging.getLogger(__name__)
+
+# Timeout constants
+AGENT_TIMEOUT = 120  # Overall agent loop timeout (2 minutes)
+PHASE_TIMEOUT = 30   # Timeout per phase (observe, plan, act, evaluate)
+TOOL_TIMEOUT = 30    # Timeout for tool execution
 
 from .brain import OllamaBrain, TaskType
 from .identity import load_identity, get_identity_prompt, detect_name_change, detect_personality_change, update_name, update_personality
@@ -14,6 +24,7 @@ from .config import Config
 from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, build_adaptive_system_prompt, get_monologue, KnowledgeGraphTool, get_knowledge_graph, MetacognitiveGuardian, GuardianConfig, NeuroDreamEngine, SleepPhase, ReflexionEngine, code_syntax_evaluator, SynapseForge, WorldSim, RiskLevel
 from .tools.mirrormind import MirrorMind
 from .tools.cognitive_theater import CognitiveTheater, is_decision_question
+from .tools.crypto_price import CryptoPriceTool
 
 # AURA v3.0 ALIVE System
 try:
@@ -22,6 +33,14 @@ try:
 except ImportError:
     AURA_AVAILABLE = False
     AURAEngine = None
+
+# AURA Fast Path - Instant responses for simple queries
+try:
+    from aura.fast_path import FastPathHandler
+    FAST_PATH_AVAILABLE = True
+except ImportError:
+    FAST_PATH_AVAILABLE = False
+    FastPathHandler = None
 
 
 class AgentPhase(Enum):
@@ -67,6 +86,7 @@ class ApprenticeAgent:
         self.tools = {
             "filesystem": FileSystemTool(),
             "web_search": WebSearchTool(),
+            "crypto_price": CryptoPriceTool(),
             "code_executor": CodeExecutorTool(),
             "clipboard": ClipboardTool(),
             "notifications": NotificationTool(),
@@ -76,6 +96,7 @@ class ApprenticeAgent:
             "inner_monologue": get_monologue(),
             "clawdbot": ClawdbotTool(),
         }
+        logger.info("[LOADED] crypto_price - Real-time crypto prices from CoinGecko")
 
         # Heavier tools - load lazily or skip for fast init
         if not fast_init:
@@ -90,6 +111,80 @@ class ApprenticeAgent:
                 "marketplace": MarketplaceTool(),
                 "knowledge_graph": get_knowledge_graph()
             })
+
+            # === LOAD ADDITIONAL TOOLS ===
+            # deep_research
+            try:
+                from .tools.deep_research import DeepResearchTool
+                self.tools['deep_research'] = DeepResearchTool()
+                logger.info("[LOADED] deep_research")
+            except Exception as e:
+                logger.warning(f"deep_research not loaded: {e}")
+
+            # image_gen
+            try:
+                from .tools.image_gen import ImageGenTool
+                self.tools['image_gen'] = ImageGenTool()
+                logger.info("[LOADED] image_gen")
+            except Exception as e:
+                logger.warning(f"image_gen not loaded: {e}")
+
+            # hybrid_memory
+            try:
+                from .tools.hybrid_memory import HybridMemoryTool
+                self.tools['hybrid_memory'] = HybridMemoryTool()
+                logger.info("[LOADED] hybrid_memory")
+            except Exception as e:
+                logger.warning(f"hybrid_memory not loaded: {e}")
+
+            # sesame_tts
+            try:
+                from .tools.sesame_tts import SesameTTSTool
+                self.tools['sesame_tts'] = SesameTTSTool()
+                logger.info("[LOADED] sesame_tts")
+            except Exception as e:
+                logger.warning(f"sesame_tts not loaded: {e}")
+
+            # voice
+            try:
+                from .tools.voice import VoiceTool
+                self.tools['voice'] = VoiceTool()
+                logger.info("[LOADED] voice")
+            except Exception as e:
+                logger.warning(f"voice not loaded: {e}")
+
+            # mirrormind (as tool)
+            try:
+                from .tools.mirrormind import MirrorMind
+                self.tools['mirrormind'] = MirrorMind()
+                logger.info("[LOADED] mirrormind")
+            except Exception as e:
+                logger.warning(f"mirrormind not loaded: {e}")
+
+            # Auto-load ALL synthesized tools
+            try:
+                import os
+                synth_path = os.path.join(os.path.dirname(__file__), 'tools', 'synthesized')
+                if os.path.exists(synth_path):
+                    for file in os.listdir(synth_path):
+                        if file.endswith('.py') and file != '__init__.py':
+                            tool_name = file[:-3]
+                            try:
+                                module = __import__(f'apprentice_agent.tools.synthesized.{tool_name}', fromlist=[tool_name])
+                                # Try different class name patterns
+                                class_name = ''.join(word.title() for word in tool_name.split('_')) + 'Tool'
+                                tool_class = getattr(module, class_name, None)
+                                if not tool_class:
+                                    # Try simpler name
+                                    tool_class = getattr(module, f'{tool_name}Tool', None)
+                                if tool_class:
+                                    self.tools[tool_name] = tool_class()
+                                    logger.info(f"[LOADED] synthesized/{tool_name}")
+                            except Exception as e:
+                                logger.warning(f"synthesized/{tool_name} not loaded: {e}")
+            except Exception as e:
+                logger.warning(f"Could not load synthesized tools: {e}")
+
         else:
             # Placeholder for lazy loading
             self._lazy_tools = [
@@ -215,6 +310,20 @@ class ApprenticeAgent:
             self.aura = None
             if not AURA_AVAILABLE:
                 print("[INFO] AURA v3.0 not available (import failed)")
+
+        # Initialize AURA Fast Path - Instant responses
+        if FAST_PATH_AVAILABLE:
+            try:
+                self.fast_path_handler = FastPathHandler(
+                    memory_store=self.aura.memory if self.aura else None,
+                    emotional_engine=self.aura.emotion if self.aura else None
+                )
+                print("[LOADED] AURA Fast Path - Instant emotional responses")
+            except Exception as e:
+                print(f"[WARNING] Fast Path initialization failed: {e}")
+                self.fast_path_handler = None
+        else:
+            self.fast_path_handler = None
 
     def _ensure_tool(self, tool_name: str):
         """Lazily load a tool if not already loaded."""
@@ -345,17 +454,205 @@ class ApprenticeAgent:
     def _is_simple_query(self, goal: str) -> bool:
         """Check if the goal is a simple conversational query.
 
-        Simple queries include:
+        IMPORTANT: Tool keywords are checked FIRST. If ANY tool keyword matches,
+        this returns False (not simple) to ensure tools are used.
+
+        Simple queries (return True) include:
         - Greetings (hello, hi, hey, thanks, bye, etc.)
         - Questions about the agent itself (who are you, what can you do)
-        - Yes/no questions and short conversational queries
         - Opinion/preference questions
         - General knowledge questions without tool needs
         """
         goal_lower = goal.lower().strip()
         words = goal_lower.split()
 
-        # Greeting patterns - always fast-path
+        # ===================================================================
+        # STEP 1: CHECK TOOL KEYWORDS FIRST (HIGHEST PRIORITY)
+        # If ANY tool keyword matches, this is NOT a simple query
+        # ===================================================================
+
+        tool_keywords = [
+            # --- Tool 1: filesystem ---
+            'list files', 'show files', 'what files', 'read file', 'write file',
+            'open file', 'save file', 'delete file', 'create file', 'file contents',
+            'list directory', 'show directory', 'folder contents', 'dir contents',
+            'find file', 'search file', 'file system', 'filesystem',
+
+            # --- Tool 2: web_search ---
+            'search', 'google', 'look up', 'lookup', 'find online', 'search online',
+            'search the web', 'web search', 'search for', 'find out',
+            'stock price',
+            'weather', 'current weather', 'weather in', 'forecast',
+            'news', 'latest news', 'news about', 'headlines',
+            'who is', 'what is the current', 'how much does',
+
+            # --- Tool 2b: crypto_price (real-time crypto prices) ---
+            'bitcoin price', 'btc price', 'ethereum price', 'eth price',
+            'crypto price', 'cryptocurrency price', 'price of bitcoin',
+            'price of ethereum', 'price of btc', 'price of eth', 'price of crypto',
+            'how much is bitcoin', 'how much is ethereum', 'how much is btc',
+            'current bitcoin', 'current ethereum', 'current btc', 'current eth',
+            'solana price', 'sol price', 'dogecoin price', 'doge price',
+            'cardano price', 'ada price', 'xrp price', 'ripple price',
+
+            # --- Tool 3: code_executor ---
+            'run code', 'execute code', 'run python', 'execute python', 'run this',
+            'calculate', 'compute', 'factorial', 'fibonacci', 'prime number',
+            'write code', 'code to', 'python code', 'script', 'program',
+
+            # --- Tool 4: screenshot ---
+            'screenshot', 'take screenshot', 'capture screen', 'capture my screen',
+            'screen capture', 'grab screen', 'print screen', 'snapshot', 'screen shot',
+            "what's on my screen", 'what is on my screen', 'show my screen',
+
+            # --- Tool 5: vision ---
+            'analyze image', 'analyze this image', 'analyze the image',
+            'describe image', 'describe this image', 'describe the image',
+            'look at image', 'look at this image', 'look at the image',
+            "what's in this image", 'what is in this image', 'read image',
+            'image analysis', 'picture analysis', 'photo analysis',
+            'ocr', 'read text from image', 'extract text from image',
+
+            # --- Tool 6: pdf_reader ---
+            'read pdf', 'open pdf', 'pdf file', 'extract pdf', 'pdf contents',
+            "what's in this pdf", 'summarize pdf', 'summarize the pdf',
+            'search pdf', 'pdf document',
+
+            # --- Tool 7: browser ---
+            'browse', 'open website', 'go to website', 'visit website', 'open url',
+            'go to url', 'visit url', 'navigate to', 'open page', 'web page',
+            'click on', 'click the', 'scroll', 'browser',
+
+            # --- Tool 8: git ---
+            'git', 'commit', 'git commit', 'git push', 'git pull', 'git status',
+            'git log', 'git diff', 'git stash', 'git branch', 'clone repo',
+            'repository', 'repo', 'staged files', 'unstaged', 'untracked',
+            'what branch', 'which branch', 'current branch', 'show commits',
+            'recent commits', 'show changes', 'list branches',
+
+            # --- Tool 9: arxiv_search ---
+            'arxiv', 'research paper', 'academic paper', 'find papers',
+            'search papers', 'download paper', 'summarize paper', 'compare papers',
+            'scientific paper', 'journal article', 'academic research',
+
+            # --- Tool 10: system_control ---
+            'volume', 'set volume', 'get volume', 'brightness', 'set brightness',
+            'system info', 'cpu usage', 'ram usage', 'memory usage', 'gpu usage',
+            'disk usage', 'disk space', 'open app', 'launch app', 'start app',
+            'open notepad', 'open calculator', 'open browser', 'open chrome',
+            'open firefox', 'open vscode', 'open terminal', 'lock screen',
+
+            # --- Tool 11: clipboard ---
+            'clipboard', 'copy to clipboard', 'paste from clipboard', 'read clipboard',
+            'write clipboard', 'clipboard contents', 'what is in clipboard',
+            "what's in my clipboard", 'copy this', 'paste this',
+
+            # --- Tool 12: notifications ---
+            'remind me', 'reminder', 'set reminder', 'create reminder',
+            'notification', 'notify me', 'alert me', 'schedule',
+            'in 5 minutes', 'in 10 minutes', 'in 30 minutes', 'in an hour',
+            'every day', 'every morning', 'every evening', 'daily at', 'weekly',
+            'set alarm', 'timer',
+
+            # --- Tool 13: knowledge_graph ---
+            'remember this', 'store this', 'save this fact', 'add to knowledge',
+            'what do you know about', 'recall', 'knowledge graph',
+
+            # --- Tool 14: tool_builder ---
+            'create tool', 'build tool', 'make tool', 'new tool', 'custom tool',
+            'generate tool', 'tool builder', 'design tool',
+
+            # --- Tool 15: marketplace ---
+            'marketplace', 'plugin', 'download tool', 'install plugin',
+            'browse plugins', 'search plugins', 'uninstall plugin',
+            'my plugins', 'installed plugins', 'share tool', 'publish tool',
+
+            # --- Tool 16: regex_builder ---
+            'regex', 'regular expression', 'build regex', 'test regex',
+            'regex pattern', 'match pattern', 'validate regex', 'explain regex',
+
+            # --- Cognitive System 17: MirrorMind (self-critique) ---
+            'critique', 'self-critique', 'review my', 'check my work',
+            'mirrormind', 'mirror mind', 'evaluate my',
+
+            # --- Cognitive System 18: CognitiveTheater (perspectives) ---
+            'perspectives', 'different perspectives', 'multiple viewpoints',
+            'cognitive theater', 'debate this', 'argue both sides',
+
+            # --- Cognitive System 19: Reflexion (learning) ---
+            'reflexion', 'learn from', 'what did you learn', 'lessons learned',
+            'past mistakes', 'improve from',
+
+            # --- Cognitive System 20: SynapseForge (dynamic tools) ---
+            'synapseforge', 'synapse forge', 'dynamic tool', 'synthesize tool',
+            'create capability',
+
+            # --- Cognitive System 21: WorldSim (consequences) ---
+            'worldsim', 'world sim', 'simulate', 'consequences of',
+            'what would happen if', 'predict outcome', 'scenario',
+
+            # --- Cognitive System 22: MetacognitiveGuardian ---
+            'guardian', 'guardian stats', 'guardian status', 'failure prediction',
+            'metacognitive', 'monitoring level', 'show predictions', 'failure patterns',
+
+            # --- Cognitive System 23: NeuroDream (memory consolidation) ---
+            'neurodream', 'go to sleep', 'sleep now', 'dream status',
+            'dream journal', 'show dreams', 'sleep insights', 'dream insights',
+            'sleep patterns', 'memory consolidation',
+
+            # --- Cognitive System 24: EvoEmo (emotional) ---
+            'evoemo', 'my mood', 'how am i feeling', 'mood history',
+            'emotional state', 'analyze emotion', 'detect emotion',
+
+            # --- Cognitive System 25: InnerMonologue ---
+            'inner monologue', 'show thoughts', 'your thoughts', 'think aloud',
+            'reasoning chain', 'what were you thinking', 'export thoughts',
+
+            # --- Tool: PersonaPlex (voice) ---
+            'personaplex', 'voice server', 'start voice', 'stop voice',
+            'set voice', 'change voice', 'list voices', 'real-time voice',
+
+            # --- Tool: Clawdbot (messaging) ---
+            'clawdbot', 'send message', 'send whatsapp', 'send telegram',
+            'text message', 'discord message', 'message to',
+
+            # --- Tool: FluxMind (calibrated reasoning) ---
+            'fluxmind', 'calibrated', 'confidence check', 'uncertainty',
+            'how confident', 'verify sequence',
+
+            # --- Tool: deep_research ---
+            'deep research', 'research thoroughly', 'thorough research',
+            'in-depth research', 'comprehensive research', 'research topic',
+            'investigate thoroughly', 'deep dive',
+
+            # --- Tool: image_gen ---
+            'generate image', 'create image', 'make image', 'draw image',
+            'image generation', 'create picture', 'generate picture',
+
+            # --- Tool: hybrid_memory ---
+            'hybrid memory', 'store memory', 'recall memory', 'memory search',
+
+            # --- Tool: voice/tts ---
+            'text to speech', 'speak this', 'say this', 'read aloud',
+            'tts', 'sesame tts',
+        ]
+
+        # CHECK TOOL KEYWORDS FIRST
+        needs_tool = any(kw in goal_lower for kw in tool_keywords)
+        if needs_tool:
+            return False  # NOT simple - use full agent loop with tools
+
+        # Check if query matches any custom tool keywords
+        for kw in self.custom_tool_keywords:
+            if kw in goal_lower:
+                return False  # NOT simple - use full agent loop
+
+        # ===================================================================
+        # STEP 2: NOW check for simple conversational patterns
+        # Only reaches here if NO tool keywords matched
+        # ===================================================================
+
+        # Greeting patterns - fast-path
         greetings = [
             'hello', 'hi', 'hey', 'greetings', 'howdy', 'yo',
             'good morning', 'good afternoon', 'good evening', 'good night',
@@ -367,7 +664,7 @@ class ApprenticeAgent:
             if goal_lower.startswith(greeting) or goal_lower == greeting:
                 return True
 
-        # Questions about the agent itself - always fast-path
+        # Questions about the agent itself - fast-path
         agent_patterns = [
             'who are you', 'what are you', 'are you an ai', 'are you a bot',
             'are you real', 'are you human', 'what can you do', 'what do you do',
@@ -382,122 +679,23 @@ class ApprenticeAgent:
             if pattern in goal_lower:
                 return True
 
-        # Yes/no question starters - usually conversational
-        yesno_starters = [
-            'is it', 'is this', 'is that', 'are you', 'are there', 'are we',
-            'can you', 'can i', 'could you', 'would you', 'should i', 'should we',
-            'do you', 'does it', 'does this', 'did you', 'have you', 'has it',
-            'will you', 'will it', 'was it', 'were you', 'is there'
-        ]
-
-        # Opinion/conversational starters - usually fast-path
+        # Opinion/conversational starters - fast-path
         conversational_starters = [
             'what do you think', 'what is your opinion', 'do you like',
-            'do you prefer', 'which is better', "what's the best",
-            'tell me a joke', 'tell me something', 'say something',
-            'how should i', 'what should i', 'why is', 'why do', 'why are',
-            'when is', 'when do', 'when should', 'where is', 'where do',
-            'explain', 'describe', 'define', 'what is a', 'what is the',
-            'who is', 'who was', 'how many', 'how much', 'how long',
-            'what happened', 'what does', 'what means', 'meaning of'
+            'do you prefer', 'which is better', 'tell me a joke',
+            'tell me something', 'say something', 'how should i',
+            'what should i do', 'why is', 'why do', 'why are',
+            'explain', 'define', 'meaning of'
         ]
-
-        # Tool keywords that REQUIRE the full agent loop
-        # Be specific - only trigger for clear tool actions
-        tool_keywords = [
-            'search the web', 'search online', 'look up online', 'google',
-            'take a screenshot', 'capture screen', 'screenshot',
-            'read file', 'open file', 'list files', 'list directory',
-            'run code', 'execute code', 'run python', 'execute python',
-            'calculate', 'compute', 'factorial', 'fibonacci',
-            'read pdf', 'open pdf', 'extract from pdf',
-            'clipboard', 'copy to clipboard', 'paste from clipboard',
-            'analyze image', 'look at image', 'describe image',
-            'current weather', 'weather in', 'news about', 'latest news',
-            'stock price', 'bitcoin price', 'crypto price',
-            'arxiv', 'research paper', 'academic paper', 'find papers',
-            'download paper', 'search papers', 'summarize papers', 'compare papers',
-            'browse', 'open website', 'go to', 'visit url', 'visit site',
-            'click', 'navigate to', 'google search', 'open page',
-            'volume', 'brightness', 'open app', 'launch app', 'open notepad',
-            'open calculator', 'open browser', 'open chrome', 'open firefox',
-            'open vscode', 'open terminal', 'system info', 'cpu usage',
-            'ram usage', 'memory usage', 'lock screen', 'set volume', 'set brightness',
-            'remind', 'reminder', 'notify', 'notification', 'alert', 'schedule',
-            'every day', 'every morning', 'every evening', 'daily at', 'weekly',
-            'in 5 minutes', 'in 10 minutes', 'in 30 minutes', 'in an hour',
-            'set reminder', 'set alarm', 'remind me',
-            'create tool', 'make tool', 'build tool', 'new tool', 'i need a tool',
-            'custom tool', 'generate tool', 'tool builder', 'list tools', 'test tool',
-            'enable tool', 'disable tool', 'delete tool', 'remove tool',
-            'marketplace', 'plugin', 'browse plugins', 'search plugins', 'install plugin',
-            'download tool', 'share tool', 'publish tool', 'uninstall plugin', 'my plugins',
-            'installed plugins', 'rate plugin', 'update plugin', 'plugin marketplace',
-            'fluxmind', 'ask fluxmind', 'confidence check', 'calibrated', 'uncertainty',
-            'verify sequence', 'how confident',
-            'regex', 'regular expression', 'pattern', 'match pattern', 'regex pattern',
-            'build regex', 'test regex', 'explain regex', 'validate regex',
-            'git', 'commit', 'push', 'pull', 'branch', 'repository', 'repo',
-            'git status', 'git log', 'git diff', 'git stash', 'clone',
-            'what branch', 'which branch', 'current branch', 'show commits',
-            'recent commits', 'staged files', 'unstaged', 'untracked',
-            'show changes', 'list branches', 'show branches',
-            'personaplex', 'duplex', 'realtime voice', 'real-time voice',
-            'natural voice', 'voice server', 'start voice', 'stop voice',
-            'set voice', 'change voice', 'list voices', 'set persona',
-            'clawdbot', 'send message', 'send whatsapp', 'send telegram',
-            'whatsapp message', 'telegram message', 'discord message',
-            'signal message', 'imessage', 'text to', 'message to',
-            'evoemo', 'mood', 'emotion', 'how am i feeling', 'my mood',
-            'mood history', 'emotional state', 'clear mood',
-            'inner monologue', 'show thoughts', 'think aloud', 'verbosity',
-            'why did you do that', 'export thoughts', 'your thoughts',
-            'reasoning chain', 'what were you thinking',
-            'guardian stats', 'guardian status', 'guardian level',
-            'set guardian', 'monitoring level', 'show predictions',
-            'failure patterns', 'reset guardian',
-            # NeuroDream keywords (Tool #24)
-            'go to sleep', 'sleep now', 'enter sleep', 'start sleep',
-            'dream status', 'sleep status', 'neurodream status',
-            'wake up', 'stop sleeping', 'interrupt sleep',
-            'dream journal', 'show dreams', 'recent dreams',
-            'dream insights', 'show insights', 'sleep insights',
-            'sleep patterns', 'consolidated patterns'
-        ]
-
-        # Check if it clearly needs a tool
-        needs_tool = any(kw in goal_lower for kw in tool_keywords)
-        if needs_tool:
-            return False  # Use full agent loop
-
-        # Check if query matches any custom tool keywords
-        for kw in self.custom_tool_keywords:
-            if kw in goal_lower:
-                return False  # Use full agent loop for custom tools
-
-        # Check for yes/no questions (usually don't need tools)
-        for starter in yesno_starters:
-            if goal_lower.startswith(starter):
-                # But not if it's asking to perform an action
-                action_words = ['search', 'find', 'calculate', 'screenshot', 'read', 'analyze']
-                if not any(aw in goal_lower for aw in action_words):
-                    return True
-
-        # Check for conversational starters
         for starter in conversational_starters:
             if goal_lower.startswith(starter):
                 return True
 
-        # Short queries (less than 8 words) without tool needs are likely conversational
-        if len(words) < 8:
+        # Short simple queries (less than 5 words) are likely conversational
+        if len(words) < 5:
             return True
 
-        # Medium queries (8-12 words) - check for question patterns
-        if len(words) < 12:
-            question_words = ['what', 'who', 'why', 'how', 'when', 'where', 'which']
-            if any(goal_lower.startswith(qw) for qw in question_words):
-                return True
-
+        # Default: NOT simple (use agent loop to be safe)
         return False
 
     def _fast_path_response(self, goal: str) -> dict:
@@ -632,17 +830,44 @@ Guidelines:
 
         return None
 
-    def run(self, goal: str, context: Optional[dict] = None, use_fastpath: Optional[bool] = None) -> dict:
+    def run(self, goal: str, context: Optional[dict] = None, use_fastpath: Optional[bool] = None, timeout_seconds: int = AGENT_TIMEOUT) -> dict:
         """Run the agent loop to achieve a goal.
 
         Args:
             goal: The goal to achieve
             context: Optional context dictionary
             use_fastpath: Override fast-path behavior (None uses self.use_fastpath)
+            timeout_seconds: Maximum time for the entire agent loop
         """
+        start_time = time.time()
+        logger.info(f"[AGENT] Starting run() with goal: {goal[:100]}...")
+
         # Record user activity for NeuroDream idle detection
         if hasattr(self, 'neurodream') and self.neurodream:
             self.neurodream.record_activity()
+
+        # ===== AURA FAST PATH - TRY FIRST =====
+        # Handle simple queries instantly without agent loop
+        fastpath_enabled = use_fastpath if use_fastpath is not None else self.use_fastpath
+        if fastpath_enabled and hasattr(self, 'fast_path_handler') and self.fast_path_handler:
+            fast_response = self.fast_path_handler.try_fast_path(goal)
+            if fast_response:
+                print(f"\n[FAST PATH] Handled instantly: {goal[:50]}...")
+                print(f"[FAST PATH] Response: {fast_response[:100]}...")
+                return {
+                    "goal": goal,
+                    "completed": True,
+                    "iterations": 0,
+                    "fast_path": True,
+                    "aura_fast_path": True,
+                    "response": fast_response,
+                    "final_evaluation": {
+                        "success": True,
+                        "confidence": 100,
+                        "progress": fast_response
+                    },
+                    "history": []
+                }
 
         # Check for identity updates first
         identity_response = self._check_identity_update(goal)
@@ -822,26 +1047,63 @@ Guidelines:
         print(f"{'='*60}\n")
 
         while not self.state.completed and self.state.iteration < self.max_iterations:
+            # Check for overall timeout
+            elapsed = time.time() - start_time
+            if elapsed > timeout_seconds:
+                logger.warning(f"[AGENT] Timeout after {elapsed:.1f}s - returning partial result")
+                return self._format_timeout_response(goal, self.state.iteration, elapsed)
+
             self.state.iteration += 1
             self.metacognition.increment_iteration()
             print(f"\n--- Iteration {self.state.iteration} ---")
+            logger.info(f"[AGENT] Iteration {self.state.iteration}/{self.max_iterations}")
 
-            # Phase 1: OBSERVE
-            self._observe(context)
+            try:
+                # Phase 1: OBSERVE
+                logger.debug("[AGENT] Phase: OBSERVE")
+                self._observe(context)
 
-            # Phase 2: PLAN
-            self._plan()
+                # Phase 2: PLAN
+                logger.debug("[AGENT] Phase: PLAN")
+                self._plan()
 
-            # Phase 3: ACT
-            self._act()
+                # Phase 3: ACT
+                logger.debug("[AGENT] Phase: ACT")
+                self._act()
 
-            # Phase 4: EVALUATE
-            self._evaluate()
+                # Phase 4: EVALUATE
+                logger.debug("[AGENT] Phase: EVALUATE")
+                self._evaluate()
 
-            # Phase 5: REMEMBER
-            self._remember()
+                # Phase 5: REMEMBER
+                logger.debug("[AGENT] Phase: REMEMBER")
+                self._remember()
 
+            except Exception as e:
+                logger.error(f"[AGENT] Error in iteration {self.state.iteration}: {e}")
+                # Continue to next iteration on error
+                continue
+
+        elapsed = time.time() - start_time
+        logger.info(f"[AGENT] Completed in {elapsed:.1f}s after {self.state.iteration} iterations")
         return self._get_final_result()
+
+    def _format_timeout_response(self, goal: str, iteration: int, elapsed: float) -> dict:
+        """Format a response when agent times out."""
+        return {
+            "goal": goal,
+            "completed": False,
+            "iterations": iteration,
+            "timeout": True,
+            "elapsed_seconds": elapsed,
+            "response": f"I ran out of time after {elapsed:.0f} seconds. Please try a simpler request.",
+            "final_evaluation": {
+                "success": False,
+                "confidence": 0,
+                "progress": f"Timeout after {iteration} iterations ({elapsed:.1f}s)"
+            },
+            "history": []
+        }
 
     def _observe(self, context: dict) -> None:
         """Phase 1: Observe the current state and context."""
@@ -1206,9 +1468,11 @@ Guidelines:
             print(f"Stored memory: {memory_content[:100]}...")
 
     def _execute_action(self, action_decision: dict) -> dict:
-        """Execute an action using the appropriate tool."""
+        """Execute an action using the appropriate tool with timeout protection."""
         tool_name = action_decision.get("tool", "").lower()
         action = action_decision.get("action", "")
+
+        logger.info(f"[TOOL] Executing {tool_name}: {action[:50]}...")
 
         # Handle summarize tool specially (it's not in self.tools)
         if tool_name == "summarize":
@@ -1228,17 +1492,33 @@ Guidelines:
 
         tool = self.tools[tool_name]
 
-        # Parse the action into tool method and arguments
+        # Parse the action into tool method and arguments WITH TIMEOUT
         try:
-            result = self._parse_and_execute_tool_action(tool, tool_name, action)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(
+                    self._parse_and_execute_tool_action, tool, tool_name, action
+                )
+                try:
+                    result = future.result(timeout=TOOL_TIMEOUT)
+                except concurrent.futures.TimeoutError:
+                    logger.warning(f"[TOOL] {tool_name} timed out after {TOOL_TIMEOUT}s")
+                    return {
+                        "success": False,
+                        "error": f"Tool {tool_name} timed out after {TOOL_TIMEOUT} seconds",
+                        "timeout": True
+                    }
+
             # Store successful search results for later summarization
             if tool_name == "web_search" and result.get("success"):
                 self._store_search_results(result)
             # Store screenshot path for combined screenshot+vision tasks
             if tool_name == "screenshot" and result.get("success"):
                 self.brain._last_screenshot_path = result.get("path")
+
+            logger.info(f"[TOOL] {tool_name} completed: success={result.get('success')}")
             return result
         except Exception as e:
+            logger.error(f"[TOOL] {tool_name} failed: {e}")
             return {"success": False, "error": str(e)}
 
     def _execute_summarize(self) -> dict:
@@ -1307,6 +1587,26 @@ Guidelines:
             else:
                 # Default to search
                 return tool.search(action)
+
+        elif tool_name == "crypto_price":
+            # Handle crypto price queries
+            # Extract crypto name from action
+            crypto_terms = ['bitcoin', 'btc', 'ethereum', 'eth', 'solana', 'sol', 'cardano', 'ada',
+                           'dogecoin', 'doge', 'xrp', 'ripple', 'polkadot', 'dot', 'bnb', 'binance',
+                           'avalanche', 'avax', 'polygon', 'matic', 'litecoin', 'ltc', 'chainlink',
+                           'link', 'uniswap', 'uni', 'toncoin', 'ton', 'tron', 'trx', 'shiba', 'shib', 'pepe']
+
+            crypto = None
+            for term in crypto_terms:
+                if term in action_lower:
+                    crypto = term
+                    break
+
+            if crypto:
+                return tool.get_price(crypto)
+            else:
+                # Default to bitcoin
+                return tool.get_price("bitcoin")
 
         elif tool_name == "code_executor":
             # Extract Python code from the action
@@ -1598,6 +1898,35 @@ Guidelines:
         elif tool_name == "marketplace":
             # Handle marketplace actions
             return tool.execute(action)
+
+        elif tool_name == "deep_research":
+            # Handle deep research actions
+            depth = "standard"
+            if "deep" in action_lower or "thorough" in action_lower:
+                depth = "deep"
+            elif "quick" in action_lower or "fast" in action_lower:
+                depth = "quick"
+            return tool.research(action, depth=depth)
+
+        elif tool_name == "image_gen":
+            # Handle image generation
+            return tool.generate(action)
+
+        elif tool_name == "hybrid_memory":
+            # Handle hybrid memory actions
+            if "store" in action_lower or "remember" in action_lower:
+                return tool.store(action)
+            elif "recall" in action_lower or "search" in action_lower:
+                return tool.recall(action)
+            return tool.run(action)
+
+        elif tool_name == "voice" or tool_name == "sesame_tts":
+            # Handle voice/TTS actions
+            return tool.speak(action)
+
+        elif tool_name == "mirrormind":
+            # Handle mirrormind self-critique
+            return tool.critique(action)
 
         elif tool_name == "fluxmind":
             # Handle FluxMind calibrated reasoning actions
@@ -3033,6 +3362,16 @@ Try these commands:
         Returns:
             Agent response text
         """
+        # ===== AURA FAST PATH - TRY FIRST =====
+        # Handle simple queries instantly (greetings, memory, emotions)
+        if self.use_fastpath and hasattr(self, 'fast_path_handler') and self.fast_path_handler:
+            fast_response = self.fast_path_handler.try_fast_path(message)
+            if fast_response:
+                print(f"[FAST PATH] {message[:30]}... -> {fast_response[:50]}...")
+                if speak:
+                    self._speak(fast_response)
+                return fast_response
+
         # AURA v3.0 ALIVE - Process input through AURA first
         aura_context = None
         if self.aura_enabled and self.aura:
@@ -3077,6 +3416,15 @@ Try these commands:
                 # Fall through to normal processing on error
                 print(f"[CognitiveTheater] Error: {e}")
 
+        # ===== EMOTIONAL PREPROCESSING - DISABLED =====
+        # Let the LLM (llama3:8b) handle conversational/emotional messages naturally
+        # The canned responses were too generic - LLM provides better conversation
+        # emotional_response = self._handle_emotional_message(message)
+        # if emotional_response:
+        #     if speak:
+        #         self._speak(emotional_response, emotion=emotion_reading.emotion if emotion_reading else None)
+        #     return emotional_response
+
         # Use fast model for simple queries (greetings, etc.)
         if self._is_simple_query(message):
             task_type = TaskType.SIMPLE
@@ -3113,10 +3461,15 @@ Try these commands:
                 aura_response = self.aura.process_response(response, aura_context)
                 response = thinking_prefix + aura_response.content
 
-                # Add any pending notifications
+                # Add any pending notifications (but filter out greetings - they shouldn't be appended)
                 if aura_response.notifications:
-                    notif_text = "\n\n---\n" + "\n".join(f"* {n}" for n in aura_response.notifications[:2])
-                    response += notif_text
+                    # Filter out greeting messages
+                    filtered_notifs = [n for n in aura_response.notifications
+                                       if "I'm here whenever" not in n and "Good morning" not in n
+                                       and "Good afternoon" not in n and "Good evening" not in n]
+                    if filtered_notifs:
+                        notif_text = "\n\n---\n" + "\n".join(f"* {n}" for n in filtered_notifs[:2])
+                        response += notif_text
             except Exception as e:
                 print(f"[AURA] Response processing error: {e}")
                 response = thinking_prefix + response
@@ -3133,6 +3486,101 @@ Try these commands:
                 return self.tools["evoemo"].analyze_text(message)
         except Exception as e:
             print(f"[EvoEmo] Analysis error: {e}")
+        return None
+
+    def _handle_emotional_message(self, message: str) -> Optional[str]:
+        """
+        Handle emotional/conversational messages that don't need the full agent loop.
+        Returns a response if this is an emotional share, None if it needs agent processing.
+        """
+        import random
+
+        message_lower = message.lower()
+
+        # Check for positive emojis
+        positive_emojis = ["😍", "🎉", "😊", "❤️", "🥳", "😄", "🔥", "💪", "✨", "👏", "😁", "🙌", "💕", "🤩"]
+        negative_emojis = ["😢", "😭", "😞", "😔", "💔", "😿", "🥺", "😰"]
+        has_positive_emoji = any(e in message for e in positive_emojis)
+        has_negative_emoji = any(e in message for e in negative_emojis)
+
+        # Task indicators - if present, let agent loop handle it
+        task_words = ["create", "make", "build", "write", "code", "help me",
+                     "can you", "please", "how do i", "what is", "explain",
+                     "search", "find", "show me", "tell me how"]
+        has_task = any(w in message_lower for w in task_words)
+
+        # If clearly a task request, let agent handle it
+        if has_task:
+            return None
+
+        # Positive/success indicators
+        positive_words = ["pay me well", "pays well", "good salary", "great salary",
+                        "good offer", "great offer", "amazing offer", "raise", "bonus",
+                        "got the", "i got", "passed", "accepted", "promoted", "won",
+                        "finally", "it worked", "made it", "nailed it", "crushed it",
+                        "so happy", "so excited", "amazing news", "great news", "good news",
+                        "best day", "awesome", "wonderful", "fantastic", "incredible",
+                        "they offered", "offered me", "hired", "got hired"]
+
+        # Negative indicators
+        negative_words = ["didn't get", "didnt get", "failed", "rejected", "lost",
+                        "fired", "broke up", "dumped", "struggling", "stressed",
+                        "anxious", "worried", "sad", "depressed", "tired", "exhausted",
+                        "terrible", "awful", "horrible", "sucks", "worst"]
+
+        # Check for positive message
+        is_positive = (has_positive_emoji and not has_negative_emoji) or \
+                     any(w in message_lower for w in positive_words)
+
+        # Check for negative message
+        is_negative = has_negative_emoji or any(w in message_lower for w in negative_words)
+
+        # Handle positive messages with excitement
+        if is_positive and not is_negative:
+            responses = [
+                "That's AMAZING!! Tell me everything!",
+                "Oh wow, that's so exciting! How do you feel?",
+                "YES! That's incredible news! What happened?",
+                "Holy crap, congrats!! That's huge!",
+                "Wait, really?! That's awesome! Tell me more!",
+                "No way!! That's fantastic! I'm so happy for you!",
+                "OMG that's wonderful! How are you feeling about it?",
+            ]
+            print(f"[EMOTIONAL] Detected POSITIVE message, handling directly")
+            return random.choice(responses)
+
+        # Handle negative messages with empathy
+        if is_negative and not is_positive:
+            responses = [
+                "I'm sorry to hear that. That's really tough.",
+                "Oof, that's hard. I'm here if you want to talk.",
+                "That sucks. How are you holding up?",
+                "I hear you. That sounds really difficult.",
+                "Hey... that's rough. Want to talk about it?",
+                "I'm here. That must be really hard.",
+            ]
+            print(f"[EMOTIONAL] Detected NEGATIVE message, handling directly")
+            return random.choice(responses)
+
+        # Casual/playful messages (like "lol", short messages, etc.)
+        playful_indicators = ["lol", "haha", "hehe", "😂", "🤣", ":)", "xd", "rofl"]
+        if any(p in message_lower for p in playful_indicators) and len(message.split()) < 15:
+            responses = [
+                "Haha, I like that!",
+                "Ha! What's on your mind?",
+                "Lol, tell me more!",
+                "Haha, what else is going on?",
+            ]
+            print(f"[EMOTIONAL] Detected PLAYFUL message, handling directly")
+            return random.choice(responses)
+
+        # Short conversational messages (not tasks)
+        if len(message.split()) < 8 and "?" not in message:
+            # Could be casual chat, but not clearly emotional
+            # Let it pass to agent for now
+            pass
+
+        # Not clearly emotional - let agent loop handle it
         return None
 
     def _handle_aura_command(self, message: str) -> Optional[str]:

@@ -1,85 +1,124 @@
-"""Web search tool using DuckDuckGo."""
+"""Web search using SearXNG."""
 
-from typing import Optional
-from ddgs import DDGS
+import requests
+import logging
+from typing import Dict, List
+
+logger = logging.getLogger(__name__)
 
 
 class WebSearchTool:
-    """Tool for web searching using DuckDuckGo."""
+    """Web search using SearXNG."""
 
     name = "web_search"
-    description = "Search the web for information using DuckDuckGo"
+    description = "Search the web using SearXNG"
+
+    # Primary instance (known working)
+    PRIMARY_INSTANCE = "https://serxng-deployment-production.up.railway.app"
+
+    # Fallback instances
+    FALLBACK_INSTANCES = [
+        "https://searx.be",
+        "https://search.sapti.me",
+    ]
 
     def __init__(self):
-        self.ddgs = DDGS()
+        self.timeout = 15
 
-    def search(self, query: str, max_results: int = 5) -> dict:
-        """Perform a web search and return results."""
-        try:
-            results = list(self.ddgs.text(query, max_results=max_results))
-            return {
-                "success": True,
-                "query": query,
-                "results": [
-                    {
-                        "title": r.get("title", ""),
-                        "url": r.get("href", ""),
-                        "snippet": r.get("body", "")
-                    }
-                    for r in results
-                ]
-            }
-        except Exception as e:
-            return {"success": False, "error": str(e), "query": query}
+    def search(self, query: str, num_results: int = 10, categories: str = "general") -> Dict:
+        """
+        Search using SearXNG.
 
-    def news(self, query: str, max_results: int = 5) -> dict:
-        """Search for news articles."""
-        try:
-            results = list(self.ddgs.news(query, max_results=max_results))
-            return {
-                "success": True,
-                "query": query,
-                "results": [
-                    {
+        Args:
+            query: Search query
+            num_results: Number of results to return
+            categories: Search categories (general, news, images)
+
+        Returns:
+            Dict with success status and results
+        """
+        logger.info(f"[SEARXNG] Searching: {query}")
+
+        # Try primary instance first, then fallbacks
+        instances = [self.PRIMARY_INSTANCE] + self.FALLBACK_INSTANCES
+
+        for instance in instances:
+            try:
+                response = requests.get(
+                    f"{instance}/search",
+                    params={
+                        "q": query,
+                        "format": "json",
+                        "categories": categories,
+                    },
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                        "Accept": "application/json",
+                    },
+                    timeout=self.timeout
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    results = data.get("results", [])[:num_results]
+
+                    formatted = [{
                         "title": r.get("title", ""),
                         "url": r.get("url", ""),
-                        "snippet": r.get("body", ""),
-                        "date": r.get("date", ""),
-                        "source": r.get("source", "")
-                    }
-                    for r in results
-                ]
-            }
-        except Exception as e:
-            return {"success": False, "error": str(e), "query": query}
+                        "snippet": r.get("content", ""),
+                        "engine": r.get("engine", "searxng"),
+                    } for r in results]
 
-    def instant_answer(self, query: str) -> dict:
-        """Get an instant answer if available."""
-        try:
-            results = list(self.ddgs.answers(query))
-            if results:
-                return {
-                    "success": True,
-                    "query": query,
-                    "answer": results[0].get("text", ""),
-                    "source": results[0].get("url", "")
-                }
+                    if formatted:
+                        logger.info(f"[SEARXNG] Found {len(formatted)} results from {instance}")
+                        return {
+                            "success": True,
+                            "query": query,
+                            "source": instance,
+                            "results": formatted,
+                            "num_results": len(formatted),
+                        }
+
+                logger.warning(f"[SEARXNG] {instance} returned {response.status_code}")
+
+            except requests.Timeout:
+                logger.warning(f"[SEARXNG] {instance} timed out")
+            except requests.RequestException as e:
+                logger.warning(f"[SEARXNG] {instance} error: {e}")
+
+        return {
+            "success": False,
+            "error": "All SearXNG instances failed.",
+            "query": query,
+        }
+
+    def news(self, query: str, num_results: int = 10) -> Dict:
+        """Search news."""
+        return self.search(query, num_results, categories="news")
+
+    def images(self, query: str, num_results: int = 10) -> Dict:
+        """Search images."""
+        return self.search(query, num_results, categories="images")
+
+    def instant_answer(self, query: str) -> Dict:
+        """Get instant answer."""
+        result = self.search(query, num_results=3)
+        if result.get("success") and result.get("results"):
+            first = result["results"][0]
             return {
                 "success": True,
                 "query": query,
-                "answer": None,
-                "message": "No instant answer available"
+                "answer": first.get("snippet", ""),
+                "source": first.get("url", ""),
             }
-        except Exception as e:
-            return {"success": False, "error": str(e), "query": query}
+        return result
 
-    def execute(self, action: str, **kwargs) -> dict:
-        """Execute a web search action by name."""
-        actions = {
-            "search": self.search,
-            "news": self.news,
-            "answer": self.instant_answer
-        }
-        if action not in actions:
-            return {"success": False, "error": f"Unknown action: {action}"}
-        return actions[action](**kwargs)
+    def run(self, query: str) -> Dict:
+        """Main entry point."""
+        return self.search(query)
+
+
+def web_search(query: str, num_results: int = 10) -> Dict:
+    """Search the web using SearXNG."""
+    tool = WebSearchTool()
+    return tool.search(query, num_results)

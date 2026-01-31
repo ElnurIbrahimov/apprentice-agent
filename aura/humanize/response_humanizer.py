@@ -53,30 +53,26 @@ class ResponseHumanizer:
     - Contextual personality
     """
 
-    # Natural openers by tone
+    # Natural openers by tone - GENUINE, not corporate
     OPENERS = {
         ResponseTone.WARM: [
-            "Great question! ", "I'd love to help with that. ", "Let me help you out. ",
-            "Happy to explain! ", "Sure thing! "
+            "Oh! ", "So, ", "Okay, ", "Right, ", "Hmm, "
         ],
         ResponseTone.PROFESSIONAL: [
-            "Certainly. ", "Of course. ", "I can assist with that. ",
-            "Allow me to explain. ", "Here's what you need to know: "
+            "Right, ", "So, ", "Here's the thing: ", "", ""
         ],
         ResponseTone.CASUAL: [
-            "Oh, ", "So, ", "Well, ", "Alright, ", "Okay so "
+            "Oh, ", "So, ", "Well, ", "Okay so ", "Hmm, "
         ],
         ResponseTone.ENTHUSIASTIC: [
-            "Ooh, great question! ", "Love this! ", "Yes! ",
-            "This is interesting! ", "Awesome, let's dive in! "
+            "Ooh! ", "Oh! ", "Yes! ", "Okay okay, ",
+            "Oh man, "
         ],
         ResponseTone.EMPATHETIC: [
-            "I understand. ", "That makes sense. ", "I hear you. ",
-            "I can see why you'd ask that. ", "That's a fair concern. "
+            "Hey, ", "Look, ", "I get it. ", "", ""
         ],
         ResponseTone.THOUGHTFUL: [
-            "That's an interesting question... ", "Let me think about this. ",
-            "Hmm, ", "Good point. ", "This requires some thought. "
+            "Hmm, ", "So... ", "Let me think... ", "Okay, ", ""
         ],
         ResponseTone.DIRECT: [
             "", "", "", "", ""  # No opener for direct tone
@@ -90,49 +86,53 @@ class ResponseHumanizer:
         "Worth mentioning: ", "Here's the thing though: "
     ]
 
-    # Natural closers by tone
+    # Natural closers by tone - GENUINE, conversational
     CLOSERS = {
         ResponseTone.WARM: [
-            " Hope that helps!", " Let me know if you need more details!",
-            " Feel free to ask if anything's unclear!", " Happy to explain more!"
+            "", " Make sense?", " Let me know!", ""
         ],
         ResponseTone.PROFESSIONAL: [
-            "", " Please let me know if you need clarification.",
-            " I trust this addresses your query."
+            "", "", ""
         ],
         ResponseTone.CASUAL: [
-            " Make sense?", " Hope that helps!", " That should do it!",
+            " Make sense?", "", " Yeah?",
             " Let me know!", ""
         ],
         ResponseTone.ENTHUSIASTIC: [
-            " Isn't that cool?", " Pretty neat, right?",
-            " Can't wait to see what you do with this!"
+            " Right?!", " Pretty cool, huh?", ""
         ],
         ResponseTone.EMPATHETIC: [
-            " I'm here if you need anything else.",
-            " Take your time with this.", " Don't hesitate to ask more."
+            "", " I'm here.", ""
         ],
         ResponseTone.THOUGHTFUL: [
-            " Does that make sense?", " Worth thinking about.",
-            " Let me know your thoughts."
+            " ...if that makes sense?", "", ""
         ],
         ResponseTone.DIRECT: [
             "", "", ""
         ]
     }
 
-    # Acknowledgment phrases for questions
+    # Acknowledgment phrases for questions - natural, not robotic
     ACKNOWLEDGMENTS = {
-        "how": ["Here's how: ", "The way to do it: ", "You can "],
-        "what": ["It's ", "That's ", "Simply put, it's "],
-        "why": ["The reason is ", "That happens because ", "It's because "],
-        "can": ["Yes, you can! ", "Absolutely! ", "Sure! "],
-        "should": ["I'd recommend ", "The best approach is ", "You should "],
-        "is": ["Yes, ", "Actually, ", "It is! "],
-        "does": ["It does! ", "Yes, it ", "Actually, it "],
+        "how": ["So, ", "Okay so ", ""],
+        "what": ["It's ", "That's ", "Oh, it's "],
+        "why": ["So basically, ", "It's because ", "Well, "],
+        "can": ["Yeah! ", "Yep! ", "Sure! "],
+        "should": ["I'd say ", "Probably ", ""],
+        "is": ["Yeah, ", "Yep, ", "It is! "],
+        "does": ["It does! ", "Yeah, it ", "Yep! "],
     }
 
-    # Robotic patterns to replace
+    # Spontaneous expressions for genuine reactions
+    SPONTANEOUS = {
+        "surprise": ["Oh!", "Whoa!", "Huh!", "Wait,"],
+        "thinking": ["Hmm...", "Let me see...", "So...", "Okay..."],
+        "agreement": ["Yeah!", "Right!", "Exactly!", "Yes!"],
+        "empathy": ["Oof.", "Ugh.", "Ah.", "Oh no."],
+        "excitement": ["Ooh!", "Nice!", "YES!", "Oh man!"],
+    }
+
+    # Robotic patterns to replace with genuine language
     ROBOTIC_PATTERNS = [
         (r"^I am ", ["I'm ", "I'm "]),
         (r"^It is ", ["It's ", "That's "]),
@@ -143,12 +143,24 @@ class ResponseHumanizer:
         (r"does not ", ["doesn't ", "doesn't "]),
         (r"cannot ", ["can't ", "can't "]),
         (r"will not ", ["won't ", "won't "]),
-        (r"However, ", ["But ", "Though, ", "That said, "]),
-        (r"Therefore, ", ["So ", "That's why ", "Which means "]),
+        (r"However, ", ["But ", "Though ", "That said, "]),
+        (r"Therefore, ", ["So ", "That's why ", ""]),
         (r"Furthermore, ", ["Also, ", "Plus, ", "And "]),
-        (r"In addition, ", ["Also, ", "Plus, ", "On top of that, "]),
-        (r"In conclusion, ", ["So ", "Basically, ", "Long story short, "]),
-        (r"Please note that ", ["Just so you know, ", "One thing - ", "Keep in mind "]),
+        (r"In addition, ", ["Also, ", "Plus, ", ""]),
+        (r"In conclusion, ", ["So ", "Basically, ", ""]),
+        (r"Please note that ", ["Just so you know, ", "Oh, ", ""]),
+        # Remove corporate speak
+        (r"I would be happy to ", ["I can ", "Sure, I'll ", ""]),
+        (r"I am happy to ", ["Sure! ", "Yeah, ", ""]),
+        (r"Certainly! ", ["Sure! ", "Yeah! ", ""]),
+        (r"Absolutely! ", ["Yeah! ", "Yep! ", "For sure! "]),
+        (r"That's great news! ", ["Oh nice! ", "Awesome! ", ""]),
+        (r"I'm sorry to hear that", ["That sucks", "Oof", "That's rough"]),
+        (r"Congratulations! ", ["Nice! ", "Congrats! ", "Awesome! "]),
+        (r"I understand your frustration", ["Yeah, that's frustrating", "Ugh, I get it", ""]),
+        (r"I appreciate your patience", ["Thanks for waiting", "Sorry about the wait", ""]),
+        (r"Please feel free to", ["You can ", "Go ahead and ", ""]),
+        (r"Don't hesitate to", ["Just ", "Feel free to ", ""]),
     ]
 
     def __init__(
@@ -180,6 +192,17 @@ class ResponseHumanizer:
         if random.random() > self.personality_level:
             return text
 
+        # Don't add openers to very short responses (looks weird)
+        if len(text) < 30:
+            return text
+
+        # Don't add openers to generic acknowledgment phrases
+        generic_responses = ["got it", "i hear you", "okay", "ok", "sure", "yes",
+                           "no", "thanks", "thank you", "alright", "noted"]
+        text_lower = text.lower().strip().rstrip("!?.")
+        if text_lower in generic_responses:
+            return text
+
         openers = self.OPENERS.get(tone, [])
         if not openers:
             return text
@@ -195,11 +218,28 @@ class ResponseHumanizer:
                     opener = random.choice(acks)
                 break
 
+        # Don't add opener if text already starts with a similar phrase
+        text_start = text[:20].lower()
+        opener_word = opener.strip().lower().rstrip("!,.")
+        if opener_word and opener_word in text_start:
+            return text
+
         return opener + text
 
     def _add_closer(self, text: str, tone: ResponseTone) -> str:
         """Add an appropriate closer based on tone."""
         if random.random() > self.personality_level * 0.7:
+            return text
+
+        # Don't add closers to very short responses (looks weird)
+        if len(text) < 30:
+            return text
+
+        # Don't add closers to generic responses
+        generic_responses = ["got it", "i hear you", "okay", "ok", "sure", "yes",
+                           "no", "thanks", "thank you", "alright", "noted"]
+        text_lower = text.lower().strip().rstrip("!?.")
+        if text_lower in generic_responses:
             return text
 
         closers = self.CLOSERS.get(tone, [])
@@ -273,6 +313,39 @@ class ResponseHumanizer:
 
         return ". ".join(result)
 
+    def _add_genuine_reaction(self, text: str, query: str) -> str:
+        """Add genuine emotional reactions based on query context."""
+        if not query or random.random() > self.personality_level:
+            return text
+
+        query_lower = query.lower()
+
+        # Success/excitement detection
+        success_words = ["got the job", "passed", "won", "made it", "finally", "worked"]
+        if any(w in query_lower for w in success_words):
+            prefix = random.choice(["Wait, REALLY?! ", "NO WAY! ", "Oh my god! ", "YES!! "])
+            return prefix + text
+
+        # Struggle detection
+        struggle_words = ["struggling", "frustrated", "stuck", "stressed", "anxious"]
+        if any(w in query_lower for w in struggle_words):
+            prefix = random.choice(["Hey... ", "Oof. ", "I hear you. ", ""])
+            return prefix + text
+
+        # Bad news detection
+        bad_words = ["failed", "rejected", "didn't get", "lost"]
+        if any(w in query_lower for w in bad_words):
+            prefix = random.choice(["Oh no... ", "Ugh, that sucks. ", "I'm sorry. ", ""])
+            return prefix + text
+
+        # Question surprise
+        if "?" in query and random.random() < 0.2:
+            prefix = random.choice(self.SPONTANEOUS.get("thinking", [""]))
+            if prefix:
+                return prefix + " " + text
+
+        return text
+
     def humanize(
         self,
         text: str,
@@ -319,6 +392,12 @@ class ResponseHumanizer:
         result = self._add_natural_pauses(result)
         if result != before:
             modifications.append("natural_pauses")
+
+        # Add genuine emotional reactions based on context
+        before = result
+        result = self._add_genuine_reaction(result, query)
+        if result != before:
+            modifications.append("genuine_reaction")
 
         before = result
         result = self._add_opener(result, tone, query)

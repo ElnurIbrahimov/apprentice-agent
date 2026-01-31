@@ -24,6 +24,11 @@ numpy>=1.24.0
 transformers>=4.36.0
 winotify>=1.1.0
 schedule>=1.2.0
+
+# Messaging (Telegram & WhatsApp)
+python-telegram-bot>=20.0
+websockets>=12.0
+
 # PersonaPlex (Tool #17) - Real-time full-duplex speech-to-speech
 # Install from: pip install moshi/. (from https://github.com/NVIDIA/personaplex)
 # Requires: libopus-dev (Linux), opus (macOS via brew), HF_TOKEN env var

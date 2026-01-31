@@ -44,7 +44,7 @@ pip install -r requirements.txt
 ```bash
 ollama pull qwen2:1.5b          # Fast responses
 ollama pull llama3:8b           # Reasoning
-ollama pull deepseek-coder:6.7b # Code tasks
+ollama pull llama3:8b # Code tasks
 ollama pull llava               # Vision
 ```
 
@@ -66,7 +66,7 @@ The agent automatically selects the optimal model based on task type:
 | Task Type | Model | Use Cases |
 |-----------|-------|-----------|
 | Simple | `qwen2:1.5b` | Greetings, short answers, basic queries |
-| Code | `deepseek-coder:6.7b` | Code generation, debugging, scripts, algorithms |
+| Code | `llama3:8b` | Code generation, debugging, scripts, algorithms |
 | Reasoning | `llama3:8b` | Planning, evaluation, complex decisions, browser tasks |
 | Vision | `llava` | Image analysis, screenshot description, OCR |
 | Calibrated | `FluxMind v0.75.1` | Uncertainty-aware reasoning, OOD detection, confidence checks |
@@ -152,6 +152,24 @@ python main.py --dream
 
 Analyzes `logs/metacognition/` to generate insights about tool effectiveness and learning opportunities.
 
+### Telegram bot
+
+Run the agent as a Telegram bot:
+
+```bash
+# Set your bot token (get from @BotFather)
+export TELEGRAM_BOT_TOKEN="your_token_here"
+
+# Start the bot
+python run_telegram.py
+```
+
+Features:
+- Full agent capabilities via Telegram
+- Tool routing (search, browse, files, crypto prices, etc.)
+- Memory persistence across sessions
+- Progress messages for long-running tasks
+
 ### GUI mode
 
 Launch the Gradio web interface:
@@ -172,7 +190,9 @@ Opens at `http://127.0.0.1:7860` with:
 
 | Tool | Description | Example Action |
 |------|-------------|----------------|
-| `web_search` | Search the internet via DuckDuckGo | `AI news 2024` |
+| `web_search` | Search the internet via SearXNG | `AI news 2025` |
+| `deep_research` | Multi-query research with page fetching | `deep research quantum computing` |
+| `crypto_price` | Real-time crypto prices via CoinGecko | `bitcoin price` |
 | `filesystem` | List/read local files | `list C:/Users/project` |
 | `code_executor` | Run Python code (sandboxed) | `print(math.factorial(50))` |
 | `screenshot` | Capture screen images | `capture` |
@@ -1756,7 +1776,7 @@ Edit `apprentice_agent/config.py` to customize:
 |---------|---------|-------------|
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama API endpoint |
 | `MODEL_FAST` | `qwen2:1.5b` | Model for simple tasks |
-| `MODEL_CODE` | `deepseek-coder:6.7b` | Model for code tasks |
+| `MODEL_CODE` | `llama3:8b` | Model for code tasks |
 | `MODEL_REASON` | `llama3:8b` | Model for reasoning |
 | `MODEL_VISION` | `llava` | Model for vision tasks |
 | `CHROMADB_PATH` | `./data/chromadb` | Memory storage location |
@@ -1792,7 +1812,9 @@ apprentice-agent/
     ├── dream.py              # Memory consolidation and pattern analysis
     ├── scheduler.py          # Background daemon for notifications
     └── tools/
-        ├── web_search.py     # DuckDuckGo search
+        ├── web_search.py     # SearXNG meta-search
+        ├── deep_research.py  # Multi-query deep research
+        ├── crypto_price.py   # CoinGecko real-time prices
         ├── filesystem.py     # File operations
         ├── code_executor.py  # Sandboxed Python execution
         ├── screenshot.py     # Screen capture with mss

@@ -1,0 +1,17 @@
+{
+  "name": "aura-baileys-bridge",
+  "version": "1.0.0",
+  "description": "WhatsApp Web bridge for AURA using Baileys",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.6.0",
+    "ws": "^8.14.2",
+    "qrcode-terminal": "^0.12.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

@@ -409,6 +409,195 @@ class MarkdownStore:
             }
         return stats
 
+    def sync_emotional_state(self, state: Dict[str, Any]) -> bool:
+        """
+        Sync emotional state from JSON to markdown.
+
+        Args:
+            state: Emotional state dict with mood, energy, warmth, etc.
+
+        Returns:
+            True if synced successfully
+        """
+        mood = state.get('mood', 'neutral')
+        energy = state.get('energy', 0.5)
+        warmth = state.get('warmth', 0.5)
+        engagement = state.get('engagement', 0.5)
+        curiosity = state.get('curiosity', 0.5)
+        reason = state.get('mood_reason', 'Baseline state')
+        updated = state.get('updated_at', 'Unknown')
+
+        content = f"""**Current State** (auto-synced)
+- Mood: {mood}
+- Energy: {energy:.0%}
+- Warmth: {warmth:.0%}
+- Engagement: {engagement:.0%}
+- Curiosity: {curiosity:.0%}
+- Reason: {reason}
+- Last updated: {updated}
+"""
+        return self.update_section("emotional_state", "Current Mood", content)
+
+    def sync_patterns(self, patterns: Dict[str, Any]) -> bool:
+        """
+        Sync patterns from JSON to markdown.
+
+        Args:
+            patterns: Dict of pattern name -> pattern data
+
+        Returns:
+            True if synced successfully
+        """
+        # Organize patterns by type
+        user_patterns = []
+        conversation_patterns = []
+        temporal_patterns = []
+
+        for name, pattern in patterns.items():
+            ptype = pattern.get('pattern_type', 'unknown')
+            desc = pattern.get('description', name)
+            confidence = pattern.get('confidence', 0)
+            occurrences = pattern.get('occurrences', 0)
+
+            entry = f"- {desc} (confidence: {confidence:.0%}, seen {occurrences}x)"
+
+            if ptype == 'temporal':
+                temporal_patterns.append(entry)
+            elif ptype == 'sequence':
+                conversation_patterns.append(entry)
+            elif ptype in ['cluster', 'behavioral']:
+                user_patterns.append(entry)
+
+        # Update each section
+        success = True
+
+        if user_patterns:
+            content = "**Auto-synced patterns:**\n" + "\n".join(user_patterns[:10])
+            success = success and self.update_section("patterns", "User Patterns", content)
+
+        if conversation_patterns:
+            content = "**Auto-synced patterns:**\n" + "\n".join(conversation_patterns[:10])
+            success = success and self.update_section("patterns", "Conversation Patterns", content)
+
+        if temporal_patterns:
+            content = "**Auto-synced patterns:**\n" + "\n".join(temporal_patterns[:10])
+            success = success and self.update_section("patterns", "Temporal Patterns", content)
+
+        return success
+
+    def sync_from_files(self, emotional_state_file: Path, patterns_file: Path) -> bool:
+        """
+        Sync markdown from JSON files.
+
+        Args:
+            emotional_state_file: Path to emotional_state.json
+            patterns_file: Path to patterns.json
+
+        Returns:
+            True if all syncs successful
+        """
+        import json
+        success = True
+
+        # Sync emotional state
+        if emotional_state_file.exists():
+            try:
+                data = json.loads(emotional_state_file.read_text(encoding="utf-8"))
+                success = success and self.sync_emotional_state(data)
+                logger.info("Synced emotional state to markdown")
+            except (json.JSONDecodeError, IOError) as e:
+                logger.error(f"Error syncing emotional state: {e}")
+                success = False
+
+        # Sync patterns
+        if patterns_file.exists():
+            try:
+                data = json.loads(patterns_file.read_text(encoding="utf-8"))
+                success = success and self.sync_patterns(data)
+                logger.info("Synced patterns to markdown")
+            except (json.JSONDecodeError, IOError) as e:
+                logger.error(f"Error syncing patterns: {e}")
+                success = False
+
+        return success
+
+    def extract_and_store_profile(self, message: str) -> Optional[str]:
+        """
+        Extract profile information from a user message and store it.
+
+        Args:
+            message: User's message to analyze
+
+        Returns:
+            Section name where data was stored, or None if no profile info found
+        """
+        message_lower = message.lower()
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
+
+        # Profile extraction patterns
+        # Note: Patterns are designed to avoid false positives from emotional statements
+        profile_patterns = {
+            "Basic Info": [
+                (r"my name is (\w+)", "Name: {}"),
+                (r"i(?:'m| am) a(?:n)? (developer|engineer|designer|student|teacher|manager|writer|artist|programmer|scientist|researcher|consultant|freelancer|professional)\b", "Role: {}"),
+                (r"i work (?:as|at|for) (.+?)(?:\.|,|$)", "Work: {}"),
+                (r"i live in (.+?)(?:\.|,|$)", "Location: {}"),
+                (r"i(?:'m| am) (\d+)(?: years old)?", "Age: {}"),
+            ],
+            "Preferences": [
+                (r"i (?:really )?(?:like|love|enjoy) (.+?)(?:\.|,|$)", "Likes: {}"),
+                (r"i (?:prefer|always use) (.+?)(?:\.|,|$)", "Prefers: {}"),
+                (r"i (?:hate|dislike|can't stand) (.+?)(?:\.|,|$)", "Dislikes: {}"),
+                (r"my favorite (\w+) is (.+?)(?:\.|,|$)", "Favorite {}: {}"),
+            ],
+            "Goals": [
+                (r"i(?:'m| am) trying to (.+?)(?:\.|,|$)", "Trying to: {}"),
+                (r"i want to (.+?)(?:\.|,|$)", "Wants to: {}"),
+                (r"my goal is (?:to )?(.+?)(?:\.|,|$)", "Goal: {}"),
+                (r"i need to (.+?)(?:\.|,|$)", "Needs to: {}"),
+                (r"i(?:'m| am) learning (.+?)(?:\.|,|$)", "Learning: {}"),
+            ],
+            "Context": [
+                (r"i(?:'m| am) (?:currently )?working on (.+?)(?:\.|,|$)", "Working on: {}"),
+                (r"(?:today|this week|recently) i (.+?)(?:\.|,|$)", "Recent: {}"),
+                (r"i(?:'m| am) using (.+?)(?:\.|,|$)", "Uses: {}"),
+            ],
+        }
+
+        stored_section = None
+
+        for section, patterns in profile_patterns.items():
+            for pattern_tuple in patterns:
+                if len(pattern_tuple) == 2:
+                    pattern, template = pattern_tuple
+                else:
+                    continue
+
+                if template is None:
+                    continue
+
+                match = re.search(pattern, message_lower)
+                if match:
+                    groups = match.groups()
+                    if len(groups) == 1:
+                        extracted = template.format(groups[0].strip())
+                    elif len(groups) == 2:
+                        extracted = template.format(groups[0].strip(), groups[1].strip())
+                    else:
+                        continue
+
+                    # Store in the appropriate section (timestamp added by add_entry)
+                    self.add_entry(
+                        "user_profile",
+                        section,
+                        extracted,
+                        importance=0.7
+                    )
+                    stored_section = section
+                    logger.info(f"Extracted profile info to {section}: {extracted}")
+
+        return stored_section
+
 
 if __name__ == "__main__":
     print("=" * 60)

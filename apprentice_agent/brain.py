@@ -1,12 +1,43 @@
 """Ollama API integration as the agent's reasoning engine."""
 
 import re
+import logging
+import concurrent.futures
 from enum import Enum
-from typing import Optional
+from typing import Optional, Callable, Any
 import ollama
 
 from .config import Config
 from .identity import get_identity_prompt
+
+logger = logging.getLogger(__name__)
+
+# Default timeouts (in seconds)
+LLM_TIMEOUT = 60  # 60 seconds for LLM calls
+WARMUP_TIMEOUT = 10  # 10 seconds for warmup
+
+
+def call_with_timeout(func: Callable, timeout: int = LLM_TIMEOUT, default: Any = None) -> Any:
+    """Execute a function with timeout protection.
+
+    Args:
+        func: Function to execute (should be a lambda or callable with no args)
+        timeout: Timeout in seconds
+        default: Value to return on timeout
+
+    Returns:
+        Function result or default on timeout
+    """
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(func)
+        try:
+            return future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            logger.warning(f"LLM call timed out after {timeout}s")
+            return default
+        except Exception as e:
+            logger.error(f"LLM call failed: {e}")
+            return default
 
 
 class TaskType(Enum):
@@ -35,11 +66,15 @@ class OllamaBrain:
     def _warmup_models(self):
         """Pre-load the fast model to reduce first-response latency."""
         try:
-            # Keep the fast model loaded for 30 minutes
-            self.client.generate(
-                model=Config.MODEL_FAST,
-                prompt="",
-                keep_alive="30m"
+            # Keep the fast model loaded for 30 minutes (with timeout)
+            call_with_timeout(
+                lambda: self.client.generate(
+                    model=Config.MODEL_FAST,
+                    prompt="",
+                    keep_alive="30m"
+                ),
+                timeout=WARMUP_TIMEOUT,
+                default=None
             )
         except Exception:
             pass  # Silently fail if warmup doesn't work
@@ -83,10 +118,18 @@ class OllamaBrain:
             messages.extend(self.conversation_history)
         messages.append({"role": "user", "content": prompt})
 
-        response = self.client.chat(
-            model=model,
-            messages=messages
+        logger.debug(f"[BRAIN] Calling {model} with timeout={LLM_TIMEOUT}s")
+
+        # Call with timeout protection
+        response = call_with_timeout(
+            lambda: self.client.chat(model=model, messages=messages),
+            timeout=LLM_TIMEOUT,
+            default=None
         )
+
+        if response is None:
+            logger.warning(f"[BRAIN] LLM call timed out or failed, returning fallback")
+            return "I'm having trouble processing that right now. Please try again."
 
         assistant_message = response["message"]["content"]
 
@@ -105,7 +148,7 @@ class OllamaBrain:
         Model routing:
         - SIMPLE (qwen2:1.5b): Greetings, short answers, basic queries
         - REASONING (llama3:8b): Planning, evaluation, complex decisions
-        - CODE (deepseek-coder:6.7b): Code generation, debugging, scripts
+        - CODE (llama3:8b): Code generation, debugging, scripts
         - VISION (llava): Image analysis
 
         Args:
@@ -770,13 +813,17 @@ Outcome: {episode.get('outcome', 'N/A')}"""
         """
         model_to_unload = model or self._last_model_used
         try:
-            # Send empty generate with keep_alive=0 to unload
-            self.client.generate(
-                model=model_to_unload,
-                prompt="",
-                keep_alive="0s"
+            # Send empty generate with keep_alive=0 to unload (with timeout)
+            result = call_with_timeout(
+                lambda: self.client.generate(
+                    model=model_to_unload,
+                    prompt="",
+                    keep_alive="0s"
+                ),
+                timeout=10,
+                default=None
             )
-            return True
+            return result is not None
         except Exception:
             return False
 
