@@ -15,6 +15,14 @@ from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTo
 from .tools.mirrormind import MirrorMind
 from .tools.cognitive_theater import CognitiveTheater, is_decision_question
 
+# AURA v3.0 ALIVE System
+try:
+    from aura.engine import AURAEngine
+    AURA_AVAILABLE = True
+except ImportError:
+    AURA_AVAILABLE = False
+    AURAEngine = None
+
 
 class AgentPhase(Enum):
     """Phases of the agent loop."""
@@ -187,6 +195,26 @@ class ApprenticeAgent:
             print("[LOADED] WorldSim - Consequence simulation")
         else:
             self.worldsim = None
+
+        # Initialize AURA v3.0 ALIVE System
+        self.aura_enabled = getattr(Config, 'AURA_ENABLED', True)
+        if AURA_AVAILABLE and self.aura_enabled:
+            try:
+                self.aura = AURAEngine(
+                    soul_name=getattr(Config, 'AURA_SOUL', 'SOUL_PERSONAL'),
+                    enable_proactive=getattr(Config, 'AURA_PROACTIVE', True),
+                    enable_thinking=getattr(Config, 'AURA_THINKING', True),
+                    enable_humanization=getattr(Config, 'AURA_HUMANIZE', True)
+                )
+                print(f"[LOADED] AURA v3.0 ALIVE - Soul: {self.aura.soul.name}, Mood: {self.aura.emotion.state.mood.value}")
+            except Exception as e:
+                print(f"[WARNING] AURA initialization failed: {e}")
+                self.aura = None
+                self.aura_enabled = False
+        else:
+            self.aura = None
+            if not AURA_AVAILABLE:
+                print("[INFO] AURA v3.0 not available (import failed)")
 
     def _ensure_tool(self, tool_name: str):
         """Lazily load a tool if not already loaded."""
@@ -3005,6 +3033,14 @@ Try these commands:
         Returns:
             Agent response text
         """
+        # AURA v3.0 ALIVE - Process input through AURA first
+        aura_context = None
+        if self.aura_enabled and self.aura:
+            try:
+                aura_context = self.aura.process_input(message)
+            except Exception as e:
+                print(f"[AURA] Input processing error: {e}")
+
         # Analyze emotional state (EvoEmo - Tool #20)
         emotion_reading = self._analyze_emotion(message)
 
@@ -3021,6 +3057,14 @@ Try these commands:
             if speak:
                 self._speak(evoemo_result)
             return evoemo_result
+
+        # Check for AURA-specific commands
+        if self.aura_enabled and self.aura:
+            aura_result = self._handle_aura_command(message)
+            if aura_result:
+                if speak:
+                    self._speak(aura_result)
+                return aura_result
 
         # Check for decision questions - use CognitiveTheater (Tool #22)
         if self.theater_enabled and is_decision_question(message):
@@ -3039,10 +3083,17 @@ Try these commands:
         else:
             task_type = None  # Let brain auto-detect
 
-        # Apply emotional tone modifier if detected with high confidence
+        # Apply emotional tone modifier - prefer AURA's tone if available
         tone_modifier = None
-        if emotion_reading and emotion_reading.confidence >= 50:
+        if aura_context and aura_context.get("tone"):
+            tone_modifier = f"Respond in a {aura_context['tone']} manner."
+        elif emotion_reading and emotion_reading.confidence >= 50:
             tone_modifier = get_tone_modifier(emotion_reading.emotion)
+
+        # Add AURA thinking prefix if enabled
+        thinking_prefix = ""
+        if aura_context and aura_context.get("thinking_prefix"):
+            thinking_prefix = aura_context["thinking_prefix"] + "\n\n"
 
         response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier)
 
@@ -3056,6 +3107,20 @@ Try these commands:
                 # Never crash on MirrorMind failure, just use original response
                 print(f"[MirrorMind] Error: {e}")
 
+        # AURA v3.0 - Process response through AURA's humanizer
+        if self.aura_enabled and self.aura and aura_context:
+            try:
+                aura_response = self.aura.process_response(response, aura_context)
+                response = thinking_prefix + aura_response.content
+
+                # Add any pending notifications
+                if aura_response.notifications:
+                    notif_text = "\n\n---\n" + "\n".join(f"* {n}" for n in aura_response.notifications[:2])
+                    response += notif_text
+            except Exception as e:
+                print(f"[AURA] Response processing error: {e}")
+                response = thinking_prefix + response
+
         if speak:
             self._speak(response, emotion=emotion_reading.emotion if emotion_reading else None)
 
@@ -3068,6 +3133,73 @@ Try these commands:
                 return self.tools["evoemo"].analyze_text(message)
         except Exception as e:
             print(f"[EvoEmo] Analysis error: {e}")
+        return None
+
+    def _handle_aura_command(self, message: str) -> Optional[str]:
+        """Handle AURA v3.0 ALIVE system commands."""
+        message_lower = message.lower()
+
+        aura_commands = [
+            "aura status", "aura mood", "aura soul", "aura memory",
+            "aura patterns", "aura insights", "remember this",
+            "aura remember", "what do you remember"
+        ]
+
+        if not any(cmd in message_lower for cmd in aura_commands):
+            return None
+
+        try:
+            if "status" in message_lower:
+                status = self.aura.get_status()
+                return f"""AURA v3.0 ALIVE Status:
+- Soul: {status['soul']}
+- Mood: {status['mood']['mood']} ({status['mood']['mood_reason']})
+- Energy: {status['mood']['energy']:.0%}
+- Patterns: {status['patterns']['total_patterns']} learned
+- Turns this session: {status['turns']}
+- Features: Proactive={status['features']['proactive']}, Thinking={status['features']['thinking']}, Humanize={status['features']['humanization']}"""
+
+            elif "mood" in message_lower:
+                mood_status = self.aura.emotion.get_status()
+                return f"""My current mood: {mood_status['mood']}
+Reason: {mood_status['mood_reason']}
+Energy: {mood_status['energy']:.0%}
+Warmth: {mood_status['warmth']:.0%}
+Engagement: {mood_status['engagement']:.0%}
+Tone: {mood_status['tone']}"""
+
+            elif "soul" in message_lower:
+                soul = self.aura.soul
+                traits = ", ".join(soul.personality_traits[:5]) if soul.personality_traits else "None defined"
+                return f"""My Soul: {soul.name}
+Personality: {traits}
+Voice: {soul.voice_style[:100]}..."""
+
+            elif "memory" in message_lower or "remember" in message_lower:
+                if "remember this" in message_lower or "aura remember" in message_lower:
+                    # Extract fact to remember
+                    fact = message.replace("remember this:", "").replace("aura remember:", "").strip()
+                    fact = fact.replace("remember this", "").replace("aura remember", "").strip()
+                    if fact:
+                        success = self.aura.remember(fact, importance=0.7)
+                        return f"Got it, I'll remember: '{fact[:50]}...'" if success else "I couldn't store that memory."
+                    return "What would you like me to remember?"
+                else:
+                    # Show memory stats
+                    stats = self.aura.memory.get_stats()
+                    lines = ["My memory contains:"]
+                    for mtype, data in stats.items():
+                        lines.append(f"- {mtype}: {data['entries']} entries")
+                    return "\n".join(lines)
+
+            elif "patterns" in message_lower or "insights" in message_lower:
+                insights = self.aura.patterns.get_insights()
+                return "Patterns I've noticed:\n" + "\n".join(f"- {i}" for i in insights)
+
+        except Exception as e:
+            print(f"[AURA] Command error: {e}")
+            return f"AURA command error: {e}"
+
         return None
 
     def _handle_evoemo_command(self, message: str) -> Optional[str]:
@@ -3196,6 +3328,14 @@ Try these commands:
                     self.neurodream.shutdown()
         except Exception as e:
             results["errors"].append(f"NeuroDream shutdown: {e}")
+
+        # 1.5. Shutdown AURA v3.0 ALIVE system
+        try:
+            if hasattr(self, 'aura') and self.aura:
+                self.aura.shutdown()
+                results["freed_resources"].append("aura_alive_system")
+        except Exception as e:
+            results["errors"].append(f"AURA shutdown: {e}")
 
         # 2. Unload Ollama models to free VRAM
         try:
