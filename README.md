@@ -152,9 +152,9 @@ python main.py --dream
 
 Analyzes `logs/metacognition/` to generate insights about tool effectiveness and learning opportunities.
 
-### Telegram bot
+### Telegram bot with Proto-AGI v3
 
-Run the agent as a Telegram bot:
+Run the agent as a Telegram bot with **Proto-AGI v3 Evidence-Based Cognition**:
 
 ```bash
 # Set your bot token (get from @BotFather)
@@ -164,7 +164,22 @@ export TELEGRAM_BOT_TOKEN="your_token_here"
 python run_telegram.py
 ```
 
-Features:
+**Proto-AGI v3 Features:**
+- **Evidence-Based Memory**: Stores observable results, not self-referential claims
+- **Probed Verification**: Task-specific probes (file_exists, url_reachable, etc.)
+- **Response Discipline**: Every claim labeled VERIFIED/INFERRED/UNKNOWN
+- **Governance Modes**: idle, assist (default), operate
+- **Budgets**: 10 actions/hr, 3 proactive messages/hr in operate mode
+- **Sandboxed Execution**: subprocess + timeout for code execution
+
+**Modes:**
+| Mode | Description |
+|------|-------------|
+| `idle` | Think internally only, no external actions |
+| `assist` | Respond to user only (default) |
+| `operate` | Autonomous actions under budget limits |
+
+**Additional Bot Features:**
 - Full agent capabilities via Telegram
 - Tool routing (search, browse, files, crypto prices, etc.)
 - Memory persistence across sessions
@@ -1766,6 +1781,99 @@ AURA is automatically integrated into the agent's chat flow:
 
 ```bash
 export AURA_ENABLED=false
+```
+
+### Proto-AGI v3 (Evidence-Based Cognition)
+
+Proto-AGI v3 is an autonomous cognitive loop that enables AURA to act, verify, and learn from its actions. It prevents self-deception by storing only **observable results** backed by **evidence**.
+
+**Key Principles:**
+- **Claims must cite evidence IDs** - No storing "I succeeded" without proof
+- **Governance checks don't consume budget** - Only granted actions use budget
+- **Structured action types** - ActionType enum, not string matching
+- **Task-specific verification** - Probes check specific expected outcomes
+
+**Evidence-Based Memory:**
+
+| Memory Type | Description |
+|-------------|-------------|
+| `ObservableFact` | Fact backed by evidence (file_exists, url_reachable, etc.) |
+| `NarrativeEntry` | Subjective experience (attempts, reflections, errors) |
+| `Evidence` | Raw evidence with ID, type, confidence, timestamp |
+
+**Verification Probes:**
+
+| Probe | Description |
+|-------|-------------|
+| `file_exists` | Check if file exists at path |
+| `hash_match` | Verify file hash matches expected |
+| `url_reachable` | Check if URL returns HTTP 2xx/3xx |
+| `output_contains` | Check if output contains expected text |
+| `json_valid` | Verify output is valid JSON |
+| `exit_zero` | Check exit code is 0 |
+| `min_matches` | Check pattern appears N+ times |
+
+**Action Types:**
+
+| Category | Actions |
+|----------|---------|
+| **Safe** | RECALL, THINK, RESPOND |
+| **Moderate** | SEARCH, READ_FILE, ANALYZE |
+| **Sensitive** | WRITE_FILE, EXECUTE_CODE, SEND_MESSAGE, API_CALL |
+| **Dangerous** | DELETE, SYSTEM_MODIFY, SEND_EMAIL |
+
+**Response Discipline:**
+
+Every response claim must be labeled:
+- `[VERIFIED:fact_id]` - Backed by verified fact with evidence
+- `[INFERRED]` - Logical conclusion, with reasoning
+- `[UNKNOWN]` - Not sure, may need verification
+- `[NARRATIVE]` - Subjective recollection
+
+**Example:**
+```
+[VERIFIED:abc123] Your last query was about Python.
+[INFERRED] Based on that, you might be interested in debugging tips.
+[UNKNOWN] I'm not sure if you've set up a debugger — want me to check?
+```
+
+**Python API:**
+
+```python
+from apprentice_agent.proto_agi_core import ProtoAGI, Action, ActionType, ExpectedOutcome
+
+# Create instance
+agi = ProtoAGI(llm_func=my_llm, data_path="data/proto_agi_v3/")
+
+# Set mode
+agi.set_mode("operate")  # idle, assist, operate
+
+# Create structured action with expected outcomes
+action = Action(
+    action_type=ActionType.EXECUTE_CODE,
+    intent="Create a test file",
+    inputs={"code": "Path('/tmp/test.txt').write_text('hello')"},
+    expected_outcomes=[
+        ExpectedOutcome("File created", "file_exists", "/tmp/test.txt"),
+        ExpectedOutcome("No errors", "exit_zero", None)
+    ]
+)
+
+# Execute with verification
+result = agi.execute(action, is_user_initiated=True)
+
+print(f"Verdict: {result.verification.verdict.value}")
+print(f"Evidence: {len(result.verification.evidence)} items")
+print(f"Facts created: {result.facts_created}")
+
+# Process user input with evidence discipline
+response = agi.process_input("Hello!", chat_id="123")
+
+# Get status
+status = agi.get_status()
+print(f"Facts: {status['memory']['verified_facts']}")
+print(f"Evidence: {status['memory']['evidence_items']}")
+print(f"Budget: {status['governance']['actions_remaining']}/10")
 ```
 
 ## Configuration

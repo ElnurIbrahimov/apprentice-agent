@@ -1,22 +1,31 @@
 #!/usr/bin/env python3
 """
-Quick start script for AURA Telegram bot.
+Proto-AGI v3 Telegram Bot - EVIDENCE-BASED
+==========================================
 
-NOW USES FULL APPRENTICE AGENT with:
-- 29 tools (web_search, browser, filesystem, code_executor, etc.)
-- 10 cognitive systems (EvoEmo, MirrorMind, CognitiveTheater, etc.)
-- AURA's Clawdbot features (soul, heartbeat, humanizer, memory)
+This version CANNOT LIE TO ITSELF.
+
+Features:
+- EVIDENCE-BASED: Store OBSERVABLE RESULTS, not "I succeeded" claims
+- PROBED VERIFICATION: Task-specific probes (file_exists, url_reachable, etc.)
+- GOVERNANCE: can_act() checks don't consume budget (fixed from v2)
+- STRUCTURED ACTIONS: ActionType enum, not string matching
+- SANDBOXED EXECUTION: subprocess + timeout for code execution
+- RESPONSE DISCIPLINE: Every claim must be VERIFIED/INFERRED/UNKNOWN
+
+Modes:
+- idle: Think internally only, no external actions
+- assist: Act only in response to user (DEFAULT)
+- operate: Autonomous actions under budgets (10/hr, 3 msgs/hr)
 
 Usage:
     python run_telegram.py
 
-Make sure to set your bot token:
+Set your bot token:
     export TELEGRAM_BOT_TOKEN="your_token_here"
 
-Or create a .env file with:
+Or create .env with:
     TELEGRAM_BOT_TOKEN=your_token_here
-
-Get a token from @BotFather on Telegram.
 """
 
 import asyncio
@@ -55,42 +64,42 @@ def load_env():
                     os.environ[key.strip()] = value
 
 
-class AgentWrapper:
+class ProtoAGIWrapper:
     """
-    Wrapper that makes ApprenticeAgent look like AURAEngine for TelegramBot.
+    Wrapper that connects Proto-AGI to Telegram.
 
-    ApprenticeAgent has: .chat(), .aura (AURAEngine inside)
-    TelegramBot expects: .generate_response(), .emotion, .memory, .proactive
+    Routes all messages through Proto-AGI's process_input() which:
+    - Updates needs (connection satisfied)
+    - Stores in memory
+    - Recalls relevant context
+    - Generates personality-aware response
     """
 
     def __init__(self, agent):
         self.agent = agent
-        # Expose AURA's components through the wrapper
-        self.aura = agent.aura  # The AURAEngine inside ApprenticeAgent
+        self.proto_agi = agent.proto_agi
+        self.aura = agent.aura  # Keep AURA reference for compatibility
 
-        # Expose commonly needed attributes from inner AURA
+        # Expose attributes for Telegram bot compatibility
         if self.aura:
             self.emotion = self.aura.emotion
             self.memory = self.aura.memory
             self.proactive = self.aura.proactive
-            self.fast_path = self.aura.fast_path
-            self.memory_retriever = self.aura.memory_retriever
-            self.llm = self.aura.llm
         else:
             self.emotion = None
             self.memory = None
             self.proactive = None
-            self.fast_path = None
-            self.memory_retriever = None
-            self.llm = None
+
+        # Progress callback for long operations
+        self._progress_callback = None
 
     def set_progress_callback(self, callback):
-        """Set callback for sending progress messages (e.g., to Telegram)."""
+        """Set callback for progress messages."""
         self._progress_callback = callback
 
     def _send_progress(self, message: str):
         """Send progress update if callback is set."""
-        if hasattr(self, '_progress_callback') and self._progress_callback:
+        if self._progress_callback:
             try:
                 self._progress_callback(message)
             except:
@@ -98,16 +107,20 @@ class AgentWrapper:
 
     def generate_response(self, user_message: str, chat_id: str = None) -> str:
         """
-        Smart routing with timeout protection:
-        - Tool queries (search, browse, files, etc.) -> agent.run() with tools
-        - Simple conversation -> agent.chat() for fast response
+        Route message through Proto-AGI.
+
+        Proto-AGI handles:
+        - Need satisfaction (connection +40)
+        - Memory storage and recall
+        - Personality/emotion-colored response
+        - Tool detection happens separately
         """
         import time
         start_time = time.time()
 
         msg_lower = user_message.lower()
 
-        # Detect if message needs tools
+        # Tool detection - certain queries need the full agent loop
         tool_triggers = [
             "search", "look up", "find out", "google", "browse", "open website",
             "what files", "list files", "read file", "create file", "delete file",
@@ -117,33 +130,27 @@ class AgentWrapper:
             "arxiv", "paper", "research", "pdf", "document"
         ]
 
-        # Deep research triggers - need progress message
         research_triggers = ["deep research", "research thoroughly", "thorough research", "investigate"]
         is_research = any(trigger in msg_lower for trigger in research_triggers)
-
         needs_tools = any(trigger in msg_lower for trigger in tool_triggers)
 
         try:
             if needs_tools:
-                # Send progress message for research tasks
+                # Tool-based query - use agent.run() with timeout
                 if is_research:
-                    self._send_progress("🔍 Researching... This may take up to 60 seconds.")
-                    print(f"[RESEARCH] Starting deep research: {user_message[:50]}...")
+                    self._send_progress("Researching... This may take up to 60 seconds.")
+                    print(f"[RESEARCH] Starting: {user_message[:50]}...")
                 else:
                     print(f"[TOOLS] Routing to agent.run(): {user_message[:50]}...")
 
-                # Use full agent loop with tools
-                result = self.agent.run(user_message, timeout_seconds=90)  # 90 second timeout
+                result = self.agent.run(user_message, timeout_seconds=90)
 
-                # Check for timeout
                 if isinstance(result, dict) and result.get("timeout"):
                     return "That request took too long. Please try a simpler query."
 
-                # Extract response from result dict
                 if isinstance(result, dict):
                     response = result.get("response") or result.get("final_evaluation", {}).get("progress", "")
                     if not response:
-                        # Try to get from history
                         history = result.get("history", [])
                         if history:
                             last_entry = history[-1]
@@ -153,25 +160,43 @@ class AgentWrapper:
                     return response if response else "I processed your request but couldn't find a clear answer."
                 return str(result)
             else:
-                # Simple conversation - use chat() for speed
-                response = self.agent.chat(user_message)
-                elapsed = time.time() - start_time
-                print(f"[CHAT] Completed in {elapsed:.1f}s")
-                return response
+                # Conversational query - route through Proto-AGI
+                if self.proto_agi:
+                    response = self.proto_agi.process_input(user_message, chat_id)
+                    elapsed = time.time() - start_time
+                    print(f"[PROTO-AGI] Completed in {elapsed:.1f}s")
+                    return response
+                else:
+                    # Fallback to regular chat
+                    response = self.agent.chat(user_message)
+                    elapsed = time.time() - start_time
+                    print(f"[CHAT] Completed in {elapsed:.1f}s")
+                    return response
+
         except Exception as e:
             print(f"[ERROR] generate_response failed: {e}")
             return f"Sorry, something went wrong: {str(e)[:100]}"
 
     def get_status(self):
-        """Get combined status from agent and AURA."""
+        """Get combined status from Proto-AGI v3 and agent."""
         status = {
-            "version": "4.0 MERGED",
-            "soul": "ApprenticeAgent + AURA",
+            "version": "5.0 PROTO-AGI-v3-EVIDENCE-BASED",
+            "soul": "Evidence-Based Autonomous Cognition",
             "tools": len(self.agent.tools),
             "mood": {},
             "patterns": {},
             "turns": 0
         }
+
+        if self.proto_agi:
+            agi_status = self.proto_agi.get_status()
+            status["mode"] = agi_status.get("mode", "assist")
+            status["needs"] = agi_status.get("needs", {})
+            status["memory"] = agi_status.get("memory", {})
+            status["governance"] = agi_status.get("governance", {})
+            status["cycle_count"] = agi_status.get("cycle_count", 0)
+            status["running"] = agi_status.get("running", False)
+            status["agi_version"] = agi_status.get("version", "v3")
 
         if self.aura:
             aura_status = self.aura.get_status()
@@ -207,58 +232,46 @@ async def main():
         return
 
     print("")
-    print("=" * 50)
-    print("Starting ApprenticeAgent + AURA Telegram Bot")
-    print("=" * 50)
+    print("=" * 60)
+    print("  PROTO-AGI v3 - EVIDENCE-BASED COGNITION")
+    print("=" * 60)
     print("")
 
-    # Load FULL ApprenticeAgent (includes AURA + 29 tools + cognitive systems)
+    # Load ApprenticeAgent with Proto-AGI
     try:
         from apprentice_agent.agent import ApprenticeAgent
-        print("Loading ApprenticeAgent (this may take a moment)...")
-        agent = ApprenticeAgent(fast_init=False)  # Full init with all tools
+        print("Loading ApprenticeAgent + Proto-AGI (this may take a moment)...")
+        agent = ApprenticeAgent(fast_init=False)
         print(f"ApprenticeAgent loaded with {len(agent.tools)} tools")
 
-        # Wrap agent to expose AURA-compatible interface
-        wrapped = AgentWrapper(agent)
+        # Wrap agent for Telegram
+        wrapped = ProtoAGIWrapper(agent)
+
+        if wrapped.proto_agi:
+            status = wrapped.proto_agi.get_status()
+            mem = status.get('memory', {})
+            gov = status.get('governance', {})
+            print(f"Proto-AGI v3: Mode={status.get('mode', 'assist')}, Cycle={status['cycle_count']}")
+            print(f"  Memory: {mem.get('verified_facts', 0)} facts, {mem.get('narratives', 0)} narratives, {mem.get('evidence_items', 0)} evidence")
+            print(f"  Budget: {gov.get('actions_remaining', 10)}/10 actions, {gov.get('messages_remaining', 3)}/3 messages")
+        else:
+            print("[WARNING] Proto-AGI not available - using fallback mode")
 
         if wrapped.aura:
-            print(f"AURA inside: Soul={wrapped.aura.soul.name}, Mood={wrapped.aura.emotion.state.mood.value}")
+            print(f"AURA: Soul={wrapped.aura.soul.name}, Mood={wrapped.aura.emotion.state.mood.value}")
 
     except Exception as e:
         print(f"Error loading ApprenticeAgent: {e}")
-        print("Falling back to AURA-only mode...")
+        import traceback
+        traceback.print_exc()
+        return
 
-        # Fallback to just AURA if ApprenticeAgent fails
-        try:
-            from aura.engine import AURAEngine
-            wrapped = AURAEngine()
-            print("AURA engine loaded (fallback mode - no tools)")
-        except Exception as e2:
-            print(f"Error loading AURA: {e2}")
-            print("Running with minimal engine...")
-
-            class MinimalAura:
-                def __init__(self):
-                    self.memory = None
-                    self.emotion = None
-                    self.proactive = None
-
-                def generate_response(self, msg, chat_id=None):
-                    return "I'm here but running in minimal mode. Some features unavailable."
-
-                def get_status(self):
-                    return {"version": "minimal", "soul": "none", "mood": {}, "patterns": {}, "turns": 0}
-
-            wrapped = MinimalAura()
-
-    # Import and initialize Telegram
+    # Initialize Telegram bot
     try:
         from aura.messaging.telegram_bot import TelegramBot
         from aura.messaging.config import TELEGRAM_CONFIG
 
         TELEGRAM_CONFIG["telegram_token"] = token
-
         bot = TelegramBot(wrapped, TELEGRAM_CONFIG)
 
     except ImportError as e:
@@ -268,24 +281,47 @@ async def main():
         print("  pip install python-telegram-bot>=20.0")
         return
 
+    # Setup Proto-AGI output callback for proactive messages
+    if agent.proto_agi:
+        def telegram_output_callback(message: str, chat_id: str = None):
+            """Send proactive message to Telegram"""
+            if chat_id and bot.bot:
+                try:
+                    # Create async task for sending
+                    asyncio.create_task(
+                        bot.bot.send_message(chat_id=int(chat_id), text=message)
+                    )
+                except Exception as e:
+                    print(f"[Proto-AGI] Failed to send proactive message: {e}")
+
+        agent.set_proto_agi_output_callback(telegram_output_callback)
+
     try:
         await bot.start()
 
+        # Start Proto-AGI autonomous loop
+        if agent.proto_agi:
+            agent.start_proto_agi(cycle_interval=60.0)  # Think every 60 seconds
+            print("")
+            print("[Proto-AGI] Autonomous loop STARTED (60s interval)")
+
         print("")
-        print("=" * 50)
-        print("ApprenticeAgent + AURA is now running on Telegram!")
+        print("=" * 60)
+        print("  Proto-AGI v3 is now ALIVE on Telegram!")
         print("")
-        print("Features available:")
-        print("  - Natural conversation with memory")
-        print("  - Web search, browser, code execution")
-        print("  - Emotional awareness (EvoEmo)")
-        print("  - Multi-perspective reasoning (CognitiveTheater)")
-        print("  - Self-critique (MirrorMind)")
-        print("  - Proactive messaging (Heartbeat)")
+        print("  EVIDENCE-BASED COGNITION:")
+        print("    - PROBES with task-specific verification")
+        print("    - STORES observable results, not self-claims")
+        print("    - LABELS claims as VERIFIED/INFERRED/UNKNOWN")
+        print("    - BUDGETS: checking doesn't consume (v2 fix)")
         print("")
-        print("Open Telegram and message your bot to start chatting.")
-        print("Press Ctrl+C to stop")
-        print("=" * 50)
+        print("  MODES: idle | assist (default) | operate")
+        print("    - assist: Responds to user only")
+        print("    - operate: Autonomous actions (10/hr, 3 msgs/hr)")
+        print("")
+        print("  Open Telegram and message your bot.")
+        print("  Press Ctrl+C to stop")
+        print("=" * 60)
         print("")
 
         # Keep running
@@ -297,9 +333,14 @@ async def main():
         print("Shutting down...")
     except Exception as e:
         print(f"Error: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
+        # Stop Proto-AGI loop
+        if agent.proto_agi:
+            agent.stop_proto_agi()
         await bot.stop()
-        print("AURA stopped cleanly")
+        print("Proto-AGI v3 stopped cleanly")
 
 
 if __name__ == "__main__":
