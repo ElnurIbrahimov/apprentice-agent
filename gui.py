@@ -843,6 +843,98 @@ class AuraGUI:
         return self.get_mood_html()
 
     # =========================================================================
+    # AURA v3.0 ALIVE - Emotionally Present AI
+    # =========================================================================
+
+    def get_aura_status_html(self) -> str:
+        """Get AURA status indicator HTML."""
+        try:
+            agent = self._get_agent()
+            if hasattr(agent, 'aura') and agent.aura:
+                aura = agent.aura
+                mood = aura.emotion.state.mood.value
+                energy = aura.emotion.state.energy
+
+                # Mood emoji mapping
+                mood_emoji = {
+                    "excited": "🌟",
+                    "happy": "😊",
+                    "content": "🙂",
+                    "neutral": "😐",
+                    "thoughtful": "🤔",
+                    "tired": "😴",
+                    "concerned": "😟",
+                    "frustrated": "😤"
+                }
+                emoji = mood_emoji.get(mood, "🤖")
+
+                # Energy bar
+                energy_pct = int(energy * 100)
+                energy_color = "#22c55e" if energy > 0.6 else "#eab308" if energy > 0.3 else "#ef4444"
+
+                return f'''<div style="padding: 10px; background: #1e293b; border-radius: 8px; border: 1px solid #334155;">
+    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+        <span style="font-size: 24px;">{emoji}</span>
+        <div>
+            <div style="color: #f1f5f9; font-weight: 500;">{mood.title()}</div>
+            <div style="color: #64748b; font-size: 11px;">Soul: {aura.soul.name}</div>
+        </div>
+    </div>
+    <div style="background: #334155; border-radius: 4px; height: 6px; overflow: hidden;">
+        <div style="background: {energy_color}; height: 100%; width: {energy_pct}%;"></div>
+    </div>
+    <div style="color: #64748b; font-size: 10px; margin-top: 4px;">Energy: {energy_pct}%</div>
+</div>'''
+            else:
+                return '''<div style="padding: 10px; background: #1e293b; border-radius: 8px; color: #64748b;">
+    AURA not loaded
+</div>'''
+        except Exception as e:
+            return f'''<div style="padding: 10px; background: #1e293b; border-radius: 8px; color: #ef4444;">
+    Error: {str(e)[:30]}
+</div>'''
+
+    def get_aura_details_md(self) -> str:
+        """Get AURA details as markdown."""
+        try:
+            agent = self._get_agent()
+            if hasattr(agent, 'aura') and agent.aura:
+                aura = agent.aura
+                status = aura.get_status()
+
+                md = f"**Mood:** {status['mood']['mood']} ({status['mood']['mood_reason']})\n\n"
+                md += f"**Energy:** {status['mood']['energy']:.0%}\n"
+                md += f"**Warmth:** {status['mood']['warmth']:.0%}\n"
+                md += f"**Engagement:** {status['mood']['engagement']:.0%}\n\n"
+                md += f"**Patterns Learned:** {status['patterns']['total_patterns']}\n"
+                md += f"**Turns:** {status['turns']}\n\n"
+
+                # Recent insights
+                insights = aura.patterns.get_insights()[:3]
+                if insights:
+                    md += "**Insights:**\n"
+                    for i in insights:
+                        md += f"- {i[:50]}...\n" if len(i) > 50 else f"- {i}\n"
+
+                return md
+            return "AURA not available"
+        except Exception as e:
+            return f"Error: {e}"
+
+    def aura_remember(self, fact: str) -> str:
+        """Store a fact in AURA memory."""
+        try:
+            agent = self._get_agent()
+            if hasattr(agent, 'aura') and agent.aura and fact.strip():
+                success = agent.aura.remember(fact.strip(), importance=0.7)
+                if success:
+                    return f"✓ Remembered: {fact[:40]}..."
+                return "Failed to store"
+            return "AURA not available or empty fact"
+        except Exception as e:
+            return f"Error: {e}"
+
+    # =========================================================================
     # INNER MONOLOGUE - Thought Visualization (Tool #21)
     # =========================================================================
 
@@ -1405,6 +1497,22 @@ def create_app():
                         refresh_mood_btn = gr.Button("Refresh", size="sm")
                         clear_mood_btn = gr.Button("Clear History", size="sm")
 
+                # AURA v3.0 ALIVE Panel
+                gr.Markdown("**AURA ALIVE**", elem_classes=["section-header"])
+                aura_status_html = gr.HTML(value=gui.get_aura_status_html())
+
+                with gr.Accordion("AURA Details", open=False):
+                    aura_details_md = gr.Markdown(gui.get_aura_details_md())
+                    with gr.Row():
+                        aura_refresh_btn = gr.Button("Refresh", size="sm")
+                    aura_remember_input = gr.Textbox(
+                        label="Remember",
+                        placeholder="Type a fact to remember...",
+                        scale=1
+                    )
+                    aura_remember_btn = gr.Button("Store Memory", size="sm")
+                    aura_remember_result = gr.Markdown("")
+
                 # Voice Controls
                 voice_status = gr.HTML(value=gui.get_voice_status_html())
                 voice_toggle = gr.Checkbox(label="🔊 Enable Voice", value=False)
@@ -1646,6 +1754,15 @@ def create_app():
         # Update mood indicator after each message
         send.click(gui.get_mood_html, outputs=mood_indicator)
         msg.submit(gui.get_mood_html, outputs=mood_indicator)
+
+        # AURA v3.0 ALIVE events
+        aura_refresh_btn.click(gui.get_aura_status_html, outputs=aura_status_html)
+        aura_refresh_btn.click(gui.get_aura_details_md, outputs=aura_details_md)
+        aura_remember_btn.click(gui.aura_remember, inputs=aura_remember_input, outputs=aura_remember_result)
+
+        # Update AURA status after each message
+        send.click(gui.get_aura_status_html, outputs=aura_status_html)
+        msg.submit(gui.get_aura_status_html, outputs=aura_status_html)
 
         # Inner Monologue events (Tool #21)
         refresh_thoughts_btn.click(gui.get_thoughts_html, outputs=thought_display)
