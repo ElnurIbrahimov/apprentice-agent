@@ -4,7 +4,7 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 
 ## Features
 
-- **29 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, Clawdbot messaging, EvoEmo emotional tracking, Inner Monologue, Knowledge Graph Memory, Metacognitive Guardian, NeuroDream sleep/dream memory consolidation, MirrorMind self-critique, CognitiveTheater multi-perspective reasoning, Reflexion learning-from-mistakes, SynapseForge dynamic tool creation, WorldSim consequence simulation, and more
+- **30 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, Clawdbot messaging, EvoEmo emotional tracking, Inner Monologue, Knowledge Graph Memory, Metacognitive Guardian, NeuroDream sleep/dream memory consolidation, MirrorMind self-critique, CognitiveTheater multi-perspective reasoning, Reflexion learning-from-mistakes, SynapseForge dynamic tool creation, WorldSim consequence simulation, **AURA v3.0 ALIVE emotional presence system**, and more
 - **5-Model Routing** - Automatically selects the best model for each task type (including FluxMind for calibrated reasoning)
 - **Observe-Plan-Act-Evaluate-Remember Loop** - Structured reasoning cycle for achieving goals
 - **Fast-Path Responses** - Instant replies for conversational queries without full agent loop
@@ -202,6 +202,7 @@ Opens at `http://127.0.0.1:7860` with:
 | `reflexion` | Learn from mistakes - retry failed tasks with accumulated lessons | Automatic for code execution failures |
 | `synapseforge` | Dynamic tool creation - synthesizes new tools at runtime | Automatic when capability gaps detected |
 | `worldsim` | Consequence simulation - previews risky actions before execution | Automatic for dangerous commands |
+| `aura` | AURA v3.0 ALIVE - emotionally present AI with memory, mood, patterns | `aura status` or `aura mood` |
 
 ### Code Executor Safety
 
@@ -1582,6 +1583,169 @@ else:
 
 ```bash
 export WORLDSIM_ENABLED=false
+```
+
+### AURA v3.0 ALIVE (Emotionally Present AI)
+
+AURA v3.0 (Autonomous Living Intelligence with Visible Emotion) transforms the agent from a reactive assistant into a **proactive, emotionally present thinking partner**.
+
+**Architecture:**
+
+```
+User Input → AURA Engine → [Memory + Emotion + Patterns + Thinking] → Humanized Response
+                ↓
+        Proactive Heartbeat → Notifications
+```
+
+**8 Core Components:**
+
+| Component | Description |
+|-----------|-------------|
+| **MarkdownStore** | Human-readable `.md` memory files (editable by user) |
+| **EmotionalEngine** | Mood persistence across sessions (energy, warmth, engagement) |
+| **HeartbeatMonitor** | Background proactive notifications and session awareness |
+| **PatternProphet** | Cross-conversation pattern recognition (topic sequences, time patterns) |
+| **VisibleThinking** | Shows internal reasoning with emoji prefixes |
+| **ResponseHumanizer** | Transforms robotic text to natural speech |
+| **SoulLoader** | Personality configuration via markdown soul files |
+| **AURAEngine** | Main orchestrator integrating all components |
+
+**Commands:**
+
+| Command | Description |
+|---------|-------------|
+| `aura status` | Full system status (mood, energy, patterns, features) |
+| `aura mood` | Current emotional state with details |
+| `aura soul` | Active personality configuration |
+| `aura memory` | Memory statistics by type |
+| `aura insights` | Learned patterns about user behavior |
+| `remember this: <fact>` | Store a fact in long-term memory |
+
+**Example:**
+
+```
+User: "aura status"
+
+AURA v3.0 ALIVE Status:
+- Soul: AURA
+- Mood: content (Balanced and comfortable)
+- Energy: 85%
+- Patterns: 12 learned
+- Turns this session: 5
+- Features: Proactive=True, Thinking=True, Humanize=True
+```
+
+**Soul Presets:**
+
+| Soul | Personality | Use Case |
+|------|-------------|----------|
+| `SOUL_PERSONAL` | Warm, curious, subtly witty | Personal assistant |
+| `SOUL_ENTERPRISE` | Professional, precise, efficient | Work environments |
+
+Soul files are markdown in `aura/soul/` and can be customized:
+
+```markdown
+# My Custom Soul
+
+## Personality
+- Friendly and supportive
+- Technical but accessible
+
+## Voice
+Speak naturally, like a knowledgeable colleague.
+
+## Quirks
+- Uses "Actually..." when gently correcting
+- Shows enthusiasm for interesting problems
+```
+
+**Memory Files:**
+
+AURA stores memory in human-readable markdown files at `aura/data/memory/`:
+
+| File | Contents |
+|------|----------|
+| `user_profile.md` | User info, preferences, goals |
+| `conversations.md` | Key conversation highlights |
+| `learned_facts.md` | Things AURA has learned |
+| `emotional_state.md` | Mood history and triggers |
+| `patterns.md` | Recognized behavioral patterns |
+
+**Visible Thinking:**
+
+When enabled, AURA shows its thought process:
+
+```
+🤔 *Considering this...*
+
+I'd be happy to help with that Python question...
+```
+
+**Proactive Notifications:**
+
+AURA can initiate interactions:
+
+```
+---
+* Good afternoon! I'm here whenever you need me.
+* Remember to take breaks - you've been working for 2 hours.
+```
+
+**Configuration:**
+
+```bash
+# Enable/disable AURA
+export AURA_ENABLED=true
+
+# Choose soul preset
+export AURA_SOUL=SOUL_PERSONAL  # or SOUL_ENTERPRISE
+
+# Feature toggles
+export AURA_PROACTIVE=true   # Background notifications
+export AURA_THINKING=true    # Visible thinking prefixes
+export AURA_HUMANIZE=true    # Response humanization
+```
+
+**Python API:**
+
+```python
+from aura.engine import create_aura
+
+# Create AURA instance
+aura = create_aura(soul="SOUL_PERSONAL")
+
+# Process user input
+context = aura.process_input("Hello! How are you?")
+print(f"Detected topic: {context['topic']}")
+print(f"Current mood: {context['mood']}")
+
+# Humanize a response
+response = aura.process_response("I am doing well.", context)
+print(response.content)  # "Oh, I'm doing well! How can I help?"
+
+# Remember something
+aura.remember("User prefers dark mode", importance=0.8)
+
+# Get greeting based on mood
+print(aura.get_greeting())  # "Good afternoon! I'm here whenever you need me."
+
+# Shutdown gracefully
+aura.shutdown()
+```
+
+**Integration with Agent:**
+
+AURA is automatically integrated into the agent's chat flow:
+
+1. **Input Processing** - AURA analyzes message, updates emotional state, records patterns
+2. **Context Enhancement** - Adds mood-appropriate tone to LLM prompts
+3. **Response Humanization** - Transforms robotic responses to natural speech
+4. **Proactive Messages** - Appends notifications when appropriate
+
+**Disable:**
+
+```bash
+export AURA_ENABLED=false
 ```
 
 ## Configuration
