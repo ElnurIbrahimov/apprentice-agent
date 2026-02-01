@@ -42,6 +42,14 @@ except ImportError:
     FAST_PATH_AVAILABLE = False
     FastPathHandler = None
 
+# Proto-AGI Core - Autonomous Cognitive Loop
+try:
+    from .proto_agi_core import ProtoAGI
+    PROTO_AGI_AVAILABLE = True
+except ImportError:
+    PROTO_AGI_AVAILABLE = False
+    ProtoAGI = None
+
 
 class AgentPhase(Enum):
     """Phases of the agent loop."""
@@ -153,9 +161,8 @@ class ApprenticeAgent:
             except Exception as e:
                 logger.warning(f"voice not loaded: {e}")
 
-            # mirrormind (as tool)
+            # mirrormind (as tool) - uses module-level import
             try:
-                from .tools.mirrormind import MirrorMind
                 self.tools['mirrormind'] = MirrorMind()
                 logger.info("[LOADED] mirrormind")
             except Exception as e:
@@ -324,6 +331,76 @@ class ApprenticeAgent:
                 self.fast_path_handler = None
         else:
             self.fast_path_handler = None
+
+        # Initialize Proto-AGI Core - Autonomous Cognitive Loop
+        # This REPLACES the old heartbeat/proactive system with a true autonomous mind
+        self.proto_agi = None
+        self._proto_agi_output_callback = None  # Set by Telegram bot
+
+        if PROTO_AGI_AVAILABLE:
+            try:
+                self.proto_agi = ProtoAGI(
+                    llm_func=self._proto_agi_llm,
+                    action_func=self._proto_agi_action,
+                    output_func=self._proto_agi_output,
+                    data_path="data/proto_agi/"
+                )
+                print(f"[LOADED] Proto-AGI Core - Autonomous cognitive loop (Cycle {self.proto_agi.cycle_count})")
+            except Exception as e:
+                print(f"[WARNING] Proto-AGI initialization failed: {e}")
+                self.proto_agi = None
+        else:
+            print("[INFO] Proto-AGI Core not available")
+
+    def _proto_agi_llm(self, prompt: str) -> str:
+        """LLM function for Proto-AGI - uses brain.think()"""
+        try:
+            return self.brain.think(prompt)
+        except Exception as e:
+            return f"[LLM Error: {e}]"
+
+    def _proto_agi_action(self, action: str) -> dict:
+        """Action function for Proto-AGI - executes tools via run()"""
+        try:
+            result = self.run(action, timeout_seconds=60)
+            return {"success": True, "result": result}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _proto_agi_output(self, message: str, chat_id: str = None):
+        """Output function for Proto-AGI - sends to Telegram"""
+        if self._proto_agi_output_callback:
+            try:
+                self._proto_agi_output_callback(message, chat_id)
+            except Exception as e:
+                print(f"[Proto-AGI] Output callback error: {e}")
+        else:
+            print(f"[Proto-AGI] Output (no callback): {message}")
+
+    def set_proto_agi_output_callback(self, callback: Callable):
+        """Set the callback for Proto-AGI proactive messages (e.g., Telegram send)"""
+        self._proto_agi_output_callback = callback
+
+    def start_proto_agi(self, cycle_interval: float = 60.0):
+        """Start the Proto-AGI autonomous loop"""
+        if self.proto_agi:
+            self.proto_agi.start(cycle_interval)
+            print(f"[Proto-AGI] Started autonomous loop (interval: {cycle_interval}s)")
+        else:
+            print("[Proto-AGI] Not available - cannot start")
+
+    def stop_proto_agi(self):
+        """Stop the Proto-AGI autonomous loop"""
+        if self.proto_agi:
+            self.proto_agi.stop()
+
+    def proto_agi_process(self, message: str, chat_id: str = None) -> str:
+        """Process message through Proto-AGI (for Telegram integration)"""
+        if self.proto_agi:
+            return self.proto_agi.process_input(message, chat_id)
+        else:
+            # Fallback to regular chat
+            return self.chat(message)
 
     def _ensure_tool(self, tool_name: str):
         """Lazily load a tool if not already loaded."""
