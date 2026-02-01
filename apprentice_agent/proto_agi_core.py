@@ -366,23 +366,64 @@ class ProtoAGI:
         self.governor = Governor()
         self.needs = NeedSystem()
 
-        # State
-        self.is_running = False
-        self.cycle_count = 0
-        self.last_cycle = time.time()
+        # State (protected by lock for thread safety)
+        self._state_lock = threading.Lock()
+        self._is_running = False
+        self._cycle_count = 0
+        self._last_cycle = time.time()
         self._last_chat_id = None
 
         self._load_state()
 
+    @property
+    def is_running(self) -> bool:
+        """Thread-safe access to running state."""
+        with self._state_lock:
+            return self._is_running
+
+    @is_running.setter
+    def is_running(self, value: bool):
+        """Thread-safe setting of running state."""
+        with self._state_lock:
+            self._is_running = value
+
+    @property
+    def cycle_count(self) -> int:
+        """Thread-safe access to cycle count."""
+        with self._state_lock:
+            return self._cycle_count
+
+    @cycle_count.setter
+    def cycle_count(self, value: int):
+        """Thread-safe setting of cycle count."""
+        with self._state_lock:
+            self._cycle_count = value
+
+    @property
+    def last_cycle(self) -> float:
+        """Thread-safe access to last cycle time."""
+        with self._state_lock:
+            return self._last_cycle
+
+    @last_cycle.setter
+    def last_cycle(self, value: float):
+        """Thread-safe setting of last cycle time."""
+        with self._state_lock:
+            self._last_cycle = value
+
     def _load_state(self):
+        """Load state from disk. Handles errors gracefully."""
         state_file = self.data_path / "state.json"
         if state_file.exists():
             try:
                 data = json.loads(state_file.read_text())
-                self.cycle_count = data.get("cycle_count", 0)
+                with self._state_lock:
+                    self._cycle_count = data.get("cycle_count", 0)
                 self.governor.mode = OperationMode(data.get("mode", "assist"))
-            except:
-                pass
+            except (json.JSONDecodeError, ValueError, IOError) as e:
+                # Log error but continue with defaults
+                import logging
+                logging.getLogger(__name__).warning(f"Failed to load state: {e}")
 
     def _save_state(self):
         (self.data_path / "state.json").write_text(json.dumps({

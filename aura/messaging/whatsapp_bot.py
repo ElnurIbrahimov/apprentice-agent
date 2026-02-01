@@ -276,8 +276,8 @@ class WhatsAppBot(BasePlatform):
                 "type": "typing",
                 "to": chat_id
             })
-        except:
-            pass
+        except (asyncio.QueueFull, Exception) as e:
+            logger.debug(f"Could not send typing indicator: {e}")
 
     # ============ OVERRIDE AURA PROCESSING ============
 

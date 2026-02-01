@@ -33,6 +33,9 @@ FORBIDDEN_PATTERNS = [
     "__builtins__", "__code__", "__class__",
 ]
 
+# Maximum history size to prevent memory bloat
+MAX_HISTORY_SIZE = 100
+
 
 def validate_custom_tool_code(code: str, tool_path: str) -> Tuple[bool, str]:
     """
@@ -160,8 +163,27 @@ class AgentState:
     evaluation: Optional[dict] = None
     iteration: int = 0
     completed: bool = False
-    history: list = field(default_factory=list)
+    _history: list = field(default_factory=list)  # Use private field
     gathered_content: str = ""  # Store content gathered from searches for summarization
+
+    @property
+    def history(self) -> list:
+        """Get history with size limit enforcement."""
+        return self._history
+
+    @history.setter
+    def history(self, value: list):
+        """Set history with automatic truncation to MAX_HISTORY_SIZE."""
+        if len(value) > MAX_HISTORY_SIZE:
+            self._history = value[-MAX_HISTORY_SIZE:]  # Keep most recent
+        else:
+            self._history = value
+
+    def add_to_history(self, item: dict):
+        """Add an item to history, enforcing size limit."""
+        self._history.append(item)
+        if len(self._history) > MAX_HISTORY_SIZE:
+            self._history = self._history[-MAX_HISTORY_SIZE:]
 
 
 class ApprenticeAgent:
@@ -256,7 +278,7 @@ class ApprenticeAgent:
             except Exception as e:
                 logger.warning(f"mirrormind not loaded: {e}")
 
-            # Auto-load ALL synthesized tools
+            # Auto-load ALL synthesized tools (with security validation)
             try:
                 import os
                 synth_path = os.path.join(os.path.dirname(__file__), 'tools', 'synthesized')
@@ -264,7 +286,17 @@ class ApprenticeAgent:
                     for file in os.listdir(synth_path):
                         if file.endswith('.py') and file != '__init__.py':
                             tool_name = file[:-3]
+                            tool_file_path = os.path.join(synth_path, file)
                             try:
+                                # SECURITY: Validate tool code before import
+                                with open(tool_file_path, 'r', encoding='utf-8') as f:
+                                    tool_code = f.read()
+
+                                is_valid, validation_msg = validate_custom_tool_code(tool_code, tool_file_path)
+                                if not is_valid:
+                                    logger.warning(f"synthesized/{tool_name} BLOCKED: {validation_msg}")
+                                    continue
+
                                 module = __import__(f'apprentice_agent.tools.synthesized.{tool_name}', fromlist=[tool_name])
                                 # Try different class name patterns
                                 class_name = ''.join(word.title() for word in tool_name.split('_')) + 'Tool'

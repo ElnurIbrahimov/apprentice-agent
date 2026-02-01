@@ -201,7 +201,8 @@ class MemoryRetriever:
                                     line = line.split(']', 1)[-1].strip()
                                 if line and len(line) > 10:
                                     memories.append(f"[{date_str}] {line[:100]}")
-                except:
+                except (ValueError, IOError, OSError) as e:
+                    logger.debug(f"Could not process {filepath}: {e}")
                     continue
 
         return memories[:5]  # Limit recent memories

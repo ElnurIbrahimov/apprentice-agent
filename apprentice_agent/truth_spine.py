@@ -1120,7 +1120,7 @@ class SecureToolExecutor:
             self._secret_key.encode(),
             signature_data.encode(),
             'sha256'
-        ).hexdigest()[:16]
+        ).hexdigest()[:32]  # 128-bit truncation for security
 
         return confirmation_id, signature
 
@@ -1253,7 +1253,7 @@ class SecureToolExecutor:
                 self._secret_key.encode(),
                 expected_signature_data.encode(),
                 'sha256'
-            ).hexdigest()[:16]
+            ).hexdigest()[:32]  # 128-bit truncation for security
 
             if not hmac.compare_digest(pending.signature, expected_signature):
                 # Signature mismatch - possible tampering

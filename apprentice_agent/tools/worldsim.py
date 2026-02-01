@@ -16,6 +16,8 @@ from typing import Dict, List, Optional, Tuple
 
 import requests
 
+from ..config import Config
+
 logger = logging.getLogger(__name__)
 
 
@@ -130,20 +132,20 @@ Keep each answer concise (1-2 sentences max).'''
 
     def __init__(
         self,
-        ollama_url: str = "http://localhost:11434",
-        model: str = "llama3:8b"
+        ollama_url: str = None,
+        model: str = None
     ):
         """
         Initialize WorldSim.
 
         Args:
-            ollama_url: URL for Ollama API
-            model: Model to use for analysis
+            ollama_url: URL for Ollama API (defaults to Config.OLLAMA_HOST)
+            model: Model to use for analysis (defaults to Config.MODEL_REASON)
         """
-        self.ollama_url = ollama_url.rstrip("/")
-        self.model = model
+        self.ollama_url = (ollama_url or Config.OLLAMA_HOST).rstrip("/")
+        self.model = model or Config.MODEL_REASON  # Use reasoning model for safety analysis
 
-        logger.info("WorldSim initialized")
+        logger.info(f"WorldSim initialized with model: {self.model}")
 
     def _check_blocked(self, action: str) -> Optional[str]:
         """

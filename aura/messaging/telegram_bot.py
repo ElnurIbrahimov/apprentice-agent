@@ -375,11 +375,22 @@ Warmth: {warmth:.0%}
         if not self._is_user_allowed(update.effective_user.id):
             return
 
+        user_id = str(update.effective_user.id)
+
         await update.message.reply_text(
             "This will clear my memory of you. Are you sure?\n\n"
+            "This includes:\n"
+            "- Conversation history\n"
+            "- User profile information\n"
+            "- Learned facts about you\n"
+            "- Emotional context\n\n"
             "Type 'yes forget everything' to confirm."
         )
-        # Actual clearing would be handled in message handler
+
+        # Store pending forget request
+        if not hasattr(self, '_pending_forget'):
+            self._pending_forget = {}
+        self._pending_forget[user_id] = datetime.now()
 
     # ============ MESSAGE HANDLER ============
 
@@ -397,9 +408,83 @@ Warmth: {warmth:.0%}
 
         # Check for forget confirmation
         if text and text.lower() == "yes forget everything":
-            # Clear user-specific memory
+            user_id = str(user.id)
+
+            # Check if there's a pending forget request (within 5 minutes)
+            if hasattr(self, '_pending_forget') and user_id in self._pending_forget:
+                request_time = self._pending_forget[user_id]
+                if (datetime.now() - request_time).total_seconds() < 300:  # 5 min
+                    # Actually clear the memory
+                    cleared_items = []
+
+                    try:
+                        # Clear AURA memory if available
+                        if hasattr(self.aura, 'memory') and self.aura.memory:
+                            # Clear markdown store sections
+                            if hasattr(self.aura.memory, 'clear_section'):
+                                self.aura.memory.clear_section("user_profile")
+                                self.aura.memory.clear_section("conversations")
+                                self.aura.memory.clear_section("learned_facts")
+                                cleared_items.append("User profile")
+                                cleared_items.append("Conversations")
+                                cleared_items.append("Learned facts")
+                            elif hasattr(self.aura.memory, 'store') and hasattr(self.aura.memory.store, 'clear_section'):
+                                self.aura.memory.store.clear_section("user_profile")
+                                self.aura.memory.store.clear_section("conversations")
+                                self.aura.memory.store.clear_section("learned_facts")
+                                cleared_items.append("User profile")
+                                cleared_items.append("Conversations")
+                                cleared_items.append("Learned facts")
+
+                        # Clear emotional history
+                        if hasattr(self.aura, 'emotion') and self.aura.emotion:
+                            if hasattr(self.aura.emotion, 'clear_history'):
+                                self.aura.emotion.clear_history()
+                                cleared_items.append("Emotional history")
+                            elif hasattr(self.aura.emotion, 'interaction_history'):
+                                self.aura.emotion.interaction_history.clear()
+                                cleared_items.append("Interaction history")
+
+                        # Clear conversation history from engine
+                        if hasattr(self.aura, 'conversation_history'):
+                            self.aura.conversation_history.clear()
+                            cleared_items.append("Conversation history")
+
+                        # Clear patterns
+                        if hasattr(self.aura, 'patterns') and self.aura.patterns:
+                            if hasattr(self.aura.patterns, 'clear'):
+                                self.aura.patterns.clear()
+                                cleared_items.append("Patterns")
+
+                        # Remove pending forget request
+                        del self._pending_forget[user_id]
+
+                        if cleared_items:
+                            cleared_list = "\n".join(f"- {item}" for item in cleared_items)
+                            await update.message.reply_text(
+                                f"Memory cleared successfully!\n\n"
+                                f"Cleared:\n{cleared_list}\n\n"
+                                f"Fresh start! What would you like to talk about?"
+                            )
+                        else:
+                            await update.message.reply_text(
+                                "Memory cleared. Fresh start! What would you like to talk about?"
+                            )
+
+                    except Exception as e:
+                        logger.error(f"Error clearing memory: {e}")
+                        await update.message.reply_text(
+                            "There was an issue clearing some memories, but I'll treat this as a fresh start. "
+                            "What would you like to talk about?"
+                        )
+                    return
+                else:
+                    # Request expired
+                    del self._pending_forget[user_id]
+
+            # No pending request or expired
             await update.message.reply_text(
-                "Memory cleared. Fresh start! What would you like to talk about?"
+                "No active forget request. Use /forget first if you want to clear my memory."
             )
             return
 
@@ -451,8 +536,8 @@ Warmth: {warmth:.0%}
                     chat_id=update.effective_chat.id,
                     text="Oops, something went wrong. Let me try again..."
                 )
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Could not send error message: {e}")
 
     # ============ OVERRIDE AURA PROCESSING ============
 
@@ -548,8 +633,8 @@ Warmth: {warmth:.0%}
                                 chat_id=chat_id,
                                 user_name=info.get("first_name", "there")
                             )
-                    except:
-                        pass
+                    except (AttributeError, TypeError) as e:
+                        logger.debug(f"Could not register chat {chat_id}: {e}")
 
                 # Start proactive polling loop
                 self._proactive_task = asyncio.create_task(self._proactive_polling_loop())

@@ -21,6 +21,8 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
+from ..config import Config
+
 logger = logging.getLogger(__name__)
 
 
@@ -119,8 +121,8 @@ Fixed code:'''
 
     def __init__(
         self,
-        ollama_url: str = "http://localhost:11434",
-        model: str = "deepseek-coder:6.7b",
+        ollama_url: str = None,
+        model: str = None,
         tools_dir: Optional[str] = None,
         registry_path: Optional[str] = None
     ):
@@ -128,13 +130,13 @@ Fixed code:'''
         Initialize SynapseForge.
 
         Args:
-            ollama_url: URL for Ollama API
-            model: Model to use for code generation (code model recommended)
+            ollama_url: URL for Ollama API (defaults to Config.OLLAMA_HOST)
+            model: Model to use for code generation (defaults to Config.MODEL_CODE)
             tools_dir: Directory to store synthesized tool files
             registry_path: Path to registry JSON file
         """
-        self.ollama_url = ollama_url.rstrip("/")
-        self.model = model
+        self.ollama_url = (ollama_url or Config.OLLAMA_HOST).rstrip("/")
+        self.model = model or Config.MODEL_CODE  # Use code-specialized model
 
         # Set up paths
         base_dir = Path(__file__).parent
