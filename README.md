@@ -152,9 +152,9 @@ python main.py --dream
 
 Analyzes `logs/metacognition/` to generate insights about tool effectiveness and learning opportunities.
 
-### Telegram bot with Proto-AGI v3
+### Telegram bot with Proto-AGI v5
 
-Run the agent as a Telegram bot with **Proto-AGI v3 Evidence-Based Cognition**:
+Run the agent as a Telegram bot with **Proto-AGI v5 Truth Spine**:
 
 ```bash
 # Set your bot token (get from @BotFather)
@@ -164,13 +164,19 @@ export TELEGRAM_BOT_TOKEN="your_token_here"
 python run_telegram.py
 ```
 
-**Proto-AGI v3 Features:**
-- **Evidence-Based Memory**: Stores observable results, not self-referential claims
-- **Probed Verification**: Task-specific probes (file_exists, url_reachable, etc.)
-- **Response Discipline**: Every claim labeled VERIFIED/INFERRED/UNKNOWN
-- **Governance Modes**: idle, assist (default), operate
-- **Budgets**: 10 actions/hr, 3 proactive messages/hr in operate mode
-- **Sandboxed Execution**: subprocess + timeout for code execution
+**Proto-AGI v5 Features:**
+- **Truth Spine**: Non-negotiable verification layer - every action produces artifacts
+- **3-Tier Memory**: FACT (verified), BELIEF (inferred), SPECULATION (unverified)
+- **Artifact System**: Physical proof with SHA256 hashes (file, stdout, JSON)
+- **Secure Executor**: Dangerous operations require user confirmation
+- **Sandbox Enforcement**: Not suggestions - actual enforcement
+
+**The Contract:**
+```
+ACTION → ARTIFACT → VERIFICATION → MEMORY TIER
+```
+
+**Core Principle:** "If you can't verify it with an artifact, it's SPECULATION"
 
 **Modes:**
 | Mode | Description |
@@ -1783,97 +1789,108 @@ AURA is automatically integrated into the agent's chat flow:
 export AURA_ENABLED=false
 ```
 
-### Proto-AGI v3 (Evidence-Based Cognition)
+### Proto-AGI v5 (Truth Spine)
 
-Proto-AGI v3 is an autonomous cognitive loop that enables AURA to act, verify, and learn from its actions. It prevents self-deception by storing only **observable results** backed by **evidence**.
+Proto-AGI v5 is an autonomous cognitive loop with **non-negotiable verification**. Every action must produce an artifact that can be verified - no exceptions.
 
-**Key Principles:**
-- **Claims must cite evidence IDs** - No storing "I succeeded" without proof
-- **Governance checks don't consume budget** - Only granted actions use budget
-- **Structured action types** - ActionType enum, not string matching
-- **Task-specific verification** - Probes check specific expected outcomes
+**The Contract:**
+```
+ACTION → ARTIFACT → VERIFICATION → MEMORY TIER
+```
 
-**Evidence-Based Memory:**
+**Core Principle:** "If you can't verify it with an artifact, it's SPECULATION"
 
-| Memory Type | Description |
-|-------------|-------------|
-| `ObservableFact` | Fact backed by evidence (file_exists, url_reachable, etc.) |
-| `NarrativeEntry` | Subjective experience (attempts, reflections, errors) |
-| `Evidence` | Raw evidence with ID, type, confidence, timestamp |
+**3-Tier Memory:**
 
-**Verification Probes:**
+| Tier | Description | Examples |
+|------|-------------|----------|
+| **FACT** | Verified with artifact | File hash matches, return code 0, file exists |
+| **BELIEF** | Inferred but not proven | Pattern recognition, logical conclusions |
+| **SPECULATION** | Unverified claims | LLM output, user claims, assumptions |
 
-| Probe | Description |
+**Artifact Types:**
+
+| Type | Description | Verification |
+|------|-------------|--------------|
+| `FILE` | File with SHA256 hash | Hash match, file exists, size check |
+| `STDOUT` | Command output with return code | Return code 0, contains text |
+| `JSON` | Structured JSON result | Valid JSON, has expected keys |
+| `NONE` | No artifact (action failed) | Automatically SPECULATION |
+
+**Verification Checks:**
+
+| Check | Description |
 |-------|-------------|
-| `file_exists` | Check if file exists at path |
-| `hash_match` | Verify file hash matches expected |
-| `url_reachable` | Check if URL returns HTTP 2xx/3xx |
-| `output_contains` | Check if output contains expected text |
-| `json_valid` | Verify output is valid JSON |
-| `exit_zero` | Check exit code is 0 |
-| `min_matches` | Check pattern appears N+ times |
+| `file_exists` | Verify file exists at path |
+| `hash_match` | SHA256 hash matches expected |
+| `return_code_zero` | Command returned exit code 0 |
+| `not_empty` | Output has content |
+| `json_valid` | Output is valid JSON |
+| `no_error` | No error field in result |
+| `contains_text` | Output contains expected text |
+| `sandbox_path` | Path is within sandbox |
 
-**Action Types:**
+**Secure Tool Executor:**
 
-| Category | Actions |
-|----------|---------|
-| **Safe** | RECALL, THINK, RESPOND |
-| **Moderate** | SEARCH, READ_FILE, ANALYZE |
-| **Sensitive** | WRITE_FILE, EXECUTE_CODE, SEND_MESSAGE, API_CALL |
-| **Dangerous** | DELETE, SYSTEM_MODIFY, SEND_EMAIL |
+Dangerous tools require user confirmation:
+- `write_file` - Creates/modifies files
+- `delete_file` - Removes files
+- `execute_python` - Runs Python code
+
+```python
+# Tool execution with confirmation workflow
+result = executor.execute("write_file", {"path": "test.txt", "content": "hello"})
+
+if result.get("needs_confirmation"):
+    # Show user the pending action
+    print(f"Confirm? {result['message']}")
+    # User confirms
+    executor.confirm(result["confirmation_id"])
+```
 
 **Response Discipline:**
 
 Every response claim must be labeled:
-- `[VERIFIED:fact_id]` - Backed by verified fact with evidence
-- `[INFERRED]` - Logical conclusion, with reasoning
-- `[UNKNOWN]` - Not sure, may need verification
-- `[NARRATIVE]` - Subjective recollection
-
-**Example:**
-```
-[VERIFIED:abc123] Your last query was about Python.
-[INFERRED] Based on that, you might be interested in debugging tips.
-[UNKNOWN] I'm not sure if you've set up a debugger — want me to check?
-```
+- `[FACT:trace_id]` - Verified with artifact
+- `[BELIEF]` - Inferred with reasoning
+- `[SPECULATION]` - Unverified (including LLM output)
+- `[UNKNOWN]` - Needs verification
 
 **Python API:**
 
 ```python
-from apprentice_agent.proto_agi_core import ProtoAGI, Action, ActionType, ExpectedOutcome
+from apprentice_agent.proto_agi_core import ProtoAGI, ActionRequest, ActionType
 
 # Create instance
-agi = ProtoAGI(llm_func=my_llm, data_path="data/proto_agi_v3/")
+agi = ProtoAGI(llm_func=my_llm, data_path="data/proto_agi_v5/")
 
 # Set mode
 agi.set_mode("operate")  # idle, assist, operate
 
-# Create structured action with expected outcomes
-action = Action(
-    action_type=ActionType.EXECUTE_CODE,
+# Create action request
+request = ActionRequest(
+    action_type=ActionType.WRITE_FILE,
     intent="Create a test file",
-    inputs={"code": "Path('/tmp/test.txt').write_text('hello')"},
-    expected_outcomes=[
-        ExpectedOutcome("File created", "file_exists", "/tmp/test.txt"),
-        ExpectedOutcome("No errors", "exit_zero", None)
-    ]
+    params={"path": "test.txt", "content": "Hello from Truth Spine!"},
+    expected_checks=["file_exists", "not_empty"]
 )
 
-# Execute with verification
-result = agi.execute(action, is_user_initiated=True)
+# Process through Truth Spine
+result = agi.process(request, is_user_initiated=True)
 
-print(f"Verdict: {result.verification.verdict.value}")
-print(f"Evidence: {len(result.verification.evidence)} items")
-print(f"Facts created: {result.facts_created}")
+print(f"Verified: {result.is_verified}")
+print(f"Memory Tier: {result.memory_tier.value}")  # FACT, BELIEF, or SPECULATION
+print(f"Trace ID: {result.memory_trace_id}")
 
-# Process user input with evidence discipline
+# Process user input (LLM output → SPECULATION)
 response = agi.process_input("Hello!", chat_id="123")
 
-# Get status
+# Get status with Truth Spine stats
 status = agi.get_status()
-print(f"Facts: {status['memory']['verified_facts']}")
-print(f"Evidence: {status['memory']['evidence_items']}")
-print(f"Budget: {status['governance']['actions_remaining']}/10")
+print(f"Facts: {status['memory']['facts']}")
+print(f"Beliefs: {status['memory']['beliefs']}")
+print(f"Speculations: {status['memory']['speculations']}")
+print(f"Verifier Pass Rate: {status['verifier']['success_rate']:.0%}")
 ```
 
 ## Configuration

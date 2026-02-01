@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """
-Proto-AGI v3 Telegram Bot - EVIDENCE-BASED
-==========================================
+Proto-AGI v5 Telegram Bot - TRUTH SPINE
+=======================================
 
-This version CANNOT LIE TO ITSELF.
+This version ENFORCES verification at every step.
 
 Features:
-- EVIDENCE-BASED: Store OBSERVABLE RESULTS, not "I succeeded" claims
-- PROBED VERIFICATION: Task-specific probes (file_exists, url_reachable, etc.)
-- GOVERNANCE: can_act() checks don't consume budget (fixed from v2)
-- STRUCTURED ACTIONS: ActionType enum, not string matching
-- SANDBOXED EXECUTION: subprocess + timeout for code execution
-- RESPONSE DISCIPLINE: Every claim must be VERIFIED/INFERRED/UNKNOWN
+- TRUTH SPINE: Non-negotiable verification layer
+- ARTIFACTS: Physical proof (file hash, stdout, return code, JSON)
+- 3-TIER MEMORY: FACT (verified), BELIEF (inferred), SPECULATION (unverified)
+- SECURE EXECUTOR: Confirmation required for dangerous operations
+- SANDBOX ENFORCEMENT: Not suggestions, enforcement
+
+The Contract:
+    ACTION → ARTIFACT → VERIFICATION → MEMORY TIER
+
+Core Principle: "If you can't verify it with an artifact, it's SPECULATION"
 
 Modes:
 - idle: Think internally only, no external actions
@@ -178,10 +182,10 @@ class ProtoAGIWrapper:
             return f"Sorry, something went wrong: {str(e)[:100]}"
 
     def get_status(self):
-        """Get combined status from Proto-AGI v3 and agent."""
+        """Get combined status from Proto-AGI v5 and agent."""
         status = {
-            "version": "5.0 PROTO-AGI-v3-EVIDENCE-BASED",
-            "soul": "Evidence-Based Autonomous Cognition",
+            "version": "5.0 PROTO-AGI-v5-TRUTH-SPINE",
+            "soul": "Truth Spine Verification-First Cognition",
             "tools": len(self.agent.tools),
             "mood": {},
             "patterns": {},
@@ -233,7 +237,7 @@ async def main():
 
     print("")
     print("=" * 60)
-    print("  PROTO-AGI v3 - EVIDENCE-BASED COGNITION")
+    print("  PROTO-AGI v5 - TRUTH SPINE VERIFICATION")
     print("=" * 60)
     print("")
 
@@ -251,8 +255,10 @@ async def main():
             status = wrapped.proto_agi.get_status()
             mem = status.get('memory', {})
             gov = status.get('governance', {})
-            print(f"Proto-AGI v3: Mode={status.get('mode', 'assist')}, Cycle={status['cycle_count']}")
-            print(f"  Memory: {mem.get('verified_facts', 0)} facts, {mem.get('narratives', 0)} narratives, {mem.get('evidence_items', 0)} evidence")
+            verifier = status.get('verifier', {})
+            print(f"Proto-AGI v5: Mode={status.get('mode', 'assist')}, Cycle={status['cycle_count']}")
+            print(f"  Memory: {mem.get('facts', 0)} FACTS, {mem.get('beliefs', 0)} BELIEFS, {mem.get('speculations', 0)} SPECULATIONS")
+            print(f"  Verifier: {verifier.get('total_verifications', 0)} checks, {verifier.get('success_rate', 0):.0%} pass rate")
             print(f"  Budget: {gov.get('actions_remaining', 10)}/10 actions, {gov.get('messages_remaining', 3)}/3 messages")
         else:
             print("[WARNING] Proto-AGI not available - using fallback mode")
@@ -307,13 +313,15 @@ async def main():
 
         print("")
         print("=" * 60)
-        print("  Proto-AGI v3 is now ALIVE on Telegram!")
+        print("  Proto-AGI v5 is now ALIVE on Telegram!")
         print("")
-        print("  EVIDENCE-BASED COGNITION:")
-        print("    - PROBES with task-specific verification")
-        print("    - STORES observable results, not self-claims")
-        print("    - LABELS claims as VERIFIED/INFERRED/UNKNOWN")
-        print("    - BUDGETS: checking doesn't consume (v2 fix)")
+        print("  TRUTH SPINE - Non-Negotiable Verification:")
+        print("    - ACTION → ARTIFACT → VERIFICATION → MEMORY TIER")
+        print("    - FACT: verified with artifact (hash, return code)")
+        print("    - BELIEF: inferred but not proven")
+        print("    - SPECULATION: unverified (including LLM output)")
+        print("")
+        print("  \"If you can't verify it with an artifact, it's SPECULATION\"")
         print("")
         print("  MODES: idle | assist (default) | operate")
         print("    - assist: Responds to user only")
@@ -340,7 +348,7 @@ async def main():
         if agent.proto_agi:
             agent.stop_proto_agi()
         await bot.stop()
-        print("Proto-AGI v3 stopped cleanly")
+        print("Proto-AGI v5 stopped cleanly")
 
 
 if __name__ == "__main__":
