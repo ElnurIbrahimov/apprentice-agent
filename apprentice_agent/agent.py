@@ -3,13 +3,101 @@
 import time
 import logging
 import concurrent.futures
+import ast
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional, Tuple, Callable
+from typing import Any, Optional, Tuple, Callable, List, Dict
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+#                    SECURITY: Safe Custom Tool Validator
+# ============================================================================
+
+# Allowed imports for custom tools
+ALLOWED_TOOL_IMPORTS = {
+    "typing", "dataclasses", "json", "re", "datetime",
+    "pathlib", "collections", "enum", "abc", "math",
+    "itertools", "functools", "operator", "string",
+}
+
+# Forbidden patterns that indicate potentially malicious code
+FORBIDDEN_PATTERNS = [
+    "os.system", "subprocess", "eval(", "exec(", "__import__",
+    "shutil.rmtree", "shutil.move", "socket", "requests.get",
+    "urllib", "importlib", "ctypes", "pickle", "marshal",
+    "compile(", "globals(", "locals(", "vars(",
+    "__builtins__", "__code__", "__class__",
+]
+
+
+def validate_custom_tool_code(code: str, tool_path: str) -> Tuple[bool, str]:
+    """
+    Validate custom tool code before dynamic import.
+
+    SECURITY: Prevents arbitrary code execution via malicious custom tools.
+    Checks:
+    - No forbidden imports (os.system, subprocess, etc.)
+    - No forbidden patterns (eval, exec, __import__)
+    - Has required Tool class with execute method
+    - Valid Python syntax
+
+    Args:
+        code: The tool source code
+        tool_path: Path for error messages
+
+    Returns:
+        (is_valid, error_message_or_ok)
+    """
+    # 1. Check for forbidden patterns (fast string check first)
+    for pattern in FORBIDDEN_PATTERNS:
+        if pattern in code:
+            return False, f"Forbidden pattern '{pattern}' found in {tool_path}"
+
+    # 2. Parse as AST to validate structure
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as e:
+        return False, f"Syntax error in {tool_path}: {e}"
+
+    # 3. Check imports
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                module_base = alias.name.split('.')[0]
+                if module_base not in ALLOWED_TOOL_IMPORTS:
+                    return False, f"Forbidden import '{alias.name}' in {tool_path}"
+
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                module_base = node.module.split('.')[0]
+                if module_base not in ALLOWED_TOOL_IMPORTS:
+                    return False, f"Forbidden import 'from {node.module}' in {tool_path}"
+
+    # 4. Check for required class structure
+    has_tool_class = False
+    has_execute = False
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            # Look for Tool class or any class ending with 'Tool'
+            if node.name == "Tool" or node.name.endswith("Tool"):
+                has_tool_class = True
+                for item in node.body:
+                    if isinstance(item, ast.FunctionDef):
+                        if item.name in ("execute", "run", "__call__"):
+                            has_execute = True
+
+    if not has_tool_class:
+        return False, f"No Tool class found in {tool_path}"
+
+    if not has_execute:
+        return False, f"Tool class missing execute/run method in {tool_path}"
+
+    return True, "Valid"
 
 # Timeout constants
 AGENT_TIMEOUT = 120  # Overall agent loop timeout (2 minutes)
@@ -454,7 +542,16 @@ class ApprenticeAgent:
                     continue
 
                 try:
-                    # Dynamic import of custom tool
+                    # SECURITY: Validate tool code before dynamic import
+                    tool_code = tool_file.read_text()
+                    is_valid, validation_msg = validate_custom_tool_code(tool_code, str(tool_file))
+
+                    if not is_valid:
+                        print(f"[SECURITY] Rejected custom tool {tool_name}: {validation_msg}")
+                        logger.warning(f"Custom tool {tool_name} failed security validation: {validation_msg}")
+                        continue
+
+                    # Dynamic import of validated custom tool
                     spec = importlib.util.spec_from_file_location(
                         tool_name,
                         tool_file
@@ -468,7 +565,7 @@ class ApprenticeAgent:
                         if hasattr(module, class_name):
                             tool_class = getattr(module, class_name)
                             self.tools[tool_name] = tool_class()
-                            print(f"[LOADED] Custom tool: {tool_name}")
+                            print(f"[LOADED] Custom tool: {tool_name} (validated)")
 
                             # Load keywords for this tool
                             keywords = tool_entry.get("keywords", [])
