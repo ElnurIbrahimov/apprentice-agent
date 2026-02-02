@@ -161,6 +161,36 @@ except ImportError:
     KGQueryEngine = None
     QueryMode = None
 
+# Episodic Time-Travel Memory - Autobiographical Memory System
+try:
+    from aura_episodic_memory import (
+        EpisodicMemoryStore,
+        Episode,
+        EpisodeType,
+        EpisodeQuery,
+        TemporalContext,
+        TitansEpisodicBridge,
+        TitansEpisodicConfig,
+        TimelineEngine,
+        MemoryConsolidator,
+        ConsolidationConfig,
+        create_episodic_tools,
+        QDRANT_AVAILABLE
+    )
+    EPISODIC_MEMORY_AVAILABLE = QDRANT_AVAILABLE
+except ImportError:
+    EPISODIC_MEMORY_AVAILABLE = False
+    EpisodicMemoryStore = None
+    Episode = None
+    EpisodeType = None
+    EpisodeQuery = None
+    TemporalContext = None
+    TitansEpisodicBridge = None
+    TitansEpisodicConfig = None
+    TimelineEngine = None
+    MemoryConsolidator = None
+    ConsolidationConfig = None
+
 
 class AgentPhase(Enum):
     """Phases of the agent loop."""
@@ -534,6 +564,58 @@ class ApprenticeAgent:
                 self.kg_query_engine = None
         elif not KG_BRAIN_AVAILABLE:
             print("[INFO] Knowledge Graph Brain not available (install kuzu: pip install kuzu)")
+
+        # Initialize Episodic Time-Travel Memory - Autobiographical Memory
+        # Like KG Brain, this is lightweight and can initialize even with fast_init
+        self.episodic_memory = None
+        self.episodic_bridge = None
+        self.episodic_timeline = None
+        self.episodic_consolidator = None
+        self.episodic_memory_enabled = getattr(Config, 'EPISODIC_MEMORY_ENABLED', True)
+
+        if EPISODIC_MEMORY_AVAILABLE and self.episodic_memory_enabled:
+            try:
+                # Initialize Qdrant-based episodic memory store (lightweight)
+                episodic_path = Path(__file__).parent.parent / "aura_data" / "episodic_memory"
+                self.episodic_memory = EpisodicMemoryStore(str(episodic_path))
+
+                # Initialize Timeline Engine (lightweight, always init)
+                self.episodic_timeline = TimelineEngine(self.episodic_memory)
+
+                # Initialize Titans-Episodic Bridge (needs LLM for significant episodes)
+                # Skip full bridge for fast_init since it may record to memory
+                if not fast_init:
+                    self.episodic_bridge = TitansEpisodicBridge(
+                        memory_store=self.episodic_memory,
+                        config=TitansEpisodicConfig(
+                            surprise_threshold=0.5,
+                            turns_per_episode=3,
+                            max_episodes_per_session=100
+                        )
+                    )
+
+                    # Initialize Consolidator (for memory maintenance)
+                    self.episodic_consolidator = MemoryConsolidator(
+                        memory_store=self.episodic_memory,
+                        config=ConsolidationConfig(
+                            decay_rate=0.03,
+                            gc_age_days=90
+                        ),
+                        llm_func=self.brain.think if not fast_init else None
+                    )
+
+                # Get statistics
+                stats = self.episodic_memory.get_statistics()
+                bridge_status = "with bridge" if self.episodic_bridge else "query-only"
+                print(f"[LOADED] Episodic Memory - {stats['total_episodes']} episodes ({bridge_status})")
+            except Exception as e:
+                print(f"[WARNING] Episodic Memory initialization failed: {e}")
+                self.episodic_memory = None
+                self.episodic_bridge = None
+                self.episodic_timeline = None
+                self.episodic_consolidator = None
+        elif not EPISODIC_MEMORY_AVAILABLE:
+            print("[INFO] Episodic Memory not available (install qdrant-client: pip install qdrant-client)")
 
     def _proto_agi_llm(self, prompt: str) -> str:
         """LLM function for Proto-AGI - uses brain.think()"""
@@ -1768,6 +1850,24 @@ Guidelines:
                         logger.debug(f"[KG BRAIN] Queued for entity extraction (confidence: {confidence}%)")
                 except Exception as e:
                     logger.debug(f"[KG BRAIN] Entity extraction queue error: {e}")
+
+            # Store to Episodic Time-Travel Memory (for task executions)
+            if self.episodic_bridge is not None:
+                try:
+                    # Determine episode type based on action
+                    tool_name = self.state.last_action.get("tool", "") if self.state.last_action else ""
+                    tools_used = [tool_name] if tool_name else []
+
+                    # Record as task completion
+                    self.episodic_bridge.on_task_complete(
+                        task_description=self.state.goal,
+                        result=self.state.evaluation.get("progress", ""),
+                        success=self.state.evaluation.get("success", False),
+                        tools_used=tools_used
+                    )
+                    logger.debug(f"[EPISODIC] Recorded task episode")
+                except Exception as e:
+                    logger.debug(f"[EPISODIC] Recording error: {e}")
 
     def _execute_action(self, action_decision: dict) -> dict:
         """Execute an action using the appropriate tool with timeout protection."""
@@ -4250,6 +4350,231 @@ Voice: {soul.voice_style[:100]}..."""
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    # =========================================================================
+    #                    EPISODIC TIME-TRAVEL MEMORY METHODS
+    # =========================================================================
+
+    def get_episodic_memory_stats(self) -> dict:
+        """Get Episodic Memory statistics.
+
+        Returns:
+            dict with episodic memory stats, or empty dict if not available
+        """
+        if self.episodic_memory is None:
+            return {"available": False, "reason": "Episodic Memory not initialized"}
+
+        try:
+            store_stats = self.episodic_memory.get_statistics()
+            bridge_stats = self.episodic_bridge.get_statistics() if self.episodic_bridge else {}
+
+            return {
+                "available": True,
+                "total_episodes": store_stats.get("total_episodes", 0),
+                "vector_dimension": store_stats.get("vector_dimension", 0),
+                "episodes_formed": bridge_stats.get("episodes_formed", 0),
+                "session_id": bridge_stats.get("session_id", None),
+                "context_retrievals": bridge_stats.get("context_retrievals", 0)
+            }
+        except Exception as e:
+            return {"available": False, "error": str(e)}
+
+    def episodic_recall(self, query: str, limit: int = 5, time_filter: str = None) -> list:
+        """Recall episodic memories matching a query.
+
+        Args:
+            query: Search query text
+            limit: Maximum results to return
+            time_filter: Optional natural language time filter (e.g., "yesterday", "last week")
+
+        Returns:
+            List of matching episodes with metadata
+        """
+        if self.episodic_memory is None:
+            return []
+
+        try:
+            from aura_episodic_memory import EpisodeQuery, TemporalParser
+
+            # Parse time filter if provided
+            start_time = None
+            end_time = None
+            if time_filter:
+                parser = TemporalParser()
+                time_range = parser.parse(time_filter)
+                if time_range:
+                    start_time = time_range.start
+                    end_time = time_range.end
+
+            search_query = EpisodeQuery(
+                query_text=query,
+                start_time=start_time,
+                end_time=end_time,
+                limit=limit
+            )
+
+            results = self.episodic_memory.search(search_query)
+
+            return [
+                {
+                    "id": r.episode.id,
+                    "content": r.episode.content[:300],
+                    "type": r.episode.episode_type.value,
+                    "timestamp": r.episode.temporal_context.timestamp.isoformat(),
+                    "importance": r.episode.importance,
+                    "score": r.score,
+                    "entities": r.episode.entities_involved[:5]
+                }
+                for r in results
+            ]
+        except Exception as e:
+            logger.error(f"Episodic recall error: {e}")
+            return []
+
+    def episodic_time_travel(self, time_reference: str) -> dict:
+        """Time travel to a point in memory.
+
+        Args:
+            time_reference: Natural language time reference (e.g., "yesterday afternoon", "last week")
+
+        Returns:
+            dict with episodes and narrative from that time
+        """
+        if self.episodic_timeline is None:
+            return {"success": False, "error": "Episodic Memory not available"}
+
+        try:
+            episodes, narrative = self.episodic_timeline.time_travel(time_reference)
+
+            return {
+                "success": True,
+                "time_reference": time_reference,
+                "episode_count": len(episodes),
+                "narrative": narrative,
+                "episodes": [
+                    {
+                        "id": ep.id,
+                        "title": ep.title or ep.content[:50],
+                        "type": ep.episode_type.value,
+                        "timestamp": ep.temporal_context.timestamp.isoformat()
+                    }
+                    for ep in episodes[:10]
+                ]
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def episodic_record(self, content: str, episode_type: str = "conversation",
+                        importance: float = 0.5, entities: list = None,
+                        tools_used: list = None) -> dict:
+        """Manually record an episode to memory.
+
+        Args:
+            content: Episode content
+            episode_type: Type of episode (conversation, task_execution, learning, etc.)
+            importance: Importance score (0-1)
+            entities: List of entities involved
+            tools_used: List of tools used
+
+        Returns:
+            dict with result of recording
+        """
+        if self.episodic_memory is None:
+            return {"success": False, "error": "Episodic Memory not available"}
+
+        try:
+            from aura_episodic_memory import Episode, EpisodeType, TemporalContext
+
+            # Map string to EpisodeType
+            type_map = {
+                "conversation": EpisodeType.CONVERSATION,
+                "task_execution": EpisodeType.TASK_EXECUTION,
+                "learning": EpisodeType.LEARNING,
+                "error": EpisodeType.ERROR,
+                "milestone": EpisodeType.MILESTONE,
+                "insight": EpisodeType.INSIGHT,
+                "user_preference": EpisodeType.USER_PREFERENCE,
+                "system_event": EpisodeType.SYSTEM_EVENT
+            }
+            ep_type = type_map.get(episode_type, EpisodeType.CONVERSATION)
+
+            episode = Episode(
+                content=content,
+                episode_type=ep_type,
+                temporal_context=TemporalContext(timestamp=datetime.now()),
+                importance=importance,
+                entities_involved=entities or [],
+                tools_used=tools_used or []
+            )
+
+            episode_id = self.episodic_memory.store_episode(episode)
+
+            return {
+                "success": True,
+                "episode_id": episode_id,
+                "type": ep_type.value
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def episodic_get_context(self, query: str, include_timeline: bool = False) -> str:
+        """Get episodic context for a query (for LLM prompting).
+
+        Args:
+            query: Query to get context for
+            include_timeline: Include recent activity summary
+
+        Returns:
+            Formatted context string
+        """
+        if self.episodic_bridge is None:
+            return ""
+
+        try:
+            return self.episodic_bridge.get_context_for_query(query, include_timeline=include_timeline)
+        except Exception as e:
+            logger.error(f"Episodic context error: {e}")
+            return ""
+
+    def episodic_consolidate(self) -> dict:
+        """Run memory consolidation (decay, merge, garbage collect).
+
+        Returns:
+            dict with consolidation results
+        """
+        if self.episodic_consolidator is None:
+            return {"success": False, "error": "Episodic consolidator not available"}
+
+        try:
+            results = self.episodic_consolidator.run_full_consolidation()
+
+            return {
+                "success": True,
+                "operations": [
+                    {
+                        "operation": r.operation,
+                        "episodes_affected": r.episodes_affected,
+                        "duration_seconds": r.duration_seconds
+                    }
+                    for r in results
+                ]
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def episodic_get_health(self) -> dict:
+        """Get memory health report with recommendations.
+
+        Returns:
+            dict with health metrics and recommendations
+        """
+        if self.episodic_consolidator is None:
+            return {"status": "unavailable"}
+
+        try:
+            return self.episodic_consolidator.get_health_report()
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
     def _speak(self, text: str, emotion: Optional[str] = None):
         """Speak text using TTS with optional emotional adaptation."""
         try:
@@ -4369,6 +4694,28 @@ Voice: {soul.voice_style[:100]}..."""
                 results["freed_resources"].append("guardian_session")
         except Exception as e:
             results["errors"].append(f"Guardian reset: {e}")
+
+        # 9. Close Knowledge Graph Brain
+        try:
+            if hasattr(self, 'kg_brain') and self.kg_brain:
+                # Flush pending extractions first
+                if self.kg_bridge:
+                    self.kg_bridge.flush()
+                self.kg_brain.close()
+                results["freed_resources"].append("kg_brain")
+        except Exception as e:
+            results["errors"].append(f"KG Brain close: {e}")
+
+        # 10. Close Episodic Memory
+        try:
+            if hasattr(self, 'episodic_memory') and self.episodic_memory:
+                # Flush pending episodes first
+                if self.episodic_bridge:
+                    self.episodic_bridge.flush_pending()
+                self.episodic_memory.close()
+                results["freed_resources"].append("episodic_memory")
+        except Exception as e:
+            results["errors"].append(f"Episodic Memory close: {e}")
 
         results["success"] = len(results["errors"]) == 0
         return results

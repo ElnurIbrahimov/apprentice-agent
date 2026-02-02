@@ -29,6 +29,10 @@ schedule>=1.2.0
 kuzu>=0.4.0
 sentence-transformers>=2.2.0
 
+# Episodic Time-Travel Memory
+qdrant-client>=1.7.0
+dateparser>=1.2.0
+
 # Messaging (Telegram & WhatsApp)
 python-telegram-bot>=20.0
 websockets>=12.0

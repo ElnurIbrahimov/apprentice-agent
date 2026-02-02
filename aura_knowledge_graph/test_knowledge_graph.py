@@ -63,8 +63,13 @@ class TestKnowledgeGraph(unittest.TestCase):
 
     def setUp(self):
         """Create temporary database for testing."""
+        # Kuzu needs a non-existent path for database creation
         self.test_dir = tempfile.mkdtemp()
-        self.kg = AURAKnowledgeGraph(self.test_dir)
+        self.db_path = Path(self.test_dir) / "kg_db"
+        # Remove the directory if it exists (Kuzu will create it)
+        if self.db_path.exists():
+            shutil.rmtree(self.db_path)
+        self.kg = AURAKnowledgeGraph(str(self.db_path))
 
     def tearDown(self):
         """Clean up test database."""
@@ -302,7 +307,10 @@ class TestTitansBridge(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures."""
         self.test_dir = tempfile.mkdtemp()
-        self.kg = AURAKnowledgeGraph(self.test_dir)
+        self.db_path = Path(self.test_dir) / "kg_db"
+        if self.db_path.exists():
+            shutil.rmtree(self.db_path)
+        self.kg = AURAKnowledgeGraph(str(self.db_path))
 
         def mock_llm(prompt):
             return '''
@@ -375,7 +383,10 @@ class TestQueryEngine(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures."""
         self.test_dir = tempfile.mkdtemp()
-        self.kg = AURAKnowledgeGraph(self.test_dir)
+        self.db_path = Path(self.test_dir) / "kg_db"
+        if self.db_path.exists():
+            shutil.rmtree(self.db_path)
+        self.kg = AURAKnowledgeGraph(str(self.db_path))
         self.engine = KGQueryEngine(self.kg)
 
         # Populate test data
