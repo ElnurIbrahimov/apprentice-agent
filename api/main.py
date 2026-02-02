@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from api.routes import chat, status, features
+from api.routes import chat, status, features, multi_agent
 from api.services.agent_service import agent_service
 
 # Configure logging
@@ -70,6 +70,7 @@ app.add_middleware(
 app.include_router(chat.router)
 app.include_router(status.router)
 app.include_router(features.router)
+app.include_router(multi_agent.router)
 
 # Serve static files in production (built React app)
 static_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web", "dist")
