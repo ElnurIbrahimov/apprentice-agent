@@ -3,14 +3,18 @@ import { useChatStore } from '../store/chatStore';
 import type { WebSocketMessage } from '../types';
 
 const WS_URL = `ws://${window.location.hostname}:${window.location.port || '8000'}/api/chat/stream`;
-const RECONNECT_DELAY = 3000;
-const MAX_RECONNECT_ATTEMPTS = 5;
+const INITIAL_RECONNECT_DELAY = 1000;
+const MAX_RECONNECT_DELAY = 30000;
+const MAX_RECONNECT_ATTEMPTS = 10;
+const HEARTBEAT_INTERVAL = 30000; // 30 seconds
 
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttempts = useRef(0);
-  const reconnectTimeout = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const heartbeatInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const currentMessageId = useRef<string | null>(null);
+  const isManualDisconnect = useRef(false);
 
   const {
     addMessage,
@@ -22,8 +26,44 @@ export function useWebSocket() {
     setError,
   } = useChatStore();
 
+  // Calculate exponential backoff delay
+  const getReconnectDelay = useCallback(() => {
+    const delay = INITIAL_RECONNECT_DELAY * Math.pow(2, reconnectAttempts.current);
+    return Math.min(delay, MAX_RECONNECT_DELAY);
+  }, []);
+
+  // Start heartbeat to detect stale connections
+  const startHeartbeat = useCallback(() => {
+    if (heartbeatInterval.current) {
+      clearInterval(heartbeatInterval.current);
+    }
+    heartbeatInterval.current = setInterval(() => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        try {
+          wsRef.current.send(JSON.stringify({ type: 'ping' }));
+        } catch (e) {
+          console.warn('[WebSocket] Heartbeat failed, connection may be stale');
+        }
+      }
+    }, HEARTBEAT_INTERVAL);
+  }, []);
+
+  const stopHeartbeat = useCallback(() => {
+    if (heartbeatInterval.current) {
+      clearInterval(heartbeatInterval.current);
+      heartbeatInterval.current = null;
+    }
+  }, []);
+
   const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
+    // Prevent multiple simultaneous connections
+    if (wsRef.current?.readyState === WebSocket.OPEN ||
+        wsRef.current?.readyState === WebSocket.CONNECTING) {
+      return;
+    }
+
+    // Don't reconnect if manually disconnected
+    if (isManualDisconnect.current) {
       return;
     }
 
@@ -36,13 +76,16 @@ export function useWebSocket() {
       ws.onopen = () => {
         console.log('[WebSocket] Connected');
         setConnectionStatus('connected');
-        reconnectAttempts.current = 0;
+        reconnectAttempts.current = 0; // Reset on successful connection
         setError(null);
+        startHeartbeat();
       };
 
       ws.onmessage = (event) => {
         try {
           const data: WebSocketMessage = JSON.parse(event.data);
+          // Ignore pong responses
+          if (data.type === 'pong') return;
           handleMessage(data);
         } catch (e) {
           console.error('[WebSocket] Failed to parse message:', e);
@@ -52,21 +95,32 @@ export function useWebSocket() {
       ws.onerror = (error) => {
         console.error('[WebSocket] Error:', error);
         setConnectionStatus('error');
-        setError('Connection error');
       };
 
       ws.onclose = (event) => {
         console.log('[WebSocket] Closed:', event.code, event.reason);
         setConnectionStatus('disconnected');
         wsRef.current = null;
+        stopHeartbeat();
 
-        // Attempt to reconnect
+        // Don't reconnect if manually disconnected or clean close
+        if (isManualDisconnect.current) {
+          return;
+        }
+
+        // Attempt to reconnect with exponential backoff
         if (reconnectAttempts.current < MAX_RECONNECT_ATTEMPTS) {
+          const delay = getReconnectDelay();
           reconnectAttempts.current++;
-          console.log(`[WebSocket] Reconnecting in ${RECONNECT_DELAY}ms (attempt ${reconnectAttempts.current})`);
-          reconnectTimeout.current = setTimeout(connect, RECONNECT_DELAY);
+          console.log(`[WebSocket] Reconnecting in ${delay}ms (attempt ${reconnectAttempts.current}/${MAX_RECONNECT_ATTEMPTS})`);
+
+          // Clear any existing timeout
+          if (reconnectTimeout.current) {
+            clearTimeout(reconnectTimeout.current);
+          }
+          reconnectTimeout.current = setTimeout(connect, delay);
         } else {
-          setError('Failed to connect after multiple attempts');
+          setError('Connection lost. Click to reconnect.');
         }
       };
 
@@ -76,7 +130,7 @@ export function useWebSocket() {
       setConnectionStatus('error');
       setError('Failed to create WebSocket connection');
     }
-  }, [setConnectionStatus, setError]);
+  }, [setConnectionStatus, setError, startHeartbeat, stopHeartbeat, getReconnectDelay]);
 
   const handleMessage = useCallback((data: WebSocketMessage) => {
     switch (data.type) {
@@ -146,29 +200,48 @@ export function useWebSocket() {
   }, [addMessage, setIsLoading, setError]);
 
   const disconnect = useCallback(() => {
+    isManualDisconnect.current = true;
+    reconnectAttempts.current = 0; // Reset attempts on manual disconnect
+
     if (reconnectTimeout.current) {
       clearTimeout(reconnectTimeout.current);
       reconnectTimeout.current = null;
     }
+    stopHeartbeat();
+
     if (wsRef.current) {
-      wsRef.current.close();
+      wsRef.current.close(1000, 'User disconnected'); // Clean close
       wsRef.current = null;
     }
     setConnectionStatus('disconnected');
-  }, [setConnectionStatus]);
+  }, [setConnectionStatus, stopHeartbeat]);
+
+  const reconnect = useCallback(() => {
+    isManualDisconnect.current = false;
+    reconnectAttempts.current = 0;
+    connect();
+  }, [connect]);
 
   // Connect on mount
   useEffect(() => {
+    isManualDisconnect.current = false;
     connect();
 
     return () => {
-      disconnect();
+      isManualDisconnect.current = true;
+      stopHeartbeat();
+      if (reconnectTimeout.current) {
+        clearTimeout(reconnectTimeout.current);
+      }
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
     };
-  }, [connect, disconnect]);
+  }, [connect, stopHeartbeat]);
 
   return {
     sendMessage,
-    connect,
+    connect: reconnect,
     disconnect,
     isConnected: useChatStore((state) => state.connectionStatus === 'connected'),
     connectionStatus: useChatStore((state) => state.connectionStatus),

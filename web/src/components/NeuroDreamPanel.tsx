@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { NeuroDreamStatus } from '../types';
 import { ArrowPathIcon, MoonIcon, SunIcon } from '@heroicons/react/24/outline';
+import { formatPercent } from '../utils/format';
 
 const PHASE_ICONS: Record<string, string> = {
   light: '🌙',
@@ -163,7 +164,11 @@ export function NeuroDreamPanel() {
               <div key={i} className="text-xs bg-chat-assistant rounded p-2">
                 <div className="flex justify-between mb-1">
                   <span className="text-chat-text capitalize">{insight.type}</span>
-                  <span className="text-chat-text-secondary">{insight.confidence}%</span>
+                  <span className="text-chat-text-secondary">
+                    {typeof insight.confidence === 'number' && insight.confidence <= 1
+                      ? formatPercent(insight.confidence)
+                      : `${Math.round(insight.confidence || 0)}%`}
+                  </span>
                 </div>
                 <div className="text-chat-text-secondary">
                   {insight.content?.slice(0, 60)}...

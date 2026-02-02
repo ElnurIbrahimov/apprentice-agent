@@ -136,6 +136,11 @@ async def websocket_chat(websocket: WebSocket):
                 })
                 continue
 
+            # Handle ping/pong for keepalive
+            if msg.get("type") == "ping":
+                await websocket.send_json({"type": "pong"})
+                continue
+
             if msg.get("type") != "chat" or not msg.get("message"):
                 await websocket.send_json({
                     "type": "error",
