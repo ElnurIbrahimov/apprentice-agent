@@ -524,3 +524,134 @@ async def get_metacognition_stats():
         return stats
     except Exception as e:
         return {"error": str(e)}
+
+
+# ============================================================================
+# LOCAL RAG (Retrieval Augmented Generation)
+# ============================================================================
+
+class RAGIndexRequest(BaseModel):
+    path: str
+    recursive: bool = True
+
+
+class RAGSearchRequest(BaseModel):
+    query: str
+    top_k: int = 5
+
+
+class RAGStatsResponse(BaseModel):
+    total_chunks: int = 0
+    total_files: int = 0
+    embeddings_available: bool = False
+    embedding_model: str = "unavailable"
+    chunks_by_type: Dict[str, int] = {}
+
+
+@router.get("/rag/stats", response_model=RAGStatsResponse)
+async def get_rag_stats():
+    """Get RAG index statistics."""
+    try:
+        agent = agent_service.agent
+        if "local_rag" not in agent.tools:
+            return RAGStatsResponse()
+
+        rag_tool = agent.tools["local_rag"]
+        stats = rag_tool.rag.get_stats()
+        return stats
+    except Exception as e:
+        logger.error(f"[RAG] Stats error: {e}")
+        return RAGStatsResponse()
+
+
+@router.get("/rag/files")
+async def get_rag_files():
+    """List indexed files."""
+    try:
+        agent = agent_service.agent
+        if "local_rag" not in agent.tools:
+            return {"files": [], "error": "RAG not available"}
+
+        rag_tool = agent.tools["local_rag"]
+        files = rag_tool.rag.list_indexed_files()
+        return {"files": files, "count": len(files)}
+    except Exception as e:
+        return {"files": [], "error": str(e)}
+
+
+@router.post("/rag/index")
+async def index_documents(request: RAGIndexRequest):
+    """Index a file or directory."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None, lambda: _index_documents_sync(request.path, request.recursive)
+        )
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _index_documents_sync(path: str, recursive: bool) -> dict:
+    from pathlib import Path
+    agent = agent_service.agent
+    if "local_rag" not in agent.tools:
+        return {"success": False, "error": "RAG not available"}
+
+    rag_tool = agent.tools["local_rag"]
+    path_obj = Path(path)
+
+    if path_obj.is_dir():
+        return rag_tool.rag.index_directory(path, recursive=recursive)
+    else:
+        return rag_tool.rag.index_file(path)
+
+
+@router.post("/rag/search")
+async def search_documents(request: RAGSearchRequest):
+    """Search indexed documents."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None, lambda: _search_documents_sync(request.query, request.top_k)
+        )
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _search_documents_sync(query: str, top_k: int) -> dict:
+    agent = agent_service.agent
+    if "local_rag" not in agent.tools:
+        return {"success": False, "error": "RAG not available"}
+
+    rag_tool = agent.tools["local_rag"]
+    results = rag_tool.rag.search(query, top_k=top_k)
+
+    return {
+        "success": True,
+        "query": query,
+        "results": [
+            {
+                "content": r.chunk.content[:500] + "..." if len(r.chunk.content) > 500 else r.chunk.content,
+                "source": r.chunk.source,
+                "score": f"{r.score:.0%}"
+            }
+            for r in results
+        ]
+    }
+
+
+@router.post("/rag/clear")
+async def clear_rag_index():
+    """Clear the RAG index."""
+    try:
+        agent = agent_service.agent
+        if "local_rag" not in agent.tools:
+            return {"success": False, "error": "RAG not available"}
+
+        rag_tool = agent.tools["local_rag"]
+        result = rag_tool.rag.clear_index()
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}

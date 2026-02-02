@@ -388,6 +388,14 @@ class ApprenticeAgent:
             except Exception as e:
                 logger.warning(f"mirrormind not loaded: {e}")
 
+            # local_rag - Local document RAG system
+            try:
+                from .tools.local_rag import LocalRAGTool
+                self.tools['local_rag'] = LocalRAGTool()
+                logger.info("[LOADED] local_rag - Index and search local documents")
+            except Exception as e:
+                logger.warning(f"local_rag not loaded: {e}")
+
             # Auto-load ALL synthesized tools (with security validation)
             try:
                 import os
@@ -4219,6 +4227,17 @@ Try these commands:
             except Exception as e:
                 logger.debug(f"[KG BRAIN] Context retrieval error in chat: {e}")
 
+        # Get RAG context from indexed documents
+        rag_context = ""
+        if not is_simple and 'local_rag' in self.tools:
+            try:
+                rag_tool = self.tools['local_rag']
+                rag_context = rag_tool.rag.get_context(message, top_k=3, max_tokens=1500)
+                if rag_context:
+                    logger.debug(f"[RAG] Found relevant context for: {message[:50]}...")
+            except Exception as e:
+                logger.debug(f"[RAG] Context retrieval error: {e}")
+
         # Apply emotional tone modifier - prefer AURA's tone if available
         tone_modifier = None
         if aura_context and aura_context.get("tone"):
@@ -4231,10 +4250,15 @@ Try these commands:
         if aura_context and aura_context.get("thinking_prefix"):
             thinking_prefix = aura_context["thinking_prefix"] + "\n\n"
 
-        # Inject KG context into system prompt if available
+        # Inject KG context and RAG context into system prompt if available
         system_prompt_addon = None
+        context_parts = []
         if kg_context:
-            system_prompt_addon = f"\n{kg_context}\nUse this knowledge when relevant to the conversation."
+            context_parts.append(kg_context)
+        if rag_context:
+            context_parts.append(rag_context)
+        if context_parts:
+            system_prompt_addon = "\n\n".join(context_parts) + "\n\nUse this knowledge when relevant to the conversation."
 
         response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
 
