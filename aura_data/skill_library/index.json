@@ -1,0 +1,99 @@
+{
+  "skill_2b599ae2c15a": {
+    "name": "Python Code Reviewer",
+    "description": "Reviews Python code for best practices, style, and potential bugs",
+    "category": "coding",
+    "path": "categories\\coding\\python-code-reviewer.skill.md",
+    "trigger_patterns": [
+      "review this python code",
+      "check my python",
+      "code review"
+    ],
+    "embedding": [],
+    "success_rate": 1.0,
+    "total_uses": 1,
+    "tags": [
+      "python",
+      "review",
+      "quality"
+    ],
+    "updated_at": "2026-02-02T15:02:58.566767"
+  },
+  "skill_8596adbc044d": {
+    "name": "Python Code Reviewer",
+    "description": "Reviews Python code for best practices, style, and potential bugs",
+    "category": "coding",
+    "path": "categories\\coding\\python-code-reviewer.skill.md",
+    "trigger_patterns": [
+      "review this python code",
+      "check my python",
+      "code review"
+    ],
+    "embedding": [],
+    "success_rate": 1.0,
+    "total_uses": 1,
+    "tags": [
+      "python",
+      "review",
+      "quality"
+    ],
+    "updated_at": "2026-02-02T15:07:39.739454"
+  },
+  "skill_830a5ecd8872": {
+    "name": "Code Explanation",
+    "description": "Explains code in simple terms, breaking down complex logic",
+    "category": "coding",
+    "path": "categories\\coding\\code-explanation.skill.md",
+    "trigger_patterns": [
+      "explain this code",
+      "what does this do",
+      "how does this work"
+    ],
+    "embedding": [],
+    "success_rate": 0.0,
+    "total_uses": 0,
+    "tags": [
+      "explanation",
+      "teaching"
+    ],
+    "updated_at": "2026-02-02T15:08:32.826202"
+  },
+  "skill_411d174f9658": {
+    "name": "Bug Finder",
+    "description": "Identifies potential bugs and issues in code",
+    "category": "coding",
+    "path": "categories\\coding\\bug-finder.skill.md",
+    "trigger_patterns": [
+      "find bugs",
+      "debug this",
+      "what's wrong with this code"
+    ],
+    "embedding": [],
+    "success_rate": 0.0,
+    "total_uses": 0,
+    "tags": [
+      "debugging",
+      "quality"
+    ],
+    "updated_at": "2026-02-02T15:08:32.827065"
+  },
+  "skill_07fbf49d3edc": {
+    "name": "Summary Writer",
+    "description": "Creates concise summaries of longer texts",
+    "category": "writing",
+    "path": "categories\\writing\\summary-writer.skill.md",
+    "trigger_patterns": [
+      "summarize this",
+      "give me a summary",
+      "tldr"
+    ],
+    "embedding": [],
+    "success_rate": 0.0,
+    "total_uses": 0,
+    "tags": [
+      "summary",
+      "concise"
+    ],
+    "updated_at": "2026-02-02T15:08:32.828261"
+  }
+}
