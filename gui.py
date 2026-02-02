@@ -356,6 +356,17 @@ class AuraGUI:
         """Get agent instance (already initialized)."""
         return self.agent
 
+    def clear_chat_and_history(self) -> list:
+        """Clear chat UI and brain's conversation history to prevent slowdown."""
+        try:
+            agent = self._get_agent()
+            if hasattr(agent, 'brain') and agent.brain:
+                agent.brain.full_reset()
+                print("[GUI] Chat and brain history cleared")
+        except Exception as e:
+            print(f"[GUI] Error clearing history: {e}")
+        return []  # Return empty list to clear chatbot UI
+
     def _check_fluxmind(self) -> dict:
         """Check FluxMind status - load lazily if needed."""
         try:
@@ -1728,7 +1739,7 @@ def create_app():
 
         send.click(on_send, [msg, chatbot, voice_toggle], chatbot).then(lambda: "", outputs=msg)
         msg.submit(on_send, [msg, chatbot, voice_toggle], chatbot).then(lambda: "", outputs=msg)
-        clear.click(lambda: [], outputs=chatbot)
+        clear.click(gui.clear_chat_and_history, outputs=chatbot)  # Also clears brain history
         refresh_btn.click(gui.get_status_html, outputs=fluxmind_html)
         stats_btn.click(gui.get_stats, outputs=stats_md)
         max_iter.change(lambda v: setattr(gui, 'max_iterations', int(v)), inputs=max_iter)

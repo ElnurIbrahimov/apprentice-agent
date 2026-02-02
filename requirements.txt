@@ -1,5 +1,9 @@
 accelerate>=0.25.0
 arxiv>=2.0.0
+
+# Input Validation & Security
+pydantic>=2.0.0
+tenacity>=8.2.0
 comtypes>=1.2.0
 diffusers>=0.25.0
 ddgs>=8.0.0

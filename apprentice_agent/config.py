@@ -1,7 +1,11 @@
-"""Configuration management for the agent."""
+"""Configuration management for the agent.
+
+SECURITY: Thread-safe configuration with proper locking.
+"""
 
 import os
 import logging
+import threading
 from pathlib import Path
 from typing import List, Optional, Dict
 from dotenv import load_dotenv
@@ -9,6 +13,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+# Thread lock for configuration changes
+_config_lock = threading.RLock()
 
 
 # ============================================================================
@@ -84,25 +91,32 @@ class Config:
     CHROMADB_PATH: Path = Path(os.getenv("CHROMADB_PATH", "./data/chromadb"))
 
     # ============================================================
-    # MODEL CONFIGURATION (Ollama - 100% FREE)
+    # MODEL CONFIGURATION - HYBRID LOCAL/CLOUD
     # ============================================================
-    # Uses local models by default with cloud fallback
+    # Fast local models for quick responses, cloud for complex tasks
+    # RTX 4060 (8GB VRAM) optimized
 
     # Model hierarchy (first available is used)
-    MODEL_FAST_CHAIN = ["qwen2:1.5b", "phi3:mini", "llama3.2:1b"]
-    MODEL_REASON_CHAIN = ["gpt-oss:120b-cloud", "llama3:8b", "mistral:7b", "qwen2.5:7b"]
-    MODEL_CODE_CHAIN = ["qwen3-coder:480b-cloud", "qwen2.5-coder:7b", "deepseek-coder:6.7b", "codellama:7b"]
-    MODEL_VISION_CHAIN = ["qwen3-vl:235b-cloud", "llava", "llava:7b"]
+    # LOCAL FIRST for speed, CLOUD as quality fallback
+    MODEL_FAST_CHAIN = ["mistral:7b", "llama3:8b", "qwen2:1.5b"]
+    MODEL_REASON_CHAIN = ["llama3:8b", "gpt-oss:120b-cloud", "mistral:7b"]
+    MODEL_CODE_CHAIN = ["qwen2.5-coder:7b", "qwen3-coder:480b-cloud", "deepseek-coder:6.7b"]
+    MODEL_VISION_CHAIN = ["llava", "qwen3-vl:235b-cloud", "llava:7b"]
 
-    # Primary models (with auto-fallback on startup)
-    MODEL_FAST: str = os.getenv("MODEL_FAST", "qwen2:1.5b")
-    MODEL_REASON: str = os.getenv("MODEL_REASON", "llama3:8b")  # Safe local default
-    MODEL_CODE: str = os.getenv("MODEL_CODE", "qwen2.5-coder:7b")  # Safe local default
-    MODEL_VISION: str = os.getenv("MODEL_VISION", "llava")  # Safe local default
+    # Primary models - LOCAL for fast response
+    MODEL_FAST: str = os.getenv("MODEL_FAST", "mistral:7b")
+    MODEL_REASON: str = os.getenv("MODEL_REASON", "llama3:8b")
+    MODEL_CODE: str = os.getenv("MODEL_CODE", "qwen2.5-coder:7b")
+    MODEL_VISION: str = os.getenv("MODEL_VISION", "llava")
 
     MODEL_NAME: str = MODEL_REASON  # Default model (backward compat)
 
-    # Explicit fallbacks
+    # Cloud models for complex tasks (used by _select_model_for_complexity)
+    MODEL_REASON_CLOUD: str = "gpt-oss:120b-cloud"
+    MODEL_CODE_CLOUD: str = "qwen3-coder:480b-cloud"
+    MODEL_VISION_CLOUD: str = "qwen3-vl:235b-cloud"
+
+    # Local fallbacks
     MODEL_REASON_LOCAL: str = "llama3:8b"
     MODEL_CODE_LOCAL: str = "qwen2.5-coder:7b"
     MODEL_VISION_LOCAL: str = "llava"
@@ -114,33 +128,99 @@ class Config:
 
         Call this once at startup to ensure models are available.
         Returns dict of role -> selected model.
+
+        SECURITY: Thread-safe with locking.
         """
-        results = {}
+        with _config_lock:
+            results = {}
 
-        # Validate each model type
-        roles = [
-            ("fast", cls.MODEL_FAST, cls.MODEL_FAST_CHAIN),
-            ("reason", cls.MODEL_REASON, cls.MODEL_REASON_CHAIN),
-            ("code", cls.MODEL_CODE, cls.MODEL_CODE_CHAIN),
-            ("vision", cls.MODEL_VISION, cls.MODEL_VISION_CHAIN),
-        ]
+            # Validate each model type
+            roles = [
+                ("fast", cls.MODEL_FAST, cls.MODEL_FAST_CHAIN),
+                ("reason", cls.MODEL_REASON, cls.MODEL_REASON_CHAIN),
+                ("code", cls.MODEL_CODE, cls.MODEL_CODE_CHAIN),
+                ("vision", cls.MODEL_VISION, cls.MODEL_VISION_CHAIN),
+            ]
 
-        for role, preferred, fallbacks in roles:
-            selected = get_best_available_model(preferred, fallbacks, role)
-            results[role] = selected
+            for role, preferred, fallbacks in roles:
+                selected = get_best_available_model(preferred, fallbacks, role)
+                results[role] = selected
 
-            # Update class attribute with validated model
-            if role == "fast":
-                cls.MODEL_FAST = selected
-            elif role == "reason":
-                cls.MODEL_REASON = selected
-                cls.MODEL_NAME = selected
-            elif role == "code":
-                cls.MODEL_CODE = selected
-            elif role == "vision":
-                cls.MODEL_VISION = selected
+                # Update class attribute with validated model
+                if role == "fast":
+                    cls.MODEL_FAST = selected
+                elif role == "reason":
+                    cls.MODEL_REASON = selected
+                    cls.MODEL_NAME = selected
+                elif role == "code":
+                    cls.MODEL_CODE = selected
+                elif role == "vision":
+                    cls.MODEL_VISION = selected
 
-        return results
+            return results
+
+    @classmethod
+    def get_model(cls, role: str) -> str:
+        """
+        Thread-safe getter for model by role.
+
+        Args:
+            role: One of 'fast', 'reason', 'code', 'vision'
+
+        Returns:
+            Model name string
+        """
+        with _config_lock:
+            role_map = {
+                'fast': cls.MODEL_FAST,
+                'reason': cls.MODEL_REASON,
+                'code': cls.MODEL_CODE,
+                'vision': cls.MODEL_VISION,
+                'default': cls.MODEL_NAME,
+            }
+            return role_map.get(role, cls.MODEL_NAME)
+
+    @classmethod
+    def set_model(cls, role: str, model: str) -> bool:
+        """
+        Thread-safe setter for model by role.
+
+        Args:
+            role: One of 'fast', 'reason', 'code', 'vision'
+            model: Model name string
+
+        Returns:
+            True if set successfully
+        """
+        with _config_lock:
+            if role == 'fast':
+                cls.MODEL_FAST = model
+            elif role == 'reason':
+                cls.MODEL_REASON = model
+                cls.MODEL_NAME = model
+            elif role == 'code':
+                cls.MODEL_CODE = model
+            elif role == 'vision':
+                cls.MODEL_VISION = model
+            else:
+                logger.warning(f"[CONFIG] Unknown role: {role}")
+                return False
+            logger.info(f"[CONFIG] Set {role} model to: {model}")
+            return True
+
+    @classmethod
+    def get_all_models(cls) -> Dict[str, str]:
+        """Thread-safe getter for all model configurations."""
+        with _config_lock:
+            return {
+                'fast': cls.MODEL_FAST,
+                'reason': cls.MODEL_REASON,
+                'code': cls.MODEL_CODE,
+                'vision': cls.MODEL_VISION,
+                'reason_cloud': cls.MODEL_REASON_CLOUD,
+                'code_cloud': cls.MODEL_CODE_CLOUD,
+                'vision_cloud': cls.MODEL_VISION_CLOUD,
+            }
 
     MEMORY_COLLECTION_NAME: str = "agent_memory"
     MAX_MEMORY_RESULTS: int = 5

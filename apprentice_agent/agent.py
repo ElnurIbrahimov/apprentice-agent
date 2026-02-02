@@ -298,6 +298,14 @@ class ApprenticeAgent:
             fast_init: If True, skip slow initialization (warmup, heavy tools).
                       Use for GUI where you want fast startup.
         """
+        # Validate and select best available models before creating brain
+        try:
+            from .config import Config
+            validated = Config.validate_models_on_startup()
+            logger.info(f"[MODELS] Validated: {validated}")
+        except Exception as e:
+            logger.warning(f"[MODELS] Validation failed: {e}")
+
         # Skip Ollama warmup for fast init
         self.brain = OllamaBrain(warmup=not fast_init)
         self.memory = MemorySystem()
@@ -1133,7 +1141,17 @@ class ApprenticeAgent:
             'what are your abilities', 'can you help', 'how can you help',
             'what should i call you', 'who made you', 'who created you',
             'are you chatgpt', 'are you gpt', 'are you claude', 'are you llama',
-            'what model are you', 'what llm are you'
+            'what model are you', 'what llm are you',
+            # Comparison questions about the agent
+            'compare yourself', 'how do you compare', 'are you better than',
+            'are you worse than', 'vs chatgpt', 'vs gpt', 'vs claude', 'vs gemini',
+            'compared to gpt', 'compared to chatgpt', 'compared to claude',
+            'difference between you', 'how are you different',
+            # Common typos for compare
+            'cmpare yourself', 'compre yourself', 'compar yourself',
+            # Conversational questions about AURA
+            'how have you been', 'how are you doing', 'how you doing',
+            'aura how', 'hey aura', 'hi aura', 'hello aura'
         ]
         for pattern in agent_patterns:
             if pattern in goal_lower:
@@ -3856,6 +3874,76 @@ Output ONLY the JSON object, no other text."""
 
         return result
 
+    def _handle_direct_search(self, message: str) -> Optional[str]:
+        """Handle explicit search requests directly, bypassing agent loop.
+
+        This prevents the LLM's planning phase from hallucinating different queries.
+        User says "search for AI news" -> searches for "AI news" exactly.
+
+        Args:
+            message: The user's message
+
+        Returns:
+            Formatted search results if search request, None otherwise
+        """
+        import re
+        message_lower = message.lower().strip()
+
+        # Patterns for explicit search requests
+        search_patterns = [
+            r'^search\s+(?:online\s+)?(?:the\s+web\s+)?(?:for\s+)?["\']?(.+?)["\']?$',
+            r'^(?:web\s+)?search[:\s]+["\']?(.+?)["\']?$',
+            r'^look\s+up\s+["\']?(.+?)["\']?$',
+            r'^google\s+["\']?(.+?)["\']?$',
+            r'^find\s+(?:online|on the web)\s+["\']?(.+?)["\']?$',
+            r'^search\s+for\s+["\']?(.+?)["\']?[.,!?]?$',
+        ]
+
+        # Extract the search query
+        query = None
+        for pattern in search_patterns:
+            match = re.match(pattern, message_lower, re.IGNORECASE)
+            if match:
+                query = match.group(1).strip()
+                # Remove trailing punctuation
+                query = re.sub(r'[.,!?]+$', '', query).strip()
+                break
+
+        if not query:
+            return None  # Not an explicit search request
+
+        # Check if web_search tool is available
+        if 'web_search' not in self.tools:
+            return "Web search tool not available."
+
+        print(f"[DIRECT SEARCH] User query: '{query}'")
+
+        try:
+            # Call web search directly with the exact user query
+            tool = self.tools['web_search']
+            result = tool.search(query, num_results=5)
+
+            if not result.get("success"):
+                return f"Search failed: {result.get('error', 'Unknown error')}"
+
+            results = result.get("results", [])
+            if not results:
+                return f"No results found for '{query}'."
+
+            # Format results nicely
+            formatted = f"Here's what I found for '{query}':\n\n"
+            for i, r in enumerate(results[:5], 1):
+                title = r.get("title", "No title")
+                snippet = r.get("snippet", "No description")
+                url = r.get("url", "")
+                formatted += f"{i}. **{title}**\n   {snippet}\n   {url}\n\n"
+
+            return formatted.strip()
+
+        except Exception as e:
+            print(f"[DIRECT SEARCH] Error: {e}")
+            return f"Search error: {e}"
+
     def _handle_fluxmind_command(self, message: str) -> Optional[str]:
         """Handle FluxMind commands directly, bypassing the LLM.
 
@@ -3988,7 +4076,16 @@ Try these commands:
                 return aura_result
 
         # Check for decision questions - use CognitiveTheater (Tool #22)
-        if self.theater_enabled and is_decision_question(message):
+        # BUT exclude self-referential questions (questions about AURA itself)
+        message_lower = message.lower()
+        is_self_referential = any(pattern in message_lower for pattern in [
+            'compare yourself', 'compare you', 'how do you compare',
+            'are you better', 'are you worse', 'about yourself', 'about you',
+            'tell me about you', 'describe yourself', 'what are you',
+            # Common typos
+            'cmpare yourself', 'compre yourself', 'compar yourself'
+        ])
+        if self.theater_enabled and is_decision_question(message) and not is_self_referential:
             try:
                 response = self.theater.quick_debate(message)
                 if speak:
@@ -4006,6 +4103,14 @@ Try these commands:
         #     if speak:
         #         self._speak(emotional_response, emotion=emotion_reading.emotion if emotion_reading else None)
         #     return emotional_response
+
+        # ===== DIRECT SEARCH HANDLER =====
+        # Bypass agent loop for explicit search requests to prevent query hallucination
+        search_response = self._handle_direct_search(message)
+        if search_response:
+            if speak:
+                self._speak(search_response, emotion=emotion_reading.emotion if emotion_reading else None)
+            return search_response
 
         # Use fast model for simple queries (greetings, etc.)
         is_simple = self._is_simple_query(message)

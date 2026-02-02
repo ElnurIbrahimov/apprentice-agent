@@ -3,6 +3,7 @@
 import re
 import logging
 import concurrent.futures
+import atexit
 from enum import Enum
 from typing import Optional, Callable, Any
 import ollama
@@ -16,9 +17,18 @@ logger = logging.getLogger(__name__)
 LLM_TIMEOUT = 60  # 60 seconds for LLM calls
 WARMUP_TIMEOUT = 10  # 10 seconds for warmup
 
+# Shared thread pool to prevent thread leaks (max 3 concurrent LLM calls)
+_SHARED_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="llm_worker")
+
+def _cleanup_executor():
+    """Cleanup shared executor on exit."""
+    _SHARED_EXECUTOR.shutdown(wait=False, cancel_futures=True)
+
+atexit.register(_cleanup_executor)
+
 
 def call_with_timeout(func: Callable, timeout: int = LLM_TIMEOUT, default: Any = None) -> Any:
-    """Execute a function with timeout protection.
+    """Execute a function with timeout protection using shared thread pool.
 
     Args:
         func: Function to execute (should be a lambda or callable with no args)
@@ -28,16 +38,40 @@ def call_with_timeout(func: Callable, timeout: int = LLM_TIMEOUT, default: Any =
     Returns:
         Function result or default on timeout
     """
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(func)
+    try:
+        future = _SHARED_EXECUTOR.submit(func)
         try:
             return future.result(timeout=timeout)
         except concurrent.futures.TimeoutError:
             logger.warning(f"LLM call timed out after {timeout}s")
+            future.cancel()  # Try to cancel the pending task
+            return default
+        except concurrent.futures.CancelledError:
+            logger.warning("LLM call was cancelled")
+            return default
+        except (ConnectionError, OSError) as e:
+            logger.error(f"LLM connection error: {e}")
+            return default
+        except ValueError as e:
+            logger.error(f"LLM value error (bad response?): {e}")
             return default
         except Exception as e:
-            logger.error(f"LLM call failed: {e}")
+            # Log unexpected errors with full context for debugging
+            logger.exception(f"Unexpected LLM error: {type(e).__name__}: {e}")
             return default
+    except RuntimeError as e:
+        # Executor might be shut down, create a one-off
+        logger.warning(f"Shared executor unavailable ({e}), using fallback")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(func)
+            try:
+                return future.result(timeout=timeout)
+            except concurrent.futures.TimeoutError:
+                logger.warning("Fallback LLM call timed out")
+                return default
+            except (ConnectionError, OSError, ValueError) as e:
+                logger.error(f"Fallback LLM error: {e}")
+                return default
 
 
 class TaskType(Enum):
@@ -54,11 +88,15 @@ class OllamaBrain:
     # Limit conversation history to prevent unbounded memory growth
     MAX_HISTORY_LENGTH = 20  # Keep last 20 messages (10 exchanges)
 
+    # Auto-reset context after this many queries to prevent slowdown
+    AUTO_RESET_INTERVAL = 15  # Reset every 15 queries
+
     def __init__(self, warmup: bool = True):
         self.client = ollama.Client(host=Config.OLLAMA_HOST)
         self.model = Config.MODEL_NAME
         self.conversation_history: list[dict] = []
         self._last_model_used: str = self.model  # Track for metacognition
+        self._query_count: int = 0  # Track queries for auto-reset
 
         if warmup:
             self._warmup_models()
@@ -79,6 +117,46 @@ class OllamaBrain:
         except Exception:
             pass  # Silently fail if warmup doesn't work
 
+    def clear_history(self):
+        """Clear conversation history to free memory."""
+        self.conversation_history.clear()
+        self._query_count = 0
+        logger.info("[BRAIN] Conversation history cleared")
+
+    def reset_context(self, model: Optional[str] = None):
+        """Reset Ollama's context for a model to prevent slowdown.
+
+        Args:
+            model: Model to reset, or None for current model
+        """
+        target_model = model or self._last_model_used
+        try:
+            # Unload and reload the model to clear its context
+            self.client.generate(
+                model=target_model,
+                prompt="",
+                keep_alive="0"  # Unload immediately
+            )
+            logger.info(f"[BRAIN] Reset context for {target_model}")
+        except Exception as e:
+            logger.debug(f"[BRAIN] Context reset failed (ok if model not loaded): {e}")
+
+    def full_reset(self):
+        """Full reset: clear history and reset Ollama context."""
+        self.clear_history()
+        self.reset_context()
+        logger.info("[BRAIN] Full reset completed")
+
+    def _check_auto_reset(self):
+        """Check if auto-reset is needed and perform it."""
+        self._query_count += 1
+        if self._query_count >= self.AUTO_RESET_INTERVAL:
+            logger.info(f"[BRAIN] Auto-reset triggered after {self._query_count} queries")
+            # Keep last 4 messages (2 exchanges) for continuity
+            if len(self.conversation_history) > 4:
+                self.conversation_history = self.conversation_history[-4:]
+            self._query_count = 0
+
     def think(
         self,
         prompt: str,
@@ -96,6 +174,9 @@ class OllamaBrain:
             task_type: Type of task for model routing (auto-detected if None)
             tone_modifier: Optional emotional tone modifier from EvoEmo
         """
+        # Check if auto-reset is needed to prevent slowdown
+        self._check_auto_reset()
+
         # Select model based on task type
         model = self._select_model(prompt, task_type)
         self._last_model_used = model
@@ -142,14 +223,43 @@ class OllamaBrain:
 
         return assistant_message
 
-    def _select_model(self, prompt: str, task_type: Optional[TaskType] = None) -> str:
-        """Select the appropriate model based on task type.
+    def _is_complex_query(self, prompt: str) -> bool:
+        """Detect if a query is complex and needs cloud model.
 
-        Model routing:
-        - SIMPLE (qwen2:1.5b): Greetings, short answers, basic queries
-        - REASONING (llama3:8b): Planning, evaluation, complex decisions
-        - CODE (llama3:8b): Code generation, debugging, scripts
-        - VISION (llava): Image analysis
+        Complex queries include:
+        - Research/analysis requests
+        - Multi-step reasoning
+        - Comparisons requiring deep knowledge
+        - Long-form content generation
+        """
+        prompt_lower = prompt.lower()
+        words = prompt.split()
+
+        # Long prompts are likely complex
+        if len(words) > 50:
+            return True
+
+        # Complex task indicators
+        complex_patterns = [
+            'analyze', 'research', 'compare', 'explain in detail',
+            'write an essay', 'write a report', 'comprehensive',
+            'thorough', 'in-depth', 'deep dive', 'investigate',
+            'pros and cons', 'advantages and disadvantages',
+            'step by step', 'detailed explanation', 'summarize',
+            'review', 'evaluate', 'assess', 'critique'
+        ]
+
+        if any(pattern in prompt_lower for pattern in complex_patterns):
+            return True
+
+        return False
+
+    def _select_model(self, prompt: str, task_type: Optional[TaskType] = None) -> str:
+        """Select the appropriate model based on task type and complexity.
+
+        HYBRID ROUTING:
+        - Simple queries -> Local models (fast: mistral:7b, llama3:8b)
+        - Complex queries -> Cloud models (gpt-oss:120b-cloud, etc.)
 
         Args:
             prompt: The prompt to analyze
@@ -158,23 +268,26 @@ class OllamaBrain:
         Returns:
             Model name to use
         """
+        # Check if this is a complex query that needs cloud model
+        use_cloud = self._is_complex_query(prompt)
+
         # If task type is explicitly provided, use it
         if task_type:
             if task_type == TaskType.SIMPLE:
                 return Config.MODEL_FAST
             elif task_type == TaskType.VISION:
-                return Config.MODEL_VISION
+                return getattr(Config, 'MODEL_VISION_CLOUD', Config.MODEL_VISION) if use_cloud else Config.MODEL_VISION
             elif task_type == TaskType.CODE:
-                return Config.MODEL_CODE
+                return getattr(Config, 'MODEL_CODE_CLOUD', Config.MODEL_CODE) if use_cloud else Config.MODEL_CODE
             else:  # REASONING
-                return Config.MODEL_REASON
+                return getattr(Config, 'MODEL_REASON_CLOUD', Config.MODEL_REASON) if use_cloud else Config.MODEL_REASON
 
         # Auto-detect task type from prompt
         prompt_lower = prompt.lower()
 
         # Vision tasks
         if any(kw in prompt_lower for kw in ['image', 'picture', 'screenshot', 'photo', 'analyze image']):
-            return Config.MODEL_VISION
+            return getattr(Config, 'MODEL_VISION_CLOUD', Config.MODEL_VISION) if use_cloud else Config.MODEL_VISION
 
         # Identity questions - route to reasoning model (follows system prompts better)
         identity_patterns = [
@@ -183,7 +296,7 @@ class OllamaBrain:
             'what are you', 'are you an ai', 'are you a bot', 'what model are you'
         ]
         if any(pattern in prompt_lower for pattern in identity_patterns):
-            return Config.MODEL_REASON
+            return getattr(Config, 'MODEL_REASON_CLOUD', Config.MODEL_REASON) if use_cloud else Config.MODEL_REASON
 
         # Simple tasks - greetings, basic questions (excluding identity questions)
         simple_patterns = [
@@ -215,9 +328,11 @@ class OllamaBrain:
             'error', 'exception', 'traceback', 'bug', 'syntax'
         ]
         if any(pattern in prompt_lower for pattern in code_patterns):
-            return Config.MODEL_CODE
+            return getattr(Config, 'MODEL_CODE_CLOUD', Config.MODEL_CODE) if use_cloud else Config.MODEL_CODE
 
-        # Default to reasoning model for complex tasks
+        # Default to reasoning model
+        if use_cloud:
+            return getattr(Config, 'MODEL_REASON_CLOUD', Config.MODEL_REASON)
         return Config.MODEL_REASON
 
     def get_last_model_used(self) -> str:

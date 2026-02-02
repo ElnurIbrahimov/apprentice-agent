@@ -58,9 +58,28 @@ class FastPathHandler:
 
         input_lower = user_input.lower().strip()
 
-        # 1. AURA commands (explicit /commands or "aura X")
-        if input_lower.startswith("/") or input_lower.startswith("aura "):
-            return self._handle_command(input_lower)
+        # Known command words (only these trigger command handling)
+        known_commands = {
+            "status", "state", "mood", "feeling", "how are you",
+            "memory", "memories", "remember", "what do you remember",
+            "help", "commands", "?"
+        }
+
+        # 1. Slash commands (explicit /commands)
+        if input_lower.startswith("/"):
+            cmd_word = input_lower.lstrip("/").split()[0] if input_lower.lstrip("/") else ""
+            if cmd_word in known_commands or input_lower.lstrip("/").startswith("remember "):
+                return self._handle_command(input_lower)
+            # Unknown slash command - let it go to LLM instead of error
+            return None
+
+        # 2. AURA commands (only "aura <known_command>")
+        if input_lower.startswith("aura "):
+            after_aura = input_lower[5:].strip()
+            first_word = after_aura.split()[0] if after_aura else ""
+            # Only handle if it's a known command, otherwise let LLM respond
+            if first_word in known_commands or after_aura.startswith("remember "):
+                return self._handle_command(input_lower)
 
         # 2. Memory commands (explicit "remember this:" etc.)
         memory_triggers = [

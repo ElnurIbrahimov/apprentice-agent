@@ -6,11 +6,16 @@ Implements a reflection loop that:
 2. Attempts the task
 3. If failed, reflects on why and stores the lesson
 4. Retries with accumulated lessons
+
+SECURITY: Thread-safe with file locking to prevent corruption.
 """
 
 import json
 import logging
 import os
+import sys
+import threading
+from contextlib import contextmanager
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
@@ -21,6 +26,78 @@ import requests
 from ..config import Config
 
 logger = logging.getLogger(__name__)
+
+# Thread lock for in-process synchronization
+_reflexion_lock = threading.RLock()
+
+
+# ============================================================================
+#                    CROSS-PLATFORM FILE LOCKING
+# ============================================================================
+
+@contextmanager
+def file_lock(filepath: Path, mode: str = 'r', exclusive: bool = False):
+    """
+    Cross-platform file locking context manager.
+
+    SECURITY: Prevents race conditions when multiple processes access the file.
+
+    Args:
+        filepath: Path to the file
+        mode: File open mode ('r', 'w', 'a', etc.)
+        exclusive: If True, acquire exclusive lock (for writes)
+
+    Yields:
+        Open file handle with lock held
+    """
+    # Use threading lock for in-process synchronization
+    with _reflexion_lock:
+        f = None
+        try:
+            f = open(filepath, mode, encoding='utf-8')
+
+            # Platform-specific file locking
+            if sys.platform == 'win32':
+                # Windows locking
+                import msvcrt
+                if exclusive:
+                    msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                # Note: Windows doesn't have shared locks via msvcrt
+            else:
+                # Unix/Linux/Mac locking
+                import fcntl
+                if exclusive:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                else:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+
+            yield f
+
+        except (ImportError, OSError) as e:
+            # If locking fails, still yield the file but log warning
+            logger.warning(f"File locking unavailable: {e}")
+            if f is None:
+                f = open(filepath, mode, encoding='utf-8')
+            yield f
+
+        finally:
+            if f is not None:
+                try:
+                    # Release lock
+                    if sys.platform == 'win32':
+                        try:
+                            import msvcrt
+                            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+                        except (ImportError, OSError):
+                            pass
+                    else:
+                        try:
+                            import fcntl
+                            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                        except (ImportError, OSError):
+                            pass
+                finally:
+                    f.close()
 
 
 @dataclass
@@ -91,7 +168,7 @@ class ReflexionEngine:
         logger.info(f"ReflexionEngine initialized with {len(self.reflections)} stored lessons")
 
     def _load_reflections(self) -> List[Reflection]:
-        """Load reflections from JSONL file."""
+        """Load reflections from JSONL file with file locking."""
         reflections = []
 
         if not self.memory_path.exists():
@@ -100,7 +177,8 @@ class ReflexionEngine:
             return reflections
 
         try:
-            with open(self.memory_path, "r", encoding="utf-8") as f:
+            # Use shared lock for reading
+            with file_lock(self.memory_path, 'r', exclusive=False) as f:
                 for line_num, line in enumerate(f, 1):
                     line = line.strip()
                     if not line:
@@ -116,10 +194,15 @@ class ReflexionEngine:
         return reflections
 
     def _save_reflection(self, reflection: Reflection) -> None:
-        """Append a reflection to the JSONL file."""
+        """Append a reflection to the JSONL file with file locking.
+
+        SECURITY: Uses exclusive lock to prevent corruption from concurrent writes.
+        """
         try:
-            with open(self.memory_path, "a", encoding="utf-8") as f:
+            # Use exclusive lock for writing
+            with file_lock(self.memory_path, 'a', exclusive=True) as f:
                 f.write(json.dumps(asdict(reflection)) + "\n")
+                f.flush()  # Ensure data is written before releasing lock
             self.reflections.append(reflection)
             logger.info(f"Stored new reflection: {reflection.reflection[:50]}...")
         except IOError as e:

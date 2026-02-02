@@ -4,7 +4,8 @@ import subprocess
 import sys
 import tempfile
 import os
-from typing import Optional
+import ast
+from typing import Optional, Set, List, Tuple
 
 
 class CodeExecutorTool:
@@ -13,18 +14,38 @@ class CodeExecutorTool:
     name = "code_executor"
     description = "Execute Python code safely and return the output"
 
+    # Blocked modules - cannot be imported
+    BLOCKED_MODULES: Set[str] = {
+        'os', 'subprocess', 'sys', 'shutil', 'pathlib',
+        'socket', 'requests', 'urllib', 'http', 'httplib',
+        'pickle', 'marshal', 'shelve', 'dill',
+        'ctypes', 'multiprocessing', 'threading', 'concurrent',
+        'importlib', 'builtins', '__builtin__',
+        'code', 'codeop', 'compileall',
+        'pty', 'fcntl', 'termios', 'tty',
+        'signal', 'resource', 'sysconfig',
+        'asyncio', 'aiohttp', 'httpx',
+    }
+
+    # Blocked built-in functions
+    BLOCKED_BUILTINS: Set[str] = {
+        'eval', 'exec', 'compile', '__import__',
+        'open', 'input', 'breakpoint',
+        'globals', 'locals', 'vars', 'dir',
+        'getattr', 'setattr', 'delattr', 'hasattr',
+        'memoryview', 'type', 'object',
+    }
+
+    # Blocked attribute access patterns
+    BLOCKED_ATTRIBUTES: Set[str] = {
+        '__class__', '__bases__', '__subclasses__', '__mro__',
+        '__code__', '__globals__', '__builtins__', '__dict__',
+        '__import__', '__loader__', '__spec__',
+    }
+
     def __init__(self, timeout: int = 30, max_output_length: int = 5000):
         self.timeout = timeout
         self.max_output_length = max_output_length
-        # Restricted built-ins for safety
-        self.blocked_imports = [
-            'os', 'subprocess', 'sys', 'shutil', 'pathlib',
-            'socket', 'requests', 'urllib', 'http',
-            'pickle', 'marshal', 'shelve',
-            'ctypes', 'multiprocessing', 'threading',
-            '__import__', 'eval', 'exec', 'compile',
-            'open', 'file', 'input',
-        ]
 
     def execute(self, code: str) -> dict:
         """Execute Python code safely and return results."""
@@ -51,40 +72,82 @@ class CodeExecutorTool:
             }
 
     def _safety_check(self, code: str) -> dict:
-        """Check code for potentially dangerous operations."""
-        code_lower = code.lower()
+        """Check code for dangerous operations using AST parsing.
 
-        # Check for blocked imports and operations
-        dangerous_patterns = [
-            ('import os', 'os module access'),
-            ('import subprocess', 'subprocess access'),
-            ('import sys', 'sys module access'),
-            ('import shutil', 'file system manipulation'),
-            ('import socket', 'network access'),
-            ('import requests', 'network access'),
-            ('import urllib', 'network access'),
-            ('import pickle', 'deserialization risk'),
-            ('import ctypes', 'low-level access'),
-            ('__import__', 'dynamic imports'),
-            ('eval(', 'code evaluation'),
-            ('exec(', 'code execution'),
-            ('compile(', 'code compilation'),
-            ('open(', 'file access'),
-            ('file(', 'file access'),
-            ('subprocess', 'subprocess access'),
-            ('os.system', 'system command'),
-            ('os.popen', 'system command'),
-            ('os.remove', 'file deletion'),
-            ('os.unlink', 'file deletion'),
-            ('shutil.rmtree', 'directory deletion'),
-            ('input(', 'user input'),
-        ]
+        SECURITY: Uses AST parsing instead of string matching to prevent bypasses.
+        This catches obfuscation attempts like string concatenation, unicode tricks,
+        and multi-line splits that string matching would miss.
+        """
+        # First, try to parse the code as valid Python
+        try:
+            tree = ast.parse(code)
+        except SyntaxError as e:
+            return {"safe": False, "reason": f"Syntax error: {e}"}
 
-        for pattern, reason in dangerous_patterns:
-            if pattern in code_lower or pattern in code:
-                return {"safe": False, "reason": reason}
+        # Walk the AST and check for dangerous patterns
+        violations = []
+
+        for node in ast.walk(tree):
+            violation = self._check_ast_node(node)
+            if violation:
+                violations.append(violation)
+
+        if violations:
+            return {"safe": False, "reason": "; ".join(violations[:3])}  # Show first 3
 
         return {"safe": True, "reason": None}
+
+    def _check_ast_node(self, node: ast.AST) -> Optional[str]:
+        """Check a single AST node for security violations."""
+
+        # Check imports: import os, import os.path, from os import *
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                module_name = alias.name.split('.')[0]  # Get base module
+                if module_name in self.BLOCKED_MODULES:
+                    return f"blocked import: {alias.name}"
+
+        # Check from imports: from os import system
+        if isinstance(node, ast.ImportFrom):
+            if node.module:
+                module_name = node.module.split('.')[0]
+                if module_name in self.BLOCKED_MODULES:
+                    return f"blocked import: from {node.module}"
+
+        # Check function calls: eval(), exec(), open(), __import__()
+        if isinstance(node, ast.Call):
+            func_name = self._get_call_name(node)
+            if func_name in self.BLOCKED_BUILTINS:
+                return f"blocked function: {func_name}()"
+
+            # Check for getattr tricks: getattr(obj, 'system')
+            if func_name == 'getattr' and len(node.args) >= 2:
+                if isinstance(node.args[1], ast.Constant):
+                    attr = node.args[1].value
+                    if isinstance(attr, str) and attr in self.BLOCKED_ATTRIBUTES:
+                        return f"blocked attribute access via getattr: {attr}"
+
+        # Check attribute access: obj.__class__, obj.__globals__
+        if isinstance(node, ast.Attribute):
+            if node.attr in self.BLOCKED_ATTRIBUTES:
+                return f"blocked attribute: {node.attr}"
+
+        # Check subscript access for __class__ etc via strings
+        if isinstance(node, ast.Subscript):
+            if isinstance(node.slice, ast.Constant):
+                if isinstance(node.slice.value, str):
+                    if node.slice.value in self.BLOCKED_ATTRIBUTES:
+                        return f"blocked subscript access: [{node.slice.value!r}]"
+
+        return None
+
+    def _get_call_name(self, node: ast.Call) -> str:
+        """Extract the function name from a Call node."""
+        if isinstance(node.func, ast.Name):
+            return node.func.id
+        elif isinstance(node.func, ast.Attribute):
+            return node.func.attr
+        return ""
 
     def _run_sandboxed(self, code: str) -> dict:
         """Run code in a separate process with restrictions."""

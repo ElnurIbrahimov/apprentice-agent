@@ -201,65 +201,86 @@ class FileSystemTool:
         """
         Resolve a path with SANDBOX ENFORCEMENT.
 
-        SECURITY: Prevents path traversal attacks by:
-        1. Blocking absolute paths outside sandbox
-        2. Resolving symlinks and checking final destination
-        3. Blocking .. traversal that escapes sandbox
+        SECURITY: Prevents path traversal and symlink attacks by:
+        1. Input validation (length, null bytes)
+        2. Resolving symlinks FIRST with strict=False
+        3. Single atomic check against sandbox boundary
         4. Blocking known sensitive directories
+        5. No TOCTOU: all checks done on resolved path only
 
         Returns:
             (resolved_path, error_message) - path is None if blocked
         """
+        # === Input Validation ===
         if not path:
             return None, "Empty path"
+
+        # Block null bytes (can bypass some checks)
+        if '\x00' in path:
+            logger.warning(f"[SECURITY] Blocked null byte in path")
+            return None, "Invalid path: null bytes not allowed"
+
+        # Block excessively long paths (Windows MAX_PATH = 260, Linux = 4096)
+        if len(path) > 4096:
+            return None, "Path too long"
 
         try:
             p = Path(path)
 
-            # Block absolute paths when sandboxed
-            if self.sandbox_enabled and p.is_absolute():
-                # Check if it's within our sandbox
-                try:
-                    p.resolve().relative_to(self.sandbox_dir)
-                except ValueError:
-                    logger.warning(f"[SECURITY] Blocked absolute path outside sandbox: {path}")
-                    return None, f"Absolute paths outside sandbox not allowed"
-
-            # Resolve relative to sandbox
+            # === Construct full path ===
+            # If relative, make it relative to sandbox
             if not p.is_absolute():
                 p = self.sandbox_dir / p
+            elif self.sandbox_enabled:
+                # Absolute path - pre-check before expensive resolve()
+                path_str = str(p)
+                sandbox_str = str(self.sandbox_dir)
+                if not path_str.startswith(sandbox_str):
+                    logger.warning(f"[SECURITY] Blocked absolute path outside sandbox: {path}")
+                    return None, "Absolute paths outside sandbox not allowed"
 
-            # Resolve symlinks and get final path
-            resolved = p.resolve()
+            # === ATOMIC RESOLUTION ===
+            # resolve() follows ALL symlinks and normalizes the path
+            # This is the ONLY path we use for all subsequent checks
+            # No separate symlink check needed - resolve() handles it
+            try:
+                resolved = p.resolve(strict=False)  # strict=False allows non-existent paths
+            except (OSError, RuntimeError) as e:
+                # RuntimeError for symlink loops, OSError for other issues
+                logger.warning(f"[SECURITY] Path resolution failed: {e}")
+                return None, f"Path resolution failed: {e}"
 
-            # Check for symlink attacks
-            if p.exists() and p.is_symlink():
-                link_target = p.readlink()
-                if link_target.is_absolute():
-                    target_resolved = link_target.resolve()
-                else:
-                    target_resolved = (p.parent / link_target).resolve()
-
-                try:
-                    target_resolved.relative_to(self.sandbox_dir)
-                except ValueError:
-                    logger.warning(f"[SECURITY] Blocked symlink escaping sandbox: {path} -> {target_resolved}")
-                    return None, "Symlink points outside sandbox"
-
-            # Verify resolved path is within sandbox
+            # === SANDBOX BOUNDARY CHECK (single atomic check) ===
             if self.sandbox_enabled:
                 try:
                     resolved.relative_to(self.sandbox_dir)
                 except ValueError:
-                    logger.warning(f"[SECURITY] Blocked path traversal: {path} -> {resolved}")
+                    # Log the attempted escape
+                    logger.warning(f"[SECURITY] Blocked path escape: {path} -> {resolved}")
                     return None, "Path traversal blocked (outside sandbox)"
 
-            # Check against blocked system paths
+            # === BLOCKED PATHS CHECK ===
             resolved_str = str(resolved)
+            resolved_lower = resolved_str.lower()  # Case-insensitive for Windows
+
             for blocked in self.BLOCKED_PATHS:
-                if resolved_str.startswith(blocked):
+                blocked_lower = blocked.lower()
+                if resolved_lower.startswith(blocked_lower) or resolved_lower == blocked_lower:
                     logger.warning(f"[SECURITY] Blocked access to sensitive path: {resolved}")
                     return None, f"Access to {blocked} is blocked"
+
+            # === ADDITIONAL SYMLINK CHECK FOR EXISTING PATHS ===
+            # Even after resolve(), verify the final target is safe
+            # This catches race conditions where symlink is created after resolve()
+            if resolved.exists():
+                # Re-resolve to catch any race condition symlink swaps
+                final_check = resolved.resolve(strict=True)
+                if self.sandbox_enabled:
+                    try:
+                        final_check.relative_to(self.sandbox_dir)
+                    except ValueError:
+                        logger.warning(f"[SECURITY] Race condition detected: {resolved} -> {final_check}")
+                        return None, "Path changed during validation"
 
             return resolved, None
 
