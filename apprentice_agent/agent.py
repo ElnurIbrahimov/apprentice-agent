@@ -141,6 +141,26 @@ except ImportError:
     PROTO_AGI_AVAILABLE = False
     ProtoAGI = None
 
+# Knowledge Graph Brain - Structured Long-Term Memory
+try:
+    from aura_knowledge_graph import (
+        AURAKnowledgeGraph,
+        TitansKGBridge,
+        BridgeConfig,
+        KGQueryEngine,
+        QueryMode,
+        create_kg_tools,
+        KUZU_AVAILABLE
+    )
+    KG_BRAIN_AVAILABLE = KUZU_AVAILABLE
+except ImportError:
+    KG_BRAIN_AVAILABLE = False
+    AURAKnowledgeGraph = None
+    TitansKGBridge = None
+    BridgeConfig = None
+    KGQueryEngine = None
+    QueryMode = None
+
 
 class AgentPhase(Enum):
     """Phases of the agent loop."""
@@ -472,6 +492,49 @@ class ApprenticeAgent:
         else:
             print("[INFO] Proto-AGI Core not available")
 
+        # Initialize Knowledge Graph Brain - Structured Long-Term Memory
+        # KG Brain is lightweight and can initialize even with fast_init
+        # The bridge (which needs LLM) is skipped for fast_init
+        self.kg_brain = None
+        self.kg_bridge = None
+        self.kg_query_engine = None
+        self.kg_brain_enabled = getattr(Config, 'KG_BRAIN_ENABLED', True)
+
+        if KG_BRAIN_AVAILABLE and self.kg_brain_enabled:
+            try:
+                # Initialize Knowledge Graph database (lightweight, always init)
+                kg_path = Path(__file__).parent.parent / "aura_data" / "knowledge_graph_brain"
+                self.kg_brain = AURAKnowledgeGraph(str(kg_path))
+
+                # Initialize Query Engine (lightweight, always init)
+                self.kg_query_engine = KGQueryEngine(self.kg_brain)
+
+                # Initialize Titans-KG Bridge for automatic extraction (needs LLM)
+                # Skip for fast_init since it requires brain.think
+                if not fast_init:
+                    self.kg_bridge = TitansKGBridge(
+                        knowledge_graph=self.kg_brain,
+                        llm_func=self.brain.think,
+                        config=BridgeConfig(
+                            surprise_threshold=0.5,
+                            batch_size=3,
+                            auto_extract=True,
+                            create_co_occurrence=True
+                        )
+                    )
+
+                # Get statistics
+                stats = self.kg_brain.get_statistics()
+                bridge_status = "with bridge" if self.kg_bridge else "query-only"
+                print(f"[LOADED] Knowledge Graph Brain - {stats['total_entities']} entities, {stats['total_relationships']} relationships ({bridge_status})")
+            except Exception as e:
+                print(f"[WARNING] Knowledge Graph Brain initialization failed: {e}")
+                self.kg_brain = None
+                self.kg_bridge = None
+                self.kg_query_engine = None
+        elif not KG_BRAIN_AVAILABLE:
+            print("[INFO] Knowledge Graph Brain not available (install kuzu: pip install kuzu)")
+
     def _proto_agi_llm(self, prompt: str) -> str:
         """LLM function for Proto-AGI - uses brain.think()"""
         try:
@@ -760,9 +823,11 @@ class ApprenticeAgent:
             'every day', 'every morning', 'every evening', 'daily at', 'weekly',
             'set alarm', 'timer',
 
-            # --- Tool 13: knowledge_graph ---
+            # --- Tool 13: knowledge_graph / KG Brain ---
             'remember this', 'store this', 'save this fact', 'add to knowledge',
             'what do you know about', 'recall', 'knowledge graph',
+            'kg brain', 'kg stats', 'kg query', 'extract entities',
+            'learn that', 'remember that', 'consolidate memory', 'graph stats',
 
             # --- Tool 14: tool_builder ---
             'create tool', 'build tool', 'make tool', 'new tool', 'custom tool',
@@ -1324,10 +1389,22 @@ Guidelines:
             memory_preview = ", ".join([m["content"][:30] for m in relevant_memories[:2]])
             self.monologue.think("recall", f"Found {len(relevant_memories)} relevant memories: {memory_preview}...")
 
+        # Get Knowledge Graph Brain context (if available)
+        kg_context = ""
+        if self.kg_bridge is not None:
+            try:
+                kg_context = self.kg_bridge.get_context_for_query(self.state.goal, max_entities=5)
+                if kg_context:
+                    self.monologue.think("recall", f"Found relevant knowledge graph entities")
+                    print(f"[KG BRAIN] Retrieved context for query")
+            except Exception as e:
+                logger.debug(f"[KG BRAIN] Context retrieval error: {e}")
+
         observation_context = {
             "goal": self.state.goal,
             "iteration": self.state.iteration,
             "relevant_memories": [m["content"] for m in relevant_memories],
+            "knowledge_graph_context": kg_context,
             "last_action": self.state.last_action,
             "last_result": self.state.last_result,
             **context
@@ -1672,6 +1749,25 @@ Guidelines:
                 }
             )
             print(f"Stored memory: {memory_content[:100]}...")
+
+            # Extract entities to Knowledge Graph Brain (for successful, significant interactions)
+            if self.kg_bridge is not None and self.state.evaluation.get("success", False):
+                try:
+                    # Only extract if confidence is high enough (indicates meaningful interaction)
+                    confidence = self.state.evaluation.get("confidence", 0)
+                    if confidence >= 70:
+                        # Combine goal and outcome for entity extraction
+                        extraction_text = f"Goal: {self.state.goal}\nOutcome: {self.state.evaluation.get('progress', '')}"
+                        # Queue for batch extraction (non-blocking)
+                        self.kg_bridge.extraction_queue.append({
+                            "trace_id": f"agent_{self.state.iteration}_{datetime.now().timestamp()}",
+                            "content": extraction_text,
+                            "surprise": confidence / 100.0,  # Use confidence as surprise proxy
+                            "timestamp": datetime.now().timestamp()
+                        })
+                        logger.debug(f"[KG BRAIN] Queued for entity extraction (confidence: {confidence}%)")
+                except Exception as e:
+                    logger.debug(f"[KG BRAIN] Entity extraction queue error: {e}")
 
     def _execute_action(self, action_decision: dict) -> dict:
         """Execute an action using the appropriate tool with timeout protection."""
@@ -3152,6 +3248,8 @@ Output ONLY the JSON object, no other text."""
     def _handle_knowledge_graph_command(self, message: str) -> Optional[str]:
         """Handle knowledge graph commands directly, bypassing the LLM.
 
+        Supports both the legacy KnowledgeGraphTool and the new KG Brain.
+
         Args:
             message: The user's message
 
@@ -3163,18 +3261,81 @@ Output ONLY the JSON object, no other text."""
         kg_keywords = [
             'what do you know about', 'knowledge graph', 'show graph',
             'how is', 'related to', 'connected to', 'find path between',
-            'what have you learned', 'consolidate memory', 'graph stats'
+            'what have you learned', 'consolidate memory', 'graph stats',
+            'kg brain', 'kg stats', 'add to knowledge', 'remember that',
+            'learn that', 'extract entities', 'kg query'
         ]
 
         if not any(kw in msg_lower for kw in kg_keywords):
             return None
 
+        # Try KG Brain first (new system)
+        if self.kg_brain is not None and self.kg_query_engine is not None:
+            # Handle KG Brain specific commands
+            if "kg brain" in msg_lower or "kg stats" in msg_lower:
+                stats = self.kg_brain.get_statistics()
+                bridge_stats = self.kg_bridge.get_statistics() if self.kg_bridge else {}
+                return (
+                    f"**Knowledge Graph Brain Statistics**\n"
+                    f"- Total Entities: {stats.get('total_entities', 0)}\n"
+                    f"- Total Relationships: {stats.get('total_relationships', 0)}\n"
+                    f"- Average Importance: {stats.get('average_importance', 0):.2f}\n"
+                    f"- Entity Types: {stats.get('entity_type_distribution', {})}\n"
+                    f"- Entities Extracted: {bridge_stats.get('total_entities_extracted', 0)}\n"
+                    f"- Extractions Triggered: {bridge_stats.get('total_extractions_triggered', 0)}"
+                )
+
+            if "what do you know about" in msg_lower:
+                topic = msg_lower.split("what do you know about")[-1].strip().rstrip("?")
+                # Query KG Brain
+                result = self.kg_query_engine.query(topic, mode=QueryMode.HYBRID, max_entities=10)
+                if result.entities:
+                    return result.context_string
+                # Fall through to legacy KG if no results
+
+            if "how is" in msg_lower and "related to" in msg_lower:
+                parts = msg_lower.replace("?", "").split("related to")
+                if len(parts) == 2:
+                    source = parts[0].replace("how is", "").strip()
+                    target = parts[1].strip()
+                    # Try to find path in KG Brain
+                    path = self.kg_query_engine.find_path(source, target)
+                    if path:
+                        return f"Connection found: {path}"
+
+            if "extract entities" in msg_lower or "learn that" in msg_lower or "remember that" in msg_lower:
+                # Force extraction from message
+                text_to_extract = message.split("that", 1)[-1].strip() if "that" in message else message
+                if self.kg_bridge:
+                    entity_ids = self.kg_bridge.force_extract(text_to_extract, context="user command")
+                    if entity_ids:
+                        return f"Extracted and stored {len(entity_ids)} entities in knowledge graph."
+                    return "No entities could be extracted from that text."
+
+            if "consolidate memory" in msg_lower:
+                # Apply decay and prune
+                self.kg_brain.decay_importance(decay_rate=0.05)
+                self.kg_brain.prune_low_importance(threshold=0.03)
+                if self.kg_bridge:
+                    self.kg_bridge.flush()
+                stats = self.kg_brain.get_statistics()
+                return f"Memory consolidated. Current state: {stats['total_entities']} entities, {stats['total_relationships']} relationships."
+
+            # Generic KG Brain query
+            if "kg query" in msg_lower:
+                query = msg_lower.replace("kg query", "").strip()
+                result = self.kg_query_engine.query(query, mode=QueryMode.HYBRID)
+                return result.context_string if result.entities else "No matching entities found."
+
+        # Fall back to legacy knowledge_graph tool
         if "knowledge_graph" not in self.tools:
-            return "Knowledge graph not available."
+            if self.kg_brain is None:
+                return "Knowledge graph not available. Install kuzu: pip install kuzu"
+            return "No results found in knowledge graph."
 
         kg = self.tools["knowledge_graph"]
 
-        # Handle specific patterns
+        # Handle specific patterns with legacy tool
         if "what do you know about" in msg_lower:
             topic = msg_lower.split("what do you know about")[-1].strip().rstrip("?")
             result = kg.execute(f"query {topic}")
@@ -3183,7 +3344,6 @@ Output ONLY the JSON object, no other text."""
             return f"I don't have much knowledge about '{topic}' yet."
 
         if "how is" in msg_lower and "related to" in msg_lower:
-            # Extract "how is X related to Y"
             parts = msg_lower.replace("?", "").split("related to")
             if len(parts) == 2:
                 source = parts[0].replace("how is", "").strip()
@@ -3458,6 +3618,15 @@ Output ONLY the JSON object, no other text."""
             self.monologue.think("reflect", f"Stopping after {self.state.iteration} iterations.")
         session_summary = self.monologue.end_session()
 
+        # Flush Knowledge Graph Brain extraction queue
+        if self.kg_bridge is not None:
+            try:
+                extracted = self.kg_bridge.flush()
+                if extracted:
+                    logger.info(f"[KG BRAIN] Extracted {len(extracted)} entities at end of run")
+            except Exception as e:
+                logger.debug(f"[KG BRAIN] Flush error: {e}")
+
         result = {
             "goal": self.state.goal,
             "completed": self.state.completed,
@@ -3632,10 +3801,19 @@ Try these commands:
         #     return emotional_response
 
         # Use fast model for simple queries (greetings, etc.)
-        if self._is_simple_query(message):
+        is_simple = self._is_simple_query(message)
+        if is_simple:
             task_type = TaskType.SIMPLE
         else:
             task_type = None  # Let brain auto-detect
+
+        # Get Knowledge Graph Brain context for non-simple queries
+        kg_context = ""
+        if not is_simple and self.kg_bridge is not None:
+            try:
+                kg_context = self.kg_bridge.get_context_for_query(message, max_entities=3)
+            except Exception as e:
+                logger.debug(f"[KG BRAIN] Context retrieval error in chat: {e}")
 
         # Apply emotional tone modifier - prefer AURA's tone if available
         tone_modifier = None
@@ -3649,7 +3827,12 @@ Try these commands:
         if aura_context and aura_context.get("thinking_prefix"):
             thinking_prefix = aura_context["thinking_prefix"] + "\n\n"
 
-        response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier)
+        # Inject KG context into system prompt if available
+        system_prompt_addon = None
+        if kg_context:
+            system_prompt_addon = f"\n{kg_context}\nUse this knowledge when relevant to the conversation."
+
+        response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
 
         # Apply MirrorMind self-critique if enabled (Tool #21)
         if self.mirrormind_enabled and not self._is_simple_query(message):
@@ -3682,6 +3865,24 @@ Try these commands:
 
         if speak:
             self._speak(response, emotion=emotion_reading.emotion if emotion_reading else None)
+
+        # Queue entity extraction for non-simple conversations (KG Brain)
+        if not is_simple and self.kg_bridge is not None:
+            try:
+                # Only extract from meaningful exchanges (>20 chars response)
+                if len(response) > 20:
+                    extraction_text = f"User: {message}\nAssistant: {response[:500]}"
+                    self.kg_bridge.extraction_queue.append({
+                        "trace_id": f"chat_{time.time()}",
+                        "content": extraction_text,
+                        "surprise": 0.6,  # Moderate surprise for chat
+                        "timestamp": time.time()
+                    })
+                    # Flush if queue is getting large
+                    if len(self.kg_bridge.extraction_queue) >= self.kg_bridge.config.batch_size:
+                        self.kg_bridge.flush()
+            except Exception as e:
+                logger.debug(f"[KG BRAIN] Chat entity extraction error: {e}")
 
         return response
 
@@ -3935,6 +4136,119 @@ Voice: {soul.voice_style[:100]}..."""
         except (AttributeError, KeyError, TypeError):
             pass  # EvoEmo tool not properly initialized
         return "😐"
+
+    # =========================================================================
+    #                    KNOWLEDGE GRAPH BRAIN METHODS
+    # =========================================================================
+
+    def get_kg_brain_stats(self) -> dict:
+        """Get Knowledge Graph Brain statistics.
+
+        Returns:
+            dict with KG Brain stats, or empty dict if not available
+        """
+        if self.kg_brain is None:
+            return {"available": False, "reason": "KG Brain not initialized"}
+
+        try:
+            kg_stats = self.kg_brain.get_statistics()
+            bridge_stats = self.kg_bridge.get_statistics() if self.kg_bridge else {}
+
+            return {
+                "available": True,
+                "total_entities": kg_stats.get("total_entities", 0),
+                "total_relationships": kg_stats.get("total_relationships", 0),
+                "entity_types": kg_stats.get("entity_type_distribution", {}),
+                "average_importance": kg_stats.get("average_importance", 0),
+                "entities_extracted": bridge_stats.get("total_entities_extracted", 0),
+                "extractions_triggered": bridge_stats.get("total_extractions_triggered", 0),
+                "queue_size": bridge_stats.get("queue_size", 0)
+            }
+        except Exception as e:
+            return {"available": False, "error": str(e)}
+
+    def kg_brain_query(self, query: str, max_entities: int = 10) -> str:
+        """Query the Knowledge Graph Brain.
+
+        Args:
+            query: Search query
+            max_entities: Maximum entities to return
+
+        Returns:
+            Formatted context string with matching entities
+        """
+        if self.kg_query_engine is None:
+            return "Knowledge Graph Brain not available."
+
+        try:
+            result = self.kg_query_engine.query(query, mode=QueryMode.HYBRID, max_entities=max_entities)
+            return result.context_string if result.entities else "No matching entities found."
+        except Exception as e:
+            return f"Query error: {e}"
+
+    def kg_brain_add_knowledge(self, text: str, context: str = "manual") -> dict:
+        """Manually add knowledge to the KG Brain.
+
+        Args:
+            text: Text to extract entities from
+            context: Context for the extraction
+
+        Returns:
+            dict with extraction results
+        """
+        if self.kg_bridge is None:
+            return {"success": False, "error": "KG Brain not available"}
+
+        try:
+            entity_ids = self.kg_bridge.force_extract(text, context=context)
+            return {
+                "success": True,
+                "entities_extracted": len(entity_ids),
+                "entity_ids": entity_ids
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def kg_brain_consolidate(self, decay_rate: float = 0.01, prune_threshold: float = 0.05) -> dict:
+        """Consolidate KG Brain memory (decay importance, prune low entities).
+
+        Args:
+            decay_rate: Rate of importance decay
+            prune_threshold: Threshold below which to prune entities
+
+        Returns:
+            dict with consolidation results
+        """
+        if self.kg_brain is None:
+            return {"success": False, "error": "KG Brain not available"}
+
+        try:
+            # Flush any pending extractions
+            if self.kg_bridge:
+                self.kg_bridge.flush()
+
+            # Get stats before
+            stats_before = self.kg_brain.get_statistics()
+
+            # Apply decay
+            self.kg_brain.decay_importance(decay_rate)
+
+            # Prune low importance
+            self.kg_brain.prune_low_importance(prune_threshold)
+
+            # Get stats after
+            stats_after = self.kg_brain.get_statistics()
+
+            return {
+                "success": True,
+                "entities_before": stats_before.get("total_entities", 0),
+                "entities_after": stats_after.get("total_entities", 0),
+                "entities_pruned": stats_before.get("total_entities", 0) - stats_after.get("total_entities", 0),
+                "decay_rate": decay_rate,
+                "prune_threshold": prune_threshold
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     def _speak(self, text: str, emotion: Optional[str] = None):
         """Speak text using TTS with optional emotional adaptation."""
