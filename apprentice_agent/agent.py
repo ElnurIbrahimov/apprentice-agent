@@ -215,6 +215,34 @@ except ImportError:
     TitansSkillBridge = None
     EMBEDDINGS_AVAILABLE = False
 
+# Predictive Life Modeling - World Simulator for Personal Decisions
+try:
+    from aura_life_modeling import (
+        LifeState,
+        LifeDomain,
+        Scenario,
+        ScenarioTemplates,
+        DecisionType,
+        SimulationConfig,
+        run_monte_carlo,
+        ReportGenerator,
+        LifeModelingTools,
+        MESA_AVAILABLE
+    )
+    LIFE_MODELING_AVAILABLE = True
+except ImportError:
+    LIFE_MODELING_AVAILABLE = False
+    LifeState = None
+    LifeDomain = None
+    Scenario = None
+    ScenarioTemplates = None
+    DecisionType = None
+    SimulationConfig = None
+    run_monte_carlo = None
+    ReportGenerator = None
+    LifeModelingTools = None
+    MESA_AVAILABLE = False
+
 
 class AgentPhase(Enum):
     """Phases of the agent loop."""
@@ -676,6 +704,25 @@ class ApprenticeAgent:
                 self.skill_bridge = None
         elif not SKILL_LIBRARY_AVAILABLE:
             print("[INFO] Skill Library not available (install sentence-transformers: pip install sentence-transformers)")
+
+        # Initialize Predictive Life Modeling - World Simulator for Personal Decisions
+        # Enables "what-if" scenario simulations for major life decisions
+        self.life_modeling = None
+        self.life_modeling_enabled = getattr(Config, 'LIFE_MODELING_ENABLED', True)
+
+        if LIFE_MODELING_AVAILABLE and self.life_modeling_enabled:
+            try:
+                self.life_modeling = LifeModelingTools(
+                    knowledge_graph=self.kg_brain,
+                    episodic_memory=self.episodic_memory,
+                    llm_client=self.brain if not fast_init else None
+                )
+                print(f"[LOADED] Life Modeling - World Simulator for decisions (Mesa: {MESA_AVAILABLE})")
+            except Exception as e:
+                print(f"[WARNING] Life Modeling initialization failed: {e}")
+                self.life_modeling = None
+        elif not LIFE_MODELING_AVAILABLE:
+            print("[INFO] Life Modeling not available (install mesa: pip install mesa)")
 
     def _proto_agi_llm(self, prompt: str) -> str:
         """LLM function for Proto-AGI - uses brain.think()"""
@@ -4870,6 +4917,179 @@ Voice: {soul.voice_style[:100]}..."""
 
         try:
             return self.skill_library.improve_skill(skill_id, apply=apply)
+        except Exception as e:
+            return {"error": str(e)}
+
+    # ==================== Life Modeling Methods ====================
+
+    def get_life_modeling_stats(self) -> dict:
+        """Get Life Modeling availability status.
+
+        Returns:
+            dict with status info
+        """
+        if self.life_modeling is None:
+            return {"available": False, "reason": "Life Modeling not initialized"}
+
+        return {
+            "available": True,
+            "mesa_available": MESA_AVAILABLE if LIFE_MODELING_AVAILABLE else False,
+            "tools": [t["name"] for t in self.life_modeling.get_tools()]
+        }
+
+    def life_update_state(
+        self,
+        financial: dict = None,
+        career: dict = None,
+        health: dict = None,
+        personal: dict = None
+    ) -> dict:
+        """Update life state model for simulations.
+
+        Args:
+            financial: dict with monthly_income, monthly_expenses, savings, etc.
+            career: dict with current_role, satisfaction (0-1), is_employed
+            health: dict with stress_level (0-1), age
+            personal: dict with life_satisfaction (0-1), location
+
+        Returns:
+            dict with success status and current wellbeing score
+        """
+        if self.life_modeling is None:
+            return {"success": False, "error": "Life Modeling not available"}
+
+        try:
+            params = {}
+            if financial:
+                params["financial"] = financial
+            if career:
+                params["career"] = career
+            if health:
+                params["health"] = health
+            if personal:
+                params["personal"] = personal
+
+            return self.life_modeling.handle_tool_call("life_state_update", params)
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def life_get_state(self) -> dict:
+        """Get current life state model.
+
+        Returns:
+            dict with life state and wellbeing score
+        """
+        if self.life_modeling is None:
+            return {"error": "Life Modeling not available"}
+
+        try:
+            return self.life_modeling.handle_tool_call("get_life_state", {})
+        except Exception as e:
+            return {"error": str(e)}
+
+    def life_simulate_decision(
+        self,
+        decision_type: str,
+        parameters: dict = None,
+        time_horizon_years: int = 5,
+        num_simulations: int = 100
+    ) -> dict:
+        """Simulate a life decision and see projected outcomes.
+
+        Args:
+            decision_type: career_change, quit_job, start_business, major_purchase,
+                          relocation, education, have_child, retirement, lifestyle_change
+            parameters: Decision-specific parameters (e.g., salary_change_pct, startup_cost)
+            time_horizon_years: How many years to simulate (default 5)
+            num_simulations: Number of Monte Carlo runs (default 100)
+
+        Returns:
+            dict with outcomes and risk metrics
+        """
+        if self.life_modeling is None:
+            return {"error": "Life Modeling not available"}
+
+        try:
+            return self.life_modeling.handle_tool_call("simulate_decision", {
+                "decision_type": decision_type,
+                "parameters": parameters or {},
+                "time_horizon_years": time_horizon_years,
+                "num_simulations": num_simulations
+            })
+        except Exception as e:
+            return {"error": str(e)}
+
+    def life_compare_decisions(
+        self,
+        decisions: list,
+        time_horizon_years: int = 5
+    ) -> dict:
+        """Compare multiple decision scenarios.
+
+        Args:
+            decisions: List of dicts with decision_type and optional parameters
+            time_horizon_years: How many years to simulate
+
+        Returns:
+            dict with ranking and summaries
+        """
+        if self.life_modeling is None:
+            return {"error": "Life Modeling not available"}
+
+        try:
+            return self.life_modeling.handle_tool_call("compare_decisions", {
+                "decisions": decisions,
+                "time_horizon_years": time_horizon_years
+            })
+        except Exception as e:
+            return {"error": str(e)}
+
+    def life_what_if(self, question: str, variables: dict = None) -> dict:
+        """Answer what-if questions about life changes.
+
+        Args:
+            question: Natural language what-if question
+            variables: Specific variable changes to analyze
+
+        Returns:
+            dict with analysis and interpretation
+        """
+        if self.life_modeling is None:
+            return {"error": "Life Modeling not available"}
+
+        try:
+            return self.life_modeling.handle_tool_call("what_if_analysis", {
+                "question": question,
+                "variables": variables or {}
+            })
+        except Exception as e:
+            return {"error": str(e)}
+
+    def life_generate_report(
+        self,
+        decision_type: str,
+        parameters: dict = None,
+        format: str = "markdown"
+    ) -> dict:
+        """Generate a detailed decision analysis report.
+
+        Args:
+            decision_type: Type of decision to analyze
+            parameters: Decision-specific parameters
+            format: "markdown" or "json"
+
+        Returns:
+            dict with report in requested format
+        """
+        if self.life_modeling is None:
+            return {"error": "Life Modeling not available"}
+
+        try:
+            return self.life_modeling.handle_tool_call("generate_decision_report", {
+                "decision_type": decision_type,
+                "parameters": parameters or {},
+                "format": format
+            })
         except Exception as e:
             return {"error": str(e)}
 

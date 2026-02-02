@@ -36,6 +36,10 @@ dateparser>=1.2.0
 # Skill Library
 pyyaml>=6.0
 
+# Predictive Life Modeling
+mesa>=3.0.0
+# dowhy>=0.10.0  # Optional: for causal inference
+
 # Messaging (Telegram & WhatsApp)
 python-telegram-bot>=20.0
 websockets>=12.0
