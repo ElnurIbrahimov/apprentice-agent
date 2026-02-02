@@ -33,6 +33,9 @@ sentence-transformers>=2.2.0
 qdrant-client>=1.7.0
 dateparser>=1.2.0
 
+# Skill Library
+pyyaml>=6.0
+
 # Messaging (Telegram & WhatsApp)
 python-telegram-bot>=20.0
 websockets>=12.0
