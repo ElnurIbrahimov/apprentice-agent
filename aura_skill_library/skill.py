@@ -6,7 +6,7 @@ procedural knowledge and reusable workflows.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from enum import Enum
 import uuid
@@ -54,7 +54,7 @@ class SkillExample:
             input_data=data.get("input_data"),
             output=data["output"],
             success=data["success"],
-            timestamp=datetime.fromisoformat(data["timestamp"]) if data.get("timestamp") else datetime.utcnow(),
+            timestamp=datetime.fromisoformat(data["timestamp"]) if data.get("timestamp") else datetime.now(timezone.utc),
             feedback=data.get("feedback")
         )
 
@@ -86,7 +86,7 @@ class SkillMetadata:
             self.success_count += 1
         else:
             self.failure_count += 1
-        self.last_used = datetime.utcnow()
+        self.last_used = datetime.now(timezone.utc)
 
         # Running average for execution time
         if self.avg_execution_time_ms == 0:
@@ -171,7 +171,7 @@ class Skill:
             failed = [e for e in self.examples if not e.success]
             # Keep 8 successful + 2 failed for learning
             self.examples = successful[-8:] + failed[-2:]
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(timezone.utc)
 
     def to_markdown(self) -> str:
         """Serialize skill to SKILL.md format."""
@@ -324,6 +324,6 @@ updated_at: {self.updated_at.isoformat()}
             examples=[SkillExample.from_dict(e) for e in data.get("examples", [])],
             metadata=SkillMetadata.from_dict(data.get("metadata", {})),
             related_skills=data.get("related_skills", []),
-            created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else datetime.utcnow(),
-            updated_at=datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else datetime.utcnow()
+            created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else datetime.now(timezone.utc),
+            updated_at=datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else datetime.now(timezone.utc)
         )

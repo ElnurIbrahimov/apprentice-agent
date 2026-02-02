@@ -8,7 +8,7 @@ import json
 import logging
 import re
 from typing import List, Optional, Dict, Any, Callable
-from datetime import datetime
+from datetime import datetime, timezone
 
 from .skill import Skill, SkillCategory, SkillExample, SkillMetadata
 from .skill_store import SkillStore
@@ -357,8 +357,8 @@ Respond ONLY with the JSON, no other text."""
         except ValueError:
             skill.metadata.version = "1.1"
 
-        skill.metadata.last_modified = datetime.utcnow()
-        skill.updated_at = datetime.utcnow()
+        skill.metadata.last_modified = datetime.now(timezone.utc)
+        skill.updated_at = datetime.now(timezone.utc)
 
         self.store.save(skill)
         self._stats["improvements_applied"] += 1

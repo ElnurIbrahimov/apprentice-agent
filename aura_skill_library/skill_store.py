@@ -9,7 +9,7 @@ import json
 import logging
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 import numpy as np
 
 from .skill import Skill, SkillCategory, SkillMetadata
@@ -143,7 +143,7 @@ class SkillStore:
             "success_rate": skill.metadata.success_rate,
             "total_uses": skill.metadata.total_uses,
             "tags": skill.metadata.tags,
-            "updated_at": datetime.utcnow().isoformat()
+            "updated_at": datetime.now(timezone.utc).isoformat()
         }
         self._save_index(self.index)
 
