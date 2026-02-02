@@ -48,6 +48,10 @@ mesa>=3.0.0
 python-telegram-bot>=20.0
 websockets>=12.0
 
+# Web API (FastAPI + React frontend)
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+
 # PersonaPlex (Tool #17) - Real-time full-duplex speech-to-speech
 # Install from: pip install moshi/. (from https://github.com/NVIDIA/personaplex)
 # Requires: libopus-dev (Linux), opus (macOS via brew), HF_TOKEN env var

@@ -3944,6 +3944,90 @@ Output ONLY the JSON object, no other text."""
             print(f"[DIRECT SEARCH] Error: {e}")
             return f"Search error: {e}"
 
+    def _handle_direct_crypto(self, message: str) -> Optional[str]:
+        """Handle crypto price requests directly, bypassing agent loop.
+
+        This prevents the LLM from hallucinating crypto prices.
+        User says "BTC price" -> fetches real BTC price from API.
+
+        Args:
+            message: The user's message
+
+        Returns:
+            Formatted price info if crypto request, None otherwise
+        """
+        import re
+        message_lower = message.lower().strip()
+
+        # Crypto symbols and names mapping
+        crypto_map = {
+            'btc': 'bitcoin', 'bitcoin': 'bitcoin',
+            'eth': 'ethereum', 'ethereum': 'ethereum',
+            'sol': 'solana', 'solana': 'solana',
+            'ada': 'cardano', 'cardano': 'cardano',
+            'doge': 'dogecoin', 'dogecoin': 'dogecoin',
+            'xrp': 'ripple', 'ripple': 'ripple',
+            'dot': 'polkadot', 'polkadot': 'polkadot',
+            'bnb': 'binancecoin', 'binance': 'binancecoin',
+            'avax': 'avalanche-2', 'avalanche': 'avalanche-2',
+            'matic': 'matic-network', 'polygon': 'matic-network',
+        }
+
+        # Patterns for crypto price requests
+        crypto_patterns = [
+            r'(?:what(?:\'s| is) )?(?:the )?(?:current )?(?:price (?:of )?)?(\w+)\s*price',
+            r'(?:what(?:\'s| is) )?(?:the )?(?:current )?price (?:of )?(\w+)',
+            r'how much (?:is|does) (\w+)(?: cost)?',
+            r'^(\w+)\s*price$',
+            r'^price\s*(?:of\s+)?(\w+)$',
+            r'(\w+) (?:price|value|cost)',
+        ]
+
+        # Try to extract crypto name
+        crypto_id = None
+        for pattern in crypto_patterns:
+            match = re.search(pattern, message_lower)
+            if match:
+                potential_crypto = match.group(1).strip()
+                if potential_crypto in crypto_map:
+                    crypto_id = crypto_map[potential_crypto]
+                    break
+
+        if not crypto_id:
+            return None  # Not a crypto price request
+
+        # Check if crypto_price tool is available
+        if 'crypto_price' not in self.tools:
+            return "Crypto price tool not available."
+
+        print(f"[DIRECT CRYPTO] Fetching price for: {crypto_id}")
+
+        try:
+            tool = self.tools['crypto_price']
+            result = tool.get_price(crypto_id)
+
+            if not result.get("success"):
+                return f"Failed to get price: {result.get('error', 'Unknown error')}"
+
+            # Format the response
+            price = result.get("price", 0)
+            change_24h = result.get("change_24h", 0)
+            name = result.get("name", crypto_id.title())
+            symbol = result.get("symbol", "").upper()
+
+            change_emoji = "📈" if change_24h >= 0 else "📉"
+            change_sign = "+" if change_24h >= 0 else ""
+
+            formatted = f"**{name} ({symbol})** {change_emoji}\n"
+            formatted += f"💰 Current Price: **${price:,.2f}**\n"
+            formatted += f"📊 24h Change: {change_sign}{change_24h:.2f}%"
+
+            return formatted
+
+        except Exception as e:
+            print(f"[DIRECT CRYPTO] Error: {e}")
+            return f"Crypto price error: {e}"
+
     def _handle_fluxmind_command(self, message: str) -> Optional[str]:
         """Handle FluxMind commands directly, bypassing the LLM.
 
@@ -4111,6 +4195,14 @@ Try these commands:
             if speak:
                 self._speak(search_response, emotion=emotion_reading.emotion if emotion_reading else None)
             return search_response
+
+        # ===== DIRECT CRYPTO HANDLER =====
+        # Bypass agent loop for crypto price requests to prevent hallucination
+        crypto_response = self._handle_direct_crypto(message)
+        if crypto_response:
+            if speak:
+                self._speak(crypto_response, emotion=emotion_reading.emotion if emotion_reading else None)
+            return crypto_response
 
         # Use fast model for simple queries (greetings, etc.)
         is_simple = self._is_simple_query(message)

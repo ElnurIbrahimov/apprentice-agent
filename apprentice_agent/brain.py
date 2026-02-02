@@ -1,10 +1,12 @@
 """Ollama API integration as the agent's reasoning engine."""
 
 import re
+import json
 import logging
 import concurrent.futures
 import atexit
 from enum import Enum
+from pathlib import Path
 from typing import Optional, Callable, Any
 import ollama
 
@@ -98,6 +100,12 @@ class OllamaBrain:
         self._last_model_used: str = self.model  # Track for metacognition
         self._query_count: int = 0  # Track queries for auto-reset
 
+        # Setup persistent history storage
+        self._history_dir = Config.CHROMADB_PATH.parent / "conversation"
+        self._history_dir.mkdir(parents=True, exist_ok=True)
+        self._history_file = self._history_dir / "history.json"
+        self._load_history()
+
         if warmup:
             self._warmup_models()
 
@@ -117,10 +125,37 @@ class OllamaBrain:
         except Exception:
             pass  # Silently fail if warmup doesn't work
 
+    def _load_history(self) -> None:
+        """Load conversation history from disk."""
+        try:
+            if self._history_file.exists():
+                data = json.loads(self._history_file.read_text(encoding="utf-8"))
+                self.conversation_history = data.get("history", [])
+                self._query_count = data.get("query_count", 0)
+                logger.info(f"[BRAIN] Loaded {len(self.conversation_history)} messages from history")
+        except (json.JSONDecodeError, IOError) as e:
+            logger.warning(f"[BRAIN] Could not load history: {e}")
+            self.conversation_history = []
+
+    def _save_history(self) -> None:
+        """Save conversation history to disk."""
+        try:
+            data = {
+                "history": self.conversation_history,
+                "query_count": self._query_count
+            }
+            self._history_file.write_text(
+                json.dumps(data, indent=2, ensure_ascii=False),
+                encoding="utf-8"
+            )
+        except IOError as e:
+            logger.warning(f"[BRAIN] Could not save history: {e}")
+
     def clear_history(self):
         """Clear conversation history to free memory."""
         self.conversation_history.clear()
         self._query_count = 0
+        self._save_history()
         logger.info("[BRAIN] Conversation history cleared")
 
     def reset_context(self, model: Optional[str] = None):
@@ -156,6 +191,7 @@ class OllamaBrain:
             if len(self.conversation_history) > 4:
                 self.conversation_history = self.conversation_history[-4:]
             self._query_count = 0
+            self._save_history()
 
     def think(
         self,
@@ -220,8 +256,86 @@ class OllamaBrain:
             # Enforce history limit to prevent unbounded memory growth
             if len(self.conversation_history) > self.MAX_HISTORY_LENGTH:
                 self.conversation_history = self.conversation_history[-self.MAX_HISTORY_LENGTH:]
+            # Persist to disk
+            self._save_history()
 
         return assistant_message
+
+    def think_stream(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        use_history: bool = True,
+        task_type: Optional[TaskType] = None,
+        tone_modifier: Optional[str] = None
+    ):
+        """Generate a streaming response using Ollama for reasoning tasks.
+
+        This is the streaming version of think() that yields chunks as they arrive.
+
+        Args:
+            prompt: The prompt to send to the model
+            system_prompt: Optional system prompt
+            use_history: Whether to include conversation history
+            task_type: Type of task for model routing (auto-detected if None)
+            tone_modifier: Optional emotional tone modifier from EvoEmo
+
+        Yields:
+            str: Response chunks as they are generated
+        """
+        # Check if auto-reset is needed to prevent slowdown
+        self._check_auto_reset()
+
+        # Select model based on task type
+        model = self._select_model(prompt, task_type)
+        self._last_model_used = model
+
+        # Prepend identity to system prompt
+        identity_prompt = get_identity_prompt()
+        if system_prompt:
+            full_system_prompt = f"{identity_prompt}\n\n{system_prompt}"
+        else:
+            full_system_prompt = identity_prompt
+
+        # Apply emotional tone modifier if provided (EvoEmo)
+        if tone_modifier:
+            full_system_prompt = f"{full_system_prompt}\n\n{tone_modifier}"
+
+        messages = []
+        if full_system_prompt:
+            messages.append({"role": "system", "content": full_system_prompt})
+        if use_history:
+            messages.extend(self.conversation_history)
+        messages.append({"role": "user", "content": prompt})
+
+        logger.debug(f"[BRAIN] Streaming call to {model}")
+
+        full_response = ""
+        try:
+            # Use Ollama's streaming API
+            stream = self.client.chat(model=model, messages=messages, stream=True)
+
+            for chunk in stream:
+                if chunk and "message" in chunk and "content" in chunk["message"]:
+                    content = chunk["message"]["content"]
+                    full_response += content
+                    yield content
+
+        except Exception as e:
+            logger.error(f"[BRAIN] Streaming error: {e}")
+            fallback = "I'm having trouble processing that right now. Please try again."
+            yield fallback
+            full_response = fallback
+
+        # Update history after streaming completes
+        if use_history and full_response:
+            self.conversation_history.append({"role": "user", "content": prompt})
+            self.conversation_history.append({"role": "assistant", "content": full_response})
+            # Enforce history limit
+            if len(self.conversation_history) > self.MAX_HISTORY_LENGTH:
+                self.conversation_history = self.conversation_history[-self.MAX_HISTORY_LENGTH:]
+            # Persist to disk
+            self._save_history()
 
     def _is_complex_query(self, prompt: str) -> bool:
         """Detect if a query is complex and needs cloud model.

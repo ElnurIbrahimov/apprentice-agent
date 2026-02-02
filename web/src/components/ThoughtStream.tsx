@@ -1,0 +1,122 @@
+import { useState, useEffect } from 'react';
+import type { Thought } from '../types';
+import { ArrowPathIcon } from '@heroicons/react/24/outline';
+
+const THOUGHT_ICONS: Record<string, string> = {
+  perceive: '🔍',
+  recall: '💾',
+  reason: '🧠',
+  decide: '⚡',
+  execute: '🔧',
+  reflect: '🪞',
+  uncertain: '❓',
+  eureka: '💡',
+};
+
+const THOUGHT_COLORS: Record<string, string> = {
+  perceive: 'border-blue-500',
+  recall: 'border-purple-500',
+  reason: 'border-yellow-500',
+  decide: 'border-green-500',
+  execute: 'border-orange-500',
+  reflect: 'border-pink-500',
+  uncertain: 'border-gray-500',
+  eureka: 'border-yellow-400',
+};
+
+export function ThoughtStream() {
+  const [thoughts, setThoughts] = useState<Thought[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [thoughtCount, setThoughtCount] = useState(0);
+
+  const fetchThoughts = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/thoughts');
+      if (res.ok) {
+        const data = await res.json();
+        setThoughts(data.thoughts || []);
+        setThoughtCount(data.thought_count || 0);
+      }
+    } catch (e) {
+      console.error('Failed to fetch thoughts:', e);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    fetchThoughts();
+    const interval = setInterval(fetchThoughts, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const clearThoughts = async () => {
+    try {
+      await fetch('/api/thoughts/clear', { method: 'POST' });
+      setThoughts([]);
+      setThoughtCount(0);
+    } catch (e) {
+      console.error('Failed to clear thoughts:', e);
+    }
+  };
+
+  return (
+    <div className="bg-chat-sidebar rounded-lg p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-chat-text font-medium flex items-center gap-2">
+          🧠 Inner Monologue
+          <span className="text-xs text-chat-text-secondary">({thoughtCount})</span>
+        </h3>
+        <div className="flex gap-2">
+          <button
+            onClick={fetchThoughts}
+            className="p-1 text-chat-text-secondary hover:text-chat-text rounded"
+            disabled={loading}
+          >
+            <ArrowPathIcon className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+          <button
+            onClick={clearThoughts}
+            className="text-xs text-chat-text-secondary hover:text-chat-text px-2 py-1 rounded hover:bg-chat-assistant"
+          >
+            Clear
+          </button>
+        </div>
+      </div>
+
+      <div className="space-y-2 max-h-64 overflow-y-auto">
+        {thoughts.length === 0 ? (
+          <div className="text-chat-text-secondary text-sm italic">
+            Waiting for AURA to think...
+          </div>
+        ) : (
+          thoughts.map((thought, i) => (
+            <div
+              key={i}
+              className={`text-sm p-2 bg-chat-assistant rounded border-l-2 ${
+                THOUGHT_COLORS[thought.type] || 'border-gray-500'
+              }`}
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <span>{THOUGHT_ICONS[thought.type] || '💭'}</span>
+                <span className="font-medium text-chat-text uppercase text-xs">
+                  {thought.type}
+                </span>
+                {thought.confidence && (
+                  <span className="text-chat-text-secondary text-xs">
+                    [{thought.confidence}%]
+                  </span>
+                )}
+              </div>
+              <div className="text-chat-text-secondary">
+                {thought.content.length > 100
+                  ? thought.content.slice(0, 100) + '...'
+                  : thought.content}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}

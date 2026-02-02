@@ -42,3 +42,6 @@ wheels/
 *.swp
 *.swo
 screenshots/
+
+# Node.js
+node_modules/
