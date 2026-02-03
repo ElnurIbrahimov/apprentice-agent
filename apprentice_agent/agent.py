@@ -4220,10 +4220,27 @@ Try these commands:
                 self._speak(crypto_response, emotion=emotion_reading.emotion if emotion_reading else None)
             return crypto_response
 
-        # Use fast model for simple queries (greetings, etc.)
+        # Classify task type explicitly for better model routing
         is_simple = self._is_simple_query(message)
+        message_lower = message.lower()
+
+        # Detect code/calculation tasks explicitly
+        code_patterns = [
+            'calculate', 'compute', 'factorial', 'fibonacci', 'prime',
+            'run code', 'execute code', 'run python', 'execute python',
+            'write code', 'write a function', 'write a script', 'implement',
+            'algorithm', 'sort', 'binary search', 'recursion',
+            'what is', 'what\'s'  # For math questions like "what's 20!"
+        ]
+        math_patterns = ['!', '+', '-', '*', '/', '^', '**', 'squared', 'cubed', 'power of']
+
+        is_code_task = any(p in message_lower for p in code_patterns)
+        is_math_task = any(p in message for p in math_patterns) and any(c.isdigit() for c in message)
+
         if is_simple:
             task_type = TaskType.SIMPLE
+        elif is_code_task or is_math_task:
+            task_type = TaskType.CODE
         else:
             task_type = None  # Let brain auto-detect
 

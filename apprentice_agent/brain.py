@@ -98,7 +98,8 @@ class OllamaBrain:
         self.model = Config.MODEL_NAME
         self.conversation_history: list[dict] = []
         self._last_model_used: str = self.model  # Track for metacognition
-        self._query_count: int = 0  # Track queries for auto-reset
+        self._query_count: int = 0  # Track queries for auto-reset (resets every 15)
+        self._total_query_count: int = 0  # Total queries (never resets)
 
         # Setup persistent history storage
         self._history_dir = Config.CHROMADB_PATH.parent / "conversation"
@@ -132,7 +133,8 @@ class OllamaBrain:
                 data = json.loads(self._history_file.read_text(encoding="utf-8"))
                 self.conversation_history = data.get("history", [])
                 self._query_count = data.get("query_count", 0)
-                logger.info(f"[BRAIN] Loaded {len(self.conversation_history)} messages from history")
+                self._total_query_count = data.get("total_query_count", 0)
+                logger.info(f"[BRAIN] Loaded {len(self.conversation_history)} messages from history (total queries: {self._total_query_count})")
         except (json.JSONDecodeError, IOError) as e:
             logger.warning(f"[BRAIN] Could not load history: {e}")
             self.conversation_history = []
@@ -142,7 +144,8 @@ class OllamaBrain:
         try:
             data = {
                 "history": self.conversation_history,
-                "query_count": self._query_count
+                "query_count": self._query_count,
+                "total_query_count": self._total_query_count
             }
             self._history_file.write_text(
                 json.dumps(data, indent=2, ensure_ascii=False),
@@ -185,8 +188,9 @@ class OllamaBrain:
     def _check_auto_reset(self):
         """Check if auto-reset is needed and perform it."""
         self._query_count += 1
+        self._total_query_count += 1  # Total count never resets
         if self._query_count >= self.AUTO_RESET_INTERVAL:
-            logger.info(f"[BRAIN] Auto-reset triggered after {self._query_count} queries")
+            logger.info(f"[BRAIN] Auto-reset triggered after {self._query_count} queries (total: {self._total_query_count})")
             # Keep last 4 messages (2 exchanges) for continuity
             if len(self.conversation_history) > 4:
                 self.conversation_history = self.conversation_history[-4:]

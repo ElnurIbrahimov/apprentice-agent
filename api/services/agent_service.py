@@ -179,7 +179,7 @@ class AgentService:
                 "aura_enabled": getattr(agent, 'aura_enabled', False),
                 "mood": self._get_mood(),
                 "memory_count": len(agent.memory.memories) if hasattr(agent.memory, 'memories') else 0,
-                "query_count": getattr(agent.brain, '_query_count', 0),
+                "query_count": getattr(agent.brain, '_total_query_count', 0),
                 "last_model_used": agent.brain.get_last_model_used()
             }
 
