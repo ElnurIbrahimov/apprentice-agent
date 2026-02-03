@@ -92,11 +92,12 @@ class WebSearchTool:
     name = "web_search"
     description = "Search the web using SearXNG"
 
-    # Primary instance (known working)
-    PRIMARY_INSTANCE = "https://serxng-deployment-production.up.railway.app"
+    # Primary instance - local SearXNG (fastest, no rate limits)
+    PRIMARY_INSTANCE = "http://localhost:8888"
 
-    # Fallback instances
+    # Fallback instances (if local is down)
     FALLBACK_INSTANCES = [
+        "https://serxng-deployment-production.up.railway.app",
         "https://searx.be",
         "https://search.sapti.me",
     ]
