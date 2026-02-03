@@ -84,27 +84,40 @@ class AgentService:
 
         return False
 
-    def chat(self, message: str, speak: bool = False) -> Dict[str, Any]:
+    def chat(self, message: str, speak: bool = False, model_override: Optional[str] = None) -> Dict[str, Any]:
         """Send a chat message to the agent.
 
         Args:
             message: User message
             speak: Enable TTS
+            model_override: Optional model to use instead of auto-selection
 
         Returns:
             Dict with response, fast_path flag, and mood
         """
         with self._agent_lock:
-            # Use agent.chat() which has direct handlers for search/crypto
-            # This bypasses the slow agent.run() loop and prevents hallucination
-            response = self.agent.chat(message, speak=speak)
+            # Set model override if provided
+            original_model = None
+            if model_override:
+                original_model = getattr(self.agent.brain, 'model', None)
+                self.agent.brain.model = model_override
+                logger.info(f"[AgentService] Using model override: {model_override}")
 
-            return {
-                "response": response,
-                "fast_path": self._was_fast_path(message),
-                "mood": self._get_mood(),
-                "model_used": self.agent.brain.get_last_model_used()
-            }
+            try:
+                # Use agent.chat() which has direct handlers for search/crypto
+                # This bypasses the slow agent.run() loop and prevents hallucination
+                response = self.agent.chat(message, speak=speak)
+
+                return {
+                    "response": response,
+                    "fast_path": self._was_fast_path(message),
+                    "mood": self._get_mood(),
+                    "model_used": self.agent.brain.get_last_model_used()
+                }
+            finally:
+                # Restore original model if we changed it
+                if original_model is not None:
+                    self.agent.brain.model = original_model
 
     def chat_stream(self, message: str) -> Generator[str, None, Dict[str, Any]]:
         """Stream a chat response from the agent.
@@ -234,6 +247,41 @@ class AgentService:
             return self.agent._is_simple_query(message)
         except Exception:
             return False
+
+    def get_available_models(self) -> Dict[str, Any]:
+        """Get list of available models (local and cloud)."""
+        with self._agent_lock:
+            try:
+                import requests
+                from apprentice_agent.config import VERIFIED_LOCAL_MODELS, VERIFIED_CLOUD_MODELS
+
+                local_models = []
+                cloud_models = list(VERIFIED_CLOUD_MODELS)
+
+                # Get locally installed models from Ollama
+                try:
+                    ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+                    response = requests.get(f"{ollama_host}/api/tags", timeout=5)
+                    if response.status_code == 200:
+                        local_models = [m["name"] for m in response.json().get("models", [])]
+                except Exception as e:
+                    logger.warning(f"[AgentService] Could not fetch local models: {e}")
+                    local_models = list(VERIFIED_LOCAL_MODELS)
+
+                current_model = getattr(self.agent.brain, 'model', 'auto')
+
+                return {
+                    "local": sorted(local_models),
+                    "cloud": sorted(cloud_models),
+                    "current": current_model
+                }
+            except Exception as e:
+                logger.error(f"[AgentService] Failed to get models: {e}")
+                return {
+                    "local": [],
+                    "cloud": [],
+                    "current": "unknown"
+                }
 
 
 # Global instance

@@ -2,8 +2,10 @@
 
 import asyncio
 import logging
+from typing import List
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from api.models.schemas import StatusResponse, HealthResponse, MoodState
 from api.services.agent_service import agent_service
@@ -11,6 +13,13 @@ from api.services.agent_service import agent_service
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["status"])
+
+
+class ModelsResponse(BaseModel):
+    """Response with available models."""
+    local_models: List[str]
+    cloud_models: List[str]
+    current_model: str
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -46,4 +55,26 @@ async def get_status() -> StatusResponse:
 
     except Exception as e:
         logger.error(f"[Status] Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/models", response_model=ModelsResponse)
+async def get_models() -> ModelsResponse:
+    """Get available models (local and cloud).
+
+    Returns:
+        List of available local and cloud models
+    """
+    try:
+        loop = asyncio.get_event_loop()
+        models = await loop.run_in_executor(None, agent_service.get_available_models)
+
+        return ModelsResponse(
+            local_models=models.get("local", []),
+            cloud_models=models.get("cloud", []),
+            current_model=models.get("current", "auto")
+        )
+
+    except Exception as e:
+        logger.error(f"[Models] Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

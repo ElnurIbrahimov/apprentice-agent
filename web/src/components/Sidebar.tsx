@@ -6,6 +6,7 @@ import {
   XMarkIcon,
   TrashIcon,
   Cog6ToothIcon,
+  ChevronDownIcon,
 } from '@heroicons/react/24/outline';
 import { SparklesIcon } from '@heroicons/react/24/solid';
 
@@ -15,6 +16,7 @@ interface SidebarProps {
 
 export function Sidebar({ onClose }: SidebarProps) {
   const [showSettings, setShowSettings] = useState(false);
+  const [showModelDropdown, setShowModelDropdown] = useState(false);
 
   const {
     mood,
@@ -22,6 +24,10 @@ export function Sidebar({ onClose }: SidebarProps) {
     setStatus,
     connectionStatus,
     clearMessages,
+    selectedModel,
+    setSelectedModel,
+    availableModels,
+    setAvailableModels,
   } = useChatStore();
 
   // Poll status every 5 seconds
@@ -42,6 +48,24 @@ export function Sidebar({ onClose }: SidebarProps) {
     const interval = setInterval(fetchStatus, 5000);
     return () => clearInterval(interval);
   }, [setStatus]);
+
+  // Fetch available models on mount
+  useEffect(() => {
+    const fetchModels = async () => {
+      try {
+        const response = await fetch('/api/models');
+        if (response.ok) {
+          const data = await response.json();
+          const allModels = [...data.local_models, ...data.cloud_models];
+          setAvailableModels(allModels);
+        }
+      } catch (e) {
+        console.error('Failed to fetch models:', e);
+      }
+    };
+
+    fetchModels();
+  }, [setAvailableModels]);
 
   const handleClearHistory = async () => {
     if (window.confirm('Clear all messages?')) {
@@ -120,6 +144,58 @@ export function Sidebar({ onClose }: SidebarProps) {
           {/* Gradient divider */}
           <div className="divider-gradient" />
 
+          {/* Model Selector */}
+          <div>
+            <h3 className="text-chat-text-secondary text-xs uppercase tracking-wider mb-3 font-medium">
+              Model Selection
+            </h3>
+            <div className="relative">
+              <button
+                onClick={() => setShowModelDropdown(!showModelDropdown)}
+                className="w-full flex items-center justify-between p-3 rounded-lg bg-chat-assistant/30 hover:bg-chat-assistant/50 transition-colors duration-200 border border-chat-border/50"
+              >
+                <span className="text-chat-text text-sm font-medium truncate">
+                  {selectedModel || '🤖 Auto (AURA decides)'}
+                </span>
+                <ChevronDownIcon className={`w-4 h-4 text-chat-text-secondary transition-transform duration-200 ${showModelDropdown ? 'rotate-180' : ''}`} />
+              </button>
+
+              {showModelDropdown && (
+                <div className="absolute z-50 w-full mt-1 bg-chat-sidebar border border-chat-border rounded-lg shadow-xl max-h-60 overflow-y-auto">
+                  <button
+                    onClick={() => {
+                      setSelectedModel(null);
+                      setShowModelDropdown(false);
+                    }}
+                    className={`w-full text-left px-3 py-2 text-sm hover:bg-chat-assistant/50 transition-colors ${
+                      !selectedModel ? 'bg-purple-600/20 text-purple-400' : 'text-chat-text'
+                    }`}
+                  >
+                    🤖 Auto (AURA decides)
+                  </button>
+                  <div className="border-t border-chat-border/50 my-1" />
+                  {availableModels.map((model) => (
+                    <button
+                      key={model}
+                      onClick={() => {
+                        setSelectedModel(model);
+                        setShowModelDropdown(false);
+                      }}
+                      className={`w-full text-left px-3 py-2 text-sm hover:bg-chat-assistant/50 transition-colors truncate ${
+                        selectedModel === model ? 'bg-purple-600/20 text-purple-400' : 'text-chat-text'
+                      }`}
+                    >
+                      {model.includes('-cloud') ? '☁️ ' : '💻 '}{model}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Gradient divider */}
+          <div className="divider-gradient" />
+
           {/* Stats */}
           {status && (
             <div>
@@ -128,11 +204,11 @@ export function Sidebar({ onClose }: SidebarProps) {
               </h3>
               <div className="space-y-3 text-sm">
                 <div className="flex justify-between items-center p-2 rounded-lg hover:bg-chat-assistant/30 transition-colors duration-200">
-                  <span className="text-chat-text-secondary">Model</span>
-                  <span className="text-chat-text font-medium">{status.model}</span>
+                  <span className="text-chat-text-secondary">Default Model</span>
+                  <span className="text-chat-text font-medium text-xs">{status.model}</span>
                 </div>
                 <div className="flex justify-between items-center p-2 rounded-lg hover:bg-chat-assistant/30 transition-colors duration-200">
-                  <span className="text-chat-text-secondary">Last Model</span>
+                  <span className="text-chat-text-secondary">Last Used</span>
                   <span className="text-chat-text text-xs truncate max-w-[120px] font-medium">
                     {status.last_model_used || '-'}
                   </span>

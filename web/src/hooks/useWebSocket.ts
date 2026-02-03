@@ -174,7 +174,7 @@ export function useWebSocket() {
     }
   }, [addMessage, appendToMessage, setMessageStreaming, setMood, setIsLoading, setError]);
 
-  const sendMessage = useCallback((message: string) => {
+  const sendMessage = useCallback((message: string, modelOverride?: string | null) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       setError('Not connected to server');
       return false;
@@ -190,11 +190,22 @@ export function useWebSocket() {
     setError(null);
     currentMessageId.current = null;
 
-    // Send to server
-    wsRef.current.send(JSON.stringify({
+    // Get selected model from store if not provided
+    const selectedModel = modelOverride !== undefined
+      ? modelOverride
+      : useChatStore.getState().selectedModel;
+
+    // Send to server with optional model override
+    const payload: { type: string; message: string; model?: string } = {
       type: 'chat',
       message,
-    }));
+    };
+
+    if (selectedModel) {
+      payload.model = selectedModel;
+    }
+
+    wsRef.current.send(JSON.stringify(payload));
 
     return true;
   }, [addMessage, setIsLoading, setError]);

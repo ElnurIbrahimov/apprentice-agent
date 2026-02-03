@@ -149,7 +149,8 @@ async def websocket_chat(websocket: WebSocket):
                 continue
 
             message = msg["message"]
-            logger.info(f"[WebSocket] Received: {message[:50]}...")
+            model_override = msg.get("model")  # Optional model override
+            logger.info(f"[WebSocket] Received: {message[:50]}..." + (f" (model: {model_override})" if model_override else ""))
 
             try:
                 loop = asyncio.get_event_loop()
@@ -158,7 +159,7 @@ async def websocket_chat(websocket: WebSocket):
                 # Run in executor to avoid blocking the event loop
                 result = await loop.run_in_executor(
                     None,
-                    lambda: agent_service.chat(message, speak=False)
+                    lambda: agent_service.chat(message, speak=False, model_override=model_override)
                 )
 
                 # Send response as single chunk

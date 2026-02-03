@@ -20,6 +20,12 @@ interface ChatState {
   status: StatusResponse | null;
   setStatus: (status: StatusResponse | null) => void;
 
+  // Model selection
+  selectedModel: string | null; // null = auto (let AURA decide)
+  availableModels: string[];
+  setSelectedModel: (model: string | null) => void;
+  setAvailableModels: (models: string[]) => void;
+
   // UI State
   isLoading: boolean;
   setIsLoading: (loading: boolean) => void;
@@ -86,6 +92,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setMood: (mood) => set({ mood }),
   status: null,
   setStatus: (status) => set({ status, mood: status?.mood || get().mood }),
+
+  // Model selection
+  selectedModel: null, // null = auto
+  availableModels: [],
+  setSelectedModel: (model) => set({ selectedModel: model }),
+  setAvailableModels: (models) => set({ availableModels: models }),
 
   // UI State
   isLoading: false,
