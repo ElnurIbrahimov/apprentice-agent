@@ -381,3 +381,37 @@ body {
 .send-btn-active.has-text:hover {
   box-shadow: 0 0 20px var(--glow-purple);
 }
+
+/* =============================================
+   TOAST ANIMATIONS
+   ============================================= */
+
+@keyframes slide-in {
+  0% {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in {
+  animation: slide-in 0.3s ease-out forwards;
+}
+
+@keyframes slide-out {
+  0% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+}
+
+.animate-slide-out {
+  animation: slide-out 0.3s ease-out forwards;
+}

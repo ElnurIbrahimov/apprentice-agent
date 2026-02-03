@@ -1,52 +1,35 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { XMarkIcon } from '@heroicons/react/24/outline';
+import { useSettingsStore, type Settings } from '../store/settingsStore';
+import { toast } from './Toast';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-interface Settings {
-  theme: 'dark' | 'light' | 'system';
-  fontSize: 'small' | 'medium' | 'large';
-  showThinking: boolean;
-  autoScroll: boolean;
-  soundEnabled: boolean;
-}
-
-const defaultSettings: Settings = {
-  theme: 'dark',
-  fontSize: 'medium',
-  showThinking: true,
-  autoScroll: true,
-  soundEnabled: false,
-};
-
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
-  const [settings, setSettings] = useState<Settings>(defaultSettings);
+  const { settings, updateSettings, resetSettings } = useSettingsStore();
+  const [localSettings, setLocalSettings] = useState<Settings>(settings);
   const [saved, setSaved] = useState(false);
 
-  // Load settings from localStorage
-  useEffect(() => {
-    const stored = localStorage.getItem('aura-settings');
-    if (stored) {
-      try {
-        setSettings({ ...defaultSettings, ...JSON.parse(stored) });
-      } catch (e) {
-        console.error('Failed to load settings:', e);
-      }
-    }
-  }, []);
-
   const handleSave = () => {
-    localStorage.setItem('aura-settings', JSON.stringify(settings));
+    updateSettings(localSettings);
     setSaved(true);
+    toast.success('Settings saved', 'Your preferences have been updated');
     setTimeout(() => setSaved(false), 2000);
   };
 
   const handleReset = () => {
-    setSettings(defaultSettings);
-    localStorage.removeItem('aura-settings');
+    resetSettings();
+    setLocalSettings({
+      theme: 'dark',
+      fontSize: 'medium',
+      showThinking: true,
+      autoScroll: true,
+      soundEnabled: false,
+    });
+    toast.info('Settings reset', 'All settings restored to defaults');
   };
 
   if (!isOpen) return null;
@@ -82,8 +65,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               <div className="flex items-center justify-between">
                 <label className="text-sm text-chat-text-secondary">Theme</label>
                 <select
-                  value={settings.theme}
-                  onChange={(e) => setSettings({ ...settings, theme: e.target.value as Settings['theme'] })}
+                  value={localSettings.theme}
+                  onChange={(e) => setLocalSettings({ ...localSettings, theme: e.target.value as Settings['theme'] })}
                   className="bg-chat-bg border border-chat-border rounded-lg px-3 py-1.5 text-sm text-chat-text focus:outline-none focus:ring-2 focus:ring-purple-500"
                 >
                   <option value="dark">Dark</option>
@@ -96,8 +79,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               <div className="flex items-center justify-between">
                 <label className="text-sm text-chat-text-secondary">Font Size</label>
                 <select
-                  value={settings.fontSize}
-                  onChange={(e) => setSettings({ ...settings, fontSize: e.target.value as Settings['fontSize'] })}
+                  value={localSettings.fontSize}
+                  onChange={(e) => setLocalSettings({ ...localSettings, fontSize: e.target.value as Settings['fontSize'] })}
                   className="bg-chat-bg border border-chat-border rounded-lg px-3 py-1.5 text-sm text-chat-text focus:outline-none focus:ring-2 focus:ring-purple-500"
                 >
                   <option value="small">Small</option>
@@ -119,14 +102,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   <p className="text-xs text-chat-text-secondary/70">Display AURA's thought process</p>
                 </div>
                 <button
-                  onClick={() => setSettings({ ...settings, showThinking: !settings.showThinking })}
+                  onClick={() => setLocalSettings({ ...localSettings, showThinking: !localSettings.showThinking })}
                   className={`relative w-11 h-6 rounded-full transition-colors ${
-                    settings.showThinking ? 'bg-purple-600' : 'bg-chat-border'
+                    localSettings.showThinking ? 'bg-purple-600' : 'bg-chat-border'
                   }`}
                 >
                   <span
                     className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${
-                      settings.showThinking ? 'translate-x-5' : ''
+                      localSettings.showThinking ? 'translate-x-5' : ''
                     }`}
                   />
                 </button>
@@ -139,14 +122,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   <p className="text-xs text-chat-text-secondary/70">Scroll to new messages</p>
                 </div>
                 <button
-                  onClick={() => setSettings({ ...settings, autoScroll: !settings.autoScroll })}
+                  onClick={() => setLocalSettings({ ...localSettings, autoScroll: !localSettings.autoScroll })}
                   className={`relative w-11 h-6 rounded-full transition-colors ${
-                    settings.autoScroll ? 'bg-purple-600' : 'bg-chat-border'
+                    localSettings.autoScroll ? 'bg-purple-600' : 'bg-chat-border'
                   }`}
                 >
                   <span
                     className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${
-                      settings.autoScroll ? 'translate-x-5' : ''
+                      localSettings.autoScroll ? 'translate-x-5' : ''
                     }`}
                   />
                 </button>
@@ -159,14 +142,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   <p className="text-xs text-chat-text-secondary/70">Play sounds for notifications</p>
                 </div>
                 <button
-                  onClick={() => setSettings({ ...settings, soundEnabled: !settings.soundEnabled })}
+                  onClick={() => setLocalSettings({ ...localSettings, soundEnabled: !localSettings.soundEnabled })}
                   className={`relative w-11 h-6 rounded-full transition-colors ${
-                    settings.soundEnabled ? 'bg-purple-600' : 'bg-chat-border'
+                    localSettings.soundEnabled ? 'bg-purple-600' : 'bg-chat-border'
                   }`}
                 >
                   <span
                     className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${
-                      settings.soundEnabled ? 'translate-x-5' : ''
+                      localSettings.soundEnabled ? 'translate-x-5' : ''
                     }`}
                   />
                 </button>

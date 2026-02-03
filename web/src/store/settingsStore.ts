@@ -1,0 +1,54 @@
+import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
+
+export interface Settings {
+  theme: 'dark' | 'light' | 'system';
+  fontSize: 'small' | 'medium' | 'large';
+  showThinking: boolean;
+  autoScroll: boolean;
+  soundEnabled: boolean;
+}
+
+interface SettingsState {
+  settings: Settings;
+  updateSettings: (settings: Partial<Settings>) => void;
+  resetSettings: () => void;
+}
+
+const defaultSettings: Settings = {
+  theme: 'dark',
+  fontSize: 'medium',
+  showThinking: true,
+  autoScroll: true,
+  soundEnabled: false,
+};
+
+// Map font size to CSS class
+export const fontSizeClasses: Record<Settings['fontSize'], string> = {
+  small: 'text-sm',
+  medium: 'text-base',
+  large: 'text-lg',
+};
+
+export const useSettingsStore = create<SettingsState>()(
+  persist(
+    (set) => ({
+      settings: defaultSettings,
+      updateSettings: (newSettings) =>
+        set((state) => ({
+          settings: { ...state.settings, ...newSettings },
+        })),
+      resetSettings: () => set({ settings: defaultSettings }),
+    }),
+    {
+      name: 'aura-settings',
+    }
+  )
+);
+
+// Apply font size to document
+export const applyFontSize = (fontSize: Settings['fontSize']) => {
+  const root = document.documentElement;
+  root.classList.remove('text-sm', 'text-base', 'text-lg');
+  root.classList.add(fontSizeClasses[fontSize]);
+};

@@ -3914,19 +3914,55 @@ Output ONLY the JSON object, no other text."""
         import re
         message_lower = message.lower().strip()
 
-        # Patterns for explicit search requests
+        # Keywords that indicate "search online" intent
+        online_keywords = ['online', 'web', 'internet', 'google', 'latest', 'current', 'recent', 'news', 'today']
+
+        # Check if this is an ambiguous research request (no topic or unclear intent)
+        ambiguous_patterns = [
+            r'^(?:do\s+)?(?:a\s+)?research$',
+            r'^(?:do\s+)?(?:a\s+)?(?:deep\s+)?search$',
+            r'^(?:can\s+you\s+)?research$',
+            r'^(?:please\s+)?research$',
+            r'^look\s+(?:something\s+)?up$',
+            r'^find\s+(?:something|info|information)$',
+        ]
+
+        for pattern in ambiguous_patterns:
+            if re.match(pattern, message_lower, re.IGNORECASE):
+                return ("I'd be happy to help with research! 🔍\n\n"
+                        "**What would you like me to do?**\n"
+                        "1. **Search online** - Get the latest info from the web\n"
+                        "2. **Use my knowledge** - Answer from what I already know\n\n"
+                        "Just tell me the topic! For example:\n"
+                        "- \"Search online for quantum computing\"\n"
+                        "- \"Tell me about quantum computing\"\n"
+                        "- \"Research latest AI news online\"")
+
+        # Patterns for EXPLICIT ONLINE search requests
         search_patterns = [
+            # Direct search commands
             r'^search\s+(?:online\s+)?(?:the\s+web\s+)?(?:for\s+)?["\']?(.+?)["\']?$',
             r'^(?:web\s+)?search[:\s]+["\']?(.+?)["\']?$',
             r'^look\s+up\s+["\']?(.+?)["\']?$',
             r'^google\s+["\']?(.+?)["\']?$',
             r'^find\s+(?:online|on the web)\s+["\']?(.+?)["\']?$',
             r'^search\s+for\s+["\']?(.+?)["\']?[.,!?]?$',
-            # More flexible patterns
+            # Flexible patterns
             r'^do\s+(?:a\s+)?(?:deep\s+)?search\s+(?:online\s+)?(?:for\s+|about\s+|on\s+)?["\']?(.+?)["\']?$',
             r'^(?:please\s+)?(?:can\s+you\s+)?search\s+(?:online\s+)?(?:for\s+|about\s+)?["\']?(.+?)["\']?$',
-            r'^research\s+(?:about\s+|on\s+)?["\']?(.+?)["\']?$',
             r'^(?:deep\s+)?search\s+(?:online\s+)?(?:for\s+|about\s+|on\s+)?["\']?(.+?)["\']?$',
+            # Research with online intent
+            r'^research\s+(?:online\s+)?(?:about\s+|on\s+)?["\']?(.+?)["\']?\s+online$',
+            r'^research\s+online\s+(?:about\s+|on\s+|for\s+)?["\']?(.+?)["\']?$',
+            # News/latest patterns (always online)
+            r'^(?:get|find|show)\s+(?:me\s+)?(?:the\s+)?(?:latest|recent|current)\s+(?:news\s+)?(?:on|about|for)\s+["\']?(.+?)["\']?$',
+            r'^what(?:\'s|\s+is)\s+(?:the\s+)?(?:latest|recent|current)\s+(?:news\s+)?(?:on|about)\s+["\']?(.+?)["\']?$',
+            # Lookup patterns
+            r'^look\s+(?:this\s+)?up[:\s]+["\']?(.+?)["\']?$',
+            r'^(?:can\s+you\s+)?(?:please\s+)?look\s+up\s+["\']?(.+?)["\']?$',
+            # Find info patterns
+            r'^find\s+(?:me\s+)?(?:info|information)\s+(?:on|about)\s+["\']?(.+?)["\']?$',
+            r'^get\s+(?:me\s+)?(?:info|information)\s+(?:on|about)\s+["\']?(.+?)["\']?$',
         ]
 
         # Extract the search query
@@ -3938,6 +3974,22 @@ Output ONLY the JSON object, no other text."""
                 # Remove trailing punctuation
                 query = re.sub(r'[.,!?]+$', '', query).strip()
                 break
+
+        # If no explicit pattern matched, check for "research X" with online keywords
+        if not query:
+            research_match = re.match(r'^(?:do\s+)?(?:a\s+)?research\s+(?:about\s+|on\s+)?["\']?(.+?)["\']?$', message_lower)
+            if research_match:
+                potential_query = research_match.group(1).strip()
+                # Check if any online keyword is present
+                if any(kw in message_lower for kw in online_keywords):
+                    query = potential_query
+                else:
+                    # Ambiguous - has topic but unclear if online or knowledge
+                    return (f"I can help you research **{potential_query}**! 🔍\n\n"
+                            f"Would you like me to:\n"
+                            f"1. **Search online** - \"search online for {potential_query}\"\n"
+                            f"2. **Use my knowledge** - \"tell me about {potential_query}\"\n\n"
+                            f"Which would you prefer?")
 
         if not query:
             return None  # Not an explicit search request

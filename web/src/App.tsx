@@ -7,7 +7,9 @@ import { GuardianPanel } from './components/GuardianPanel';
 import { NeuroDreamPanel } from './components/NeuroDreamPanel';
 import { ToolsPanel } from './components/ToolsPanel';
 import { AMEMPanel } from './components/AMEMPanel';
+import { ToastContainer, useToastStore } from './components/Toast';
 import { useChatStore } from './store/chatStore';
+import { useSettingsStore, applyFontSize } from './store/settingsStore';
 import {
   Bars3Icon,
   ChatBubbleLeftRightIcon,
@@ -26,8 +28,15 @@ const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: 
 
 function App() {
   const { sidebarOpen, setSidebarOpen, toggleSidebar } = useChatStore();
+  const { settings } = useSettingsStore();
+  const { toasts, removeToast } = useToastStore();
   const [isMobile, setIsMobile] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>('chat');
+
+  // Apply font size setting
+  useEffect(() => {
+    applyFontSize(settings.fontSize);
+  }, [settings.fontSize]);
 
   // Detect mobile viewport
   useEffect(() => {
@@ -87,6 +96,8 @@ function App() {
 
   return (
     <div className="flex h-screen bg-chat-bg">
+      {/* Toast notifications */}
+      <ToastContainer toasts={toasts} onDismiss={removeToast} />
       {/* Sidebar - Desktop: fixed, Mobile: overlay */}
       <aside
         className={`
