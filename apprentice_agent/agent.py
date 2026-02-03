@@ -3922,6 +3922,11 @@ Output ONLY the JSON object, no other text."""
             r'^google\s+["\']?(.+?)["\']?$',
             r'^find\s+(?:online|on the web)\s+["\']?(.+?)["\']?$',
             r'^search\s+for\s+["\']?(.+?)["\']?[.,!?]?$',
+            # More flexible patterns
+            r'^do\s+(?:a\s+)?(?:deep\s+)?search\s+(?:online\s+)?(?:for\s+|about\s+|on\s+)?["\']?(.+?)["\']?$',
+            r'^(?:please\s+)?(?:can\s+you\s+)?search\s+(?:online\s+)?(?:for\s+|about\s+)?["\']?(.+?)["\']?$',
+            r'^research\s+(?:about\s+|on\s+)?["\']?(.+?)["\']?$',
+            r'^(?:deep\s+)?search\s+(?:online\s+)?(?:for\s+|about\s+|on\s+)?["\']?(.+?)["\']?$',
         ]
 
         # Extract the search query

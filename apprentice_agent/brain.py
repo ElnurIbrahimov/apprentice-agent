@@ -1,5 +1,6 @@
 """Ollama API integration as the agent's reasoning engine."""
 
+import os
 import re
 import json
 import logging
@@ -93,8 +94,25 @@ class OllamaBrain:
     # Auto-reset context after this many queries to prevent slowdown
     AUTO_RESET_INTERVAL = 15  # Reset every 15 queries
 
+    # Ollama cloud configuration
+    OLLAMA_CLOUD_HOST = "https://ollama.com"
+
     def __init__(self, warmup: bool = True):
+        # Local Ollama client (for local models)
         self.client = ollama.Client(host=Config.OLLAMA_HOST)
+
+        # Cloud Ollama client (for cloud models like deepseek-v3.1:671b-cloud)
+        self._cloud_client = None
+        api_key = os.getenv("OLLAMA_API_KEY")
+        if api_key:
+            self._cloud_client = ollama.Client(
+                host=self.OLLAMA_CLOUD_HOST,
+                headers={"Authorization": f"Bearer {api_key}"}
+            )
+            print(f"[BRAIN] Ollama cloud client initialized")
+        else:
+            print(f"[BRAIN] Warning: OLLAMA_API_KEY not set, cloud models unavailable")
+
         self.model = Config.MODEL_NAME
         self.conversation_history: list[dict] = []
         self._last_model_used: str = self.model  # Track for metacognition
@@ -109,6 +127,21 @@ class OllamaBrain:
 
         if warmup:
             self._warmup_models()
+
+    def _get_client_for_model(self, model: str) -> ollama.Client:
+        """Get the appropriate client (local or cloud) based on model name.
+
+        Cloud models end with '-cloud' suffix and require the cloud client.
+        """
+        if model.endswith("-cloud"):
+            if self._cloud_client:
+                print(f"[BRAIN] Using cloud client for model: {model}")
+                return self._cloud_client
+            else:
+                print(f"[BRAIN] Warning: Cloud model {model} requested but no API key, falling back to local")
+                # Fall back to local model
+                return self.client
+        return self.client
 
     def _warmup_models(self):
         """Pre-load the fast model to reduce first-response latency."""
@@ -241,9 +274,12 @@ class OllamaBrain:
 
         logger.debug(f"[BRAIN] Calling {model} with timeout={LLM_TIMEOUT}s")
 
+        # Get appropriate client (local or cloud)
+        client = self._get_client_for_model(model)
+
         # Call with timeout protection
         response = call_with_timeout(
-            lambda: self.client.chat(model=model, messages=messages),
+            lambda: client.chat(model=model, messages=messages),
             timeout=LLM_TIMEOUT,
             default=None
         )
@@ -314,10 +350,13 @@ class OllamaBrain:
 
         logger.debug(f"[BRAIN] Streaming call to {model}")
 
+        # Get appropriate client (local or cloud)
+        client = self._get_client_for_model(model)
+
         full_response = ""
         try:
             # Use Ollama's streaming API
-            stream = self.client.chat(model=model, messages=messages, stream=True)
+            stream = client.chat(model=model, messages=messages, stream=True)
 
             for chunk in stream:
                 if chunk and "message" in chunk and "content" in chunk["message"]:
@@ -361,10 +400,13 @@ class OllamaBrain:
         complex_patterns = [
             'analyze', 'research', 'compare', 'explain in detail',
             'write an essay', 'write a report', 'comprehensive',
-            'thorough', 'in-depth', 'deep dive', 'investigate',
+            'thorough', 'in-depth', 'deep dive', 'deep search', 'investigate',
             'pros and cons', 'advantages and disadvantages',
             'step by step', 'detailed explanation', 'summarize',
-            'review', 'evaluate', 'assess', 'critique'
+            'review', 'evaluate', 'assess', 'critique',
+            # Additional patterns for research/analysis
+            'explain how', 'how does', 'what are the', 'tell me about',
+            'architecture', 'technical', 'detailed', 'overview'
         ]
 
         if any(pattern in prompt_lower for pattern in complex_patterns):

@@ -410,21 +410,41 @@ def _get_neurodream_sync() -> dict:
 
 def _trigger_sleep_sync() -> dict:
     """Sync helper for sleep trigger."""
+    import time
+    start = time.time()
+    logger.info("[NeuroDream] Starting sleep trigger...")
+
     agent = agent_service.agent
-    if hasattr(agent, 'neurodream') and agent.neurodream:
+    if not hasattr(agent, 'neurodream') or not agent.neurodream:
+        return {"success": False, "error": "NeuroDream not available"}
+
+    try:
+        logger.info("[NeuroDream] Calling enter_sleep...")
         result = agent.neurodream.enter_sleep(trigger="web_ui")
+        elapsed = time.time() - start
+        logger.info(f"[NeuroDream] enter_sleep completed in {elapsed:.2f}s: {result}")
         return {"success": True, "result": result}
-    return {"success": False, "error": "NeuroDream not available"}
+    except Exception as e:
+        logger.error(f"[NeuroDream] enter_sleep error: {e}")
+        return {"success": False, "error": str(e)}
 
 
 @router.post("/neurodream/sleep")
 async def trigger_sleep():
     """Trigger a sleep cycle."""
+    import concurrent.futures
     try:
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, _trigger_sleep_sync)
-        return result
+        # Use dedicated executor with timeout to avoid blocking
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_trigger_sleep_sync)
+            try:
+                result = future.result(timeout=10)  # 10 second timeout
+                return result
+            except concurrent.futures.TimeoutError:
+                logger.error("[NeuroDream] Sleep trigger timed out after 10s")
+                return {"success": False, "error": "Operation timed out - enter_sleep is blocking"}
     except Exception as e:
+        logger.error(f"[NeuroDream] Sleep trigger exception: {e}")
         return {"success": False, "error": str(e)}
 
 
