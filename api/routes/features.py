@@ -408,28 +408,42 @@ def _get_neurodream_sync() -> dict:
     return {"enabled": False}
 
 
+def _trigger_sleep_sync() -> dict:
+    """Sync helper for sleep trigger."""
+    agent = agent_service.agent
+    if hasattr(agent, 'neurodream') and agent.neurodream:
+        result = agent.neurodream.enter_sleep(trigger="web_ui")
+        return {"success": True, "result": result}
+    return {"success": False, "error": "NeuroDream not available"}
+
+
 @router.post("/neurodream/sleep")
 async def trigger_sleep():
     """Trigger a sleep cycle."""
     try:
-        agent = agent_service.agent
-        if hasattr(agent, 'neurodream') and agent.neurodream:
-            result = agent.neurodream.enter_sleep(trigger="web_ui")
-            return {"success": True, "result": result}
-        return {"success": False, "error": "NeuroDream not available"}
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, _trigger_sleep_sync)
+        return result
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+def _trigger_wake_sync() -> dict:
+    """Sync helper for wake trigger."""
+    agent = agent_service.agent
+    if hasattr(agent, 'neurodream') and agent.neurodream:
+        result = agent.neurodream.wake_up(reason="user_request")
+        return {"success": True, "result": result}
+    return {"success": False, "error": "NeuroDream not available"}
 
 
 @router.post("/neurodream/wake")
 async def trigger_wake():
     """Wake up from sleep."""
     try:
-        agent = agent_service.agent
-        if hasattr(agent, 'neurodream') and agent.neurodream:
-            result = agent.neurodream.wake_up(reason="user_request")
-            return {"success": True, "result": result}
-        return {"success": False, "error": "NeuroDream not available"}
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, _trigger_wake_sync)
+        return result
     except Exception as e:
         return {"success": False, "error": str(e)}
 
