@@ -13,7 +13,10 @@ export function MessageInput({
   placeholder = 'Message AURA...',
 }: MessageInputProps) {
   const [message, setMessage] = useState('');
+  const [isFocused, setIsFocused] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const hasText = message.trim().length > 0;
 
   // Auto-resize textarea
   useEffect(() => {
@@ -50,37 +53,51 @@ export function MessageInput({
   };
 
   return (
-    <div className="border-t border-chat-border bg-chat-bg px-4 py-4">
+    <div className="border-t border-chat-border/50 bg-chat-bg/80 backdrop-blur-sm px-4 py-4">
       <form
         onSubmit={handleSubmit}
         className="max-w-3xl mx-auto relative"
       >
-        <div className="relative flex items-end bg-chat-assistant rounded-xl border border-chat-border focus-within:border-chat-accent transition-colors">
+        <div
+          className={`
+            relative flex items-end bg-chat-assistant/80 rounded-xl border
+            transition-all duration-300 ease-out
+            ${isFocused
+              ? 'border-aura-purple/60 shadow-[0_0_0_2px_rgba(139,92,246,0.15),0_0_20px_rgba(139,92,246,0.2)]'
+              : 'border-chat-border/50 hover:border-chat-border'
+            }
+          `}
+        >
           <textarea
             ref={textareaRef}
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={handleKeyDown}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => setIsFocused(false)}
             placeholder={placeholder}
             disabled={disabled}
             rows={1}
-            className="input-textarea flex-1 bg-transparent text-chat-text placeholder-chat-text-secondary px-4 py-3 pr-12 outline-none resize-none"
+            className="input-textarea flex-1 bg-transparent text-chat-text placeholder-chat-text-secondary px-4 py-3 pr-14 outline-none resize-none"
           />
 
           <button
             type="submit"
-            disabled={disabled || !message.trim()}
-            className={`absolute right-2 bottom-2 p-2 rounded-lg transition-colors ${
-              disabled || !message.trim()
-                ? 'text-chat-text-secondary cursor-not-allowed'
-                : 'text-chat-accent hover:bg-chat-accent hover:text-white'
-            }`}
+            disabled={disabled || !hasText}
+            className={`
+              absolute right-2 bottom-2 p-2.5 rounded-lg
+              transition-all duration-300 ease-out
+              ${disabled || !hasText
+                ? 'text-chat-text-secondary cursor-not-allowed scale-100'
+                : 'bg-gradient-to-r from-aura-purple to-aura-blue text-white scale-105 shadow-glow-purple hover:shadow-glow-purple-lg hover:scale-110'
+              }
+            `}
           >
-            <PaperAirplaneIcon className="w-5 h-5" />
+            <PaperAirplaneIcon className={`w-5 h-5 transition-transform duration-300 ${hasText && !disabled ? '-rotate-45' : ''}`} />
           </button>
         </div>
 
-        <div className="mt-2 text-xs text-chat-text-secondary text-center">
+        <div className="mt-2 text-xs text-chat-text-secondary text-center font-light tracking-wide">
           Press Enter to send, Shift+Enter for new line
         </div>
       </form>

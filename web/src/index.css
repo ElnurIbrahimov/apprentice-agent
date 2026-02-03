@@ -2,19 +2,38 @@
 @tailwind components;
 @tailwind utilities;
 
+/* CSS Custom Properties for easy theming */
 :root {
+  /* Base theme */
   font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
-
   color-scheme: dark;
   color: #ececf1;
   background-color: #343541;
-
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  /* Glow colors */
+  --glow-purple: rgba(139, 92, 246, 0.4);
+  --glow-purple-strong: rgba(139, 92, 246, 0.6);
+  --glow-green: rgba(16, 163, 127, 0.4);
+  --glow-blue: rgba(59, 130, 246, 0.4);
+  --glow-yellow: rgba(234, 179, 8, 0.4);
+  --glow-red: rgba(239, 68, 68, 0.4);
+  --glow-orange: rgba(249, 115, 22, 0.4);
+
+  /* Accent colors */
+  --accent-purple: #8b5cf6;
+  --accent-blue: #3b82f6;
+  --accent-green: #10a37f;
+
+  /* Transition defaults */
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.25s ease;
+  --transition-slow: 0.4s ease;
 }
 
 * {
@@ -51,14 +70,168 @@ body {
   background: #666;
 }
 
-/* Markdown styles */
+/* =============================================
+   GLASS MORPHISM UTILITIES
+   ============================================= */
+
+.glass {
+  background: rgba(32, 33, 35, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(77, 77, 79, 0.3);
+}
+
+.glass-subtle {
+  background: rgba(32, 33, 35, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* =============================================
+   GLOW EFFECTS
+   ============================================= */
+
+.glow-purple {
+  box-shadow: 0 0 20px var(--glow-purple);
+}
+
+.glow-purple-hover:hover {
+  box-shadow: 0 0 25px var(--glow-purple-strong);
+}
+
+.glow-green {
+  box-shadow: 0 0 15px var(--glow-green);
+}
+
+.glow-input-focus:focus-within {
+  box-shadow: 0 0 0 2px var(--accent-purple), 0 0 20px var(--glow-purple);
+}
+
+/* =============================================
+   GRADIENT TEXT
+   ============================================= */
+
+.text-gradient-purple {
+  background: linear-gradient(135deg, #8b5cf6 0%, #3b82f6 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* =============================================
+   BUTTON ENHANCEMENTS
+   ============================================= */
+
+.btn-enhanced {
+  transition: all var(--transition-normal);
+}
+
+.btn-enhanced:hover {
+  transform: scale(1.03);
+  box-shadow: 0 0 20px var(--glow-purple);
+}
+
+.btn-enhanced:active {
+  transform: scale(0.98);
+}
+
+.btn-glass {
+  background: rgba(68, 70, 84, 0.6);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  backdrop-filter: blur(4px);
+  transition: all var(--transition-normal);
+}
+
+.btn-glass:hover {
+  background: rgba(68, 70, 84, 0.8);
+  border-color: rgba(139, 92, 246, 0.5);
+  box-shadow: 0 0 20px var(--glow-purple);
+}
+
+/* =============================================
+   ANIMATION DELAYS FOR STAGGERED EFFECTS
+   ============================================= */
+
+.animation-delay-100 { animation-delay: 100ms; }
+.animation-delay-200 { animation-delay: 200ms; }
+.animation-delay-300 { animation-delay: 300ms; }
+.animation-delay-400 { animation-delay: 400ms; }
+.animation-delay-500 { animation-delay: 500ms; }
+
+/* =============================================
+   PROGRESS BAR ENHANCEMENTS
+   ============================================= */
+
+.progress-bar-animated {
+  animation: progress-fill 1s ease-out forwards;
+}
+
+.progress-gradient-green {
+  background: linear-gradient(90deg, #10a37f 0%, #14b8a6 100%);
+}
+
+.progress-gradient-mood {
+  background: linear-gradient(90deg, var(--mood-color-start, #10a37f) 0%, var(--mood-color-end, #14b8a6) 100%);
+}
+
+/* =============================================
+   SIDEBAR DIVIDER
+   ============================================= */
+
+.divider-gradient {
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(139, 92, 246, 0.3) 50%, transparent 100%);
+}
+
+/* =============================================
+   MOOD CARD GLOW
+   ============================================= */
+
+.mood-glow {
+  transition: box-shadow var(--transition-slow);
+}
+
+.mood-glow[data-mood="happy"],
+.mood-glow[data-mood="excited"] {
+  box-shadow: 0 0 20px rgba(234, 179, 8, 0.3);
+}
+
+.mood-glow[data-mood="calm"],
+.mood-glow[data-mood="confident"] {
+  box-shadow: 0 0 20px rgba(16, 163, 127, 0.3);
+}
+
+.mood-glow[data-mood="sad"],
+.mood-glow[data-mood="fearful"] {
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+}
+
+.mood-glow[data-mood="angry"],
+.mood-glow[data-mood="disgusted"] {
+  box-shadow: 0 0 20px rgba(239, 68, 68, 0.3);
+}
+
+.mood-glow[data-mood="curious"],
+.mood-glow[data-mood="thoughtful"] {
+  box-shadow: 0 0 20px rgba(139, 92, 246, 0.3);
+}
+
+.mood-glow[data-mood="neutral"],
+.mood-glow[data-mood="confused"] {
+  box-shadow: 0 0 15px rgba(142, 142, 160, 0.2);
+}
+
+/* =============================================
+   MARKDOWN STYLES
+   ============================================= */
+
 .prose {
   max-width: none;
 }
 
 .prose pre {
   background-color: #1e1e1e;
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 1rem;
   overflow-x: auto;
   margin: 0.5rem 0;
@@ -92,13 +265,17 @@ body {
 .prose a {
   color: #10a37f;
   text-decoration: underline;
+  transition: color var(--transition-fast);
 }
 
 .prose a:hover {
   color: #1a7f64;
 }
 
-/* Animation for typing indicator */
+/* =============================================
+   TYPING CURSOR ANIMATION
+   ============================================= */
+
 @keyframes blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
@@ -108,9 +285,82 @@ body {
   animation: blink 1s step-end infinite;
 }
 
-/* Textarea auto-resize helper */
+/* =============================================
+   TEXTAREA AUTO-RESIZE
+   ============================================= */
+
 .input-textarea {
   resize: none;
   overflow-y: auto;
   max-height: 200px;
+}
+
+/* =============================================
+   CONNECTED STATUS DOT ANIMATION
+   ============================================= */
+
+@keyframes connected-pulse {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4);
+  }
+  50% {
+    opacity: 0.8;
+    box-shadow: 0 0 0 4px rgba(34, 197, 94, 0);
+  }
+}
+
+.connected-dot {
+  animation: connected-pulse 2s ease-in-out infinite;
+}
+
+/* =============================================
+   RADIAL BACKGROUND FOR MAIN CONTENT
+   ============================================= */
+
+.bg-radial-content {
+  background:
+    radial-gradient(ellipse at center, rgba(68, 70, 84, 0.3) 0%, transparent 50%),
+    #343541;
+}
+
+.bg-radial-welcome {
+  background: radial-gradient(ellipse at center, rgba(139, 92, 246, 0.1) 0%, transparent 50%);
+}
+
+/* =============================================
+   ICON ANIMATIONS
+   ============================================= */
+
+@keyframes icon-pulse-glow {
+  0%, 100% {
+    filter: drop-shadow(0 0 8px rgba(139, 92, 246, 0.5));
+    transform: scale(1);
+  }
+  50% {
+    filter: drop-shadow(0 0 16px rgba(139, 92, 246, 0.8));
+    transform: scale(1.05);
+  }
+}
+
+.icon-glow-pulse {
+  animation: icon-pulse-glow 2s ease-in-out infinite;
+}
+
+/* =============================================
+   SEND BUTTON ACTIVE STATE
+   ============================================= */
+
+.send-btn-active {
+  transition: all var(--transition-normal);
+}
+
+.send-btn-active.has-text {
+  background: linear-gradient(135deg, #8b5cf6 0%, #3b82f6 100%);
+  color: white;
+  transform: scale(1.05);
+}
+
+.send-btn-active.has-text:hover {
+  box-shadow: 0 0 20px var(--glow-purple);
 }
