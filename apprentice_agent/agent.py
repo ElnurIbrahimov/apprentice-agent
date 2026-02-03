@@ -4036,6 +4036,165 @@ Output ONLY the JSON object, no other text."""
             print(f"[DIRECT CRYPTO] Error: {e}")
             return f"Crypto price error: {e}"
 
+    def _handle_direct_code(self, message: str) -> Optional[str]:
+        """Handle code execution requests directly, bypassing agent loop.
+
+        This ensures code is actually executed when the user asks for it.
+        Handles: "calculate X", "run python for X", "execute code for X", "what is X!" (factorial)
+
+        Args:
+            message: The user's message
+
+        Returns:
+            Formatted execution result if code request, None otherwise
+        """
+        import re
+        message_lower = message.lower().strip()
+
+        # Check if code_executor tool is available
+        if 'code_executor' not in self.tools:
+            return None
+
+        # Patterns that indicate code execution intent
+        execute_patterns = [
+            r'^(?:please\s+)?(?:run|execute)\s+(?:python\s+)?(?:code\s+)?(?:for|to)\s+(.+)$',
+            r'^(?:please\s+)?(?:write\s+and\s+)?(?:run|execute)\s+(?:python\s+)?(?:code\s+)?(?:for|to)\s+(.+)$',
+            r'^(?:please\s+)?calculate\s+(.+)$',
+            r'^(?:please\s+)?compute\s+(.+)$',
+            r'^what\s+is\s+(\d+)\s*[!]$',  # "what is 20!" -> factorial
+            r'^(\d+)\s*[!]$',  # "20!" -> factorial
+            r'^(?:please\s+)?(?:find|generate|show)\s+(?:the\s+)?(?:first\s+)?(\d+)\s+(?:fibonacci|fib)\s*(?:numbers?)?$',
+            r'^(?:please\s+)?(?:fibonacci|fib)\s+(?:sequence\s+)?(?:of\s+)?(\d+)$',
+        ]
+
+        task_description = None
+        code_to_run = None
+
+        for pattern in execute_patterns:
+            match = re.match(pattern, message_lower, re.IGNORECASE)
+            if match:
+                task_description = match.group(1).strip()
+                break
+
+        # Also check for explicit code in the message (```python ... ```)
+        code_block_match = re.search(r'```(?:python)?\s*\n?(.*?)\n?```', message, re.DOTALL | re.IGNORECASE)
+        if code_block_match:
+            code_to_run = code_block_match.group(1).strip()
+            task_description = "provided code"
+
+        if not task_description and not code_to_run:
+            return None  # Not a code execution request
+
+        print(f"[DIRECT CODE] Task: '{task_description}'")
+
+        # Generate code if not provided
+        if not code_to_run:
+            # Handle common patterns directly without LLM
+            if re.match(r'^\d+\s*!?$', task_description) or 'factorial' in task_description:
+                # Factorial
+                num_match = re.search(r'(\d+)', task_description)
+                if num_match:
+                    n = num_match.group(1)
+                    code_to_run = f"import math\nresult = math.factorial({n})\nprint(f'{n}! = {{result}}')"
+
+            elif 'fibonacci' in task_description or 'fib' in task_description:
+                # Fibonacci
+                num_match = re.search(r'(\d+)', task_description)
+                n = num_match.group(1) if num_match else "10"
+                code_to_run = f"""def fibonacci(n):
+    fib = [0, 1]
+    for i in range(2, n):
+        fib.append(fib[i-1] + fib[i-2])
+    return fib[:n]
+
+result = fibonacci({n})
+print(f"First {n} Fibonacci numbers: {{result}}")"""
+
+            elif 'prime' in task_description:
+                # Prime numbers or prime check
+                num_match = re.search(r'(\d+)', task_description)
+                if num_match:
+                    n = num_match.group(1)
+                    if 'first' in task_description or 'generate' in task_description:
+                        code_to_run = f"""def sieve_of_eratosthenes(limit):
+    primes = []
+    is_prime = [True] * (limit + 1)
+    for num in range(2, limit + 1):
+        if is_prime[num]:
+            primes.append(num)
+            for multiple in range(num * num, limit + 1, num):
+                is_prime[multiple] = False
+    return primes
+
+# Generate enough primes
+primes = sieve_of_eratosthenes({int(n) * 15})[:int({n})]
+print(f"First {n} prime numbers: {{primes}}")"""
+                    else:
+                        code_to_run = f"""def is_prime(n):
+    if n < 2:
+        return False
+    for i in range(2, int(n**0.5) + 1):
+        if n % i == 0:
+            return False
+    return True
+
+result = is_prime({n})
+print(f"{n} is{'' if result else ' not'} a prime number")"""
+
+            else:
+                # Use LLM to generate code for complex requests
+                code_prompt = f"""Write Python code to: {task_description}
+
+Requirements:
+- Include print statements to show the output
+- Keep it simple and readable
+- Only output the Python code, nothing else
+
+Python code:"""
+
+                generated = self.brain.think(code_prompt, use_history=False, task_type=TaskType.CODE)
+
+                # Extract code from response
+                code_match = re.search(r'```(?:python)?\s*\n?(.*?)\n?```', generated, re.DOTALL)
+                if code_match:
+                    code_to_run = code_match.group(1).strip()
+                else:
+                    # Try to use the whole response if it looks like code
+                    lines = generated.strip().split('\n')
+                    code_lines = [l for l in lines if any(c in l for c in ['print', 'def ', 'import ', '=', 'for ', 'if ', 'return'])]
+                    if code_lines:
+                        code_to_run = '\n'.join(code_lines)
+                    else:
+                        code_to_run = generated.strip()
+
+        if not code_to_run:
+            return None
+
+        # Execute the code
+        try:
+            tool = self.tools['code_executor']
+            result = tool.execute(code_to_run)
+
+            # Format the response
+            formatted = f"**Code Execution Result**\n\n"
+            formatted += f"```python\n{code_to_run}\n```\n\n"
+
+            if result.get("success"):
+                output = result.get("output", "").strip()
+                if output:
+                    formatted += f"**Output:**\n```\n{output}\n```"
+                else:
+                    formatted += "**Output:** (no output)"
+            else:
+                error = result.get("errors", result.get("error", "Unknown error"))
+                formatted += f"**Error:**\n```\n{error}\n```"
+
+            return formatted
+
+        except Exception as e:
+            print(f"[DIRECT CODE] Error: {e}")
+            return f"Code execution error: {e}"
+
     def _handle_fluxmind_command(self, message: str) -> Optional[str]:
         """Handle FluxMind commands directly, bypassing the LLM.
 
@@ -4219,6 +4378,16 @@ Try these commands:
             if speak:
                 self._speak(crypto_response, emotion=emotion_reading.emotion if emotion_reading else None)
             return crypto_response
+
+        # ===== DIRECT CODE EXECUTION HANDLER =====
+        # Bypass agent loop for explicit code execution requests
+        code_response = self._handle_direct_code(message)
+        if code_response:
+            if hasattr(self, 'monologue') and self.monologue:
+                self.monologue.think("execute", "Running code via direct handler")
+            if speak:
+                self._speak(code_response, emotion=emotion_reading.emotion if emotion_reading else None)
+            return code_response
 
         # Classify task type explicitly for better model routing
         is_simple = self._is_simple_query(message)
