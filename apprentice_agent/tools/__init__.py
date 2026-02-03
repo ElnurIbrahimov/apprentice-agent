@@ -65,6 +65,9 @@ from .reflexion import (
 )
 from .synapseforge import SynapseForge, SynthesizedTool
 from .worldsim import WorldSim, RiskLevel, SimulationResult, quick_check
+from .amem import AMEMSystem, MemoryNote, get_amem
+from .amem_tool import AMEMTool, get_amem_tool
+from .hybrid_amem import HybridAMEMSystem, HybridResult, get_hybrid_memory
 
 # Import FluxMind from external tools directory
 import sys
@@ -174,4 +177,14 @@ __all__ = [
     "RiskLevel",
     "SimulationResult",
     "quick_check",
+    # A-MEM - Zettelkasten Agentic Memory
+    "AMEMSystem",
+    "MemoryNote",
+    "get_amem",
+    "AMEMTool",
+    "get_amem_tool",
+    # Hybrid A-MEM + KG Memory
+    "HybridAMEMSystem",
+    "HybridResult",
+    "get_hybrid_memory",
 ]

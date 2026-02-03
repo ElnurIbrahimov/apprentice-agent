@@ -4,7 +4,7 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 
 ## Features
 
-- **30+ Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, Clawdbot messaging, EvoEmo emotional tracking, Inner Monologue, Knowledge Graph Memory, Metacognitive Guardian, NeuroDream sleep/dream memory consolidation, MirrorMind self-critique, CognitiveTheater multi-perspective reasoning, Reflexion learning-from-mistakes, SynapseForge dynamic tool creation, WorldSim consequence simulation, **AURA v3.0 ALIVE emotional presence system**, **Local RAG (document indexing)**, and more
+- **30+ Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, Clawdbot messaging, EvoEmo emotional tracking, Inner Monologue, Knowledge Graph Memory, Metacognitive Guardian, NeuroDream sleep/dream memory consolidation, MirrorMind self-critique, CognitiveTheater multi-perspective reasoning, Reflexion learning-from-mistakes, SynapseForge dynamic tool creation, WorldSim consequence simulation, **AURA v3.0 ALIVE emotional presence system**, **Local RAG (document indexing)**, **A-MEM Zettelkasten Memory** (NeurIPS 2025), and more
 - **Multi-Agent Architecture** - Specialized agents for different task types with automatic routing
 - **Local RAG System** - Index and query local documents (PDF, TXT, MD) with semantic search
 - **5-Model Routing** - Automatically selects the best model for each task type (including FluxMind for calibrated reasoning)
@@ -278,6 +278,8 @@ Opens at `http://127.0.0.1:7860` with:
 | `worldsim` | Consequence simulation - previews risky actions before execution | Automatic for dangerous commands |
 | `aura` | AURA v3.0 ALIVE - emotionally present AI with memory, mood, patterns | `aura status` or `aura mood` |
 | `local_rag` | Index and query local documents with semantic search | `index /path/to/docs` or `rag search query` |
+| `amem` | A-MEM Zettelkasten-style agentic memory with semantic linking | `remember: <fact>` or `recall: <query>` |
+| `hybrid_amem` | Combined A-MEM + Knowledge Graph unified retrieval | Automatic cross-system search |
 
 ### Code Executor Safety
 
@@ -1908,6 +1910,119 @@ context = rag.get_context("explain quantum computing")
 | `RAG_TOP_K` | `5` | Results to return |
 | `RAG_EMBEDDING_MODEL` | `nomic-embed-text` | Ollama embedding model |
 
+### A-MEM (Zettelkasten Agentic Memory)
+
+A-MEM implements the Zettelkasten method for agentic memory, based on the NeurIPS 2025 paper "A-MEM: Agentic Memory for LLM Agents". It provides atomic notes with rich metadata, dynamic indexing, semantic linking, and memory evolution.
+
+**Core Concepts:**
+
+| Concept | Description |
+|---------|-------------|
+| **Atomic Notes** | Each memory is self-contained with keywords, tags, context |
+| **Semantic Linking** | Notes automatically link to related notes via embeddings |
+| **Soft Clustering (Boxes)** | Notes belong to multiple "boxes" based on content |
+| **Memory Evolution** | Related memories update when new ones are added |
+| **Hybrid Retrieval** | Combined A-MEM + Knowledge Graph search |
+
+**Commands:**
+
+```bash
+# Store a memory
+"remember: User prefers dark mode for all applications"
+"remember: Fixed CUDA error by reducing batch size [tag:cuda, tag:fix] [category:procedural]"
+
+# Recall memories
+"recall: CUDA problems"
+"what do you remember about user preferences?"
+
+# Search with link traversal
+"search memories for GPU issues"
+
+# View statistics
+"amem stats"
+"memory boxes"
+
+# Consolidate (merge similar, prune weak links)
+"consolidate memories"
+```
+
+**Memory Categories:**
+
+| Category | Icon | Use Case |
+|----------|------|----------|
+| `general` | 📝 | Default category |
+| `episodic` | 📅 | Events, conversations |
+| `semantic` | 🧠 | Knowledge, concepts |
+| `procedural` | ⚙️ | How-to, fixes, procedures |
+| `fact` | ✓ | Verified facts |
+
+**Python API:**
+
+```python
+from apprentice_agent.tools.amem import get_amem
+
+amem = get_amem()
+
+# Add a memory
+note = amem.add(
+    content="User prefers Python for scripting",
+    tags=["preference", "coding"],
+    category="semantic",
+    importance=0.8
+)
+
+# Search with semantic embeddings
+results = amem.search("programming preferences", k=5)
+
+# Agentic search with link traversal
+results = amem.search_agentic("GPU issues", k=10, follow_links=True)
+
+# Get linked notes
+linked = amem.get_linked(note.id)
+
+# List boxes (soft clusters)
+boxes = amem.list_boxes()
+
+# Consolidate memories
+amem.consolidate()
+```
+
+**Hybrid Memory (A-MEM + Knowledge Graph):**
+
+```python
+from apprentice_agent.tools.hybrid_amem import get_hybrid_memory
+
+hybrid = get_hybrid_memory()
+
+# Store in both systems
+result = hybrid.remember(
+    content="AURA uses Ollama for local LLM inference",
+    memory_type="fact",
+    tags=["aura", "architecture"]
+)
+# Returns: note_id, node_ids (KG), links_created
+
+# Search across both systems
+results = hybrid.recall("how does AURA work?", k=10)
+
+# Get context for LLM prompt injection
+context = hybrid.get_context("AURA architecture", max_tokens=500)
+```
+
+**Web UI:**
+
+The A-MEM panel is available in the **Advanced** tab with:
+- Stats display (notes, links, boxes, embeddings)
+- Category breakdown with color coding
+- Three tabs: Recent notes, Search, Add memory
+- Consolidate button for memory optimization
+
+**Storage:**
+
+- Notes: `data/amem/notes.jsonl`
+- Embeddings: ChromaDB at `data/amem/chroma/`
+- Links: Stored within note objects
+
 ### Multi-Agent Architecture
 
 AURA includes a multi-agent system with specialist agents that collaborate on complex tasks.
@@ -2159,6 +2274,9 @@ apprentice-agent/
         ├── synapseforge.py   # Dynamic tool creation system
         ├── worldsim.py       # Consequence simulation system
         ├── local_rag.py      # Document indexing and retrieval
+        ├── amem.py           # A-MEM Zettelkasten memory system
+        ├── amem_tool.py      # A-MEM tool interface for agent
+        ├── hybrid_amem.py    # Combined A-MEM + Knowledge Graph memory
         ├── synthesized/      # Runtime-generated tools
         └── custom/           # Auto-generated custom tools
     └── multi_agent/          # Multi-agent collaboration system

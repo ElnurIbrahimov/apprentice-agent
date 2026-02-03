@@ -33,6 +33,10 @@ schedule>=1.2.0
 kuzu>=0.4.0
 sentence-transformers>=2.2.0
 
+# A-MEM Agentic Memory (Zettelkasten-style)
+chromadb>=0.4.0  # Optional: for vector search, falls back to numpy if unavailable
+networkx>=3.0  # Already used by knowledge_graph.py
+
 # Episodic Time-Travel Memory
 qdrant-client>=1.7.0
 dateparser>=1.2.0

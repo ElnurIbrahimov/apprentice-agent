@@ -674,3 +674,419 @@ async def clear_rag_index():
         return result
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+# ============================================================================
+# A-MEM (Agentic Memory - Zettelkasten-style)
+# ============================================================================
+
+class AMEMStatsResponse(BaseModel):
+    total_notes: int = 0
+    total_links: int = 0
+    total_boxes: int = 0
+    categories: Dict[str, int] = {}
+    has_embeddings: int = 0
+    evolution_enabled: bool = False
+
+
+class AMEMNoteResponse(BaseModel):
+    id: str
+    content: str
+    keywords: List[str] = []
+    tags: List[str] = []
+    context: str = ""
+    category: str = "general"
+    importance: float = 0.5
+    links: int = 0
+    created_at: str = ""
+
+
+class AMEMSearchRequest(BaseModel):
+    query: str
+    k: int = 5
+    follow_links: bool = True
+
+
+class AMEMRememberRequest(BaseModel):
+    content: str
+    tags: List[str] = []
+    category: str = "general"
+    importance: float = 0.5
+
+
+@router.get("/amem/stats", response_model=AMEMStatsResponse)
+async def get_amem_stats():
+    """Get A-MEM statistics."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, _get_amem_stats_sync)
+        return result
+    except Exception as e:
+        logger.error(f"[A-MEM] Stats error: {e}")
+        return AMEMStatsResponse()
+
+
+def _get_amem_stats_sync() -> dict:
+    agent = agent_service.agent
+    # Check tools dict for amem
+    amem_tool = agent.tools.get('amem')
+    if amem_tool and hasattr(amem_tool, 'amem'):
+        return amem_tool.amem.get_stats()
+    # Try to get from hybrid memory
+    hybrid_mem = agent.tools.get('hybrid_amem')
+    if hybrid_mem and hasattr(hybrid_mem, 'amem'):
+        return hybrid_mem.amem.get_stats()
+    return {}
+
+
+@router.get("/amem/notes")
+async def get_amem_notes(limit: int = 20, category: Optional[str] = None):
+    """Get recent A-MEM notes."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None, lambda: _get_amem_notes_sync(limit, category)
+        )
+        return result
+    except Exception as e:
+        logger.error(f"[A-MEM] Notes error: {e}")
+        return {"notes": [], "error": str(e)}
+
+
+def _get_amem_notes_sync(limit: int, category: Optional[str]) -> dict:
+    agent = agent_service.agent
+
+    # Get A-MEM instance from tools dict
+    amem = None
+    amem_tool = agent.tools.get('amem')
+    if amem_tool and hasattr(amem_tool, 'amem'):
+        amem = amem_tool.amem
+    else:
+        hybrid_mem = agent.tools.get('hybrid_amem')
+        if hybrid_mem and hasattr(hybrid_mem, 'amem'):
+            amem = hybrid_mem.amem
+
+    if not amem:
+        return {"notes": [], "count": 0}
+
+    # Get notes sorted by creation time
+    notes = sorted(
+        amem._notes.values(),
+        key=lambda n: n.created_at,
+        reverse=True
+    )
+
+    # Filter by category if specified
+    if category:
+        notes = [n for n in notes if n.category == category]
+
+    notes = notes[:limit]
+
+    return {
+        "notes": [
+            {
+                "id": n.id,
+                "content": n.content[:200],
+                "keywords": n.keywords,
+                "tags": n.tags,
+                "context": n.context,
+                "category": n.category,
+                "importance": n.importance,
+                "links": len(n.links),
+                "created_at": n.created_at
+            }
+            for n in notes
+        ],
+        "count": len(notes)
+    }
+
+
+@router.get("/amem/note/{note_id}")
+async def get_amem_note(note_id: str):
+    """Get a specific A-MEM note with linked notes."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None, lambda: _get_amem_note_sync(note_id)
+        )
+        return result
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _get_amem_note_sync(note_id: str) -> dict:
+    agent = agent_service.agent
+
+    # Get A-MEM instance from tools dict
+    amem = None
+    amem_tool = agent.tools.get('amem')
+    if amem_tool and hasattr(amem_tool, 'amem'):
+        amem = amem_tool.amem
+    else:
+        hybrid_mem = agent.tools.get('hybrid_amem')
+        if hybrid_mem and hasattr(hybrid_mem, 'amem'):
+            amem = hybrid_mem.amem
+
+    if not amem:
+        return {"error": "A-MEM not available"}
+
+    note = amem.read(note_id)
+    if not note:
+        return {"error": "Note not found"}
+
+    # Get linked notes
+    linked = amem.get_linked(note_id)
+
+    return {
+        "note": {
+            "id": note.id,
+            "content": note.content,
+            "keywords": note.keywords,
+            "tags": note.tags,
+            "context": note.context,
+            "category": note.category,
+            "importance": note.importance,
+            "boxes": note.boxes,
+            "created_at": note.created_at,
+            "updated_at": note.updated_at,
+            "access_count": note.access_count
+        },
+        "linked_notes": [
+            {
+                "id": ln.id,
+                "content": ln.content[:100],
+                "strength": s
+            }
+            for ln, s in linked[:10]
+        ]
+    }
+
+
+@router.post("/amem/search")
+async def search_amem(request: AMEMSearchRequest):
+    """Search A-MEM notes."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None, lambda: _search_amem_sync(request.query, request.k, request.follow_links)
+        )
+        return result
+    except Exception as e:
+        return {"error": str(e), "results": []}
+
+
+def _search_amem_sync(query: str, k: int, follow_links: bool) -> dict:
+    agent = agent_service.agent
+
+    # Get A-MEM instance from tools dict
+    amem = None
+    amem_tool = agent.tools.get('amem')
+    if amem_tool and hasattr(amem_tool, 'amem'):
+        amem = amem_tool.amem
+    else:
+        hybrid_mem = agent.tools.get('hybrid_amem')
+        if hybrid_mem and hasattr(hybrid_mem, 'amem'):
+            amem = hybrid_mem.amem
+
+    if not amem:
+        return {"results": [], "error": "A-MEM not available"}
+
+    results = amem.search_agentic(query, k=k, follow_links=follow_links)
+
+    return {
+        "query": query,
+        "count": len(results),
+        "results": [
+            {
+                "id": r.get("id", ""),
+                "content": r.get("content", ""),
+                "keywords": r.get("keywords", []),
+                "tags": r.get("tags", []),
+                "context": r.get("context", ""),
+                "relevance": round(r.get("relevance", 0), 2),
+                "hop": r.get("hop", 0)
+            }
+            for r in results
+        ]
+    }
+
+
+@router.post("/amem/remember")
+async def amem_remember(request: AMEMRememberRequest):
+    """Store a new memory in A-MEM."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None, lambda: _amem_remember_sync(
+                request.content, request.tags, request.category, request.importance
+            )
+        )
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _amem_remember_sync(
+    content: str, tags: List[str], category: str, importance: float
+) -> dict:
+    agent = agent_service.agent
+
+    # Prefer hybrid memory for cross-system storage
+    hybrid_mem = agent.tools.get('hybrid_amem')
+    if hybrid_mem:
+        result = hybrid_mem.remember(
+            content=content,
+            memory_type=category,
+            tags=tags,
+            importance=importance,
+            source="web_ui"
+        )
+        return {
+            "success": True,
+            "note_id": result.get("note_id"),
+            "links_created": result.get("links_created", 0),
+            "kg_nodes": len(result.get("node_ids", []))
+        }
+
+    # Fallback to A-MEM only
+    amem_tool = agent.tools.get('amem')
+    if amem_tool:
+        note = amem_tool.remember(
+            content=content,
+            tags=tags,
+            category=category,
+            importance=importance
+        )
+        return {
+            "success": True,
+            "note_id": note.id,
+            "keywords": note.keywords,
+            "links": len(note.links)
+        }
+
+    return {"success": False, "error": "A-MEM not available"}
+
+
+@router.get("/amem/boxes")
+async def get_amem_boxes():
+    """Get A-MEM boxes (soft clusters)."""
+    try:
+        agent = agent_service.agent
+
+        # Get A-MEM instance from tools dict
+        amem = None
+        amem_tool = agent.tools.get('amem')
+        if amem_tool and hasattr(amem_tool, 'amem'):
+            amem = amem_tool.amem
+        else:
+            hybrid_mem = agent.tools.get('hybrid_amem')
+            if hybrid_mem and hasattr(hybrid_mem, 'amem'):
+                amem = hybrid_mem.amem
+
+        if not amem:
+            return {"boxes": {}}
+
+        return {"boxes": amem.list_boxes()}
+    except Exception as e:
+        return {"boxes": {}, "error": str(e)}
+
+
+@router.post("/amem/consolidate")
+async def consolidate_amem():
+    """Consolidate A-MEM (merge duplicates, prune weak links)."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, _consolidate_amem_sync)
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _consolidate_amem_sync() -> dict:
+    agent = agent_service.agent
+
+    # Prefer hybrid consolidation
+    hybrid_mem = agent.tools.get('hybrid_amem')
+    if hybrid_mem:
+        result = hybrid_mem.consolidate()
+        return {"success": True, **result}
+
+    amem_tool = agent.tools.get('amem')
+    if amem_tool and hasattr(amem_tool, 'amem'):
+        result = amem_tool.amem.consolidate()
+        return {"success": True, **result}
+
+    return {"success": False, "error": "A-MEM not available"}
+
+
+# ============================================================================
+# HYBRID MEMORY (A-MEM + Knowledge Graph)
+# ============================================================================
+
+@router.get("/hybrid-memory/stats")
+async def get_hybrid_memory_stats():
+    """Get combined hybrid memory statistics."""
+    try:
+        agent = agent_service.agent
+        hybrid_mem = agent.tools.get('hybrid_amem')
+        if hybrid_mem:
+            return hybrid_mem.get_stats()
+        return {"error": "Hybrid memory not available"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.post("/hybrid-memory/search")
+async def search_hybrid_memory(request: AMEMSearchRequest):
+    """Search across both A-MEM and Knowledge Graph."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None, lambda: _search_hybrid_sync(request.query, request.k)
+        )
+        return result
+    except Exception as e:
+        return {"error": str(e), "results": []}
+
+
+def _search_hybrid_sync(query: str, k: int) -> dict:
+    agent = agent_service.agent
+
+    hybrid_mem = agent.tools.get('hybrid_amem')
+    if not hybrid_mem:
+        return {"results": [], "error": "Hybrid memory not available"}
+
+    results = hybrid_mem.recall(query, k=k)
+
+    return {
+        "query": query,
+        "count": len(results),
+        "results": [
+            {
+                "content": r.content,
+                "source": r.source,
+                "score": round(r.score, 2),
+                "id": r.id,
+                "keywords": r.keywords,
+                "tags": r.tags,
+                "context": r.context,
+                "node_type": r.node_type,
+                "relationships": r.relationships
+            }
+            for r in results
+        ]
+    }
+
+
+@router.get("/hybrid-memory/context")
+async def get_memory_context(query: str, max_tokens: int = 500):
+    """Get memory context for a query (for LLM prompt injection)."""
+    try:
+        agent = agent_service.agent
+        hybrid_mem = agent.tools.get('hybrid_amem')
+        if hybrid_mem:
+            context = hybrid_mem.get_context(query, max_tokens=max_tokens)
+            return {"context": context, "query": query}
+        return {"context": "", "error": "Hybrid memory not available"}
+    except Exception as e:
+        return {"context": "", "error": str(e)}

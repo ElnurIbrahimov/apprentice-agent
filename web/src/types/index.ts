@@ -163,3 +163,47 @@ export interface MetacognitionStats {
 
 // Tab types
 export type TabId = 'chat' | 'monitoring' | 'tools' | 'advanced';
+
+// A-MEM (Agentic Memory)
+export interface AMEMNote {
+  id: string;
+  content: string;
+  keywords: string[];
+  tags: string[];
+  context: string;
+  category: string;
+  importance: number;
+  links: number;
+  created_at: string;
+}
+
+export interface AMEMStats {
+  total_notes: number;
+  total_links: number;
+  total_boxes: number;
+  categories: Record<string, number>;
+  has_embeddings: number;
+  evolution_enabled: boolean;
+}
+
+export interface AMEMSearchResult {
+  id: string;
+  content: string;
+  keywords: string[];
+  tags: string[];
+  context: string;
+  relevance: number;
+  hop: number;
+}
+
+export interface HybridResult {
+  content: string;
+  source: 'amem' | 'kg';
+  score: number;
+  id: string;
+  keywords: string[];
+  tags: string[];
+  context: string;
+  node_type: string;
+  relationships: string[];
+}

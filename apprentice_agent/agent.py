@@ -396,6 +396,23 @@ class ApprenticeAgent:
             except Exception as e:
                 logger.warning(f"local_rag not loaded: {e}")
 
+            # amem - A-MEM Zettelkasten-style agentic memory
+            try:
+                from .tools.amem_tool import get_amem_tool
+                self.tools['amem'] = get_amem_tool()
+                print("[LOADED] amem - Zettelkasten agentic memory")
+            except Exception as e:
+                print(f"[WARNING] amem not loaded: {e}")
+
+            # hybrid_amem - Combined A-MEM + Knowledge Graph memory
+            try:
+                from .tools.hybrid_amem import get_hybrid_memory
+                kg = self.tools.get('knowledge_graph')
+                self.tools['hybrid_amem'] = get_hybrid_memory(knowledge_graph=kg)
+                print("[LOADED] hybrid_amem - Hybrid A-MEM + KG memory")
+            except Exception as e:
+                print(f"[WARNING] hybrid_amem not loaded: {e}")
+
             # Auto-load ALL synthesized tools (with security validation)
             try:
                 import os

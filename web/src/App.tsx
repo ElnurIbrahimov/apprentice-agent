@@ -6,6 +6,7 @@ import { AuraPanel } from './components/AuraPanel';
 import { GuardianPanel } from './components/GuardianPanel';
 import { NeuroDreamPanel } from './components/NeuroDreamPanel';
 import { ToolsPanel } from './components/ToolsPanel';
+import { AMEMPanel } from './components/AMEMPanel';
 import { useChatStore } from './store/chatStore';
 import {
   Bars3Icon,
@@ -74,6 +75,7 @@ function App() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <GuardianPanel />
               <NeuroDreamPanel />
+              <AMEMPanel />
             </div>
           </div>
         );
