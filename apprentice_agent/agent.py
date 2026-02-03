@@ -4124,12 +4124,20 @@ Try these commands:
         Returns:
             Agent response text
         """
+        # Start inner monologue session for this chat
+        if hasattr(self, 'monologue') and self.monologue:
+            self.monologue.start_session()
+            self.monologue.think("perceive", f"Received: '{message[:80]}{'...' if len(message) > 80 else ''}'")
+
         # ===== AURA FAST PATH - TRY FIRST =====
         # Handle simple queries instantly (greetings, memory, emotions)
         if self.use_fastpath and hasattr(self, 'fast_path_handler') and self.fast_path_handler:
             fast_response = self.fast_path_handler.try_fast_path(message)
             if fast_response:
                 print(f"[FAST PATH] {message[:30]}... -> {fast_response[:50]}...")
+                if hasattr(self, 'monologue') and self.monologue:
+                    self.monologue.think("reason", "Using fast path for simple query")
+                    self.monologue.think("respond", f"Fast path response ({len(fast_response)} chars)")
                 if speak:
                     self._speak(fast_response)
                 return fast_response
@@ -4260,7 +4268,15 @@ Try these commands:
         if context_parts:
             system_prompt_addon = "\n\n".join(context_parts) + "\n\nUse this knowledge when relevant to the conversation."
 
+        # Record reasoning in monologue
+        if hasattr(self, 'monologue') and self.monologue:
+            self.monologue.think("reason", f"Processing query with task_type={task_type}")
+
         response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
+
+        # Record response generation in monologue
+        if hasattr(self, 'monologue') and self.monologue:
+            self.monologue.think("respond", f"Generated response ({len(response)} chars)")
 
         # Apply MirrorMind self-critique if enabled (Tool #21)
         if self.mirrormind_enabled and not self._is_simple_query(message):
@@ -4311,6 +4327,12 @@ Try these commands:
                         self.kg_bridge.flush()
             except Exception as e:
                 logger.debug(f"[KG BRAIN] Chat entity extraction error: {e}")
+
+        # End inner monologue session
+        if hasattr(self, 'monologue') and self.monologue:
+            self.monologue.think("reflect", "Chat response completed")
+            # Don't end session immediately - let frontend poll for thoughts
+            # Session will auto-close on next chat or after timeout
 
         return response
 
