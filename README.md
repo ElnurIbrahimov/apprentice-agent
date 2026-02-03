@@ -4,10 +4,14 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 
 ## Features
 
-- **30 Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, Clawdbot messaging, EvoEmo emotional tracking, Inner Monologue, Knowledge Graph Memory, Metacognitive Guardian, NeuroDream sleep/dream memory consolidation, MirrorMind self-critique, CognitiveTheater multi-perspective reasoning, Reflexion learning-from-mistakes, SynapseForge dynamic tool creation, WorldSim consequence simulation, **AURA v3.0 ALIVE emotional presence system**, and more
+- **30+ Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, Clawdbot messaging, EvoEmo emotional tracking, Inner Monologue, Knowledge Graph Memory, Metacognitive Guardian, NeuroDream sleep/dream memory consolidation, MirrorMind self-critique, CognitiveTheater multi-perspective reasoning, Reflexion learning-from-mistakes, SynapseForge dynamic tool creation, WorldSim consequence simulation, **AURA v3.0 ALIVE emotional presence system**, **Local RAG (document indexing)**, and more
+- **Multi-Agent Architecture** - Specialized agents for different task types with automatic routing
+- **Local RAG System** - Index and query local documents (PDF, TXT, MD) with semantic search
 - **5-Model Routing** - Automatically selects the best model for each task type (including FluxMind for calibrated reasoning)
 - **Observe-Plan-Act-Evaluate-Remember Loop** - Structured reasoning cycle for achieving goals
 - **Fast-Path Responses** - Instant replies for conversational queries without full agent loop
+- **Direct Code Execution** - Automatic code generation and execution for calculations, factorials, Fibonacci, primes
+- **Modern Web UI** - React-based interface with real-time WebSocket streaming, settings panel, and thought visualization
 - **Long-Term Memory** - ChromaDB-powered memory system for learning from past experiences
 - **Knowledge Graph** - Relationship-based memory with semantic understanding (nodes, edges, paths)
 - **Dream Mode** - Memory consolidation and pattern analysis from metacognition logs
@@ -191,7 +195,36 @@ ACTION → ARTIFACT → VERIFICATION → MEMORY TIER
 - Memory persistence across sessions
 - Progress messages for long-running tasks
 
-### GUI mode
+### Web UI (Modern React Interface)
+
+Launch the modern web interface:
+
+```bash
+python run_web.py
+```
+
+Then in another terminal:
+```bash
+cd web && npm run dev
+```
+
+Opens at `http://localhost:5173` with:
+
+- **Chat Panel** - Real-time streaming responses via WebSocket
+- **Monitor Tab** - Inner Monologue visualization (thoughts, reasoning chain)
+- **Tools Tab** - 28 available tools with status indicators
+- **Advanced Tab** - AURA ALIVE metrics, FluxMind, Metacognitive Guardian, NeuroDream
+- **Settings Modal** - Theme, notifications, response length preferences
+- **Connection Status** - Live WebSocket connection indicator with auto-reconnect
+
+**Features:**
+- Real-time thought streaming during agent processing
+- Automatic code execution for calculations (e.g., "calculate 20!", "fibonacci 10")
+- Persistent query counter that doesn't reset
+- WebSocket heartbeat for stable connections
+- Dark theme with clean UI
+
+### GUI mode (Gradio - Legacy)
 
 Launch the Gradio web interface:
 
@@ -244,6 +277,7 @@ Opens at `http://127.0.0.1:7860` with:
 | `synapseforge` | Dynamic tool creation - synthesizes new tools at runtime | Automatic when capability gaps detected |
 | `worldsim` | Consequence simulation - previews risky actions before execution | Automatic for dangerous commands |
 | `aura` | AURA v3.0 ALIVE - emotionally present AI with memory, mood, patterns | `aura status` or `aura mood` |
+| `local_rag` | Index and query local documents with semantic search | `index /path/to/docs` or `rag search query` |
 
 ### Code Executor Safety
 
@@ -253,6 +287,26 @@ The code executor runs Python code in a sandboxed subprocess with:
 - **Timeout protection**: 30 second default limit
 - **Isolated execution**: Runs in temp directory
 - **Escaped newline handling**: Converts LLM output `\n` to actual newlines
+
+**Direct Code Execution (Auto-Triggered):**
+
+The agent automatically detects and executes code for common patterns:
+
+| Pattern | Example | Auto-Generated Code |
+|---------|---------|---------------------|
+| Factorial | "calculate 20!" or "what is 20!" | `math.factorial(20)` |
+| Fibonacci | "fibonacci 10" or "first 10 fib numbers" | Fibonacci generator |
+| Prime check | "is 17 prime?" | Prime checking function |
+| Prime generation | "first 10 primes" | Sieve of Eratosthenes |
+| Custom code | "run python for sorting [5,2,8,1]" | LLM-generated code |
+
+```bash
+# Examples that auto-execute:
+"calculate 20!"           → 2432902008176640000
+"fibonacci 15"            → [0, 1, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377]
+"is 97 prime?"            → 97 is a prime number
+"run python for sum of 1 to 100"  → 5050
+```
 
 ### Browser Safety
 
@@ -1789,6 +1843,124 @@ AURA is automatically integrated into the agent's chat flow:
 export AURA_ENABLED=false
 ```
 
+### Local RAG (Document-Augmented Responses)
+
+Local RAG enables AURA to index your local documents and use them to augment responses with your personal knowledge base.
+
+**Supported Formats:**
+
+| Format | Extension | Features |
+|--------|-----------|----------|
+| PDF | `.pdf` | Full text extraction via PyMuPDF |
+| Text | `.txt` | Plain text files |
+| Markdown | `.md` | Markdown documents |
+| Code | `.py`, `.js`, `.ts`, etc. | Source code files |
+| Word | `.docx` | Microsoft Word documents |
+
+**Commands:**
+
+```bash
+# Index a directory
+"index /path/to/documents"
+"add documents from ~/research"
+
+# Search indexed documents
+"rag search quantum computing"
+"search my documents for machine learning"
+
+# Get RAG status
+"rag status"
+```
+
+**How It Works:**
+
+1. **Chunking**: Documents are split into overlapping chunks (512 tokens, 64 overlap)
+2. **Embedding**: Chunks are embedded using `nomic-embed-text` via Ollama
+3. **Storage**: Embeddings stored in `data/rag/` as JSON
+4. **Retrieval**: Semantic search finds relevant chunks using cosine similarity
+5. **Augmentation**: Top-k chunks are injected into LLM context
+
+**Python API:**
+
+```python
+from apprentice_agent.tools.local_rag import LocalRAGTool
+
+rag = LocalRAGTool()
+
+# Index documents
+rag.index_directory("/path/to/docs")
+
+# Search
+results = rag.search("quantum entanglement", top_k=5)
+for r in results:
+    print(f"{r.score:.2f}: {r.chunk.content[:100]}...")
+
+# Get context for query (used automatically in chat)
+context = rag.get_context("explain quantum computing")
+```
+
+**Configuration:**
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `RAG_CHUNK_SIZE` | `512` | Tokens per chunk |
+| `RAG_CHUNK_OVERLAP` | `64` | Overlap between chunks |
+| `RAG_TOP_K` | `5` | Results to return |
+| `RAG_EMBEDDING_MODEL` | `nomic-embed-text` | Ollama embedding model |
+
+### Multi-Agent Architecture
+
+AURA includes a multi-agent system with specialist agents that collaborate on complex tasks.
+
+**Specialist Agents:**
+
+| Agent | Expertise | Capabilities |
+|-------|-----------|--------------|
+| **ResearchAgent** | Information gathering | Web search, deep research, fact verification |
+| **CoderAgent** | Programming tasks | Code generation, debugging, refactoring |
+| **AnalystAgent** | Data analysis | Calculations, comparisons, insights |
+| **CreativeAgent** | Creative tasks | Writing, brainstorming, ideation |
+
+**Collaboration Modes:**
+
+| Mode | Description |
+|------|-------------|
+| `SINGLE` | One specialist handles the query |
+| `SEQUENTIAL` | Specialists work in sequence, passing results |
+| `PARALLEL` | Multiple specialists work simultaneously |
+| `DEBATE` | Specialists debate and synthesize perspectives |
+
+**How It Works:**
+
+1. **Intent Routing**: Query is analyzed to determine best specialist(s)
+2. **Task Delegation**: Orchestrator delegates to appropriate agent(s)
+3. **Collaboration**: Agents may collaborate based on task complexity
+4. **Synthesis**: Results are synthesized into a coherent response
+
+**Python API:**
+
+```python
+from apprentice_agent.multi_agent import MultiAgentOrchestrator
+
+orchestrator = MultiAgentOrchestrator(
+    tool_registry=agent.tools,
+    llm_func=agent.brain.think
+)
+
+# Route and process query
+response = orchestrator.chat("Research the latest AI developments and write a summary")
+
+# Check which specialists were used
+for turn in orchestrator.history:
+    print(f"Agent: {turn.agent}, Confidence: {turn.confidence}")
+```
+
+**Enable Multi-Agent Mode:**
+
+```bash
+export MULTI_AGENT_ENABLED=true
+```
+
 ### Proto-AGI v5 (Truth Spine)
 
 Proto-AGI v5 is an autonomous cognitive loop with **non-negotiable verification**. Every action must produce an artifact that can be verified - no exceptions.
@@ -1919,9 +2091,20 @@ Edit `apprentice_agent/config.py` to customize:
 
 ```
 apprentice-agent/
-├── gui.py                    # Gradio web interface
+├── gui.py                    # Gradio web interface (legacy)
 ├── main.py                   # CLI entry point
+├── run_web.py                # Modern React web UI launcher
 ├── clawdbot_bridge.py        # Aura-Clawdbot message bridge
+├── web/                      # Modern React web interface
+│   ├── src/
+│   │   ├── components/       # React components (Chat, Monitor, Tools, Settings)
+│   │   ├── hooks/            # Custom hooks (useWebSocket)
+│   │   └── store/            # Zustand state management
+│   └── package.json
+├── api/                      # FastAPI backend
+│   ├── routes/               # API endpoints (chat, status, features)
+│   ├── services/             # Agent service layer
+│   └── main.py               # FastAPI app
 ├── models/
 │   └── fluxmind_v0751.pt     # Trained FluxMind model (1.5MB)
 ├── tools/
@@ -1975,8 +2158,14 @@ apprentice-agent/
         ├── reflexion.py      # Learn from mistakes system
         ├── synapseforge.py   # Dynamic tool creation system
         ├── worldsim.py       # Consequence simulation system
+        ├── local_rag.py      # Document indexing and retrieval
         ├── synthesized/      # Runtime-generated tools
         └── custom/           # Auto-generated custom tools
+    └── multi_agent/          # Multi-agent collaboration system
+        ├── orchestrator.py   # Agent coordination
+        ├── router.py         # Intent routing
+        ├── protocol.py       # Agent communication protocol
+        └── specialists/      # Specialist agents (Research, Coder, Analyst, Creative)
 ```
 
 ## License
