@@ -34,11 +34,23 @@ VERIFIED_LOCAL_MODELS = {
     "codellama", "codellama:7b",
 }
 
-# Verified cloud models via Ollama.com (may or may not be available)
+# Verified cloud models via Ollama.com (Pro $20/month subscription)
+# Updated Feb 2026 with latest models
 VERIFIED_CLOUD_MODELS = {
+    # Reasoning - best for complex analysis
+    "deepseek-v3.1:671b-cloud",   # Hybrid thinking/non-thinking, 671B params
+    "cogito-2.1:671b-cloud",       # MIT license, general purpose
+    "qwen3-next:80b-cloud",        # Efficient reasoning
+    # Code - best for software engineering
+    "devstral-2:123b-cloud",       # Codebase exploration, agents
+    "glm-4.7-cloud",               # Advanced coding
+    "devstral-small-2:24b-cloud",  # Lightweight code agent
+    # Vision - best for multimodal
+    "qwen3-vl:235b-cloud",         # Most powerful vision-language
+    "kimi-k2.5-cloud",             # Native multimodal agentic
+    # Legacy (still work)
     "gpt-oss:120b-cloud",
     "qwen3-coder:480b-cloud",
-    "qwen3-vl:235b-cloud",
 }
 
 def validate_model(model_name: str, ollama_host: str = None) -> bool:
@@ -99,9 +111,9 @@ class Config:
     # Model hierarchy (first available is used)
     # LOCAL FIRST for speed, CLOUD as quality fallback
     MODEL_FAST_CHAIN = ["mistral:7b", "llama3:8b", "qwen2:1.5b"]
-    MODEL_REASON_CHAIN = ["llama3:8b", "gpt-oss:120b-cloud", "mistral:7b"]
-    MODEL_CODE_CHAIN = ["qwen2.5-coder:7b", "qwen3-coder:480b-cloud", "deepseek-coder:6.7b"]
-    MODEL_VISION_CHAIN = ["llava", "qwen3-vl:235b-cloud", "llava:7b"]
+    MODEL_REASON_CHAIN = ["llama3:8b", "deepseek-v3.1:671b-cloud", "cogito-2.1:671b-cloud", "mistral:7b"]
+    MODEL_CODE_CHAIN = ["qwen2.5-coder:7b", "devstral-2:123b-cloud", "glm-4.7-cloud", "deepseek-coder:6.7b"]
+    MODEL_VISION_CHAIN = ["llava", "qwen3-vl:235b-cloud", "kimi-k2.5-cloud", "llava:7b"]
 
     # Primary models - LOCAL for fast response
     MODEL_FAST: str = os.getenv("MODEL_FAST", "mistral:7b")
@@ -112,9 +124,10 @@ class Config:
     MODEL_NAME: str = MODEL_REASON  # Default model (backward compat)
 
     # Cloud models for complex tasks (used by _select_model_for_complexity)
-    MODEL_REASON_CLOUD: str = "gpt-oss:120b-cloud"
-    MODEL_CODE_CLOUD: str = "qwen3-coder:480b-cloud"
-    MODEL_VISION_CLOUD: str = "qwen3-vl:235b-cloud"
+    # Updated Feb 2026 - Best models for $20/month Pro tier
+    MODEL_REASON_CLOUD: str = "deepseek-v3.1:671b-cloud"   # 671B hybrid thinking model
+    MODEL_CODE_CLOUD: str = "devstral-2:123b-cloud"         # Best for code agents
+    MODEL_VISION_CLOUD: str = "qwen3-vl:235b-cloud"         # Most powerful vision-language
 
     # Local fallbacks
     MODEL_REASON_LOCAL: str = "llama3:8b"
