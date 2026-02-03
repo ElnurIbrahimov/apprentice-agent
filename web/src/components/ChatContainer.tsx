@@ -114,7 +114,7 @@ export function ChatContainer() {
                       group flex items-center gap-3 px-5 py-4
                       btn-glass rounded-xl text-left text-sm text-chat-text
                       disabled:opacity-50 disabled:cursor-not-allowed
-                      opacity-0 animate-slide-up
+                      animate-slide-up-fade
                       ${index === 0 ? 'animation-delay-100' : ''}
                       ${index === 1 ? 'animation-delay-200' : ''}
                       ${index === 2 ? 'animation-delay-300' : ''}
