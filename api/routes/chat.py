@@ -24,7 +24,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
     """Non-streaming chat endpoint.
 
     Args:
-        request: Chat request with message and optional speak flag
+        request: Chat request with message, optional speak flag, and optional model override
 
     Returns:
         Chat response with agent reply and mood
@@ -34,7 +34,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
             None,
-            lambda: agent_service.chat(request.message, speak=request.speak)
+            lambda: agent_service.chat(request.message, speak=request.speak, model_override=request.model)
         )
 
         mood = result.get("mood")

@@ -96,11 +96,9 @@ class AgentService:
             Dict with response, fast_path flag, and mood
         """
         with self._agent_lock:
-            # Set model override if provided
-            original_model = None
+            # Set model override if provided (uses brain's override mechanism)
             if model_override:
-                original_model = getattr(self.agent.brain, 'model', None)
-                self.agent.brain.model = model_override
+                self.agent.brain.set_model_override(model_override)
                 logger.info(f"[AgentService] Using model override: {model_override}")
 
             try:
@@ -115,9 +113,9 @@ class AgentService:
                     "model_used": self.agent.brain.get_last_model_used()
                 }
             finally:
-                # Restore original model if we changed it
-                if original_model is not None:
-                    self.agent.brain.model = original_model
+                # Clear model override after request
+                if model_override:
+                    self.agent.brain.set_model_override(None)
 
     def chat_stream(self, message: str) -> Generator[str, None, Dict[str, Any]]:
         """Stream a chat response from the agent.

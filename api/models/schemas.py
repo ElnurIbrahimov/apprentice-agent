@@ -23,6 +23,7 @@ class ChatRequest(BaseModel):
     """Request body for chat endpoint."""
     message: str = Field(..., min_length=1, description="User message")
     speak: bool = Field(default=False, description="Enable TTS for response")
+    model: Optional[str] = Field(default=None, description="Model override (None = auto)")
 
 
 class RunRequest(BaseModel):

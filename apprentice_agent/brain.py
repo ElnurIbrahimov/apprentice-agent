@@ -118,6 +118,7 @@ class OllamaBrain:
         self._last_model_used: str = self.model  # Track for metacognition
         self._query_count: int = 0  # Track queries for auto-reset (resets every 15)
         self._total_query_count: int = 0  # Total queries (never resets)
+        self._model_override: Optional[str] = None  # Manual model override (bypasses auto-selection)
 
         # Setup persistent history storage
         self._history_dir = Config.CHROMADB_PATH.parent / "conversation"
@@ -414,6 +415,18 @@ class OllamaBrain:
 
         return False
 
+    def set_model_override(self, model: Optional[str]) -> None:
+        """Set a manual model override that bypasses auto-selection.
+
+        Args:
+            model: Model name to force, or None to return to auto-selection
+        """
+        self._model_override = model
+        if model:
+            logger.info(f"[BRAIN] Model override set: {model}")
+        else:
+            logger.info("[BRAIN] Model override cleared, returning to auto-selection")
+
     def _select_model(self, prompt: str, task_type: Optional[TaskType] = None) -> str:
         """Select the appropriate model based on task type and complexity.
 
@@ -428,6 +441,11 @@ class OllamaBrain:
         Returns:
             Model name to use
         """
+        # Check for manual override first
+        if self._model_override:
+            logger.info(f"[BRAIN] Using manual model override: {self._model_override}")
+            return self._model_override
+
         # Check if this is a complex query that needs cloud model
         use_cloud = self._is_complex_query(prompt)
 
