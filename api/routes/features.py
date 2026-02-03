@@ -414,7 +414,7 @@ async def trigger_sleep():
     try:
         agent = agent_service.agent
         if hasattr(agent, 'neurodream') and agent.neurodream:
-            result = agent.neurodream.sleep(duration_minutes=5)
+            result = agent.neurodream.enter_sleep(trigger="web_ui")
             return {"success": True, "result": result}
         return {"success": False, "error": "NeuroDream not available"}
     except Exception as e:
