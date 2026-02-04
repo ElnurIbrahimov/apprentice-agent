@@ -148,6 +148,49 @@ class AgentService:
                 logger.info(f"[AgentService] Streaming with model override: {model_override}")
 
             try:
+                # ===== DIRECT SEARCH HANDLER =====
+                # Check for direct search before streaming to prevent query hallucination
+                # This matches the logic in agent.chat() which was being bypassed
+                if hasattr(self.agent, '_handle_direct_search'):
+                    search_response = self.agent._handle_direct_search(message)
+                    if search_response:
+                        logger.info("[AgentService] Direct search handled, returning result")
+                        yield {"type": "chunk", "content": search_response}
+                        yield {
+                            "type": "done",
+                            "mood": self._get_mood(),
+                            "model_used": "direct_search"
+                        }
+                        return
+
+                # ===== DIRECT CRYPTO HANDLER =====
+                # Check for crypto price requests
+                if hasattr(self.agent, '_handle_direct_crypto'):
+                    crypto_response = self.agent._handle_direct_crypto(message)
+                    if crypto_response:
+                        logger.info("[AgentService] Direct crypto handled, returning result")
+                        yield {"type": "chunk", "content": crypto_response}
+                        yield {
+                            "type": "done",
+                            "mood": self._get_mood(),
+                            "model_used": "direct_crypto"
+                        }
+                        return
+
+                # ===== DIRECT CODE HANDLER =====
+                # Check for explicit code execution requests
+                if hasattr(self.agent, '_handle_direct_code'):
+                    code_response = self.agent._handle_direct_code(message)
+                    if code_response:
+                        logger.info("[AgentService] Direct code handled, returning result")
+                        yield {"type": "chunk", "content": code_response}
+                        yield {
+                            "type": "done",
+                            "mood": self._get_mood(),
+                            "model_used": "direct_code"
+                        }
+                        return
+
                 # Check if brain has streaming support
                 if hasattr(self.agent.brain, 'think_stream'):
                     for chunk in self.agent.brain.think_stream(message):

@@ -53,7 +53,7 @@ export interface StatusResponse {
 }
 
 export interface WebSocketMessage {
-  type: 'chat' | 'chunk' | 'done' | 'error' | 'ping' | 'pong';
+  type: 'chat' | 'chunk' | 'done' | 'error' | 'ping' | 'pong' | 'stopped';
   content?: string;
   message?: string;
   response?: string;
