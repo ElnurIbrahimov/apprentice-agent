@@ -23,6 +23,80 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# =============================================================================
+#                    AUTO-MODEL SELECTION FOR ACTION MODES
+# =============================================================================
+
+# Best models for each action mode
+ACTION_MODE_MODELS = {
+    "search": {
+        # Fast model for quick search - speed matters
+        "preferred": "devstral-small-2:24b-cloud",
+        "fallbacks": ["qwen2.5:7b", "llama3.2:3b"]
+    },
+    "research": {
+        # Powerful reasoning model for comprehensive research
+        "preferred": "deepseek-v3.1:671b-cloud",
+        "fallbacks": ["cogito-2.1:671b-cloud", "qwen3-next:80b-cloud"]
+    },
+    "agent": {
+        # Most capable agentic model for autonomous tasks
+        "preferred": "kimi-k2.5-cloud",
+        "fallbacks": ["devstral-2:123b-cloud", "deepseek-v3.1:671b-cloud"]
+    }
+}
+
+
+def detect_action_mode(message: str) -> Optional[str]:
+    """Detect the action mode from message prefix.
+
+    Returns:
+        'search', 'research', 'agent', or None
+    """
+    msg_lower = message.lower().strip()
+
+    if msg_lower.startswith("search online for"):
+        return "search"
+    elif msg_lower.startswith("do comprehensive research on"):
+        return "research"
+    elif msg_lower.startswith("[agent mode]"):
+        return "agent"
+
+    return None
+
+
+def get_model_for_action(action_mode: str) -> Optional[str]:
+    """Get the best model for an action mode.
+
+    Returns:
+        Model name to use, or None to use default
+    """
+    if action_mode not in ACTION_MODE_MODELS:
+        return None
+
+    config = ACTION_MODE_MODELS[action_mode]
+    preferred = config["preferred"]
+
+    # For cloud models, just return them (Ollama.com handles availability)
+    if preferred.endswith("-cloud"):
+        logger.info(f"[AutoModel] Action '{action_mode}' -> using cloud model: {preferred}")
+        return preferred
+
+    # For local models, validate availability
+    from apprentice_agent.config import validate_model
+    if validate_model(preferred):
+        logger.info(f"[AutoModel] Action '{action_mode}' -> using local model: {preferred}")
+        return preferred
+
+    # Try fallbacks
+    for fallback in config["fallbacks"]:
+        if fallback.endswith("-cloud") or validate_model(fallback):
+            logger.info(f"[AutoModel] Action '{action_mode}' -> using fallback: {fallback}")
+            return fallback
+
+    logger.warning(f"[AutoModel] No model available for action '{action_mode}'")
+    return None
+
 
 class AgentService:
     """Singleton service for managing ApprenticeAgent instance."""
@@ -131,21 +205,37 @@ class AgentService:
                 if model_override:
                     self.agent.brain.set_model_override(None)
 
-    def chat_stream(self, message: str, model_override: Optional[str] = None):
+    def chat_stream(self, message: str, model_override: Optional[str] = None, action_mode: Optional[str] = None):
         """Stream a chat response from the agent.
 
         Args:
             message: User message
-            model_override: Optional model to use
+            model_override: Optional model to use (explicit selection takes priority)
+            action_mode: Optional action mode ('search', 'research', 'agent')
 
         Yields:
             Response chunks as they're generated
         """
         with self._agent_lock:
-            # Set model override if provided
-            if model_override:
-                self.agent.brain.set_model_override(model_override)
-                logger.info(f"[AgentService] Streaming with model override: {model_override}")
+            # Determine model to use:
+            # 1. Explicit model_override takes priority
+            # 2. Auto-detect action mode from message prefix
+            # 3. Use action_mode parameter if provided
+            # 4. Fall back to default model
+
+            effective_model = model_override
+            detected_action = action_mode or detect_action_mode(message)
+
+            if not effective_model and detected_action:
+                # Auto-select model based on action mode
+                effective_model = get_model_for_action(detected_action)
+                if effective_model:
+                    logger.info(f"[AgentService] Auto-selected model for {detected_action}: {effective_model}")
+
+            # Set model override if we have one
+            if effective_model:
+                self.agent.brain.set_model_override(effective_model)
+                logger.info(f"[AgentService] Streaming with model: {effective_model}")
 
             try:
                 # ===== DIRECT SEARCH HANDLER =====
@@ -213,7 +303,7 @@ class AgentService:
                     }
             finally:
                 # Clear model override after request
-                if model_override:
+                if effective_model:
                     self.agent.brain.set_model_override(None)
 
     def run(self, goal: str, context: Optional[Dict] = None,

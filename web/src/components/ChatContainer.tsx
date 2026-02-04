@@ -70,8 +70,9 @@ export function ChatContainer() {
     }
   }, [isLoading]);
 
-  const handleSend = (message: string, attachments?: FileAttachment[]) => {
-    sendMessage(message, attachments);
+  const handleSend = (message: string, attachments?: FileAttachment[], actionMode?: string | null) => {
+    // Pass actionMode for auto-model selection (null = use user's selected model)
+    sendMessage(message, attachments, null, actionMode);
   };
 
   const isDisabled = isLoading || connectionStatus !== 'connected';

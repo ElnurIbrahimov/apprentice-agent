@@ -9,7 +9,7 @@ import type { FileAttachment } from '../types';
 type ActionMode = 'none' | 'search' | 'research' | 'agent';
 
 interface MessageInputProps {
-  onSend: (message: string, attachments?: FileAttachment[]) => void;
+  onSend: (message: string, attachments?: FileAttachment[], actionMode?: string | null) => void;
   onStop?: () => void;
   disabled?: boolean;
   isLoading?: boolean;
@@ -74,7 +74,9 @@ export function MessageInput({
       finalMessage = `[AGENT MODE] ${finalMessage}`;
     }
 
-    onSend(finalMessage, readyAttachments.length > 0 ? readyAttachments : undefined);
+    // Pass action mode (as string or null) for auto-model selection
+    const modeForBackend = actionMode !== 'none' ? actionMode : null;
+    onSend(finalMessage, readyAttachments.length > 0 ? readyAttachments : undefined, modeForBackend);
     setMessage('');
     setActionMode('none'); // Reset mode after sending
     clearAttachments();

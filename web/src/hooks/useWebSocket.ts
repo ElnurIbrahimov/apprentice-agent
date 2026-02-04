@@ -184,7 +184,7 @@ export function useWebSocket() {
     }
   }, [addMessage, appendToMessage, setMessageStreaming, setMood, setIsLoading, setError]);
 
-  const sendMessage = useCallback((message: string, attachments?: FileAttachment[], modelOverride?: string | null) => {
+  const sendMessage = useCallback((message: string, attachments?: FileAttachment[], modelOverride?: string | null, actionMode?: string | null) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       setError('Not connected to server');
       return false;
@@ -202,15 +202,17 @@ export function useWebSocket() {
     currentMessageId.current = null;
 
     // Get selected model from store if not provided
+    // Note: If actionMode is set, backend will auto-select the best model
     const selectedModel = modelOverride !== undefined
       ? modelOverride
-      : useChatStore.getState().selectedModel;
+      : (actionMode ? null : useChatStore.getState().selectedModel); // Don't send user model if action mode is active
 
     // Build payload with attachments metadata for server processing
     const payload: {
       type: string;
       message: string;
       model?: string;
+      action_mode?: string;
       attachments?: Array<{
         id: string;
         filename: string;
@@ -224,6 +226,11 @@ export function useWebSocket() {
 
     if (selectedModel) {
       payload.model = selectedModel;
+    }
+
+    // Include action mode for auto-model selection
+    if (actionMode) {
+      payload.action_mode = actionMode;
     }
 
     // Include attachment metadata for server-side processing

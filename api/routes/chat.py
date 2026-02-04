@@ -259,8 +259,9 @@ async def websocket_chat(websocket: WebSocket):
 
             message = msg.get("message", "")
             model_override = msg.get("model")  # Optional model override
+            action_mode = msg.get("action_mode")  # Optional action mode for auto-model selection
             attachments = msg.get("attachments", [])  # Optional attachments
-            print(f"[WebSocket] Received message: '{message[:50]}...' model={model_override} attachments={len(attachments)}")
+            print(f"[WebSocket] Received message: '{message[:50]}...' model={model_override} action_mode={action_mode} attachments={len(attachments)}")
             if attachments:
                 print(f"[WebSocket] Attachment details: {attachments}")
             logger.info(f"[WebSocket] Received: {message[:50]}..." + (f" (model: {model_override})" if model_override else "") + (f" ({len(attachments)} attachments)" if attachments else ""))
@@ -293,7 +294,7 @@ async def websocket_chat(websocket: WebSocket):
                 def stream_worker():
                     """Run streaming in a separate thread."""
                     try:
-                        for item in agent_service.chat_stream(message, model_override=model_override):
+                        for item in agent_service.chat_stream(message, model_override=model_override, action_mode=action_mode):
                             # Check if stop was requested
                             if stop_generation.is_set():
                                 logger.info("[WebSocket] Generation stopped by user")
