@@ -1,8 +1,9 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState, useCallback } from 'react';
 import { useChatStore } from '../store/chatStore';
 import { MessageBubble } from './MessageBubble';
 import { MessageInput } from './MessageInput';
 import { useWebSocket } from '../hooks/useWebSocket';
+import type { FileAttachment } from '../types';
 import {
   SparklesIcon,
   ChatBubbleLeftRightIcon,
@@ -33,16 +34,44 @@ const QUICK_ACTIONS = [
 
 export function ChatContainer() {
   const { messages, isLoading, error, connectionStatus } = useChatStore();
-  const { sendMessage } = useWebSocket();
+  const { sendMessage, stopGeneration } = useWebSocket();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
 
-  // Auto-scroll to bottom on new messages
+  // Check if user is near the bottom of scroll area
+  const checkIfNearBottom = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return true;
+
+    const threshold = 100; // pixels from bottom
+    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+    return isNearBottom;
+  }, []);
+
+  // Handle scroll events to detect if user scrolled up
+  const handleScroll = useCallback(() => {
+    const isNearBottom = checkIfNearBottom();
+    setIsUserScrolledUp(!isNearBottom);
+  }, [checkIfNearBottom]);
+
+  // Smart auto-scroll: only scroll if user is already at bottom
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    if (!isUserScrolledUp) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, isUserScrolledUp]);
 
-  const handleSend = (message: string) => {
-    sendMessage(message);
+  // Auto-scroll to bottom when user sends a new message
+  useEffect(() => {
+    if (isLoading) {
+      setIsUserScrolledUp(false);
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [isLoading]);
+
+  const handleSend = (message: string, attachments?: FileAttachment[]) => {
+    sendMessage(message, attachments);
   };
 
   const isDisabled = isLoading || connectionStatus !== 'connected';
@@ -78,7 +107,10 @@ export function ChatContainer() {
       )}
 
       {/* Messages area */}
-      <div className="flex-1 overflow-y-auto">
+      <div
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto">
         {messages.length === 0 ? (
           // Empty state with enhanced styling
           <div className="flex flex-col items-center justify-center h-full text-chat-text-secondary relative">
@@ -146,7 +178,9 @@ export function ChatContainer() {
       {/* Input area */}
       <MessageInput
         onSend={handleSend}
+        onStop={stopGeneration}
         disabled={isDisabled}
+        isLoading={isLoading}
         placeholder={
           connectionStatus !== 'connected'
             ? 'Connecting...'

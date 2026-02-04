@@ -3919,6 +3919,10 @@ Output ONLY the JSON object, no other text."""
             r'^(?:hey\s+)?(?:aura|assistant|ai|bot)[,!.]?\s*',
             r'^(?:hi|hello|hey)[,!.]?\s*',
             r'^(?:okay|ok|yo)[,!.]?\s*',
+            r'^(?:alright|sure|yeah|yep|yes)[,!.]?\s*',
+            r'^(?:let\'?s|lets|can\s+you|could\s+you|please|pls)[,!.]?\s*',
+            r'^(?:i\s+want\s+(?:you\s+)?to|i\s+need\s+(?:you\s+)?to)[,!.]?\s*',
+            r'^(?:go\s+ahead\s+and|now)[,!.]?\s*',
         ]
         for prefix in prefix_patterns:
             message_lower = re.sub(prefix, '', message_lower, flags=re.IGNORECASE).strip()

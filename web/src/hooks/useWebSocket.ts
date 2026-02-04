@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useChatStore } from '../store/chatStore';
-import type { WebSocketMessage } from '../types';
+import type { WebSocketMessage, FileAttachment } from '../types';
 
 const WS_URL = `ws://${window.location.hostname}:${window.location.port || '8000'}/api/chat/stream`;
 const INITIAL_RECONNECT_DELAY = 1000;
@@ -171,19 +171,30 @@ export function useWebSocket() {
         currentMessageId.current = null;
         setIsLoading(false);
         break;
+
+      case 'stopped':
+        console.log('[WebSocket] Generation stopped by user');
+        if (currentMessageId.current) {
+          setMessageStreaming(currentMessageId.current, false);
+          appendToMessage(currentMessageId.current, '\n\n*[Generation stopped]*');
+        }
+        currentMessageId.current = null;
+        setIsLoading(false);
+        break;
     }
   }, [addMessage, appendToMessage, setMessageStreaming, setMood, setIsLoading, setError]);
 
-  const sendMessage = useCallback((message: string, modelOverride?: string | null) => {
+  const sendMessage = useCallback((message: string, attachments?: FileAttachment[], modelOverride?: string | null) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       setError('Not connected to server');
       return false;
     }
 
-    // Add user message to store
+    // Add user message to store (with attachments for display)
     addMessage({
       role: 'user',
       content: message,
+      attachments,
     });
 
     setIsLoading(true);
@@ -195,14 +206,34 @@ export function useWebSocket() {
       ? modelOverride
       : useChatStore.getState().selectedModel;
 
-    // Send to server with optional model override
-    const payload: { type: string; message: string; model?: string } = {
+    // Build payload with attachments metadata for server processing
+    const payload: {
+      type: string;
+      message: string;
+      model?: string;
+      attachments?: Array<{
+        id: string;
+        filename: string;
+        type: string;
+        path?: string;
+      }>;
+    } = {
       type: 'chat',
       message,
     };
 
     if (selectedModel) {
       payload.model = selectedModel;
+    }
+
+    // Include attachment metadata for server-side processing
+    if (attachments && attachments.length > 0) {
+      payload.attachments = attachments.map(a => ({
+        id: a.id,
+        filename: a.filename,
+        type: a.type,
+        path: a.path,
+      }));
     }
 
     wsRef.current.send(JSON.stringify(payload));
@@ -233,6 +264,17 @@ export function useWebSocket() {
     connect();
   }, [connect]);
 
+  const stopGeneration = useCallback(() => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      console.warn('[WebSocket] Cannot stop - not connected');
+      return false;
+    }
+
+    console.log('[WebSocket] Sending stop request');
+    wsRef.current.send(JSON.stringify({ type: 'stop' }));
+    return true;
+  }, []);
+
   // Connect on mount
   useEffect(() => {
     isManualDisconnect.current = false;
@@ -252,6 +294,7 @@ export function useWebSocket() {
 
   return {
     sendMessage,
+    stopGeneration,
     connect: reconnect,
     disconnect,
     isConnected: useChatStore((state) => state.connectionStatus === 'connected'),
