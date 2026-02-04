@@ -1054,6 +1054,134 @@ def _consolidate_amem_sync() -> dict:
 
 
 # ============================================================================
+# PROTO-AGI (Truth Spine - Cognitive Core)
+# ============================================================================
+
+class ProtoAGIResponse(BaseModel):
+    enabled: bool = False
+    mode: str = "idle"
+    cycle_count: int = 0
+    facts: int = 0
+    beliefs: int = 0
+    speculations: int = 0
+    verifier_pass_rate: float = 0.0
+    pending_confirmations: int = 0
+    last_action: Optional[str] = None
+
+
+@router.get("/proto-agi", response_model=ProtoAGIResponse)
+async def get_proto_agi_status():
+    """Get Proto-AGI Truth Spine status."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, _get_proto_agi_sync)
+        return result
+    except Exception as e:
+        logger.error(f"[Proto-AGI] Error: {e}")
+        return ProtoAGIResponse()
+
+
+def _get_proto_agi_sync() -> dict:
+    agent = agent_service.agent
+    if hasattr(agent, 'proto_agi') and agent.proto_agi:
+        agi = agent.proto_agi
+        try:
+            status = agi.get_status() if hasattr(agi, 'get_status') else {}
+            memory = status.get('memory', {})
+            verifier = status.get('verifier', {})
+
+            return {
+                "enabled": True,
+                "mode": status.get('mode', 'idle'),
+                "cycle_count": status.get('cycle_count', 0),
+                "facts": memory.get('facts', 0),
+                "beliefs": memory.get('beliefs', 0),
+                "speculations": memory.get('speculations', 0),
+                "verifier_pass_rate": verifier.get('success_rate', 0.0),
+                "pending_confirmations": status.get('pending_confirmations', 0),
+                "last_action": status.get('last_action')
+            }
+        except Exception as e:
+            logger.error(f"[Proto-AGI] Status error: {e}")
+            return {"enabled": True, "mode": "error"}
+    return {"enabled": False}
+
+
+@router.post("/proto-agi/mode")
+async def set_proto_agi_mode(mode: str):
+    """Set Proto-AGI operation mode (idle, assist, operate)."""
+    try:
+        agent = agent_service.agent
+        if hasattr(agent, 'proto_agi') and agent.proto_agi:
+            agent.proto_agi.set_mode(mode)
+            return {"success": True, "mode": mode}
+        return {"success": False, "error": "Proto-AGI not available"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/proto-agi/start")
+async def start_proto_agi_loop(cycle_interval: float = 60.0):
+    """Start the Proto-AGI autonomous cognitive loop."""
+    try:
+        agent = agent_service.agent
+        if hasattr(agent, 'start_proto_agi'):
+            agent.start_proto_agi(cycle_interval)
+            return {"success": True, "message": f"Proto-AGI loop started (interval: {cycle_interval}s)"}
+        return {"success": False, "error": "Proto-AGI start method not available"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/proto-agi/stop")
+async def stop_proto_agi_loop():
+    """Stop the Proto-AGI autonomous cognitive loop."""
+    try:
+        agent = agent_service.agent
+        if hasattr(agent, 'stop_proto_agi'):
+            agent.stop_proto_agi()
+            return {"success": True, "message": "Proto-AGI loop stopped"}
+        return {"success": False, "error": "Proto-AGI stop method not available"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/proto-agi/traces")
+async def get_proto_agi_traces(limit: int = 10):
+    """Get recent verification traces."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None, lambda: _get_traces_sync(limit)
+        )
+        return result
+    except Exception as e:
+        return {"traces": [], "error": str(e)}
+
+
+def _get_traces_sync(limit: int) -> dict:
+    agent = agent_service.agent
+    if hasattr(agent, 'proto_agi') and agent.proto_agi:
+        agi = agent.proto_agi
+        if hasattr(agi, 'get_recent_traces'):
+            traces = agi.get_recent_traces(limit)
+            return {
+                "traces": [
+                    {
+                        "id": t.id if hasattr(t, 'id') else str(i),
+                        "action": t.action if hasattr(t, 'action') else "unknown",
+                        "tier": t.tier.value if hasattr(t, 'tier') else "unknown",
+                        "verified": t.verified if hasattr(t, 'verified') else False,
+                        "timestamp": t.timestamp if hasattr(t, 'timestamp') else ""
+                    }
+                    for i, t in enumerate(traces)
+                ],
+                "count": len(traces)
+            }
+    return {"traces": [], "count": 0}
+
+
+# ============================================================================
 # HYBRID MEMORY (A-MEM + Knowledge Graph)
 # ============================================================================
 

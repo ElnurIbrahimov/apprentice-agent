@@ -1,6 +1,7 @@
 import ReactMarkdown from 'react-markdown';
 import type { Message } from '../types';
 import { UserCircleIcon, SparklesIcon } from '@heroicons/react/24/solid';
+import { AttachmentList } from './AttachmentPreview';
 
 interface MessageBubbleProps {
   message: Message;
@@ -36,6 +37,11 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           <div className="text-chat-text font-medium mb-1">
             {isUser ? 'You' : 'AURA'}
           </div>
+
+          {/* Attachments (for user messages) */}
+          {isUser && message.attachments && message.attachments.length > 0 && (
+            <AttachmentList attachments={message.attachments} compact />
+          )}
 
           {/* Message content */}
           <div className="prose prose-invert max-w-none text-chat-text">

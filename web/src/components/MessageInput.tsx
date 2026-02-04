@@ -1,8 +1,12 @@
 import { useState, useRef, useEffect, KeyboardEvent, FormEvent, DragEvent, ClipboardEvent } from 'react';
 import { PaperAirplaneIcon, PaperClipIcon, StopIcon } from '@heroicons/react/24/solid';
+import { MagnifyingGlassIcon, BookOpenIcon, CpuChipIcon } from '@heroicons/react/24/outline';
 import { AttachmentList } from './AttachmentPreview';
 import { useFileUpload, isSupported } from '../hooks/useFileUpload';
 import type { FileAttachment } from '../types';
+
+// Action modes for quick actions
+type ActionMode = 'none' | 'search' | 'research' | 'agent';
 
 interface MessageInputProps {
   onSend: (message: string, attachments?: FileAttachment[]) => void;
@@ -22,6 +26,7 @@ export function MessageInput({
   const [message, setMessage] = useState('');
   const [isFocused, setIsFocused] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [actionMode, setActionMode] = useState<ActionMode>('none');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -59,8 +64,19 @@ export function MessageInput({
     // Get ready attachments (not uploading, no errors)
     const readyAttachments = attachments.filter(a => !a.uploading && !a.error);
 
-    onSend(message.trim(), readyAttachments.length > 0 ? readyAttachments : undefined);
+    // Prepend mode prefix based on selected action
+    let finalMessage = message.trim();
+    if (actionMode === 'search' && finalMessage) {
+      finalMessage = `search online for ${finalMessage}`;
+    } else if (actionMode === 'research' && finalMessage) {
+      finalMessage = `do comprehensive research on ${finalMessage}`;
+    } else if (actionMode === 'agent' && finalMessage) {
+      finalMessage = `[AGENT MODE] ${finalMessage}`;
+    }
+
+    onSend(finalMessage, readyAttachments.length > 0 ? readyAttachments : undefined);
     setMessage('');
+    setActionMode('none'); // Reset mode after sending
     clearAttachments();
 
     // Reset textarea height
@@ -173,6 +189,74 @@ export function MessageInput({
           </div>
         )}
 
+        {/* Action mode buttons */}
+        <div className="flex items-center gap-2 mb-2">
+          <button
+            type="button"
+            onClick={() => setActionMode(actionMode === 'search' ? 'none' : 'search')}
+            disabled={disabled || isLoading}
+            className={`
+              flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
+              transition-all duration-200 border
+              ${actionMode === 'search'
+                ? 'bg-blue-500/20 border-blue-500/50 text-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.3)]'
+                : 'bg-chat-assistant/60 border-chat-border/30 text-chat-text-secondary hover:text-blue-400 hover:border-blue-500/30 hover:bg-blue-500/10'
+              }
+              ${(disabled || isLoading) ? 'opacity-50 cursor-not-allowed' : ''}
+            `}
+            title="Quick web search"
+          >
+            <MagnifyingGlassIcon className="w-3.5 h-3.5" />
+            Search
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActionMode(actionMode === 'research' ? 'none' : 'research')}
+            disabled={disabled || isLoading}
+            className={`
+              flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
+              transition-all duration-200 border
+              ${actionMode === 'research'
+                ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.3)]'
+                : 'bg-chat-assistant/60 border-chat-border/30 text-chat-text-secondary hover:text-emerald-400 hover:border-emerald-500/30 hover:bg-emerald-500/10'
+              }
+              ${(disabled || isLoading) ? 'opacity-50 cursor-not-allowed' : ''}
+            `}
+            title="Comprehensive research with analysis"
+          >
+            <BookOpenIcon className="w-3.5 h-3.5" />
+            Research
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActionMode(actionMode === 'agent' ? 'none' : 'agent')}
+            disabled={disabled || isLoading}
+            className={`
+              flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
+              transition-all duration-200 border
+              ${actionMode === 'agent'
+                ? 'bg-purple-500/20 border-purple-500/50 text-purple-400 shadow-[0_0_10px_rgba(168,85,247,0.3)]'
+                : 'bg-chat-assistant/60 border-chat-border/30 text-chat-text-secondary hover:text-purple-400 hover:border-purple-500/30 hover:bg-purple-500/10'
+              }
+              ${(disabled || isLoading) ? 'opacity-50 cursor-not-allowed' : ''}
+            `}
+            title="Autonomous agent mode"
+          >
+            <CpuChipIcon className="w-3.5 h-3.5" />
+            Agent
+          </button>
+
+          {actionMode !== 'none' && (
+            <span className="text-xs text-chat-text-secondary ml-2 animate-fade-in">
+              {actionMode === 'search' && 'Type your query and press Enter to search the web'}
+              {actionMode === 'research' && 'Type your topic for comprehensive research'}
+              {actionMode === 'agent' && 'Agent will work autonomously on your task'}
+            </span>
+          )}
+        </div>
+
         <div
           className={`
             relative flex items-end bg-chat-assistant/80 rounded-xl border
@@ -181,6 +265,9 @@ export function MessageInput({
               ? 'border-aura-purple/60 shadow-[0_0_0_2px_rgba(139,92,246,0.15),0_0_20px_rgba(139,92,246,0.2)]'
               : 'border-chat-border/50 hover:border-chat-border'
             }
+            ${actionMode === 'search' ? 'border-blue-500/40' : ''}
+            ${actionMode === 'research' ? 'border-emerald-500/40' : ''}
+            ${actionMode === 'agent' ? 'border-purple-500/40' : ''}
           `}
         >
           {/* Attachment button */}
@@ -219,7 +306,12 @@ export function MessageInput({
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}
             onPaste={handlePaste}
-            placeholder={placeholder}
+            placeholder={
+              actionMode === 'search' ? 'What do you want to search for?' :
+              actionMode === 'research' ? 'What topic should I research?' :
+              actionMode === 'agent' ? 'Describe the task for the agent...' :
+              placeholder
+            }
             disabled={disabled}
             rows={1}
             className="input-textarea flex-1 bg-transparent text-chat-text placeholder-chat-text-secondary px-2 py-3 pr-14 outline-none resize-none"
@@ -229,10 +321,10 @@ export function MessageInput({
             <button
               type="button"
               onClick={onStop}
-              className="absolute right-2 bottom-2 p-2.5 rounded-lg bg-red-600 text-white scale-105 shadow-lg hover:bg-red-700 hover:scale-110 transition-all duration-300 ease-out"
+              className="absolute right-2 bottom-2 p-2.5 rounded-xl bg-gradient-to-r from-rose-500/90 to-orange-500/90 text-white shadow-[0_0_15px_rgba(244,63,94,0.4)] hover:shadow-[0_0_25px_rgba(244,63,94,0.6)] hover:scale-105 transition-all duration-300 ease-out backdrop-blur-sm border border-white/10"
               title="Stop generation"
             >
-              <StopIcon className="w-5 h-5" />
+              <StopIcon className="w-5 h-5 drop-shadow-sm" />
             </button>
           ) : (
             <button

@@ -3899,20 +3899,27 @@ Output ONLY the JSON object, no other text."""
 
         return result
 
-    def _handle_direct_search(self, message: str) -> Optional[str]:
+    def _handle_direct_search(self, message: str, synthesize: bool = True) -> Optional[str]:
         """Handle explicit search requests directly, bypassing agent loop.
 
         This prevents the LLM's planning phase from hallucinating different queries.
         User says "search for AI news" -> searches for "AI news" exactly.
+        Results are then synthesized by the LLM for better presentation.
 
         Args:
             message: The user's message
+            synthesize: Whether to use LLM to synthesize results
 
         Returns:
             Formatted search results if search request, None otherwise
         """
         import re
         message_lower = message.lower().strip()
+
+        # If user wants comprehensive/detailed research, let it go through full agent loop
+        comprehensive_keywords = ['comprehensive', 'detailed', 'in-depth', 'thorough', 'deep dive', 'extensive', 'full analysis']
+        if any(kw in message_lower for kw in comprehensive_keywords):
+            return None  # Let full agent loop handle this
 
         # Strip common greeting/name prefixes to allow "hey aura search for X"
         prefix_patterns = [
@@ -4025,7 +4032,34 @@ Output ONLY the JSON object, no other text."""
             if not results:
                 return f"No results found for '{query}'."
 
-            # Format results nicely
+            # Format raw results
+            raw_results = ""
+            for i, r in enumerate(results[:5], 1):
+                title = r.get("title", "No title")
+                snippet = r.get("snippet", "No description")
+                url = r.get("url", "")
+                raw_results += f"{i}. {title}\n   {snippet}\n   URL: {url}\n\n"
+
+            # Synthesize with LLM if available and requested
+            if synthesize and hasattr(self, 'brain'):
+                try:
+                    synthesis_prompt = f"""Based on these web search results for '{query}', provide a helpful summary:
+
+{raw_results}
+
+Instructions:
+- Summarize the key information from these results
+- Include relevant URLs as references
+- Keep it concise but informative
+- Format nicely with markdown"""
+
+                    synthesized = self.brain.think(synthesis_prompt)
+                    if synthesized and len(synthesized) > 50:
+                        return synthesized
+                except Exception as e:
+                    print(f"[DIRECT SEARCH] Synthesis failed, returning raw: {e}")
+
+            # Fallback to formatted raw results
             formatted = f"Here's what I found for '{query}':\n\n"
             for i, r in enumerate(results[:5], 1):
                 title = r.get("title", "No title")

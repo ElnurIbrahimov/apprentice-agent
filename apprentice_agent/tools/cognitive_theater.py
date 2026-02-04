@@ -7,11 +7,13 @@ Flow:
     User Question -> Single LLM Call -> 4 Perspectives -> Synthesis -> Balanced Answer
 """
 
+import os
 import re
 import logging
 from dataclasses import dataclass, field
 from typing import Dict, Optional
 
+import ollama
 import requests
 
 from ..config import Config
@@ -77,6 +79,8 @@ Begin:"""
         "low": 0.40,
     }
 
+    OLLAMA_CLOUD_HOST = "https://ollama.com"
+
     def __init__(
         self,
         ollama_url: str = "http://localhost:11434",
@@ -91,7 +95,44 @@ Begin:"""
         self.ollama_url = ollama_url.rstrip("/")
         self.model = model or Config.MODEL_FAST
         self.name = "cognitive_theater"
+
+        # Initialize ollama clients
+        self._local_client = ollama.Client(host=ollama_url)
+        self._cloud_client = None
+
+        # Set up cloud client if API key is available
+        api_key = os.getenv("OLLAMA_API_KEY")
+        if api_key:
+            self._cloud_client = ollama.Client(
+                host=self.OLLAMA_CLOUD_HOST,
+                headers={"Authorization": f"Bearer {api_key}"}
+            )
+            logger.info("[CognitiveTheater] Cloud client initialized")
+
+    def set_model(self, model: str) -> None:
+        """Update the model used for deliberation.
+
+        Args:
+            model: Model name to use
+        """
+        self.model = model
         self.description = "Multi-perspective reasoning and deliberation"
+
+    def _get_client(self) -> ollama.Client:
+        """Get the appropriate client based on current model.
+
+        Returns:
+            ollama.Client - local or cloud client
+        """
+        if self.model.endswith("-cloud"):
+            if self._cloud_client:
+                return self._cloud_client
+            else:
+                logger.warning(f"[CognitiveTheater] Cloud model {self.model} requested but no cloud client available")
+                # Fall back to local client with a local model
+                self.model = Config.MODEL_FAST
+                return self._local_client
+        return self._local_client
 
     def _call_llm(self, prompt: str) -> str:
         """Call Ollama API to generate response.
@@ -103,24 +144,20 @@ Begin:"""
             Generated response text
 
         Raises:
-            requests.RequestException: On API errors
-            requests.Timeout: On timeout
+            Exception: On API errors
         """
-        response = requests.post(
-            f"{self.ollama_url}/api/generate",
-            json={
-                "model": self.model,
-                "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "temperature": 0.7,
-                    "num_predict": 1000
-                }
-            },
-            timeout=90
+        client = self._get_client()
+
+        response = client.generate(
+            model=self.model,
+            prompt=prompt,
+            stream=False,
+            options={
+                "temperature": 0.7,
+                "num_predict": 1000
+            }
         )
-        response.raise_for_status()
-        return response.json().get("response", "").strip()
+        return response.get("response", "").strip()
 
     def _build_prompt(self, question: str, context: str = "") -> str:
         """Build the multi-perspective deliberation prompt.
@@ -200,19 +237,27 @@ Begin:"""
                 raw_response=raw_response
             )
 
-        except requests.Timeout:
-            logger.warning("[CognitiveTheater] Request timed out")
+        except ollama.ResponseError as e:
+            logger.error(f"[CognitiveTheater] Ollama error: {e}")
+            return Deliberation(
+                question=question,
+                synthesis=f"Model error: {str(e)[:100]}",
+                confidence=0.0
+            )
+
+        except (requests.Timeout, TimeoutError) as e:
+            logger.warning(f"[CognitiveTheater] Request timed out: {e}")
             return Deliberation(
                 question=question,
                 synthesis="I need more time to think about this complex question.",
                 confidence=0.3
             )
 
-        except requests.RequestException as e:
-            logger.error(f"[CognitiveTheater] API error: {e}")
+        except (requests.RequestException, ConnectionError) as e:
+            logger.error(f"[CognitiveTheater] Connection error: {e}")
             return Deliberation(
                 question=question,
-                synthesis="Unable to complete deliberation due to a technical issue.",
+                synthesis="Unable to connect to AI service. Please check if Ollama is running.",
                 confidence=0.0
             )
 
@@ -236,26 +281,40 @@ Begin:"""
         """
         result = self.deliberate(question, context)
 
+        # If we got a raw response but no parsed perspectives, just return the raw response
+        # This handles cases where the model doesn't follow the expected format
+        if result.raw_response and not result.perspectives:
+            return result.raw_response
+
         output_parts = ["**Multi-Perspective Analysis**\n"]
+
+        has_content = False
 
         # Add each perspective if available
         if result.perspectives.get("advocate"):
             advocate = result.perspectives["advocate"]
-            if len(advocate) > 250:
-                advocate = advocate[:250] + "..."
+            if len(advocate) > 500:
+                advocate = advocate[:500] + "..."
             output_parts.append(f"**Pro:** {advocate}\n")
+            has_content = True
 
         if result.perspectives.get("critic"):
             critic = result.perspectives["critic"]
-            if len(critic) > 250:
-                critic = critic[:250] + "..."
+            if len(critic) > 500:
+                critic = critic[:500] + "..."
             output_parts.append(f"**Con:** {critic}\n")
+            has_content = True
 
         if result.perspectives.get("analyst"):
             analyst = result.perspectives["analyst"]
-            if len(analyst) > 250:
-                analyst = analyst[:250] + "..."
+            if len(analyst) > 500:
+                analyst = analyst[:500] + "..."
             output_parts.append(f"**Analysis:** {analyst}\n")
+            has_content = True
+
+        # If no perspectives were parsed but we have raw response, show it
+        if not has_content and result.raw_response:
+            return result.raw_response
 
         # Always show synthesis/recommendation
         if result.synthesis:

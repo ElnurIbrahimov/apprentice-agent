@@ -53,19 +53,25 @@ export function Sidebar({ onClose }: SidebarProps) {
   useEffect(() => {
     const fetchModels = async () => {
       try {
+        console.log('[Sidebar] Fetching models...');
         const response = await fetch('/api/models');
+        console.log('[Sidebar] Models response status:', response.status);
         if (response.ok) {
           const data = await response.json();
-          const allModels = [...data.local_models, ...data.cloud_models];
+          console.log('[Sidebar] Models data:', data);
+          const allModels = [...(data.local_models || []), ...(data.cloud_models || [])];
+          console.log('[Sidebar] All models:', allModels);
           setAvailableModels(allModels);
+        } else {
+          console.error('[Sidebar] Models API returned:', response.status);
         }
       } catch (e) {
-        console.error('Failed to fetch models:', e);
+        console.error('[Sidebar] Failed to fetch models:', e);
       }
     };
 
     fetchModels();
-  }, [setAvailableModels]);
+  }, []); // Run once on mount
 
   const handleClearHistory = async () => {
     if (window.confirm('Clear all messages?')) {
@@ -147,7 +153,7 @@ export function Sidebar({ onClose }: SidebarProps) {
           {/* Model Selector */}
           <div>
             <h3 className="text-chat-text-secondary text-xs uppercase tracking-wider mb-3 font-medium">
-              Model Selection
+              Model Selection {availableModels.length > 0 && <span className="text-purple-400">({availableModels.length})</span>}
             </h3>
             <div className="relative">
               <button

@@ -1,6 +1,7 @@
 export { ChatContainer } from './ChatContainer';
 export { MessageBubble } from './MessageBubble';
 export { MessageInput } from './MessageInput';
+export { AttachmentPreview, AttachmentList } from './AttachmentPreview';
 export { Sidebar } from './Sidebar';
 export { MoodIndicator } from './MoodIndicator';
 export { ThoughtStream } from './ThoughtStream';
