@@ -3914,6 +3914,15 @@ Output ONLY the JSON object, no other text."""
         import re
         message_lower = message.lower().strip()
 
+        # Strip common greeting/name prefixes to allow "hey aura search for X"
+        prefix_patterns = [
+            r'^(?:hey\s+)?(?:aura|assistant|ai|bot)[,!.]?\s*',
+            r'^(?:hi|hello|hey)[,!.]?\s*',
+            r'^(?:okay|ok|yo)[,!.]?\s*',
+        ]
+        for prefix in prefix_patterns:
+            message_lower = re.sub(prefix, '', message_lower, flags=re.IGNORECASE).strip()
+
         # Keywords that indicate "search online" intent
         online_keywords = ['online', 'web', 'internet', 'google', 'latest', 'current', 'recent', 'news', 'today']
 
@@ -4410,6 +4419,7 @@ Try these commands:
 
         # Check for decision questions - use CognitiveTheater (Tool #22)
         # BUT exclude self-referential questions (questions about AURA itself)
+        # AND exclude file attachment contexts (code review, file analysis, etc.)
         message_lower = message.lower()
         is_self_referential = any(pattern in message_lower for pattern in [
             'compare yourself', 'compare you', 'how do you compare',
@@ -4418,8 +4428,13 @@ Try these commands:
             # Common typos
             'cmpare yourself', 'compre yourself', 'compar yourself'
         ])
-        if self.theater_enabled and is_decision_question(message) and not is_self_referential:
+        # Skip CognitiveTheater for file attachments - these need direct analysis, not deliberation
+        has_file_attachment = "[FILE_ATTACHMENT_CONTEXT]" in message
+        if self.theater_enabled and is_decision_question(message) and not is_self_referential and not has_file_attachment:
             try:
+                # Pass model override to CognitiveTheater if set
+                if hasattr(self.brain, '_model_override') and self.brain._model_override:
+                    self.theater.set_model(self.brain._model_override)
                 response = self.theater.quick_debate(message)
                 if speak:
                     self._speak(response, emotion=emotion_reading.emotion if emotion_reading else None)
@@ -4506,6 +4521,21 @@ Try these commands:
             except Exception as e:
                 logger.debug(f"[RAG] Context retrieval error: {e}")
 
+        # Get A-MEM memory context for personalization
+        amem_context = ""
+        if 'amem' in self.tools:
+            try:
+                amem_tool = self.tools['amem']
+                # Search for relevant memories
+                memories = amem_tool.amem.search(message, limit=3)
+                if memories:
+                    memory_texts = [f"- {m.content}" for m in memories if m.content]
+                    if memory_texts:
+                        amem_context = "RELEVANT MEMORIES:\n" + "\n".join(memory_texts)
+                        logger.debug(f"[A-MEM] Found {len(memories)} relevant memories for: {message[:50]}...")
+            except Exception as e:
+                logger.debug(f"[A-MEM] Memory retrieval error: {e}")
+
         # Apply emotional tone modifier - prefer AURA's tone if available
         tone_modifier = None
         if aura_context and aura_context.get("tone"):
@@ -4518,15 +4548,17 @@ Try these commands:
         if aura_context and aura_context.get("thinking_prefix"):
             thinking_prefix = aura_context["thinking_prefix"] + "\n\n"
 
-        # Inject KG context and RAG context into system prompt if available
+        # Inject KG context, RAG context, and A-MEM context into system prompt if available
         system_prompt_addon = None
         context_parts = []
+        if amem_context:
+            context_parts.append(amem_context)
         if kg_context:
             context_parts.append(kg_context)
         if rag_context:
             context_parts.append(rag_context)
         if context_parts:
-            system_prompt_addon = "\n\n".join(context_parts) + "\n\nUse this knowledge when relevant to the conversation."
+            system_prompt_addon = "\n\n".join(context_parts) + "\n\nUse this knowledge and memories when relevant to the conversation. Remember personal details about the user."
 
         # Record reasoning in monologue
         if hasattr(self, 'monologue') and self.monologue:
