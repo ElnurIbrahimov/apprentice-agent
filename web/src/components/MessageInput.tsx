@@ -359,12 +359,12 @@ export function MessageInput({
             <button
               type="button"
               onClick={onStop}
-              className="absolute right-2 bottom-2 p-2 rounded-full bg-chat-assistant/80 border-2 border-rose-500/70 text-rose-400 hover:bg-rose-500/20 hover:border-rose-400 hover:text-rose-300 transition-all duration-200 ease-out group"
+              className="absolute right-2 bottom-2 w-10 h-10 rounded-full border border-gray-600 bg-gray-800/90 flex items-center justify-center hover:bg-gray-700 hover:border-gray-500 transition-all duration-150"
               title="Stop generation"
             >
-              <div className="w-5 h-5 flex items-center justify-center">
-                <div className="w-3 h-3 rounded-sm bg-current group-hover:scale-110 transition-transform" />
-              </div>
+              <svg className="w-4 h-4 text-gray-200" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="6" y="6" width="12" height="12" rx="1" />
+              </svg>
             </button>
           ) : (
             <button
