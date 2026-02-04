@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from api.routes import chat, status, features, multi_agent
+from api.routes import chat, status, features, multi_agent, upload, reasoning_tree
 from api.services.agent_service import agent_service
 
 # Configure logging
@@ -71,6 +71,8 @@ app.include_router(chat.router)
 app.include_router(status.router)
 app.include_router(features.router)
 app.include_router(multi_agent.router)
+app.include_router(upload.router)
+app.include_router(reasoning_tree.router)
 
 # Serve static files in production (built React app)
 static_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web", "dist")
@@ -85,6 +87,11 @@ if os.path.exists(static_path):
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
         """Serve SPA - fallback to index.html for client-side routing."""
+        # Don't intercept API routes - let the API routers handle them
+        if full_path.startswith("api/"):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="API endpoint not found")
+
         file_path = os.path.join(static_path, full_path)
         if os.path.exists(file_path) and os.path.isfile(file_path):
             return FileResponse(file_path)

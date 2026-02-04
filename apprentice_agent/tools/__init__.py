@@ -68,6 +68,16 @@ from .worldsim import WorldSim, RiskLevel, SimulationResult, quick_check
 from .amem import AMEMSystem, MemoryNote, get_amem
 from .amem_tool import AMEMTool, get_amem_tool
 from .hybrid_amem import HybridAMEMSystem, HybridResult, get_hybrid_memory
+from .mcts_reasoning import (
+    MCTSReasoning,
+    MCTSConfig,
+    MCTSResult,
+    MCTSNode,
+    ThoughtType,
+    NodeState,
+    mcts_reason
+)
+from .reasoning_tree_tool import ReasoningTreeTool, deep_reason
 
 # Import FluxMind from external tools directory
 import sys
@@ -187,4 +197,14 @@ __all__ = [
     "HybridAMEMSystem",
     "HybridResult",
     "get_hybrid_memory",
+    # MCTS Reasoning Tree
+    "MCTSReasoning",
+    "MCTSConfig",
+    "MCTSResult",
+    "MCTSNode",
+    "ThoughtType",
+    "NodeState",
+    "mcts_reason",
+    "ReasoningTreeTool",
+    "deep_reason",
 ]

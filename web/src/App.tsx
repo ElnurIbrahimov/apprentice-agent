@@ -7,6 +7,8 @@ import { GuardianPanel } from './components/GuardianPanel';
 import { NeuroDreamPanel } from './components/NeuroDreamPanel';
 import { ToolsPanel } from './components/ToolsPanel';
 import { AMEMPanel } from './components/AMEMPanel';
+import { ProtoAGIPanel } from './components/ProtoAGIPanel';
+import { ReasoningTreePanel } from './components/ReasoningTreePanel';
 import { ToastContainer, useToastStore } from './components/Toast';
 import { useChatStore } from './store/chatStore';
 import { useSettingsStore, applyFontSize } from './store/settingsStore';
@@ -82,7 +84,9 @@ function App() {
           <div className="h-full overflow-y-auto p-4 space-y-4">
             <h2 className="text-xl font-semibold text-chat-text mb-4">Advanced Features</h2>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <ProtoAGIPanel />
               <GuardianPanel />
+              <ReasoningTreePanel />
               <NeuroDreamPanel />
               <AMEMPanel />
             </div>
