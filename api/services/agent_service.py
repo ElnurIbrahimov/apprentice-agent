@@ -12,6 +12,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from apprentice_agent import ApprenticeAgent
 from api.models.schemas import MoodState
 
+# Import ALMA directly for mood detection
+try:
+    from apprentice_agent.emotion.alma_engine import alma_engine
+    from apprentice_agent.emotion.integration import get_mood_emoji
+    ALMA_AVAILABLE = True
+except ImportError:
+    ALMA_AVAILABLE = False
+    alma_engine = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -117,42 +126,47 @@ class AgentService:
                 if model_override:
                     self.agent.brain.set_model_override(None)
 
-    def chat_stream(self, message: str) -> Generator[str, None, Dict[str, Any]]:
+    def chat_stream(self, message: str, model_override: Optional[str] = None):
         """Stream a chat response from the agent.
 
         Args:
             message: User message
+            model_override: Optional model to use
 
         Yields:
-            Response chunks
-
-        Returns:
-            Final response dict with mood
+            Response chunks as they're generated
         """
         with self._agent_lock:
-            # Check if brain has streaming support
-            if hasattr(self.agent.brain, 'think_stream'):
-                full_response = ""
-                for chunk in self.agent.brain.think_stream(message):
-                    full_response += chunk
-                    yield chunk
+            # Set model override if provided
+            if model_override:
+                self.agent.brain.set_model_override(model_override)
+                logger.info(f"[AgentService] Streaming with model override: {model_override}")
 
-                return {
-                    "response": full_response,
-                    "fast_path": self._was_fast_path(message),
-                    "mood": self._get_mood(),
-                    "model_used": self.agent.brain.get_last_model_used()
-                }
-            else:
-                # Fallback to non-streaming
-                response = self.agent.chat(message, speak=False)
-                yield response
-                return {
-                    "response": response,
-                    "fast_path": self._was_fast_path(message),
-                    "mood": self._get_mood(),
-                    "model_used": self.agent.brain.get_last_model_used()
-                }
+            try:
+                # Check if brain has streaming support
+                if hasattr(self.agent.brain, 'think_stream'):
+                    for chunk in self.agent.brain.think_stream(message):
+                        yield {"type": "chunk", "content": chunk}
+
+                    # After streaming, yield final result
+                    yield {
+                        "type": "done",
+                        "mood": self._get_mood(),
+                        "model_used": self.agent.brain.get_last_model_used()
+                    }
+                else:
+                    # Fallback to non-streaming
+                    response = self.agent.chat(message, speak=False)
+                    yield {"type": "chunk", "content": response}
+                    yield {
+                        "type": "done",
+                        "mood": self._get_mood(),
+                        "model_used": self.agent.brain.get_last_model_used()
+                    }
+            finally:
+                # Clear model override after request
+                if model_override:
+                    self.agent.brain.set_model_override(None)
 
     def run(self, goal: str, context: Optional[Dict] = None,
             use_fastpath: Optional[bool] = None, max_iterations: int = 10) -> Dict[str, Any]:
@@ -205,11 +219,50 @@ class AgentService:
                 return False
 
     def _get_mood(self) -> Optional[MoodState]:
-        """Extract current mood from AURA/EvoEmo."""
+        """Extract AURA's current mood from ALMA emotional engine."""
+        print(f"[DEBUG _get_mood] ALMA_AVAILABLE={ALMA_AVAILABLE}, alma_engine exists={alma_engine is not None}", flush=True)
         try:
+            # Try ALMA directly first (most reliable)
+            if ALMA_AVAILABLE and alma_engine:
+                try:
+                    alma_state = alma_engine.get_emotional_state()
+                    print(f"[DEBUG] ALMA state: {alma_state}", flush=True)
+                    if alma_state:
+                        pad = alma_state.get('pad', {})
+                        emoji = get_mood_emoji() if ALMA_AVAILABLE else '🤖'
+                        mood = MoodState(
+                            emotion=alma_state.get('dominant_emotion', 'neutral'),
+                            confidence=int(alma_state.get('intensity', 0.5) * 100),
+                            valence=pad.get('pleasure', 0.0),
+                            arousal=pad.get('arousal', 0.0),
+                            dominance=pad.get('dominance', 0.0),
+                            emoji=emoji
+                        )
+                        print(f"[DEBUG] Returning ALMA mood: {mood.model_dump()}", flush=True)
+                        return mood
+                except Exception as e:
+                    print(f"[DEBUG] ALMA direct state ERROR: {e}", flush=True)
+
             agent = self.agent
 
-            # Try AURA first
+            # Fallback: Try ALMA via brain
+            if hasattr(agent.brain, '_alma_enabled') and agent.brain._alma_enabled:
+                try:
+                    alma_state = agent.brain.get_emotional_state()
+                    if alma_state:
+                        pad = alma_state.get('pad', {})
+                        return MoodState(
+                            emotion=alma_state.get('dominant_emotion', 'neutral'),
+                            confidence=int(alma_state.get('intensity', 0.5) * 100),
+                            valence=pad.get('pleasure', 0.0),
+                            arousal=pad.get('arousal', 0.0),
+                            dominance=pad.get('dominance', 0.0),
+                            emoji=agent.brain.get_mood_emoji()
+                        )
+                except Exception as e:
+                    logger.debug(f"[AgentService] ALMA brain state error: {e}")
+
+            # Fallback: Try legacy AURA
             if hasattr(agent, 'aura') and agent.aura:
                 aura_state = agent.aura.get_state() if hasattr(agent.aura, 'get_state') else None
                 if aura_state:
@@ -217,10 +270,12 @@ class AgentService:
                         emotion=aura_state.get('emotion', 'neutral'),
                         confidence=aura_state.get('confidence', 50),
                         valence=aura_state.get('valence', 0.0),
-                        arousal=aura_state.get('arousal', 0.0)
+                        arousal=aura_state.get('arousal', 0.0),
+                        dominance=0.0,
+                        emoji='😐'
                     )
 
-            # Try EvoEmo tool
+            # Fallback: Try EvoEmo tool (user emotion, not AURA)
             if 'evoemo' in agent.tools:
                 evoemo = agent.tools['evoemo']
                 if hasattr(evoemo, 'get_state'):
@@ -229,15 +284,32 @@ class AgentService:
                         emotion=state.get('emotion', 'neutral'),
                         confidence=state.get('confidence', 50),
                         valence=state.get('valence', 0.0),
-                        arousal=state.get('arousal', 0.0)
+                        arousal=state.get('arousal', 0.0),
+                        dominance=0.0,
+                        emoji='😐'
                     )
 
-            # Default neutral mood
-            return MoodState(emotion='neutral', confidence=50)
+            # Default neutral mood with ALMA defaults
+            logger.info("[AgentService] Using default mood (no ALMA/AURA)")
+            return MoodState(
+                emotion='neutral',
+                confidence=50,
+                valence=0.3,  # Slightly positive baseline
+                arousal=0.1,
+                dominance=0.3,
+                emoji='🤖'
+            )
 
         except Exception as e:
-            logger.debug(f"[AgentService] Could not get mood: {e}")
-            return MoodState(emotion='neutral', confidence=50)
+            logger.warning(f"[AgentService] _get_mood exception: {e}")
+            return MoodState(
+                emotion='neutral',
+                confidence=50,
+                valence=0.0,
+                arousal=0.0,
+                dominance=0.0,
+                emoji='🤖'
+            )
 
     def _was_fast_path(self, message: str) -> bool:
         """Check if message was handled via fast path."""

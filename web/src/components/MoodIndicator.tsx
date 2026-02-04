@@ -59,9 +59,11 @@ export function MoodIndicator({ mood, compact = false }: MoodIndicatorProps) {
     );
   }
 
-  const emoji = EMOTION_EMOJIS[mood.emotion || 'neutral'] || '😐';
+  // Use emoji from API (ALMA) if available, otherwise fallback to local mapping
+  const emoji = mood.emoji || EMOTION_EMOJIS[mood.emotion || 'neutral'] || '😐';
   const confidence = mood.confidence || 0;
   const gradient = MOOD_GRADIENTS[mood.emotion || 'neutral'] || MOOD_GRADIENTS.neutral;
+  const dominance = mood.dominance || 0;
 
   if (compact) {
     return (
@@ -111,16 +113,20 @@ export function MoodIndicator({ mood, compact = false }: MoodIndicatorProps) {
         />
       </div>
 
-      {/* Valence/Arousal mini-display */}
-      {(mood.valence !== 0 || mood.arousal !== 0) && (
-        <div className="mt-3 text-xs text-chat-text-secondary flex gap-4 font-medium">
-          <span className="flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-purple-500"></span>
-            Valence: {(mood.valence * 100).toFixed(0)}%
+      {/* PAD (Pleasure-Arousal-Dominance) mini-display */}
+      {(mood.valence !== 0 || mood.arousal !== 0 || dominance !== 0) && (
+        <div className="mt-3 text-xs text-chat-text-secondary flex flex-wrap gap-3 font-medium">
+          <span className="flex items-center gap-1" title="Pleasure (positive/negative)">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+            P: {(mood.valence * 100).toFixed(0)}%
           </span>
-          <span className="flex items-center gap-1">
+          <span className="flex items-center gap-1" title="Arousal (calm/excited)">
+            <span className="w-1.5 h-1.5 rounded-full bg-yellow-500"></span>
+            A: {(mood.arousal * 100).toFixed(0)}%
+          </span>
+          <span className="flex items-center gap-1" title="Dominance (submissive/dominant)">
             <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-            Arousal: {(mood.arousal * 100).toFixed(0)}%
+            D: {(dominance * 100).toFixed(0)}%
           </span>
         </div>
       )}

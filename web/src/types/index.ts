@@ -3,10 +3,27 @@
 export interface MoodState {
   emotion: string | null;
   confidence: number;
-  valence: number;
-  arousal: number;
+  valence: number;      // PAD: Pleasure (-1 to 1)
+  arousal: number;      // PAD: Arousal (-1 to 1)
+  dominance?: number;   // PAD: Dominance (-1 to 1)
+  emoji?: string;       // Mood emoji from ALMA
   session_dominant?: string;
   readings?: number;
+}
+
+// File attachment types
+export type AttachmentType = 'image' | 'document' | 'code';
+
+export interface FileAttachment {
+  id: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+  type: AttachmentType;
+  preview?: string;  // Base64 data URL for images
+  uploading?: boolean;
+  error?: string;
+  path?: string;  // Server path (after upload)
 }
 
 export interface Message {
@@ -15,6 +32,7 @@ export interface Message {
   content: string;
   timestamp: number;
   isStreaming?: boolean;
+  attachments?: FileAttachment[];
 }
 
 export interface ChatResponse {

@@ -3,6 +3,7 @@
 import os
 import sys
 import logging
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -23,20 +24,39 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Track async initialization state
+_init_state = {"ready": False, "error": None, "progress": "starting"}
+
+
+def _background_init():
+    """Initialize agent in background thread."""
+    global _init_state
+    try:
+        _init_state["progress"] = "loading agent..."
+        logger.info("[API] Background: Starting agent initialization...")
+        agent_service.initialize(fast_init=False)  # Full init with all tools
+        _init_state["ready"] = True
+        _init_state["progress"] = "ready"
+        logger.info("[API] Background: Agent initialization complete!")
+    except Exception as e:
+        _init_state["error"] = str(e)
+        _init_state["progress"] = f"error: {e}"
+        logger.error(f"[API] Background: Agent initialization failed: {e}")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler for startup/shutdown."""
     # Startup
     logger.info("[API] Starting AURA Web API...")
-    logger.info("[API] Initializing agent (this may take a moment)...")
+    logger.info("[API] Server ready - agent initializing in background...")
 
-    try:
-        agent_service.initialize(fast_init=False)  # Load ALL tools
-        logger.info("[API] Agent initialized successfully")
-    except Exception as e:
-        logger.error(f"[API] Failed to initialize agent: {e}")
-        raise
+    # Start agent initialization in background thread
+    init_thread = threading.Thread(target=_background_init, daemon=True)
+    init_thread.start()
+
+    # Store init state in app for endpoints to check
+    app.state.init_state = _init_state
 
     yield
 

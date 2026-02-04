@@ -35,11 +35,18 @@ class RunRequest(BaseModel):
 
 
 class MoodState(BaseModel):
-    """Agent's emotional/mood state."""
-    emotion: Optional[str] = None
-    confidence: int = Field(default=0, ge=0, le=100)
-    valence: float = Field(default=0.0, ge=-1.0, le=1.0)
-    arousal: float = Field(default=0.0, ge=-1.0, le=1.0)
+    """Agent's emotional/mood state (ALMA-based PAD model)."""
+    model_config = {
+        "ser_json_inf_nan": "constants",
+        "populate_by_name": True,
+    }
+
+    emotion: str = Field(default="neutral")  # Must be non-optional to always serialize
+    confidence: int = Field(default=50, ge=0, le=100)
+    valence: float = Field(default=0.0, ge=-1.0, le=1.0)  # PAD: Pleasure
+    arousal: float = Field(default=0.0, ge=-1.0, le=1.0)  # PAD: Arousal
+    dominance: float = Field(default=0.0, ge=-1.0, le=1.0)  # PAD: Dominance
+    emoji: str = "🤖"  # Mood emoji representation
 
 
 class ChatResponse(BaseModel):
@@ -91,3 +98,27 @@ class ClearHistoryResponse(BaseModel):
     """Response from clear history endpoint."""
     success: bool
     message: str = "History cleared"
+
+
+class AttachmentType(str, Enum):
+    """Type of file attachment."""
+    IMAGE = "image"
+    DOCUMENT = "document"
+    CODE = "code"
+
+
+class FileAttachment(BaseModel):
+    """File attachment metadata."""
+    id: str
+    filename: str
+    mime_type: str
+    size: int
+    type: AttachmentType
+    path: str
+
+
+class UploadResponse(BaseModel):
+    """Response from file upload endpoint."""
+    success: bool
+    attachment: Optional[FileAttachment] = None
+    error: Optional[str] = None

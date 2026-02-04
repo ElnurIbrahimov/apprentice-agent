@@ -14,6 +14,22 @@ import ollama
 from .config import Config
 from .identity import get_identity_prompt
 
+# ALMA Emotional Intelligence System
+try:
+    from .emotion.integration import (
+        get_emotional_tone_modifier,
+        process_user_message,
+        process_response_outcome,
+        bridge_evoemo_detection,
+        get_mood_emoji,
+    )
+    from .emotion.alma_engine import alma_engine, trigger_emotion
+    ALMA_AVAILABLE = True
+except ImportError:
+    ALMA_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.warning("[BRAIN] ALMA emotional system not available")
+
 logger = logging.getLogger(__name__)
 
 # Default timeouts (in seconds)
@@ -126,23 +142,47 @@ class OllamaBrain:
         self._history_file = self._history_dir / "history.json"
         self._load_history()
 
+        # ALMA Emotional Intelligence
+        self._alma_enabled = ALMA_AVAILABLE
+        self._auto_emotional_tone = True  # Automatically add emotional tone to responses
+        if self._alma_enabled:
+            logger.info(f"[BRAIN] ALMA emotional system enabled {get_mood_emoji()}")
+
         if warmup:
             self._warmup_models()
 
-    def _get_client_for_model(self, model: str) -> ollama.Client:
+    def _get_client_for_model(self, model: str) -> tuple[ollama.Client, str]:
         """Get the appropriate client (local or cloud) based on model name.
 
         Cloud models end with '-cloud' suffix and require the cloud client.
+
+        Returns:
+            Tuple of (client, actual_model_name) - model name may be modified for fallback
         """
         if model.endswith("-cloud"):
             if self._cloud_client:
                 print(f"[BRAIN] Using cloud client for model: {model}")
-                return self._cloud_client
+                return self._cloud_client, model
             else:
-                print(f"[BRAIN] Warning: Cloud model {model} requested but no API key, falling back to local")
-                # Fall back to local model
-                return self.client
-        return self.client
+                # Fall back to local model - strip -cloud suffix and use base model
+                local_model = model.replace("-cloud", "").split(":")[0]
+                # Map to known local equivalents
+                fallback_map = {
+                    "deepseek-v3.1": Config.MODEL_REASON,
+                    "cogito-2.1": Config.MODEL_REASON,
+                    "qwen3-next": Config.MODEL_REASON,
+                    "devstral-2": Config.MODEL_CODE,
+                    "glm-4.7": Config.MODEL_CODE,
+                    "devstral-small-2": Config.MODEL_CODE,
+                    "qwen3-vl": Config.MODEL_VISION,
+                    "kimi-k2.5": Config.MODEL_VISION,
+                    "gpt-oss": Config.MODEL_REASON,
+                    "qwen3-coder": Config.MODEL_CODE,
+                }
+                fallback_model = fallback_map.get(local_model, Config.MODEL_REASON)
+                print(f"[BRAIN] Warning: Cloud model {model} requested but no API key, falling back to local: {fallback_model}")
+                return self.client, fallback_model
+        return self.client, model
 
     def _warmup_models(self):
         """Pre-load the fast model to reduce first-response latency."""
@@ -246,10 +286,17 @@ class OllamaBrain:
             system_prompt: Optional system prompt
             use_history: Whether to include conversation history
             task_type: Type of task for model routing (auto-detected if None)
-            tone_modifier: Optional emotional tone modifier from EvoEmo
+            tone_modifier: Optional emotional tone modifier from EvoEmo/ALMA
         """
         # Check if auto-reset is needed to prevent slowdown
         self._check_auto_reset()
+
+        # ALMA: Process user message for emotional triggers
+        if self._alma_enabled and use_history:
+            try:
+                process_user_message(prompt)
+            except Exception as e:
+                logger.debug(f"[BRAIN] ALMA message processing failed: {e}")
 
         # Select model based on task type
         model = self._select_model(prompt, task_type)
@@ -262,9 +309,16 @@ class OllamaBrain:
         else:
             full_system_prompt = identity_prompt
 
-        # Apply emotional tone modifier if provided (EvoEmo)
+        # Apply emotional tone modifier - auto-generate from ALMA if not provided
         if tone_modifier:
             full_system_prompt = f"{full_system_prompt}\n\n{tone_modifier}"
+        elif self._alma_enabled and self._auto_emotional_tone:
+            try:
+                alma_tone = get_emotional_tone_modifier()
+                if alma_tone:
+                    full_system_prompt = f"{full_system_prompt}\n\n{alma_tone}"
+            except Exception as e:
+                logger.debug(f"[BRAIN] ALMA tone generation failed: {e}")
 
         messages = []
         if full_system_prompt:
@@ -275,12 +329,17 @@ class OllamaBrain:
 
         logger.debug(f"[BRAIN] Calling {model} with timeout={LLM_TIMEOUT}s")
 
-        # Get appropriate client (local or cloud)
-        client = self._get_client_for_model(model)
+        # Get appropriate client (local or cloud) - may return fallback model
+        client, actual_model = self._get_client_for_model(model)
+        if actual_model != model:
+            logger.info(f"[BRAIN] Model fallback: {model} -> {actual_model}")
+
+        # Update last model used to reflect ACTUAL model, not requested
+        self._last_model_used = actual_model
 
         # Call with timeout protection
         response = call_with_timeout(
-            lambda: client.chat(model=model, messages=messages),
+            lambda: client.chat(model=actual_model, messages=messages),
             timeout=LLM_TIMEOUT,
             default=None
         )
@@ -319,13 +378,20 @@ class OllamaBrain:
             system_prompt: Optional system prompt
             use_history: Whether to include conversation history
             task_type: Type of task for model routing (auto-detected if None)
-            tone_modifier: Optional emotional tone modifier from EvoEmo
+            tone_modifier: Optional emotional tone modifier from EvoEmo/ALMA
 
         Yields:
             str: Response chunks as they are generated
         """
         # Check if auto-reset is needed to prevent slowdown
         self._check_auto_reset()
+
+        # ALMA: Process user message for emotional triggers
+        if self._alma_enabled and use_history:
+            try:
+                process_user_message(prompt)
+            except Exception as e:
+                logger.debug(f"[BRAIN] ALMA message processing failed: {e}")
 
         # Select model based on task type
         model = self._select_model(prompt, task_type)
@@ -338,9 +404,16 @@ class OllamaBrain:
         else:
             full_system_prompt = identity_prompt
 
-        # Apply emotional tone modifier if provided (EvoEmo)
+        # Apply emotional tone modifier - auto-generate from ALMA if not provided
         if tone_modifier:
             full_system_prompt = f"{full_system_prompt}\n\n{tone_modifier}"
+        elif self._alma_enabled and self._auto_emotional_tone:
+            try:
+                alma_tone = get_emotional_tone_modifier()
+                if alma_tone:
+                    full_system_prompt = f"{full_system_prompt}\n\n{alma_tone}"
+            except Exception as e:
+                logger.debug(f"[BRAIN] ALMA tone generation failed: {e}")
 
         messages = []
         if full_system_prompt:
@@ -351,13 +424,18 @@ class OllamaBrain:
 
         logger.debug(f"[BRAIN] Streaming call to {model}")
 
-        # Get appropriate client (local or cloud)
-        client = self._get_client_for_model(model)
+        # Get appropriate client (local or cloud) - may return fallback model
+        client, actual_model = self._get_client_for_model(model)
+        if actual_model != model:
+            logger.info(f"[BRAIN] Model fallback: {model} -> {actual_model}")
+
+        # Update last model used to reflect ACTUAL model, not requested
+        self._last_model_used = actual_model
 
         full_response = ""
         try:
             # Use Ollama's streaming API
-            stream = client.chat(model=model, messages=messages, stream=True)
+            stream = client.chat(model=actual_model, messages=messages, stream=True)
 
             for chunk in stream:
                 if chunk and "message" in chunk and "content" in chunk["message"]:
@@ -1516,3 +1594,71 @@ Say 'NEXT: complete' when the goal is achieved."""
 
     def _memory_prompt(self) -> str:
         return "Summarize in 2-3 short sentences. Focus on what happened and what was learned."
+
+    # =========================================================================
+    # ALMA Emotional Intelligence Methods
+    # =========================================================================
+
+    def set_emotional_tone(self, enabled: bool = True):
+        """Enable or disable automatic emotional tone in responses.
+
+        Args:
+            enabled: Whether to automatically add emotional context to prompts
+        """
+        self._auto_emotional_tone = enabled
+        logger.info(f"[BRAIN] Automatic emotional tone: {'enabled' if enabled else 'disabled'}")
+
+    def trigger_emotional_response(self, emotion: str, intensity: float = 0.7, reason: str = "manual"):
+        """Trigger an emotional response in AURA.
+
+        Args:
+            emotion: Name of emotion (joy, curious, excited, etc.)
+            intensity: Strength of emotion (0.0 to 1.0)
+            reason: Why this emotion was triggered
+        """
+        if self._alma_enabled:
+            try:
+                trigger_emotion(emotion, intensity, reason)
+                logger.debug(f"[BRAIN] Triggered emotion: {emotion} ({intensity})")
+            except Exception as e:
+                logger.warning(f"[BRAIN] Failed to trigger emotion: {e}")
+
+    def get_emotional_state(self) -> Optional[dict]:
+        """Get AURA's current emotional state.
+
+        Returns:
+            Dictionary with emotional state info, or None if ALMA not available
+        """
+        if not self._alma_enabled:
+            return None
+        try:
+            return alma_engine.get_emotional_state()
+        except Exception as e:
+            logger.warning(f"[BRAIN] Failed to get emotional state: {e}")
+            return None
+
+    def get_mood_emoji(self) -> str:
+        """Get emoji representing AURA's current mood.
+
+        Returns:
+            Mood emoji string
+        """
+        if self._alma_enabled:
+            try:
+                return get_mood_emoji()
+            except Exception:
+                pass
+        return "🤖"
+
+    def update_emotional_state(self, success: bool = True, user_satisfied: bool = True):
+        """Update emotional state after an interaction.
+
+        Args:
+            success: Whether the response was successful
+            user_satisfied: Whether the user seemed satisfied
+        """
+        if self._alma_enabled:
+            try:
+                process_response_outcome(success, user_satisfied)
+            except Exception as e:
+                logger.debug(f"[BRAIN] Failed to update emotional state: {e}")
