@@ -463,8 +463,8 @@ class ALMAEngine:
             **OCC_EMOTIONS
         }
 
-        # Thread safety
-        self._lock = threading.Lock()
+        # Thread safety (RLock for reentrant method calls)
+        self._lock = threading.RLock()
 
         # Load persisted state
         self._load_state()

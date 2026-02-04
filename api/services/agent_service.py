@@ -47,6 +47,11 @@ class AgentService:
         self._initialized = True
         logger.info("[AgentService] Singleton initialized")
 
+    @property
+    def is_ready(self) -> bool:
+        """Check if agent is ready."""
+        return self._agent is not None
+
     def initialize(self, fast_init: bool = True) -> None:
         """Initialize the agent instance.
 
