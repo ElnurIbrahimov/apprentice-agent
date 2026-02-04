@@ -78,6 +78,18 @@ from .mcts_reasoning import (
     mcts_reason
 )
 from .reasoning_tree_tool import ReasoningTreeTool, deep_reason
+from .introspection_circuit import (
+    IntrospectionCircuit,
+    IntrospectionConfig,
+    IntrospectionResult,
+    IntrospectionAction,
+    ConfidenceLevel,
+    ConfidenceSignal,
+    QueryType,
+    create_introspection_circuit,
+    quick_confidence_check
+)
+from .introspection_tool import IntrospectionTool, get_introspection_tool
 
 # Import FluxMind from external tools directory
 import sys
@@ -207,4 +219,16 @@ __all__ = [
     "mcts_reason",
     "ReasoningTreeTool",
     "deep_reason",
+    # Introspection Circuit
+    "IntrospectionCircuit",
+    "IntrospectionConfig",
+    "IntrospectionResult",
+    "IntrospectionAction",
+    "ConfidenceLevel",
+    "ConfidenceSignal",
+    "QueryType",
+    "create_introspection_circuit",
+    "quick_confidence_check",
+    "IntrospectionTool",
+    "get_introspection_tool",
 ]

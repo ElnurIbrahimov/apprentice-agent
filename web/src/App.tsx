@@ -9,6 +9,7 @@ import { ToolsPanel } from './components/ToolsPanel';
 import { AMEMPanel } from './components/AMEMPanel';
 import { ProtoAGIPanel } from './components/ProtoAGIPanel';
 import { ReasoningTreePanel } from './components/ReasoningTreePanel';
+import { IntrospectionPanel } from './components/IntrospectionPanel';
 import { ToastContainer, useToastStore } from './components/Toast';
 import { useChatStore } from './store/chatStore';
 import { useSettingsStore, applyFontSize } from './store/settingsStore';
@@ -86,6 +87,7 @@ function App() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <ProtoAGIPanel />
               <GuardianPanel />
+              <IntrospectionPanel />
               <ReasoningTreePanel />
               <NeuroDreamPanel />
               <AMEMPanel />
