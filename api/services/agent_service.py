@@ -102,10 +102,16 @@ ACTION_TRIGGERS = {
 
     # ===== SWARM MODE =====
     # Multiple agents working in parallel
+    # Note: Compound triggers (longer) must come first to match before individual words
+    "swarm research": "swarm",
+    "swarm search": "swarm",
+    "swarm analyze": "swarm",
+    "swarm mode": "swarm",
     "swarm": "swarm",
     "multi-agent": "swarm",
     "multiple agents": "swarm",
     "team research": "swarm",
+    "collaborative research": "swarm",
     "collaborative": "swarm",
     "all agents": "swarm",
     "agent team": "swarm",
@@ -315,17 +321,58 @@ class AgentService:
 
                     logger.info(f"[AgentService] Swarm mode (REST) for: {message[:50]}...")
 
+                    # Check if query needs real-time data (news, latest, current, etc.)
+                    needs_search_keywords = [
+                        "news", "latest", "current", "recent", "today", "now",
+                        "update", "happening", "trending", "2024", "2025", "2026",
+                        "research", "developments", "breakthroughs", "announced"
+                    ]
+                    msg_lower = message.lower()
+                    needs_search = any(kw in msg_lower for kw in needs_search_keywords)
+
+                    # Gather real data first if needed
+                    search_context = ""
+                    if needs_search:
+                        logger.info("[AgentService] Swarm: Gathering real-time data first...")
+                        try:
+                            # Extract topic from message (remove swarm trigger words)
+                            topic = msg_lower
+                            for trigger in ["swarm", "multi-agent", "multiple agents", "team research", "collaborative", "all agents", "agent team"]:
+                                topic = topic.replace(trigger, "").strip()
+                            topic = topic.strip(" :,.-")
+
+                            # Use the search tool to get real data
+                            from apprentice_agent.tools.search import SearchTool
+                            search_tool = SearchTool()
+                            search_results = search_tool.search(topic, num_results=8)
+
+                            if search_results.get("success") and search_results.get("results"):
+                                results_text = []
+                                for i, r in enumerate(search_results["results"][:8], 1):
+                                    results_text.append(f"{i}. **{r.get('title', 'No title')}**\n   {r.get('snippet', '')}\n   Source: {r.get('link', '')}")
+                                search_context = f"\n\n**Search Results for '{topic}':**\n\n" + "\n\n".join(results_text) + "\n\n---\n\n"
+                                logger.info(f"[AgentService] Swarm: Got {len(search_results['results'])} search results")
+                            else:
+                                logger.warning(f"[AgentService] Swarm: Search returned no results")
+                        except Exception as e:
+                            logger.error(f"[AgentService] Swarm search error: {e}")
+
+                    # Build the prompt with search context if available
+                    agent_prompt = message
+                    if search_context:
+                        agent_prompt = f"Based on the following real-time search results, analyze and respond to: {message}\n{search_context}\nUse the search results above to provide informed, factual analysis."
+
                     agents = {
-                        "Research": "You are a Research Agent. Gather factual information and provide evidence-based analysis.",
-                        "Analyst": "You are an Analyst Agent. Provide critical analysis, identify patterns, and assess implications.",
-                        "Creative": "You are a Creative Agent. Think outside the box and propose innovative perspectives.",
-                        "Strategist": "You are a Strategy Agent. Consider long-term implications and actionable recommendations."
+                        "Research": "You are a Research Agent. Analyze the provided data and extract key facts, findings, and evidence. Cite sources when available.",
+                        "Analyst": "You are an Analyst Agent. Provide critical analysis of the data, identify patterns, trends, and assess implications.",
+                        "Creative": "You are a Creative Agent. Think outside the box, find unexpected connections, and propose innovative perspectives on the data.",
+                        "Strategist": "You are a Strategy Agent. Consider long-term implications, identify opportunities and risks, and provide actionable recommendations."
                     }
 
                     results = {}
                     def run_agent(name, system_prompt):
                         try:
-                            return name, self.agent.brain.think(message, system_prompt=system_prompt, use_history=False)
+                            return name, self.agent.brain.think(agent_prompt, system_prompt=system_prompt, use_history=False)
                         except Exception as e:
                             return name, f"Error: {e}"
 
@@ -339,9 +386,12 @@ class AgentService:
                                 results[futures[future]] = f"Error: {e}"
 
                     # Build response
-                    response_parts = ["🐝 **Agent Swarm Analysis**\n\n**Agents:** Research, Analyst, Creative, Strategist\n**Mode:** parallel\n\n---\n"]
+                    mode_text = "parallel + search" if search_context else "parallel"
+                    header = f"## Agent Swarm\n\n**Agents:** Research, Analyst, Creative, Strategist\n**Mode:** {mode_text}\n\n---\n"
+                    response_parts = [header]
+
                     for name, resp in results.items():
-                        response_parts.append(f"### 🤖 {name} Agent\n\n{resp}\n\n---\n")
+                        response_parts.append(f"### {name} Agent\n\n{resp}\n\n---\n")
 
                     # Synthesis
                     if len(results) >= 2:
@@ -351,7 +401,7 @@ class AgentService:
 
 Provide a unified synthesis with key consensus points and a final conclusion."""
                         synthesis = self.agent.brain.think(synthesis_prompt)
-                        response_parts.append(f"### 🧠 Swarm Synthesis\n\n{synthesis}")
+                        response_parts.append(f"### Synthesis\n\n{synthesis}")
 
                     return {
                         "response": "\n".join(response_parts),
@@ -378,7 +428,7 @@ Provide a unified synthesis with key consensus points and a final conclusion."""
 
 Provide key findings and cite sources."""
                         synthesized = self.agent.brain.think(synthesis_prompt)
-                        response = f"🔬 **Deep Research: {topic}**\n\n{synthesized}\n\n---\n*{result.get('summary', '')}*"
+                        response = f"## Deep Research: {topic}**\n\n{synthesized}\n\n---\n*{result.get('summary', '')}*"
                     else:
                         response = f"Research failed: {result.get('error', 'Unknown error')}"
 
@@ -479,7 +529,7 @@ Provide key findings and cite sources."""
                         topic = topic.strip(" on about for")
 
                         logger.info(f"[AgentService] Deep research on: {topic}")
-                        yield {"type": "chunk", "content": f"🔬 **Starting deep research on:** {topic}\n\n"}
+                        yield {"type": "chunk", "content": f"## Deep Research: {topic}\n\n"}
 
                         result = deep_tool.research(topic, depth="deep")
 
@@ -517,25 +567,62 @@ Provide a well-structured, informative summary with key findings and cite source
                         import concurrent.futures
 
                         logger.info(f"[AgentService] Swarm mode activated for: {message[:50]}...")
-                        yield {"type": "chunk", "content": "🐝 **Activating agent swarm...**\n\n"}
+                        yield {"type": "chunk", "content": "## Agent Swarm\n\n"}
+
+                        # Check if query needs real-time data
+                        needs_search_keywords = [
+                            "news", "latest", "current", "recent", "today", "now",
+                            "update", "happening", "trending", "2024", "2025", "2026",
+                            "research", "developments", "breakthroughs", "announced"
+                        ]
+                        msg_lower = message.lower()
+                        needs_search = any(kw in msg_lower for kw in needs_search_keywords)
+
+                        # Gather real data first if needed
+                        search_context = ""
+                        if needs_search:
+                            yield {"type": "chunk", "content": "Gathering real-time data...\n\n"}
+                            try:
+                                topic = msg_lower
+                                for trigger in ["swarm", "multi-agent", "multiple agents", "team research", "collaborative", "all agents", "agent team"]:
+                                    topic = topic.replace(trigger, "").strip()
+                                topic = topic.strip(" :,.-")
+
+                                from apprentice_agent.tools.search import SearchTool
+                                search_tool = SearchTool()
+                                search_results = search_tool.search(topic, num_results=8)
+
+                                if search_results.get("success") and search_results.get("results"):
+                                    results_text = []
+                                    for i, r in enumerate(search_results["results"][:8], 1):
+                                        results_text.append(f"{i}. **{r.get('title', 'No title')}**\n   {r.get('snippet', '')}\n   Source: {r.get('link', '')}")
+                                    search_context = f"\n\n**Search Results for '{topic}':**\n\n" + "\n\n".join(results_text) + "\n\n---\n\n"
+                                    yield {"type": "chunk", "content": f"Found {len(search_results['results'])} sources.\n\n"}
+                            except Exception as e:
+                                logger.error(f"[AgentService] Swarm search error: {e}")
+
+                        # Build prompt with search context
+                        agent_prompt = message
+                        if search_context:
+                            agent_prompt = f"Based on the following real-time search results, analyze: {message}\n{search_context}\nUse the search results to provide informed analysis."
 
                         # Define agent perspectives
                         agents = {
-                            "Research": "You are a Research Agent. Gather factual information, cite sources, and provide evidence-based analysis.",
-                            "Analyst": "You are an Analyst Agent. Provide critical analysis, identify patterns, evaluate pros/cons, and assess implications.",
-                            "Creative": "You are a Creative Agent. Think outside the box, propose innovative solutions, and explore unconventional perspectives.",
-                            "Strategist": "You are a Strategy Agent. Consider long-term implications, competitive landscape, and actionable recommendations."
+                            "Research": "You are a Research Agent. Analyze the provided data and extract key facts, findings, and evidence. Cite sources when available.",
+                            "Analyst": "You are an Analyst Agent. Provide critical analysis of the data, identify patterns, trends, and assess implications.",
+                            "Creative": "You are a Creative Agent. Think outside the box, find unexpected connections, and propose innovative perspectives.",
+                            "Strategist": "You are a Strategy Agent. Consider long-term implications, identify opportunities and risks, and provide actionable recommendations."
                         }
 
-                        yield {"type": "chunk", "content": f"**Agents:** {', '.join(agents.keys())}\n**Mode:** parallel\n\n"}
-                        yield {"type": "chunk", "content": "---\n\n"}
+                        mode_text = "parallel + search" if search_context else "parallel"
+                        yield {"type": "chunk", "content": f"**Agents:** {', '.join(agents.keys())}\n**Mode:** {mode_text}\n\n---\n\n"}
 
                         # Execute all agents in parallel
                         results = {}
                         def run_agent(name, system_prompt):
                             try:
                                 response = self.agent.brain.think(
-                                    message,
+                                    agent_prompt,
                                     system_prompt=system_prompt,
                                     use_history=False
                                 )
@@ -550,15 +637,14 @@ Provide a well-structured, informative summary with key findings and cite source
                                 try:
                                     name, response = future.result()
                                     results[name] = response
-                                    # Stream each agent's response as it completes
-                                    yield {"type": "chunk", "content": f"### 🤖 {name} Agent\n\n{response}\n\n---\n\n"}
+                                    yield {"type": "chunk", "content": f"### {name} Agent\n\n{response}\n\n---\n\n"}
                                 except Exception as e:
                                     name = futures[future]
-                                    yield {"type": "chunk", "content": f"### ⚠️ {name} Agent\n\nError: {e}\n\n---\n\n"}
+                                    yield {"type": "chunk", "content": f"### {name} Agent\n\nError: {e}\n\n---\n\n"}
 
                         # Synthesize final summary
                         if len(results) >= 2:
-                            yield {"type": "chunk", "content": "### 🧠 Swarm Synthesis\n\n"}
+                            yield {"type": "chunk", "content": "### Synthesis\n\n"}
 
                             synthesis_prompt = f"""You are synthesizing insights from multiple AI agents who analyzed this query: "{message}"
 
