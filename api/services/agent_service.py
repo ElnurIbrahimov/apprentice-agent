@@ -395,11 +395,24 @@ class AgentService:
 
                     # Synthesis
                     if len(results) >= 2:
-                        synthesis_prompt = f"""Synthesize these agent perspectives on: "{message}"
+                        synthesis_prompt = f"""You are synthesizing insights from multiple AI agents who analyzed: "{message}"
+
+Here are their perspectives:
 
 {chr(10).join([f"**{name}:** {resp[:1500]}" for name, resp in results.items()])}
 
-Provide a unified synthesis with key consensus points and a final conclusion."""
+Write a well-formatted synthesis in readable prose (NOT JSON). Use this structure:
+
+**Key Consensus Points**
+- List the main points where agents agree
+
+**Diverse Perspectives**
+- Note any different angles or unique insights from specific agents
+
+**Conclusion**
+Write a brief integrative conclusion that captures the essential takeaways.
+
+Keep it concise, readable, and well-formatted with markdown."""
                         synthesis = self.agent.brain.think(synthesis_prompt)
                         response_parts.append(f"### Synthesis\n\n{synthesis}")
 
@@ -646,18 +659,24 @@ Provide a well-structured, informative summary with key findings and cite source
                         if len(results) >= 2:
                             yield {"type": "chunk", "content": "### Synthesis\n\n"}
 
-                            synthesis_prompt = f"""You are synthesizing insights from multiple AI agents who analyzed this query: "{message}"
+                            synthesis_prompt = f"""You are synthesizing insights from multiple AI agents who analyzed: "{message}"
 
 Here are their perspectives:
 
 {chr(10).join([f"**{name}:** {resp[:1500]}" for name, resp in results.items()])}
 
-Provide a unified synthesis that:
-1. Identifies key consensus points
-2. Notes important disagreements or different angles
-3. Gives a final integrated conclusion
+Write a well-formatted synthesis in readable prose (NOT JSON). Use this structure:
 
-Be concise but comprehensive."""
+**Key Consensus Points**
+- List the main points where agents agree
+
+**Diverse Perspectives**
+- Note any different angles or unique insights from specific agents
+
+**Conclusion**
+Write a brief integrative conclusion that captures the essential takeaways.
+
+Keep it concise, readable, and well-formatted with markdown."""
 
                             # Stream the synthesis
                             if hasattr(self.agent.brain, 'think_stream'):
