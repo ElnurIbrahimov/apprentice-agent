@@ -423,30 +423,75 @@ Provide a well-structured, informative summary with key findings and cite source
                         return
 
                 # ===== SWARM/MULTI-AGENT HANDLER =====
-                # Use MultiAgentOrchestrator for parallel agent collaboration
+                # Force parallel execution of ALL agents for true swarm behavior
                 if detected_action == "swarm":
                     try:
-                        from apprentice_agent.multi_agent import MultiAgentOrchestrator
+                        import concurrent.futures
 
                         logger.info(f"[AgentService] Swarm mode activated for: {message[:50]}...")
                         yield {"type": "chunk", "content": "🐝 **Activating agent swarm...**\n\n"}
 
-                        # Create orchestrator with agent's tools and LLM
-                        orchestrator = MultiAgentOrchestrator(
-                            tool_registry=self.agent.tools,
-                            llm_func=lambda sys, usr: self.agent.brain.think(usr, system_prompt=sys)
-                        )
+                        # Define agent perspectives
+                        agents = {
+                            "Research": "You are a Research Agent. Gather factual information, cite sources, and provide evidence-based analysis.",
+                            "Analyst": "You are an Analyst Agent. Provide critical analysis, identify patterns, evaluate pros/cons, and assess implications.",
+                            "Creative": "You are a Creative Agent. Think outside the box, propose innovative solutions, and explore unconventional perspectives.",
+                            "Strategist": "You are a Strategy Agent. Consider long-term implications, competitive landscape, and actionable recommendations."
+                        }
 
-                        # Get routing preview
-                        preview = orchestrator.route_preview(message)
-                        agents = preview.get("selected_agents", [])
-                        mode = preview.get("mode", "parallel")
+                        yield {"type": "chunk", "content": f"**Agents:** {', '.join(agents.keys())}\n**Mode:** parallel\n\n"}
+                        yield {"type": "chunk", "content": "---\n\n"}
 
-                        yield {"type": "chunk", "content": f"**Agents:** {', '.join(agents)}\n**Mode:** {mode}\n\n"}
+                        # Execute all agents in parallel
+                        results = {}
+                        def run_agent(name, system_prompt):
+                            try:
+                                response = self.agent.brain.think(
+                                    message,
+                                    system_prompt=system_prompt,
+                                    use_history=False
+                                )
+                                return name, response
+                            except Exception as e:
+                                return name, f"Error: {e}"
 
-                        # Execute
-                        response = orchestrator.chat(message)
-                        yield {"type": "chunk", "content": response}
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+                            futures = {executor.submit(run_agent, name, prompt): name for name, prompt in agents.items()}
+
+                            for future in concurrent.futures.as_completed(futures, timeout=120):
+                                try:
+                                    name, response = future.result()
+                                    results[name] = response
+                                    # Stream each agent's response as it completes
+                                    yield {"type": "chunk", "content": f"### 🤖 {name} Agent\n\n{response}\n\n---\n\n"}
+                                except Exception as e:
+                                    name = futures[future]
+                                    yield {"type": "chunk", "content": f"### ⚠️ {name} Agent\n\nError: {e}\n\n---\n\n"}
+
+                        # Synthesize final summary
+                        if len(results) >= 2:
+                            yield {"type": "chunk", "content": "### 🧠 Swarm Synthesis\n\n"}
+
+                            synthesis_prompt = f"""You are synthesizing insights from multiple AI agents who analyzed this query: "{message}"
+
+Here are their perspectives:
+
+{chr(10).join([f"**{name}:** {resp[:1500]}" for name, resp in results.items()])}
+
+Provide a unified synthesis that:
+1. Identifies key consensus points
+2. Notes important disagreements or different angles
+3. Gives a final integrated conclusion
+
+Be concise but comprehensive."""
+
+                            # Stream the synthesis
+                            if hasattr(self.agent.brain, 'think_stream'):
+                                for chunk in self.agent.brain.think_stream(synthesis_prompt):
+                                    yield {"type": "chunk", "content": chunk}
+                            else:
+                                synthesis = self.agent.brain.think(synthesis_prompt)
+                                yield {"type": "chunk", "content": synthesis}
 
                         yield {"type": "done", "mood": self._get_mood(), "model_used": effective_model or "swarm"}
                         return
