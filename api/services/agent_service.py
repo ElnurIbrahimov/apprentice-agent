@@ -294,14 +294,102 @@ class AgentService:
             Dict with response, fast_path flag, and mood
         """
         with self._agent_lock:
-            # Set model override if provided (uses brain's override mechanism)
-            if model_override:
-                self.agent.brain.set_model_override(model_override)
-                logger.info(f"[AgentService] Using model override: {model_override}")
+            # Detect action mode and auto-select model
+            detected_action = detect_action_mode(message)
+            effective_model = model_override
+
+            if not effective_model and detected_action:
+                effective_model = get_model_for_action(detected_action)
+                if effective_model:
+                    logger.info(f"[AgentService] Chat auto-selected model for {detected_action}: {effective_model}")
+
+            # Set model override if we have one
+            if effective_model:
+                self.agent.brain.set_model_override(effective_model)
+                logger.info(f"[AgentService] Using model: {effective_model}")
 
             try:
+                # ===== SWARM MODE HANDLER =====
+                if detected_action == "swarm":
+                    import concurrent.futures
+
+                    logger.info(f"[AgentService] Swarm mode (REST) for: {message[:50]}...")
+
+                    agents = {
+                        "Research": "You are a Research Agent. Gather factual information and provide evidence-based analysis.",
+                        "Analyst": "You are an Analyst Agent. Provide critical analysis, identify patterns, and assess implications.",
+                        "Creative": "You are a Creative Agent. Think outside the box and propose innovative perspectives.",
+                        "Strategist": "You are a Strategy Agent. Consider long-term implications and actionable recommendations."
+                    }
+
+                    results = {}
+                    def run_agent(name, system_prompt):
+                        try:
+                            return name, self.agent.brain.think(message, system_prompt=system_prompt, use_history=False)
+                        except Exception as e:
+                            return name, f"Error: {e}"
+
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+                        futures = {executor.submit(run_agent, name, prompt): name for name, prompt in agents.items()}
+                        for future in concurrent.futures.as_completed(futures, timeout=120):
+                            try:
+                                name, response = future.result()
+                                results[name] = response
+                            except Exception as e:
+                                results[futures[future]] = f"Error: {e}"
+
+                    # Build response
+                    response_parts = ["🐝 **Agent Swarm Analysis**\n\n**Agents:** Research, Analyst, Creative, Strategist\n**Mode:** parallel\n\n---\n"]
+                    for name, resp in results.items():
+                        response_parts.append(f"### 🤖 {name} Agent\n\n{resp}\n\n---\n")
+
+                    # Synthesis
+                    if len(results) >= 2:
+                        synthesis_prompt = f"""Synthesize these agent perspectives on: "{message}"
+
+{chr(10).join([f"**{name}:** {resp[:1500]}" for name, resp in results.items()])}
+
+Provide a unified synthesis with key consensus points and a final conclusion."""
+                        synthesis = self.agent.brain.think(synthesis_prompt)
+                        response_parts.append(f"### 🧠 Swarm Synthesis\n\n{synthesis}")
+
+                    return {
+                        "response": "\n".join(response_parts),
+                        "fast_path": False,
+                        "mood": self._get_mood(),
+                        "model_used": effective_model or "swarm"
+                    }
+
+                # ===== DEEP RESEARCH HANDLER =====
+                if detected_action == "deep_research":
+                    from apprentice_agent.tools.deep_research import DeepResearchTool
+                    deep_tool = DeepResearchTool()
+
+                    topic = message.lower()
+                    for trigger in ["deep research", "thorough research", "extensive research"]:
+                        topic = topic.replace(trigger, "").strip()
+                    topic = topic.strip(" on about for")
+
+                    result = deep_tool.research(topic, depth="deep")
+
+                    if result.get("success"):
+                        synthesis_prompt = f"""Summarize this research on '{topic}':
+{result.get('content', '')[:8000]}
+
+Provide key findings and cite sources."""
+                        synthesized = self.agent.brain.think(synthesis_prompt)
+                        response = f"🔬 **Deep Research: {topic}**\n\n{synthesized}\n\n---\n*{result.get('summary', '')}*"
+                    else:
+                        response = f"Research failed: {result.get('error', 'Unknown error')}"
+
+                    return {
+                        "response": response,
+                        "fast_path": False,
+                        "mood": self._get_mood(),
+                        "model_used": effective_model or "deep_research"
+                    }
+
                 # Use agent.chat() which has direct handlers for search/crypto
-                # This bypasses the slow agent.run() loop and prevents hallucination
                 response = self.agent.chat(message, speak=speak)
 
                 return {
@@ -312,7 +400,7 @@ class AgentService:
                 }
             finally:
                 # Clear model override after request
-                if model_override:
+                if effective_model:
                     self.agent.brain.set_model_override(None)
 
     def chat_stream(self, message: str, model_override: Optional[str] = None, action_mode: Optional[str] = None):
