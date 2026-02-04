@@ -90,6 +90,25 @@ ACTION_TRIGGERS = {
     "look at this": "vision",
     "explain this image": "vision",
     "screenshot": "vision",
+
+    # ===== DEEP RESEARCH MODE =====
+    # Multi-query, multi-source research with page reading
+    "deep research": "deep_research",
+    "thorough research": "deep_research",
+    "extensive research": "deep_research",
+    "full research": "deep_research",
+    "research everything": "deep_research",
+    "research in depth": "deep_research",
+
+    # ===== SWARM MODE =====
+    # Multiple agents working in parallel
+    "swarm": "swarm",
+    "multi-agent": "swarm",
+    "multiple agents": "swarm",
+    "team research": "swarm",
+    "collaborative": "swarm",
+    "all agents": "swarm",
+    "agent team": "swarm",
 }
 
 # Best models for each action mode
@@ -110,14 +129,24 @@ ACTION_MODE_MODELS = {
         "description": "Autonomous task execution"
     },
     "code": {
-        "preferred": "devstral-2:123b-cloud",
-        "fallbacks": ["qwen3-coder:480b-cloud", "devstral-small-2:24b-cloud"],
+        "preferred": "glm-4.7-cloud",
+        "fallbacks": ["devstral-2:123b-cloud", "qwen3-coder:480b-cloud"],
         "description": "Code generation and analysis"
     },
     "vision": {
         "preferred": "qwen3-vl:235b-cloud",
         "fallbacks": ["kimi-k2.5-cloud", "llava:13b"],
         "description": "Image analysis"
+    },
+    "deep_research": {
+        "preferred": "deepseek-v3.1:671b-cloud",
+        "fallbacks": ["cogito-2.1:671b-cloud", "kimi-k2.5-cloud"],
+        "description": "Multi-source deep research with page reading"
+    },
+    "swarm": {
+        "preferred": "deepseek-v3.1:671b-cloud",
+        "fallbacks": ["cogito-2.1:671b-cloud", "kimi-k2.5-cloud"],
+        "description": "Multi-agent parallel collaboration"
     }
 }
 
@@ -346,6 +375,85 @@ class AgentService:
                             "mood": self._get_mood(),
                             "model_used": "direct_crypto"
                         }
+                        return
+
+                # ===== DEEP RESEARCH HANDLER =====
+                # Use DeepResearchTool for thorough multi-source research
+                if detected_action == "deep_research":
+                    try:
+                        from apprentice_agent.tools.deep_research import DeepResearchTool
+                        deep_tool = DeepResearchTool()
+
+                        # Extract topic from message
+                        topic = message.lower()
+                        for trigger in ["deep research", "thorough research", "extensive research", "full research", "research everything", "research in depth"]:
+                            topic = topic.replace(trigger, "").strip()
+                        topic = topic.strip(" on about for")
+
+                        logger.info(f"[AgentService] Deep research on: {topic}")
+                        yield {"type": "chunk", "content": f"🔬 **Starting deep research on:** {topic}\n\n"}
+
+                        result = deep_tool.research(topic, depth="deep")
+
+                        if result.get("success"):
+                            # Synthesize with LLM
+                            synthesis_prompt = f"""Based on this deep research, provide a comprehensive summary:
+
+Topic: {topic}
+Sources Found: {result.get('urls_found', 0)}
+Pages Read: {result.get('pages_read', 0)}
+
+Content:
+{result.get('content', '')[:8000]}
+
+Provide a well-structured, informative summary with key findings and cite sources."""
+
+                            synthesized = self.agent.brain.think(synthesis_prompt)
+                            yield {"type": "chunk", "content": synthesized}
+                            yield {"type": "chunk", "content": f"\n\n---\n*{result.get('summary', '')}*"}
+                        else:
+                            yield {"type": "chunk", "content": f"Research failed: {result.get('error', 'Unknown error')}"}
+
+                        yield {"type": "done", "mood": self._get_mood(), "model_used": effective_model or "deep_research"}
+                        return
+                    except Exception as e:
+                        logger.error(f"[AgentService] Deep research error: {e}")
+                        yield {"type": "chunk", "content": f"Deep research error: {e}"}
+                        yield {"type": "done", "mood": self._get_mood(), "model_used": "error"}
+                        return
+
+                # ===== SWARM/MULTI-AGENT HANDLER =====
+                # Use MultiAgentOrchestrator for parallel agent collaboration
+                if detected_action == "swarm":
+                    try:
+                        from apprentice_agent.multi_agent import MultiAgentOrchestrator
+
+                        logger.info(f"[AgentService] Swarm mode activated for: {message[:50]}...")
+                        yield {"type": "chunk", "content": "🐝 **Activating agent swarm...**\n\n"}
+
+                        # Create orchestrator with agent's tools and LLM
+                        orchestrator = MultiAgentOrchestrator(
+                            tool_registry=self.agent.tools,
+                            llm_func=lambda sys, usr: self.agent.brain.think(usr, system_prompt=sys)
+                        )
+
+                        # Get routing preview
+                        preview = orchestrator.route_preview(message)
+                        agents = preview.get("selected_agents", [])
+                        mode = preview.get("mode", "parallel")
+
+                        yield {"type": "chunk", "content": f"**Agents:** {', '.join(agents)}\n**Mode:** {mode}\n\n"}
+
+                        # Execute
+                        response = orchestrator.chat(message)
+                        yield {"type": "chunk", "content": response}
+
+                        yield {"type": "done", "mood": self._get_mood(), "model_used": effective_model or "swarm"}
+                        return
+                    except Exception as e:
+                        logger.error(f"[AgentService] Swarm mode error: {e}")
+                        yield {"type": "chunk", "content": f"Swarm mode error: {e}"}
+                        yield {"type": "done", "mood": self._get_mood(), "model_used": "error"}
                         return
 
                 # ===== DIRECT CODE HANDLER =====

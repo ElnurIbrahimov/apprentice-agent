@@ -1,12 +1,12 @@
 import { useState, useRef, useEffect, KeyboardEvent, FormEvent, DragEvent, ClipboardEvent } from 'react';
 import { PaperAirplaneIcon, PaperClipIcon } from '@heroicons/react/24/solid';
-import { MagnifyingGlassIcon, BookOpenIcon, CpuChipIcon } from '@heroicons/react/24/outline';
+import { MagnifyingGlassIcon, BookOpenIcon, CpuChipIcon, BeakerIcon, UserGroupIcon } from '@heroicons/react/24/outline';
 import { AttachmentList } from './AttachmentPreview';
 import { useFileUpload, isSupported } from '../hooks/useFileUpload';
 import type { FileAttachment } from '../types';
 
 // Action modes for quick actions
-type ActionMode = 'none' | 'search' | 'research' | 'agent';
+type ActionMode = 'none' | 'search' | 'research' | 'deep_research' | 'swarm' | 'agent';
 
 interface MessageInputProps {
   onSend: (message: string, attachments?: FileAttachment[], actionMode?: string | null) => void;
@@ -244,11 +244,51 @@ export function MessageInput({
             Agent
           </button>
 
+          <button
+            type="button"
+            onClick={() => setActionMode(actionMode === 'deep_research' ? 'none' : 'deep_research')}
+            disabled={disabled || isLoading}
+            className={`
+              flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
+              transition-all duration-200 border
+              ${actionMode === 'deep_research'
+                ? 'bg-amber-500/20 border-amber-500/50 text-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.3)]'
+                : 'bg-chat-assistant/60 border-chat-border/30 text-chat-text-secondary hover:text-amber-400 hover:border-amber-500/30 hover:bg-amber-500/10'
+              }
+              ${(disabled || isLoading) ? 'opacity-50 cursor-not-allowed' : ''}
+            `}
+            title="Deep multi-source research"
+          >
+            <BeakerIcon className="w-3.5 h-3.5" />
+            Deep
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActionMode(actionMode === 'swarm' ? 'none' : 'swarm')}
+            disabled={disabled || isLoading}
+            className={`
+              flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
+              transition-all duration-200 border
+              ${actionMode === 'swarm'
+                ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.3)]'
+                : 'bg-chat-assistant/60 border-chat-border/30 text-chat-text-secondary hover:text-cyan-400 hover:border-cyan-500/30 hover:bg-cyan-500/10'
+              }
+              ${(disabled || isLoading) ? 'opacity-50 cursor-not-allowed' : ''}
+            `}
+            title="Multi-agent swarm collaboration"
+          >
+            <UserGroupIcon className="w-3.5 h-3.5" />
+            Swarm
+          </button>
+
           {actionMode !== 'none' && (
             <span className="text-xs text-chat-text-secondary ml-2 animate-fade-in">
-              {actionMode === 'search' && 'Type your query and press Enter to search the web'}
-              {actionMode === 'research' && 'Type your topic for comprehensive research'}
-              {actionMode === 'agent' && 'Agent will work autonomously on your task'}
+              {actionMode === 'search' && 'Quick web search'}
+              {actionMode === 'research' && 'Comprehensive research'}
+              {actionMode === 'deep_research' && 'Multi-source deep research (20+ pages)'}
+              {actionMode === 'swarm' && 'Multiple agents working in parallel'}
+              {actionMode === 'agent' && 'Autonomous task execution'}
             </span>
           )}
         </div>
@@ -264,6 +304,8 @@ export function MessageInput({
             ${actionMode === 'search' ? 'border-blue-500/40' : ''}
             ${actionMode === 'research' ? 'border-emerald-500/40' : ''}
             ${actionMode === 'agent' ? 'border-purple-500/40' : ''}
+            ${actionMode === 'deep_research' ? 'border-amber-500/40' : ''}
+            ${actionMode === 'swarm' ? 'border-cyan-500/40' : ''}
           `}
         >
           {/* Attachment button */}
