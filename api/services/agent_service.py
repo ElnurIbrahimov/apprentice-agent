@@ -24,43 +24,124 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 # =============================================================================
-#                    AUTO-MODEL SELECTION FOR ACTION MODES
+#                    ACTION MODE TRIGGER SYSTEM
 # =============================================================================
+
+# Trigger words that activate different agent modes
+# Format: trigger_word -> (action_mode, model_config)
+
+ACTION_TRIGGERS = {
+    # ===== SEARCH MODE =====
+    # Quick web search - uses fast cloud model
+    "search": "search",
+    "google": "search",
+    "lookup": "search",
+    "find online": "search",
+    "web search": "search",
+    "search online": "search",
+    "look up": "search",
+    "search for": "search",
+    "search the web": "search",
+
+    # ===== RESEARCH MODE =====
+    # Deep research with multiple sources - uses powerful reasoning model
+    "research": "research",
+    "deep dive": "research",
+    "analyze": "research",
+    "investigate": "research",
+    "comprehensive": "research",
+    "in-depth": "research",
+    "detailed analysis": "research",
+    "thorough research": "research",
+    "deep research": "research",
+    "full analysis": "research",
+
+    # ===== AGENT MODE =====
+    # Autonomous multi-step tasks - uses agentic model
+    "agent": "agent",
+    "autonomous": "agent",
+    "execute": "agent",
+    "automate": "agent",
+    "do this for me": "agent",
+    "handle this": "agent",
+    "take care of": "agent",
+    "multi-step": "agent",
+    "workflow": "agent",
+    "[agent mode]": "agent",
+
+    # ===== CODE MODE =====
+    # Code generation/analysis - uses code-specialized model
+    "code": "code",
+    "program": "code",
+    "script": "code",
+    "implement": "code",
+    "debug": "code",
+    "fix code": "code",
+    "write code": "code",
+    "coding": "code",
+    "refactor": "code",
+    "optimize code": "code",
+
+    # ===== VISION MODE =====
+    # Image analysis - uses vision model
+    "describe image": "vision",
+    "analyze image": "vision",
+    "what's in this": "vision",
+    "look at this": "vision",
+    "explain this image": "vision",
+    "screenshot": "vision",
+}
 
 # Best models for each action mode
 ACTION_MODE_MODELS = {
     "search": {
-        # Fast model for quick search - speed matters
         "preferred": "devstral-small-2:24b-cloud",
-        "fallbacks": ["qwen2.5:7b", "llama3.2:3b"]
+        "fallbacks": ["qwen2.5:7b", "llama3.2:3b"],
+        "description": "Quick web search"
     },
     "research": {
-        # Powerful reasoning model for comprehensive research
         "preferred": "deepseek-v3.1:671b-cloud",
-        "fallbacks": ["cogito-2.1:671b-cloud", "qwen3-next:80b-cloud"]
+        "fallbacks": ["cogito-2.1:671b-cloud", "qwen3-next:80b-cloud"],
+        "description": "Comprehensive research"
     },
     "agent": {
-        # Most capable agentic model for autonomous tasks
         "preferred": "kimi-k2.5-cloud",
-        "fallbacks": ["devstral-2:123b-cloud", "deepseek-v3.1:671b-cloud"]
+        "fallbacks": ["devstral-2:123b-cloud", "deepseek-v3.1:671b-cloud"],
+        "description": "Autonomous task execution"
+    },
+    "code": {
+        "preferred": "devstral-2:123b-cloud",
+        "fallbacks": ["qwen3-coder:480b-cloud", "devstral-small-2:24b-cloud"],
+        "description": "Code generation and analysis"
+    },
+    "vision": {
+        "preferred": "qwen3-vl:235b-cloud",
+        "fallbacks": ["kimi-k2.5-cloud", "llava:13b"],
+        "description": "Image analysis"
     }
 }
 
 
 def detect_action_mode(message: str) -> Optional[str]:
-    """Detect the action mode from message prefix.
+    """Detect action mode from trigger words in message.
+
+    Scans the message for trigger words and returns the corresponding action mode.
+    Trigger words can appear anywhere in the message (not just at the start).
 
     Returns:
-        'search', 'research', 'agent', or None
+        'search', 'research', 'agent', 'code', 'vision', or None
     """
     msg_lower = message.lower().strip()
 
-    if msg_lower.startswith("search online for"):
-        return "search"
-    elif msg_lower.startswith("do comprehensive research on"):
-        return "research"
-    elif msg_lower.startswith("[agent mode]"):
-        return "agent"
+    # Check for trigger words (longer phrases first to avoid partial matches)
+    # Sort by length descending so "search online" matches before "search"
+    sorted_triggers = sorted(ACTION_TRIGGERS.keys(), key=len, reverse=True)
+
+    for trigger in sorted_triggers:
+        if trigger in msg_lower:
+            mode = ACTION_TRIGGERS[trigger]
+            logger.info(f"[ActionMode] Trigger '{trigger}' detected -> mode: {mode}")
+            return mode
 
     return None
 

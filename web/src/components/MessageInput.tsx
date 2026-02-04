@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, KeyboardEvent, FormEvent, DragEvent, ClipboardEvent } from 'react';
-import { PaperAirplaneIcon, PaperClipIcon, StopIcon } from '@heroicons/react/24/solid';
+import { PaperAirplaneIcon, PaperClipIcon } from '@heroicons/react/24/solid';
 import { MagnifyingGlassIcon, BookOpenIcon, CpuChipIcon } from '@heroicons/react/24/outline';
 import { AttachmentList } from './AttachmentPreview';
 import { useFileUpload, isSupported } from '../hooks/useFileUpload';
@@ -64,17 +64,11 @@ export function MessageInput({
     // Get ready attachments (not uploading, no errors)
     const readyAttachments = attachments.filter(a => !a.uploading && !a.error);
 
-    // Prepend mode prefix based on selected action
+    // Just use the message as-is - backend detects trigger words
+    // Only add minimal hint if action mode is selected but no trigger word in message
     let finalMessage = message.trim();
-    if (actionMode === 'search' && finalMessage) {
-      finalMessage = `search online for ${finalMessage}`;
-    } else if (actionMode === 'research' && finalMessage) {
-      finalMessage = `do comprehensive research on ${finalMessage}`;
-    } else if (actionMode === 'agent' && finalMessage) {
-      finalMessage = `[AGENT MODE] ${finalMessage}`;
-    }
 
-    // Pass action mode (as string or null) for auto-model selection
+    // Pass action mode for auto-model selection (backend will use appropriate cloud model)
     const modeForBackend = actionMode !== 'none' ? actionMode : null;
     onSend(finalMessage, readyAttachments.length > 0 ? readyAttachments : undefined, modeForBackend);
     setMessage('');
@@ -323,10 +317,12 @@ export function MessageInput({
             <button
               type="button"
               onClick={onStop}
-              className="absolute right-2 bottom-2 p-2.5 rounded-xl bg-gradient-to-r from-rose-500/90 to-orange-500/90 text-white shadow-[0_0_15px_rgba(244,63,94,0.4)] hover:shadow-[0_0_25px_rgba(244,63,94,0.6)] hover:scale-105 transition-all duration-300 ease-out backdrop-blur-sm border border-white/10"
+              className="absolute right-2 bottom-2 p-2 rounded-full bg-chat-assistant/80 border-2 border-rose-500/70 text-rose-400 hover:bg-rose-500/20 hover:border-rose-400 hover:text-rose-300 transition-all duration-200 ease-out group"
               title="Stop generation"
             >
-              <StopIcon className="w-5 h-5 drop-shadow-sm" />
+              <div className="w-5 h-5 flex items-center justify-center">
+                <div className="w-3 h-3 rounded-sm bg-current group-hover:scale-110 transition-transform" />
+              </div>
             </button>
           ) : (
             <button
