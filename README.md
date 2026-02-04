@@ -4,7 +4,10 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 
 ## Features
 
-- **30+ Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, Clawdbot messaging, EvoEmo emotional tracking, Inner Monologue, Knowledge Graph Memory, Metacognitive Guardian, NeuroDream sleep/dream memory consolidation, MirrorMind self-critique, CognitiveTheater multi-perspective reasoning, Reflexion learning-from-mistakes, SynapseForge dynamic tool creation, WorldSim consequence simulation, **AURA v3.0 ALIVE emotional presence system**, **Local RAG (document indexing)**, **A-MEM Zettelkasten Memory** (NeurIPS 2025), and more
+- **Proto-AGI v5 Truth Spine** - Autonomous cognitive core with non-negotiable verification. Every action produces artifacts (file hashes, return codes, JSON results) that are verified before being stored as FACT, BELIEF, or SPECULATION. Prevents hallucination by requiring physical proof.
+- **30+ Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, Clawdbot messaging, EvoEmo emotional tracking, Inner Monologue, Knowledge Graph Memory, Metacognitive Guardian, NeuroDream sleep/dream memory consolidation, MirrorMind self-critique, CognitiveTheater multi-perspective reasoning, Reflexion learning-from-mistakes, SynapseForge dynamic tool creation, WorldSim consequence simulation, **AURA v3.0 ALIVE emotional presence system**, **Local RAG (document indexing)**, **A-MEM Zettelkasten Memory** (NeurIPS 2025), **MCTS Reasoning Tree**, **Introspection Circuit**, and more
+- **MCTS Reasoning Tree** - Monte Carlo Tree Search for multi-path reasoning exploration. Explores multiple solution paths simultaneously, backtracks from dead ends, and finds optimal answers through deliberate search with UCT selection.
+- **Introspection Circuit** - "Know when you don't know" uncertainty detection based on Anthropic's 2025 research. Detects uncertainty before responding, auto-triggers verification for factual queries, and adds epistemic markers for uncertain responses.
 - **Multi-Agent Architecture** - Specialized agents for different task types with automatic routing
 - **Local RAG System** - Index and query local documents (PDF, TXT, MD) with semantic search
 - **5-Model Routing** - Automatically selects the best model for each task type (including FluxMind for calibrated reasoning)
@@ -155,6 +158,120 @@ python main.py --dream
 ```
 
 Analyzes `logs/metacognition/` to generate insights about tool effectiveness and learning opportunities.
+
+## Proto-AGI v5: The Cognitive Core
+
+Proto-AGI v5 is AURA's **autonomous cognitive core** - the "brain" that governs all reasoning, actions, and memory. It implements a **Truth Spine** that prevents hallucination by requiring physical proof for every claim.
+
+### The Evolution
+
+| Version | Focus |
+|---------|-------|
+| v1 | Basic agent loop |
+| v2 | Needs + governance |
+| v3 | Evidence-based cognition (probes, observable facts) |
+| v4 | (skipped) |
+| **v5** | **Truth Spine** - Non-negotiable verification layer |
+
+### The Truth Spine Contract
+
+```
+ACTION → ARTIFACT → VERIFICATION → MEMORY TIER
+```
+
+**Core Principle:** "If you can't verify it with an artifact, it's SPECULATION"
+
+### 3-Tier Memory System
+
+| Tier | Description | Examples |
+|------|-------------|----------|
+| **FACT** | Verified with artifact | File hash matches, return code 0, file exists |
+| **BELIEF** | Inferred but not proven | Pattern recognition, logical conclusions |
+| **SPECULATION** | Unverified claims | LLM output, user claims, assumptions |
+
+### Action Permission Levels
+
+| Level | Actions | Behavior |
+|-------|---------|----------|
+| **Safe** | RECALL, THINK, RESPOND | Always allowed |
+| **Moderate** | SEARCH, READ_FILE, ANALYZE | Budget-controlled |
+| **Sensitive** | WRITE_FILE, EXECUTE_CODE, SEND_MESSAGE | Require confirmation |
+| **Dangerous** | DELETE, SYSTEM_MODIFY, SEND_EMAIL | Always require explicit approval |
+
+### Artifact Types
+
+Every action produces an artifact as proof:
+
+| Type | Description | Verification |
+|------|-------------|--------------|
+| `FILE` | File with SHA256 hash | Hash match, file exists, size check |
+| `STDOUT` | Command output with return code | Return code 0, contains expected text |
+| `JSON` | Structured JSON result | Valid JSON, has expected keys |
+| `NONE` | No artifact (action failed) | Automatically SPECULATION |
+
+### Operation Modes
+
+| Mode | Description |
+|------|-------------|
+| `idle` | Think internally only, no external actions |
+| `assist` | Respond to user only (default) |
+| `operate` | Autonomous actions under budget limits |
+
+### Architecture
+
+```
+apprentice_agent/
+├── proto_agi_core.py    # Main cognitive loop, action processing
+└── truth_spine.py       # Artifact verification, memory tiering
+    ├── Artifact         # Proof of action (FILE, STDOUT, JSON)
+    ├── VerifierSpine    # Runs verification checks
+    ├── VerifiedMemory   # 3-tier memory store
+    └── SecureToolExecutor  # Confirmation workflow for sensitive actions
+```
+
+### Response Discipline
+
+Every claim in AURA's responses is labeled:
+- `[FACT:trace_id]` - Verified with artifact, can be traced
+- `[BELIEF]` - Inferred with reasoning
+- `[SPECULATION]` - Unverified (including raw LLM output)
+- `[UNKNOWN]` - Needs verification
+
+### Python API
+
+```python
+from apprentice_agent.proto_agi_core import ProtoAGI, ActionRequest, ActionType
+
+# Create instance
+agi = ProtoAGI(llm_func=my_llm, data_path="data/proto_agi_v5/")
+
+# Set operation mode
+agi.set_mode("operate")  # idle, assist, operate
+
+# Execute an action through Truth Spine
+request = ActionRequest(
+    action_type=ActionType.WRITE_FILE,
+    intent="Create a test file",
+    params={"path": "test.txt", "content": "Hello!"},
+    expected_checks=["file_exists", "not_empty"]
+)
+
+result = agi.process(request, is_user_initiated=True)
+
+print(f"Verified: {result.is_verified}")
+print(f"Memory Tier: {result.memory_tier.value}")  # FACT, BELIEF, or SPECULATION
+print(f"Trace ID: {result.memory_trace_id}")
+```
+
+### Web UI Integration
+
+The Proto-AGI status is visible in the **Advanced** tab:
+- Memory tier counts (Facts, Beliefs, Speculations)
+- Verifier pass rate
+- Current operation mode
+- Recent verification traces
+
+---
 
 ### Telegram bot with Proto-AGI v5
 
@@ -2076,35 +2193,11 @@ for turn in orchestrator.history:
 export MULTI_AGENT_ENABLED=true
 ```
 
-### Proto-AGI v5 (Truth Spine)
+### Proto-AGI v5 (Truth Spine) - Additional Details
 
-Proto-AGI v5 is an autonomous cognitive loop with **non-negotiable verification**. Every action must produce an artifact that can be verified - no exceptions.
+> **See [Proto-AGI v5: The Cognitive Core](#proto-agi-v5-the-cognitive-core) above for full documentation.**
 
-**The Contract:**
-```
-ACTION → ARTIFACT → VERIFICATION → MEMORY TIER
-```
-
-**Core Principle:** "If you can't verify it with an artifact, it's SPECULATION"
-
-**3-Tier Memory:**
-
-| Tier | Description | Examples |
-|------|-------------|----------|
-| **FACT** | Verified with artifact | File hash matches, return code 0, file exists |
-| **BELIEF** | Inferred but not proven | Pattern recognition, logical conclusions |
-| **SPECULATION** | Unverified claims | LLM output, user claims, assumptions |
-
-**Artifact Types:**
-
-| Type | Description | Verification |
-|------|-------------|--------------|
-| `FILE` | File with SHA256 hash | Hash match, file exists, size check |
-| `STDOUT` | Command output with return code | Return code 0, contains text |
-| `JSON` | Structured JSON result | Valid JSON, has expected keys |
-| `NONE` | No artifact (action failed) | Automatically SPECULATION |
-
-**Verification Checks:**
+**Additional Verification Checks:**
 
 | Check | Description |
 |-------|-------------|
@@ -2129,50 +2222,13 @@ Dangerous tools require user confirmation:
 result = executor.execute("write_file", {"path": "test.txt", "content": "hello"})
 
 if result.get("needs_confirmation"):
-    # Show user the pending action
     print(f"Confirm? {result['message']}")
-    # User confirms
     executor.confirm(result["confirmation_id"])
 ```
 
-**Response Discipline:**
-
-Every response claim must be labeled:
-- `[FACT:trace_id]` - Verified with artifact
-- `[BELIEF]` - Inferred with reasoning
-- `[SPECULATION]` - Unverified (including LLM output)
-- `[UNKNOWN]` - Needs verification
-
-**Python API:**
+**Get Truth Spine Stats:**
 
 ```python
-from apprentice_agent.proto_agi_core import ProtoAGI, ActionRequest, ActionType
-
-# Create instance
-agi = ProtoAGI(llm_func=my_llm, data_path="data/proto_agi_v5/")
-
-# Set mode
-agi.set_mode("operate")  # idle, assist, operate
-
-# Create action request
-request = ActionRequest(
-    action_type=ActionType.WRITE_FILE,
-    intent="Create a test file",
-    params={"path": "test.txt", "content": "Hello from Truth Spine!"},
-    expected_checks=["file_exists", "not_empty"]
-)
-
-# Process through Truth Spine
-result = agi.process(request, is_user_initiated=True)
-
-print(f"Verified: {result.is_verified}")
-print(f"Memory Tier: {result.memory_tier.value}")  # FACT, BELIEF, or SPECULATION
-print(f"Trace ID: {result.memory_trace_id}")
-
-# Process user input (LLM output → SPECULATION)
-response = agi.process_input("Hello!", chat_id="123")
-
-# Get status with Truth Spine stats
 status = agi.get_status()
 print(f"Facts: {status['memory']['facts']}")
 print(f"Beliefs: {status['memory']['beliefs']}")
