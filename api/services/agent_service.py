@@ -342,14 +342,14 @@ class AgentService:
                             topic = topic.strip(" :,.-")
 
                             # Use the search tool to get real data
-                            from apprentice_agent.tools.search import SearchTool
-                            search_tool = SearchTool()
+                            from apprentice_agent.tools.web_search import WebSearchTool
+                            search_tool = WebSearchTool()
                             search_results = search_tool.search(topic, num_results=8)
 
                             if search_results.get("success") and search_results.get("results"):
                                 results_text = []
                                 for i, r in enumerate(search_results["results"][:8], 1):
-                                    results_text.append(f"{i}. **{r.get('title', 'No title')}**\n   {r.get('snippet', '')}\n   Source: {r.get('link', '')}")
+                                    results_text.append(f"{i}. **{r.get('title', 'No title')}**\n   {r.get('snippet', '')}\n   Source: {r.get('url', '')}")
                                 search_context = f"\n\n**Search Results for '{topic}':**\n\n" + "\n\n".join(results_text) + "\n\n---\n\n"
                                 logger.info(f"[AgentService] Swarm: Got {len(search_results['results'])} search results")
                             else:
@@ -588,14 +588,14 @@ Provide a well-structured, informative summary with key findings and cite source
                                     topic = topic.replace(trigger, "").strip()
                                 topic = topic.strip(" :,.-")
 
-                                from apprentice_agent.tools.search import SearchTool
-                                search_tool = SearchTool()
+                                from apprentice_agent.tools.web_search import WebSearchTool
+                                search_tool = WebSearchTool()
                                 search_results = search_tool.search(topic, num_results=8)
 
                                 if search_results.get("success") and search_results.get("results"):
                                     results_text = []
                                     for i, r in enumerate(search_results["results"][:8], 1):
-                                        results_text.append(f"{i}. **{r.get('title', 'No title')}**\n   {r.get('snippet', '')}\n   Source: {r.get('link', '')}")
+                                        results_text.append(f"{i}. **{r.get('title', 'No title')}**\n   {r.get('snippet', '')}\n   Source: {r.get('url', '')}")
                                     search_context = f"\n\n**Search Results for '{topic}':**\n\n" + "\n\n".join(results_text) + "\n\n---\n\n"
                                     yield {"type": "chunk", "content": f"Found {len(search_results['results'])} sources.\n\n"}
                             except Exception as e:
