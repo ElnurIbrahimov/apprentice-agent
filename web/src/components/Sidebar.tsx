@@ -2,13 +2,19 @@ import { useEffect, useState } from 'react';
 import { useChatStore } from '../store/chatStore';
 import { EmotionPanel } from './EmotionPanel';
 import { SettingsModal } from './SettingsModal';
-import { AuraBreathingAvatar, AuraStatusLine } from './AuraBreathingAvatar';
+import { AuraBreathingAvatar, AuraStatusLine, AuraConsideringIndicator } from './AuraBreathingAvatar';
 import {
   XMarkIcon,
   TrashIcon,
   Cog6ToothIcon,
   ChevronDownIcon,
 } from '@heroicons/react/24/outline';
+
+interface ConsiderationState {
+  is_considering: boolean;
+  decided_against: boolean;
+  topic: string | null;
+}
 
 interface SidebarProps {
   onClose?: () => void;
@@ -32,6 +38,36 @@ export function Sidebar({ onClose }: SidebarProps) {
 
   // Ambient status messages that make AURA feel alive
   const [ambientStatus, setAmbientStatus] = useState<string | null>(null);
+
+  // AURA consideration state - "thinking about saying something"
+  const [consideration, setConsideration] = useState<ConsiderationState>({
+    is_considering: false,
+    decided_against: false,
+    topic: null,
+  });
+
+  // Poll consideration state
+  useEffect(() => {
+    if (connectionStatus !== 'connected') return;
+
+    const fetchConsideration = async () => {
+      try {
+        const response = await fetch('/api/aura/consideration');
+        if (response.ok) {
+          const data = await response.json();
+          setConsideration(data);
+        }
+      } catch (e) {
+        // Silently ignore - not critical
+      }
+    };
+
+    // Poll every 2 seconds to catch considerations
+    const interval = setInterval(fetchConsideration, 2000);
+    fetchConsideration(); // Initial fetch
+
+    return () => clearInterval(interval);
+  }, [connectionStatus]);
 
   // Simulate idle "noticing" behavior
   useEffect(() => {
@@ -180,6 +216,13 @@ export function Sidebar({ onClose }: SidebarProps) {
               </>
             )}
           </div>
+
+          {/* AURA Consideration - "Thinking about saying something" */}
+          <AuraConsideringIndicator
+            isConsidering={consideration.is_considering}
+            decidedAgainst={consideration.decided_against}
+            topic={consideration.topic}
+          />
 
           {/* Gradient divider */}
           <div className="divider-gradient" />

@@ -213,29 +213,59 @@ export function AuraStatusLine({ status, isVisible = true }: AuraStatusLineProps
 }
 
 /**
- * "Decided not to speak" indicator
+ * "Decided not to speak" indicator - shows when AURA considers but decides against speaking
  */
 interface AuraConsideringProps {
   isConsidering?: boolean;
   decidedAgainst?: boolean;
+  topic?: string | null;
 }
 
-export function AuraConsideringIndicator({ isConsidering = false, decidedAgainst = false }: AuraConsideringProps) {
-  if (!isConsidering && !decidedAgainst) return null;
+export function AuraConsideringIndicator({
+  isConsidering = false,
+  decidedAgainst = false,
+  topic = null
+}: AuraConsideringProps) {
+  const [showDeclined, setShowDeclined] = useState(false);
+  const [declinedTopic, setDeclinedTopic] = useState<string | null>(null);
+
+  // Handle the transition from considering to decided against
+  useEffect(() => {
+    if (decidedAgainst && topic) {
+      setDeclinedTopic(topic);
+      setShowDeclined(true);
+      // Auto-hide after 4 seconds
+      const timer = setTimeout(() => {
+        setShowDeclined(false);
+        setDeclinedTopic(null);
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [decidedAgainst, topic]);
+
+  if (!isConsidering && !showDeclined) return null;
 
   return (
-    <div className="flex items-center gap-2 text-xs">
+    <div className="py-2 px-3 bg-chat-assistant/40 rounded-lg border border-chat-border/20 mt-2">
       {isConsidering && (
-        <span className="text-purple-400/70 flex items-center gap-1.5 animate-pulse">
-          <span className="w-1.5 h-1.5 rounded-full bg-purple-400/50" />
-          considering...
-        </span>
+        <div className="flex items-center gap-2 text-xs animate-pulse">
+          <div className="relative">
+            <span className="w-2 h-2 rounded-full bg-purple-400/60 block" />
+            <span className="absolute inset-0 w-2 h-2 rounded-full bg-purple-400/40 animate-ping" />
+          </div>
+          <span className="text-purple-300/80 italic">
+            considering {topic ? `${topic}...` : '...'}
+          </span>
+        </div>
       )}
-      {decidedAgainst && (
-        <span className="text-chat-text-secondary/50 flex items-center gap-1.5 animate-fade-out">
-          <span className="w-1.5 h-1.5 rounded-full bg-gray-500/50" />
-          <span className="line-through">decided against</span>
-        </span>
+      {showDeclined && !isConsidering && (
+        <div className="flex items-center gap-2 text-xs opacity-60 animate-fade-out">
+          <span className="w-2 h-2 rounded-full bg-gray-500/40 block" />
+          <span className="text-chat-text-secondary/60 italic">
+            <span className="line-through opacity-70">thought about {declinedTopic}</span>
+            <span className="ml-1 text-gray-500">— decided against</span>
+          </span>
+        </div>
       )}
     </div>
   );

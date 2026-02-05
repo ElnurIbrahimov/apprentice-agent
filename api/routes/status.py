@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+import random
+import time
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -15,6 +17,111 @@ logger = logging.getLogger(__name__)
 # ALMA imports are done lazily inside endpoints to avoid blocking startup
 
 router = APIRouter(prefix="/api", tags=["status"])
+
+
+# ============================================================================
+# AURA "Consideration" State - Makes AURA feel alive by showing deliberation
+# ============================================================================
+
+class ConsiderationState:
+    """Tracks AURA's internal deliberation about whether to speak."""
+
+    def __init__(self):
+        self.is_considering = False
+        self.decided_against = False
+        self.consideration_topic: Optional[str] = None
+        self.last_consideration_time = 0.0
+        self.last_decision_time = 0.0
+        self.consideration_count = 0
+        self.declined_count = 0
+
+        # Possible things AURA might consider mentioning
+        self.consideration_topics = [
+            "a pattern in your recent questions",
+            "something from our earlier conversation",
+            "a connection to your interests",
+            "an observation about your workflow",
+            "a thought about the current topic",
+            "a memory that seemed relevant",
+            "an insight from recent context",
+            "something that might be helpful",
+        ]
+
+    def maybe_trigger_consideration(self) -> bool:
+        """Randomly decide whether to start a new consideration.
+
+        Returns True if a new consideration was triggered.
+        """
+        now = time.time()
+
+        # Don't consider if already considering or recently decided
+        if self.is_considering:
+            return False
+        if now - self.last_decision_time < 10:  # Min 10s between decisions
+            return False
+        if now - self.last_consideration_time < 20:  # Min 20s between considerations
+            return False
+
+        # 15% chance to start considering when polled
+        if random.random() < 0.15:
+            self.is_considering = True
+            self.decided_against = False
+            self.consideration_topic = random.choice(self.consideration_topics)
+            self.last_consideration_time = now
+            self.consideration_count += 1
+
+            # Schedule the decision (will be resolved on next poll)
+            return True
+
+        return False
+
+    def resolve_consideration(self) -> bool:
+        """Resolve an ongoing consideration - decide whether to speak.
+
+        Returns True if decided NOT to speak (the interesting case).
+        """
+        if not self.is_considering:
+            return False
+
+        now = time.time()
+        consideration_duration = now - self.last_consideration_time
+
+        # Need at least 2 seconds of "thinking"
+        if consideration_duration < 2.0:
+            return False
+
+        # After 2-5 seconds, make a decision
+        # 75% chance to decide NOT to speak (makes it feel more selective)
+        self.is_considering = False
+        self.last_decision_time = now
+
+        if random.random() < 0.75:
+            self.decided_against = True
+            self.declined_count += 1
+            return True
+        else:
+            # Would have spoken - but we don't actually generate content here
+            # This just means the "decided against" won't show
+            self.decided_against = False
+            return False
+
+    def clear_decided_against(self):
+        """Clear the decided_against flag after frontend has shown it."""
+        self.decided_against = False
+
+    def get_state(self) -> dict:
+        """Get current consideration state for API."""
+        return {
+            "is_considering": self.is_considering,
+            "decided_against": self.decided_against,
+            "topic": self.consideration_topic if (self.is_considering or self.decided_against) else None,
+            "consideration_count": self.consideration_count,
+            "declined_count": self.declined_count,
+        }
+
+
+# Global consideration state
+_consideration_state = ConsiderationState()
 
 
 class ModelsResponse(BaseModel):
@@ -192,6 +299,53 @@ async def get_alma_state():
         },
         "timestamp": 0
     }
+
+
+@router.get("/aura/consideration")
+async def get_consideration_state():
+    """Get AURA's current consideration state.
+
+    This endpoint is polled by the frontend to show when AURA is
+    "thinking about saying something" and when it "decides not to speak".
+
+    Returns:
+        Consideration state with is_considering, decided_against, and topic
+    """
+    global _consideration_state
+
+    # First, try to resolve any ongoing consideration
+    _consideration_state.resolve_consideration()
+
+    # Then, maybe trigger a new consideration
+    _consideration_state.maybe_trigger_consideration()
+
+    state = _consideration_state.get_state()
+
+    # If we just showed "decided against", clear it for next poll
+    # (frontend gets one chance to see it)
+    if state["decided_against"]:
+        # Keep it for this response, clear after
+        asyncio.get_event_loop().call_later(0.1, _consideration_state.clear_decided_against)
+
+    return state
+
+
+@router.post("/aura/consideration/trigger")
+async def trigger_consideration(topic: Optional[str] = None):
+    """Manually trigger a consideration (for testing).
+
+    Args:
+        topic: Optional custom topic to consider
+    """
+    global _consideration_state
+
+    _consideration_state.is_considering = True
+    _consideration_state.decided_against = False
+    _consideration_state.consideration_topic = topic or random.choice(_consideration_state.consideration_topics)
+    _consideration_state.last_consideration_time = time.time()
+    _consideration_state.consideration_count += 1
+
+    return {"status": "considering", "topic": _consideration_state.consideration_topic}
 
 
 @router.get("/models", response_model=ModelsResponse)
