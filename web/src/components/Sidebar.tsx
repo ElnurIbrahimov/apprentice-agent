@@ -8,6 +8,7 @@ import { SystemStatsPanel } from './SystemStatsPanel';
 import { InnerThoughtsPanel } from './InnerThoughtsPanel';
 import { MemoryRecallIndicator } from './MemoryRecallIndicator';
 import { ContextHeatmap } from './ContextHeatmap';
+import { ConversationStarterPanel } from './ConversationStarterPanel';
 import {
   XMarkIcon,
   TrashIcon,
@@ -249,6 +250,17 @@ export function Sidebar({ onClose }: SidebarProps) {
               Proactive System
             </h3>
             <ProactiveDaemonPanel />
+          </div>
+
+          {/* Gradient divider */}
+          <div className="divider-gradient" />
+
+          {/* Spontaneous Conversation Starters */}
+          <div>
+            <h3 className="text-chat-text-secondary text-xs uppercase tracking-wider mb-3 font-medium">
+              Conversation
+            </h3>
+            <ConversationStarterPanel />
           </div>
 
           {/* Gradient divider */}

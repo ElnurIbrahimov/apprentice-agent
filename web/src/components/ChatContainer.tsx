@@ -4,6 +4,7 @@ import { MessageBubble } from './MessageBubble';
 import { MessageInput } from './MessageInput';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useProactiveMessages } from '../hooks/useProactiveMessages';
+import { useConversationStarters } from '../hooks/useConversationStarters';
 import type { FileAttachment } from '../types';
 import {
   SparklesIcon,
@@ -42,6 +43,9 @@ export function ChatContainer() {
 
   // Poll for proactive messages from Gateway Daemon
   useProactiveMessages(connectionStatus === 'connected');
+
+  // Poll for spontaneous conversation starters
+  useConversationStarters(connectionStatus === 'connected');
 
   // Check if user is near the bottom of scroll area
   const checkIfNearBottom = useCallback(() => {
