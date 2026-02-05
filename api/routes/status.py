@@ -348,6 +348,168 @@ async def trigger_consideration(topic: Optional[str] = None):
     return {"status": "considering", "topic": _consideration_state.consideration_topic}
 
 
+# ============================================================================
+# AURA Personality Editor - Adjust OCEAN traits
+# ============================================================================
+
+class PersonalityUpdate(BaseModel):
+    """Request model for updating personality traits."""
+    openness: Optional[float] = None
+    conscientiousness: Optional[float] = None
+    extraversion: Optional[float] = None
+    agreeableness: Optional[float] = None
+    neuroticism: Optional[float] = None
+
+
+@router.get("/alma/personality")
+async def get_personality():
+    """Get AURA's current personality traits (OCEAN model).
+
+    Returns:
+        Personality traits with descriptions
+    """
+    try:
+        from apprentice_agent.emotion.alma_engine import alma_engine
+
+        if alma_engine:
+            personality = alma_engine.personality.to_dict()
+            return {
+                "available": True,
+                "traits": personality,
+                "descriptions": {
+                    "openness": {
+                        "name": "Openness",
+                        "low": "Conventional, practical",
+                        "high": "Creative, curious",
+                        "description": "Openness to new experiences and ideas"
+                    },
+                    "conscientiousness": {
+                        "name": "Conscientiousness",
+                        "low": "Flexible, spontaneous",
+                        "high": "Organized, reliable",
+                        "description": "Tendency to be organized and dependable"
+                    },
+                    "extraversion": {
+                        "name": "Extraversion",
+                        "low": "Reserved, reflective",
+                        "high": "Outgoing, energetic",
+                        "description": "Energy derived from social interaction"
+                    },
+                    "agreeableness": {
+                        "name": "Agreeableness",
+                        "low": "Analytical, detached",
+                        "high": "Warm, empathetic",
+                        "description": "Tendency to be compassionate and cooperative"
+                    },
+                    "neuroticism": {
+                        "name": "Emotional Sensitivity",
+                        "low": "Calm, stable",
+                        "high": "Sensitive, reactive",
+                        "description": "Tendency to experience negative emotions"
+                    }
+                }
+            }
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.warning(f"[Personality] Error: {e}")
+
+    # Default response if ALMA not available
+    return {
+        "available": False,
+        "traits": {
+            "openness": 0.8,
+            "conscientiousness": 0.7,
+            "extraversion": 0.5,
+            "agreeableness": 0.75,
+            "neuroticism": 0.25
+        },
+        "descriptions": {}
+    }
+
+
+@router.post("/alma/personality")
+async def update_personality(update: PersonalityUpdate):
+    """Update AURA's personality traits.
+
+    Args:
+        update: Personality traits to update (only specified traits are changed)
+
+    Returns:
+        Updated personality and the effect on baseline mood
+    """
+    try:
+        from apprentice_agent.emotion.alma_engine import alma_engine, PersonalityProfile
+
+        if alma_engine:
+            # Get current values
+            current = alma_engine.personality
+
+            # Update only provided values (clamp to 0-1)
+            new_openness = max(0, min(1, update.openness)) if update.openness is not None else current.openness
+            new_conscientiousness = max(0, min(1, update.conscientiousness)) if update.conscientiousness is not None else current.conscientiousness
+            new_extraversion = max(0, min(1, update.extraversion)) if update.extraversion is not None else current.extraversion
+            new_agreeableness = max(0, min(1, update.agreeableness)) if update.agreeableness is not None else current.agreeableness
+            new_neuroticism = max(0, min(1, update.neuroticism)) if update.neuroticism is not None else current.neuroticism
+
+            # Create new personality profile
+            alma_engine.personality = PersonalityProfile(
+                openness=new_openness,
+                conscientiousness=new_conscientiousness,
+                extraversion=new_extraversion,
+                agreeableness=new_agreeableness,
+                neuroticism=new_neuroticism
+            )
+
+            # Update mood baseline
+            new_baseline = alma_engine.personality.get_baseline_mood()
+
+            # Save state
+            alma_engine._save_state()
+
+            return {
+                "success": True,
+                "traits": alma_engine.personality.to_dict(),
+                "baseline_mood": {
+                    "pleasure": new_baseline.pleasure,
+                    "arousal": new_baseline.arousal,
+                    "dominance": new_baseline.dominance
+                }
+            }
+
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.error(f"[Personality Update] Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    raise HTTPException(status_code=503, detail="ALMA not available")
+
+
+@router.post("/alma/personality/reset")
+async def reset_personality():
+    """Reset AURA's personality to default values."""
+    try:
+        from apprentice_agent.emotion.alma_engine import alma_engine, PersonalityProfile
+
+        if alma_engine:
+            alma_engine.personality = PersonalityProfile.aura_default()
+            alma_engine._save_state()
+
+            return {
+                "success": True,
+                "traits": alma_engine.personality.to_dict(),
+                "message": "Personality reset to AURA defaults"
+            }
+
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.error(f"[Personality Reset] Error: {e}")
+
+    raise HTTPException(status_code=503, detail="ALMA not available")
+
+
 @router.get("/models", response_model=ModelsResponse)
 async def get_models() -> ModelsResponse:
     """Get available models (local and cloud).

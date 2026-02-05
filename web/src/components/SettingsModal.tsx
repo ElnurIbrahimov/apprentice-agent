@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { XMarkIcon } from '@heroicons/react/24/outline';
 import { useSettingsStore, type Settings } from '../store/settingsStore';
 import { toast } from './Toast';
@@ -8,10 +8,98 @@ interface SettingsModalProps {
   onClose: () => void;
 }
 
+interface PersonalityTraits {
+  openness: number;
+  conscientiousness: number;
+  extraversion: number;
+  agreeableness: number;
+  neuroticism: number;
+}
+
+interface TraitDescription {
+  name: string;
+  low: string;
+  high: string;
+  description: string;
+}
+
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const { settings, updateSettings, resetSettings } = useSettingsStore();
   const [localSettings, setLocalSettings] = useState<Settings>(settings);
   const [saved, setSaved] = useState(false);
+
+  // Personality state
+  const [personality, setPersonality] = useState<PersonalityTraits>({
+    openness: 0.8,
+    conscientiousness: 0.7,
+    extraversion: 0.5,
+    agreeableness: 0.75,
+    neuroticism: 0.25,
+  });
+  const [traitDescriptions, setTraitDescriptions] = useState<Record<string, TraitDescription>>({});
+  const [personalityLoading, setPersonalityLoading] = useState(false);
+  const [personalityAvailable, setPersonalityAvailable] = useState(false);
+
+  // Fetch personality when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      fetchPersonality();
+    }
+  }, [isOpen]);
+
+  const fetchPersonality = async () => {
+    try {
+      const response = await fetch('/api/alma/personality');
+      if (response.ok) {
+        const data = await response.json();
+        setPersonalityAvailable(data.available);
+        setPersonality(data.traits);
+        setTraitDescriptions(data.descriptions || {});
+      }
+    } catch (e) {
+      console.error('Failed to fetch personality:', e);
+    }
+  };
+
+  const handlePersonalityChange = (trait: keyof PersonalityTraits, value: number) => {
+    setPersonality(prev => ({ ...prev, [trait]: value }));
+  };
+
+  const savePersonality = async () => {
+    setPersonalityLoading(true);
+    try {
+      const response = await fetch('/api/alma/personality', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(personality),
+      });
+      if (response.ok) {
+        toast.success('Personality updated', 'AURA\'s personality traits have been saved');
+      } else {
+        toast.error('Failed to save', 'Could not update personality');
+      }
+    } catch (e) {
+      toast.error('Error', 'Failed to save personality');
+    } finally {
+      setPersonalityLoading(false);
+    }
+  };
+
+  const resetPersonality = async () => {
+    setPersonalityLoading(true);
+    try {
+      const response = await fetch('/api/alma/personality/reset', { method: 'POST' });
+      if (response.ok) {
+        const data = await response.json();
+        setPersonality(data.traits);
+        toast.info('Personality reset', 'Restored to AURA defaults');
+      }
+    } catch (e) {
+      toast.error('Error', 'Failed to reset personality');
+    } finally {
+      setPersonalityLoading(false);
+    }
+  };
 
   const handleSave = () => {
     updateSettings(localSettings);
@@ -157,6 +245,78 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             </div>
           </div>
 
+          {/* AURA Personality */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-medium text-chat-text">AURA Personality (OCEAN)</h3>
+              {personalityAvailable && (
+                <button
+                  onClick={resetPersonality}
+                  disabled={personalityLoading}
+                  className="text-xs text-chat-text-secondary hover:text-chat-text transition-colors"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+            {personalityAvailable ? (
+              <div className="space-y-4">
+                {/* Openness */}
+                <PersonalitySlider
+                  trait="openness"
+                  value={personality.openness}
+                  onChange={(v) => handlePersonalityChange('openness', v)}
+                  description={traitDescriptions.openness}
+                  color="purple"
+                />
+                {/* Conscientiousness */}
+                <PersonalitySlider
+                  trait="conscientiousness"
+                  value={personality.conscientiousness}
+                  onChange={(v) => handlePersonalityChange('conscientiousness', v)}
+                  description={traitDescriptions.conscientiousness}
+                  color="blue"
+                />
+                {/* Extraversion */}
+                <PersonalitySlider
+                  trait="extraversion"
+                  value={personality.extraversion}
+                  onChange={(v) => handlePersonalityChange('extraversion', v)}
+                  description={traitDescriptions.extraversion}
+                  color="yellow"
+                />
+                {/* Agreeableness */}
+                <PersonalitySlider
+                  trait="agreeableness"
+                  value={personality.agreeableness}
+                  onChange={(v) => handlePersonalityChange('agreeableness', v)}
+                  description={traitDescriptions.agreeableness}
+                  color="green"
+                />
+                {/* Neuroticism */}
+                <PersonalitySlider
+                  trait="neuroticism"
+                  value={personality.neuroticism}
+                  onChange={(v) => handlePersonalityChange('neuroticism', v)}
+                  description={traitDescriptions.neuroticism}
+                  color="red"
+                />
+
+                <button
+                  onClick={savePersonality}
+                  disabled={personalityLoading}
+                  className="w-full mt-2 px-4 py-2 text-sm bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 rounded-lg transition-colors border border-purple-500/30"
+                >
+                  {personalityLoading ? 'Saving...' : 'Save Personality'}
+                </button>
+              </div>
+            ) : (
+              <div className="text-sm text-chat-text-secondary/70 italic">
+                ALMA emotional system not available
+              </div>
+            )}
+          </div>
+
           {/* About */}
           <div>
             <h3 className="text-sm font-medium text-chat-text mb-3">About</h3>
@@ -188,6 +348,82 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Personality trait slider component
+interface PersonalitySliderProps {
+  trait: string;
+  value: number;
+  onChange: (value: number) => void;
+  description?: {
+    name: string;
+    low: string;
+    high: string;
+    description: string;
+  };
+  color: 'purple' | 'blue' | 'green' | 'yellow' | 'red';
+}
+
+const TRAIT_COLORS = {
+  purple: { bg: 'bg-purple-600', glow: 'shadow-purple-500/30' },
+  blue: { bg: 'bg-blue-600', glow: 'shadow-blue-500/30' },
+  green: { bg: 'bg-emerald-600', glow: 'shadow-emerald-500/30' },
+  yellow: { bg: 'bg-amber-500', glow: 'shadow-amber-500/30' },
+  red: { bg: 'bg-red-500', glow: 'shadow-red-500/30' },
+};
+
+function PersonalitySlider({ trait, value, onChange, description, color }: PersonalitySliderProps) {
+  const colors = TRAIT_COLORS[color];
+  const percentage = Math.round(value * 100);
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-chat-text capitalize">
+          {description?.name || trait}
+        </span>
+        <span className="text-xs text-chat-text-secondary font-mono">
+          {percentage}%
+        </span>
+      </div>
+
+      {/* Labels */}
+      <div className="flex justify-between text-xs text-chat-text-secondary/60">
+        <span>{description?.low || 'Low'}</span>
+        <span>{description?.high || 'High'}</span>
+      </div>
+
+      {/* Slider track */}
+      <div className="relative h-2 bg-chat-border/50 rounded-full overflow-hidden">
+        {/* Fill */}
+        <div
+          className={`absolute inset-y-0 left-0 ${colors.bg} rounded-full transition-all duration-150`}
+          style={{ width: `${percentage}%` }}
+        />
+        {/* Slider input */}
+        <input
+          type="range"
+          min="0"
+          max="100"
+          value={percentage}
+          onChange={(e) => onChange(parseInt(e.target.value) / 100)}
+          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+        />
+        {/* Thumb indicator */}
+        <div
+          className={`absolute top-1/2 -translate-y-1/2 w-3 h-3 ${colors.bg} rounded-full shadow-lg ${colors.glow} transition-all duration-150 pointer-events-none`}
+          style={{ left: `calc(${percentage}% - 6px)` }}
+        />
+      </div>
+
+      {/* Description tooltip */}
+      {description?.description && (
+        <p className="text-xs text-chat-text-secondary/50 italic">
+          {description.description}
+        </p>
+      )}
     </div>
   );
 }
