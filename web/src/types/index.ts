@@ -33,6 +33,20 @@ export interface Message {
   timestamp: number;
   isStreaming?: boolean;
   attachments?: FileAttachment[];
+  proactive?: {
+    action: string;       // e.g., 'notify', 'suggest', 'remind', 'ask'
+    trigger?: string;     // What triggered this message
+    confidence?: number;  // How confident the daemon was
+  };
+}
+
+export interface ProactiveMessage {
+  action: string;
+  content: string;
+  priority: string;
+  timestamp: string;
+  delivered: boolean;
+  metadata: Record<string, unknown>;
 }
 
 export interface ChatResponse {

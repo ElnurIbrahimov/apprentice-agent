@@ -3,6 +3,7 @@ import { useChatStore } from '../store/chatStore';
 import { MessageBubble } from './MessageBubble';
 import { MessageInput } from './MessageInput';
 import { useWebSocket } from '../hooks/useWebSocket';
+import { useProactiveMessages } from '../hooks/useProactiveMessages';
 import type { FileAttachment } from '../types';
 import {
   SparklesIcon,
@@ -38,6 +39,9 @@ export function ChatContainer() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
+
+  // Poll for proactive messages from Gateway Daemon
+  useProactiveMessages(connectionStatus === 'connected');
 
   // Check if user is near the bottom of scroll area
   const checkIfNearBottom = useCallback(() => {

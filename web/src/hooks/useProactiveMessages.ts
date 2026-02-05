@@ -1,0 +1,99 @@
+import { useEffect, useCallback, useRef } from 'react';
+import { useChatStore } from '../store/chatStore';
+
+interface ProactiveMessageResponse {
+  action: string;
+  content: string;
+  priority: string;
+  timestamp: string;
+  delivered: boolean;
+  metadata: Record<string, unknown>;
+}
+
+interface ProactiveMessagesResponse {
+  count: number;
+  messages: ProactiveMessageResponse[];
+}
+
+/**
+ * Hook to poll for proactive messages from the Gateway Daemon
+ * and inject them into the chat as AURA-initiated messages.
+ */
+export function useProactiveMessages(enabled: boolean = true) {
+  const { addMessage, connectionStatus } = useChatStore();
+  const lastCheckRef = useRef<number>(0);
+  const isPollingRef = useRef<boolean>(false);
+
+  const fetchAndAddMessages = useCallback(async () => {
+    // Prevent concurrent fetches
+    if (isPollingRef.current) return;
+    isPollingRef.current = true;
+
+    try {
+      const response = await fetch('/api/proactive/messages');
+      if (!response.ok) return;
+
+      const data: ProactiveMessagesResponse = await response.json();
+
+      if (data.messages && data.messages.length > 0) {
+        for (const msg of data.messages) {
+          // Create a chat message from the proactive message
+          const actionLabels: Record<string, string> = {
+            notify: 'noticed something',
+            suggest: 'has a suggestion',
+            remind: 'wants to remind you',
+            ask: 'is curious',
+            intervene: 'needs your attention',
+            prepare: 'prepared something',
+          };
+
+          const triggerLabel = actionLabels[msg.action] || 'wants to share';
+
+          addMessage({
+            role: 'assistant',
+            content: msg.content,
+            proactive: {
+              action: msg.action,
+              trigger: triggerLabel,
+              confidence: typeof msg.metadata?.confidence === 'number'
+                ? msg.metadata.confidence
+                : undefined,
+            },
+          });
+
+          // Also record interaction with daemon
+          fetch('/api/proactive/interaction', { method: 'POST' }).catch(() => {});
+        }
+      }
+
+      lastCheckRef.current = Date.now();
+    } catch (error) {
+      console.error('[Proactive] Failed to fetch messages:', error);
+    } finally {
+      isPollingRef.current = false;
+    }
+  }, [addMessage]);
+
+  useEffect(() => {
+    if (!enabled || connectionStatus !== 'connected') return;
+
+    // Initial fetch after a short delay
+    const initialTimeout = setTimeout(() => {
+      fetchAndAddMessages();
+    }, 2000);
+
+    // Poll every 5 seconds
+    const interval = setInterval(() => {
+      fetchAndAddMessages();
+    }, 5000);
+
+    return () => {
+      clearTimeout(initialTimeout);
+      clearInterval(interval);
+    };
+  }, [enabled, connectionStatus, fetchAndAddMessages]);
+
+  return {
+    lastCheck: lastCheckRef.current,
+  };
+}

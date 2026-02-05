@@ -295,6 +295,69 @@ async def trigger_decision():
 
 
 # ============================================================================
+# Test Message (for demonstration)
+# ============================================================================
+
+class TestMessageRequest(BaseModel):
+    """Request for creating a test proactive message."""
+    action: str = "suggest"
+    content: Optional[str] = None
+
+
+@router.post("/test-message")
+async def create_test_message(request: TestMessageRequest):
+    """Create a test proactive message for demonstration."""
+    daemon = await _get_daemon()
+
+    try:
+        from apprentice_agent.proactive import ProactiveMessage, ProactiveAction, EventPriority
+
+        # Default messages based on action
+        default_messages = {
+            "notify": "I noticed you've been working for a while. Remember to take a break!",
+            "suggest": "Based on what you're working on, you might find it helpful to check the documentation.",
+            "remind": "Just a gentle reminder - you mentioned wanting to review the code changes earlier.",
+            "ask": "I've been observing your workflow. Would you like me to help optimize anything?",
+            "intervene": "I detected something that might need your attention.",
+        }
+
+        action_str = request.action.lower()
+        content = request.content or default_messages.get(action_str, "Hello! I wanted to reach out proactively.")
+
+        # Map string to ProactiveAction enum
+        action_map = {
+            "notify": ProactiveAction.NOTIFY,
+            "suggest": ProactiveAction.SUGGEST,
+            "remind": ProactiveAction.REMIND,
+            "ask": ProactiveAction.ASK,
+            "intervene": ProactiveAction.INTERVENE,
+        }
+
+        action = action_map.get(action_str, ProactiveAction.SUGGEST)
+
+        # Create and queue the message
+        message = ProactiveMessage(
+            action=action,
+            content=content,
+            priority=EventPriority.MEDIUM,
+            metadata={"test": True, "confidence": 0.85}
+        )
+
+        daemon._pending_messages.append(message)
+
+        return {
+            "status": "queued",
+            "action": action.value,
+            "content": content,
+            "pending_count": len(daemon._pending_messages)
+        }
+
+    except Exception as e:
+        logger.error(f"[Proactive API] Test message error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
 # Event Publishing (for testing)
 # ============================================================================
 

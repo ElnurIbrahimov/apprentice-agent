@@ -1,41 +1,73 @@
 import ReactMarkdown from 'react-markdown';
 import type { Message } from '../types';
-import { UserCircleIcon, SparklesIcon } from '@heroicons/react/24/solid';
+import { UserCircleIcon, SparklesIcon, BoltIcon } from '@heroicons/react/24/solid';
 import { AttachmentList } from './AttachmentPreview';
 
 interface MessageBubbleProps {
   message: Message;
 }
 
+// Action icons for proactive messages
+const PROACTIVE_ICONS: Record<string, string> = {
+  notify: '💡',
+  suggest: '✨',
+  remind: '⏰',
+  ask: '🤔',
+  intervene: '⚡',
+  prepare: '📋',
+};
+
 export function MessageBubble({ message }: MessageBubbleProps) {
   const isUser = message.role === 'user';
   const isStreaming = message.isStreaming;
+  const isProactive = !!message.proactive;
 
   return (
     <div
       className={`py-6 px-4 md:px-8 ${
-        isUser ? 'bg-chat-user' : 'bg-chat-assistant'
+        isUser ? 'bg-chat-user' : isProactive ? 'bg-gradient-to-r from-purple-900/20 to-chat-assistant' : 'bg-chat-assistant'
       }`}
     >
       <div className="max-w-3xl mx-auto flex gap-4">
         {/* Avatar */}
-        <div className="flex-shrink-0">
+        <div className="flex-shrink-0 relative">
           {isUser ? (
             <div className="w-8 h-8 rounded-full bg-chat-accent flex items-center justify-center">
               <UserCircleIcon className="w-6 h-6 text-white" />
             </div>
           ) : (
-            <div className="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center">
-              <SparklesIcon className="w-5 h-5 text-white" />
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+              isProactive ? 'bg-gradient-to-br from-purple-500 to-pink-500' : 'bg-purple-600'
+            }`}>
+              {isProactive ? (
+                <BoltIcon className="w-5 h-5 text-white" />
+              ) : (
+                <SparklesIcon className="w-5 h-5 text-white" />
+              )}
             </div>
+          )}
+          {/* Proactive indicator pulse */}
+          {isProactive && (
+            <span className="absolute -top-1 -right-1 flex h-3 w-3">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-pink-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-pink-500"></span>
+            </span>
           )}
         </div>
 
         {/* Content */}
         <div className="flex-1 min-w-0">
-          {/* Role label */}
-          <div className="text-chat-text font-medium mb-1">
-            {isUser ? 'You' : 'AURA'}
+          {/* Role label with proactive badge */}
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-chat-text font-medium">
+              {isUser ? 'You' : 'AURA'}
+            </span>
+            {isProactive && message.proactive && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                <span>{PROACTIVE_ICONS[message.proactive.action] || '💭'}</span>
+                <span>{message.proactive.trigger || 'initiated'}</span>
+              </span>
+            )}
           </div>
 
           {/* Attachments (for user messages) */}
