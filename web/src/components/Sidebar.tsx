@@ -6,6 +6,7 @@ import { AuraBreathingAvatar, AuraStatusLine, AuraConsideringIndicator } from '.
 import { ProactiveDaemonPanel } from './ProactiveDaemonPanel';
 import { SystemStatsPanel } from './SystemStatsPanel';
 import { InnerThoughtsPanel } from './InnerThoughtsPanel';
+import { MemoryRecallIndicator } from './MemoryRecallIndicator';
 import {
   XMarkIcon,
   TrashIcon,
@@ -299,6 +300,17 @@ export function Sidebar({ onClose }: SidebarProps) {
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Gradient divider */}
+          <div className="divider-gradient" />
+
+          {/* Memory Recall Indicator */}
+          <div>
+            <h3 className="text-chat-text-secondary text-xs uppercase tracking-wider mb-3 font-medium">
+              Memory System
+            </h3>
+            <MemoryRecallIndicator />
           </div>
 
           {/* Gradient divider */}

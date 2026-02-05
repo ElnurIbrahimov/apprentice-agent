@@ -4545,6 +4545,13 @@ Try these commands:
         if not is_simple and self.kg_bridge is not None:
             try:
                 kg_context = self.kg_bridge.get_context_for_query(message, max_entities=3)
+                if kg_context:
+                    # Track memory recall for UI
+                    try:
+                        from api.routes.memory import record_memory_recall
+                        record_memory_recall("kg", 1, message, [kg_context[:200]])
+                    except Exception:
+                        pass
             except Exception as e:
                 logger.debug(f"[KG BRAIN] Context retrieval error in chat: {e}")
 
@@ -4556,6 +4563,12 @@ Try these commands:
                 rag_context = rag_tool.rag.get_context(message, top_k=3, max_tokens=1500)
                 if rag_context:
                     logger.debug(f"[RAG] Found relevant context for: {message[:50]}...")
+                    # Track memory recall for UI
+                    try:
+                        from api.routes.memory import record_memory_recall
+                        record_memory_recall("rag", 1, message, [rag_context[:200]])
+                    except Exception:
+                        pass
             except Exception as e:
                 logger.debug(f"[RAG] Context retrieval error: {e}")
 
@@ -4571,6 +4584,12 @@ Try these commands:
                     if memory_texts:
                         amem_context = "RELEVANT MEMORIES:\n" + "\n".join(memory_texts)
                         logger.debug(f"[A-MEM] Found {len(memories)} relevant memories for: {message[:50]}...")
+                        # Track memory recall for UI
+                        try:
+                            from api.routes.memory import record_memory_recall
+                            record_memory_recall("amem", len(memories), message, [m.content[:100] for m in memories if m.content])
+                        except Exception:
+                            pass
             except Exception as e:
                 logger.debug(f"[A-MEM] Memory retrieval error: {e}")
 
