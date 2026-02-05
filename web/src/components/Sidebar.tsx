@@ -10,6 +10,7 @@ import { ThinkingAboutTeaser } from './ThinkingAboutTeaser';
 import { MemoryRecallIndicator } from './MemoryRecallIndicator';
 import { ContextHeatmap } from './ContextHeatmap';
 import { ConversationStarterPanel } from './ConversationStarterPanel';
+import { IdleBehaviorPanel } from './IdleBehaviorPanel';
 import {
   XMarkIcon,
   TrashIcon,
@@ -76,35 +77,38 @@ export function Sidebar({ onClose }: SidebarProps) {
     return () => clearInterval(interval);
   }, [connectionStatus]);
 
-  // Simulate idle "noticing" behavior
+  // Fetch idle behavior status for ambient display
   useEffect(() => {
     if (connectionStatus !== 'connected') return;
 
-    const idleMessages = [
-      'Monitoring context...',
-      'Processing memories...',
-      'Observing patterns...',
-      'Integrating knowledge...',
-      'Reflecting quietly...',
-      null, // Sometimes show nothing
-      null,
-      null,
-    ];
-
-    const showRandomStatus = () => {
-      const msg = idleMessages[Math.floor(Math.random() * idleMessages.length)];
-      setAmbientStatus(msg);
+    const fetchIdleStatus = async () => {
+      try {
+        const response = await fetch('/api/idle/state');
+        if (response.ok) {
+          const data = await response.json();
+          if (data.current_behavior?.status_message) {
+            setAmbientStatus(data.current_behavior.status_message);
+          } else if (!data.is_idle) {
+            setAmbientStatus(null); // Clear when not idle
+          }
+        }
+      } catch (e) {
+        // Fallback to simple messages if API unavailable
+        const fallbackMessages = [
+          'Monitoring context...',
+          'Processing memories...',
+          'Observing patterns...',
+          null,
+        ];
+        setAmbientStatus(fallbackMessages[Math.floor(Math.random() * fallbackMessages.length)]);
+      }
     };
 
     // Initial delay before first status
-    const initialDelay = setTimeout(() => {
-      showRandomStatus();
-    }, 5000);
+    const initialDelay = setTimeout(fetchIdleStatus, 3000);
 
-    // Show status periodically with random intervals
-    const interval = setInterval(() => {
-      showRandomStatus();
-    }, 8000 + Math.random() * 12000); // 8-20 seconds
+    // Poll for idle status
+    const interval = setInterval(fetchIdleStatus, 5000);
 
     return () => {
       clearTimeout(initialDelay);
@@ -358,6 +362,17 @@ export function Sidebar({ onClose }: SidebarProps) {
               Inner Monologue
             </h3>
             <InnerThoughtsPanel />
+          </div>
+
+          {/* Gradient divider */}
+          <div className="divider-gradient" />
+
+          {/* Ambient Idle Behaviors */}
+          <div>
+            <h3 className="text-chat-text-secondary text-xs uppercase tracking-wider mb-3 font-medium">
+              Ambient Presence
+            </h3>
+            <IdleBehaviorPanel />
           </div>
 
           {/* Gradient divider */}
