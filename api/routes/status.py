@@ -128,6 +128,72 @@ async def trigger_mood(emotion: str, intensity: float = 0.7) -> MoodState:
     )
 
 
+@router.get("/alma/state")
+async def get_alma_state():
+    """Get full ALMA emotional state including neuromodulators and active emotions.
+
+    Returns:
+        Complete ALMA state with all emotional data
+    """
+    try:
+        # Import ALMA lazily
+        from apprentice_agent.emotion.alma_engine import alma_engine
+
+        if alma_engine:
+            state = alma_engine.get_emotional_state()
+            if state:
+                return {
+                    "available": True,
+                    "dominant_emotion": state.get("dominant_emotion", "neutral"),
+                    "intensity": state.get("intensity", 0.5),
+                    "pad": state.get("pad", {"pleasure": 0, "arousal": 0, "dominance": 0}),
+                    "mood": state.get("mood", {}),
+                    "active_emotions": state.get("active_emotions", []),
+                    "neuromodulators": state.get("neuromodulators", {
+                        "dopamine": 0.5,
+                        "serotonin": 0.5,
+                        "norepinephrine": 0.5,
+                        "oxytocin": 0.5
+                    }),
+                    "personality": state.get("personality", {
+                        "openness": 0.8,
+                        "conscientiousness": 0.7,
+                        "extraversion": 0.5,
+                        "agreeableness": 0.75,
+                        "neuroticism": 0.25
+                    }),
+                    "timestamp": state.get("timestamp", 0)
+                }
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.warning(f"[ALMA State] Error: {e}")
+
+    # Return default state if ALMA not available
+    return {
+        "available": False,
+        "dominant_emotion": "neutral",
+        "intensity": 0.5,
+        "pad": {"pleasure": 0, "arousal": 0, "dominance": 0},
+        "mood": {"label": "neutral", "intensity": 0.5},
+        "active_emotions": [],
+        "neuromodulators": {
+            "dopamine": 0.5,
+            "serotonin": 0.5,
+            "norepinephrine": 0.5,
+            "oxytocin": 0.5
+        },
+        "personality": {
+            "openness": 0.8,
+            "conscientiousness": 0.7,
+            "extraversion": 0.5,
+            "agreeableness": 0.75,
+            "neuroticism": 0.25
+        },
+        "timestamp": 0
+    }
+
+
 @router.get("/models", response_model=ModelsResponse)
 async def get_models() -> ModelsResponse:
     """Get available models (local and cloud).

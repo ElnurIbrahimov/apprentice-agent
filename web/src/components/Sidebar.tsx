@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useChatStore } from '../store/chatStore';
-import { MoodIndicator } from './MoodIndicator';
+import { EmotionPanel } from './EmotionPanel';
 import { SettingsModal } from './SettingsModal';
+import { AuraBreathingAvatar, AuraStatusLine } from './AuraBreathingAvatar';
 import {
   XMarkIcon,
   TrashIcon,
   Cog6ToothIcon,
   ChevronDownIcon,
 } from '@heroicons/react/24/outline';
-import { SparklesIcon } from '@heroicons/react/24/solid';
 
 interface SidebarProps {
   onClose?: () => void;
@@ -19,7 +19,6 @@ export function Sidebar({ onClose }: SidebarProps) {
   const [showModelDropdown, setShowModelDropdown] = useState(false);
 
   const {
-    mood,
     status,
     setStatus,
     connectionStatus,
@@ -28,7 +27,47 @@ export function Sidebar({ onClose }: SidebarProps) {
     setSelectedModel,
     availableModels,
     setAvailableModels,
+    isLoading,
   } = useChatStore();
+
+  // Ambient status messages that make AURA feel alive
+  const [ambientStatus, setAmbientStatus] = useState<string | null>(null);
+
+  // Simulate idle "noticing" behavior
+  useEffect(() => {
+    if (connectionStatus !== 'connected') return;
+
+    const idleMessages = [
+      'Monitoring context...',
+      'Processing memories...',
+      'Observing patterns...',
+      'Integrating knowledge...',
+      'Reflecting quietly...',
+      null, // Sometimes show nothing
+      null,
+      null,
+    ];
+
+    const showRandomStatus = () => {
+      const msg = idleMessages[Math.floor(Math.random() * idleMessages.length)];
+      setAmbientStatus(msg);
+    };
+
+    // Initial delay before first status
+    const initialDelay = setTimeout(() => {
+      showRandomStatus();
+    }, 5000);
+
+    // Show status periodically with random intervals
+    const interval = setInterval(() => {
+      showRandomStatus();
+    }, 8000 + Math.random() * 12000); // 8-20 seconds
+
+    return () => {
+      clearTimeout(initialDelay);
+      clearInterval(interval);
+    };
+  }, [connectionStatus]);
 
   // Poll status every 5 seconds
   useEffect(() => {
@@ -90,12 +129,18 @@ export function Sidebar({ onClose }: SidebarProps) {
         {/* Header */}
         <div className="p-4 border-b border-chat-border/50 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center shadow-glow-purple transition-all duration-300 hover:scale-105 hover:shadow-glow-purple-lg">
-              <SparklesIcon className="w-5 h-5 text-white" />
-            </div>
+            <AuraBreathingAvatar
+              isActive={connectionStatus === 'connected'}
+              isThinking={isLoading}
+              size="md"
+            />
             <div>
               <span className="text-chat-text font-bold text-lg">AURA</span>
               <div className="text-xs text-chat-text-secondary">v3.0 ALIVE</div>
+              <AuraStatusLine
+                status={isLoading ? 'Thinking...' : ambientStatus}
+                isVisible={connectionStatus === 'connected'}
+              />
             </div>
           </div>
           {onClose && (
@@ -139,12 +184,12 @@ export function Sidebar({ onClose }: SidebarProps) {
           {/* Gradient divider */}
           <div className="divider-gradient" />
 
-          {/* Mood indicator */}
+          {/* ALMA Emotion Panel */}
           <div>
             <h3 className="text-chat-text-secondary text-xs uppercase tracking-wider mb-3 font-medium">
-              Current Mood
+              ALMA Emotional State
             </h3>
-            <MoodIndicator mood={mood} />
+            <EmotionPanel />
           </div>
 
           {/* Gradient divider */}
