@@ -223,24 +223,28 @@ export function EmotionPanel() {
 
           {/* Personality Section */}
           {activeSection === 'personality' && (
-            <div className="space-y-2">
+            <div className="space-y-3">
               <div className="text-xs text-chat-text-secondary font-medium">OCEAN Personality</div>
               {Object.entries(almaState.personality).map(([key, value]) => {
                 const info = PERSONALITY_INFO[key];
                 return (
                   <div key={key} className="space-y-1">
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="text-chat-text-secondary/60">{info.low}</span>
-                      <span className="text-chat-text font-medium">{info.label}</span>
-                      <span className="text-chat-text-secondary/60">{info.high}</span>
+                    {/* Trait name and value */}
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-chat-text font-medium">{info.label}</span>
+                      <span className="text-xs text-chat-text-secondary">{(value * 100).toFixed(0)}%</span>
                     </div>
-                    <div className="h-2 bg-chat-border/30 rounded-full overflow-hidden relative">
-                      {/* Center marker */}
-                      <div className="absolute left-1/2 top-0 bottom-0 w-px bg-chat-text-secondary/30" />
+                    {/* Progress bar */}
+                    <div className="h-1.5 bg-chat-border/30 rounded-full overflow-hidden">
                       <div
                         className="h-full rounded-full transition-all duration-700 bg-gradient-to-r from-purple-600 to-blue-500"
                         style={{ width: `${value * 100}%` }}
                       />
+                    </div>
+                    {/* Low/High labels below */}
+                    <div className="flex justify-between text-xs text-chat-text-secondary/50">
+                      <span>{info.low}</span>
+                      <span>{info.high}</span>
                     </div>
                   </div>
                 );
