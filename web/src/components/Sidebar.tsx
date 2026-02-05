@@ -7,6 +7,7 @@ import { ProactiveDaemonPanel } from './ProactiveDaemonPanel';
 import { SystemStatsPanel } from './SystemStatsPanel';
 import { InnerThoughtsPanel } from './InnerThoughtsPanel';
 import { MemoryRecallIndicator } from './MemoryRecallIndicator';
+import { ContextHeatmap } from './ContextHeatmap';
 import {
   XMarkIcon,
   TrashIcon,
@@ -311,6 +312,17 @@ export function Sidebar({ onClose }: SidebarProps) {
               Memory System
             </h3>
             <MemoryRecallIndicator />
+          </div>
+
+          {/* Gradient divider */}
+          <div className="divider-gradient" />
+
+          {/* Context Awareness Heatmap */}
+          <div>
+            <h3 className="text-chat-text-secondary text-xs uppercase tracking-wider mb-3 font-medium">
+              Context Awareness
+            </h3>
+            <ContextHeatmap />
           </div>
 
           {/* Gradient divider */}

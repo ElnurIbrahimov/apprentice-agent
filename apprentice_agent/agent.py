@@ -4409,6 +4409,13 @@ Try these commands:
             self.monologue.start_session()
             self.monologue.think("perceive", f"Received: '{message[:80]}{'...' if len(message) > 80 else ''}'")
 
+        # Track context for UI heatmap
+        try:
+            from api.routes.context import track_context_from_message
+            track_context_from_message(message, is_user=True)
+        except Exception:
+            pass
+
         # ===== AURA FAST PATH - TRY FIRST =====
         # Handle simple queries instantly (greetings, memory, emotions)
         if self.use_fastpath and hasattr(self, 'fast_path_handler') and self.fast_path_handler:
@@ -4432,6 +4439,14 @@ Try these commands:
 
         # Analyze emotional state (EvoEmo - Tool #20)
         emotion_reading = self._analyze_emotion(message)
+
+        # Track emotional context for UI heatmap
+        if emotion_reading and emotion_reading.emotion:
+            try:
+                from api.routes.context import track_context_from_emotion
+                track_context_from_emotion(emotion_reading.emotion, emotion_reading.confidence / 100.0)
+            except Exception:
+                pass
 
         # Check for FluxMind commands FIRST, before LLM
         fluxmind_result = self._handle_fluxmind_command(message)
@@ -4588,6 +4603,12 @@ Try these commands:
                         try:
                             from api.routes.memory import record_memory_recall
                             record_memory_recall("amem", len(memories), message, [m.content[:100] for m in memories if m.content])
+                        except Exception:
+                            pass
+                        # Track memory context for heatmap
+                        try:
+                            from api.routes.context import track_context_from_memory
+                            track_context_from_memory([m.content[:100] for m in memories if m.content])
                         except Exception:
                             pass
             except Exception as e:
