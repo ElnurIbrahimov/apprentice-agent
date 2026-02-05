@@ -4,6 +4,8 @@ import { EmotionPanel } from './EmotionPanel';
 import { SettingsModal } from './SettingsModal';
 import { AuraBreathingAvatar, AuraStatusLine, AuraConsideringIndicator } from './AuraBreathingAvatar';
 import { ProactiveDaemonPanel } from './ProactiveDaemonPanel';
+import { SystemStatsPanel } from './SystemStatsPanel';
+import { InnerThoughtsPanel } from './InnerThoughtsPanel';
 import {
   XMarkIcon,
   TrashIcon,
@@ -302,40 +304,24 @@ export function Sidebar({ onClose }: SidebarProps) {
           {/* Gradient divider */}
           <div className="divider-gradient" />
 
-          {/* Stats */}
-          {status && (
-            <div>
-              <h3 className="text-chat-text-secondary text-xs uppercase tracking-wider mb-3 font-medium">
-                System Stats
-              </h3>
-              <div className="space-y-3 text-sm">
-                <div className="flex justify-between items-center p-2 rounded-lg hover:bg-chat-assistant/30 transition-colors duration-200">
-                  <span className="text-chat-text-secondary">Default Model</span>
-                  <span className="text-chat-text font-medium text-xs">{status.model}</span>
-                </div>
-                <div className="flex justify-between items-center p-2 rounded-lg hover:bg-chat-assistant/30 transition-colors duration-200">
-                  <span className="text-chat-text-secondary">Last Used</span>
-                  <span className="text-chat-text text-xs truncate max-w-[120px] font-medium">
-                    {status.last_model_used || '-'}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center p-2 rounded-lg hover:bg-chat-assistant/30 transition-colors duration-200">
-                  <span className="text-chat-text-secondary">AURA</span>
-                  <span className={`font-medium ${status.aura_enabled ? 'text-green-400' : 'text-chat-text-secondary'}`}>
-                    {status.aura_enabled ? 'Enabled' : 'Disabled'}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center p-2 rounded-lg hover:bg-chat-assistant/30 transition-colors duration-200">
-                  <span className="text-chat-text-secondary">Memories</span>
-                  <span className="text-chat-text font-medium">{status.memory_count}</span>
-                </div>
-                <div className="flex justify-between items-center p-2 rounded-lg hover:bg-chat-assistant/30 transition-colors duration-200">
-                  <span className="text-chat-text-secondary">Queries</span>
-                  <span className="text-chat-text font-medium">{status.query_count}</span>
-                </div>
-              </div>
-            </div>
-          )}
+          {/* Inner Thoughts */}
+          <div>
+            <h3 className="text-chat-text-secondary text-xs uppercase tracking-wider mb-3 font-medium">
+              Inner Monologue
+            </h3>
+            <InnerThoughtsPanel />
+          </div>
+
+          {/* Gradient divider */}
+          <div className="divider-gradient" />
+
+          {/* System Stats */}
+          <div>
+            <h3 className="text-chat-text-secondary text-xs uppercase tracking-wider mb-3 font-medium">
+              System
+            </h3>
+            <SystemStatsPanel status={status} />
+          </div>
         </div>
 
         {/* Footer actions */}
