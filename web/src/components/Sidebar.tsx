@@ -6,6 +6,7 @@ import { AuraBreathingAvatar, AuraStatusLine, AuraConsideringIndicator } from '.
 import { ProactiveDaemonPanel } from './ProactiveDaemonPanel';
 import { SystemStatsPanel } from './SystemStatsPanel';
 import { InnerThoughtsPanel } from './InnerThoughtsPanel';
+import { ThinkingAboutTeaser } from './ThinkingAboutTeaser';
 import { MemoryRecallIndicator } from './MemoryRecallIndicator';
 import { ContextHeatmap } from './ContextHeatmap';
 import { ConversationStarterPanel } from './ConversationStarterPanel';
@@ -335,6 +336,17 @@ export function Sidebar({ onClose }: SidebarProps) {
               Context Awareness
             </h3>
             <ContextHeatmap />
+          </div>
+
+          {/* Gradient divider */}
+          <div className="divider-gradient" />
+
+          {/* Thinking About Teaser */}
+          <div>
+            <h3 className="text-chat-text-secondary text-xs uppercase tracking-wider mb-3 font-medium">
+              Thought Process
+            </h3>
+            <ThinkingAboutTeaser />
           </div>
 
           {/* Gradient divider */}
