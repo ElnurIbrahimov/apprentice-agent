@@ -9,6 +9,7 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 - **MCTS Reasoning Tree** - Monte Carlo Tree Search for multi-path reasoning exploration. Explores multiple solution paths simultaneously, backtracks from dead ends, and finds optimal answers through deliberate search with UCT selection.
 - **Introspection Circuit** - "Know when you don't know" uncertainty detection based on Anthropic's 2025 research. Detects uncertainty before responding, auto-triggers verification for factual queries, and adds epistemic markers for uncertain responses.
 - **Multi-Agent Architecture** - Specialized agents for different task types with automatic routing
+- **Swarm Mode** - 4 parallel AI agents (Research, Analyst, Creative, Strategist) with real-time web search and unified synthesis
 - **Local RAG System** - Index and query local documents (PDF, TXT, MD) with semantic search
 - **5-Model Routing** - Automatically selects the best model for each task type (including FluxMind for calibrated reasoning)
 - **Observe-Plan-Act-Evaluate-Remember Loop** - Structured reasoning cycle for achieving goals
@@ -2192,6 +2193,119 @@ for turn in orchestrator.history:
 ```bash
 export MULTI_AGENT_ENABLED=true
 ```
+
+### Swarm Mode (Multi-Agent Parallel Analysis)
+
+Swarm Mode deploys 4 specialized AI agents in parallel to analyze queries from different perspectives, then synthesizes their insights into a unified response.
+
+**Agents:**
+
+| Agent | Focus | Perspective |
+|-------|-------|-------------|
+| **Research** | Facts and data | Information gathering, sources, evidence |
+| **Analyst** | Patterns and trends | Data analysis, implications, predictions |
+| **Creative** | Novel approaches | Innovative solutions, alternatives, ideas |
+| **Strategist** | Action planning | Practical steps, recommendations, priorities |
+
+**Features:**
+
+- **Parallel Execution**: All 4 agents run simultaneously via ThreadPoolExecutor
+- **Real-time Search**: Auto-detects when queries need current data and performs web search before analysis
+- **Smart Synthesis**: Combines agent perspectives into readable prose with consensus points and conclusions
+- **Streaming Support**: Watch agent responses arrive in real-time
+
+**Trigger Words:**
+
+```
+"swarm research" - Research-focused swarm
+"swarm search" - Search-focused swarm
+"swarm analyze" - Analysis-focused swarm
+"swarm mode" - General swarm activation
+"swarm" - Simple trigger
+```
+
+**Example:**
+
+```
+User: "swarm research AI news"
+
+## Agent Swarm
+
+**Agents:** Research, Analyst, Creative, Strategist
+**Mode:** parallel
+
+---
+
+### Research Agent
+
+[Factual findings from web search...]
+
+---
+
+### Analyst Agent
+
+[Pattern analysis and trends...]
+
+---
+
+### Creative Agent
+
+[Novel perspectives and ideas...]
+
+---
+
+### Strategist Agent
+
+[Actionable recommendations...]
+
+---
+
+### Synthesis
+
+**Key Consensus Points**
+- Point 1 where agents agree
+- Point 2 where agents agree
+
+**Diverse Perspectives**
+- Unique insight from Research agent
+- Different angle from Creative agent
+
+**Conclusion**
+Integrative summary of all perspectives...
+```
+
+**Search Keywords (Auto-trigger):**
+
+When queries contain these keywords, Swarm Mode automatically performs web search first:
+- `news`, `latest`, `current`, `recent`, `today`, `now`
+- `update`, `happening`, `trending`, `2024`, `2025`, `2026`
+- `research`, `developments`, `breakthroughs`, `announced`
+
+### Action Modes (Web UI)
+
+The modern web UI includes quick action buttons for different AI modes:
+
+| Mode | Icon | Color | Description |
+|------|------|-------|-------------|
+| **Search** | 🔍 | Blue | Quick web search for current information |
+| **Research** | 📖 | Green | Comprehensive research with analysis |
+| **Agent** | 🤖 | Purple | Autonomous task execution mode |
+| **Deep** | 🧪 | Amber | Multi-source deep research (20+ pages) |
+| **Swarm** | 👥 | Cyan | Multi-agent parallel collaboration |
+
+**How to Use:**
+
+1. Click an action mode button (it will glow when active)
+2. Type your query in the input field
+3. Press Enter - the query will be processed with the selected mode
+4. Mode resets to default after sending
+
+**Auto-Model Selection:**
+
+Each action mode automatically selects the appropriate cloud model:
+- Search/Research modes use web-capable models
+- Agent mode enables autonomous tool use
+- Swarm mode activates parallel agent execution
 
 ### Proto-AGI v5 (Truth Spine) - Additional Details
 
