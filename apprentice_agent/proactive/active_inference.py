@@ -349,10 +349,41 @@ class SimplifiedActiveInference:
 
 class ActiveInferenceEngine:
     """
-    Main Active Inference engine for proactive behavior.
+    Main Active Inference engine for proactive behavior (Phase 6A).
 
-    Uses pymdp if available, otherwise falls back to simplified implementation.
+    Uses pymdp if available for full free energy minimization,
+    otherwise falls back to simplified implementation.
+
+    Hidden states:
+      - User state: idle, shallow, focused (3 levels)
+      - Task state: none, pending, urgent (3 levels)
+      - Emotional state: negative, neutral, positive (3 levels)
+      - Context state: stable, shifting, chaotic (3 levels)
+
+    Observations:
+      - User signals: inactivity, browsing, typing_fast
+      - Task signals: no_tasks, some_tasks, urgent_tasks
+      - Emotional signals: distressed, calm, happy
+      - Context signals: same_app, app_switch, many_switches
+
+    Actions: wait, notify, suggest, remind, ask, prepare, intervene (7)
     """
+
+    # Map ProactiveAction to action index for pymdp
+    ACTION_MAP = {
+        ProactiveAction.WAIT: 0,
+        ProactiveAction.NOTIFY: 1,
+        ProactiveAction.SUGGEST: 2,
+        ProactiveAction.REMIND: 3,
+        ProactiveAction.ASK: 4,
+        ProactiveAction.PREPARE: 5,
+        ProactiveAction.INTERVENE: 6,
+    }
+    ACTION_REVERSE = {v: k for k, v in ACTION_MAP.items()}
+
+    NUM_STATES = [3, 3, 3, 3]   # user, task, emotional, context
+    NUM_OBS = [3, 3, 3, 3]      # user_sig, task_sig, emo_sig, context_sig
+    NUM_ACTIONS = 7
 
     def __init__(self, use_pymdp: bool = True):
         """
@@ -361,68 +392,248 @@ class ActiveInferenceEngine:
         Args:
             use_pymdp: Whether to use pymdp (if available)
         """
+        # Always keep simplified engine for belief tracking
+        self._simple_engine = SimplifiedActiveInference()
         self.use_pymdp = use_pymdp and PYMDP_AVAILABLE
 
         if self.use_pymdp:
-            self._init_pymdp()
-        else:
-            self._simple_engine = SimplifiedActiveInference()
+            try:
+                self._init_pymdp()
+                logger.info("[ActiveInference] pymdp agent initialized")
+            except Exception as e:
+                logger.warning(f"[ActiveInference] pymdp init failed, falling back: {e}")
+                self.use_pymdp = False
 
         logger.info(f"[ActiveInference] Engine initialized (pymdp={self.use_pymdp})")
 
+    @staticmethod
+    def _make_factor_A(likelihood_2d, target_factor, num_obs_m, num_states):
+        """Build multi-factor A matrix where one modality depends on a single factor.
+
+        Args:
+            likelihood_2d: Shape (num_obs_m, num_states[target_factor])
+            target_factor: Which hidden factor this modality depends on
+            num_obs_m: Number of observation levels for this modality
+            num_states: List of state dims per factor
+
+        Returns:
+            A_m with shape (num_obs_m, *num_states), normalized over obs axis.
+        """
+        full_shape = [num_obs_m] + list(num_states)
+        A_m = np.zeros(full_shape)
+        for obs_idx in range(num_obs_m):
+            for state_idx in range(num_states[target_factor]):
+                slices = [obs_idx] + [slice(None)] * len(num_states)
+                slices[target_factor + 1] = state_idx  # +1 for obs dimension
+                A_m[tuple(slices)] = likelihood_2d[obs_idx, state_idx]
+        return A_m
+
     def _init_pymdp(self):
-        """Initialize pymdp-based agent."""
-        # State space: [user_state, task_state, context_state]
-        # Each has 3 levels: low, medium, high
-        num_states = [3, 3, 3]
+        """Initialize pymdp-based agent with AURA's generative model (Phase 6A).
 
-        # Observation space: [user_signals, task_signals, context_signals]
-        num_obs = [3, 3, 3]
+        Architecture: 4 hidden state factors, 4 observation modalities, 7 actions.
+        Only factor 0 (user state) is directly controllable by the agent's 7 actions.
+        Factors 1-3 (task, emotional, context) have autonomous dynamics.
 
-        # Action space: wait, notify, suggest, remind, ask
-        num_actions = 5
+        Each observation modality depends on exactly one hidden factor (conditional
+        independence), expressed via properly-shaped multi-factor A tensors.
+        """
+        n_states = self.NUM_STATES
+        n_obs = self.NUM_OBS
+        n_actions = self.NUM_ACTIONS
+        n_factors = len(n_states)
+        n_modalities = len(n_obs)
 
-        # A matrix: P(observation | state)
-        A = pymdp_utils.obj_array(len(num_obs))
-        for i in range(len(num_obs)):
-            # Noisy identity - state roughly corresponds to observation
-            A[i] = np.eye(num_states[i]) * 0.8 + 0.2 / num_states[i]
+        # === A matrix: P(observation | state) ===
+        # Each A[m] has shape (num_obs[m], *num_states) = (3, 3, 3, 3, 3)
+        # Each modality depends on one factor; uniform over others.
+        A = pymdp_utils.obj_array(n_modalities)
 
-        # B matrix: P(state' | state, action)
-        B = pymdp_utils.obj_array(len(num_states))
-        for i in range(len(num_states)):
-            B[i] = np.zeros((num_states[i], num_states[i], num_actions))
-            for a in range(num_actions):
-                # Default: state tends to persist
-                B[i][:, :, a] = np.eye(num_states[i]) * 0.7 + 0.3 / num_states[i]
+        # Per-factor likelihood matrices (2D: obs × states for that factor)
+        likelihoods = [
+            # User: idle->inactivity, shallow->browsing, focused->typing
+            np.array([
+                [0.8, 0.1, 0.1],
+                [0.15, 0.7, 0.2],
+                [0.05, 0.2, 0.7],
+            ]),
+            # Task: none->no_tasks, pending->some_tasks, urgent->urgent_tasks
+            np.array([
+                [0.8, 0.15, 0.05],
+                [0.15, 0.7, 0.2],
+                [0.05, 0.15, 0.75],
+            ]),
+            # Emotional: negative->distressed, neutral->calm, positive->happy
+            np.array([
+                [0.75, 0.15, 0.05],
+                [0.2, 0.7, 0.2],
+                [0.05, 0.15, 0.75],
+            ]),
+            # Context: stable->same_app, shifting->app_switch, chaotic->many_switches
+            np.array([
+                [0.8, 0.15, 0.05],
+                [0.15, 0.7, 0.2],
+                [0.05, 0.15, 0.75],
+            ]),
+        ]
+        for m in range(n_modalities):
+            A[m] = self._make_factor_A(likelihoods[m], m, n_obs[m], n_states)
 
-        # C vector: Preferred observations
-        C = pymdp_utils.obj_array(len(num_obs))
-        C[0] = np.array([0.2, 0.5, 0.3])  # Prefer medium user engagement
-        C[1] = np.array([0.6, 0.3, 0.1])  # Prefer low task urgency (handled)
-        C[2] = np.array([0.2, 0.5, 0.3])  # Prefer medium context stability
+        # === B matrix: P(state' | state, action) - Transition model ===
+        # Factor 0 (user): controllable, 7 actions
+        # Factors 1-3: uncontrollable, 1 action (natural dynamics)
+        B = pymdp_utils.obj_array(n_factors)
 
-        # D vector: Initial state beliefs
-        D = pymdp_utils.obj_array(len(num_states))
-        for i in range(len(num_states)):
-            D[i] = np.ones(num_states[i]) / num_states[i]
+        # Factor 0: User state transitions under 7 actions
+        B[0] = np.zeros((n_states[0], n_states[0], n_actions))
+        for a in range(n_actions):
+            B[0][:, :, a] = np.eye(n_states[0]) * 0.7 + 0.1
+        # SUGGEST (2) or ASK (4) can move user from idle to engaged
+        for action_idx in [2, 4]:
+            B[0][1, 0, action_idx] = 0.4  # idle -> shallow
+            B[0][0, 0, action_idx] = 0.5  # idle stays idle
+            B[0][2, 0, action_idx] = 0.1  # idle -> focused (unlikely)
+        # NOTIFY (1) mildly engages idle user
+        B[0][1, 0, 1] = 0.3
+        B[0][0, 0, 1] = 0.6
+        # INTERVENE (6) strongly engages
+        B[0][2, 0, 6] = 0.3
+        B[0][1, 0, 6] = 0.3
+        B[0][0, 0, 6] = 0.3
 
-        self._pymdp_agent = PyMDPAgent(A=A, B=B, C=C, D=D)
+        # Factors 1-3: Uncontrollable (1 "null" action - natural dynamics)
+        for f in range(1, n_factors):
+            B[f] = np.zeros((n_states[f], n_states[f], 1))
+            B[f][:, :, 0] = np.eye(n_states[f]) * 0.7 + 0.1
+
+        # Normalize B matrices
+        for f in range(n_factors):
+            n_ctrl = B[f].shape[2]
+            for a in range(n_ctrl):
+                col_sums = B[f][:, :, a].sum(axis=0, keepdims=True)
+                col_sums[col_sums == 0] = 1
+                B[f][:, :, a] /= col_sums
+
+        # === C vector: Preferred observations (log preferences) ===
+        C = pymdp_utils.obj_array(n_modalities)
+        C[0] = np.array([-1.0, 0.5, 1.0])   # Prefer user engaged
+        C[1] = np.array([1.0, 0.0, -2.0])    # Prefer tasks resolved
+        C[2] = np.array([-1.0, 0.5, 1.5])    # Prefer positive emotion
+        C[3] = np.array([1.0, 0.0, -0.5])    # Prefer stable context
+
+        # === D vector: Prior beliefs about initial states ===
+        D = pymdp_utils.obj_array(n_factors)
+        D[0] = np.array([0.3, 0.5, 0.2])    # Probably shallow work
+        D[1] = np.array([0.5, 0.35, 0.15])   # Probably no tasks
+        D[2] = np.array([0.1, 0.7, 0.2])     # Probably neutral
+        D[3] = np.array([0.5, 0.35, 0.15])   # Probably stable
+
+        # Create pymdp agent - only factor 0 is controllable
+        self._pymdp_agent = PyMDPAgent(
+            A=A, B=B, C=C, D=D,
+            control_fac_idx=[0],
+            policy_len=1,
+        )
+
+        # Track last observations for pymdp
+        self._last_obs = None
+
+    def _discretize_observations(self, observations: Dict[str, float]) -> List[int]:
+        """Convert continuous observations to discrete indices for pymdp.
+
+        Maps float observations (0-1) to 3 discrete levels: 0=low, 1=medium, 2=high.
+        """
+        def to_level(val: float) -> int:
+            if val < 0.33:
+                return 0
+            elif val < 0.67:
+                return 1
+            return 2
+
+        # User signal: from activity level
+        user_activity = observations.get("user_activity", 0.5)
+        user_obs = to_level(user_activity)
+
+        # Task signal: from urgency
+        task_urgency = observations.get("urgent_events", 0.0)
+        task_obs = to_level(task_urgency)
+
+        # Emotional signal: from emotional state (if available)
+        emotional = observations.get("emotional_valence", 0.5)
+        emo_obs = to_level(emotional)
+
+        # Context signal: from context changes
+        context_change = observations.get("context_changes", 0.0)
+        ctx_obs = to_level(context_change)
+
+        return [user_obs, task_obs, emo_obs, ctx_obs]
 
     def update_beliefs(self, observations: Dict[str, float]) -> BeliefState:
         """Update beliefs from observations."""
-        if self.use_pymdp:
-            # Convert observations to discrete format for pymdp
-            # TODO: Implement full pymdp integration
-            pass
+        # Always update simplified engine (for backward compat)
+        simple_beliefs = self._simple_engine.update_beliefs(observations)
 
-        return self._simple_engine.update_beliefs(observations)
+        if self.use_pymdp:
+            try:
+                obs = self._discretize_observations(observations)
+                self._last_obs = obs
+                # pymdp infer_states
+                self._pymdp_agent.infer_states(obs)
+            except Exception as e:
+                logger.debug(f"[ActiveInference] pymdp belief update error: {e}")
+
+        return simple_beliefs
 
     def select_action(self) -> ProactiveDecision:
         """Select best proactive action."""
-        if self.use_pymdp:
-            # TODO: Implement full pymdp action selection
-            pass
+        if self.use_pymdp and self._last_obs is not None:
+            try:
+                # pymdp infer_policies and sample_action
+                q_pi, efe = self._pymdp_agent.infer_policies()
+                action_idx = self._pymdp_agent.sample_action()
+
+                # Map to ProactiveAction
+                # action_idx may be an array of per-factor actions; take first
+                if hasattr(action_idx, '__len__'):
+                    idx = int(action_idx[0])
+                else:
+                    idx = int(action_idx)
+
+                idx = idx % self.NUM_ACTIONS  # Safety clamp
+                action = self.ACTION_REVERSE.get(idx, ProactiveAction.WAIT)
+
+                # Confidence from policy posterior
+                confidence = float(q_pi.max()) if q_pi is not None else 0.5
+
+                # EFE of selected policy
+                best_efe = float(efe.min()) if efe is not None else 0.0
+
+                # Also get simplified reasoning for the chosen action
+                _, reasoning = self._simple_engine.compute_expected_free_energy(action)
+
+                # Check cooldowns using simplified engine
+                if not self._simple_engine._can_take_action(action):
+                    action = ProactiveAction.WAIT
+                    reasoning = "Selected action on cooldown"
+
+                # Record in simplified engine for cooldown tracking
+                if action != ProactiveAction.WAIT:
+                    self._simple_engine.action_history.append((action, datetime.now()))
+                    self._simple_engine.last_action_time = datetime.now()
+
+                return ProactiveDecision(
+                    action=action,
+                    confidence=confidence,
+                    expected_free_energy=best_efe,
+                    reasoning=f"[pymdp] {reasoning}",
+                    metadata={
+                        "beliefs": self._simple_engine.beliefs.__dict__,
+                        "pymdp_action_idx": idx,
+                        "policy_posterior_max": float(q_pi.max()) if q_pi is not None else None,
+                    }
+                )
+            except Exception as e:
+                logger.debug(f"[ActiveInference] pymdp action selection error: {e}, falling back")
 
         return self._simple_engine.select_action()
 
@@ -433,6 +644,40 @@ class ActiveInferenceEngine:
     def get_beliefs(self) -> BeliefState:
         """Get current belief state."""
         return self._simple_engine.beliefs
+
+    def set_intrinsic_preferences(self, preferences: Dict[str, float]) -> None:
+        """Update intrinsic motivation priors in the generative model (Phase 6E).
+
+        Args:
+            preferences: Dict mapping preference names to values (-2 to 2).
+                E.g. {"curiosity": 1.5, "social": 0.8}
+        """
+        if not self.use_pymdp:
+            # Update simplified engine preferences
+            self._simple_engine.preferences.update(preferences)
+            return
+
+        try:
+            # Modify C vector based on intrinsic drives
+            if "curiosity" in preferences:
+                # Curiosity: prefer context shifts (exploration)
+                self._pymdp_agent.C[3][2] += preferences["curiosity"] * 0.3
+
+            if "social" in preferences:
+                # Social drive: prefer user engagement
+                self._pymdp_agent.C[0][1] += preferences["social"] * 0.2
+                self._pymdp_agent.C[0][2] += preferences["social"] * 0.3
+
+            if "competence" in preferences:
+                # Competence: prefer task resolution
+                self._pymdp_agent.C[1][0] += preferences["competence"] * 0.3
+
+            if "coherence" in preferences:
+                # Coherence: prefer stable context
+                self._pymdp_agent.C[3][0] += preferences["coherence"] * 0.2
+
+        except Exception as e:
+            logger.debug(f"[ActiveInference] Failed to set preferences: {e}")
 
 
 if __name__ == "__main__":

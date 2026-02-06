@@ -140,6 +140,25 @@ class HybridAMEMSystem:
             "links_created": 0
         }
 
+        # Neuromodulator: Dopamine modulates memory importance (learning rate)
+        # High dopamine = reward state = store with higher importance
+        try:
+            from .mood_memory import get_current_mood_pad
+            mood = get_current_mood_pad()
+            if mood:
+                dopamine_level = 0.5
+                try:
+                    from apprentice_agent.emotion.alma_engine import alma_engine
+                    neuro = alma_engine.neuromodulators
+                    dopamine_level = neuro.dopamine
+                except Exception:
+                    pass
+                # Scale importance: dopamine=0.5 -> no change, 1.0 -> +20%, 0.0 -> -15%
+                dopamine_offset = (dopamine_level - 0.5) * 0.4
+                importance = max(0.1, min(1.0, importance + dopamine_offset))
+        except Exception:
+            pass
+
         # 1. Store in A-MEM (always)
         note = self.amem.add(
             content=content,
@@ -277,6 +296,13 @@ tool: web_search | search the internet"""
         """
         results = []
 
+        # Record real thought: memory recall happening
+        try:
+            from api.routes.thinking import record_thought
+            record_thought("recalling", f"hybrid memory search: {query[:50]}", 0.6, "memory")
+        except Exception:
+            pass
+
         # 1. Search A-MEM
         if include_amem:
             amem_results = self.amem.search_agentic(
@@ -330,13 +356,31 @@ tool: web_search | search the internet"""
         if follow_links:
             self._boost_linked_results(results)
 
-        # 4. Sort and deduplicate
+        # 4. Apply mood-congruent memory bias
+        self._apply_mood_congruent_bias(results)
+
+        # 5. Sort and deduplicate
         results.sort(key=lambda r: r.score, reverse=True)
 
         # Remove low-score results
         results = [r for r in results if r.score >= min_score]
 
-        return results[:k]
+        final = results[:k]
+
+        # Record memory recall for UI indicator
+        if final:
+            try:
+                from api.routes.memory import record_memory_recall
+                record_memory_recall(
+                    "hybrid_amem",
+                    len(final),
+                    query,
+                    [r.content[:80] for r in final[:5]]
+                )
+            except Exception:
+                pass
+
+        return final
 
     def _boost_linked_results(self, results: List[HybridResult]):
         """Boost scores for results that have cross-system links."""
@@ -355,6 +399,71 @@ tool: web_search | search the internet"""
                 linked_amem = self._kg_to_amem.get(result.id, [])
                 if any(note_id in amem_ids for note_id in linked_amem):
                     result.score *= 1.2
+
+    def _apply_mood_congruent_bias(self, results: List[HybridResult]):
+        """
+        Apply mood-congruent memory bias: current emotional state
+        biases which memories surface more easily.
+
+        Positive mood -> boost positively-valenced memories
+        Negative mood -> boost negatively-valenced memories
+
+        Uses stored emotional_pad from A-MEM notes when available,
+        falls back to word-heuristic estimation.
+        """
+        try:
+            from .mood_memory import (
+                get_current_mood_pad,
+                estimate_memory_valence,
+                mood_congruent_score_adjustment,
+            )
+
+            mood_pad = get_current_mood_pad()
+            if mood_pad is None:
+                return
+
+            pleasure = mood_pad.get("pleasure", 0.0)
+            if abs(pleasure) < 0.1:
+                return
+
+            adjusted_count = 0
+            for result in results:
+                valence = None
+                # Prefer stored emotional PAD from A-MEM note
+                if result.source == "amem":
+                    note = self.amem._notes.get(result.id)
+                    if note and getattr(note, "emotional_pad", None):
+                        stored_pleasure = note.emotional_pad.get("pleasure", 0.0)
+                        if abs(stored_pleasure) > 0.01:
+                            valence = stored_pleasure
+
+                # Fallback to word-heuristic estimation
+                if valence is None:
+                    valence = estimate_memory_valence(
+                        result.content, result.keywords, result.tags
+                    )
+
+                if abs(valence) > 0.05:
+                    result.score = mood_congruent_score_adjustment(
+                        result.score, valence, pleasure
+                    )
+                    adjusted_count += 1
+
+            if adjusted_count > 0:
+                try:
+                    from api.routes.thinking import record_thought
+                    mood_label = "positive" if pleasure > 0 else "negative"
+                    record_thought(
+                        "observing",
+                        f"mood-congruent bias ({mood_label} mood) adjusted {adjusted_count} memories",
+                        0.4,
+                        "emotion",
+                    )
+                except Exception:
+                    pass
+
+        except Exception as e:
+            logger.debug(f"Mood-congruent bias skipped: {e}")
 
     # =========================================================================
     # CROSS-SYSTEM LINKING

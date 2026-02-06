@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
+import { usePolling } from '../hooks/usePolling';
 import { ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline';
 
 interface RecallEvent {
@@ -43,6 +44,7 @@ export function MemoryRecallIndicator() {
   const [status, setStatus] = useState<RecallStatus | null>(null);
   const [isGlowing, setIsGlowing] = useState(false);
   const [pulseKey, setPulseKey] = useState(0);
+  const prevStatusRef = useRef<{ is_active?: boolean; last_recall?: string | null }>({});
 
   // Fetch recall status
   const fetchStatus = useCallback(async () => {
@@ -52,26 +54,24 @@ export function MemoryRecallIndicator() {
         const data = await response.json();
 
         // Check if we have new activity
-        if (data.is_active && (!status?.is_active || data.last_recall !== status?.last_recall)) {
+        const prev = prevStatusRef.current;
+        if (data.is_active && (!prev.is_active || data.last_recall !== prev.last_recall)) {
           // Trigger glow animation
           setIsGlowing(true);
           setPulseKey(prev => prev + 1);
           setTimeout(() => setIsGlowing(false), 3000);
         }
 
+        prevStatusRef.current = { is_active: data.is_active, last_recall: data.last_recall };
         setStatus(data);
       }
     } catch (e) {
       // Silently ignore - not critical
     }
-  }, [status?.is_active, status?.last_recall]);
+  }, []);
 
-  // Poll for status
-  useEffect(() => {
-    fetchStatus();
-    const interval = setInterval(fetchStatus, 2000);
-    return () => clearInterval(interval);
-  }, [fetchStatus]);
+  // Poll for status (30s - memory recalls don't happen that often)
+  usePolling(fetchStatus, 30000);
 
   const formatTime = (timestamp: string) => {
     const date = new Date(timestamp);

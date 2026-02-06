@@ -4,6 +4,8 @@ import os
 import re
 import json
 import logging
+import time
+import shutil
 import concurrent.futures
 import atexit
 from enum import Enum
@@ -35,6 +37,44 @@ logger = logging.getLogger(__name__)
 # Default timeouts (in seconds)
 LLM_TIMEOUT = 60  # 60 seconds for LLM calls
 WARMUP_TIMEOUT = 10  # 10 seconds for warmup
+
+# Neuromodulator bounds for safety (multipliers on default values)
+NEURO_MIN_MULTIPLIER = 0.7   # Never reduce below 70% of default
+NEURO_MAX_MULTIPLIER = 1.4   # Never increase above 140% of default
+
+
+def _get_neuromodulator_levels() -> dict:
+    """Get current neuromodulator levels from ALMA, with safe defaults.
+
+    Returns dict with dopamine, serotonin, norepinephrine, oxytocin (all 0-1).
+    Returns 0.5 for all if ALMA is unavailable.
+    """
+    try:
+        from apprentice_agent.emotion.alma_engine import alma_engine
+        state = alma_engine.get_emotional_state()
+        if state and "neuromodulators" in state:
+            return state["neuromodulators"]
+    except Exception:
+        pass
+    return {"dopamine": 0.5, "serotonin": 0.5, "norepinephrine": 0.5, "oxytocin": 0.5}
+
+
+def _neuro_scale(base_value: float, neuro_level: float, sensitivity: float = 0.5) -> float:
+    """Scale a base value by a neuromodulator level.
+
+    neuro_level=0.5 -> no change (returns base_value)
+    neuro_level=1.0 -> increase by sensitivity * (NEURO_MAX_MULTIPLIER - 1)
+    neuro_level=0.0 -> decrease by sensitivity * (1 - NEURO_MIN_MULTIPLIER)
+
+    Safety: result is always clamped to [base * NEURO_MIN_MULTIPLIER, base * NEURO_MAX_MULTIPLIER]
+    """
+    # Map neuro_level 0-1 to multiplier centered at 1.0
+    offset = (neuro_level - 0.5) * 2 * sensitivity  # -sensitivity to +sensitivity
+    multiplier = 1.0 + offset
+
+    # Clamp to safety bounds
+    multiplier = max(NEURO_MIN_MULTIPLIER, min(NEURO_MAX_MULTIPLIER, multiplier))
+    return base_value * multiplier
 
 # Shared thread pool to prevent thread leaks (max 3 concurrent LLM calls)
 _SHARED_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="llm_worker")
@@ -136,10 +176,19 @@ class OllamaBrain:
         self._total_query_count: int = 0  # Total queries (never resets)
         self._model_override: Optional[str] = None  # Manual model override (bypasses auto-selection)
 
-        # Setup persistent history storage
+        # Setup persistent history storage (legacy single-conversation path)
         self._history_dir = Config.CHROMADB_PATH.parent / "conversation"
         self._history_dir.mkdir(parents=True, exist_ok=True)
         self._history_file = self._history_dir / "history.json"
+
+        # Multi-conversation support
+        self._conversations_dir = Config.CHROMADB_PATH.parent / "conversations"
+        self._conversations_dir.mkdir(parents=True, exist_ok=True)
+        self._conversations_index_file = self._conversations_dir / "index.json"
+        self._current_conversation_id: Optional[str] = None
+
+        # Migrate legacy history and initialize conversations
+        self._migrate_legacy_history()
         self._load_history()
 
         # ALMA Emotional Intelligence
@@ -225,8 +274,410 @@ class OllamaBrain:
                 json.dumps(data, indent=2, ensure_ascii=False),
                 encoding="utf-8"
             )
+            # Update conversation index metadata
+            self._update_conversation_index_entry()
         except IOError as e:
             logger.warning(f"[BRAIN] Could not save history: {e}")
+
+    # =========================================================================
+    # Multi-Conversation Management
+    # =========================================================================
+
+    def _migrate_legacy_history(self) -> None:
+        """Migrate existing single-conversation history into multi-conversation system."""
+        index = self._load_conversations_index()
+        if index:
+            # Already have conversations, check if we need to set current
+            if not self._current_conversation_id:
+                # Find most recently updated conversation
+                sorted_convs = sorted(index, key=lambda c: c.get("updated_at", 0), reverse=True)
+                if sorted_convs:
+                    self._current_conversation_id = sorted_convs[0]["id"]
+                    # Point history file to current conversation
+                    conv_dir = self._conversations_dir / self._current_conversation_id
+                    if conv_dir.exists():
+                        self._history_file = conv_dir / "history.json"
+            return
+
+        # No conversations index yet — migrate legacy history if it exists
+        legacy_file = self._history_dir / "history.json"
+        if legacy_file.exists():
+            try:
+                data = json.loads(legacy_file.read_text(encoding="utf-8"))
+                history = data.get("history", [])
+                if history:
+                    # Create first conversation from legacy data
+                    conv_id = self._generate_conversation_id()
+                    conv_dir = self._conversations_dir / conv_id
+                    conv_dir.mkdir(parents=True, exist_ok=True)
+
+                    # Copy history to new location
+                    new_history_file = conv_dir / "history.json"
+                    new_history_file.write_text(
+                        json.dumps(data, indent=2, ensure_ascii=False),
+                        encoding="utf-8"
+                    )
+
+                    # Generate title from first user message
+                    title = self._auto_title(history)
+
+                    # Get preview from last message
+                    preview = ""
+                    if history:
+                        last_msg = history[-1].get("content", "")
+                        preview = last_msg[:100]
+
+                    # Create index with migrated conversation
+                    index_entry = {
+                        "id": conv_id,
+                        "title": title,
+                        "created_at": int(time.time()),
+                        "updated_at": int(time.time()),
+                        "message_count": len(history),
+                        "preview": preview,
+                    }
+                    self._save_conversations_index([index_entry])
+                    self._current_conversation_id = conv_id
+                    self._history_file = new_history_file
+                    logger.info(f"[BRAIN] Migrated legacy history to conversation: {conv_id} ({title})")
+                    return
+            except (json.JSONDecodeError, IOError) as e:
+                logger.warning(f"[BRAIN] Could not migrate legacy history: {e}")
+
+        # No legacy history either — create a default conversation
+        conv_id = self._create_conversation_dir("New Chat")
+        self._current_conversation_id = conv_id
+        conv_dir = self._conversations_dir / conv_id
+        self._history_file = conv_dir / "history.json"
+
+    def _generate_conversation_id(self) -> str:
+        """Generate a unique conversation ID."""
+        import hashlib
+        timestamp = int(time.time())
+        random_part = hashlib.md5(f"{timestamp}{os.getpid()}{id(self)}".encode()).hexdigest()[:6]
+        return f"conv_{timestamp}_{random_part}"
+
+    def _auto_title(self, messages: list) -> str:
+        """Generate a title from the first user message."""
+        for msg in messages:
+            if msg.get("role") == "user":
+                content = msg.get("content", "").strip()
+                # Strip file attachment context markers
+                if "[FILE_ATTACHMENT_CONTEXT]" in content:
+                    # Try to find the user request after the context
+                    parts = content.split("User request:")
+                    if len(parts) > 1:
+                        content = parts[-1].strip()
+                    else:
+                        content = content.split("\n")[0].strip()
+                # Truncate to 50 chars
+                if len(content) > 50:
+                    content = content[:47] + "..."
+                return content or "New Chat"
+        return "New Chat"
+
+    def _create_conversation_dir(self, title: str) -> str:
+        """Create a new conversation directory and add to index."""
+        conv_id = self._generate_conversation_id()
+        conv_dir = self._conversations_dir / conv_id
+        conv_dir.mkdir(parents=True, exist_ok=True)
+
+        # Write empty history
+        empty_data = {"history": [], "query_count": 0, "total_query_count": 0}
+        (conv_dir / "history.json").write_text(
+            json.dumps(empty_data, indent=2, ensure_ascii=False),
+            encoding="utf-8"
+        )
+
+        # Add to index
+        index = self._load_conversations_index()
+        index.append({
+            "id": conv_id,
+            "title": title,
+            "created_at": int(time.time()),
+            "updated_at": int(time.time()),
+            "message_count": 0,
+            "preview": "",
+        })
+        self._save_conversations_index(index)
+        return conv_id
+
+    def _load_conversations_index(self) -> list:
+        """Load the conversations index."""
+        try:
+            if self._conversations_index_file.exists():
+                return json.loads(self._conversations_index_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, IOError) as e:
+            logger.warning(f"[BRAIN] Could not load conversations index: {e}")
+        return []
+
+    def _save_conversations_index(self, index: list) -> None:
+        """Save the conversations index."""
+        try:
+            self._conversations_index_file.write_text(
+                json.dumps(index, indent=2, ensure_ascii=False),
+                encoding="utf-8"
+            )
+        except IOError as e:
+            logger.warning(f"[BRAIN] Could not save conversations index: {e}")
+
+    def _update_conversation_index_entry(self) -> None:
+        """Update the current conversation's index entry with latest metadata."""
+        if not self._current_conversation_id:
+            return
+        index = self._load_conversations_index()
+        for entry in index:
+            if entry["id"] == self._current_conversation_id:
+                entry["updated_at"] = int(time.time())
+                entry["message_count"] = len(self.conversation_history)
+                if self.conversation_history:
+                    last_msg = self.conversation_history[-1].get("content", "")
+                    entry["preview"] = last_msg[:100]
+                # Update title if still "New Chat" and we have messages
+                if entry["title"] == "New Chat" and self.conversation_history:
+                    entry["title"] = self._auto_title(self.conversation_history)
+                break
+        self._save_conversations_index(index)
+
+    def create_conversation(self, title: Optional[str] = None) -> str:
+        """Create a new conversation.
+
+        Args:
+            title: Optional title, defaults to "New Chat"
+
+        Returns:
+            The new conversation's ID
+        """
+        # Save current conversation first
+        self._save_history()
+        self._update_conversation_index_entry()
+
+        effective_title = title or "New Chat"
+        conv_id = self._create_conversation_dir(effective_title)
+
+        # Switch to the new conversation
+        self._current_conversation_id = conv_id
+        conv_dir = self._conversations_dir / conv_id
+        self._history_file = conv_dir / "history.json"
+        self.conversation_history = []
+        self._query_count = 0
+        logger.info(f"[BRAIN] Created new conversation: {conv_id} ({effective_title})")
+        return conv_id
+
+    def list_conversations(self) -> list:
+        """List all conversations.
+
+        Returns:
+            List of conversation summaries sorted by updated_at descending
+        """
+        index = self._load_conversations_index()
+        # Sort by updated_at descending (most recent first)
+        index.sort(key=lambda c: c.get("updated_at", 0), reverse=True)
+        # Add is_active flag
+        for entry in index:
+            entry["is_active"] = entry["id"] == self._current_conversation_id
+        return index
+
+    def switch_conversation(self, conversation_id: str) -> bool:
+        """Switch to a different conversation.
+
+        Args:
+            conversation_id: ID of conversation to switch to
+
+        Returns:
+            True if switched successfully
+        """
+        if conversation_id == self._current_conversation_id:
+            return True
+
+        conv_dir = self._conversations_dir / conversation_id
+        if not conv_dir.exists():
+            logger.warning(f"[BRAIN] Conversation not found: {conversation_id}")
+            return False
+
+        # Save current conversation
+        self._save_history()
+        self._update_conversation_index_entry()
+
+        # Load new conversation
+        self._current_conversation_id = conversation_id
+        self._history_file = conv_dir / "history.json"
+        self._load_history()
+        logger.info(f"[BRAIN] Switched to conversation: {conversation_id} ({len(self.conversation_history)} messages)")
+        return True
+
+    def delete_conversation(self, conversation_id: str) -> bool:
+        """Delete a conversation.
+
+        Args:
+            conversation_id: ID of conversation to delete
+
+        Returns:
+            True if deleted successfully
+        """
+        conv_dir = self._conversations_dir / conversation_id
+        if not conv_dir.exists():
+            return False
+
+        # Remove directory
+        try:
+            shutil.rmtree(conv_dir)
+        except OSError as e:
+            logger.error(f"[BRAIN] Failed to delete conversation dir: {e}")
+            return False
+
+        # Remove from index
+        index = self._load_conversations_index()
+        index = [c for c in index if c["id"] != conversation_id]
+        self._save_conversations_index(index)
+
+        # If we deleted the active conversation, switch to another or create new
+        if conversation_id == self._current_conversation_id:
+            if index:
+                self.switch_conversation(index[0]["id"])
+            else:
+                conv_id = self._create_conversation_dir("New Chat")
+                self._current_conversation_id = conv_id
+                self._history_file = self._conversations_dir / conv_id / "history.json"
+                self.conversation_history = []
+                self._query_count = 0
+
+        logger.info(f"[BRAIN] Deleted conversation: {conversation_id}")
+        return True
+
+    def rename_conversation(self, conversation_id: str, title: str) -> bool:
+        """Rename a conversation.
+
+        Args:
+            conversation_id: ID of conversation to rename
+            title: New title
+
+        Returns:
+            True if renamed successfully
+        """
+        index = self._load_conversations_index()
+        for entry in index:
+            if entry["id"] == conversation_id:
+                entry["title"] = title
+                self._save_conversations_index(index)
+                logger.info(f"[BRAIN] Renamed conversation {conversation_id}: {title}")
+                return True
+        return False
+
+    def get_current_conversation_id(self) -> Optional[str]:
+        """Get the current conversation ID."""
+        return self._current_conversation_id
+
+    def get_conversation_messages(self, conversation_id: str) -> list:
+        """Get messages for a specific conversation without switching.
+
+        Args:
+            conversation_id: ID of conversation
+
+        Returns:
+            List of messages
+        """
+        if conversation_id == self._current_conversation_id:
+            return list(self.conversation_history)
+
+        conv_dir = self._conversations_dir / conversation_id
+        history_file = conv_dir / "history.json"
+        if history_file.exists():
+            try:
+                data = json.loads(history_file.read_text(encoding="utf-8"))
+                return data.get("history", [])
+            except (json.JSONDecodeError, IOError):
+                pass
+        return []
+
+    def save_conversation_to_memory(self, conversation_id: Optional[str] = None) -> dict:
+        """Save a conversation's content to AURA's long-term memory (A-MEM).
+
+        Args:
+            conversation_id: ID of conversation to save, or None for current
+
+        Returns:
+            Dict with success status and details
+        """
+        conv_id = conversation_id or self._current_conversation_id
+        if not conv_id:
+            return {"success": False, "error": "No active conversation"}
+
+        messages = self.get_conversation_messages(conv_id)
+        if not messages:
+            return {"success": False, "error": "Conversation is empty"}
+
+        # Get conversation title
+        index = self._load_conversations_index()
+        title = "Unknown"
+        for entry in index:
+            if entry["id"] == conv_id:
+                title = entry["title"]
+                break
+
+        # Build a summary of the conversation
+        user_messages = [m["content"] for m in messages if m.get("role") == "user"]
+        assistant_messages = [m["content"] for m in messages if m.get("role") == "assistant"]
+
+        # Create a condensed version for memory
+        conversation_text = ""
+        for msg in messages:
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            # Skip file attachment context markers for cleaner memory
+            if "[FILE_ATTACHMENT_CONTEXT]" in content:
+                parts = content.split("User request:")
+                content = parts[-1].strip() if len(parts) > 1 else content[:200]
+            conversation_text += f"{role.upper()}: {content[:300]}\n"
+
+        # Truncate if too long (keep under 2000 chars for memory)
+        if len(conversation_text) > 2000:
+            conversation_text = conversation_text[:1900] + "\n...(truncated)"
+
+        memory_content = f"Conversation: {title}\n\n{conversation_text}"
+
+        # Try to save to A-MEM
+        try:
+            from apprentice_agent.tools.amem import get_amem
+            amem = get_amem()
+            note = amem.add(
+                content=memory_content,
+                tags=["conversation", "chat_history", title.lower().replace(" ", "_")[:30]],
+                category="conversation",
+                source="conversation_save",
+                importance=0.6,
+            )
+            logger.info(f"[BRAIN] Saved conversation {conv_id} to A-MEM (note: {note.id})")
+            return {
+                "success": True,
+                "note_id": note.id,
+                "message_count": len(messages),
+                "title": title,
+            }
+        except Exception as e:
+            logger.error(f"[BRAIN] Failed to save conversation to memory: {e}")
+
+        # Fallback: try hybrid memory
+        try:
+            from apprentice_agent.tools.hybrid_amem import get_hybrid_memory
+            hybrid = get_hybrid_memory()
+            result = hybrid.remember(
+                content=memory_content,
+                memory_type="episodic",
+                tags=["conversation", "chat_history"],
+                importance=0.6,
+                source="conversation_save",
+            )
+            logger.info(f"[BRAIN] Saved conversation {conv_id} to hybrid memory")
+            return {
+                "success": True,
+                "note_id": result.get("note_id"),
+                "message_count": len(messages),
+                "title": title,
+            }
+        except Exception as e2:
+            logger.error(f"[BRAIN] Hybrid memory fallback also failed: {e2}")
+            return {"success": False, "error": f"Memory save failed: {e}; {e2}"}
 
     def clear_history(self):
         """Clear conversation history to free memory."""
@@ -309,6 +760,58 @@ class OllamaBrain:
         else:
             full_system_prompt = identity_prompt
 
+        # === LEARNED CONTEXT INJECTION (Phase 4D: Letta-style) ===
+        try:
+            from apprentice_agent.tools.neurodream import get_neurodream
+            nd = get_neurodream()
+            learned_ctx = nd.get_learned_context_prompt()
+            if learned_ctx:
+                full_system_prompt = f"{full_system_prompt}\n\n{learned_ctx}"
+        except Exception:
+            pass  # NeuroDream not available
+
+        # === CALENDAR CONTEXT INJECTION (Phase 5D) ===
+        try:
+            from apprentice_agent.proactive.monitors.calendar_monitor import get_calendar_monitor
+            cm = get_calendar_monitor()
+            cal_ctx = cm.get_context_for_prompt()
+            if cal_ctx:
+                full_system_prompt = f"{full_system_prompt}\n\n{cal_ctx}"
+        except Exception:
+            pass  # Calendar monitor not available
+
+        # === SELF-MODEL INJECTION (Phase 6B: Metacognitive Self-Improvement) ===
+        try:
+            from apprentice_agent.consciousness.metacognition import get_metacognitive_engine
+            mc = get_metacognitive_engine()
+            self_model_ctx = mc.get_self_model_prompt()
+            if self_model_ctx:
+                full_system_prompt = f"{full_system_prompt}\n\n{self_model_ctx}"
+        except Exception:
+            pass  # Metacognition not available
+
+        # === USER MODEL INJECTION (Phase 6C: Theory of Mind) ===
+        try:
+            from apprentice_agent.proactive.theory_of_mind import get_theory_of_mind
+            tom = get_theory_of_mind()
+            tom.observe_message(prompt, role="user")
+            user_model_ctx = tom.get_context_for_prompt()
+            if user_model_ctx:
+                full_system_prompt = f"{full_system_prompt}\n\n{user_model_ctx}"
+        except Exception:
+            pass  # Theory of Mind not available
+
+        # === MOTIVATION INJECTION (Phase 6E: Intrinsic Motivation) ===
+        try:
+            from apprentice_agent.consciousness.intrinsic_motivation import get_intrinsic_motivation
+            im = get_intrinsic_motivation()
+            im.record_interaction()  # Satisfies social drive
+            motivation_ctx = im.get_context_for_prompt()
+            if motivation_ctx:
+                full_system_prompt = f"{full_system_prompt}\n\n{motivation_ctx}"
+        except Exception:
+            pass  # Intrinsic motivation not available
+
         # Apply emotional tone modifier - auto-generate from ALMA if not provided
         if tone_modifier:
             full_system_prompt = f"{full_system_prompt}\n\n{tone_modifier}"
@@ -327,7 +830,11 @@ class OllamaBrain:
             messages.extend(self.conversation_history)
         messages.append({"role": "user", "content": prompt})
 
-        logger.debug(f"[BRAIN] Calling {model} with timeout={LLM_TIMEOUT}s")
+        # Neuromodulator: Serotonin modulates patience (timeout)
+        # High serotonin = more patience = longer timeout; low = impatient = shorter
+        neuro = _get_neuromodulator_levels()
+        adjusted_timeout = int(_neuro_scale(LLM_TIMEOUT, neuro["serotonin"], sensitivity=0.3))
+        logger.debug(f"[BRAIN] Calling {model} with timeout={adjusted_timeout}s (serotonin={neuro['serotonin']:.2f})")
 
         # Get appropriate client (local or cloud) - may return fallback model
         client, actual_model = self._get_client_for_model(model)
@@ -337,10 +844,69 @@ class OllamaBrain:
         # Update last model used to reflect ACTUAL model, not requested
         self._last_model_used = actual_model
 
-        # Call with timeout protection
+        # === PHASE 1: Record real thinking — LLM inference starting ===
+        try:
+            from api.routes.thinking import get_manager as get_thinking_manager
+            tm = get_thinking_manager()
+            tm.record_real_thought("formulating", f"reasoning with {actual_model}...", intensity=0.7, source="brain")
+        except Exception:
+            pass
+
+        # Neuromodulator: Dopamine modulates temperature (creativity/exploration)
+        # High dopamine = slightly higher temp = more creative; low = more conservative
+        base_temp = 0.7
+        adjusted_temp = round(_neuro_scale(base_temp, neuro["dopamine"], sensitivity=0.25), 2)
+
+        # Neuromodulator: Serotonin modulates num_predict (response thoroughness)
+        # High serotonin = patience = longer responses allowed; low = terse
+        base_num_predict = 1024
+        adjusted_num_predict = int(_neuro_scale(base_num_predict, neuro["serotonin"], sensitivity=0.3))
+
+        # Neuromodulator: Norepinephrine modulates top_p (focus vs exploration)
+        # High norepinephrine = alert/focused = lower top_p (more deterministic)
+        # Low norepinephrine = relaxed = higher top_p (more varied responses)
+        base_top_p = 0.9
+        adjusted_top_p = round(base_top_p - (neuro["norepinephrine"] - 0.5) * 0.15, 2)
+        adjusted_top_p = max(0.7, min(0.95, adjusted_top_p))
+
+        llm_options = {
+            "temperature": adjusted_temp,
+            "num_predict": adjusted_num_predict,
+            "top_p": adjusted_top_p,
+        }
+
+        logger.debug(
+            f"[BRAIN] Neuro-modulated LLM: temp={adjusted_temp} "
+            f"(DA={neuro['dopamine']:.2f}), "
+            f"num_predict={adjusted_num_predict} "
+            f"(5HT={neuro['serotonin']:.2f}), "
+            f"top_p={adjusted_top_p} "
+            f"(NE={neuro['norepinephrine']:.2f})"
+        )
+
+        # Record neuromodulator influence on thinking panel
+        try:
+            from api.routes.thinking import record_thought
+            neuro_effects = []
+            if abs(neuro["dopamine"] - 0.5) > 0.1:
+                neuro_effects.append(f"DA={'high' if neuro['dopamine']>0.5 else 'low'}")
+            if abs(neuro["serotonin"] - 0.5) > 0.1:
+                neuro_effects.append(f"5HT={'high' if neuro['serotonin']>0.5 else 'low'}")
+            if abs(neuro["norepinephrine"] - 0.5) > 0.1:
+                neuro_effects.append(f"NE={'high' if neuro['norepinephrine']>0.5 else 'low'}")
+            if neuro_effects:
+                record_thought(
+                    "observing",
+                    f"neuromodulators influencing response: {', '.join(neuro_effects)}",
+                    0.4, "emotion"
+                )
+        except Exception:
+            pass
+
+        # Call with timeout protection (serotonin-modulated)
         response = call_with_timeout(
-            lambda: client.chat(model=actual_model, messages=messages),
-            timeout=LLM_TIMEOUT,
+            lambda: client.chat(model=actual_model, messages=messages, options=llm_options),
+            timeout=adjusted_timeout,
             default=None
         )
 
@@ -404,6 +970,58 @@ class OllamaBrain:
         else:
             full_system_prompt = identity_prompt
 
+        # === LEARNED CONTEXT INJECTION (Phase 4D: Letta-style) ===
+        try:
+            from apprentice_agent.tools.neurodream import get_neurodream
+            nd = get_neurodream()
+            learned_ctx = nd.get_learned_context_prompt()
+            if learned_ctx:
+                full_system_prompt = f"{full_system_prompt}\n\n{learned_ctx}"
+        except Exception:
+            pass  # NeuroDream not available
+
+        # === CALENDAR CONTEXT INJECTION (Phase 5D) ===
+        try:
+            from apprentice_agent.proactive.monitors.calendar_monitor import get_calendar_monitor
+            cm = get_calendar_monitor()
+            cal_ctx = cm.get_context_for_prompt()
+            if cal_ctx:
+                full_system_prompt = f"{full_system_prompt}\n\n{cal_ctx}"
+        except Exception:
+            pass  # Calendar monitor not available
+
+        # === SELF-MODEL INJECTION (Phase 6B: Metacognitive Self-Improvement) ===
+        try:
+            from apprentice_agent.consciousness.metacognition import get_metacognitive_engine
+            mc = get_metacognitive_engine()
+            self_model_ctx = mc.get_self_model_prompt()
+            if self_model_ctx:
+                full_system_prompt = f"{full_system_prompt}\n\n{self_model_ctx}"
+        except Exception:
+            pass  # Metacognition not available
+
+        # === USER MODEL INJECTION (Phase 6C: Theory of Mind) ===
+        try:
+            from apprentice_agent.proactive.theory_of_mind import get_theory_of_mind
+            tom = get_theory_of_mind()
+            tom.observe_message(prompt, role="user")
+            user_model_ctx = tom.get_context_for_prompt()
+            if user_model_ctx:
+                full_system_prompt = f"{full_system_prompt}\n\n{user_model_ctx}"
+        except Exception:
+            pass  # Theory of Mind not available
+
+        # === MOTIVATION INJECTION (Phase 6E: Intrinsic Motivation) ===
+        try:
+            from apprentice_agent.consciousness.intrinsic_motivation import get_intrinsic_motivation
+            im = get_intrinsic_motivation()
+            im.record_interaction()  # Satisfies social drive
+            motivation_ctx = im.get_context_for_prompt()
+            if motivation_ctx:
+                full_system_prompt = f"{full_system_prompt}\n\n{motivation_ctx}"
+        except Exception:
+            pass  # Intrinsic motivation not available
+
         # Apply emotional tone modifier - auto-generate from ALMA if not provided
         if tone_modifier:
             full_system_prompt = f"{full_system_prompt}\n\n{tone_modifier}"
@@ -431,6 +1049,14 @@ class OllamaBrain:
 
         # Update last model used to reflect ACTUAL model, not requested
         self._last_model_used = actual_model
+
+        # === PHASE 1: Record real thinking — streaming inference starting ===
+        try:
+            from api.routes.thinking import get_manager as get_thinking_manager
+            tm = get_thinking_manager()
+            tm.record_real_thought("formulating", f"streaming response with {actual_model}...", intensity=0.7, source="brain")
+        except Exception:
+            pass
 
         full_response = ""
         try:
@@ -563,6 +1189,12 @@ class OllamaBrain:
         if any(pattern in prompt_lower for pattern in simple_patterns):
             # Check if it's ONLY a simple greeting (short prompt)
             if len(prompt.split()) < 10:
+                # Neuromodulator: High norepinephrine (alertness) -> prefer reasoning
+                # even for simple queries (more attentive, careful responses)
+                neuro = _get_neuromodulator_levels()
+                if neuro["norepinephrine"] > 0.7:
+                    logger.debug(f"[BRAIN] Norepinephrine={neuro['norepinephrine']:.2f} -> upgrading simple to reasoning model")
+                    return Config.MODEL_REASON
                 return Config.MODEL_FAST
 
         # Browser tasks - route to reasoning model
@@ -606,6 +1238,14 @@ List 3-5 key observations. Be brief."""
 
     def plan(self, goal: str, observations: str, available_tools: list[str]) -> str:
         """Create a plan to achieve the goal based on observations."""
+        # === PHASE 1: Record real thinking — planning ===
+        try:
+            from api.routes.thinking import get_manager as get_thinking_manager
+            tm = get_thinking_manager()
+            tm.record_real_thought("analyzing", f"planning approach for: {goal[:60]}", intensity=0.7, source="brain")
+        except Exception:
+            pass
+
         tool_descriptions = self._get_tool_descriptions(available_tools)
 
         # Detect task type from goal
@@ -843,6 +1483,15 @@ Create a short 3-5 step plan. Be specific about which tool to use for each step.
 
     def decide_action(self, plan: str, available_tools: list[str]) -> dict:
         """Decide the next action to take based on the plan."""
+        # === PHASE 1: Record real thinking — deciding action ===
+        try:
+            from api.routes.thinking import get_manager as get_thinking_manager
+            tm = get_thinking_manager()
+            tools_short = ", ".join(available_tools[:4])
+            tm.record_real_thought("connecting", f"selecting tool from: {tools_short}", intensity=0.6, source="brain")
+        except Exception:
+            pass
+
         tool_descriptions = self._get_tool_descriptions(available_tools)
 
         # Check task type
@@ -1128,6 +1777,14 @@ REASONING: see directory"""
 
     def evaluate(self, action: str, result: str, goal: str) -> dict:
         """Evaluate the result of an action."""
+        # === PHASE 1: Record real thinking — evaluating result ===
+        try:
+            from api.routes.thinking import get_manager as get_thinking_manager
+            tm = get_thinking_manager()
+            tm.record_real_thought("observing", f"evaluating result of: {action[:50]}", intensity=0.5, source="brain")
+        except Exception:
+            pass
+
         # Truncate result to avoid overwhelming the model
         result_truncated = result[:1000] if len(result) > 1000 else result
 
@@ -1168,10 +1825,6 @@ Actions: {episode.get('actions', [])}
 Outcome: {episode.get('outcome', 'N/A')}"""
 
         return self.think(prompt, system_prompt=self._memory_prompt(), use_history=False)
-
-    def clear_history(self) -> None:
-        """Clear conversation history."""
-        self.conversation_history = []
 
     def unload_model(self, model: str = None) -> bool:
         """Unload a model from Ollama to free VRAM.

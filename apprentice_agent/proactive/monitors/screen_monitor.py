@@ -145,6 +145,12 @@ class ScreenMonitor(BaseMonitor):
             content_events = await self._check_screen_content()
             events.extend(content_events)
 
+        # Check for errors on screen (if Screenpipe available)
+        if self._screenpipe:
+            error_event = await self._check_screen_errors()
+            if error_event:
+                events.append(error_event)
+
         # Check for idle state
         idle_event = self._check_idle()
         if idle_event:
@@ -383,6 +389,66 @@ class ScreenMonitor(BaseMonitor):
             },
             priority=EventPriority.BACKGROUND
         )
+
+    _last_error_check: float = 0.0
+    _last_error_hash: str = ""
+
+    async def _check_screen_errors(self) -> Optional[Event]:
+        """
+        Check if errors are visible on screen via Screenpipe OCR.
+
+        Rate-limited to once per 15 seconds to avoid spam.
+        Only fires if a new error is detected (not the same as last time).
+        """
+        now = time.time()
+        if now - self._last_error_check < 15:
+            return None
+        self._last_error_check = now
+
+        if not self._screenpipe:
+            return None
+
+        try:
+            ctx = self._screenpipe.get_screen_context(minutes=1, max_chars=1000)
+            if ctx.get("has_errors"):
+                # Create a hash of the error text to deduplicate
+                error_text = ctx.get("recent_text", "")[:200]
+                error_hash = str(hash(error_text))
+                if error_hash == self._last_error_hash:
+                    return None  # Same error, don't re-fire
+                self._last_error_hash = error_hash
+
+                return self.create_event(
+                    "error_on_screen",
+                    {
+                        "app_name": ctx.get("current_app"),
+                        "window_name": ctx.get("current_window"),
+                        "text_preview": error_text,
+                    },
+                    priority=EventPriority.NORMAL
+                )
+        except Exception as e:
+            logger.debug(f"[ScreenMonitor] Error check failed: {e}")
+
+        return None
+
+    def get_screen_context(self, minutes: int = 2) -> Dict[str, Any]:
+        """
+        Get structured screen context via Screenpipe.
+
+        Convenience method for other systems to query current screen state.
+
+        Returns:
+            Dict with current_app, current_window, recent_text, etc.
+            Returns empty context if Screenpipe unavailable.
+        """
+        if not self._screenpipe:
+            return {"available": False}
+
+        try:
+            return self._screenpipe.get_screen_context(minutes=minutes)
+        except Exception:
+            return {"available": False}
 
     def record_activity(self) -> None:
         """Record user activity (call this on keyboard/mouse input)."""

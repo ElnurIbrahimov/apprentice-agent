@@ -530,6 +530,18 @@ class ALMAEngine:
 
             logger.debug(f"Triggered emotion: {emotion_name} ({intensity:.2f})")
 
+            # Record real thought: emotional state change
+            try:
+                from api.routes.thinking import record_thought
+                record_thought(
+                    "observing",
+                    f"feeling {emotion_name} ({intensity:.1f}) triggered by: {trigger[:40]}",
+                    min(0.8, intensity),
+                    "emotion"
+                )
+            except Exception:
+                pass
+
             return emotion
 
     def trigger_from_appraisal(
@@ -924,6 +936,104 @@ class ALMAEngine:
                 f.write(json.dumps(entry) + "\n")
         except Exception as e:
             logger.error(f"Failed to log emotion: {e}")
+
+    # -------------------------------------------------------------------------
+    # Autonomous Emotional Drift (Phase 2D)
+    # -------------------------------------------------------------------------
+
+    _last_interaction_time: float = 0.0
+    _success_streak: int = 0
+    _last_drift_time: float = 0.0
+
+    def record_interaction(self, success: bool = True):
+        """Record that an interaction occurred (for drift calculations)."""
+        self._last_interaction_time = time.time()
+        if success:
+            self._success_streak += 1
+        else:
+            self._success_streak = max(0, self._success_streak - 1)
+
+    def autonomous_drift(self) -> Optional[str]:
+        """
+        Apply autonomous emotional drift based on system state.
+
+        Called periodically (e.g., from Gateway Daemon decision loop).
+        Moods evolve even without user interaction:
+        - Boredom during extended idle periods
+        - Curiosity when patterns or events are detected
+        - Satisfaction after success streaks
+        - Natural baseline pull (already in decay_toward_baseline)
+
+        Returns:
+            Description of drift applied, or None if no drift
+        """
+        now = time.time()
+
+        # Rate limit: at most once per 30 seconds
+        if now - self._last_drift_time < 30:
+            return None
+        self._last_drift_time = now
+
+        with self._lock:
+            drift_reason = None
+
+            # 1. Boredom during idle
+            idle_seconds = now - self._last_interaction_time if self._last_interaction_time > 0 else 0
+            if idle_seconds > 300:  # More than 5 minutes idle
+                # Gradually decrease pleasure and arousal (boredom)
+                boredom_strength = min(0.03, idle_seconds / 36000)  # caps at ~10 min
+                boredom_pad = PADState(pleasure=-0.3, arousal=-0.5, dominance=0.0)
+                self.mood.push_toward(boredom_pad, boredom_strength)
+                drift_reason = f"idle for {int(idle_seconds/60)}min, drifting toward boredom"
+
+            # 2. Satisfaction from success streak
+            if self._success_streak >= 3:
+                satisfaction_strength = min(0.02, self._success_streak * 0.005)
+                satisfaction_pad = PADState(pleasure=0.5, arousal=-0.1, dominance=0.4)
+                self.mood.push_toward(satisfaction_pad, satisfaction_strength)
+                if drift_reason:
+                    drift_reason += f"; success streak ({self._success_streak})"
+                else:
+                    drift_reason = f"success streak ({self._success_streak}), drifting toward satisfaction"
+
+            # 3. Curiosity from event bus activity
+            try:
+                from apprentice_agent.proactive.gateway_daemon import get_daemon
+                daemon = get_daemon()
+                if daemon and daemon._stats.get("events_processed", 0) > 0:
+                    recent_events = daemon._stats.get("events_processed", 0)
+                    if recent_events > 5:
+                        curiosity_strength = min(0.02, recent_events * 0.002)
+                        curiosity_pad = PADState(pleasure=0.3, arousal=0.4, dominance=0.1)
+                        self.mood.push_toward(curiosity_pad, curiosity_strength)
+                        if drift_reason:
+                            drift_reason += f"; {recent_events} events detected"
+                        else:
+                            drift_reason = f"{recent_events} events detected, drifting toward curiosity"
+            except Exception:
+                pass
+
+            # 4. Natural baseline pull (enhanced)
+            self.mood.decay_toward_baseline()
+
+            # Update neuromodulators after drift
+            self._update_neuromodulators()
+
+            # Record drift on thinking panel
+            if drift_reason:
+                try:
+                    from api.routes.thinking import record_thought
+                    record_thought(
+                        "observing",
+                        f"emotional drift: {drift_reason}",
+                        0.3, "emotion"
+                    )
+                except Exception:
+                    pass
+
+                self._save_state()
+
+            return drift_reason
 
     # -------------------------------------------------------------------------
     # Utility

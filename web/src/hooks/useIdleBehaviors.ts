@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { usePolling } from './usePolling';
 
 interface IdleBehavior {
   type: string;
   intensity: string;
   status_message: string;
-  breath_rate: float;
+  breath_rate: number;
   attention_drift: number;
   age_seconds: number;
   duration_hint: number;
@@ -48,7 +49,7 @@ export function useIdleBehaviors(enabled: boolean = true) {
   });
 
   const lastActivityRef = useRef<number>(Date.now());
-  const activityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const activityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Record activity to backend
   const recordActivity = useCallback(async () => {
@@ -128,25 +129,9 @@ export function useIdleBehaviors(enabled: boolean = true) {
     }
   }, [enabled]);
 
-  // Poll for updates
-  useEffect(() => {
-    if (!enabled) return;
-
-    // Initial fetch
-    fetchIdleState();
-    fetchAnimationParams();
-
-    // Poll idle state every 3 seconds
-    const stateInterval = setInterval(fetchIdleState, 3000);
-
-    // Poll animation params every 2 seconds for smoother transitions
-    const animInterval = setInterval(fetchAnimationParams, 2000);
-
-    return () => {
-      clearInterval(stateInterval);
-      clearInterval(animInterval);
-    };
-  }, [enabled, fetchIdleState, fetchAnimationParams]);
+  // Poll for updates (slowed to 10s - idle behaviors are ambient/cosmetic)
+  usePolling(fetchIdleState, 10000, { enabled });
+  usePolling(fetchAnimationParams, 10000, { enabled });
 
   // Get current status message
   const getStatusMessage = useCallback((): string | null => {

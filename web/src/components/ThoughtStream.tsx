@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useCallback } from 'react';
+import { usePolling } from '../hooks/usePolling';
 import type { Thought } from '../types';
 import { ArrowPathIcon } from '@heroicons/react/24/outline';
 
@@ -29,7 +30,7 @@ export function ThoughtStream() {
   const [loading, setLoading] = useState(false);
   const [thoughtCount, setThoughtCount] = useState(0);
 
-  const fetchThoughts = async () => {
+  const fetchThoughts = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch('/api/thoughts');
@@ -38,17 +39,12 @@ export function ThoughtStream() {
         setThoughts(data.thoughts || []);
         setThoughtCount(data.thought_count || 0);
       }
-    } catch (e) {
-      console.error('Failed to fetch thoughts:', e);
+    } catch {
+      // Ignore - thought stream is cosmetic
     }
     setLoading(false);
-  };
-
-  useEffect(() => {
-    fetchThoughts();
-    const interval = setInterval(fetchThoughts, 3000);
-    return () => clearInterval(interval);
   }, []);
+  usePolling(fetchThoughts, 10000);
 
   const clearThoughts = async () => {
     try {

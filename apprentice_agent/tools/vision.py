@@ -1,11 +1,15 @@
 """Vision tool for analyzing images using Ollama's LLaVA model."""
 
+import json
 import base64
+import logging
 import ollama
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from ..config import Config
+
+logger = logging.getLogger(__name__)
 
 
 class VisionTool:
@@ -124,6 +128,94 @@ class VisionTool:
             image_path,
             question="Read and transcribe all visible text in this image. List the text exactly as it appears."
         )
+
+    def analyze_screen_context(self, screenshot_path: str) -> Dict[str, Any]:
+        """
+        Analyze a screenshot and return structured context.
+
+        Instead of a free-form description, returns categorized info:
+        - app_type: What kind of application (code_editor, browser, terminal, etc.)
+        - has_errors: Whether errors/exceptions are visible
+        - error_text: The error content if detected
+        - main_content: What the user is working on
+        - suggested_action: What AURA could proactively help with
+
+        Args:
+            screenshot_path: Path to the screenshot
+
+        Returns:
+            Structured dict with screen analysis
+        """
+        structured_prompt = """Analyze this screenshot and respond in this EXACT format (one field per line):
+
+APP_TYPE: <one of: code_editor, browser, terminal, file_manager, chat, email, document, media, settings, other>
+HAS_ERROR: <yes or no>
+ERROR_TEXT: <the error message if visible, or "none">
+MAIN_CONTENT: <brief description of what the user is working on, 1 sentence>
+LANGUAGE: <programming language if code is visible, or "none">
+SUGGESTED_HELP: <one brief suggestion for how an AI assistant could help, or "none">
+
+Be concise. Only report what you actually see."""
+
+        result = self.analyze_image(screenshot_path, structured_prompt)
+
+        if not result.get("success"):
+            return {
+                "success": False,
+                "available": False,
+                "error": result.get("error", "Vision analysis failed"),
+            }
+
+        # Parse structured response
+        raw = result.get("description", "")
+        parsed = {
+            "success": True,
+            "available": True,
+            "app_type": "other",
+            "has_errors": False,
+            "error_text": None,
+            "main_content": "",
+            "language": None,
+            "suggested_help": None,
+            "raw_analysis": raw,
+        }
+
+        for line in raw.strip().split("\n"):
+            line = line.strip()
+            if ":" not in line:
+                continue
+            key, _, value = line.partition(":")
+            value = value.strip()
+            key_lower = key.strip().lower().replace(" ", "_")
+
+            if key_lower == "app_type":
+                parsed["app_type"] = value.lower()
+            elif key_lower == "has_error":
+                parsed["has_errors"] = value.lower() in ("yes", "true", "1")
+            elif key_lower == "error_text":
+                if value.lower() not in ("none", "n/a", ""):
+                    parsed["error_text"] = value
+            elif key_lower == "main_content":
+                parsed["main_content"] = value
+            elif key_lower == "language":
+                if value.lower() not in ("none", "n/a", ""):
+                    parsed["language"] = value
+            elif key_lower == "suggested_help":
+                if value.lower() not in ("none", "n/a", ""):
+                    parsed["suggested_help"] = value
+
+        # Record thought about screen analysis
+        try:
+            from api.routes.thinking import record_thought
+            content_desc = parsed["main_content"][:50] if parsed["main_content"] else parsed["app_type"]
+            if parsed["has_errors"]:
+                record_thought("observing", f"detected error on screen in {parsed['app_type']}: {parsed.get('error_text', '')[:40]}", 0.7, "tool")
+            else:
+                record_thought("observing", f"screen shows {parsed['app_type']}: {content_desc}", 0.3, "tool")
+        except Exception:
+            pass
+
+        return parsed
 
     def execute(self, action: str, **kwargs) -> dict:
         """Execute a vision action.

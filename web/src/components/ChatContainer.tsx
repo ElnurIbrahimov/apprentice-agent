@@ -3,8 +3,8 @@ import { useChatStore } from '../store/chatStore';
 import { MessageBubble } from './MessageBubble';
 import { MessageInput } from './MessageInput';
 import { useWebSocket } from '../hooks/useWebSocket';
-import { useProactiveMessages } from '../hooks/useProactiveMessages';
-import { useConversationStarters } from '../hooks/useConversationStarters';
+// import { useProactiveMessages } from '../hooks/useProactiveMessages';
+// import { useConversationStarters } from '../hooks/useConversationStarters';
 import type { FileAttachment } from '../types';
 import {
   SparklesIcon,
@@ -35,17 +35,14 @@ const QUICK_ACTIONS = [
 ];
 
 export function ChatContainer() {
-  const { messages, isLoading, error, connectionStatus } = useChatStore();
+  const { messages, isLoading, error, connectionStatus, currentConversationId } = useChatStore();
   const { sendMessage, stopGeneration } = useWebSocket();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
 
-  // Poll for proactive messages from Gateway Daemon
-  useProactiveMessages(connectionStatus === 'connected');
-
-  // Poll for spontaneous conversation starters
-  useConversationStarters(connectionStatus === 'connected');
+  // useProactiveMessages(connectionStatus === 'connected');
+  // useConversationStarters(connectionStatus === 'connected');
 
   // Check if user is near the bottom of scroll area
   const checkIfNearBottom = useCallback(() => {

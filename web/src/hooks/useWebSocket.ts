@@ -2,11 +2,13 @@ import { useEffect, useRef, useCallback } from 'react';
 import { useChatStore } from '../store/chatStore';
 import type { WebSocketMessage, FileAttachment } from '../types';
 
-const WS_URL = `ws://${window.location.hostname}:${window.location.port || '8000'}/api/chat/stream`;
+// Connect WebSocket directly to backend
+const WS_URL = `ws://127.0.0.1:8000/api/chat/stream`;
+
 const INITIAL_RECONNECT_DELAY = 1000;
 const MAX_RECONNECT_DELAY = 30000;
 const MAX_RECONNECT_ATTEMPTS = 10;
-const HEARTBEAT_INTERVAL = 30000; // 30 seconds
+const HEARTBEAT_INTERVAL = 30000;
 
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
@@ -15,6 +17,7 @@ export function useWebSocket() {
   const heartbeatInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const currentMessageId = useRef<string | null>(null);
   const isManualDisconnect = useRef(false);
+  const mountedRef = useRef(true);
 
   const {
     addMessage,
@@ -32,22 +35,7 @@ export function useWebSocket() {
     return Math.min(delay, MAX_RECONNECT_DELAY);
   }, []);
 
-  // Start heartbeat to detect stale connections
-  const startHeartbeat = useCallback(() => {
-    if (heartbeatInterval.current) {
-      clearInterval(heartbeatInterval.current);
-    }
-    heartbeatInterval.current = setInterval(() => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        try {
-          wsRef.current.send(JSON.stringify({ type: 'ping' }));
-        } catch (e) {
-          console.warn('[WebSocket] Heartbeat failed, connection may be stale');
-        }
-      }
-    }, HEARTBEAT_INTERVAL);
-  }, []);
-
+  // Stop heartbeat
   const stopHeartbeat = useCallback(() => {
     if (heartbeatInterval.current) {
       clearInterval(heartbeatInterval.current);
@@ -55,96 +43,32 @@ export function useWebSocket() {
     }
   }, []);
 
-  const connect = useCallback(() => {
-    // Prevent multiple simultaneous connections
-    if (wsRef.current?.readyState === WebSocket.OPEN ||
-        wsRef.current?.readyState === WebSocket.CONNECTING) {
-      return;
-    }
-
-    // Don't reconnect if manually disconnected
-    if (isManualDisconnect.current) {
-      return;
-    }
-
-    setConnectionStatus('connecting');
-    console.log('[WebSocket] Connecting to', WS_URL);
-
-    try {
-      const ws = new WebSocket(WS_URL);
-
-      ws.onopen = () => {
-        console.log('[WebSocket] Connected');
-        setConnectionStatus('connected');
-        reconnectAttempts.current = 0; // Reset on successful connection
-        setError(null);
-        startHeartbeat();
-      };
-
-      ws.onmessage = (event) => {
+  // Start heartbeat
+  const startHeartbeat = useCallback(() => {
+    stopHeartbeat();
+    heartbeatInterval.current = setInterval(() => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
         try {
-          const data: WebSocketMessage = JSON.parse(event.data);
-          // Ignore pong responses
-          if (data.type === 'pong') return;
-          handleMessage(data);
+          wsRef.current.send(JSON.stringify({ type: 'ping' }));
         } catch (e) {
-          console.error('[WebSocket] Failed to parse message:', e);
+          console.warn('[WebSocket] Heartbeat failed');
         }
-      };
+      }
+    }, HEARTBEAT_INTERVAL);
+  }, [stopHeartbeat]);
 
-      ws.onerror = (error) => {
-        console.error('[WebSocket] Error:', error);
-        setConnectionStatus('error');
-      };
-
-      ws.onclose = (event) => {
-        console.log('[WebSocket] Closed:', event.code, event.reason);
-        setConnectionStatus('disconnected');
-        wsRef.current = null;
-        stopHeartbeat();
-
-        // Don't reconnect if manually disconnected or clean close
-        if (isManualDisconnect.current) {
-          return;
-        }
-
-        // Attempt to reconnect with exponential backoff
-        if (reconnectAttempts.current < MAX_RECONNECT_ATTEMPTS) {
-          const delay = getReconnectDelay();
-          reconnectAttempts.current++;
-          console.log(`[WebSocket] Reconnecting in ${delay}ms (attempt ${reconnectAttempts.current}/${MAX_RECONNECT_ATTEMPTS})`);
-
-          // Clear any existing timeout
-          if (reconnectTimeout.current) {
-            clearTimeout(reconnectTimeout.current);
-          }
-          reconnectTimeout.current = setTimeout(connect, delay);
-        } else {
-          setError('Connection lost. Click to reconnect.');
-        }
-      };
-
-      wsRef.current = ws;
-    } catch (e) {
-      console.error('[WebSocket] Failed to create connection:', e);
-      setConnectionStatus('error');
-      setError('Failed to create WebSocket connection');
-    }
-  }, [setConnectionStatus, setError, startHeartbeat, stopHeartbeat, getReconnectDelay]);
-
+  // Handle incoming messages - defined before connect to avoid closure issues
   const handleMessage = useCallback((data: WebSocketMessage) => {
     switch (data.type) {
       case 'chunk':
         if (data.content) {
           if (!currentMessageId.current) {
-            // First chunk - create message
             currentMessageId.current = addMessage({
               role: 'assistant',
               content: data.content,
               isStreaming: true,
             });
           } else {
-            // Append to existing message
             appendToMessage(currentMessageId.current, data.content);
           }
         }
@@ -173,7 +97,6 @@ export function useWebSocket() {
         break;
 
       case 'stopped':
-        console.log('[WebSocket] Generation stopped by user');
         if (currentMessageId.current) {
           setMessageStreaming(currentMessageId.current, false);
           appendToMessage(currentMessageId.current, '\n\n*[Generation stopped]*');
@@ -184,13 +107,98 @@ export function useWebSocket() {
     }
   }, [addMessage, appendToMessage, setMessageStreaming, setMood, setIsLoading, setError]);
 
+  // Connect function
+  const connect = useCallback(() => {
+    // Check if already connected or connecting
+    if (wsRef.current) {
+      const state = wsRef.current.readyState;
+      if (state === WebSocket.OPEN || state === WebSocket.CONNECTING) {
+        return;
+      }
+    }
+
+    // Check if manually disconnected
+    if (isManualDisconnect.current) {
+      return;
+    }
+
+    // Check if unmounted
+    if (!mountedRef.current) {
+      return;
+    }
+
+    setConnectionStatus('connecting');
+
+    try {
+      const ws = new WebSocket(WS_URL);
+
+      ws.onopen = () => {
+        if (!mountedRef.current) {
+          ws.close();
+          return;
+        }
+        setConnectionStatus('connected');
+        reconnectAttempts.current = 0;
+        setError(null);
+        startHeartbeat();
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data: WebSocketMessage = JSON.parse(event.data);
+          if (data.type === 'pong') return;
+          handleMessage(data);
+        } catch (e) {
+          console.error('[WebSocket] Parse error:', e);
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error('[WebSocket] Connection error:', error);
+        setConnectionStatus('error');
+      };
+
+      ws.onclose = () => {
+        // Only handle if this is our current socket
+        if (wsRef.current !== ws) {
+          return;
+        }
+
+        setConnectionStatus('disconnected');
+        wsRef.current = null;
+        stopHeartbeat();
+
+        // Don't reconnect if manually disconnected or unmounted
+        if (isManualDisconnect.current || !mountedRef.current) {
+          return;
+        }
+
+        // Reconnect with backoff
+        if (reconnectAttempts.current < MAX_RECONNECT_ATTEMPTS) {
+          const delay = getReconnectDelay();
+          reconnectAttempts.current++;
+          reconnectTimeout.current = setTimeout(connect, delay);
+        } else {
+          setError('Connection lost. Click to reconnect.');
+        }
+      };
+
+      wsRef.current = ws;
+
+    } catch (e) {
+      console.error('[WebSocket] Failed to create WebSocket:', e);
+      setConnectionStatus('error');
+      setError('Failed to create WebSocket connection');
+    }
+  }, [setConnectionStatus, setError, startHeartbeat, stopHeartbeat, getReconnectDelay, handleMessage]);
+
+  // Send message
   const sendMessage = useCallback((message: string, attachments?: FileAttachment[], modelOverride?: string | null, actionMode?: string | null) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       setError('Not connected to server');
       return false;
     }
 
-    // Add user message to store (with attachments for display)
     addMessage({
       role: 'user',
       content: message,
@@ -201,40 +209,26 @@ export function useWebSocket() {
     setError(null);
     currentMessageId.current = null;
 
-    // Get selected model from store if not provided
-    // Note: If actionMode is set, backend will auto-select the best model
     const selectedModel = modelOverride !== undefined
       ? modelOverride
-      : (actionMode ? null : useChatStore.getState().selectedModel); // Don't send user model if action mode is active
+      : (actionMode ? null : useChatStore.getState().selectedModel);
 
-    // Build payload with attachments metadata for server processing
     const payload: {
       type: string;
       message: string;
       model?: string;
       action_mode?: string;
-      attachments?: Array<{
-        id: string;
-        filename: string;
-        type: string;
-        path?: string;
-      }>;
-    } = {
-      type: 'chat',
-      message,
-    };
+      conversation_id?: string;
+      attachments?: Array<{ id: string; filename: string; type: string; path?: string }>;
+    } = { type: 'chat', message };
 
-    if (selectedModel) {
-      payload.model = selectedModel;
-    }
+    if (selectedModel) payload.model = selectedModel;
+    if (actionMode) payload.action_mode = actionMode;
 
-    // Include action mode for auto-model selection
-    if (actionMode) {
-      payload.action_mode = actionMode;
-    }
-
-    // Include attachment metadata for server-side processing
-    if (attachments && attachments.length > 0) {
+    // Include conversation_id for multi-conversation support
+    const conversationId = useChatStore.getState().currentConversationId;
+    if (conversationId) payload.conversation_id = conversationId;
+    if (attachments?.length) {
       payload.attachments = attachments.map(a => ({
         id: a.id,
         filename: a.filename,
@@ -244,13 +238,13 @@ export function useWebSocket() {
     }
 
     wsRef.current.send(JSON.stringify(payload));
-
     return true;
   }, [addMessage, setIsLoading, setError]);
 
+  // Disconnect
   const disconnect = useCallback(() => {
     isManualDisconnect.current = true;
-    reconnectAttempts.current = 0; // Reset attempts on manual disconnect
+    reconnectAttempts.current = 0;
 
     if (reconnectTimeout.current) {
       clearTimeout(reconnectTimeout.current);
@@ -259,42 +253,52 @@ export function useWebSocket() {
     stopHeartbeat();
 
     if (wsRef.current) {
-      wsRef.current.close(1000, 'User disconnected'); // Clean close
+      wsRef.current.close(1000, 'User disconnected');
       wsRef.current = null;
     }
     setConnectionStatus('disconnected');
   }, [setConnectionStatus, stopHeartbeat]);
 
+  // Reconnect
   const reconnect = useCallback(() => {
     isManualDisconnect.current = false;
     reconnectAttempts.current = 0;
     connect();
   }, [connect]);
 
+  // Stop generation
   const stopGeneration = useCallback(() => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      console.warn('[WebSocket] Cannot stop - not connected');
       return false;
     }
-
-    console.log('[WebSocket] Sending stop request');
     wsRef.current.send(JSON.stringify({ type: 'stop' }));
     return true;
   }, []);
 
   // Connect on mount
   useEffect(() => {
+    mountedRef.current = true;
     isManualDisconnect.current = false;
-    connect();
+
+    // Small delay to ensure DOM is ready
+    const timeoutId = setTimeout(() => {
+      connect();
+    }, 100);
 
     return () => {
+      mountedRef.current = false;
       isManualDisconnect.current = true;
+      clearTimeout(timeoutId);
       stopHeartbeat();
+
       if (reconnectTimeout.current) {
         clearTimeout(reconnectTimeout.current);
       }
+
       if (wsRef.current) {
-        wsRef.current.close();
+        const ws = wsRef.current;
+        wsRef.current = null;
+        ws.close();
       }
     };
   }, [connect, stopHeartbeat]);

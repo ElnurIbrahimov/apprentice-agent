@@ -78,6 +78,10 @@ class SleepSession:
     novel_connections: int = 0
     creative_hypotheses: int = 0
 
+    # Learned context (Phase 4D)
+    learned_context_generated: bool = False
+    learned_context_version: int = 0
+
     # Overall
     duration_seconds: float = 0
     interrupted: bool = False
@@ -103,6 +107,57 @@ class ConsolidatedPattern:
         return asdict(self)
 
 
+@dataclass
+class LearnedContext:
+    """Letta-style learned context distilled from conversations (Phase 4D)."""
+    generated_at: str
+    session_id: str
+
+    # Distilled knowledge
+    user_summary: str = ""          # Who the user is, what they care about
+    key_facts: List[str] = field(default_factory=list)      # Important facts learned
+    preferences: Dict[str, str] = field(default_factory=dict)  # User preferences
+    principles: List[str] = field(default_factory=list)     # Interaction principles
+    ongoing_topics: List[str] = field(default_factory=list)  # Current interests/projects
+    emotional_patterns: str = ""    # How the user tends to feel / what comforts them
+
+    # Metadata
+    conversations_processed: int = 0
+    messages_analyzed: int = 0
+    version: int = 1
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'LearnedContext':
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+
+    def to_system_prompt(self) -> str:
+        """Format learned context for injection into system prompts."""
+        parts = []
+        if self.user_summary:
+            parts.append(f"About the user: {self.user_summary}")
+        if self.key_facts:
+            facts_str = "; ".join(self.key_facts[:10])
+            parts.append(f"Key facts: {facts_str}")
+        if self.preferences:
+            prefs = "; ".join(f"{k}: {v}" for k, v in list(self.preferences.items())[:8])
+            parts.append(f"User preferences: {prefs}")
+        if self.ongoing_topics:
+            topics = ", ".join(self.ongoing_topics[:5])
+            parts.append(f"Current interests/projects: {topics}")
+        if self.principles:
+            princ = "; ".join(self.principles[:5])
+            parts.append(f"Interaction principles: {princ}")
+        if self.emotional_patterns:
+            parts.append(f"Emotional notes: {self.emotional_patterns}")
+
+        if not parts:
+            return ""
+        return "[Learned Context]\n" + "\n".join(parts)
+
+
 class NeuroDreamEngine:
     """Sleep/dream memory consolidation engine for Aura.
 
@@ -111,6 +166,7 @@ class NeuroDreamEngine:
     - Find and abstract patterns
     - Generate creative connections
     - Consolidate emotional experiences
+    - Generate Letta-style learned context (Phase 4D)
     """
 
     def __init__(
@@ -120,6 +176,7 @@ class NeuroDreamEngine:
         evoemo=None,
         inner_monologue=None,
         chromadb=None,
+        brain=None,
         data_dir: str = "data/neurodream",
         idle_threshold_minutes: int = 30,
         max_vram_gb: float = 4.0
@@ -132,6 +189,7 @@ class NeuroDreamEngine:
             evoemo: EvoEmoTool instance
             inner_monologue: InnerMonologueTool instance
             chromadb: ChromaDB collection for memories
+            brain: Brain instance for LLM calls and conversation access
             data_dir: Directory for dream data
             idle_threshold_minutes: Minutes of inactivity before auto-sleep
             max_vram_gb: Maximum VRAM to use during sleep
@@ -141,6 +199,7 @@ class NeuroDreamEngine:
         self.evoemo = evoemo
         self.monologue = inner_monologue
         self.chromadb = chromadb
+        self.brain = brain
 
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -148,6 +207,10 @@ class NeuroDreamEngine:
 
         self.idle_threshold = timedelta(minutes=idle_threshold_minutes)
         self.max_vram_gb = max_vram_gb
+
+        # Learned context (Phase 4D: Letta-style)
+        self._learned_context_file = self.data_dir / "learned_context.json"
+        self._learned_context: Optional[LearnedContext] = self._load_learned_context()
 
         # State
         self.current_phase = SleepPhase.AWAKE
@@ -214,7 +277,7 @@ class NeuroDreamEngine:
 
     def get_status(self) -> Dict[str, Any]:
         """Get current sleep status."""
-        return {
+        status = {
             "phase": self.current_phase.value,
             "is_sleeping": self.current_phase != SleepPhase.AWAKE,
             "last_activity": self.last_activity_time.isoformat(),
@@ -222,8 +285,18 @@ class NeuroDreamEngine:
             "total_sessions": self._total_sessions,
             "total_insights": self._total_insights,
             "idle_minutes": (datetime.now() - self.last_activity_time).total_seconds() / 60,
-            "current_session": self.current_session.to_dict() if self.current_session else None
+            "current_session": self.current_session.to_dict() if self.current_session else None,
         }
+        # Learned context info (Phase 4D)
+        if self._learned_context:
+            status["learned_context"] = {
+                "version": self._learned_context.version,
+                "generated_at": self._learned_context.generated_at,
+                "key_facts": len(self._learned_context.key_facts),
+                "preferences": len(self._learned_context.preferences),
+                "ongoing_topics": self._learned_context.ongoing_topics,
+            }
+        return status
 
     def enter_sleep(self, trigger: str = "manual") -> Dict[str, Any]:
         """Enter sleep mode and begin dream cycle.
@@ -304,6 +377,8 @@ class NeuroDreamEngine:
                     self.current_session.edges_pruned = deep_results.get("edges_pruned", 0)
                     self.current_session.edges_strengthened = deep_results.get("edges_strengthened", 0)
                     self.current_session.nodes_merged = deep_results.get("nodes_merged", 0)
+                    self.current_session.learned_context_generated = deep_results.get("learned_context_generated", False)
+                    self.current_session.learned_context_version = deep_results.get("learned_context_version", 0)
                     self.current_session.phases_completed.append("deep")
 
             # Phase 3: REM Sleep (creative synthesis)
@@ -454,6 +529,42 @@ class NeuroDreamEngine:
             except Exception as e:
                 print(f"[NeuroDream] Merge nodes error: {e}")
 
+        # === Letta-style learned context generation (Phase 4D) ===
+        learned_context_result = {}
+        if not self._interrupt_flag.is_set():
+            try:
+                learned_context_result = self.generate_learned_context()
+                results["learned_context_generated"] = learned_context_result.get("success", False)
+                results["learned_context_version"] = learned_context_result.get("version", 0)
+            except Exception as e:
+                print(f"[NeuroDream] Learned context generation error: {e}")
+                results["learned_context_generated"] = False
+
+        # === Metacognitive self-improvement cycle (Phase 6B) ===
+        if not self._interrupt_flag.is_set():
+            try:
+                from apprentice_agent.consciousness.metacognition import get_metacognitive_engine
+                mc = get_metacognitive_engine()
+                mc_result = mc.run_metacognitive_cycle()
+                results["metacognition_ran"] = True
+                results["metacognition_improvements"] = mc_result.get("improvements_attempted", 0)
+            except Exception as e:
+                print(f"[NeuroDream] Metacognition cycle error: {e}")
+                results["metacognition_ran"] = False
+
+        # === Intrinsic motivation cycle (Phase 6E) ===
+        if not self._interrupt_flag.is_set():
+            try:
+                from apprentice_agent.consciousness.intrinsic_motivation import get_intrinsic_motivation
+                im = get_intrinsic_motivation()
+                im_result = im.run_motivation_cycle()
+                results["motivation_ran"] = True
+                results["dominant_drive"] = im_result.get("dominant_drive", "unknown")
+                results["motivation_actions"] = len(im_result.get("actions", []))
+            except Exception as e:
+                print(f"[NeuroDream] Intrinsic motivation cycle error: {e}")
+                results["motivation_ran"] = False
+
         results["duration_seconds"] = time.time() - start_time
 
         # Save consolidated patterns
@@ -462,11 +573,14 @@ class NeuroDreamEngine:
 
         # Log dream thought
         if self.monologue and not self._interrupt_flag.is_set():
+            lc_msg = ""
+            if learned_context_result.get("success"):
+                lc_msg = f" Generated learned context v{learned_context_result.get('version', '?')}."
             self.monologue.think(
                 "reason",
                 f"Deep sleep complete. Found {results['patterns_found']} patterns, "
                 f"pruned {results['edges_pruned']} weak edges, "
-                f"merged {results['nodes_merged']} similar nodes.",
+                f"merged {results['nodes_merged']} similar nodes.{lc_msg}",
                 confidence=80
             )
 
@@ -1079,6 +1193,314 @@ class NeuroDreamEngine:
                 insights.append(insight)
 
         return insights[:3]  # Limit hypotheses
+
+    # ==================== Learned Context (Phase 4D: Letta-style) ====================
+
+    def _load_learned_context(self) -> Optional[LearnedContext]:
+        """Load learned context from disk."""
+        if self._learned_context_file.exists():
+            try:
+                data = json.loads(self._learned_context_file.read_text(encoding="utf-8"))
+                return LearnedContext.from_dict(data)
+            except (json.JSONDecodeError, IOError, TypeError) as e:
+                print(f"[NeuroDream] Error loading learned context: {e}")
+        return None
+
+    def _save_learned_context(self, ctx: LearnedContext):
+        """Save learned context to disk."""
+        self._learned_context = ctx
+        self._learned_context_file.write_text(
+            json.dumps(ctx.to_dict(), indent=2, ensure_ascii=False),
+            encoding="utf-8"
+        )
+
+    def get_learned_context(self) -> Optional[LearnedContext]:
+        """Get the current learned context (for system prompt injection)."""
+        return self._learned_context
+
+    def get_learned_context_prompt(self) -> str:
+        """Get learned context formatted for system prompt injection."""
+        if self._learned_context:
+            return self._learned_context.to_system_prompt()
+        return ""
+
+    def _gather_conversation_logs(self, max_conversations: int = 10) -> List[Dict[str, Any]]:
+        """Gather recent conversation logs for context distillation.
+
+        Pulls from brain's conversation history files.
+        """
+        conversations = []
+
+        # Try to get conversations from brain
+        if self.brain:
+            try:
+                conv_list = self.brain.list_conversations()
+                # Sort by most recent
+                sorted_convs = sorted(
+                    conv_list,
+                    key=lambda c: c.get("updated_at", 0),
+                    reverse=True
+                )
+
+                for conv_info in sorted_convs[:max_conversations]:
+                    conv_id = conv_info.get("id", "")
+                    try:
+                        messages = self.brain.get_conversation_messages(conv_id)
+                        if messages:
+                            conversations.append({
+                                "id": conv_id,
+                                "title": conv_info.get("title", "Untitled"),
+                                "messages": messages,
+                                "message_count": len(messages),
+                            })
+                    except Exception:
+                        continue
+            except Exception as e:
+                print(f"[NeuroDream] Error gathering conversations from brain: {e}")
+
+        # Also gather from monologue logs
+        monologue_memories = self._get_monologue_memories(hours=168)  # Last 7 days
+        if monologue_memories:
+            conversations.append({
+                "id": "monologue",
+                "title": "Inner Thoughts",
+                "messages": [{"role": "assistant", "content": m["content"]} for m in monologue_memories[:50]],
+                "message_count": len(monologue_memories),
+            })
+
+        return conversations
+
+    def _distill_conversations(self, conversations: List[Dict[str, Any]]) -> LearnedContext:
+        """Distill conversation logs into learned context using LLM.
+
+        This is the core Letta-style operation: transform raw conversation logs
+        into compressed, structured knowledge.
+        """
+        session_id = self.current_session.session_id if self.current_session else "manual"
+
+        # Build a summary of conversation content for the LLM
+        conv_summary_parts = []
+        total_messages = 0
+
+        for conv in conversations:
+            messages = conv.get("messages", [])
+            if not messages:
+                continue
+
+            title = conv.get("title", "Untitled")
+            conv_text = f"\n--- Conversation: {title} ---\n"
+
+            for msg in messages[-20:]:  # Last 20 messages per conversation
+                role = msg.get("role", "unknown")
+                content = msg.get("content", "")[:300]  # Truncate long messages
+                conv_text += f"{role}: {content}\n"
+                total_messages += 1
+
+            conv_summary_parts.append(conv_text)
+
+        if not conv_summary_parts:
+            # Return empty context if no conversations
+            return LearnedContext(
+                generated_at=datetime.now().isoformat(),
+                session_id=session_id,
+                conversations_processed=0,
+                messages_analyzed=0,
+            )
+
+        # Build the raw material (limit to ~4000 chars for LLM processing)
+        raw_material = "\n".join(conv_summary_parts)[:4000]
+
+        # Use LLM to distill if brain is available
+        if self.brain:
+            return self._llm_distill(raw_material, session_id, len(conversations), total_messages)
+
+        # Fallback: simple keyword extraction without LLM
+        return self._simple_distill(raw_material, session_id, len(conversations), total_messages)
+
+    def _llm_distill(
+        self,
+        raw_material: str,
+        session_id: str,
+        conv_count: int,
+        msg_count: int
+    ) -> LearnedContext:
+        """Use LLM to distill conversations into learned context."""
+        distill_prompt = f"""Analyze these conversation logs and extract structured knowledge.
+
+CONVERSATIONS:
+{raw_material}
+
+Extract the following as JSON:
+{{
+  "user_summary": "Brief description of who the user is and what they care about (1-2 sentences)",
+  "key_facts": ["fact1", "fact2", ...],
+  "preferences": {{"preference_name": "preference_value", ...}},
+  "principles": ["interaction principle 1", ...],
+  "ongoing_topics": ["topic1", "topic2", ...],
+  "emotional_patterns": "Brief note on user's emotional tendencies (1 sentence)"
+}}
+
+Rules:
+- Only include facts actually stated or clearly implied in conversations
+- Preferences should be about communication style, interests, tools used
+- Principles should be about how to best interact with this user
+- Be concise - each fact/principle should be one short sentence
+- Return ONLY valid JSON, no other text"""
+
+        try:
+            response = self.brain.think(
+                distill_prompt,
+                system_prompt="You are a memory consolidation system. Extract and structure knowledge from conversation logs. Return ONLY valid JSON.",
+                use_history=False,
+            )
+
+            # Parse LLM response as JSON
+            parsed = self._parse_json_response(response)
+
+            existing = self._learned_context
+            ctx = LearnedContext(
+                generated_at=datetime.now().isoformat(),
+                session_id=session_id,
+                user_summary=parsed.get("user_summary", existing.user_summary if existing else ""),
+                key_facts=self._merge_lists(
+                    existing.key_facts if existing else [],
+                    parsed.get("key_facts", []),
+                    max_items=20
+                ),
+                preferences=self._merge_dicts(
+                    existing.preferences if existing else {},
+                    parsed.get("preferences", {}),
+                    max_items=15
+                ),
+                principles=self._merge_lists(
+                    existing.principles if existing else [],
+                    parsed.get("principles", []),
+                    max_items=10
+                ),
+                ongoing_topics=parsed.get("ongoing_topics", [])[:8],
+                emotional_patterns=parsed.get("emotional_patterns", existing.emotional_patterns if existing else ""),
+                conversations_processed=conv_count,
+                messages_analyzed=msg_count,
+                version=(existing.version + 1) if existing else 1,
+            )
+            return ctx
+
+        except Exception as e:
+            print(f"[NeuroDream] LLM distillation error: {e}")
+            return self._simple_distill(raw_material, session_id, conv_count, msg_count)
+
+    def _simple_distill(
+        self,
+        raw_material: str,
+        session_id: str,
+        conv_count: int,
+        msg_count: int
+    ) -> LearnedContext:
+        """Simple keyword-based distillation without LLM."""
+        # Extract frequent topics from raw material
+        words = re.findall(r'\b[A-Za-z]{5,}\b', raw_material.lower())
+        stopwords = self._get_stopwords()
+        meaningful = [w for w in words if w not in stopwords]
+        topic_counts = Counter(meaningful)
+        top_topics = [t[0] for t in topic_counts.most_common(8)]
+
+        existing = self._learned_context
+        return LearnedContext(
+            generated_at=datetime.now().isoformat(),
+            session_id=session_id,
+            ongoing_topics=top_topics,
+            key_facts=existing.key_facts if existing else [],
+            preferences=existing.preferences if existing else {},
+            principles=existing.principles if existing else [],
+            user_summary=existing.user_summary if existing else "",
+            emotional_patterns=existing.emotional_patterns if existing else "",
+            conversations_processed=conv_count,
+            messages_analyzed=msg_count,
+            version=(existing.version + 1) if existing else 1,
+        )
+
+    def _parse_json_response(self, response: str) -> dict:
+        """Parse JSON from LLM response, handling markdown code blocks."""
+        text = response.strip()
+        # Strip markdown code block if present
+        if text.startswith("```"):
+            lines = text.split("\n")
+            # Remove first and last lines (```json and ```)
+            lines = [l for l in lines if not l.strip().startswith("```")]
+            text = "\n".join(lines)
+
+        # Try to find JSON object in text
+        brace_start = text.find("{")
+        brace_end = text.rfind("}")
+        if brace_start >= 0 and brace_end > brace_start:
+            text = text[brace_start:brace_end + 1]
+
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return {}
+
+    def _merge_lists(self, existing: List[str], new: List[str], max_items: int = 20) -> List[str]:
+        """Merge two lists, deduplicating and limiting size."""
+        seen = set()
+        merged = []
+        # New items first (more recent)
+        for item in new + existing:
+            key = item.lower().strip()
+            if key not in seen and key:
+                seen.add(key)
+                merged.append(item)
+            if len(merged) >= max_items:
+                break
+        return merged
+
+    def _merge_dicts(self, existing: Dict, new: Dict, max_items: int = 15) -> Dict:
+        """Merge two dicts, with new values overriding existing."""
+        merged = dict(existing)
+        merged.update(new)
+        # Limit size
+        if len(merged) > max_items:
+            items = list(merged.items())[-max_items:]
+            merged = dict(items)
+        return merged
+
+    def generate_learned_context(self) -> Dict[str, Any]:
+        """Generate learned context from conversation logs (can be called manually).
+
+        This is the main Letta-style operation.
+        """
+        print("[NeuroDream] Generating learned context...")
+
+        conversations = self._gather_conversation_logs(max_conversations=10)
+        if not conversations:
+            return {"success": False, "message": "No conversation logs available"}
+
+        ctx = self._distill_conversations(conversations)
+        self._save_learned_context(ctx)
+
+        # Log to monologue
+        if self.monologue:
+            try:
+                self.monologue.think(
+                    "reflect",
+                    f"Generated learned context v{ctx.version}: "
+                    f"{len(ctx.key_facts)} facts, {len(ctx.preferences)} preferences, "
+                    f"{len(ctx.ongoing_topics)} topics from {ctx.conversations_processed} conversations.",
+                    confidence=80
+                )
+            except (AttributeError, TypeError):
+                pass
+
+        return {
+            "success": True,
+            "version": ctx.version,
+            "key_facts": len(ctx.key_facts),
+            "preferences": len(ctx.preferences),
+            "principles": len(ctx.principles),
+            "ongoing_topics": ctx.ongoing_topics,
+            "conversations_processed": ctx.conversations_processed,
+            "messages_analyzed": ctx.messages_analyzed,
+        }
 
     # ==================== Storage ====================
 

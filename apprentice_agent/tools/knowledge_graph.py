@@ -58,7 +58,12 @@ EDGE_TYPES = {
 
 @dataclass
 class Node:
-    """Represents a node in the knowledge graph."""
+    """Represents a node in the knowledge graph.
+
+    Bi-temporal tracking (Phase 4A):
+    - valid_from: when this entity became relevant
+    - valid_to: when this entity stopped being relevant (None = still valid)
+    """
     id: str
     type: str
     label: str
@@ -70,6 +75,9 @@ class Node:
     last_accessed: str = ""
     confidence: float = 0.8
     source: str = "inference"
+    # Bi-temporal fields (Phase 4A)
+    valid_from: str = ""
+    valid_to: Optional[str] = None  # None = still valid
 
     def __post_init__(self):
         if not self.created_at:
@@ -78,6 +86,8 @@ class Node:
             self.updated_at = self.created_at
         if not self.last_accessed:
             self.last_accessed = self.created_at
+        if not self.valid_from:
+            self.valid_from = self.created_at
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -108,7 +118,14 @@ class Node:
 
 @dataclass
 class Edge:
-    """Represents an edge (relationship) in the knowledge graph."""
+    """Represents an edge (relationship) in the knowledge graph.
+
+    Bi-temporal tracking (Phase 4A):
+    - transaction_time: when this edge was recorded in the KG (immutable)
+    - valid_from: when this fact became true in the real world
+    - valid_to: when this fact stopped being true (None = still valid)
+    - superseded_by: ID of the edge that replaced this one
+    """
     id: str
     type: str
     source_id: str
@@ -117,12 +134,27 @@ class Edge:
     properties: Dict[str, Any] = field(default_factory=dict)
     created_at: str = ""
     last_reinforced: str = ""
+    # Bi-temporal fields (Phase 4A)
+    transaction_time: str = ""
+    valid_from: str = ""
+    valid_to: Optional[str] = None  # None = still valid
+    superseded_by: Optional[str] = None  # Edge ID that replaced this
 
     def __post_init__(self):
+        now = datetime.now().isoformat()
         if not self.created_at:
-            self.created_at = datetime.now().isoformat()
+            self.created_at = now
         if not self.last_reinforced:
             self.last_reinforced = self.created_at
+        if not self.transaction_time:
+            self.transaction_time = self.created_at
+        if not self.valid_from:
+            self.valid_from = self.created_at
+
+    @property
+    def is_valid(self) -> bool:
+        """Check if this edge is currently valid (not superseded)."""
+        return self.valid_to is None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -507,6 +539,213 @@ class KnowledgeGraphTool:
             return True
 
     # =========================================================================
+    # BI-TEMPORAL OPERATIONS (Phase 4A)
+    # =========================================================================
+
+    def invalidate_edge(self, edge_id: str, reason: str = "") -> bool:
+        """
+        Mark an edge as no longer valid (Zep-style invalidation).
+
+        Does NOT delete the edge — preserves history.
+        Sets valid_to = now so time-travel queries still see it.
+
+        Args:
+            edge_id: Edge to invalidate
+            reason: Why this fact is no longer true
+
+        Returns:
+            True if invalidated successfully
+        """
+        with self._lock:
+            edge = self._edges.get(edge_id)
+            if not edge or not edge.is_valid:
+                return False
+
+            edge.valid_to = datetime.now().isoformat()
+            if reason:
+                edge.properties["invalidation_reason"] = reason
+            return True
+
+    def supersede_edge(
+        self,
+        old_edge_id: str,
+        new_edge_type: str,
+        new_weight: float = 0.5,
+        new_properties: Optional[Dict] = None,
+        reason: str = ""
+    ) -> Optional[Edge]:
+        """
+        Replace an edge with a new one (supersession tracking).
+
+        Invalidates the old edge and creates a new one between the same nodes.
+        The old edge's superseded_by points to the new edge.
+
+        Args:
+            old_edge_id: Edge being replaced
+            new_edge_type: Type for the replacement edge
+            new_weight: Weight for the new edge
+            new_properties: Properties for the new edge
+            reason: Why the old fact was superseded
+
+        Returns:
+            The new Edge, or None if old edge not found
+        """
+        with self._lock:
+            old_edge = self._edges.get(old_edge_id)
+            if not old_edge:
+                return None
+
+            # Create new edge between same nodes
+            new_edge = self.add_edge(
+                old_edge.source_id,
+                old_edge.target_id,
+                new_edge_type,
+                weight=new_weight,
+                properties=new_properties or {}
+            )
+
+            if new_edge:
+                # Invalidate old edge and link to new
+                old_edge.valid_to = datetime.now().isoformat()
+                old_edge.superseded_by = new_edge.id
+                if reason:
+                    old_edge.properties["supersession_reason"] = reason
+
+            return new_edge
+
+    def query_at_time(
+        self,
+        query: str,
+        at_time: str,
+        limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        Time-travel query: what did AURA believe at a given time?
+
+        Returns nodes and their edges that were valid at the specified time.
+
+        Args:
+            query: Search query (same as regular query)
+            at_time: ISO timestamp to query at
+            limit: Max results
+
+        Returns:
+            List of dicts with node and its valid edges at that time
+        """
+        with self._lock:
+            try:
+                target_time = datetime.fromisoformat(at_time)
+            except (ValueError, TypeError):
+                return []
+
+            # Find matching nodes that existed at that time
+            nodes = self.find_nodes(query, limit=limit * 2)
+            results = []
+
+            for node in nodes:
+                try:
+                    node_created = datetime.fromisoformat(node.created_at)
+                except (ValueError, TypeError):
+                    continue
+
+                # Node must have existed by target_time
+                if node_created > target_time:
+                    continue
+
+                # Check if node was still valid at target_time
+                if node.valid_to:
+                    try:
+                        node_expired = datetime.fromisoformat(node.valid_to)
+                        if node_expired < target_time:
+                            continue
+                    except (ValueError, TypeError):
+                        pass
+
+                # Get edges that were valid at target_time
+                valid_edges = []
+                for edge in self._edges.values():
+                    if edge.source_id != node.id and edge.target_id != node.id:
+                        continue
+
+                    try:
+                        edge_from = datetime.fromisoformat(edge.valid_from)
+                    except (ValueError, TypeError):
+                        continue
+
+                    if edge_from > target_time:
+                        continue
+
+                    if edge.valid_to:
+                        try:
+                            edge_to = datetime.fromisoformat(edge.valid_to)
+                            if edge_to < target_time:
+                                continue
+                        except (ValueError, TypeError):
+                            pass
+
+                    valid_edges.append(edge)
+
+                results.append({
+                    "node": node,
+                    "edges": valid_edges,
+                    "edge_count": len(valid_edges),
+                })
+
+                if len(results) >= limit:
+                    break
+
+            return results
+
+    def get_edge_history(
+        self,
+        source_label: str,
+        target_label: str
+    ) -> List[Edge]:
+        """
+        Get all versions of a relationship between two nodes.
+
+        Returns edges sorted by valid_from (oldest first), including
+        invalidated/superseded edges.
+
+        Args:
+            source_label: Source node label
+            target_label: Target node label
+
+        Returns:
+            List of all edges (current and historical) between the nodes
+        """
+        with self._lock:
+            source_id = self._label_index.get(source_label.lower())
+            target_id = self._label_index.get(target_label.lower())
+
+            if not source_id or not target_id:
+                return []
+
+            history = []
+            for edge in self._edges.values():
+                if ((edge.source_id == source_id and edge.target_id == target_id) or
+                        (edge.source_id == target_id and edge.target_id == source_id)):
+                    history.append(edge)
+
+            # Sort by valid_from
+            history.sort(key=lambda e: e.valid_from)
+            return history
+
+    def get_valid_edges(
+        self,
+        node_id: str,
+        direction: str = "both",
+        edge_type: Optional[str] = None
+    ) -> List[Edge]:
+        """
+        Get only currently valid edges for a node (filters out invalidated).
+
+        Same as get_edges() but excludes edges where valid_to is set.
+        """
+        all_edges = self.get_edges(node_id, direction, edge_type)
+        return [e for e in all_edges if e.is_valid]
+
+    # =========================================================================
     # QUERY OPERATIONS
     # =========================================================================
 
@@ -539,7 +778,15 @@ class KnowledgeGraphTool:
                 return self.find_nodes("", node_type=node_type, limit=20)
 
         # Fallback: general search
-        return self.find_nodes(question, limit=10)
+        results = self.find_nodes(question, limit=10)
+        # === PHASE 1: Track memory recall ===
+        try:
+            from api.routes.memory import record_memory_recall
+            if results:
+                record_memory_recall("kg", len(results), question, [n.label for n in results[:5]])
+        except Exception:
+            pass
+        return results
 
     def get_related(
         self,
@@ -551,6 +798,7 @@ class KnowledgeGraphTool:
         Get neighborhood of a node up to N hops.
 
         Returns dict with 'nodes' and 'edges' keys.
+        Only follows currently valid edges (Phase 4A).
         """
         with self._lock:
             # Resolve label to ID
@@ -568,10 +816,12 @@ class KnowledgeGraphTool:
             for _ in range(depth):
                 next_frontier = []
                 for current_id in frontier:
-                    # Get connected edges
+                    # Get connected edges (only valid ones)
                     for edge in self._edges.values():
                         if edge.weight < min_weight:
                             continue
+                        if not edge.is_valid:
+                            continue  # Skip invalidated edges (Phase 4A)
 
                         neighbor_id = None
                         if edge.source_id == current_id:
@@ -881,30 +1131,83 @@ class KnowledgeGraphTool:
         # Remove the merged node
         self.delete_node(remove_id)
 
+    # Edge half-life in hours (Phase 4B): unreinforced edges decay to 50% weight in 2 weeks
+    EDGE_HALF_LIFE_HOURS: float = 336.0  # 14 days
+    # Node confidence half-life: unreferenced nodes lose confidence over 4 weeks
+    NODE_HALF_LIFE_HOURS: float = 672.0  # 28 days
+
     def decay(self, hours_passed: float = 24) -> int:
         """
-        Apply forgetting curve to unused knowledge.
+        Apply Ebbinghaus exponential forgetting curve to knowledge (Phase 4B).
+
+        Uses: weight *= e^(-ln(2)/half_life * hours_since_last_access)
+        Replaces the old linear 1%/day decay.
+
+        Spaced repetition: accessing a node/edge resets its decay timer
+        (already handled by last_reinforced / last_accessed updates).
 
         Returns number of edges weakened.
         """
-        decay_amount = 0.01 * (hours_passed / 24)  # ~1% per day
-        weakened = 0
+        import math
 
         now = datetime.now()
+        decay_rate_edge = math.log(2) / self.EDGE_HALF_LIFE_HOURS
+        decay_rate_node = math.log(2) / self.NODE_HALF_LIFE_HOURS
+        weakened = 0
 
         with self._lock:
+            # Decay edges
             for edge in self._edges.values():
+                if not edge.is_valid:
+                    continue  # Don't decay already-invalidated edges
                 try:
                     last_accessed = datetime.fromisoformat(edge.last_reinforced)
                     hours_since = (now - last_accessed).total_seconds() / 3600
 
                     if hours_since > hours_passed:
-                        edge.weight = max(0.0, edge.weight - decay_amount)
-                        weakened += 1
+                        # Ebbinghaus exponential decay
+                        decay_factor = math.exp(-decay_rate_edge * hours_since)
+                        # Apply decay relative to original weight, with floor
+                        new_weight = edge.weight * decay_factor
+                        if new_weight < edge.weight:
+                            edge.weight = max(0.01, new_weight)
+                            weakened += 1
                 except (ValueError, TypeError, AttributeError):
-                    pass  # Skip edges with invalid timestamps
+                    pass
+
+            # Decay node confidence (Phase 4B)
+            for node in self._nodes.values():
+                if node.valid_to is not None:
+                    continue  # Don't decay invalidated nodes
+                try:
+                    last_accessed = datetime.fromisoformat(node.last_accessed)
+                    hours_since = (now - last_accessed).total_seconds() / 3600
+
+                    if hours_since > hours_passed:
+                        decay_factor = math.exp(-decay_rate_node * hours_since)
+                        new_conf = node.confidence * decay_factor
+                        if new_conf < node.confidence:
+                            node.confidence = max(0.05, new_conf)
+                except (ValueError, TypeError, AttributeError):
+                    pass
 
         return weakened
+
+    def reinforce_node(self, node_id: str) -> bool:
+        """
+        Spaced repetition: reinforce a node by resetting its decay timer (Phase 4B).
+
+        Call this whenever a node is accessed or referenced.
+        """
+        with self._lock:
+            node = self._nodes.get(node_id)
+            if not node:
+                return False
+            node.last_accessed = datetime.now().isoformat()
+            node.access_count += 1
+            # Slight confidence boost on access (spaced repetition effect)
+            node.confidence = min(1.0, node.confidence + 0.02)
+            return True
 
     # =========================================================================
     # PERSISTENCE

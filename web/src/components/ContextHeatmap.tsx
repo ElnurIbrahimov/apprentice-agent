@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { usePolling } from '../hooks/usePolling';
 import { ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline';
 
 interface FocusItem {
@@ -34,8 +35,8 @@ const CATEGORY_ICONS: Record<string, string> = {
 export function ContextHeatmap() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [data, setData] = useState<HeatmapData | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
   const [pulsingItems, setPulsingItems] = useState<Set<string>>(new Set());
+  const prevItemsRef = useRef<FocusItem[] | null>(null);
 
   // Fetch heatmap data
   const fetchData = useCallback(async () => {
@@ -45,10 +46,11 @@ export function ContextHeatmap() {
         const newData = await response.json();
 
         // Detect new/boosted items for pulse animation
-        if (data?.items) {
+        const prevItems = prevItemsRef.current;
+        if (prevItems) {
           const newPulsing = new Set<string>();
           newData.items.forEach((item: FocusItem) => {
-            const existing = data.items.find(i => i.name === item.name);
+            const existing = prevItems.find(i => i.name === item.name);
             if (!existing || item.weight > existing.weight + 0.1) {
               newPulsing.add(item.name);
             }
@@ -59,26 +61,23 @@ export function ContextHeatmap() {
           }
         }
 
+        prevItemsRef.current = newData.items;
         setData(newData);
       }
     } catch (e) {
       // Silently ignore - not critical
     }
-  }, [data?.items]);
-
-  // Poll for data
-  useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 3000);
-    return () => clearInterval(interval);
   }, []);
+
+  // Poll for data (30s - context awareness is cosmetic)
+  usePolling(fetchData, 30000);
 
   // Refresh data when expanded
   useEffect(() => {
     if (isExpanded) {
       fetchData();
     }
-  }, [isExpanded]);
+  }, [isExpanded, fetchData]);
 
   const topItems = data?.items?.slice(0, 3) || [];
   const hasItems = data?.items && data.items.length > 0;

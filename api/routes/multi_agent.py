@@ -7,9 +7,13 @@ from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from api.services.agent_service import agent_service
-
 logger = logging.getLogger(__name__)
+
+# Lazy import to avoid blocking event loop at module load
+def _get_agent_service():
+    """Get agent_service with lazy loading."""
+    from api.services.agent_service import agent_service
+    return agent_service
 
 router = APIRouter(prefix="/api/multi-agent", tags=["multi-agent"])
 
@@ -72,7 +76,7 @@ def get_orchestrator():
         try:
             from apprentice_agent.multi_agent import MultiAgentOrchestrator
 
-            agent = agent_service.agent
+            agent = _get_agent_service().agent
 
             # Create LLM function wrapper
             def llm_func(system_prompt: str, user_message: str) -> str:

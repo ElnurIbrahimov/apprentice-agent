@@ -1,5 +1,6 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { ChevronDownIcon, ChevronUpIcon, ChatBubbleLeftEllipsisIcon } from '@heroicons/react/24/outline';
+import { usePolling } from '../hooks/usePolling';
 
 interface StarterStats {
   total_generated: number;
@@ -30,11 +31,7 @@ export function ConversationStarterPanel() {
   }, []);
 
   // Poll for stats
-  useEffect(() => {
-    fetchStats();
-    const interval = setInterval(fetchStats, 10000);
-    return () => clearInterval(interval);
-  }, [fetchStats]);
+  usePolling(fetchStats, 10000);
 
   // Trigger a conversation starter
   const triggerStarter = async () => {

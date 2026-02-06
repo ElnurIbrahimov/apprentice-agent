@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import { usePolling } from '../hooks/usePolling';
 import type { AuraStatus } from '../types';
 import { ArrowPathIcon, SparklesIcon } from '@heroicons/react/24/outline';
 
@@ -33,11 +34,7 @@ export function AuraPanel() {
     setLoading(false);
   };
 
-  useEffect(() => {
-    fetchStatus();
-    const interval = setInterval(fetchStatus, 5000);
-    return () => clearInterval(interval);
-  }, []);
+  usePolling(fetchStatus, 15000);
 
   const handleRemember = async () => {
     if (!rememberText.trim()) return;

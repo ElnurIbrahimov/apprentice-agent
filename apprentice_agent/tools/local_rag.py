@@ -522,6 +522,13 @@ class LocalRAG:
 
                 # Filter by min_score and return top_k
                 results = [r for r in scores if r.score >= min_score][:top_k]
+                # === PHASE 1: Track memory recall ===
+                try:
+                    from api.routes.memory import record_memory_recall
+                    if results:
+                        record_memory_recall("rag", len(results), query, [r.chunk.content[:80] for r in results[:5]])
+                except Exception:
+                    pass
                 return results
 
         # Fallback to keyword search

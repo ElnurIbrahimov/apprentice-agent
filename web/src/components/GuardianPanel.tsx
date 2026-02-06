@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import { usePolling } from '../hooks/usePolling';
 import type { GuardianStatus } from '../types';
 import { ArrowPathIcon, ShieldCheckIcon } from '@heroicons/react/24/outline';
 
@@ -20,11 +21,7 @@ export function GuardianPanel() {
     setLoading(false);
   };
 
-  useEffect(() => {
-    fetchStatus();
-    const interval = setInterval(fetchStatus, 5000);
-    return () => clearInterval(interval);
-  }, []);
+  usePolling(fetchStatus, 15000);
 
   if (!status?.enabled) {
     return (

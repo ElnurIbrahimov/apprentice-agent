@@ -16,6 +16,7 @@ Events generated:
 import asyncio
 import logging
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import List, Optional, Dict, Any, Set
 from dataclasses import dataclass, field
 
@@ -190,10 +191,144 @@ class CalendarMonitor(BaseMonitor):
         return age > 900
 
     async def _refresh_events(self) -> None:
-        """Refresh events from calendar sources."""
-        # This would integrate with actual calendar APIs
-        # For now, we rely on manual event addition
+        """Refresh events from calendar sources (Phase 5D: ICS support)."""
         self._last_fetch = datetime.now()
+
+        # Load from local ICS files
+        ics_events = self._load_ics_files()
+        if ics_events:
+            # Merge with manually added events (don't replace them)
+            manual_ids = {e.id for e in self._events if e.source == "manual"}
+            manual_events = [e for e in self._events if e.id in manual_ids]
+            self._events = manual_events + ics_events
+            self._events.sort(key=lambda e: e.start)
+            logger.info(f"[CalendarMonitor] Loaded {len(ics_events)} events from ICS files")
+
+    def _load_ics_files(self) -> List[CalendarEvent]:
+        """Parse local ICS calendar files (Phase 5D).
+
+        Searches for .ics files in common locations:
+        - ./data/calendars/
+        - ~/calendars/
+        - Paths configured in self._ics_paths
+        """
+        events = []
+        search_dirs = [
+            Path("data/calendars"),
+            Path.home() / "calendars",
+            Path.home() / "Documents" / "calendars",
+        ]
+
+        for cal_dir in search_dirs:
+            if not cal_dir.exists():
+                continue
+
+            for ics_file in cal_dir.glob("*.ics"):
+                try:
+                    file_events = self._parse_ics_file(ics_file)
+                    events.extend(file_events)
+                except Exception as e:
+                    logger.warning(f"[CalendarMonitor] Error parsing {ics_file}: {e}")
+
+        return events
+
+    def _parse_ics_file(self, filepath: Path) -> List[CalendarEvent]:
+        """Parse a single ICS file into CalendarEvent objects.
+
+        Handles VEVENT components with DTSTART, DTEND, SUMMARY, LOCATION.
+        """
+        events = []
+        now = datetime.now()
+        lookahead = now + timedelta(hours=self._lookahead_hours)
+
+        try:
+            text = filepath.read_text(encoding="utf-8", errors="replace")
+        except (IOError, OSError) as e:
+            logger.warning(f"[CalendarMonitor] Cannot read {filepath}: {e}")
+            return events
+
+        # Simple ICS parser (handles basic VEVENT blocks)
+        in_event = False
+        event_data: Dict[str, str] = {}
+
+        for line in text.splitlines():
+            line = line.strip()
+
+            if line == "BEGIN:VEVENT":
+                in_event = True
+                event_data = {}
+            elif line == "END:VEVENT" and in_event:
+                in_event = False
+                cal_event = self._ics_data_to_event(event_data, filepath.stem)
+                if cal_event and cal_event.end >= now and cal_event.start <= lookahead:
+                    events.append(cal_event)
+            elif in_event and ":" in line:
+                key, _, value = line.partition(":")
+                # Handle properties with parameters (e.g., DTSTART;TZID=...:20260207T...)
+                key = key.split(";")[0]
+                event_data[key] = value
+
+        return events
+
+    def _ics_data_to_event(
+        self, data: Dict[str, str], source_name: str
+    ) -> Optional[CalendarEvent]:
+        """Convert ICS event data dict to CalendarEvent."""
+        try:
+            title = data.get("SUMMARY", "Untitled Event")
+            uid = data.get("UID", f"ics_{hash(title)}")
+
+            start_str = data.get("DTSTART", "")
+            end_str = data.get("DTEND", "")
+
+            if not start_str:
+                return None
+
+            start = self._parse_ics_datetime(start_str)
+            if not start:
+                return None
+
+            if end_str:
+                end = self._parse_ics_datetime(end_str)
+            else:
+                # Default: 1 hour
+                end = start + timedelta(hours=1)
+
+            if not end:
+                end = start + timedelta(hours=1)
+
+            # Check if all-day event
+            is_all_day = len(start_str) == 8  # YYYYMMDD format
+
+            return CalendarEvent(
+                id=uid,
+                title=title,
+                start=start,
+                end=end,
+                location=data.get("LOCATION"),
+                description=data.get("DESCRIPTION"),
+                is_all_day=is_all_day,
+                source=f"ics:{source_name}",
+                metadata={"ics_status": data.get("STATUS", "")},
+            )
+        except Exception as e:
+            logger.debug(f"[CalendarMonitor] Failed to parse ICS event: {e}")
+            return None
+
+    def _parse_ics_datetime(self, dt_str: str) -> Optional[datetime]:
+        """Parse ICS datetime formats: YYYYMMDD, YYYYMMDDTHHmmss, YYYYMMDDTHHmmssZ."""
+        dt_str = dt_str.strip()
+        formats = [
+            "%Y%m%dT%H%M%SZ",   # UTC
+            "%Y%m%dT%H%M%S",    # Local
+            "%Y%m%d",            # Date only
+        ]
+        for fmt in formats:
+            try:
+                return datetime.strptime(dt_str, fmt)
+            except ValueError:
+                continue
+        return None
 
     def _cleanup_reminders(self) -> None:
         """Remove reminder keys for past events."""
@@ -293,3 +428,57 @@ class CalendarMonitor(BaseMonitor):
             if event.start <= now <= event.end:
                 return event
         return None
+
+    def get_next_event(self) -> Optional[Dict[str, Any]]:
+        """Get the next upcoming event (Phase 5D).
+
+        Used by the proactive suggestion engine for reminders.
+
+        Returns:
+            Dict with title, minutes_until, start_time, or None.
+        """
+        now = datetime.now()
+        for event in self._events:
+            if event.start > now and not event.is_all_day:
+                return {
+                    "title": event.title,
+                    "minutes_until": event.minutes_until_start(),
+                    "start_time": event.start.isoformat(),
+                    "end_time": event.end.isoformat(),
+                    "location": event.location,
+                    "duration_minutes": event.duration_minutes,
+                }
+        return None
+
+    def get_context_for_prompt(self) -> str:
+        """Get calendar context formatted for LLM injection (Phase 5D).
+
+        Returns a brief summary of upcoming events for system prompt.
+        """
+        upcoming = self.get_upcoming_events(hours=4, limit=3)
+        if not upcoming:
+            return ""
+
+        parts = ["[Calendar Context]"]
+        for evt in upcoming:
+            mins = evt.minutes_until_start()
+            if mins > 0:
+                parts.append(
+                    f"- In {int(mins)}min: {evt.title}"
+                    + (f" at {evt.location}" if evt.location else "")
+                )
+            elif evt.minutes_until_end() > 0:
+                parts.append(f"- NOW: {evt.title} (ends in {int(evt.minutes_until_end())}min)")
+        return "\n".join(parts) if len(parts) > 1 else ""
+
+
+# Singleton
+_calendar_monitor_instance: Optional[CalendarMonitor] = None
+
+
+def get_calendar_monitor(event_bus=None) -> CalendarMonitor:
+    """Get or create the calendar monitor singleton."""
+    global _calendar_monitor_instance
+    if _calendar_monitor_instance is None:
+        _calendar_monitor_instance = CalendarMonitor(event_bus=event_bus)
+    return _calendar_monitor_instance

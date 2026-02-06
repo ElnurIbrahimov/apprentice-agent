@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
+import { usePolling } from '../hooks/usePolling';
 import { ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline';
 
 interface ALMAState {
@@ -71,24 +72,19 @@ export function EmotionPanel() {
   const [isExpanded, setIsExpanded] = useState(true);
   const [activeSection, setActiveSection] = useState<'emotions' | 'neuro' | 'personality'>('emotions');
 
-  // Fetch ALMA state periodically
-  useEffect(() => {
-    const fetchState = async () => {
-      try {
-        const response = await fetch('/api/alma/state');
-        if (response.ok) {
-          const data = await response.json();
-          setAlmaState(data);
-        }
-      } catch (e) {
-        console.error('Failed to fetch ALMA state:', e);
+  // Fetch ALMA state periodically (10s - emotional state doesn't change that fast)
+  const fetchState = useCallback(async () => {
+    try {
+      const response = await fetch('/api/alma/state');
+      if (response.ok) {
+        const data = await response.json();
+        setAlmaState(data);
       }
-    };
-
-    fetchState();
-    const interval = setInterval(fetchState, 3000); // Update every 3s
-    return () => clearInterval(interval);
+    } catch {
+      // Ignore - emotion panel is cosmetic
+    }
   }, []);
+  usePolling(fetchState, 30000);
 
   if (!almaState) {
     return (

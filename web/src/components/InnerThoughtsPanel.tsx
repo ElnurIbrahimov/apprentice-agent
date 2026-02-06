@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
+import { usePolling } from '../hooks/usePolling';
 import { ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline';
 
 interface Thought {
@@ -37,12 +38,13 @@ export function InnerThoughtsPanel() {
   // Fetch thoughts from API
   const fetchThoughts = useCallback(async () => {
     try {
-      const response = await fetch('/api/introspection/thoughts');
+      const response = await fetch('/api/introspection/recent?limit=5');
       if (response.ok) {
         const data = await response.json();
-        if (data.thoughts && data.thoughts.length > 0) {
-          setThoughts(data.thoughts.slice(-5)); // Keep last 5
-          setCurrentThought(data.thoughts[data.thoughts.length - 1]);
+        const items = data.results || data.thoughts || [];
+        if (items.length > 0) {
+          setThoughts(items.slice(-5)); // Keep last 5
+          setCurrentThought(items[items.length - 1]);
         }
       }
     } catch (e) {
@@ -50,41 +52,8 @@ export function InnerThoughtsPanel() {
     }
   }, []);
 
-  // Generate simulated thoughts when API not available
-  useEffect(() => {
-    const simulatedThoughts: Thought[] = [
-      { type: 'observation', content: 'User seems focused on coding tasks', timestamp: Date.now() - 30000 },
-      { type: 'reflection', content: 'Previous conversation patterns suggest technical interest', timestamp: Date.now() - 20000 },
-      { type: 'memory', content: 'Recalling related context from earlier sessions', timestamp: Date.now() - 10000 },
-      { type: 'planning', content: 'Preparing relevant information for potential questions', timestamp: Date.now() },
-    ];
-
-    // Try API first, fall back to simulation
-    fetchThoughts().then(() => {
-      if (thoughts.length === 0) {
-        // Rotate through simulated thoughts
-        let index = 0;
-        const interval = setInterval(() => {
-          const thought = simulatedThoughts[index % simulatedThoughts.length];
-          setCurrentThought({ ...thought, timestamp: Date.now() });
-          setThoughts(prev => [...prev.slice(-4), { ...thought, timestamp: Date.now() }]);
-          index++;
-        }, 8000 + Math.random() * 7000); // 8-15 seconds
-
-        // Set initial thought
-        setCurrentThought(simulatedThoughts[0]);
-        setThoughts([simulatedThoughts[0]]);
-
-        return () => clearInterval(interval);
-      }
-    });
-  }, [fetchThoughts]);
-
-  // Poll for real thoughts
-  useEffect(() => {
-    const interval = setInterval(fetchThoughts, 10000);
-    return () => clearInterval(interval);
-  }, [fetchThoughts]);
+  // Poll for thoughts using staggered polling (30s)
+  usePolling(fetchThoughts, 30000);
 
   const icon = currentThought ? THOUGHT_ICONS[currentThought.type] || THOUGHT_ICONS.default : '💭';
   const colorClass = currentThought ? THOUGHT_COLORS[currentThought.type] || THOUGHT_COLORS.default : 'text-chat-text-secondary';

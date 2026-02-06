@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .memory import MarkdownStore
+    from .markdown_store import MarkdownStore
     from .emotion import EmotionalEngine
 
 logger = logging.getLogger(__name__)

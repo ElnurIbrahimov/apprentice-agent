@@ -199,7 +199,15 @@ class HybridMemory:
                         ))
 
         # 3. Merge and rank results
-        return self._rank_results(results, query, limit, min_relevance)
+        ranked = self._rank_results(results, query, limit, min_relevance)
+        # === PHASE 1: Track memory recall ===
+        try:
+            from api.routes.memory import record_memory_recall
+            if ranked:
+                record_memory_recall("hybrid", len(ranked), query, [r.content[:80] for r in ranked[:5]])
+        except Exception:
+            pass
+        return ranked
 
     def _rank_results(
         self,

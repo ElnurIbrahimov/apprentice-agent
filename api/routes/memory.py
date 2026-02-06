@@ -1,5 +1,7 @@
 """Memory system API endpoints - Memory recall tracking for AURA."""
 
+import asyncio
+import functools
 import logging
 from typing import Dict, List, Optional, Any
 from datetime import datetime
@@ -183,11 +185,14 @@ async def get_recall_status():
     Designed for polling by the frontend to show visual indicators.
     """
     tracker = get_tracker()
-    recent = tracker.get_recent_recalls(limit=5, since_seconds=30)
-    stats = tracker.get_stats()
+    loop = asyncio.get_event_loop()
+    recent = await loop.run_in_executor(
+        None, functools.partial(tracker.get_recent_recalls, limit=5, since_seconds=30)
+    )
+    stats = await loop.run_in_executor(None, tracker.get_stats)
 
     return RecallStatusResponse(
-        is_active=tracker.is_active(within_seconds=3),
+        is_active=await loop.run_in_executor(None, functools.partial(tracker.is_active, within_seconds=3)),
         last_recall=stats["last_recall"],
         recent_count=len(recent),
         recent_events=[RecallEventResponse(**e) for e in recent]
@@ -204,7 +209,10 @@ async def get_recent_recalls(limit: int = 10, since_seconds: Optional[float] = N
         since_seconds: Only return events from the last N seconds
     """
     tracker = get_tracker()
-    events = tracker.get_recent_recalls(limit=min(limit, 50), since_seconds=since_seconds)
+    loop = asyncio.get_event_loop()
+    events = await loop.run_in_executor(
+        None, functools.partial(tracker.get_recent_recalls, limit=min(limit, 50), since_seconds=since_seconds)
+    )
 
     return {
         "count": len(events),
@@ -216,7 +224,8 @@ async def get_recent_recalls(limit: int = 10, since_seconds: Optional[float] = N
 async def get_recall_stats():
     """Get memory recall statistics."""
     tracker = get_tracker()
-    stats = tracker.get_stats()
+    loop = asyncio.get_event_loop()
+    stats = await loop.run_in_executor(None, tracker.get_stats)
 
     return RecallStatsResponse(**stats)
 
@@ -236,7 +245,10 @@ async def record_recall(
     memories are retrieved during response generation.
     """
     tracker = get_tracker()
-    tracker.record_recall(source, count, query, memories, metadata)
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(
+        None, functools.partial(tracker.record_recall, source, count, query, memories, metadata)
+    )
 
     return {
         "status": "recorded",
@@ -249,7 +261,8 @@ async def record_recall(
 async def clear_recalls():
     """Clear memory recall history."""
     tracker = get_tracker()
-    tracker.clear()
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, tracker.clear)
 
     return {"status": "cleared"}
 

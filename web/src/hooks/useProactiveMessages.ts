@@ -1,5 +1,6 @@
-import { useEffect, useCallback, useRef } from 'react';
+import { useCallback, useRef } from 'react';
 import { useChatStore } from '../store/chatStore';
+import { usePolling } from './usePolling';
 
 interface ProactiveMessageResponse {
   action: string;
@@ -74,24 +75,8 @@ export function useProactiveMessages(enabled: boolean = true) {
     }
   }, [addMessage]);
 
-  useEffect(() => {
-    if (!enabled || connectionStatus !== 'connected') return;
-
-    // Initial fetch after a short delay
-    const initialTimeout = setTimeout(() => {
-      fetchAndAddMessages();
-    }, 2000);
-
-    // Poll every 5 seconds
-    const interval = setInterval(() => {
-      fetchAndAddMessages();
-    }, 5000);
-
-    return () => {
-      clearTimeout(initialTimeout);
-      clearInterval(interval);
-    };
-  }, [enabled, connectionStatus, fetchAndAddMessages]);
+  // Poll every 30 seconds (proactive messages aren't time-critical)
+  usePolling(fetchAndAddMessages, 30000, { enabled: enabled && connectionStatus === 'connected' });
 
   return {
     lastCheck: lastCheckRef.current,

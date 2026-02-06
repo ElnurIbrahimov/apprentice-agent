@@ -18,13 +18,13 @@ _daemon_task = None
 
 
 async def _get_daemon():
-    """Get or create the Gateway Daemon instance."""
+    """Get the global Gateway Daemon singleton (shared with main.py auto-start)."""
     global _daemon
     if _daemon is None:
         try:
-            from apprentice_agent.proactive import GatewayDaemon
-            _daemon = GatewayDaemon(use_redis=False)
-            logger.info("[Proactive API] Gateway Daemon created")
+            from apprentice_agent.proactive.gateway_daemon import get_gateway_daemon
+            _daemon = get_gateway_daemon()
+            logger.info("[Proactive API] Using shared Gateway Daemon singleton")
         except ImportError as e:
             logger.error(f"[Proactive API] Failed to import GatewayDaemon: {e}")
             raise HTTPException(status_code=503, detail="Proactive system not available")
@@ -420,3 +420,87 @@ async def record_idle():
         "idle_since": daemon.user_context.idle_since.isoformat() if daemon.user_context.idle_since else None,
         "activity_level": daemon.user_context.activity_level,
     }
+
+
+# ============================================================================
+# Screen Awareness (Phase 3D)
+# ============================================================================
+
+@router.get("/screen-context")
+async def get_screen_context():
+    """Get current screen awareness context from Screenpipe.
+
+    Returns what AURA can see: current app, window, recent text, errors.
+    """
+    try:
+        from apprentice_agent.tools.screenpipe import get_screenpipe_client
+        client = get_screenpipe_client()
+
+        if not client.is_available():
+            return {
+                "available": False,
+                "message": "Screenpipe not running. Install from https://screenpi.pe/"
+            }
+
+        ctx = client.get_screen_context(minutes=2, max_chars=1000)
+        return {
+            "available": ctx.get("available", False),
+            "current_app": ctx.get("current_app"),
+            "current_window": ctx.get("current_window"),
+            "apps_used": ctx.get("apps_used", []),
+            "has_errors": ctx.get("has_errors", False),
+            "text_preview": ctx.get("recent_text", "")[:300],
+            "result_count": ctx.get("result_count", 0),
+        }
+    except ImportError:
+        return {"available": False, "message": "Screenpipe client not installed"}
+    except Exception as e:
+        logger.error(f"[Proactive API] Screen context error: {e}")
+        return {"available": False, "error": str(e)}
+
+
+@router.get("/workflow")
+async def get_workflow_state():
+    """Get current workflow boundary detection state (Phase 5B).
+
+    Returns focus state, interruptibility, and recent app switches.
+    """
+    try:
+        from apprentice_agent.proactive.monitors.workflow_detector import get_workflow_detector
+        wd = get_workflow_detector()
+        return wd.get_focus_state()
+    except ImportError:
+        return {"error": "Workflow detector not available"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.get("/suggestion")
+async def get_proactive_suggestion():
+    """Get a proactive suggestion based on current context (Phase 5C).
+
+    Returns what AURA would suggest right now based on screen, memory, patterns.
+    """
+    try:
+        daemon = await _get_daemon()
+        from apprentice_agent.proactive.active_inference import ProactiveAction
+
+        suggestion = daemon._generate_message_content(ProactiveAction.SUGGEST)
+        beliefs = daemon.inference_engine.get_beliefs()
+
+        return {
+            "suggestion": suggestion,
+            "has_suggestion": suggestion is not None,
+            "beliefs": {
+                "task_urgent": beliefs.task_urgent,
+                "uncertainty": beliefs.uncertainty,
+                "user_engaged": beliefs.user_engaged,
+            },
+            "context": {
+                "current_app": daemon.user_context.current_app,
+                "current_task": daemon.user_context.current_task,
+                "do_not_disturb": daemon.user_context.do_not_disturb,
+            },
+        }
+    except Exception as e:
+        return {"suggestion": None, "error": str(e)}

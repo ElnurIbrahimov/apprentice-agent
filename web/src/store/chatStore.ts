@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Message, MoodState, StatusResponse, ConnectionStatus } from '../types';
+import type { Message, MoodState, StatusResponse, ConnectionStatus, Conversation } from '../types';
 
 interface ChatState {
   // Messages
@@ -32,6 +32,12 @@ interface ChatState {
   sidebarOpen: boolean;
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;
+
+  // Conversations
+  conversations: Conversation[];
+  currentConversationId: string | null;
+  setConversations: (conversations: Conversation[]) => void;
+  setCurrentConversationId: (id: string | null) => void;
 
   // Error handling
   error: string | null;
@@ -105,6 +111,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
   sidebarOpen: true,
   toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
+
+  // Conversations
+  conversations: [],
+  currentConversationId: null,
+  setConversations: (conversations) => set({ conversations }),
+  setCurrentConversationId: (id) => set({ currentConversationId: id }),
 
   // Error handling
   error: null,

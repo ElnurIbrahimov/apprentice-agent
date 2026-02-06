@@ -4,7 +4,6 @@ import json
 import logging
 import asyncio
 import os
-import queue
 import threading
 from pathlib import Path
 from typing import Optional, List
@@ -14,11 +13,18 @@ from fastapi.responses import JSONResponse
 
 from api.models.schemas import (
     ChatRequest, ChatResponse, RunRequest, RunResponse,
-    ClearHistoryResponse, WebSocketMessage, MoodState, AttachmentType
+    ClearHistoryResponse, WebSocketMessage, MoodState, AttachmentType,
+    ConversationSummary, CreateConversationRequest, RenameConversationRequest,
+    ConversationResponse, SaveToMemoryResponse,
 )
-from api.services.agent_service import agent_service
 
 logger = logging.getLogger(__name__)
+
+# Lazy import to avoid blocking event loop at module load
+def _get_agent_service():
+    """Get agent_service with lazy loading."""
+    from api.services.agent_service import agent_service
+    return agent_service
 
 # Upload directory for file cleanup
 UPLOAD_DIR = Path(__file__).parent.parent / "data" / "uploads"
@@ -124,7 +130,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
             None,
-            lambda: agent_service.chat(request.message, speak=request.speak, model_override=request.model)
+            lambda: _get_agent_service().chat(request.message, speak=request.speak, model_override=request.model)
         )
 
         mood = result.get("mood")
@@ -157,7 +163,7 @@ async def run(request: RunRequest) -> RunResponse:
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
             None,
-            lambda: agent_service.run(
+            lambda: _get_agent_service().run(
                 goal=request.goal,
                 context=request.context,
                 use_fastpath=request.use_fastpath,
@@ -188,7 +194,7 @@ async def clear_history() -> ClearHistoryResponse:
     """Clear conversation history."""
     try:
         loop = asyncio.get_event_loop()
-        success = await loop.run_in_executor(None, agent_service.clear_history)
+        success = await loop.run_in_executor(None, _get_agent_service().clear_history)
 
         return ClearHistoryResponse(
             success=success,
@@ -197,6 +203,109 @@ async def clear_history() -> ClearHistoryResponse:
 
     except Exception as e:
         logger.error(f"[Clear] Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =========================================================================
+# Multi-Conversation Endpoints
+# =========================================================================
+
+@router.get("/conversations", response_model=list[ConversationSummary])
+async def list_conversations():
+    """List all conversations."""
+    try:
+        loop = asyncio.get_event_loop()
+        conversations = await loop.run_in_executor(None, _get_agent_service().list_conversations)
+        return conversations
+    except Exception as e:
+        logger.error(f"[Conversations] List error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/conversations", response_model=ConversationResponse)
+async def create_conversation(request: CreateConversationRequest = None):
+    """Create a new conversation."""
+    try:
+        title = request.title if request else None
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None, lambda: _get_agent_service().create_conversation(title)
+        )
+        if "error" in result:
+            raise HTTPException(status_code=500, detail=result["error"])
+        return ConversationResponse(**result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[Conversations] Create error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/conversations/{conversation_id}")
+async def rename_conversation(conversation_id: str, request: RenameConversationRequest):
+    """Rename a conversation."""
+    try:
+        loop = asyncio.get_event_loop()
+        success = await loop.run_in_executor(
+            None, lambda: _get_agent_service().rename_conversation(conversation_id, request.title)
+        )
+        if not success:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[Conversations] Rename error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: str):
+    """Delete a conversation."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None, lambda: _get_agent_service().delete_conversation(conversation_id)
+        )
+        if not result.get("success"):
+            raise HTTPException(status_code=404, detail=result.get("error", "Not found"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[Conversations] Delete error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/conversations/{conversation_id}/switch", response_model=ConversationResponse)
+async def switch_conversation(conversation_id: str):
+    """Switch to a different conversation."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None, lambda: _get_agent_service().switch_conversation(conversation_id)
+        )
+        if "error" in result:
+            raise HTTPException(status_code=404, detail=result["error"])
+        return ConversationResponse(**result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[Conversations] Switch error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/conversations/{conversation_id}/save-to-memory", response_model=SaveToMemoryResponse)
+async def save_conversation_to_memory(conversation_id: str):
+    """Save a conversation to AURA's long-term memory (A-MEM)."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None, lambda: _get_agent_service().save_conversation_to_memory(conversation_id)
+        )
+        return SaveToMemoryResponse(**result)
+    except Exception as e:
+        logger.error(f"[Conversations] Save to memory error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -260,8 +369,45 @@ async def websocket_chat(websocket: WebSocket):
             message = msg.get("message", "")
             model_override = msg.get("model")  # Optional model override
             action_mode = msg.get("action_mode")  # Optional action mode for auto-model selection
+            conversation_id = msg.get("conversation_id")  # Optional conversation context
             attachments = msg.get("attachments", [])  # Optional attachments
-            print(f"[WebSocket] Received message: '{message[:50]}...' model={model_override} action_mode={action_mode} attachments={len(attachments)}")
+            print(f"[WebSocket] Received message: '{message[:50]}...' model={model_override} action_mode={action_mode} conv={conversation_id} attachments={len(attachments)}")
+
+            # Auto-switch conversation if needed
+            if conversation_id:
+                try:
+                    svc = _get_agent_service()
+                    current_conv = svc.agent.brain.get_current_conversation_id() if svc.is_ready else None
+                    if current_conv and current_conv != conversation_id:
+                        svc.switch_conversation(conversation_id)
+                        logger.info(f"[WebSocket] Auto-switched to conversation: {conversation_id}")
+                except Exception as e:
+                    logger.warning(f"[WebSocket] Conversation switch failed: {e}")
+
+            # === PHASE 1: Wire real cognitive tracking ===
+            # Track user message in ContextHeatmap (real attention data)
+            try:
+                from api.routes.context import track_context_from_message
+                if message and not message.startswith("[FILE_ATTACHMENT_CONTEXT]"):
+                    track_context_from_message(message, is_user=True)
+            except Exception:
+                pass  # Non-critical, don't break chat
+
+            # Record user activity for IdleBehaviorPanel
+            try:
+                from api.routes.idle_behaviors import record_user_activity
+                record_user_activity()
+            except Exception:
+                pass
+
+            # Record interaction for Gateway Daemon (proactive system)
+            try:
+                from apprentice_agent.proactive.gateway_daemon import get_gateway_daemon
+                daemon = get_gateway_daemon()
+                if daemon.state.value == "running":
+                    daemon.record_interaction()
+            except Exception:
+                pass
             if attachments:
                 print(f"[WebSocket] Attachment details: {attachments}")
             logger.info(f"[WebSocket] Received: {message[:50]}..." + (f" (model: {model_override})" if model_override else "") + (f" ({len(attachments)} attachments)" if attachments else ""))
@@ -286,82 +432,118 @@ async def websocket_chat(websocket: WebSocket):
                             message = f"{file_marker}{attachment_context}\n\n---\n\nIMPORTANT: Summarize and discuss the analysis provided above. Do NOT generate your own image description - use what's provided in the IMAGE ANALYSIS sections."
                         logger.info(f"[WebSocket] Final message to agent ({len(message)} chars)")
 
+                # Check if agent is ready before starting stream
+                svc = _get_agent_service()
+                if not svc.is_ready:
+                    # Agent still initializing - wait briefly then notify user
+                    await websocket.send_json({
+                        "type": "chunk",
+                        "content": "AURA is warming up, please wait a moment...\n\n"
+                    })
+                    # Wait up to 30 seconds for initialization
+                    for _ in range(60):
+                        if svc.is_ready:
+                            break
+                        await asyncio.sleep(0.5)
+                    if not svc.is_ready:
+                        await websocket.send_json({
+                            "type": "error",
+                            "error": "Agent is still initializing. Please try again in a few seconds."
+                        })
+                        continue
+
                 # Use streaming for real-time response
-                # Create a queue to communicate between sync streaming and async WebSocket
-                chunk_queue = queue.Queue()
+                # asyncio.Queue bridges the sync streaming thread and async WebSocket
+                # Unlike queue.Queue + run_in_executor, this doesn't burn threads polling
+                chunk_queue: asyncio.Queue = asyncio.Queue()
                 full_response = ""
 
                 def stream_worker():
                     """Run streaming in a separate thread."""
                     try:
-                        for item in agent_service.chat_stream(message, model_override=model_override, action_mode=action_mode):
-                            # Check if stop was requested
+                        for item in _get_agent_service().chat_stream(message, model_override=model_override, action_mode=action_mode):
                             if stop_generation.is_set():
                                 logger.info("[WebSocket] Generation stopped by user")
                                 break
-                            chunk_queue.put(item)
+                            # Thread-safe put into asyncio.Queue
+                            loop.call_soon_threadsafe(chunk_queue.put_nowait, item)
                     except Exception as e:
-                        chunk_queue.put({"type": "error", "error": str(e)})
+                        loop.call_soon_threadsafe(chunk_queue.put_nowait, {"type": "error", "error": str(e)})
                     finally:
-                        chunk_queue.put(None)  # Signal completion
+                        loop.call_soon_threadsafe(chunk_queue.put_nowait, None)
 
                 # Start streaming in background thread
                 stream_thread = threading.Thread(target=stream_worker, daemon=True)
                 stream_thread.start()
 
-                # Send chunks as they arrive
+                # Send chunks as they arrive (truly async, no busy-wait)
+                # Max 5 minutes for any single response, then timeout
+                stream_deadline = asyncio.get_event_loop().time() + 300
                 while True:
-                    # Check if stop was requested
                     if stop_generation.is_set():
                         logger.info("[WebSocket] Breaking loop due to stop request")
                         break
 
                     try:
-                        # Non-blocking check with small timeout (20ms for smoother streaming)
-                        item = await loop.run_in_executor(
-                            None,
-                            lambda: chunk_queue.get(timeout=0.02)
-                        )
+                        remaining = max(0.1, stream_deadline - asyncio.get_event_loop().time())
+                        item = await asyncio.wait_for(chunk_queue.get(), timeout=remaining)
+                    except asyncio.TimeoutError:
+                        logger.warning("[WebSocket] Stream timed out after 5 minutes")
+                        stop_generation.set()
+                        await websocket.send_json({
+                            "type": "error",
+                            "error": "Response timed out after 5 minutes"
+                        })
+                        break
 
-                        if item is None:
-                            # Stream complete
-                            break
+                    if item is None:
+                        break
 
-                        if item.get("type") == "chunk":
-                            content = item.get("content", "")
-                            full_response += content
-                            await websocket.send_json({
-                                "type": "chunk",
-                                "content": content
-                            })
-                        elif item.get("type") == "done":
-                            # Send final completion message
-                            mood = item.get("mood")
-                            mood_dict = None
-                            if mood:
-                                if hasattr(mood, 'model_dump'):
-                                    mood_dict = mood.model_dump()
-                                elif isinstance(mood, dict):
-                                    mood_dict = mood
+                    if item.get("type") == "chunk":
+                        content = item.get("content", "")
+                        full_response += content
+                        await websocket.send_json({
+                            "type": "chunk",
+                            "content": content
+                        })
+                    elif item.get("type") == "done":
+                        mood = item.get("mood")
+                        mood_dict = None
+                        if mood:
+                            if hasattr(mood, 'model_dump'):
+                                mood_dict = mood.model_dump()
+                            elif isinstance(mood, dict):
+                                mood_dict = mood
 
-                            await websocket.send_json({
-                                "type": "done",
-                                "response": full_response,
-                                "mood": mood_dict
-                            })
-                        elif item.get("type") == "error":
-                            await websocket.send_json({
-                                "type": "error",
-                                "error": item.get("error", "Unknown error")
-                            })
+                        # === PHASE 1: Track assistant response in ContextHeatmap ===
+                        try:
+                            from api.routes.context import track_context_from_message
+                            if full_response:
+                                track_context_from_message(full_response, is_user=False)
+                        except Exception:
+                            pass
 
-                    except queue.Empty:
-                        # No chunk available yet, continue waiting
-                        continue
+                        # Track emotion if mood data available
+                        try:
+                            from api.routes.context import track_context_from_emotion
+                            if mood_dict and mood_dict.get("emotion"):
+                                track_context_from_emotion(
+                                    mood_dict["emotion"],
+                                    mood_dict.get("confidence", 50) / 100.0
+                                )
+                        except Exception:
+                            pass
 
-                # Cleanup attachment files after processing
-                if attachments:
-                    cleanup_attachment_files(attachments)
+                        await websocket.send_json({
+                            "type": "done",
+                            "response": full_response,
+                            "mood": mood_dict
+                        })
+                    elif item.get("type") == "error":
+                        await websocket.send_json({
+                            "type": "error",
+                            "error": item.get("error", "Unknown error")
+                        })
 
             except Exception as e:
                 logger.error(f"[WebSocket] Processing error: {e}")
@@ -369,8 +551,14 @@ async def websocket_chat(websocket: WebSocket):
                     "type": "error",
                     "error": str(e)
                 })
+            finally:
+                # Always cleanup attachment files, even on error
+                if attachments:
+                    cleanup_attachment_files(attachments)
 
     except WebSocketDisconnect:
         logger.info("[WebSocket] Client disconnected")
+        stop_generation.set()  # Kill any running stream_worker thread
     except Exception as e:
         logger.error(f"[WebSocket] Connection error: {e}")
+        stop_generation.set()  # Kill any running stream_worker thread

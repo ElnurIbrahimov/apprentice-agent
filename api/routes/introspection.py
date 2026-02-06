@@ -186,20 +186,25 @@ async def get_stats():
 @router.get("/recent")
 async def get_recent(limit: int = 10):
     """
-    Get recent introspection results.
+    Get recent inner thoughts from the Real Inner Thoughts Engine.
+
+    Returns {results: [{type, content, timestamp}]} matching the
+    InnerThoughtsPanel frontend format.
     """
-    from api.services.agent_service import agent_service
-
-    if not agent_service.agent:
-        raise HTTPException(status_code=503, detail="Agent not initialized")
-
     try:
-        tool = _get_or_create_tool(agent_service)
-        return tool.get_recent(limit=min(limit, 50))
+        from api.services.inner_thoughts_engine import get_inner_thoughts_engine
+        engine = get_inner_thoughts_engine()
+        thoughts = engine.get_recent(limit=min(limit, 50))
+
+        if thoughts:
+            return {"results": thoughts}
+
+        # Fallback: if engine hasn't generated anything yet, return empty
+        return {"results": []}
 
     except Exception as e:
-        logger.error(f"Error getting recent: {e}", exc_info=True)
-        return {"success": False, "error": str(e)}
+        logger.error(f"Error getting recent thoughts: {e}", exc_info=True)
+        return {"results": []}
 
 
 @router.post("/config")

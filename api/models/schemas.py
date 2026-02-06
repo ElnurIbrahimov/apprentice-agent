@@ -122,3 +122,44 @@ class UploadResponse(BaseModel):
     success: bool
     attachment: Optional[FileAttachment] = None
     error: Optional[str] = None
+
+
+# =========================================================================
+# Multi-Conversation Models
+# =========================================================================
+
+class ConversationSummary(BaseModel):
+    """Summary of a conversation for listing."""
+    id: str
+    title: str
+    created_at: int
+    updated_at: int
+    message_count: int = 0
+    preview: str = ""
+    is_active: bool = False
+
+
+class CreateConversationRequest(BaseModel):
+    """Request to create a new conversation."""
+    title: Optional[str] = Field(default=None, description="Conversation title (auto-generated if omitted)")
+
+
+class RenameConversationRequest(BaseModel):
+    """Request to rename a conversation."""
+    title: str = Field(..., min_length=1, max_length=200, description="New title")
+
+
+class ConversationResponse(BaseModel):
+    """Response after creating/switching conversations."""
+    id: str
+    title: str
+    messages: List[Dict[str, Any]] = []
+
+
+class SaveToMemoryResponse(BaseModel):
+    """Response after saving conversation to memory."""
+    success: bool
+    note_id: Optional[str] = None
+    message_count: int = 0
+    title: str = ""
+    error: Optional[str] = None

@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
+import { usePolling } from '../hooks/usePolling';
 import { ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline';
 
 interface IdleBehavior {
@@ -50,25 +51,20 @@ export function IdleBehaviorPanel() {
   const [state, setState] = useState<IdleState | null>(null);
   const [stats, setStats] = useState<IdleStats | null>(null);
 
-  // Fetch idle state
-  const fetchState = useCallback(async () => {
+  // Fetch both idle state and stats in a single polling callback
+  const fetchAll = useCallback(async () => {
     try {
-      const response = await fetch('/api/idle/state');
-      if (response.ok) {
-        const data = await response.json();
+      const [stateRes, statsRes] = await Promise.all([
+        fetch('/api/idle/state'),
+        fetch('/api/idle/stats'),
+      ]);
+
+      if (stateRes.ok) {
+        const data = await stateRes.json();
         setState(data);
       }
-    } catch (e) {
-      // Silently ignore
-    }
-  }, []);
-
-  // Fetch stats
-  const fetchStats = useCallback(async () => {
-    try {
-      const response = await fetch('/api/idle/stats');
-      if (response.ok) {
-        const data = await response.json();
+      if (statsRes.ok) {
+        const data = await statsRes.json();
         setStats(data);
       }
     } catch (e) {
@@ -76,19 +72,8 @@ export function IdleBehaviorPanel() {
     }
   }, []);
 
-  // Poll for updates
-  useEffect(() => {
-    fetchState();
-    fetchStats();
-
-    const stateInterval = setInterval(fetchState, 2000);
-    const statsInterval = setInterval(fetchStats, 10000);
-
-    return () => {
-      clearInterval(stateInterval);
-      clearInterval(statsInterval);
-    };
-  }, [fetchState, fetchStats]);
+  // Poll every 10s (was 30s — now shows real system state, not just cosmetic)
+  usePolling(fetchAll, 10000);
 
   // Format duration
   const formatDuration = (seconds: number): string => {
@@ -163,7 +148,7 @@ export function IdleBehaviorPanel() {
         <div className="px-3 pb-3 space-y-3">
           {/* Description */}
           <div className="text-xs text-chat-text-secondary/70">
-            Subtle behaviors that make AURA feel alive and present.
+            Real-time ambient state from AURA's cognitive systems.
           </div>
 
           {/* Current behavior display */}
@@ -192,8 +177,17 @@ export function IdleBehaviorPanel() {
                       </div>
                     )}
                   </div>
-                  <div className="text-sm text-chat-text italic">
+                  <div className={`text-sm italic ${
+                    behavior.status_message.includes(':')
+                      ? 'text-chat-text'
+                      : 'text-chat-text-secondary/70'
+                  }`}>
                     "{behavior.status_message}"
+                    {behavior.status_message.includes(':') && (
+                      <span className="ml-1.5 text-[9px] px-1 py-0.5 rounded bg-green-500/20 text-green-400 not-italic font-medium">
+                        REAL
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-3 mt-2 text-[10px] text-chat-text-secondary/60">
                     <span>Breath: {behavior.breath_rate.toFixed(1)}x</span>

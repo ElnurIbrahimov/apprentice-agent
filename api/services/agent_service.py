@@ -23,6 +23,15 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Thinking system integration — safe import
+def _record_thought(thought_type: str, content: str, intensity: float = 0.6, source: str = "service"):
+    """Record a real thought event. Safe to call even if thinking system isn't ready."""
+    try:
+        from api.routes.thinking import record_thought
+        record_thought(thought_type, content, intensity, source)
+    except Exception:
+        pass
+
 # =============================================================================
 #                    ACTION MODE TRIGGER SYSTEM
 # =============================================================================
@@ -234,6 +243,7 @@ class AgentService:
 
         self._agent: Optional[ApprenticeAgent] = None
         self._agent_lock = threading.RLock()
+        self._initializing = False
         self._initialized = True
         logger.info("[AgentService] Singleton initialized")
 
@@ -241,6 +251,28 @@ class AgentService:
     def is_ready(self) -> bool:
         """Check if agent is ready."""
         return self._agent is not None
+
+    def start_background_init(self) -> None:
+        """Start agent initialization in a background thread.
+
+        Non-blocking - returns immediately. The agent will be available
+        once initialization completes.
+        """
+        if self._agent is not None or self._initializing:
+            return
+        self._initializing = True
+        thread = threading.Thread(target=self._background_init, daemon=True)
+        thread.start()
+        logger.info("[AgentService] Background initialization started")
+
+    def _background_init(self) -> None:
+        """Initialize agent in background thread."""
+        try:
+            self.initialize(fast_init=False)
+        except Exception as e:
+            logger.error(f"[AgentService] Background init failed: {e}")
+        finally:
+            self._initializing = False
 
     def initialize(self, fast_init: bool = True) -> None:
         """Initialize the agent instance.
@@ -253,6 +285,15 @@ class AgentService:
                 logger.info(f"[AgentService] Initializing agent (fast_init={fast_init})...")
                 self._agent = ApprenticeAgent(fast_init=fast_init)
                 logger.info("[AgentService] Agent initialized successfully")
+
+                # Start Real Inner Thoughts Engine
+                try:
+                    from api.services.inner_thoughts_engine import get_inner_thoughts_engine
+                    engine = get_inner_thoughts_engine()
+                    engine.start(self._agent.brain)
+                    logger.info("[AgentService] Inner Thoughts Engine started")
+                except Exception as e:
+                    logger.warning(f"[AgentService] Inner Thoughts Engine failed to start: {e}")
 
     @property
     def agent(self) -> ApprenticeAgent:
@@ -304,10 +345,35 @@ class AgentService:
             detected_action = detect_action_mode(message)
             effective_model = model_override
 
+            # === Record real thought: processing begins ===
+            _record_thought("analyzing", f"processing: {message[:60]}...", 0.7, "service")
+
+            # Record interaction for ALMA emotional drift (Phase 2D)
+            try:
+                from apprentice_agent.emotion.alma_engine import alma_engine
+                alma_engine.record_interaction(success=True)
+            except Exception:
+                pass
+
+            # Track context for heatmap (covers direct handlers that bypass agent.chat)
+            try:
+                from api.routes.context import track_context_from_message
+                track_context_from_message(message, is_user=True)
+            except Exception:
+                pass
+
+            # Record activity for idle panel
+            try:
+                from api.routes.idle_behaviors import record_user_activity
+                record_user_activity()
+            except Exception:
+                pass
+
             if not effective_model and detected_action:
                 effective_model = get_model_for_action(detected_action)
                 if effective_model:
                     logger.info(f"[AgentService] Chat auto-selected model for {detected_action}: {effective_model}")
+                    _record_thought("connecting", f"action mode: {detected_action} -> {effective_model}", 0.5, "service")
 
             # Set model override if we have one
             if effective_model:
@@ -320,6 +386,7 @@ class AgentService:
                     import concurrent.futures
 
                     logger.info(f"[AgentService] Swarm mode (REST) for: {message[:50]}...")
+                    _record_thought("connecting", "activating multi-agent swarm: Research, Analyst, Creative, Strategist", 0.8, "service")
 
                     # Check if query needs real-time data (news, latest, current, etc.)
                     needs_search_keywords = [
@@ -425,6 +492,7 @@ Keep it concise, readable, and well-formatted with markdown."""
 
                 # ===== DEEP RESEARCH HANDLER =====
                 if detected_action == "deep_research":
+                    _record_thought("analyzing", "initiating deep research pipeline...", 0.8, "service")
                     from apprentice_agent.tools.deep_research import DeepResearchTool
                     deep_tool = DeepResearchTool()
 
@@ -452,8 +520,27 @@ Provide key findings and cite sources."""
                         "model_used": effective_model or "deep_research"
                     }
 
+                # Screen context injection (Phase 3D)
+                screen_hint = ""
+                try:
+                    from apprentice_agent.tools.screenpipe import get_screenpipe_client
+                    sp = get_screenpipe_client()
+                    if sp.is_available():
+                        ctx = sp.get_screen_context(minutes=1, max_chars=500)
+                        if ctx.get("available") and ctx.get("current_app"):
+                            screen_hint = (
+                                f"\n[Screen context: user is in {ctx['current_app']}"
+                                + (f" — {ctx['current_window']}" if ctx.get("current_window") else "")
+                                + (". Error visible on screen." if ctx.get("has_errors") else "")
+                                + "]"
+                            )
+                except Exception:
+                    pass
+
+                enriched_msg = message + screen_hint if screen_hint else message
+
                 # Use agent.chat() which has direct handlers for search/crypto
-                response = self.agent.chat(message, speak=speak)
+                response = self.agent.chat(enriched_msg, speak=speak)
 
                 return {
                     "response": response,
@@ -476,79 +563,85 @@ Provide key findings and cite sources."""
 
         Yields:
             Response chunks as they're generated
-        """
-        with self._agent_lock:
-            # Determine model to use:
-            # 1. Explicit model_override takes priority
-            # 2. Auto-detect action mode from message prefix
-            # 3. Use action_mode parameter if provided
-            # 4. Fall back to default model
 
+        Note:
+            CRITICAL FIX: Lock is only held briefly for setup/teardown, NOT during streaming.
+            This prevents blocking concurrent requests (WebSocket, health checks, etc.).
+        """
+        # ===== SETUP PHASE - Brief lock =====
+        with self._agent_lock:
             effective_model = model_override
             detected_action = action_mode or detect_action_mode(message)
 
             if not effective_model and detected_action:
-                # Auto-select model based on action mode
                 effective_model = get_model_for_action(detected_action)
                 if effective_model:
                     logger.info(f"[AgentService] Auto-selected model for {detected_action}: {effective_model}")
 
-            # Set model override if we have one
             if effective_model:
                 self.agent.brain.set_model_override(effective_model)
                 logger.info(f"[AgentService] Streaming with model: {effective_model}")
 
+            # Get references we need (agent is thread-safe for reads)
+            agent = self.agent
+            brain = self.agent.brain
+        # ===== END SETUP - Lock released, streaming can proceed without blocking =====
+
+        try:
+            # === Record real thought: stream processing begins ===
+            _record_thought("formulating", f"streaming: {message[:60]}...", 0.7, "service")
+
+            # Track context for heatmap (covers direct handlers that bypass agent.chat)
             try:
-                # ===== DIRECT SEARCH HANDLER =====
-                # Check for direct search before streaming to prevent query hallucination
-                # This matches the logic in agent.chat() which was being bypassed
-                if hasattr(self.agent, '_handle_direct_search'):
-                    search_response = self.agent._handle_direct_search(message)
-                    if search_response:
-                        logger.info("[AgentService] Direct search handled, returning result")
-                        yield {"type": "chunk", "content": search_response}
-                        yield {
-                            "type": "done",
-                            "mood": self._get_mood(),
-                            "model_used": "direct_search"
-                        }
-                        return
+                from api.routes.context import track_context_from_message
+                track_context_from_message(message, is_user=True)
+            except Exception:
+                pass
 
-                # ===== DIRECT CRYPTO HANDLER =====
-                # Check for crypto price requests
-                if hasattr(self.agent, '_handle_direct_crypto'):
-                    crypto_response = self.agent._handle_direct_crypto(message)
-                    if crypto_response:
-                        logger.info("[AgentService] Direct crypto handled, returning result")
-                        yield {"type": "chunk", "content": crypto_response}
-                        yield {
-                            "type": "done",
-                            "mood": self._get_mood(),
-                            "model_used": "direct_crypto"
-                        }
-                        return
+            # Record activity for idle panel
+            try:
+                from api.routes.idle_behaviors import record_user_activity
+                record_user_activity()
+            except Exception:
+                pass
 
-                # ===== DEEP RESEARCH HANDLER =====
-                # Use DeepResearchTool for thorough multi-source research
-                if detected_action == "deep_research":
-                    try:
-                        from apprentice_agent.tools.deep_research import DeepResearchTool
-                        deep_tool = DeepResearchTool()
+            # ===== DIRECT SEARCH HANDLER =====
+            # Check for direct search before streaming to prevent query hallucination
+            if hasattr(agent, '_handle_direct_search'):
+                search_response = agent._handle_direct_search(message)
+                if search_response:
+                    logger.info("[AgentService] Direct search handled, returning result")
+                    yield {"type": "chunk", "content": search_response}
+                    yield {"type": "done", "mood": self._get_mood(), "model_used": "direct_search"}
+                    return
 
-                        # Extract topic from message
-                        topic = message.lower()
-                        for trigger in ["deep research", "thorough research", "extensive research", "full research", "research everything", "research in depth"]:
-                            topic = topic.replace(trigger, "").strip()
-                        topic = topic.strip(" on about for")
+            # ===== DIRECT CRYPTO HANDLER =====
+            if hasattr(agent, '_handle_direct_crypto'):
+                crypto_response = agent._handle_direct_crypto(message)
+                if crypto_response:
+                    logger.info("[AgentService] Direct crypto handled, returning result")
+                    yield {"type": "chunk", "content": crypto_response}
+                    yield {"type": "done", "mood": self._get_mood(), "model_used": "direct_crypto"}
+                    return
 
-                        logger.info(f"[AgentService] Deep research on: {topic}")
-                        yield {"type": "chunk", "content": f"## Deep Research: {topic}\n\n"}
+            # ===== DEEP RESEARCH HANDLER =====
+            if detected_action == "deep_research":
+                try:
+                    from apprentice_agent.tools.deep_research import DeepResearchTool
+                    deep_tool = DeepResearchTool()
 
-                        result = deep_tool.research(topic, depth="deep")
+                    topic = message.lower()
+                    for trigger in ["deep research", "thorough research", "extensive research", "full research", "research everything", "research in depth"]:
+                        topic = topic.replace(trigger, "").strip()
+                    topic = topic.strip(" on about for")
 
-                        if result.get("success"):
-                            # Synthesize with LLM
-                            synthesis_prompt = f"""Based on this deep research, provide a comprehensive summary:
+                    logger.info(f"[AgentService] Deep research on: {topic}")
+                    yield {"type": "chunk", "content": f"## Deep Research: {topic}\n\n"}
+
+                    result = deep_tool.research(topic, depth="deep")
+
+                    if result.get("success"):
+                        synthesis_prompt = f"""Based on this deep research, provide a comprehensive summary:
 
 Topic: {topic}
 Sources Found: {result.get('urls_found', 0)}
@@ -559,107 +652,101 @@ Content:
 
 Provide a well-structured, informative summary with key findings and cite sources."""
 
-                            synthesized = self.agent.brain.think(synthesis_prompt)
-                            yield {"type": "chunk", "content": synthesized}
-                            yield {"type": "chunk", "content": f"\n\n---\n*{result.get('summary', '')}*"}
-                        else:
-                            yield {"type": "chunk", "content": f"Research failed: {result.get('error', 'Unknown error')}"}
+                        synthesized = brain.think(synthesis_prompt)
+                        yield {"type": "chunk", "content": synthesized}
+                        yield {"type": "chunk", "content": f"\n\n---\n*{result.get('summary', '')}*"}
+                    else:
+                        yield {"type": "chunk", "content": f"Research failed: {result.get('error', 'Unknown error')}"}
 
-                        yield {"type": "done", "mood": self._get_mood(), "model_used": effective_model or "deep_research"}
-                        return
-                    except Exception as e:
-                        logger.error(f"[AgentService] Deep research error: {e}")
-                        yield {"type": "chunk", "content": f"Deep research error: {e}"}
-                        yield {"type": "done", "mood": self._get_mood(), "model_used": "error"}
-                        return
+                    yield {"type": "done", "mood": self._get_mood(), "model_used": effective_model or "deep_research"}
+                    return
+                except Exception as e:
+                    logger.error(f"[AgentService] Deep research error: {e}")
+                    yield {"type": "chunk", "content": f"Deep research error: {e}"}
+                    yield {"type": "done", "mood": self._get_mood(), "model_used": "error"}
+                    return
 
-                # ===== SWARM/MULTI-AGENT HANDLER =====
-                # Force parallel execution of ALL agents for true swarm behavior
-                if detected_action == "swarm":
-                    try:
-                        import concurrent.futures
+            # ===== SWARM/MULTI-AGENT HANDLER =====
+            if detected_action == "swarm":
+                try:
+                    import concurrent.futures
 
-                        logger.info(f"[AgentService] Swarm mode activated for: {message[:50]}...")
-                        yield {"type": "chunk", "content": "## Agent Swarm\n\n"}
+                    logger.info(f"[AgentService] Swarm mode activated for: {message[:50]}...")
+                    yield {"type": "chunk", "content": "## Agent Swarm\n\n"}
 
-                        # Check if query needs real-time data
-                        needs_search_keywords = [
-                            "news", "latest", "current", "recent", "today", "now",
-                            "update", "happening", "trending", "2024", "2025", "2026",
-                            "research", "developments", "breakthroughs", "announced"
-                        ]
-                        msg_lower = message.lower()
-                        needs_search = any(kw in msg_lower for kw in needs_search_keywords)
+                    needs_search_keywords = [
+                        "news", "latest", "current", "recent", "today", "now",
+                        "update", "happening", "trending", "2024", "2025", "2026",
+                        "research", "developments", "breakthroughs", "announced"
+                    ]
+                    msg_lower = message.lower()
+                    needs_search = any(kw in msg_lower for kw in needs_search_keywords)
 
-                        # Gather real data first if needed
-                        search_context = ""
-                        if needs_search:
-                            yield {"type": "chunk", "content": "Gathering real-time data...\n\n"}
+                    search_context = ""
+                    if needs_search:
+                        yield {"type": "chunk", "content": "Gathering real-time data...\n\n"}
+                        try:
+                            topic = msg_lower
+                            for trigger in ["swarm", "multi-agent", "multiple agents", "team research", "collaborative", "all agents", "agent team"]:
+                                topic = topic.replace(trigger, "").strip()
+                            topic = topic.strip(" :,.-")
+
+                            from apprentice_agent.tools.web_search import WebSearchTool
+                            search_tool = WebSearchTool()
+                            search_results = search_tool.search(topic, num_results=8)
+
+                            if search_results.get("success") and search_results.get("results"):
+                                results_text = []
+                                for i, r in enumerate(search_results["results"][:8], 1):
+                                    results_text.append(f"{i}. **{r.get('title', 'No title')}**\n   {r.get('snippet', '')}\n   Source: {r.get('url', '')}")
+                                search_context = f"\n\n**Search Results for '{topic}':**\n\n" + "\n\n".join(results_text) + "\n\n---\n\n"
+                                yield {"type": "chunk", "content": f"Found {len(search_results['results'])} sources.\n\n"}
+                        except Exception as e:
+                            logger.error(f"[AgentService] Swarm search error: {e}")
+
+                    agent_prompt = message
+                    if search_context:
+                        agent_prompt = f"Based on the following real-time search results, analyze: {message}\n{search_context}\nUse the search results to provide informed analysis."
+
+                    agents_config = {
+                        "Research": "You are a Research Agent. Analyze the provided data and extract key facts, findings, and evidence. Cite sources when available.",
+                        "Analyst": "You are an Analyst Agent. Provide critical analysis of the data, identify patterns, trends, and assess implications.",
+                        "Creative": "You are a Creative Agent. Think outside the box, find unexpected connections, and propose innovative perspectives.",
+                        "Strategist": "You are a Strategy Agent. Consider long-term implications, identify opportunities and risks, and provide actionable recommendations."
+                    }
+
+                    mode_text = "parallel + search" if search_context else "parallel"
+                    yield {"type": "chunk", "content": f"**Agents:** {', '.join(agents_config.keys())}\n**Mode:** {mode_text}\n\n---\n\n"}
+
+                    # Execute all agents in parallel (brain reference captured at setup)
+                    results = {}
+                    def run_agent(name, system_prompt):
+                        try:
+                            response = brain.think(
+                                agent_prompt,
+                                system_prompt=system_prompt,
+                                use_history=False
+                            )
+                            return name, response
+                        except Exception as e:
+                            return name, f"Error: {e}"
+
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+                        futures = {executor.submit(run_agent, name, prompt): name for name, prompt in agents_config.items()}
+
+                        for future in concurrent.futures.as_completed(futures, timeout=120):
                             try:
-                                topic = msg_lower
-                                for trigger in ["swarm", "multi-agent", "multiple agents", "team research", "collaborative", "all agents", "agent team"]:
-                                    topic = topic.replace(trigger, "").strip()
-                                topic = topic.strip(" :,.-")
-
-                                from apprentice_agent.tools.web_search import WebSearchTool
-                                search_tool = WebSearchTool()
-                                search_results = search_tool.search(topic, num_results=8)
-
-                                if search_results.get("success") and search_results.get("results"):
-                                    results_text = []
-                                    for i, r in enumerate(search_results["results"][:8], 1):
-                                        results_text.append(f"{i}. **{r.get('title', 'No title')}**\n   {r.get('snippet', '')}\n   Source: {r.get('url', '')}")
-                                    search_context = f"\n\n**Search Results for '{topic}':**\n\n" + "\n\n".join(results_text) + "\n\n---\n\n"
-                                    yield {"type": "chunk", "content": f"Found {len(search_results['results'])} sources.\n\n"}
+                                name, response = future.result()
+                                results[name] = response
+                                yield {"type": "chunk", "content": f"### {name} Agent\n\n{response}\n\n---\n\n"}
                             except Exception as e:
-                                logger.error(f"[AgentService] Swarm search error: {e}")
+                                name = futures[future]
+                                yield {"type": "chunk", "content": f"### {name} Agent\n\nError: {e}\n\n---\n\n"}
 
-                        # Build prompt with search context
-                        agent_prompt = message
-                        if search_context:
-                            agent_prompt = f"Based on the following real-time search results, analyze: {message}\n{search_context}\nUse the search results to provide informed analysis."
+                    if len(results) >= 2:
+                        yield {"type": "chunk", "content": "### Synthesis\n\n"}
 
-                        # Define agent perspectives
-                        agents = {
-                            "Research": "You are a Research Agent. Analyze the provided data and extract key facts, findings, and evidence. Cite sources when available.",
-                            "Analyst": "You are an Analyst Agent. Provide critical analysis of the data, identify patterns, trends, and assess implications.",
-                            "Creative": "You are a Creative Agent. Think outside the box, find unexpected connections, and propose innovative perspectives.",
-                            "Strategist": "You are a Strategy Agent. Consider long-term implications, identify opportunities and risks, and provide actionable recommendations."
-                        }
-
-                        mode_text = "parallel + search" if search_context else "parallel"
-                        yield {"type": "chunk", "content": f"**Agents:** {', '.join(agents.keys())}\n**Mode:** {mode_text}\n\n---\n\n"}
-
-                        # Execute all agents in parallel
-                        results = {}
-                        def run_agent(name, system_prompt):
-                            try:
-                                response = self.agent.brain.think(
-                                    agent_prompt,
-                                    system_prompt=system_prompt,
-                                    use_history=False
-                                )
-                                return name, response
-                            except Exception as e:
-                                return name, f"Error: {e}"
-
-                        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-                            futures = {executor.submit(run_agent, name, prompt): name for name, prompt in agents.items()}
-
-                            for future in concurrent.futures.as_completed(futures, timeout=120):
-                                try:
-                                    name, response = future.result()
-                                    results[name] = response
-                                    yield {"type": "chunk", "content": f"### {name} Agent\n\n{response}\n\n---\n\n"}
-                                except Exception as e:
-                                    name = futures[future]
-                                    yield {"type": "chunk", "content": f"### {name} Agent\n\nError: {e}\n\n---\n\n"}
-
-                        # Synthesize final summary
-                        if len(results) >= 2:
-                            yield {"type": "chunk", "content": "### Synthesis\n\n"}
-
-                            synthesis_prompt = f"""You are synthesizing insights from multiple AI agents who analyzed: "{message}"
+                        synthesis_prompt = f"""You are synthesizing insights from multiple AI agents who analyzed: "{message}"
 
 Here are their perspectives:
 
@@ -678,60 +765,67 @@ Write a brief integrative conclusion that captures the essential takeaways.
 
 Keep it concise, readable, and well-formatted with markdown."""
 
-                            # Stream the synthesis
-                            if hasattr(self.agent.brain, 'think_stream'):
-                                for chunk in self.agent.brain.think_stream(synthesis_prompt):
-                                    yield {"type": "chunk", "content": chunk}
-                            else:
-                                synthesis = self.agent.brain.think(synthesis_prompt)
-                                yield {"type": "chunk", "content": synthesis}
+                        # Stream the synthesis
+                        if hasattr(brain, 'think_stream'):
+                            for chunk in brain.think_stream(synthesis_prompt):
+                                yield {"type": "chunk", "content": chunk}
+                        else:
+                            synthesis = brain.think(synthesis_prompt)
+                            yield {"type": "chunk", "content": synthesis}
 
-                        yield {"type": "done", "mood": self._get_mood(), "model_used": effective_model or "swarm"}
-                        return
-                    except Exception as e:
-                        logger.error(f"[AgentService] Swarm mode error: {e}")
-                        yield {"type": "chunk", "content": f"Swarm mode error: {e}"}
-                        yield {"type": "done", "mood": self._get_mood(), "model_used": "error"}
-                        return
+                    yield {"type": "done", "mood": self._get_mood(), "model_used": effective_model or "swarm"}
+                    return
+                except Exception as e:
+                    logger.error(f"[AgentService] Swarm mode error: {e}")
+                    yield {"type": "chunk", "content": f"Swarm mode error: {e}"}
+                    yield {"type": "done", "mood": self._get_mood(), "model_used": "error"}
+                    return
 
-                # ===== DIRECT CODE HANDLER =====
-                # Check for explicit code execution requests
-                if hasattr(self.agent, '_handle_direct_code'):
-                    code_response = self.agent._handle_direct_code(message)
-                    if code_response:
-                        logger.info("[AgentService] Direct code handled, returning result")
-                        yield {"type": "chunk", "content": code_response}
-                        yield {
-                            "type": "done",
-                            "mood": self._get_mood(),
-                            "model_used": "direct_code"
-                        }
-                        return
+            # ===== DIRECT CODE HANDLER =====
+            if hasattr(agent, '_handle_direct_code'):
+                code_response = agent._handle_direct_code(message)
+                if code_response:
+                    logger.info("[AgentService] Direct code handled, returning result")
+                    yield {"type": "chunk", "content": code_response}
+                    yield {"type": "done", "mood": self._get_mood(), "model_used": "direct_code"}
+                    return
 
-                # Check if brain has streaming support
-                if hasattr(self.agent.brain, 'think_stream'):
-                    for chunk in self.agent.brain.think_stream(message):
-                        yield {"type": "chunk", "content": chunk}
+            # ===== SCREEN CONTEXT INJECTION (Phase 3D) =====
+            # Inject screen awareness so AURA knows what the user is looking at
+            screen_hint = ""
+            try:
+                from apprentice_agent.tools.screenpipe import get_screenpipe_client
+                sp = get_screenpipe_client()
+                if sp.is_available():
+                    ctx = sp.get_screen_context(minutes=1, max_chars=500)
+                    if ctx.get("available") and ctx.get("current_app"):
+                        screen_hint = (
+                            f"\n[Screen context: user is in {ctx['current_app']}"
+                            + (f" — {ctx['current_window']}" if ctx.get("current_window") else "")
+                            + (". Error visible on screen." if ctx.get("has_errors") else "")
+                            + "]"
+                        )
+            except Exception:
+                pass
 
-                    # After streaming, yield final result
-                    yield {
-                        "type": "done",
-                        "mood": self._get_mood(),
-                        "model_used": self.agent.brain.get_last_model_used()
-                    }
-                else:
-                    # Fallback to non-streaming
-                    response = self.agent.chat(message, speak=False)
-                    yield {"type": "chunk", "content": response}
-                    yield {
-                        "type": "done",
-                        "mood": self._get_mood(),
-                        "model_used": self.agent.brain.get_last_model_used()
-                    }
-            finally:
-                # Clear model override after request
-                if effective_model:
-                    self.agent.brain.set_model_override(None)
+            enriched_message = message + screen_hint if screen_hint else message
+
+            # ===== STANDARD STREAMING =====
+            if hasattr(brain, 'think_stream'):
+                for chunk in brain.think_stream(enriched_message):
+                    yield {"type": "chunk", "content": chunk}
+                yield {"type": "done", "mood": self._get_mood(), "model_used": brain.get_last_model_used()}
+            else:
+                # Fallback to non-streaming
+                response = agent.chat(message, speak=False)
+                yield {"type": "chunk", "content": response}
+                yield {"type": "done", "mood": self._get_mood(), "model_used": brain.get_last_model_used()}
+
+        finally:
+            # ===== TEARDOWN - Brief lock to clear model override =====
+            if effective_model:
+                with self._agent_lock:
+                    brain.set_model_override(None)
 
     def run(self, goal: str, context: Optional[Dict] = None,
             use_fastpath: Optional[bool] = None, max_iterations: int = 10) -> Dict[str, Any]:
@@ -759,10 +853,24 @@ Keep it concise, readable, and well-formatted with markdown."""
                 self.agent.max_iterations = original_max
 
     def get_status(self) -> Dict[str, Any]:
-        """Get agent status information."""
-        with self._agent_lock:
-            agent = self.agent
+        """Get agent status information.
 
+        NOTE: No lock needed - only reads properties. Holding the lock here
+        caused deadlocks when concurrent polling endpoints all waited for it.
+        """
+        if self._agent is None:
+            return {
+                "online": False,
+                "model": "initializing...",
+                "aura_enabled": False,
+                "mood": None,
+                "memory_count": 0,
+                "query_count": 0,
+                "last_model_used": None
+            }
+
+        agent = self._agent
+        try:
             return {
                 "online": True,
                 "model": getattr(agent.brain, 'model', 'unknown'),
@@ -772,26 +880,118 @@ Keep it concise, readable, and well-formatted with markdown."""
                 "query_count": getattr(agent.brain, '_total_query_count', 0),
                 "last_model_used": agent.brain.get_last_model_used()
             }
+        except Exception as e:
+            logger.error(f"[AgentService] get_status error: {e}")
+            return {
+                "online": True,
+                "model": "error",
+                "aura_enabled": False,
+                "mood": None,
+                "memory_count": 0,
+                "query_count": 0,
+                "last_model_used": None
+            }
 
     def clear_history(self) -> bool:
         """Clear conversation history."""
-        with self._agent_lock:
-            try:
-                self.agent.brain.clear_history()
+        try:
+            if self._agent is not None:
+                self._agent.brain.clear_history()
                 return True
-            except Exception as e:
-                logger.error(f"[AgentService] Failed to clear history: {e}")
-                return False
+            return False
+        except Exception as e:
+            logger.error(f"[AgentService] Failed to clear history: {e}")
+            return False
+
+    # =========================================================================
+    # Multi-Conversation Management
+    # =========================================================================
+
+    def create_conversation(self, title: Optional[str] = None) -> Dict[str, Any]:
+        """Create a new conversation."""
+        if self._agent is None:
+            return {"error": "Agent not initialized"}
+        conv_id = self._agent.brain.create_conversation(title)
+        return {"id": conv_id, "title": title or "New Chat", "messages": []}
+
+    def list_conversations(self) -> list:
+        """List all conversations."""
+        if self._agent is None:
+            return []
+        return self._agent.brain.list_conversations()
+
+    def switch_conversation(self, conversation_id: str) -> Dict[str, Any]:
+        """Switch to a different conversation."""
+        if self._agent is None:
+            return {"error": "Agent not initialized"}
+
+        success = self._agent.brain.switch_conversation(conversation_id)
+        if not success:
+            return {"error": f"Conversation not found: {conversation_id}"}
+
+        # Reset transient context systems
+        self._reset_conversation_context()
+
+        messages = list(self._agent.brain.conversation_history)
+        # Get title from index
+        convs = self._agent.brain.list_conversations()
+        title = "Unknown"
+        for c in convs:
+            if c["id"] == conversation_id:
+                title = c["title"]
+                break
+
+        return {"id": conversation_id, "title": title, "messages": messages}
+
+    def delete_conversation(self, conversation_id: str) -> Dict[str, Any]:
+        """Delete a conversation."""
+        if self._agent is None:
+            return {"success": False, "error": "Agent not initialized"}
+        success = self._agent.brain.delete_conversation(conversation_id)
+        return {
+            "success": success,
+            "new_active_id": self._agent.brain.get_current_conversation_id(),
+        }
+
+    def rename_conversation(self, conversation_id: str, title: str) -> bool:
+        """Rename a conversation."""
+        if self._agent is None:
+            return False
+        return self._agent.brain.rename_conversation(conversation_id, title)
+
+    def save_conversation_to_memory(self, conversation_id: Optional[str] = None) -> Dict[str, Any]:
+        """Save a conversation to AURA's long-term memory."""
+        if self._agent is None:
+            return {"success": False, "error": "Agent not initialized"}
+        return self._agent.brain.save_conversation_to_memory(conversation_id)
+
+    def _reset_conversation_context(self):
+        """Reset transient systems when switching conversations."""
+        # Clear context heatmap topics
+        try:
+            from api.routes.context import get_tracker
+            get_tracker().clear()
+        except Exception:
+            pass
+
+        # Clear active thinking state
+        try:
+            from api.routes.thinking import get_manager
+            get_manager().clear_active()
+        except Exception:
+            pass
 
     def _get_mood(self) -> Optional[MoodState]:
-        """Extract AURA's current mood from ALMA emotional engine."""
-        print(f"[DEBUG _get_mood] ALMA_AVAILABLE={ALMA_AVAILABLE}, alma_engine exists={alma_engine is not None}", flush=True)
+        """Extract AURA's current mood from ALMA emotional engine.
+
+        NOTE: This method must NOT acquire _agent_lock since it's called from
+        contexts that may or may not already hold the lock.
+        """
         try:
-            # Try ALMA directly first (most reliable)
+            # Try ALMA directly first (most reliable - no agent lock needed)
             if ALMA_AVAILABLE and alma_engine:
                 try:
                     alma_state = alma_engine.get_emotional_state()
-                    print(f"[DEBUG] ALMA state: {alma_state}", flush=True)
                     if alma_state:
                         pad = alma_state.get('pad', {})
                         emoji = get_mood_emoji() if ALMA_AVAILABLE else '🤖'
@@ -803,12 +1003,16 @@ Keep it concise, readable, and well-formatted with markdown."""
                             dominance=pad.get('dominance', 0.0),
                             emoji=emoji
                         )
-                        print(f"[DEBUG] Returning ALMA mood: {mood.model_dump()}", flush=True)
                         return mood
                 except Exception as e:
-                    print(f"[DEBUG] ALMA direct state ERROR: {e}", flush=True)
+                    logger.debug(f"[AgentService] ALMA direct state error: {e}")
 
-            agent = self.agent
+            agent = self._agent
+            if agent is None:
+                return MoodState(
+                    emotion='neutral', confidence=50,
+                    valence=0.3, arousal=0.1, dominance=0.3, emoji='🤖'
+                )
 
             # Fallback: Try ALMA via brain
             if hasattr(agent.brain, '_alma_enabled') and agent.brain._alma_enabled:
@@ -884,39 +1088,44 @@ Keep it concise, readable, and well-formatted with markdown."""
             return False
 
     def get_available_models(self) -> Dict[str, Any]:
-        """Get list of available models (local and cloud)."""
-        with self._agent_lock:
+        """Get list of available models (local and cloud).
+
+        NOTE: No lock needed - reads config and makes HTTP request to Ollama.
+        Holding the lock here while waiting on Ollama HTTP caused deadlocks.
+        """
+        try:
+            import requests
+            from apprentice_agent.config import VERIFIED_LOCAL_MODELS, VERIFIED_CLOUD_MODELS
+
+            local_models = []
+            cloud_models = list(VERIFIED_CLOUD_MODELS)
+
+            # Get locally installed models from Ollama
             try:
-                import requests
-                from apprentice_agent.config import VERIFIED_LOCAL_MODELS, VERIFIED_CLOUD_MODELS
-
-                local_models = []
-                cloud_models = list(VERIFIED_CLOUD_MODELS)
-
-                # Get locally installed models from Ollama
-                try:
-                    ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-                    response = requests.get(f"{ollama_host}/api/tags", timeout=5)
-                    if response.status_code == 200:
-                        local_models = [m["name"] for m in response.json().get("models", [])]
-                except Exception as e:
-                    logger.warning(f"[AgentService] Could not fetch local models: {e}")
-                    local_models = list(VERIFIED_LOCAL_MODELS)
-
-                current_model = getattr(self.agent.brain, 'model', 'auto')
-
-                return {
-                    "local": sorted(local_models),
-                    "cloud": sorted(cloud_models),
-                    "current": current_model
-                }
+                ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+                response = requests.get(f"{ollama_host}/api/tags", timeout=3)
+                if response.status_code == 200:
+                    local_models = [m["name"] for m in response.json().get("models", [])]
             except Exception as e:
-                logger.error(f"[AgentService] Failed to get models: {e}")
-                return {
-                    "local": [],
-                    "cloud": [],
-                    "current": "unknown"
-                }
+                logger.warning(f"[AgentService] Could not fetch local models: {e}")
+                local_models = list(VERIFIED_LOCAL_MODELS)
+
+            current_model = "auto"
+            if self._agent is not None:
+                current_model = getattr(self._agent.brain, 'model', 'auto')
+
+            return {
+                "local": sorted(local_models),
+                "cloud": sorted(cloud_models),
+                "current": current_model
+            }
+        except Exception as e:
+            logger.error(f"[AgentService] Failed to get models: {e}")
+            return {
+                "local": [],
+                "cloud": [],
+                "current": "unknown"
+            }
 
 
 # Global instance

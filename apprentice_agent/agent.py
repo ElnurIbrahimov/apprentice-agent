@@ -13,6 +13,16 @@ from typing import Any, Optional, Tuple, Callable, List, Dict
 logger = logging.getLogger(__name__)
 
 
+# Thinking system integration — safe import
+def _record_thought(thought_type: str, content: str, intensity: float = 0.6, source: str = "agent"):
+    """Record a real thought event. Safe to call even if thinking system isn't ready."""
+    try:
+        from api.routes.thinking import record_thought
+        record_thought(thought_type, content, intensity, source)
+    except Exception:
+        pass
+
+
 # ============================================================================
 #                    SECURITY: Safe Custom Tool Validator
 # ============================================================================
@@ -4421,6 +4431,7 @@ Try these commands:
         if self.use_fastpath and hasattr(self, 'fast_path_handler') and self.fast_path_handler:
             fast_response = self.fast_path_handler.try_fast_path(message)
             if fast_response:
+                _record_thought("observing", f"fast path: {message[:40]}", 0.3, "agent")
                 print(f"[FAST PATH] {message[:30]}... -> {fast_response[:50]}...")
                 if hasattr(self, 'monologue') and self.monologue:
                     self.monologue.think("reason", "Using fast path for simple query")
@@ -4558,9 +4569,11 @@ Try these commands:
         # Get Knowledge Graph Brain context for non-simple queries
         kg_context = ""
         if not is_simple and self.kg_bridge is not None:
+            _record_thought("recalling", f"searching knowledge graph for: {message[:50]}", 0.5, "memory")
             try:
                 kg_context = self.kg_bridge.get_context_for_query(message, max_entities=3)
                 if kg_context:
+                    _record_thought("recalling", f"found KG context ({len(kg_context)} chars)", 0.6, "memory")
                     # Track memory recall for UI
                     try:
                         from api.routes.memory import record_memory_recall
@@ -4590,14 +4603,24 @@ Try these commands:
         # Get A-MEM memory context for personalization
         amem_context = ""
         if 'amem' in self.tools:
+            _record_thought("recalling", f"searching episodic memory for: {message[:40]}", 0.5, "memory")
             try:
                 amem_tool = self.tools['amem']
-                # Search for relevant memories
-                memories = amem_tool.amem.search(message, limit=3)
+                # Search for relevant memories (returns List[Tuple[MemoryNote, float]])
+                memories_raw = amem_tool.amem.search(message, k=3)
+                # Apply mood-congruent reranking
+                try:
+                    from apprentice_agent.tools.mood_memory import apply_mood_bias_to_tuples
+                    memories_raw = apply_mood_bias_to_tuples(memories_raw)
+                    memories_raw.sort(key=lambda x: x[1], reverse=True)
+                except Exception:
+                    pass
+                memories = [note for note, score in memories_raw] if memories_raw else []
                 if memories:
                     memory_texts = [f"- {m.content}" for m in memories if m.content]
                     if memory_texts:
                         amem_context = "RELEVANT MEMORIES:\n" + "\n".join(memory_texts)
+                        _record_thought("recalling", f"recalled {len(memories)} memories", 0.7, "memory")
                         logger.debug(f"[A-MEM] Found {len(memories)} relevant memories for: {message[:50]}...")
                         # Track memory recall for UI
                         try:
@@ -4642,6 +4665,7 @@ Try these commands:
         if hasattr(self, 'monologue') and self.monologue:
             self.monologue.think("reason", f"Processing query with task_type={task_type}")
 
+        _record_thought("formulating", f"reasoning about: {message[:50]}...", 0.7, "agent")
         response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
 
         # Record response generation in monologue
@@ -4650,9 +4674,11 @@ Try these commands:
 
         # Apply MirrorMind self-critique if enabled (Tool #21)
         if self.mirrormind_enabled and not self._is_simple_query(message):
+            _record_thought("analyzing", "self-critiquing response with MirrorMind...", 0.5, "agent")
             try:
                 critique_result = self.mirrormind.refine(message, response)
                 if critique_result.was_improved():
+                    _record_thought("observing", "MirrorMind improved the response", 0.6, "agent")
                     response = critique_result.improved
             except Exception as e:
                 # Never crash on MirrorMind failure, just use original response

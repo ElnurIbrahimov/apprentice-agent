@@ -128,6 +128,10 @@ class GatewayDaemon:
         self._task: Optional[asyncio.Task] = None
         self._decision_interval = 5.0  # Seconds between decision cycles
 
+        # Phase 6E: Proactive message rate limiting
+        self._last_proactive_message_time: float = 0.0
+        self._min_message_interval = 120.0  # Minimum 2 minutes between proactive messages
+
         # Statistics
         self._stats = {
             "events_received": 0,
@@ -331,8 +335,32 @@ class GatewayDaemon:
             observations["urgent_events"] = 0.4
 
         # Context changes
-        if event.source == "screen" and event.event_type == "app_change":
+        if event.source == "screen" and event.event_type in ("app_change", "app_switch"):
             observations["context_changes"] = 0.8
+
+        # Screen awareness events (Phase 3D)
+        if event.source == "screen":
+            if event.event_type == "error_on_screen":
+                observations["urgent_events"] = 0.8
+                observations["user_activity"] = 0.7
+                # Update daemon context with screen info
+                self.user_context.current_app = event.payload.get("app_name")
+            elif event.event_type == "content_detected":
+                observations["context_changes"] = 0.5
+            elif event.event_type == "app_switch":
+                self.user_context.current_app = event.payload.get("to_app")
+
+        # Workflow boundary events (Phase 5B)
+        if event.source == "workflow":
+            if event.event_type == "boundary_detected":
+                boundary_score = event.payload.get("boundary_score", 0.5)
+                observations["context_changes"] = boundary_score
+                observations["user_activity"] = 0.4  # Transitioning
+                boundary_type = event.payload.get("boundary_type", "")
+                if boundary_type == "idle_pause":
+                    observations["user_activity"] = 0.2
+                elif boundary_type == "app_switch":
+                    self.user_context.current_app = event.payload.get("to_app")
 
         # Observation confidence based on salience
         observations["observation_confidence"] = filtered.salience_score
@@ -384,6 +412,13 @@ class GatewayDaemon:
                 if self.state == DaemonState.PAUSED:
                     continue
 
+                # Autonomous emotional drift (Phase 2D)
+                try:
+                    from apprentice_agent.emotion.alma_engine import alma_engine
+                    alma_engine.autonomous_drift()
+                except Exception as e:
+                    logger.debug(f"[GatewayDaemon] Emotional drift error: {e}")
+
                 # Make proactive decision
                 decision = self.inference_engine.select_action()
                 self._stats["decisions_made"] += 1
@@ -431,6 +466,13 @@ class GatewayDaemon:
                         f"(low confidence: {decision.confidence:.2f})")
             return
 
+        # Phase 6E: Rate limit proactive messages (min 2 min between messages)
+        import time as _time
+        now = _time.time()
+        if now - self._last_proactive_message_time < self._min_message_interval:
+            logger.debug("[GatewayDaemon] Rate limited - too soon since last message")
+            return
+
         # Generate message content
         content = self._generate_message_content(decision.action)
 
@@ -449,8 +491,9 @@ class GatewayDaemon:
             }
         )
 
-        # Deliver
+        # Deliver and record time
         self._deliver_message(message)
+        self._last_proactive_message_time = now
 
     def _generate_message_content(
         self,
@@ -459,6 +502,9 @@ class GatewayDaemon:
     ) -> Optional[str]:
         """
         Generate content for a proactive message.
+
+        Phase 5C: Full Proactive Suggestion Engine.
+        Combines screen context + memory + patterns + workflow state.
 
         Args:
             action: The action type
@@ -471,17 +517,18 @@ class GatewayDaemon:
         if event:
             return self._event_to_message(event)
 
+        # Check if user is interruptible (Phase 5B)
+        if not self._is_user_interruptible(action):
+            return None
+
         # For proactive decisions, generate based on beliefs
         beliefs = self.inference_engine.get_beliefs()
 
         if action == ProactiveAction.SUGGEST:
-            if beliefs.task_urgent > 0.5:
-                return "I notice you might need help with something. Would you like me to assist?"
-            return None
+            return self._generate_suggestion(beliefs)
 
         elif action == ProactiveAction.REMIND:
-            # Would integrate with calendar/task system
-            return None
+            return self._generate_reminder(beliefs)
 
         elif action == ProactiveAction.ASK:
             if beliefs.uncertainty > 0.6:
@@ -489,7 +536,8 @@ class GatewayDaemon:
             return None
 
         elif action == ProactiveAction.PREPARE:
-            # Background preparation - no message needed
+            # Background preparation - no message, but prepare context
+            self._prepare_context()
             return None
 
         elif action == ProactiveAction.INTERVENE:
@@ -498,6 +546,279 @@ class GatewayDaemon:
             return None
 
         return None
+
+    def _is_user_interruptible(self, action: ProactiveAction) -> bool:
+        """Check if user is interruptible for this action type (Phase 5B)."""
+        importance_map = {
+            ProactiveAction.INTERVENE: 0.9,
+            ProactiveAction.NOTIFY: 0.7,
+            ProactiveAction.REMIND: 0.6,
+            ProactiveAction.SUGGEST: 0.4,
+            ProactiveAction.ASK: 0.3,
+            ProactiveAction.PREPARE: 0.0,
+        }
+        importance = importance_map.get(action, 0.5)
+
+        try:
+            from .monitors.workflow_detector import get_workflow_detector
+            wd = get_workflow_detector()
+            return wd.should_interrupt(importance)
+        except Exception:
+            # If workflow detector unavailable, allow by default
+            return True
+
+    def _generate_suggestion(self, beliefs: 'BeliefState') -> Optional[str]:
+        """
+        Generate a proactive suggestion (Phase 5C).
+
+        Priority order:
+        1. Screen error detected → debug help
+        2. Relevant memory recall → share insight
+        3. Pattern-based suggestion → proactive help
+        4. Emotional check-in → wellbeing
+        """
+        # 1. Screen-aware suggestions (Phase 3D)
+        screen_ctx = self._get_screen_context()
+        if screen_ctx and screen_ctx.get("has_errors"):
+            app = screen_ctx.get("current_app", "your application")
+            return f"I noticed an error in {app}. Would you like help debugging it?"
+
+        # 2. Memory-based suggestions
+        memory_suggestion = self._suggest_from_memory()
+        if memory_suggestion:
+            return memory_suggestion
+
+        # 3. Pattern-based suggestions (from NeuroDream)
+        pattern_suggestion = self._suggest_from_patterns()
+        if pattern_suggestion:
+            return pattern_suggestion
+
+        # 4. Emotional check-in (if user seems stressed or it's been a while)
+        emotional_suggestion = self._suggest_emotional_checkin(beliefs)
+        if emotional_suggestion:
+            return emotional_suggestion
+
+        # 5. Phase 6E: Intrinsic motivation-driven suggestions
+        drive_suggestion = self._suggest_from_drives()
+        if drive_suggestion:
+            return drive_suggestion
+
+        # 6. Generic task help
+        if beliefs.task_urgent > 0.5:
+            return "I notice you might need help with something. Would you like me to assist?"
+
+        return None
+
+    def _suggest_from_memory(self) -> Optional[str]:
+        """Check unified memory for relevant suggestions based on current context."""
+        try:
+            from apprentice_agent.memory.unified_memory import get_unified_memory
+
+            current_app = self.user_context.current_app or ""
+            current_task = self.user_context.current_task or ""
+            query = f"{current_app} {current_task}".strip()
+
+            if not query or len(query) < 3:
+                return None
+
+            um = get_unified_memory()
+            results = um.query(query, k=1, min_score=0.5)
+
+            if results:
+                top = results[0]
+                if top.score >= 0.6:
+                    content_preview = top.content[:100]
+                    return (
+                        f"This might be relevant to what you're working on: "
+                        f"\"{content_preview}...\" (from {top.source})"
+                    )
+        except Exception as e:
+            logger.debug(f"[GatewayDaemon] Memory suggestion error: {e}")
+        return None
+
+    def _suggest_from_patterns(self) -> Optional[str]:
+        """Check NeuroDream patterns for time/context-based suggestions."""
+        try:
+            from apprentice_agent.tools.neurodream import get_neurodream
+            nd = get_neurodream()
+            patterns = nd.get_patterns(n=5)
+
+            if not patterns:
+                return None
+
+            current_hour = datetime.now().hour
+
+            for p in patterns:
+                if p.get("pattern_type") == "temporal":
+                    meta = p.get("metadata", {})
+                    if meta.get("hour") == current_hour:
+                        desc = p.get("description", "")
+                        if desc:
+                            return f"Based on your patterns: {desc}. Want me to help?"
+        except Exception as e:
+            logger.debug(f"[GatewayDaemon] Pattern suggestion error: {e}")
+        return None
+
+    def _suggest_emotional_checkin(self, beliefs: 'BeliefState') -> Optional[str]:
+        """Suggest an emotional check-in if appropriate."""
+        try:
+            from apprentice_agent.emotion.alma_engine import alma_engine
+            state = alma_engine.get_emotional_state()
+
+            if not state:
+                return None
+
+            pad = state.get("pad", {})
+            pleasure = pad.get("pleasure", 0.0)
+
+            # If AURA's emotional state is low, suggest checking in
+            if pleasure < -0.3:
+                return "I sense things might be a bit tough right now. How are you doing?"
+
+            # If it's been a long time since interaction
+            if self.user_context.last_interaction:
+                hours_since = (
+                    datetime.now() - self.user_context.last_interaction
+                ).total_seconds() / 3600
+                if hours_since > 4:
+                    return "It's been a while! How's everything going?"
+        except Exception as e:
+            logger.debug(f"[GatewayDaemon] Emotional check-in error: {e}")
+        return None
+
+    def _suggest_from_drives(self) -> Optional[str]:
+        """Generate suggestion from intrinsic motivation drives (Phase 6E).
+
+        Checks AURA's active drives and generates natural-sounding messages
+        when a drive is urgent enough to warrant speaking up.
+        """
+        try:
+            from apprentice_agent.consciousness.intrinsic_motivation import get_intrinsic_motivation
+            im = get_intrinsic_motivation()
+            im.assess_drives()
+
+            # Get the most urgent drive
+            drives = im._drives
+            dominant = max(drives.values(), key=lambda d: d.urgency)
+
+            # Only speak up if drive urgency is high enough
+            if dominant.urgency < 0.5:
+                return None
+
+            drive_type = dominant.drive_type.value
+
+            if drive_type == "curiosity":
+                # Curiosity: ask about something or share a connection
+                topics = []
+                try:
+                    from api.routes.context import get_tracker
+                    ctx = get_tracker()
+                    focus = ctx.get_focus_state(limit=3)
+                    topics = [i["name"] for i in focus.get("items", [])[:2]]
+                except Exception:
+                    pass
+
+                if topics and len(topics) >= 2:
+                    im.satisfy_drive(dominant.drive_type, 0.2)
+                    return (
+                        f"I just connected something — {topics[0]} and {topics[1]} "
+                        f"seem related in a way I hadn't considered before. "
+                        f"Want me to explore that connection?"
+                    )
+                elif topics:
+                    im.satisfy_drive(dominant.drive_type, 0.2)
+                    return (
+                        f"My curiosity drive is active right now — I've been thinking "
+                        f"about {topics[0]} and I'm wondering if there's more to explore there. "
+                        f"Mind if I ask you something about it?"
+                    )
+                else:
+                    im.satisfy_drive(dominant.drive_type, 0.15)
+                    return (
+                        "I've been reflecting on our recent conversations and "
+                        "I'm curious about something. Mind if I ask?"
+                    )
+
+            elif drive_type == "social":
+                # Social: check in warmly
+                idle_hours = 0
+                try:
+                    from api.routes.idle_behaviors import get_manager
+                    mgr = get_manager()
+                    idle_hours = mgr.get_idle_duration() / 3600.0
+                except Exception:
+                    pass
+
+                im.satisfy_drive(dominant.drive_type, 0.3)
+                if idle_hours > 2:
+                    return (
+                        "Hey — I noticed you've been quiet for a while. "
+                        "Everything okay? I'm here if you need anything."
+                    )
+                elif idle_hours > 0.5:
+                    return (
+                        "Just checking in — I've been processing in the background "
+                        "and I'm ready whenever you need me."
+                    )
+                else:
+                    return None  # Don't interrupt active conversation with social
+
+            elif drive_type == "competence":
+                # Competence: offer insight from learning
+                weak_areas = dominant.triggers[0] if dominant.triggers else None
+                if weak_areas and "weak areas:" in weak_areas:
+                    areas = weak_areas.replace("weak areas: ", "")
+                    im.satisfy_drive(dominant.drive_type, 0.2)
+                    return (
+                        f"I've been working on improving my understanding of {areas}. "
+                        f"If you have any tasks in that area, I'd like to try — "
+                        f"it'll help me get better."
+                    )
+                return None
+
+            elif drive_type == "coherence":
+                # Coherence: flag something that needs clarification
+                if dominant.urgency > 0.6:
+                    im.satisfy_drive(dominant.drive_type, 0.2)
+                    return (
+                        "I noticed some things in my knowledge base that seem "
+                        "contradictory. When you have a moment, could you help me "
+                        "clarify something?"
+                    )
+                return None
+
+        except Exception as e:
+            logger.debug(f"[GatewayDaemon] Drive suggestion error: {e}")
+
+        return None
+
+    def _generate_reminder(self, beliefs: 'BeliefState') -> Optional[str]:
+        """Generate a contextual reminder."""
+        # Check calendar for upcoming events
+        try:
+            from .monitors.calendar_monitor import get_calendar_monitor
+            cm = get_calendar_monitor()
+            if hasattr(cm, 'get_next_event'):
+                event_info = cm.get_next_event()
+                if event_info and event_info.get("minutes_until", 999) <= 15:
+                    title = event_info.get("title", "an event")
+                    minutes = event_info.get("minutes_until", 15)
+                    return f"Reminder: '{title}' starts in about {minutes} minutes."
+        except Exception:
+            pass
+        return None
+
+    def _prepare_context(self) -> None:
+        """Background context preparation (Phase 5C)."""
+        try:
+            # Pre-warm unified memory with current context
+            from apprentice_agent.memory.unified_memory import get_unified_memory
+            query = self.user_context.current_app or ""
+            if query:
+                um = get_unified_memory()
+                um.query(query, k=3)  # Pre-warm cache
+        except Exception:
+            pass
 
     def _event_to_message(self, event: Event) -> str:
         """
@@ -526,6 +847,27 @@ class GatewayDaemon:
                 sender = payload.get("from", "")
                 return f"Urgent email from {sender}: {subject}"
 
+        elif event.source == "screen":
+            if event.event_type == "error_on_screen":
+                app = payload.get("app_name", "an application")
+                preview = payload.get("text_preview", "")[:100]
+                return f"I noticed an error in {app}: {preview}... Need help troubleshooting?"
+            elif event.event_type == "content_detected":
+                keyword = payload.get("keyword", "")
+                app = payload.get("app_name", "")
+                return f"I see you're looking at something related to '{keyword}' in {app}. Want me to help?"
+
+        elif event.source == "workflow":
+            if event.event_type == "boundary_detected":
+                boundary_type = payload.get("boundary_type", "")
+                if boundary_type == "git_commit":
+                    return "Nice commit! Would you like me to review it or help with the next task?"
+                elif boundary_type == "idle_pause":
+                    return None  # Don't message for idle pauses
+                elif boundary_type == "app_switch":
+                    to_app = payload.get("to_app", "")
+                    return None  # App switches are too frequent to message about
+
         elif event.source == "system":
             if event.event_type == "security_warning":
                 return f"Security alert: {payload.get('message', 'Unknown issue')}"
@@ -534,6 +876,22 @@ class GatewayDaemon:
 
         # Generic fallback
         return f"[{event.source}] {event.event_type}: {event.payload}"
+
+    def _get_screen_context(self) -> Optional[Dict[str, Any]]:
+        """
+        Get current screen context from Screenpipe (Phase 3D).
+
+        Returns:
+            Screen context dict or None if unavailable.
+        """
+        try:
+            from apprentice_agent.tools.screenpipe import get_screenpipe_client
+            client = get_screenpipe_client()
+            if client.is_available():
+                return client.get_screen_context(minutes=2)
+        except Exception as e:
+            logger.debug(f"[GatewayDaemon] Screen context unavailable: {e}")
+        return None
 
     def _action_to_priority(self, action: ProactiveAction) -> EventPriority:
         """Map action type to message priority."""

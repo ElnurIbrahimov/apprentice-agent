@@ -1,28 +1,23 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useChatStore } from '../store/chatStore';
+import { usePolling } from '../hooks/usePolling';
 import { EmotionPanel } from './EmotionPanel';
 import { SettingsModal } from './SettingsModal';
-import { AuraBreathingAvatar, AuraStatusLine, AuraConsideringIndicator } from './AuraBreathingAvatar';
-import { ProactiveDaemonPanel } from './ProactiveDaemonPanel';
+import { AuraBreathingAvatar, AuraStatusLine } from './AuraBreathingAvatar';
 import { SystemStatsPanel } from './SystemStatsPanel';
+import { ConversationList } from './ConversationList';
+import { ProactiveDaemonPanel } from './ProactiveDaemonPanel';
 import { InnerThoughtsPanel } from './InnerThoughtsPanel';
 import { ThinkingAboutTeaser } from './ThinkingAboutTeaser';
 import { MemoryRecallIndicator } from './MemoryRecallIndicator';
 import { ContextHeatmap } from './ContextHeatmap';
-import { ConversationStarterPanel } from './ConversationStarterPanel';
 import { IdleBehaviorPanel } from './IdleBehaviorPanel';
+import { MotivationDrivesPanel } from './MotivationDrivesPanel';
 import {
   XMarkIcon,
-  TrashIcon,
   Cog6ToothIcon,
   ChevronDownIcon,
 } from '@heroicons/react/24/outline';
-
-interface ConsiderationState {
-  is_considering: boolean;
-  decided_against: boolean;
-  topic: string | null;
-}
 
 interface SidebarProps {
   onClose?: () => void;
@@ -36,7 +31,6 @@ export function Sidebar({ onClose }: SidebarProps) {
     status,
     setStatus,
     connectionStatus,
-    clearMessages,
     selectedModel,
     setSelectedModel,
     availableModels,
@@ -44,96 +38,19 @@ export function Sidebar({ onClose }: SidebarProps) {
     isLoading,
   } = useChatStore();
 
-  // Ambient status messages that make AURA feel alive
-  const [ambientStatus, setAmbientStatus] = useState<string | null>(null);
-
-  // AURA consideration state - "thinking about saying something"
-  const [consideration, setConsideration] = useState<ConsiderationState>({
-    is_considering: false,
-    decided_against: false,
-    topic: null,
-  });
-
-  // Poll consideration state
-  useEffect(() => {
-    if (connectionStatus !== 'connected') return;
-
-    const fetchConsideration = async () => {
-      try {
-        const response = await fetch('/api/aura/consideration');
-        if (response.ok) {
-          const data = await response.json();
-          setConsideration(data);
-        }
-      } catch (e) {
-        // Silently ignore - not critical
+  // Poll status only (10s - lightweight, just /api/status)
+  const fetchStatus = useCallback(async () => {
+    try {
+      const response = await fetch('/api/status');
+      if (response.ok) {
+        const data = await response.json();
+        setStatus(data);
       }
-    };
-
-    // Poll every 2 seconds to catch considerations
-    const interval = setInterval(fetchConsideration, 2000);
-    fetchConsideration(); // Initial fetch
-
-    return () => clearInterval(interval);
-  }, [connectionStatus]);
-
-  // Fetch idle behavior status for ambient display
-  useEffect(() => {
-    if (connectionStatus !== 'connected') return;
-
-    const fetchIdleStatus = async () => {
-      try {
-        const response = await fetch('/api/idle/state');
-        if (response.ok) {
-          const data = await response.json();
-          if (data.current_behavior?.status_message) {
-            setAmbientStatus(data.current_behavior.status_message);
-          } else if (!data.is_idle) {
-            setAmbientStatus(null); // Clear when not idle
-          }
-        }
-      } catch (e) {
-        // Fallback to simple messages if API unavailable
-        const fallbackMessages = [
-          'Monitoring context...',
-          'Processing memories...',
-          'Observing patterns...',
-          null,
-        ];
-        setAmbientStatus(fallbackMessages[Math.floor(Math.random() * fallbackMessages.length)]);
-      }
-    };
-
-    // Initial delay before first status
-    const initialDelay = setTimeout(fetchIdleStatus, 3000);
-
-    // Poll for idle status
-    const interval = setInterval(fetchIdleStatus, 5000);
-
-    return () => {
-      clearTimeout(initialDelay);
-      clearInterval(interval);
-    };
-  }, [connectionStatus]);
-
-  // Poll status every 5 seconds
-  useEffect(() => {
-    const fetchStatus = async () => {
-      try {
-        const response = await fetch('/api/status');
-        if (response.ok) {
-          const data = await response.json();
-          setStatus(data);
-        }
-      } catch (e) {
-        console.error('Failed to fetch status:', e);
-      }
-    };
-
-    fetchStatus();
-    const interval = setInterval(fetchStatus, 5000);
-    return () => clearInterval(interval);
+    } catch {
+      // Ignore - status is secondary to WebSocket connection
+    }
   }, [setStatus]);
+  usePolling(fetchStatus, 30000);
 
   // Fetch available models on mount
   useEffect(() => {
@@ -159,17 +76,6 @@ export function Sidebar({ onClose }: SidebarProps) {
     fetchModels();
   }, []); // Run once on mount
 
-  const handleClearHistory = async () => {
-    if (window.confirm('Clear all messages?')) {
-      try {
-        await fetch('/api/chat/clear', { method: 'POST' });
-        clearMessages();
-      } catch (e) {
-        console.error('Failed to clear history:', e);
-      }
-    }
-  };
-
   return (
     <>
       <div className="h-full glass flex flex-col">
@@ -185,7 +91,7 @@ export function Sidebar({ onClose }: SidebarProps) {
               <span className="text-chat-text font-bold text-lg">AURA</span>
               <div className="text-xs text-chat-text-secondary">v3.0 ALIVE</div>
               <AuraStatusLine
-                status={isLoading ? 'Thinking...' : ambientStatus}
+                status={isLoading ? 'Thinking...' : null}
                 isVisible={connectionStatus === 'connected'}
               />
             </div>
@@ -199,6 +105,14 @@ export function Sidebar({ onClose }: SidebarProps) {
             </button>
           )}
         </div>
+
+        {/* Conversations */}
+        <div className="px-4 pt-3 pb-1">
+          <ConversationList />
+        </div>
+
+        {/* Gradient divider */}
+        <div className="mx-4 divider-gradient" />
 
         {/* Status section */}
         <div className="flex-1 overflow-y-auto p-4 space-y-5">
@@ -228,44 +142,12 @@ export function Sidebar({ onClose }: SidebarProps) {
             )}
           </div>
 
-          {/* AURA Consideration - "Thinking about saying something" */}
-          <AuraConsideringIndicator
-            isConsidering={consideration.is_considering}
-            decidedAgainst={consideration.decided_against}
-            topic={consideration.topic}
-          />
-
-          {/* Gradient divider */}
-          <div className="divider-gradient" />
-
           {/* ALMA Emotion Panel */}
           <div>
             <h3 className="text-chat-text-secondary text-xs uppercase tracking-wider mb-3 font-medium">
               ALMA Emotional State
             </h3>
             <EmotionPanel />
-          </div>
-
-          {/* Gradient divider */}
-          <div className="divider-gradient" />
-
-          {/* Gateway Daemon - Proactive System */}
-          <div>
-            <h3 className="text-chat-text-secondary text-xs uppercase tracking-wider mb-3 font-medium">
-              Proactive System
-            </h3>
-            <ProactiveDaemonPanel />
-          </div>
-
-          {/* Gradient divider */}
-          <div className="divider-gradient" />
-
-          {/* Spontaneous Conversation Starters */}
-          <div>
-            <h3 className="text-chat-text-secondary text-xs uppercase tracking-wider mb-3 font-medium">
-              Conversation
-            </h3>
-            <ConversationStarterPanel />
           </div>
 
           {/* Gradient divider */}
@@ -323,57 +205,14 @@ export function Sidebar({ onClose }: SidebarProps) {
           {/* Gradient divider */}
           <div className="divider-gradient" />
 
-          {/* Memory Recall Indicator */}
-          <div>
-            <h3 className="text-chat-text-secondary text-xs uppercase tracking-wider mb-3 font-medium">
-              Memory System
-            </h3>
-            <MemoryRecallIndicator />
-          </div>
-
-          {/* Gradient divider */}
-          <div className="divider-gradient" />
-
-          {/* Context Awareness Heatmap */}
-          <div>
-            <h3 className="text-chat-text-secondary text-xs uppercase tracking-wider mb-3 font-medium">
-              Context Awareness
-            </h3>
-            <ContextHeatmap />
-          </div>
-
-          {/* Gradient divider */}
-          <div className="divider-gradient" />
-
-          {/* Thinking About Teaser */}
-          <div>
-            <h3 className="text-chat-text-secondary text-xs uppercase tracking-wider mb-3 font-medium">
-              Thought Process
-            </h3>
-            <ThinkingAboutTeaser />
-          </div>
-
-          {/* Gradient divider */}
-          <div className="divider-gradient" />
-
-          {/* Inner Thoughts */}
-          <div>
-            <h3 className="text-chat-text-secondary text-xs uppercase tracking-wider mb-3 font-medium">
-              Inner Monologue
-            </h3>
-            <InnerThoughtsPanel />
-          </div>
-
-          {/* Gradient divider */}
-          <div className="divider-gradient" />
-
-          {/* Ambient Idle Behaviors */}
-          <div>
-            <h3 className="text-chat-text-secondary text-xs uppercase tracking-wider mb-3 font-medium">
-              Ambient Presence
-            </h3>
-            <IdleBehaviorPanel />
-          </div>
+          {/* Sidebar panels - enabling one by one to find culprit */}
+          <ProactiveDaemonPanel />
+          <InnerThoughtsPanel />
+          <MemoryRecallIndicator />
+          <ContextHeatmap />
+          <ThinkingAboutTeaser />
+          <IdleBehaviorPanel />
+          <MotivationDrivesPanel />
 
           {/* Gradient divider */}
           <div className="divider-gradient" />
@@ -388,14 +227,7 @@ export function Sidebar({ onClose }: SidebarProps) {
         </div>
 
         {/* Footer actions */}
-        <div className="p-4 border-t border-chat-border/50 space-y-2">
-          <button
-            onClick={handleClearHistory}
-            className="w-full flex items-center gap-3 px-4 py-3 text-sm text-chat-text-secondary hover:text-chat-text hover:bg-chat-assistant/50 rounded-xl transition-all duration-200 group"
-          >
-            <TrashIcon className="w-5 h-5 transition-transform duration-200 group-hover:scale-110" />
-            <span>Clear History</span>
-          </button>
+        <div className="p-4 border-t border-chat-border/50">
           <button
             onClick={() => setShowSettings(true)}
             className="w-full flex items-center gap-3 px-4 py-3 text-sm text-chat-text-secondary hover:text-chat-text hover:bg-chat-assistant/50 rounded-xl transition-all duration-200 group"

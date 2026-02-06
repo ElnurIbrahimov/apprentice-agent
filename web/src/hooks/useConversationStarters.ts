@@ -1,5 +1,6 @@
 import { useEffect, useCallback, useRef } from 'react';
 import { useChatStore } from '../store/chatStore';
+import { usePolling } from './usePolling';
 
 interface ConversationStarter {
   type: string;
@@ -19,7 +20,6 @@ interface ConversationStarter {
 export function useConversationStarters(enabled: boolean = true) {
   const { addMessage, isLoading } = useChatStore();
   const lastStarterTime = useRef<string | null>(null);
-  const idleStartTime = useRef<number>(Date.now());
   const lastActivityTime = useRef<number>(Date.now());
 
   // Track user activity
@@ -68,7 +68,6 @@ export function useConversationStarters(enabled: boolean = true) {
             addMessage({
               role: 'assistant',
               content: starter.content,
-              timestamp: new Date().toISOString(),
               proactive: {
                 action: 'conversation_starter',
                 trigger: starter.type,
@@ -102,7 +101,6 @@ export function useConversationStarters(enabled: boolean = true) {
             addMessage({
               role: 'assistant',
               content: starter.content,
-              timestamp: new Date().toISOString(),
               proactive: {
                 action: 'conversation_starter',
                 trigger: starter.type,
@@ -117,25 +115,11 @@ export function useConversationStarters(enabled: boolean = true) {
     }
   }, [enabled, isLoading, addMessage]);
 
-  // Set up polling intervals
-  useEffect(() => {
-    if (!enabled) return;
+  // Poll for pending starters every 30 seconds
+  usePolling(checkPending, 30000, { enabled });
 
-    // Check for pending starters every 10 seconds
-    const pendingInterval = setInterval(checkPending, 10000);
-
-    // Try to generate starters every 2 minutes (if conditions are met)
-    const generateInterval = setInterval(generateStarter, 120000);
-
-    // Initial check after 30 seconds
-    const initialTimeout = setTimeout(checkPending, 30000);
-
-    return () => {
-      clearInterval(pendingInterval);
-      clearInterval(generateInterval);
-      clearTimeout(initialTimeout);
-    };
-  }, [enabled, checkPending, generateStarter]);
+  // Try to generate starters every 2 minutes (if conditions are met)
+  usePolling(generateStarter, 120000, { enabled });
 
   // Manual trigger for testing
   const triggerStarter = useCallback(async (force: boolean = true) => {
@@ -152,7 +136,6 @@ export function useConversationStarters(enabled: boolean = true) {
           addMessage({
             role: 'assistant',
             content: data.starter.content,
-            timestamp: new Date().toISOString(),
             proactive: {
               action: 'conversation_starter',
               trigger: data.starter.type,

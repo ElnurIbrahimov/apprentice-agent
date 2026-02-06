@@ -1,4 +1,6 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
+import { usePolling } from '../hooks/usePolling';
+import { useChatStore } from '../store/chatStore';
 import {
   PlayIcon,
   PauseIcon,
@@ -74,7 +76,9 @@ export function ProactiveDaemonPanel() {
     }
   }, []);
 
-  // Fetch pending messages
+  const addChatMessage = useChatStore((state) => state.addMessage);
+
+  // Fetch pending messages and inject into chat
   const fetchMessages = useCallback(async () => {
     if (!status?.running) return;
     try {
@@ -82,23 +86,33 @@ export function ProactiveDaemonPanel() {
       if (response.ok) {
         const data = await response.json();
         if (data.messages?.length > 0) {
+          // Add to sidebar panel
           setMessages(prev => [...prev, ...data.messages].slice(-10));
+          // Inject each message into the main chat with proactive styling
+          for (const msg of data.messages) {
+            addChatMessage({
+              role: 'assistant',
+              content: msg.content,
+              proactive: {
+                action: msg.action,
+                trigger: 'daemon',
+                confidence: msg.metadata?.confidence,
+              },
+            });
+          }
         }
       }
     } catch (e) {
       console.error('Messages fetch error:', e);
     }
-  }, [status?.running]);
+  }, [status?.running, addChatMessage]);
 
-  // Poll for status and messages
-  useEffect(() => {
-    fetchStatus();
-    const interval = setInterval(() => {
-      fetchStatus();
-      fetchMessages();
-    }, 5000);
-    return () => clearInterval(interval);
+  // Poll for status and messages (15s - daemon status doesn't change rapidly)
+  const fetchAll = useCallback(async () => {
+    await fetchStatus();
+    await fetchMessages();
   }, [fetchStatus, fetchMessages]);
+  usePolling(fetchAll, 30000);
 
   // Control functions
   const startDaemon = async () => {
@@ -182,6 +196,16 @@ export function ProactiveDaemonPanel() {
           timestamp: new Date().toISOString(),
           metadata: { test: true },
         }].slice(-10));
+        // Inject into chat immediately with proactive styling
+        addChatMessage({
+          role: 'assistant',
+          content: data.content,
+          proactive: {
+            action: data.action,
+            trigger: 'test',
+            confidence: 0.85,
+          },
+        });
       }
     } finally {
       setLoading(false);

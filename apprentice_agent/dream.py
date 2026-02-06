@@ -35,6 +35,13 @@ class DreamMode:
         print("DREAM MODE - Memory Consolidation")
         print("=" * 60 + "\n")
 
+        # Record real thought: dream mode beginning
+        try:
+            from api.routes.thinking import record_thought
+            record_thought("analyzing", "entering dream mode: consolidating memories...", 0.8, "dream")
+        except Exception:
+            pass
+
         # Step 1: Load today's logs
         print("[1/4] Loading metacognition logs...")
         logs = self._load_logs(date)
@@ -50,6 +57,11 @@ class DreamMode:
 
         # Step 3: Generate insights using LLM
         print("\n[3/4] Generating insights...")
+        try:
+            from api.routes.thinking import record_thought
+            record_thought("wondering", f"dreaming: generating insights from {len(logs)} interactions", 0.7, "dream")
+        except Exception:
+            pass
         insights = self._generate_insights(patterns, logs)
         print(f"      Generated {len(insights)} insights")
 

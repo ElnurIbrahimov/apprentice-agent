@@ -7,9 +7,13 @@ from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from api.services.agent_service import agent_service
-
 logger = logging.getLogger(__name__)
+
+# Lazy import to avoid blocking event loop at module load
+def _get_agent_service():
+    """Get agent_service with lazy loading."""
+    from api.services.agent_service import agent_service
+    return agent_service
 
 router = APIRouter(prefix="/api", tags=["features"])
 
@@ -40,7 +44,7 @@ async def get_mood():
 
 
 def _get_mood_sync() -> dict:
-    agent = agent_service.agent
+    agent = _get_agent_service().agent
     if "evoemo" in agent.tools:
         evoemo = agent.tools["evoemo"]
         state = evoemo.get_state() if hasattr(evoemo, 'get_state') else {}
@@ -68,7 +72,7 @@ async def get_mood_history():
 
 
 def _get_mood_history_sync() -> dict:
-    agent = agent_service.agent
+    agent = _get_agent_service().agent
     if "evoemo" in agent.tools:
         evoemo = agent.tools["evoemo"]
         session = evoemo.get_session_summary() if hasattr(evoemo, 'get_session_summary') else {}
@@ -110,7 +114,7 @@ async def get_aura_status():
 
 
 def _get_aura_sync() -> dict:
-    agent = agent_service.agent
+    agent = _get_agent_service().agent
     if hasattr(agent, 'aura') and agent.aura:
         aura = agent.aura
         try:
@@ -148,7 +152,7 @@ async def aura_remember(request: RememberRequest):
 
 
 def _aura_remember_sync(fact: str) -> dict:
-    agent = agent_service.agent
+    agent = _get_agent_service().agent
     if hasattr(agent, 'aura') and agent.aura and fact.strip():
         success = agent.aura.remember(fact.strip(), importance=0.7)
         return {"success": success, "fact": fact[:50]}
@@ -186,7 +190,7 @@ async def get_thoughts():
 
 
 def _get_thoughts_sync() -> dict:
-    agent = agent_service.agent
+    agent = _get_agent_service().agent
     if "inner_monologue" in agent.tools:
         monologue = agent.tools["inner_monologue"]
         thoughts = monologue.get_recent_thoughts(15) if hasattr(monologue, 'get_recent_thoughts') else []
@@ -221,7 +225,7 @@ async def get_reasoning_chain():
 
 
 def _get_reasoning_sync() -> str:
-    agent = agent_service.agent
+    agent = _get_agent_service().agent
     if "inner_monologue" in agent.tools:
         return agent.tools["inner_monologue"].get_reasoning_chain()
     return "No reasoning chain available."
@@ -231,7 +235,7 @@ def _get_reasoning_sync() -> str:
 async def clear_thoughts():
     """Clear the thought stream."""
     try:
-        agent = agent_service.agent
+        agent = _get_agent_service().agent
         if "inner_monologue" in agent.tools:
             agent.tools["inner_monologue"].stream.clear()
         return {"success": True}
@@ -264,7 +268,7 @@ async def get_knowledge_graph(center: Optional[str] = None, depth: int = 2):
 
 
 def _get_kg_sync(center: Optional[str], depth: int) -> dict:
-    agent = agent_service.agent
+    agent = _get_agent_service().agent
     if "knowledge_graph" not in agent.tools:
         return {"nodes": [], "edges": [], "stats": {}}
 
@@ -336,7 +340,7 @@ async def get_guardian_status():
 
 
 def _get_guardian_sync() -> dict:
-    agent = agent_service.agent
+    agent = _get_agent_service().agent
     if hasattr(agent, 'guardian') and agent.guardian:
         guardian = agent.guardian
         # Use get_stats() - the correct method name
@@ -375,6 +379,7 @@ class NeuroDreamResponse(BaseModel):
     total_insights: int = 0
     dream_journal: List[Dict[str, Any]] = []
     insights: List[Dict[str, Any]] = []
+    learned_context: Optional[Dict[str, Any]] = None
 
 
 @router.get("/neurodream", response_model=NeuroDreamResponse)
@@ -390,12 +395,24 @@ async def get_neurodream_status():
 
 
 def _get_neurodream_sync() -> dict:
-    agent = agent_service.agent
+    agent = _get_agent_service().agent
     if hasattr(agent, 'neurodream') and agent.neurodream:
         nd = agent.neurodream
         status = nd.get_status() if hasattr(nd, 'get_status') else {}
         journal = nd.get_dream_journal(n=5) if hasattr(nd, 'get_dream_journal') else []
         insights = nd.get_insights() if hasattr(nd, 'get_insights') else []
+        learned_ctx = None
+        if hasattr(nd, 'get_learned_context') and nd.get_learned_context():
+            lc = nd.get_learned_context()
+            learned_ctx = {
+                "version": lc.version,
+                "generated_at": lc.generated_at,
+                "user_summary": lc.user_summary,
+                "key_facts_count": len(lc.key_facts),
+                "preferences_count": len(lc.preferences),
+                "ongoing_topics": lc.ongoing_topics,
+                "conversations_processed": lc.conversations_processed,
+            }
         return {
             "enabled": True,
             "is_sleeping": status.get("is_sleeping", False),
@@ -403,7 +420,8 @@ def _get_neurodream_sync() -> dict:
             "total_sessions": status.get("total_sessions", 0),
             "total_insights": status.get("total_insights", 0),
             "dream_journal": journal[-5:] if journal else [],
-            "insights": insights[-5:] if insights else []
+            "insights": insights[-5:] if insights else [],
+            "learned_context": learned_ctx,
         }
     return {"enabled": False}
 
@@ -414,7 +432,7 @@ def _trigger_sleep_sync() -> dict:
     start = time.time()
     logger.info("[NeuroDream] Starting sleep trigger...")
 
-    agent = agent_service.agent
+    agent = _get_agent_service().agent
     if not hasattr(agent, 'neurodream') or not agent.neurodream:
         return {"success": False, "error": "NeuroDream not available"}
 
@@ -450,7 +468,7 @@ async def trigger_sleep():
 
 def _trigger_wake_sync() -> dict:
     """Sync helper for wake trigger."""
-    agent = agent_service.agent
+    agent = _get_agent_service().agent
     if hasattr(agent, 'neurodream') and agent.neurodream:
         result = agent.neurodream.wake_up(reason="user_request")
         return {"success": True, "result": result}
@@ -463,6 +481,44 @@ async def trigger_wake():
     try:
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(None, _trigger_wake_sync)
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/neurodream/learned-context")
+async def get_learned_context():
+    """Get the current Letta-style learned context (Phase 4D)."""
+    try:
+        agent = _get_agent_service().agent
+        if hasattr(agent, 'neurodream') and agent.neurodream:
+            nd = agent.neurodream
+            ctx = nd.get_learned_context()
+            if ctx:
+                return {
+                    "available": True,
+                    "context": ctx.to_dict(),
+                    "system_prompt_preview": ctx.to_system_prompt()[:500],
+                }
+        return {"available": False, "message": "No learned context generated yet"}
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
+def _generate_learned_context_sync() -> dict:
+    """Sync helper for learned context generation."""
+    agent = _get_agent_service().agent
+    if hasattr(agent, 'neurodream') and agent.neurodream:
+        return agent.neurodream.generate_learned_context()
+    return {"success": False, "error": "NeuroDream not available"}
+
+
+@router.post("/neurodream/learned-context/generate")
+async def generate_learned_context():
+    """Manually trigger Letta-style learned context generation (Phase 4D)."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, _generate_learned_context_sync)
         return result
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -492,7 +548,7 @@ async def get_fluxmind_status():
 
 
 def _get_fluxmind_sync() -> dict:
-    agent = agent_service.agent
+    agent = _get_agent_service().agent
     if "fluxmind" in agent.tools:
         fm = agent.tools["fluxmind"]
         status = fm.status() if hasattr(fm, 'status') else {}
@@ -527,7 +583,7 @@ async def get_voice_status():
     """Get voice/TTS status."""
     try:
         # TTS is typically a separate singleton, check if agent has TTS
-        agent = agent_service.agent
+        agent = _get_agent_service().agent
 
         # Check for PersonaPlex tool
         if "personaplex" in agent.tools:
@@ -552,7 +608,7 @@ async def get_voice_status():
 async def get_available_tools():
     """Get list of available tools."""
     try:
-        agent = agent_service.agent
+        agent = _get_agent_service().agent
         tools = []
         for name, tool in agent.tools.items():
             tools.append({
@@ -605,7 +661,7 @@ class RAGStatsResponse(BaseModel):
 async def get_rag_stats():
     """Get RAG index statistics."""
     try:
-        agent = agent_service.agent
+        agent = _get_agent_service().agent
         if "local_rag" not in agent.tools:
             return RAGStatsResponse()
 
@@ -621,7 +677,7 @@ async def get_rag_stats():
 async def get_rag_files():
     """List indexed files."""
     try:
-        agent = agent_service.agent
+        agent = _get_agent_service().agent
         if "local_rag" not in agent.tools:
             return {"files": [], "error": "RAG not available"}
 
@@ -647,7 +703,7 @@ async def index_documents(request: RAGIndexRequest):
 
 def _index_documents_sync(path: str, recursive: bool) -> dict:
     from pathlib import Path
-    agent = agent_service.agent
+    agent = _get_agent_service().agent
     if "local_rag" not in agent.tools:
         return {"success": False, "error": "RAG not available"}
 
@@ -674,7 +730,7 @@ async def search_documents(request: RAGSearchRequest):
 
 
 def _search_documents_sync(query: str, top_k: int) -> dict:
-    agent = agent_service.agent
+    agent = _get_agent_service().agent
     if "local_rag" not in agent.tools:
         return {"success": False, "error": "RAG not available"}
 
@@ -699,7 +755,7 @@ def _search_documents_sync(query: str, top_k: int) -> dict:
 async def clear_rag_index():
     """Clear the RAG index."""
     try:
-        agent = agent_service.agent
+        agent = _get_agent_service().agent
         if "local_rag" not in agent.tools:
             return {"success": False, "error": "RAG not available"}
 
@@ -761,7 +817,7 @@ async def get_amem_stats():
 
 
 def _get_amem_stats_sync() -> dict:
-    agent = agent_service.agent
+    agent = _get_agent_service().agent
     # Check tools dict for amem
     amem_tool = agent.tools.get('amem')
     if amem_tool and hasattr(amem_tool, 'amem'):
@@ -788,7 +844,7 @@ async def get_amem_notes(limit: int = 20, category: Optional[str] = None):
 
 
 def _get_amem_notes_sync(limit: int, category: Optional[str]) -> dict:
-    agent = agent_service.agent
+    agent = _get_agent_service().agent
 
     # Get A-MEM instance from tools dict
     amem = None
@@ -849,7 +905,7 @@ async def get_amem_note(note_id: str):
 
 
 def _get_amem_note_sync(note_id: str) -> dict:
-    agent = agent_service.agent
+    agent = _get_agent_service().agent
 
     # Get A-MEM instance from tools dict
     amem = None
@@ -910,7 +966,7 @@ async def search_amem(request: AMEMSearchRequest):
 
 
 def _search_amem_sync(query: str, k: int, follow_links: bool) -> dict:
-    agent = agent_service.agent
+    agent = _get_agent_service().agent
 
     # Get A-MEM instance from tools dict
     amem = None
@@ -963,7 +1019,7 @@ async def amem_remember(request: AMEMRememberRequest):
 def _amem_remember_sync(
     content: str, tags: List[str], category: str, importance: float
 ) -> dict:
-    agent = agent_service.agent
+    agent = _get_agent_service().agent
 
     # Prefer hybrid memory for cross-system storage
     hybrid_mem = agent.tools.get('hybrid_amem')
@@ -1005,7 +1061,7 @@ def _amem_remember_sync(
 async def get_amem_boxes():
     """Get A-MEM boxes (soft clusters)."""
     try:
-        agent = agent_service.agent
+        agent = _get_agent_service().agent
 
         # Get A-MEM instance from tools dict
         amem = None
@@ -1037,7 +1093,7 @@ async def consolidate_amem():
 
 
 def _consolidate_amem_sync() -> dict:
-    agent = agent_service.agent
+    agent = _get_agent_service().agent
 
     # Prefer hybrid consolidation
     hybrid_mem = agent.tools.get('hybrid_amem')
@@ -1082,7 +1138,7 @@ async def get_proto_agi_status():
 
 
 def _get_proto_agi_sync() -> dict:
-    agent = agent_service.agent
+    agent = _get_agent_service().agent
     if hasattr(agent, 'proto_agi') and agent.proto_agi:
         agi = agent.proto_agi
         try:
@@ -1111,7 +1167,7 @@ def _get_proto_agi_sync() -> dict:
 async def set_proto_agi_mode(mode: str):
     """Set Proto-AGI operation mode (idle, assist, operate)."""
     try:
-        agent = agent_service.agent
+        agent = _get_agent_service().agent
         if hasattr(agent, 'proto_agi') and agent.proto_agi:
             agent.proto_agi.set_mode(mode)
             return {"success": True, "mode": mode}
@@ -1124,7 +1180,7 @@ async def set_proto_agi_mode(mode: str):
 async def start_proto_agi_loop(cycle_interval: float = 60.0):
     """Start the Proto-AGI autonomous cognitive loop."""
     try:
-        agent = agent_service.agent
+        agent = _get_agent_service().agent
         if hasattr(agent, 'start_proto_agi'):
             agent.start_proto_agi(cycle_interval)
             return {"success": True, "message": f"Proto-AGI loop started (interval: {cycle_interval}s)"}
@@ -1137,7 +1193,7 @@ async def start_proto_agi_loop(cycle_interval: float = 60.0):
 async def stop_proto_agi_loop():
     """Stop the Proto-AGI autonomous cognitive loop."""
     try:
-        agent = agent_service.agent
+        agent = _get_agent_service().agent
         if hasattr(agent, 'stop_proto_agi'):
             agent.stop_proto_agi()
             return {"success": True, "message": "Proto-AGI loop stopped"}
@@ -1160,7 +1216,7 @@ async def get_proto_agi_traces(limit: int = 10):
 
 
 def _get_traces_sync(limit: int) -> dict:
-    agent = agent_service.agent
+    agent = _get_agent_service().agent
     if hasattr(agent, 'proto_agi') and agent.proto_agi:
         agi = agent.proto_agi
         if hasattr(agi, 'get_recent_traces'):
@@ -1189,7 +1245,7 @@ def _get_traces_sync(limit: int) -> dict:
 async def get_hybrid_memory_stats():
     """Get combined hybrid memory statistics."""
     try:
-        agent = agent_service.agent
+        agent = _get_agent_service().agent
         hybrid_mem = agent.tools.get('hybrid_amem')
         if hybrid_mem:
             return hybrid_mem.get_stats()
@@ -1212,7 +1268,7 @@ async def search_hybrid_memory(request: AMEMSearchRequest):
 
 
 def _search_hybrid_sync(query: str, k: int) -> dict:
-    agent = agent_service.agent
+    agent = _get_agent_service().agent
 
     hybrid_mem = agent.tools.get('hybrid_amem')
     if not hybrid_mem:
@@ -1244,7 +1300,7 @@ def _search_hybrid_sync(query: str, k: int) -> dict:
 async def get_memory_context(query: str, max_tokens: int = 500):
     """Get memory context for a query (for LLM prompt injection)."""
     try:
-        agent = agent_service.agent
+        agent = _get_agent_service().agent
         hybrid_mem = agent.tools.get('hybrid_amem')
         if hybrid_mem:
             context = hybrid_mem.get_context(query, max_tokens=max_tokens)
@@ -1252,3 +1308,269 @@ async def get_memory_context(query: str, max_tokens: int = 500):
         return {"context": "", "error": "Hybrid memory not available"}
     except Exception as e:
         return {"context": "", "error": str(e)}
+
+
+# ============================================================================
+# Metacognitive Self-Improvement (Phase 6B)
+# ============================================================================
+
+@router.get("/metacognition/status")
+async def get_metacognition_status():
+    """Get metacognitive engine status: capabilities, goals, improvements."""
+    try:
+        from apprentice_agent.consciousness.metacognition import get_metacognitive_engine
+        mc = get_metacognitive_engine()
+        return mc.get_status()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.get("/metacognition/capabilities")
+async def get_capabilities():
+    """Get AURA's self-assessed capability profile."""
+    try:
+        from apprentice_agent.consciousness.metacognition import get_metacognitive_engine
+        mc = get_metacognitive_engine()
+        caps = mc.assess_capabilities()
+        return {
+            "capabilities": {
+                d: {"score": c.score, "confidence": c.confidence,
+                    "trend": c.trend, "evidence": c.evidence}
+                for d, c in caps.items()
+            }
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.get("/metacognition/evaluation")
+async def get_evaluation():
+    """Get metacognitive evaluation report."""
+    try:
+        from apprentice_agent.consciousness.metacognition import get_metacognitive_engine
+        mc = get_metacognitive_engine()
+        return mc.evaluate_progress()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.post("/metacognition/cycle")
+async def run_metacognitive_cycle():
+    """Trigger a full metacognitive cycle: assess -> plan -> improve -> evaluate."""
+    try:
+        from apprentice_agent.consciousness.metacognition import get_metacognitive_engine
+        mc = get_metacognitive_engine()
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, mc.run_metacognitive_cycle)
+        return result
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.get("/metacognition/self-model")
+async def get_self_model():
+    """Get AURA's self-model and system prompt injection preview."""
+    try:
+        from apprentice_agent.consciousness.metacognition import get_metacognitive_engine
+        mc = get_metacognitive_engine()
+        model = mc.get_self_model()
+        return {
+            "strengths": model.strengths,
+            "weaknesses": model.weaknesses,
+            "active_goals": [
+                {"id": g.id, "domain": g.domain, "description": g.description}
+                for g in model.learning_goals if g.status in ("pending", "active")
+            ],
+            "improvement_rate": (
+                model.successful_improvements / model.total_improvements
+                if model.total_improvements > 0 else 0.0
+            ),
+            "system_prompt_preview": model.to_system_prompt(),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ============================================================================
+# THEORY OF MIND (Phase 6C: User Mental Modeling)
+# ============================================================================
+
+@router.get("/theory-of-mind/status")
+async def get_tom_status():
+    """Get Theory of Mind engine status and summary."""
+    try:
+        from apprentice_agent.proactive.theory_of_mind import get_theory_of_mind
+        tom = get_theory_of_mind()
+        status = tom.get_status()
+        return {"active": True, **status}
+    except Exception as e:
+        return {"active": False, "error": str(e)}
+
+
+@router.get("/theory-of-mind/model")
+async def get_user_model():
+    """Get the full user mental model."""
+    try:
+        from apprentice_agent.proactive.theory_of_mind import get_theory_of_mind
+        tom = get_theory_of_mind()
+        return {
+            "full_model": tom.get_full_model(),
+            "style_guidance": tom.get_style_guidance(),
+            "observations_for_inference": tom.get_observations_for_inference(),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.get("/theory-of-mind/topics")
+async def get_topic_knowledge():
+    """Get tracked topic knowledge levels."""
+    try:
+        from apprentice_agent.proactive.theory_of_mind import get_theory_of_mind
+        tom = get_theory_of_mind()
+        return {
+            "topics": tom.get_knowledge_summary(top_n=20),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.post("/theory-of-mind/observe")
+async def observe_message(request: dict):
+    """Manually feed a message for Theory of Mind to observe."""
+    try:
+        from apprentice_agent.proactive.theory_of_mind import get_theory_of_mind
+        tom = get_theory_of_mind()
+        message = request.get("message", "")
+        role = request.get("role", "user")
+        if not message:
+            return {"error": "message is required"}
+        tom.observe_message(message, role=role)
+        return {
+            "success": True,
+            "emotional_state": tom.get_emotional_state().to_dict(),
+            "style": tom.get_communication_style().to_dict(),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ============================================================================
+# IDLE PRESENCE (Phase 6D: Genuine Idle Presence)
+# ============================================================================
+
+@router.get("/idle-presence/status")
+async def get_idle_presence_status():
+    """Get genuine idle presence engine status."""
+    try:
+        from apprentice_agent.consciousness.idle_presence import get_idle_presence_engine
+        ipe = get_idle_presence_engine()
+        return ipe.get_status()
+    except Exception as e:
+        return {"active": False, "error": str(e)}
+
+
+@router.get("/idle-presence/state")
+async def get_idle_presence_state():
+    """Get full idle presence state with cognitive load and activities."""
+    try:
+        from apprentice_agent.consciousness.idle_presence import get_idle_presence_engine
+        ipe = get_idle_presence_engine()
+        return ipe.get_state()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.get("/idle-presence/cognitive-load")
+async def get_cognitive_load():
+    """Get current cognitive load breakdown."""
+    try:
+        from apprentice_agent.consciousness.idle_presence import get_idle_presence_engine
+        ipe = get_idle_presence_engine()
+        load = ipe.compute_cognitive_load()
+        return {
+            **load.to_dict(),
+            "breath_rate": ipe.get_breath_rate_from_load(),
+            "glow_intensity": ipe.get_glow_from_load(),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.get("/idle-presence/activities")
+async def get_idle_activities():
+    """Get recent background activities."""
+    try:
+        from apprentice_agent.consciousness.idle_presence import get_idle_presence_engine
+        ipe = get_idle_presence_engine()
+        return {"activities": ipe.get_recent_activities(limit=20)}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ============================================================================
+# INTRINSIC MOTIVATION (Phase 6E: Drive System)
+# ============================================================================
+
+@router.get("/motivation/status")
+async def get_motivation_status():
+    """Get intrinsic motivation engine status."""
+    try:
+        from apprentice_agent.consciousness.intrinsic_motivation import get_intrinsic_motivation
+        im = get_intrinsic_motivation()
+        return im.get_status()
+    except Exception as e:
+        return {"active": False, "error": str(e)}
+
+
+@router.get("/motivation/drives")
+async def get_drives():
+    """Get current drive urgency levels."""
+    try:
+        from apprentice_agent.consciousness.intrinsic_motivation import get_intrinsic_motivation
+        im = get_intrinsic_motivation()
+        return {"drives": im.get_drives_summary()}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.post("/motivation/cycle")
+async def run_motivation_cycle():
+    """Run a full intrinsic motivation cycle."""
+    try:
+        from apprentice_agent.consciousness.intrinsic_motivation import get_intrinsic_motivation
+        im = get_intrinsic_motivation()
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, im.run_motivation_cycle)
+        return result
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.get("/motivation/actions")
+async def get_motivation_actions():
+    """Get drive-motivated pending actions."""
+    try:
+        from apprentice_agent.consciousness.intrinsic_motivation import get_intrinsic_motivation
+        im = get_intrinsic_motivation()
+        actions = im.generate_actions()
+        return {
+            "actions": [
+                {"drive": a.drive.value, "action": a.action,
+                 "description": a.description, "priority": round(a.priority, 2)}
+                for a in actions
+            ]
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.get("/motivation/prompt")
+async def get_motivation_prompt():
+    """Get the motivation system prompt injection preview."""
+    try:
+        from apprentice_agent.consciousness.intrinsic_motivation import get_intrinsic_motivation
+        im = get_intrinsic_motivation()
+        return {"prompt": im.get_context_for_prompt()}
+    except Exception as e:
+        return {"error": str(e)}

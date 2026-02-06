@@ -378,6 +378,21 @@ class AURAEngine:
         memories = self.memory_retriever.get_relevant_memories(user_message)
         logger.debug(f"Retrieved {len(memories)} relevant memories")
 
+        # === PHASE 1: Wire real memory recall tracking ===
+        try:
+            from api.routes.memory import record_memory_recall
+            if memories:
+                memory_texts = [str(m)[:100] for m in memories[:5]]
+                record_memory_recall("retriever", len(memories), user_message, memory_texts)
+        except Exception:
+            pass
+        try:
+            from api.routes.context import track_context_from_memory
+            if memories:
+                track_context_from_memory([str(m)[:100] for m in memories[:5]])
+        except Exception:
+            pass
+
         # 3. Get user profile
         user_profile = self.memory_retriever.get_user_profile()
 
@@ -389,8 +404,27 @@ class AURAEngine:
             "warmth": getattr(self.emotion.state, 'warmth', 0.5)
         }
 
+        # === PHASE 1: Wire emotion tracking to ContextHeatmap ===
+        try:
+            from api.routes.context import track_context_from_emotion
+            track_context_from_emotion(emotional_context["mood"], getattr(self.emotion.state, 'energy', 0.5))
+        except Exception:
+            pass
+
         # 5. Extract profile information from message
         self.memory.extract_and_store_profile(user_message)
+
+        # === PHASE 1: Record real thinking — what AURA is actually processing ===
+        try:
+            from api.routes.thinking import get_manager as get_thinking_manager
+            tm = get_thinking_manager()
+            # Record that we're recalling memories (real cognitive step)
+            if memories:
+                tm.record_real_thought("recalling", f"retrieved {len(memories)} memories about: {user_message[:50]}", intensity=0.6, source="engine")
+            # Record emotional processing
+            tm.record_real_thought("analyzing", f"emotional state: {emotional_context['mood']}", intensity=0.4, source="emotion")
+        except Exception:
+            pass
 
         # 6. Generate with LLM + full context
         response = self.llm.generate(
@@ -409,6 +443,14 @@ class AURAEngine:
             # Only use humanized if it's not too different
             if len(result.modifications) <= 2:
                 response = result.humanized
+
+        # === PHASE 1: Record that LLM generation completed ===
+        try:
+            from api.routes.thinking import get_manager as get_thinking_manager
+            tm = get_thinking_manager()
+            tm.record_real_thought("formulating", f"generated response ({len(response)} chars)", intensity=0.5, source="engine")
+        except Exception:
+            pass
 
         # 8. Store interaction for future memory
         self.memory_retriever.store_interaction(user_message, response, chat_id)

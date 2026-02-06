@@ -262,7 +262,7 @@ class Config:
     # AURA v3.0 ALIVE System Configuration
     AURA_ENABLED: bool = os.getenv("AURA_ENABLED", "true").lower() == "true"
     AURA_SOUL: str = os.getenv("AURA_SOUL", "SOUL_PERSONAL")  # SOUL_PERSONAL or SOUL_ENTERPRISE
-    AURA_PROACTIVE: bool = os.getenv("AURA_PROACTIVE", "true").lower() == "true"
+    AURA_PROACTIVE: bool = os.getenv("AURA_PROACTIVE", "false").lower() == "true"  # Disabled to prevent event loop blocking
     AURA_THINKING: bool = os.getenv("AURA_THINKING", "true").lower() == "true"
     AURA_HUMANIZE: bool = os.getenv("AURA_HUMANIZE", "true").lower() == "true"
 

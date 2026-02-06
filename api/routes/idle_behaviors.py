@@ -1,11 +1,13 @@
 """Ambient Idle Behaviors - Makes AURA feel alive when not actively responding."""
 
+import asyncio
+import functools
 import logging
 import random
 import time
 from typing import Dict, List, Optional, Any
 from datetime import datetime
-from threading import Lock
+from threading import RLock
 from enum import Enum
 
 from fastapi import APIRouter
@@ -176,7 +178,7 @@ class IdleStateManager:
     """Manages AURA's ambient idle behaviors."""
 
     def __init__(self):
-        self._lock = Lock()
+        self._lock = RLock()
         self._current_behavior: Optional[IdleBehavior] = None
         self._last_activity_time = time.time()
         self._last_behavior_change = 0.0
@@ -209,13 +211,158 @@ class IdleStateManager:
     def _get_emotion_context(self) -> Optional[str]:
         """Get current emotional state from ALMA."""
         try:
-            from api.routes.features import get_alma_state
-            state = get_alma_state()
-            if state:
-                return state.get("dominant_emotion")
+            from apprentice_agent.emotion.alma_engine import alma_engine
+            if alma_engine and alma_engine.current_state:
+                return alma_engine.current_state.get("dominant_emotion")
         except Exception:
             pass
         return None
+
+    def _get_real_idle_status(self, behavior_type: IdleBehaviorType) -> Optional[str]:
+        """Get a REAL status message from actual cognitive systems.
+
+        Queries multiple always-available systems and selects based on
+        behavior type for variety. Returns real data almost every time.
+        """
+        sources = []
+
+        # === Idle Presence Engine (Phase 6D - highest priority genuine activity) ===
+        try:
+            from apprentice_agent.consciousness.idle_presence import get_idle_presence_engine
+            ipe = get_idle_presence_engine()
+            activity_status = ipe.get_current_activity_status()
+            if activity_status:
+                sources.append(activity_status)
+        except Exception:
+            pass
+
+        # === ALMA emotional state (always available) ===
+        try:
+            from apprentice_agent.emotion.alma_engine import alma_engine
+            if alma_engine:
+                state = alma_engine.get_emotional_state()
+                if state:
+                    emotion = state.get("dominant_emotion", "neutral")
+                    pad = state.get("pad", {})
+                    pleasure = pad.get("pleasure", 0)
+                    arousal = pad.get("arousal", 0)
+                    neuro = state.get("neuromodulators", {})
+                    mood_info = state.get("mood", {})
+                    mood_name = mood_info.get("name", "neutral")
+                    active_count = len(state.get("active_emotions", []))
+
+                    # Rich emotional status messages
+                    if emotion != "neutral":
+                        sources.append(f"emotional state: {emotion} (pleasure: {pleasure:+.2f}, arousal: {arousal:+.2f})")
+                    if mood_name and mood_name != "neutral":
+                        sources.append(f"mood: {mood_name} (drifting naturally)")
+                    if active_count > 0:
+                        sources.append(f"processing {active_count} active emotion(s)")
+                    if neuro:
+                        dopa = neuro.get("dopamine", 0.5)
+                        sero = neuro.get("serotonin", 0.5)
+                        if abs(dopa - 0.5) > 0.1:
+                            sources.append(f"dopamine: {dopa:.2f} ({'elevated' if dopa > 0.5 else 'low'}) — {'motivated' if dopa > 0.5 else 'resting'}")
+                        if abs(sero - 0.5) > 0.1:
+                            sources.append(f"serotonin: {sero:.2f} — {'patient' if sero > 0.5 else 'restless'}")
+        except Exception:
+            pass
+
+        # === Gateway Daemon stats (always running) ===
+        try:
+            from apprentice_agent.proactive.gateway_daemon import get_gateway_daemon
+            daemon = get_gateway_daemon()
+            stats = daemon.get_stats()
+            events = stats.get("events_processed", 0)
+            decisions = stats.get("decisions_made", 0)
+            uptime = stats.get("uptime_seconds")
+            beliefs = stats.get("beliefs", {})
+            daemon_state = stats.get("state", "unknown")
+
+            if daemon_state == "running":
+                if uptime and uptime > 0:
+                    uptime_min = int(uptime / 60)
+                    sources.append(f"gateway daemon: active for {uptime_min}m, {events} events, {decisions} decisions")
+                if beliefs:
+                    user_focus = beliefs.get("user_focus_level", 0.5)
+                    user_activity = beliefs.get("user_activity", "unknown")
+                    if user_activity != "unknown":
+                        sources.append(f"user state: {user_activity} (focus: {user_focus:.1f})")
+        except Exception:
+            pass
+
+        # === Thinking system stats (always available) ===
+        try:
+            from api.routes.thinking import get_manager as get_thinking_manager
+            tm = get_thinking_manager()
+            stats = tm.get_stats()
+            real = stats.get("real_thoughts", 0)
+            total = stats.get("total_thoughts", 0)
+            active = stats.get("active_thoughts", 0)
+            if total > 0:
+                sources.append(f"cognitive activity: {real} real thoughts / {total} total ({active} active)")
+        except Exception:
+            pass
+
+        # === Memory recall tracker ===
+        try:
+            from api.routes.memory import get_tracker as get_memory_tracker
+            mem_tracker = get_memory_tracker()
+            stats = mem_tracker.get_stats()
+            recalls = stats.get("total_recalls", 0)
+            memories = stats.get("total_memories_retrieved", 0)
+            if recalls > 0:
+                sources.append(f"memory: {recalls} recall cycles, {memories} memories surfaced")
+        except Exception:
+            pass
+
+        # === Context focus tracker ===
+        try:
+            from api.routes.context import get_tracker as get_context_tracker
+            ctx_tracker = get_context_tracker()
+            focus_state = ctx_tracker.get_focus_state(limit=3)
+            items = focus_state.get("items", [])
+            if items:
+                top_topics = [item["name"] for item in items[:2]]
+                sources.append(f"attention on: {', '.join(top_topics)}")
+        except Exception:
+            pass
+
+        # === Event bus stats (via daemon) ===
+        try:
+            from apprentice_agent.proactive.gateway_daemon import get_gateway_daemon
+            daemon_ref = get_gateway_daemon()
+            bus_stats = daemon_ref.event_bus.get_stats()
+            published = bus_stats.get("events_published", 0)
+            if published > 0:
+                sources.append(f"event bus: {published} events flowing")
+        except Exception:
+            pass
+
+        # Select based on behavior type for variety
+        if not sources:
+            return None
+
+        # Map behavior types to preferred source indices for natural variety
+        # Index 0 = idle presence (genuine activity), 1+ = other sources
+        type_preferences = {
+            IdleBehaviorType.OBSERVING: [0, 1, 5, 6],    # IdlePresence, emotion, context, events
+            IdleBehaviorType.REFLECTING: [0, 3, 4, 1],    # IdlePresence, thinking, memory, emotion
+            IdleBehaviorType.ANTICIPATING: [2, 0, 5, 1],  # Daemon, IdlePresence, context, emotion
+            IdleBehaviorType.DRIFTING: [1, 0, 3, 6],      # Emotion, IdlePresence, thinking, events
+            IdleBehaviorType.FOCUSING: [0, 5, 3, 1],      # IdlePresence, context, thinking, emotion
+            IdleBehaviorType.RELAXING: [0, 1, 2, 4],      # IdlePresence, emotion, daemon, memory
+            IdleBehaviorType.CURIOUS: [0, 6, 4, 3],       # IdlePresence, events, memory, thinking
+            IdleBehaviorType.PROCESSING: [0, 2, 3, 4],    # IdlePresence, daemon, thinking, memory
+        }
+
+        preferred = type_preferences.get(behavior_type, [0, 1, 2])
+        for idx in preferred:
+            if idx < len(sources):
+                return sources[idx]
+
+        # Fallback: return first available
+        return sources[0] if sources else None
 
     def _select_behavior_type(self) -> IdleBehaviorType:
         """Select a behavior type based on context."""
@@ -310,7 +457,10 @@ class IdleStateManager:
             # Generate new behavior
             behavior_type = self._select_behavior_type()
             intensity = self._select_intensity(idle_duration)
-            status_message = random.choice(IDLE_STATUS_MESSAGES[behavior_type])
+
+            # PHASE 1: Try to get a REAL status from actual cognitive systems
+            real_status = self._get_real_idle_status(behavior_type)
+            status_message = real_status if real_status else random.choice(IDLE_STATUS_MESSAGES[behavior_type])
 
             # Vary duration based on intensity
             duration_base = {
@@ -355,7 +505,7 @@ class IdleStateManager:
             if is_idle:
                 self.generate_behavior()
 
-            return {
+            state = {
                 "is_idle": is_idle,
                 "idle_duration": round(idle_duration, 1),
                 "current_behavior": self._current_behavior.to_dict() if self._current_behavior else None,
@@ -364,8 +514,29 @@ class IdleStateManager:
                 "time_period": self._get_time_period(),
             }
 
+            # === Phase 6D: Add genuine cognitive load data ===
+            try:
+                from apprentice_agent.consciousness.idle_presence import get_idle_presence_engine
+                ipe = get_idle_presence_engine()
+                load = ipe.compute_cognitive_load()
+                state["cognitive_load"] = load.to_dict()
+                state["breath_rate_from_load"] = ipe.get_breath_rate_from_load()
+                state["glow_from_load"] = ipe.get_glow_from_load()
+                state["dream_state"] = {
+                    "active": ipe._dream_session_active,
+                    "phase": ipe._current_dream_phase,
+                }
+            except Exception:
+                pass
+
+            return state
+
     def get_animation_params(self) -> Dict[str, Any]:
-        """Get animation parameters for the avatar."""
+        """Get animation parameters for the avatar.
+
+        Phase 6D: Breath rate and glow are driven by actual cognitive load
+        rather than CSS-only intensity enums.
+        """
         with self._lock:
             behavior = self._current_behavior
 
@@ -379,29 +550,49 @@ class IdleStateManager:
                 "micro_movement_x": 0.0,
                 "micro_movement_y": 0.0,
                 "pulse_variation": 0.0,
+                "cognitive_load": 0.0,
             }
 
-            if behavior:
-                params["breath_rate_modifier"] = behavior.breath_rate
-                params["attention_x"] = behavior.attention_drift
+            # === Phase 6D: Drive from real cognitive load ===
+            try:
+                from apprentice_agent.consciousness.idle_presence import get_idle_presence_engine
+                ipe = get_idle_presence_engine()
+                params["breath_rate_modifier"] = ipe.get_breath_rate_from_load()
+                params["glow_intensity"] = ipe.get_glow_from_load()
+                load = ipe.compute_cognitive_load()
+                params["cognitive_load"] = round(load.total_load, 3)
 
-                # Intensity-based adjustments
-                intensity_glow = {
-                    IdleIntensity.DEEP: 0.3,
-                    IdleIntensity.LIGHT: 0.5,
-                    IdleIntensity.ALERT: 0.7,
-                    IdleIntensity.RESTLESS: 0.8,
-                }
-                params["glow_intensity"] = intensity_glow.get(behavior.intensity, 0.5)
+                # Deeper breathing when dreaming
+                if ipe._dream_session_active:
+                    if ipe._current_dream_phase == "deep":
+                        params["breath_depth_modifier"] = 1.3
+                    elif ipe._current_dream_phase == "rem":
+                        params["pulse_variation"] = 0.12  # Subtle REM pulse
+            except Exception:
+                # Fallback to behavior-based values
+                if behavior:
+                    params["breath_rate_modifier"] = behavior.breath_rate
+                    intensity_glow = {
+                        IdleIntensity.DEEP: 0.3,
+                        IdleIntensity.LIGHT: 0.5,
+                        IdleIntensity.ALERT: 0.7,
+                        IdleIntensity.RESTLESS: 0.8,
+                    }
+                    params["glow_intensity"] = intensity_glow.get(behavior.intensity, 0.5)
+
+            if behavior:
+                params["attention_x"] = behavior.attention_drift
 
                 # Behavior-specific adjustments
                 if behavior.type == IdleBehaviorType.CURIOUS:
                     params["attention_y"] = random.uniform(0.1, 0.3)
                 elif behavior.type == IdleBehaviorType.RELAXING:
-                    params["breath_depth_modifier"] = 1.2
-                elif behavior.type == IdleBehaviorType.RESTLESS:
+                    params["breath_depth_modifier"] = max(params["breath_depth_modifier"], 1.2)
+
+                # Intensity-specific adjustments
+                if behavior.intensity == IdleIntensity.RESTLESS:
                     params["micro_movement_x"] = random.uniform(-0.1, 0.1)
-                    params["pulse_variation"] = 0.15
+                    params["pulse_variation"] = max(params["pulse_variation"], 0.15)
 
             # Add time-based micro-movements
             t = time.time()
@@ -438,6 +629,21 @@ _manager = IdleStateManager()
 
 def get_manager() -> IdleStateManager:
     return _manager
+
+
+def init_idle_presence() -> None:
+    """Initialize Phase 6D idle presence engine and register callbacks.
+
+    Call this after all systems are initialized (e.g., from agent_service startup).
+    """
+    try:
+        from apprentice_agent.consciousness.idle_presence import get_idle_presence_engine
+        ipe = get_idle_presence_engine()
+        ipe.register_neurodream_callbacks()
+        ipe.start_background_tasks()
+        logger.info("[IdleBehaviors] Phase 6D idle presence engine initialized")
+    except Exception as e:
+        logger.debug(f"[IdleBehaviors] Idle presence init failed: {e}")
 
 
 # ============================================================================
@@ -482,21 +688,24 @@ class AnimationParamsResponse(BaseModel):
 async def get_idle_state():
     """Get current idle state with behavior info."""
     manager = get_manager()
-    return manager.get_state()
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, manager.get_state)
 
 
 @router.get("/animation")
 async def get_animation_params():
     """Get animation parameters for the avatar."""
     manager = get_manager()
-    return manager.get_animation_params()
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, manager.get_animation_params)
 
 
 @router.post("/activity")
 async def record_activity():
     """Record that user activity occurred (resets idle state)."""
     manager = get_manager()
-    manager.record_activity()
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, manager.record_activity)
     return {"status": "recorded"}
 
 
@@ -504,7 +713,8 @@ async def record_activity():
 async def generate_behavior(force: bool = False):
     """Generate a new idle behavior."""
     manager = get_manager()
-    behavior = manager.generate_behavior(force=force)
+    loop = asyncio.get_event_loop()
+    behavior = await loop.run_in_executor(None, functools.partial(manager.generate_behavior, force=force))
 
     if behavior:
         return {"generated": True, "behavior": behavior.to_dict()}
@@ -515,7 +725,8 @@ async def generate_behavior(force: bool = False):
 async def get_stats():
     """Get idle behavior statistics."""
     manager = get_manager()
-    return manager.get_stats()
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, manager.get_stats)
 
 
 # ============================================================================

@@ -78,6 +78,9 @@ class MemoryNote:
     importance: float = 0.5  # 0-1 score
     source: str = "user"  # user, conversation, tool, inference
 
+    # Emotional state at time of storage (PAD: pleasure, arousal, dominance)
+    emotional_pad: Optional[Dict[str, float]] = None
+
     # Embedding (stored separately for efficiency)
     has_embedding: bool = False
 
@@ -100,9 +103,30 @@ class MemoryNote:
         return cls(**data)
 
     def touch(self):
-        """Mark as accessed."""
+        """Mark as accessed (spaced repetition — resets decay timer, Phase 4B)."""
         self.accessed_at = datetime.now().isoformat()
         self.access_count += 1
+        # Spaced repetition: slight importance boost on access
+        self.importance = min(1.0, self.importance + 0.01)
+
+    def get_recency_score(self, half_life_hours: float = 336.0) -> float:
+        """
+        Ebbinghaus exponential decay score based on time since last access (Phase 4B).
+
+        Args:
+            half_life_hours: Hours for score to decay to 0.5 (default: 2 weeks)
+
+        Returns:
+            Score from 0.0 to 1.0
+        """
+        import math
+        try:
+            last = datetime.fromisoformat(self.accessed_at)
+            age_hours = (datetime.now() - last).total_seconds() / 3600
+            decay_rate = math.log(2) / half_life_hours
+            return math.exp(-decay_rate * age_hours)
+        except (ValueError, TypeError):
+            return 0.5  # Unknown age, neutral score
 
     def add_link(self, target_id: str, strength: float = 0.5):
         """Add a link to another note."""
@@ -270,6 +294,15 @@ class AMEMSystem:
                 importance=importance
             )
 
+            # Capture current emotional state (PAD) for emotional memory tagging
+            try:
+                from apprentice_agent.emotion.alma_engine import alma_engine
+                state = alma_engine.get_emotional_state()
+                if state and "pad" in state:
+                    note.emotional_pad = state["pad"]
+            except Exception:
+                pass
+
             # Step 1: Extract attributes via LLM
             if auto_extract and self.llm_func:
                 self._extract_attributes(note)
@@ -285,14 +318,20 @@ class AMEMSystem:
 
                 # Add to ChromaDB if available
                 if self._chroma_collection:
+                    chroma_meta = {
+                        "category": category,
+                        "tags": ",".join(note.tags),
+                        "importance": importance,
+                    }
+                    # Include emotional PAD for mood-congruent retrieval
+                    if note.emotional_pad:
+                        chroma_meta["emotion_pleasure"] = note.emotional_pad.get("pleasure", 0.0)
+                        chroma_meta["emotion_arousal"] = note.emotional_pad.get("arousal", 0.0)
+                        chroma_meta["emotion_dominance"] = note.emotional_pad.get("dominance", 0.0)
                     self._chroma_collection.add(
                         ids=[note_id],
                         embeddings=[embedding.tolist()],
-                        metadatas=[{
-                            "category": category,
-                            "tags": ",".join(note.tags),
-                            "importance": importance
-                        }],
+                        metadatas=[chroma_meta],
                         documents=[content]
                     )
 
@@ -375,9 +414,20 @@ class AMEMSystem:
                                     # ChromaDB returns distances, convert to similarity
                                     distance = results["distances"][0][i] if results["distances"] else 0
                                     similarity = 1.0 - distance
-                                    matches.append((note, similarity))
+                                    # Phase 4B: Blend similarity with Ebbinghaus recency
+                                    recency = note.get_recency_score()
+                                    blended = 0.7 * similarity + 0.2 * recency + 0.1 * note.importance
+                                    matches.append((note, blended))
 
-                        return sorted(matches, key=lambda x: x[1], reverse=True)[:k]
+                        final = sorted(matches, key=lambda x: x[1], reverse=True)[:k]
+                        # === PHASE 1: Track memory recall ===
+                        try:
+                            from api.routes.memory import record_memory_recall
+                            if final:
+                                record_memory_recall("amem", len(final), query, [n.content[:80] for n, _ in final[:5]])
+                        except Exception:
+                            pass
+                        return final
                 except Exception as e:
                     logger.warning(f"ChromaDB search failed: {e}")
 
@@ -385,10 +435,26 @@ class AMEMSystem:
             if self._embedder:
                 query_embedding = self._embed(query)
                 if query_embedding is not None:
-                    return self._search_by_embedding(query_embedding, k, category, min_importance)
+                    emb_results = self._search_by_embedding(query_embedding, k, category, min_importance)
+                    # === PHASE 1: Track memory recall ===
+                    try:
+                        from api.routes.memory import record_memory_recall
+                        if emb_results:
+                            record_memory_recall("amem", len(emb_results), query, [n.content[:80] for n, _ in emb_results[:5]])
+                    except Exception:
+                        pass
+                    return emb_results
 
             # Final fallback: keyword search
-            return self._search_by_keywords(query, k, category, min_importance)
+            results = self._search_by_keywords(query, k, category, min_importance)
+            # === PHASE 1: Track memory recall ===
+            try:
+                from api.routes.memory import record_memory_recall
+                if results:
+                    record_memory_recall("amem", len(results), query, [n.content[:80] for n, _ in results[:5]])
+            except Exception:
+                pass
+            return results
 
     def search_agentic(
         self,

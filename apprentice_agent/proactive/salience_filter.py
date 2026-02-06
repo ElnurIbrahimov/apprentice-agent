@@ -96,6 +96,11 @@ class SalienceFilter:
         "task_reminder": 0.65,
         "file_changed": 0.50,
 
+        # Screen awareness (Phase 3D)
+        "error_on_screen": 0.85,
+        "content_detected": 0.55,
+        "window_change": 0.20,
+
         # Low importance
         "screen_change": 0.30,
         "app_switch": 0.25,

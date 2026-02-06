@@ -10,9 +10,14 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from api.models.schemas import StatusResponse, HealthResponse, MoodState
-from api.services.agent_service import agent_service
 
 logger = logging.getLogger(__name__)
+
+# Lazy import to avoid blocking event loop at module load
+def _get_agent_service():
+    """Get agent_service with lazy loading."""
+    from api.services.agent_service import agent_service
+    return agent_service
 
 # ALMA imports are done lazily inside endpoints to avoid blocking startup
 
@@ -186,8 +191,28 @@ async def get_status() -> StatusResponse:
         Status response with agent state
     """
     try:
+        svc = _get_agent_service()
+
+        # If agent isn't ready yet, return a lightweight status
+        if not svc.is_ready:
+            return StatusResponse(
+                online=True,
+                model="initializing...",
+                aura_enabled=False,
+                mood=MoodState(
+                    emotion='neutral', confidence=50,
+                    valence=0.3, arousal=0.1, dominance=0.3, emoji='🔄'
+                ),
+                memory_count=0,
+                query_count=0,
+                last_model_used=None
+            )
+
         loop = asyncio.get_event_loop()
-        status = await loop.run_in_executor(None, agent_service.get_status)
+        status = await asyncio.wait_for(
+            loop.run_in_executor(None, svc.get_status),
+            timeout=10.0
+        )
 
         mood = status.get("mood")
         if mood and isinstance(mood, dict):
@@ -203,6 +228,13 @@ async def get_status() -> StatusResponse:
             last_model_used=status.get("last_model_used")
         )
 
+    except asyncio.TimeoutError:
+        logger.warning("[Status] Timed out getting agent status")
+        return StatusResponse(
+            online=True, model="loading...", aura_enabled=False,
+            mood=MoodState(emotion='neutral', confidence=50, valence=0.0, arousal=0.0, dominance=0.0, emoji='🔄'),
+            memory_count=0, query_count=0, last_model_used=None
+        )
     except Exception as e:
         logger.error(f"[Status] Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -518,8 +550,19 @@ async def get_models() -> ModelsResponse:
         List of available local and cloud models
     """
     try:
+        svc = _get_agent_service()
+
+        # If agent isn't ready, return empty lists
+        if not svc.is_ready:
+            return ModelsResponse(
+                local_models=[], cloud_models=[], current_model="initializing..."
+            )
+
         loop = asyncio.get_event_loop()
-        models = await loop.run_in_executor(None, agent_service.get_available_models)
+        models = await asyncio.wait_for(
+            loop.run_in_executor(None, svc.get_available_models),
+            timeout=10.0
+        )
 
         return ModelsResponse(
             local_models=models.get("local", []),
@@ -527,6 +570,9 @@ async def get_models() -> ModelsResponse:
             current_model=models.get("current", "auto")
         )
 
+    except asyncio.TimeoutError:
+        logger.warning("[Models] Timed out getting models")
+        return ModelsResponse(local_models=[], cloud_models=[], current_model="loading...")
     except Exception as e:
         logger.error(f"[Models] Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

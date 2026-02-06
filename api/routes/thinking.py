@@ -1,11 +1,13 @@
 """Thinking About Teaser - Shows what AURA is contemplating."""
 
+import asyncio
+import functools
 import logging
 import random
 import time
 from typing import Dict, List, Optional, Any
 from datetime import datetime
-from threading import Lock
+from threading import RLock
 from enum import Enum
 
 from fastapi import APIRouter
@@ -98,12 +100,16 @@ class ActiveThought:
         content: str,
         topics: List[str],
         intensity: float = 0.5,
+        source: str = "template",
+        is_real: bool = False,
     ):
         self.id = f"thought_{time.time()}"
         self.type = thought_type
         self.content = content
         self.topics = topics
         self.intensity = intensity
+        self.source = source  # "brain", "engine", "memory", "dream", "emotion", "tool", "template"
+        self.is_real = is_real  # True = from actual cognitive processing
         self.created_at = time.time()
         self.resolved = False
         self.resolution: Optional[str] = None  # "spoke", "dismissed", "merged"
@@ -122,20 +128,30 @@ class ActiveThought:
             "age_seconds": round(self.age_seconds(), 1),
             "resolved": self.resolved,
             "resolution": self.resolution,
+            "source": self.source,
+            "is_real": self.is_real,
         }
 
 
 class ThinkingStateManager:
-    """Manages AURA's visible thinking process."""
+    """Manages AURA's visible thinking process.
+
+    PHASE 1: Now supports real cognitive thoughts from actual processing
+    (brain.py reasoning, memory retrieval, emotion analysis) alongside
+    template-based fallback for when nothing real is happening.
+    """
 
     def __init__(self, max_active_thoughts: int = 3):
-        self._lock = Lock()
+        self._lock = RLock()
         self._active_thoughts: List[ActiveThought] = []
         self._max_thoughts = max_active_thoughts
         self._thought_history: List[ActiveThought] = []
         self._last_thought_time = 0.0
+        self._last_real_thought_time = 0.0  # Track when last REAL thought arrived
         self._stats = {
             "total_thoughts": 0,
+            "real_thoughts": 0,
+            "template_thoughts": 0,
             "thoughts_spoken": 0,
             "thoughts_dismissed": 0,
         }
@@ -150,8 +166,68 @@ class ThinkingStateManager:
         except Exception:
             return []
 
+    def record_real_thought(
+        self,
+        thought_type_str: str,
+        content: str,
+        intensity: float = 0.6,
+        topics: Optional[List[str]] = None,
+        source: str = "brain",
+    ) -> Optional[ActiveThought]:
+        """Record a REAL thought from actual cognitive processing.
+
+        Called from engine.py, brain.py, agent_service.py, memory systems,
+        NeuroDream, ALMA, and tool execution when actual reasoning,
+        memory retrieval, emotional processing, or tool selection occurs.
+        These are genuine cognitive events, not templates.
+
+        Args:
+            thought_type_str: One of ThoughtType values
+            content: Human-readable description of the thought
+            intensity: 0.0-1.0 importance level
+            topics: Related topics (auto-detected from context if None)
+            source: Origin system - "brain", "engine", "memory", "dream",
+                    "emotion", "tool", "agent", "service"
+        """
+        with self._lock:
+            try:
+                thought_type = ThoughtType(thought_type_str)
+            except ValueError:
+                thought_type = ThoughtType.OBSERVING
+
+            if topics is None:
+                topics = self._get_topics_from_context()
+
+            thought = ActiveThought(
+                thought_type=thought_type,
+                content=content,
+                topics=topics[:3] if topics else [],
+                intensity=min(1.0, intensity),
+                source=source,
+                is_real=True,
+            )
+
+            self._active_thoughts.append(thought)
+            self._last_thought_time = time.time()
+            self._last_real_thought_time = time.time()
+            self._stats["total_thoughts"] += 1
+            self._stats["real_thoughts"] += 1
+
+            # Limit active thoughts
+            while len(self._active_thoughts) > self._max_thoughts:
+                old = self._active_thoughts.pop(0)
+                old.resolved = True
+                old.resolution = "faded"
+                self._thought_history.append(old)
+
+            logger.debug(f"[THINKING] Real thought from {source}: {content[:60]}")
+            return thought
+
     def generate_thought(self, force: bool = False) -> Optional[ActiveThought]:
-        """Generate a new thought based on context."""
+        """Generate a template-based thought (FALLBACK only).
+
+        Only used when no real cognitive activity has occurred recently.
+        Real thoughts from record_real_thought() are always preferred."""
         with self._lock:
             now = time.time()
 
@@ -170,27 +246,28 @@ class ThinkingStateManager:
             # Generate content from template
             template = random.choice(THOUGHT_TEMPLATES[thought_type])
 
-            if "{topic1}" in template and "{topic2}" in template:
-                if len(topics) >= 2:
-                    content = template.format(topic1=topics[0], topic2=topics[1])
-                else:
-                    content = template.format(topic1=topics[0], topic2="earlier context")
+            topic = random.choice(topics) if topics else "this"
+            if "{topic1}" in template:
+                topic2 = topics[1] if len(topics) >= 2 else "earlier context"
+                content = template.format(topic1=topics[0] if topics else "this", topic2=topic2)
             else:
-                topic = random.choice(topics) if topics else "this"
                 content = template.format(topic=topic)
 
-            # Create thought
+            # Create thought (marked as template fallback)
             thought = ActiveThought(
                 thought_type=thought_type,
                 content=content,
                 topics=topics[:3],
                 intensity=0.3 + random.random() * 0.5,
+                source="template",
+                is_real=False,
             )
 
             # Add to active thoughts
             self._active_thoughts.append(thought)
             self._last_thought_time = now
             self._stats["total_thoughts"] += 1
+            self._stats["template_thoughts"] += 1
 
             # Limit active thoughts
             while len(self._active_thoughts) > self._max_thoughts:
@@ -244,8 +321,11 @@ class ThinkingStateManager:
         with self._lock:
             self.decay_thoughts()
 
-            # Maybe generate a new thought
-            if len(self._active_thoughts) < 2 and random.random() < 0.3:
+            # Only fall back to template generation if no real thoughts recently
+            # Real thoughts from record_real_thought() are always preferred
+            real_thought_age = time.time() - self._last_real_thought_time
+            if len(self._active_thoughts) < 2 and real_thought_age > 30 and random.random() < 0.15:
+                # No real cognitive activity for 30+ seconds — use template as subtle fallback
                 self.generate_thought()
 
             active = [t.to_dict() for t in self._active_thoughts]
@@ -375,17 +455,34 @@ class AddThoughtRequest(BaseModel):
 # ============================================================================
 
 @router.get("/state")
-async def get_thinking_state():
-    """Get current thinking state with all active thoughts."""
+async def get_thinking_state(since: Optional[float] = None):
+    """Get current thinking state with all active thoughts.
+
+    Args:
+        since: Optional timestamp. If provided, returns only thoughts newer than this.
+               Enables efficient polling — frontend can skip full fetch when nothing changed.
+    """
     manager = get_manager()
-    return manager.get_state()
+    loop = asyncio.get_event_loop()
+    state = await loop.run_in_executor(None, manager.get_state)
+
+    # If 'since' is provided, check if anything changed
+    if since is not None:
+        has_new = any(
+            t.get("age_seconds", 999) < (time.time() - since)
+            for t in state.get("active_thoughts", [])
+        )
+        state["has_new_since"] = has_new
+
+    return state
 
 
 @router.get("/teaser")
 async def get_teaser():
     """Get a teaser preview of what AURA is thinking about."""
     manager = get_manager()
-    teaser = manager.get_teaser()
+    loop = asyncio.get_event_loop()
+    teaser = await loop.run_in_executor(None, manager.get_teaser)
 
     if teaser:
         return {"has_teaser": True, "teaser": teaser}
@@ -396,7 +493,8 @@ async def get_teaser():
 async def generate_thought(force: bool = False):
     """Generate a new thought."""
     manager = get_manager()
-    thought = manager.generate_thought(force=force)
+    loop = asyncio.get_event_loop()
+    thought = await loop.run_in_executor(None, functools.partial(manager.generate_thought, force=force))
 
     if thought:
         return {"generated": True, "thought": thought.to_dict()}
@@ -413,10 +511,15 @@ async def add_thought(request: AddThoughtRequest):
     except ValueError:
         thought_type = ThoughtType.WONDERING
 
-    manager.add_thought_from_context(
-        thought_type=thought_type,
-        topic=request.topic,
-        intensity=request.intensity or 0.6,
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(
+        None,
+        functools.partial(
+            manager.add_thought_from_context,
+            thought_type=thought_type,
+            topic=request.topic,
+            intensity=request.intensity or 0.6,
+        ),
     )
 
     return {"status": "added", "topic": request.topic}
@@ -426,7 +529,8 @@ async def add_thought(request: AddThoughtRequest):
 async def resolve_thought(thought_id: str, resolution: str = "dismissed"):
     """Resolve a thought."""
     manager = get_manager()
-    manager.resolve_thought(thought_id, resolution)
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, functools.partial(manager.resolve_thought, thought_id, resolution))
     return {"status": "resolved", "thought_id": thought_id}
 
 
@@ -434,14 +538,16 @@ async def resolve_thought(thought_id: str, resolution: str = "dismissed"):
 async def get_stats():
     """Get thinking statistics."""
     manager = get_manager()
-    return manager.get_stats()
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, manager.get_stats)
 
 
 @router.post("/clear")
 async def clear_thoughts():
     """Clear all thoughts."""
     manager = get_manager()
-    manager.clear()
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, manager.clear)
     return {"status": "cleared"}
 
 
@@ -457,3 +563,31 @@ def add_thinking_context(thought_type: str, topic: str, intensity: float = 0.6):
     except ValueError:
         t_type = ThoughtType.WONDERING
     manager.add_thought_from_context(t_type, topic, intensity)
+
+
+def record_thought(
+    thought_type: str,
+    content: str,
+    intensity: float = 0.6,
+    source: str = "brain",
+    topics: Optional[List[str]] = None,
+):
+    """Convenience helper to record a real thought from anywhere in the codebase.
+
+    This is the preferred way to hook into the thinking system.
+    Safe to call even if the thinking system isn't initialized.
+
+    Args:
+        thought_type: "connecting", "questioning", "recalling", "analyzing",
+                      "wondering", "formulating", "observing"
+        content: Human-readable description (e.g., "retrieving 3 memories about python")
+        intensity: 0.0-1.0, how important/visible this thought is
+        source: Which system generated it - "brain", "engine", "memory",
+                "dream", "emotion", "tool", "agent", "service"
+        topics: Optional topic tags
+    """
+    try:
+        manager = get_manager()
+        manager.record_real_thought(thought_type, content, intensity, topics, source)
+    except Exception:
+        pass  # Never let thinking system errors break actual processing

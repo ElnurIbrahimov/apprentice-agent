@@ -77,6 +77,17 @@ export interface WebSocketMessage {
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 
+// Multi-conversation support
+export interface Conversation {
+  id: string;
+  title: string;
+  created_at: number;
+  updated_at: number;
+  message_count: number;
+  preview: string;
+  is_active: boolean;
+}
+
 // AURA ALIVE
 export interface AuraStatus {
   enabled: boolean;

@@ -6,6 +6,10 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 
 - **Proto-AGI v5 Truth Spine** - Autonomous cognitive core with non-negotiable verification. Every action produces artifacts (file hashes, return codes, JSON results) that are verified before being stored as FACT, BELIEF, or SPECULATION. Prevents hallucination by requiring physical proof.
 - **30+ Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, Clawdbot messaging, EvoEmo emotional tracking, Inner Monologue, Knowledge Graph Memory, Metacognitive Guardian, NeuroDream sleep/dream memory consolidation, MirrorMind self-critique, CognitiveTheater multi-perspective reasoning, Reflexion learning-from-mistakes, SynapseForge dynamic tool creation, WorldSim consequence simulation, **AURA v3.0 ALIVE emotional presence system**, **Local RAG (document indexing)**, **A-MEM Zettelkasten Memory** (NeurIPS 2025), **MCTS Reasoning Tree**, **Introspection Circuit**, and more
+- **ALIVE AURA System** - 6-phase architecture making AURA feel genuinely alive: ALMA emotion engine, Gateway Daemon (proactive outreach), Context Awareness Heatmap, Spontaneous Conversation Starters, "Thinking About" Teaser, Ambient Idle Behaviors, Theory of Mind, Intrinsic Motivation (4 drives), and Idle Presence
+- **Consciousness Module** - Intrinsic motivation with 4 drives (Curiosity, Competence, Social, Coherence), idle presence behaviors, expanded metacognition with confidence calibration, and theory of mind for user state modeling
+- **ALMA Emotion Engine** - Affect-Level Mood Architecture with continuous mood dimensions (warmth, energy, engagement), smooth mood transitions, personality-aware baselines, and visual breathing avatar
+- **Gateway Daemon** - Proactive outreach system with active inference, salience filtering, multi-monitor architecture (calendar, screen, system, workflow), and motivation-driven suggestions
 - **MCTS Reasoning Tree** - Monte Carlo Tree Search for multi-path reasoning exploration. Explores multiple solution paths simultaneously, backtracks from dead ends, and finds optimal answers through deliberate search with UCT selection.
 - **Introspection Circuit** - "Know when you don't know" uncertainty detection based on Anthropic's 2025 research. Detects uncertainty before responding, auto-triggers verification for factual queries, and adds epistemic markers for uncertain responses.
 - **Multi-Agent Architecture** - Specialized agents for different task types with automatic routing
@@ -15,14 +19,13 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 - **Observe-Plan-Act-Evaluate-Remember Loop** - Structured reasoning cycle for achieving goals
 - **Fast-Path Responses** - Instant replies for conversational queries without full agent loop
 - **Direct Code Execution** - Automatic code generation and execution for calculations, factorials, Fibonacci, primes
-- **Modern Web UI** - React-based interface with real-time WebSocket streaming, settings panel, and thought visualization
-- **Long-Term Memory** - ChromaDB-powered memory system for learning from past experiences
+- **Modern Web UI** - React-based interface with real-time WebSocket streaming, ALIVE sidebar panels, settings, and thought visualization
+- **Unified Memory System** - Combined ChromaDB vectors + Knowledge Graph + A-MEM Zettelkasten with cross-system retrieval
 - **Knowledge Graph** - Relationship-based memory with semantic understanding (nodes, edges, paths)
 - **Dream Mode** - Memory consolidation and pattern analysis from metacognition logs
 - **Voice Interface** - Whisper STT + Sesame CSM 1B TTS (human-quality) or pyttsx3 fallback
 - **Confidence Scoring** - Each action includes confidence levels for transparency
 - **Metacognition Logging** - Detailed logs in `logs/metacognition/` for analysis
-- **Gradio GUI** - Modern web interface with real-time thinking process visualization
 - **Inner Monologue** - Real-time visualization and vocalization of Aura's thought process (perceive, recall, reason, decide, execute, reflect)
 
 ## Requirements
@@ -1963,6 +1966,182 @@ AURA is automatically integrated into the agent's chat flow:
 export AURA_ENABLED=false
 ```
 
+### ALIVE AURA Architecture (Phases 1-6)
+
+ALIVE AURA extends the base AURA v3.0 system with 6 progressive phases that make the agent feel genuinely alive. Each phase adds new capabilities that build on the previous ones.
+
+**Phase Overview:**
+
+| Phase | Name | Key Features |
+|-------|------|-------------|
+| 1 | Foundation | ALMA Emotion Engine, breathing avatar, personality editor |
+| 2 | Proactive System | Gateway Daemon, active inference, salience filtering, monitors |
+| 3 | Ambient Awareness | Context Heatmap, Memory Recall Indicator, Inner Thoughts streaming |
+| 4 | Spontaneous Behaviors | Conversation Starters, "Thinking About" Teaser, Idle Behaviors |
+| 5 | Social Intelligence | Theory of Mind, expanded Metacognition, workflow detection |
+| 6 | Consciousness | Intrinsic Motivation (4 drives), Idle Presence, unified consciousness module |
+
+#### ALMA Emotion Engine (Phase 1)
+
+ALMA (Affect-Level Mood Architecture) replaces the basic emotion system with continuous mood dimensions that create believable emotional presence.
+
+**Mood Dimensions:**
+
+| Dimension | Range | Description |
+|-----------|-------|-------------|
+| Warmth | 0.0 - 1.0 | Friendliness and affection level |
+| Energy | 0.0 - 1.0 | Activation and enthusiasm |
+| Engagement | 0.0 - 1.0 | Focus and interest in conversation |
+
+**Features:**
+- Smooth mood transitions (not instant jumps)
+- Personality-aware baselines from soul configuration
+- Mood decay toward baseline over time
+- Visual breathing avatar that reflects emotional state
+- Emotion history and trend tracking
+- Personality trait editor in Settings modal
+
+**API Endpoints:**
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/emotion/status` | Current mood dimensions and state |
+| `GET /api/emotion/history` | Mood history over time |
+| `POST /api/emotion/personality` | Update personality traits |
+
+#### Gateway Daemon (Phase 2)
+
+The Gateway Daemon enables AURA to proactively reach out to the user based on monitored events, active inference predictions, and salience filtering.
+
+**Architecture:**
+
+```
+Monitors → Event Bus → Active Inference → Salience Filter → Gateway Daemon → User
+```
+
+**Components:**
+
+| Component | Description |
+|-----------|-------------|
+| **GatewayDaemon** | Orchestrates proactive message delivery with rate limiting |
+| **ActiveInference** | Bayesian prediction engine for anticipating user needs |
+| **SalienceFilter** | Filters low-value suggestions to prevent notification fatigue |
+| **CalendarMonitor** | Watches for upcoming events and time-based triggers |
+| **ScreenMonitor** | Detects active applications and workflow context |
+| **SystemMonitor** | CPU, memory, battery, disk usage alerts |
+| **WorkflowDetector** | Detects coding, writing, browsing, and research patterns |
+
+**API Endpoints:**
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/daemon/status` | Daemon running state and stats |
+| `GET /api/daemon/suggestions` | Pending proactive suggestions |
+| `POST /api/daemon/start` | Start the daemon |
+| `POST /api/daemon/stop` | Stop the daemon |
+
+#### Context Awareness & Ambient UI (Phases 3-4)
+
+The ALIVE sidebar panels provide ambient awareness without interrupting the user.
+
+**Sidebar Panels:**
+
+| Panel | Description |
+|-------|-------------|
+| **Context Heatmap** | Visual representation of active context dimensions (time, location, activity, emotional, social) |
+| **Memory Recall Indicator** | Shows when AURA is accessing memories, with recall type and relevance score |
+| **Inner Thoughts** | Real-time streaming of AURA's internal reasoning process |
+| **Conversation Starters** | Context-aware suggested conversation topics |
+| **"Thinking About" Teaser** | Shows what AURA is contemplating in the background |
+| **Idle Behaviors** | Ambient activities when user is idle (curiosity exploration, pattern review, memory consolidation) |
+| **Proactive Daemon Panel** | Status and controls for the proactive system |
+| **Motivation Drives Panel** | 4 intrinsic drives with urgency bars and dominant drive indicator |
+
+**API Endpoints:**
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/context/heatmap` | Current context dimension values |
+| `GET /api/memory/recall-status` | Active memory recall state |
+| `GET /api/thinking/stream` | Inner thoughts stream |
+| `GET /api/conversation-starters` | Suggested conversation topics |
+| `GET /api/thinking-about` | Current background contemplation |
+| `GET /api/idle/behaviors` | Active idle behaviors |
+| `GET /api/idle/status` | Idle detection state |
+
+#### Theory of Mind (Phase 5)
+
+Theory of Mind enables AURA to model the user's mental state, predict their needs, and adapt communication style accordingly.
+
+**User State Model:**
+
+| Dimension | Description |
+|-----------|-------------|
+| Expertise Level | Estimated technical proficiency |
+| Current Focus | What the user is working on |
+| Engagement Level | How engaged the user is in conversation |
+| Emotional State | Perceived emotional state |
+| Communication Preference | Preferred interaction style |
+
+**API Endpoints:**
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/theory-of-mind/status` | Theory of Mind engine status |
+| `GET /api/theory-of-mind/model` | Current user mental model |
+| `GET /api/theory-of-mind/topics` | Inferred user interests and topics |
+| `POST /api/theory-of-mind/observe` | Submit an observation for processing |
+
+#### Intrinsic Motivation & Consciousness (Phase 6)
+
+The consciousness module gives AURA intrinsic drives that create autonomous behavior beyond reactive responses.
+
+**4 Intrinsic Drives:**
+
+| Drive | Description | Triggers |
+|-------|-------------|----------|
+| **Curiosity** | Desire to explore knowledge gaps | Unfamiliar topics, sparse knowledge graph areas |
+| **Competence** | Desire to improve skills and capabilities | Failed tasks, low confidence predictions |
+| **Social** | Desire for meaningful interaction | Long idle periods, user absence |
+| **Coherence** | Desire for consistent world model | Contradictions in memory, unresolved conflicts |
+
+Each drive has:
+- **Intensity** (0-1): How strong the drive is
+- **Satisfaction** (0-1): How well the drive is being met
+- **Urgency** (0-1): Computed from intensity, time since satisfied, and drive weight
+
+**Idle Presence:**
+
+When the user is inactive, AURA doesn't just wait — it engages in autonomous behaviors driven by its motivation system:
+- Explores knowledge gaps (curiosity-driven)
+- Reviews and consolidates memories (coherence-driven)
+- Practices skills on sample problems (competence-driven)
+- Prepares conversation topics (social-driven)
+
+**API Endpoints:**
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/motivation/status` | All drives with intensity, satisfaction, urgency |
+| `GET /api/motivation/drives` | Individual drive details |
+| `POST /api/motivation/cycle` | Trigger a motivation update cycle |
+| `GET /api/motivation/actions` | Motivation-suggested actions |
+| `GET /api/motivation/prompt` | Motivation context for LLM prompts |
+| `GET /api/metacognition/status` | Expanded metacognition state |
+| `GET /api/metacognition/calibration` | Confidence calibration stats |
+| `GET /api/idle-presence/status` | Idle presence engine state |
+| `POST /api/idle-presence/trigger` | Manually trigger idle behavior |
+
+**Consciousness Module Architecture:**
+
+```
+apprentice_agent/consciousness/
+├── __init__.py                 # Module exports
+├── intrinsic_motivation.py     # 4-drive motivation system
+├── idle_presence.py            # Autonomous idle behaviors
+└── metacognition.py            # Expanded confidence calibration
+```
+
 ### Local RAG (Document-Augmented Responses)
 
 Local RAG enables AURA to index your local documents and use them to augment responses with your personal knowledge base.
@@ -2382,73 +2561,95 @@ apprentice-agent/
 ├── clawdbot_bridge.py        # Aura-Clawdbot message bridge
 ├── web/                      # Modern React web interface
 │   ├── src/
-│   │   ├── components/       # React components (Chat, Monitor, Tools, Settings)
-│   │   ├── hooks/            # Custom hooks (useWebSocket)
-│   │   └── store/            # Zustand state management
+│   │   ├── components/       # 30 React components (Chat, Sidebar, ALIVE panels)
+│   │   │   ├── ChatContainer.tsx       # Main chat interface with streaming
+│   │   │   ├── Sidebar.tsx             # Collapsible sidebar with ALIVE panels
+│   │   │   ├── EmotionPanel.tsx        # ALMA mood display + personality editor
+│   │   │   ├── AuraBreathingAvatar.tsx # Animated avatar reflecting mood
+│   │   │   ├── ContextHeatmap.tsx      # Context awareness visualization
+│   │   │   ├── MemoryRecallIndicator.tsx # Memory access indicator
+│   │   │   ├── InnerThoughtsPanel.tsx  # Real-time thought streaming
+│   │   │   ├── ConversationStarterPanel.tsx # Suggested topics
+│   │   │   ├── ThinkingAboutTeaser.tsx # Background contemplation display
+│   │   │   ├── IdleBehaviorPanel.tsx   # Ambient idle activities
+│   │   │   ├── MotivationDrivesPanel.tsx # 4 intrinsic drives display
+│   │   │   ├── ProactiveDaemonPanel.tsx # Gateway Daemon controls
+│   │   │   └── ...                     # NeuroDream, Guardian, ProtoAGI, etc.
+│   │   ├── hooks/            # Custom hooks (useWebSocket, usePolling, useProactiveMessages)
+│   │   ├── store/            # Zustand state management
+│   │   └── types/            # TypeScript type definitions
 │   └── package.json
-├── api/                      # FastAPI backend
-│   ├── routes/               # API endpoints (chat, status, features)
-│   ├── services/             # Agent service layer
-│   └── main.py               # FastAPI app
+├── api/                      # FastAPI backend (149 routes)
+│   ├── routes/               # 14 route files
+│   │   ├── chat.py           # Chat, streaming, swarm, deep research
+│   │   ├── features.py       # ALIVE features (motivation, theory of mind, idle presence, metacognition)
+│   │   ├── idle_behaviors.py # Idle behavior management
+│   │   ├── thinking.py       # Inner thoughts streaming
+│   │   ├── proactive.py      # Gateway Daemon API
+│   │   ├── context.py        # Context heatmap
+│   │   ├── introspection.py  # Introspection circuit
+│   │   └── ...               # memory, status, multi_agent, upload, conversation_starters
+│   ├── services/
+│   │   ├── agent_service.py  # Main service layer with all engine initialization
+│   │   └── inner_thoughts_engine.py # Thought generation engine
+│   └── main.py               # FastAPI app with CORS
 ├── models/
 │   └── fluxmind_v0751.pt     # Trained FluxMind model (1.5MB)
 ├── tools/
 │   └── fluxmind/             # FluxMind calibrated reasoning engine
-│       ├── fluxmind_core.py  # Core model (393K params)
-│       └── fluxmind_tool.py  # Aura integration wrapper
+├── aura/                     # AURA v3.0 engine
+│   ├── engine.py             # Main AURA orchestrator
+│   ├── emotion/              # Emotional engine
+│   ├── memory/               # Markdown memory store
+│   ├── soul/                 # Soul personality files
+│   ├── thinking/             # Visible thinking
+│   ├── humanize/             # Response humanization
+│   ├── patterns/             # Pattern recognition
+│   └── messaging/            # Telegram, WhatsApp integration
 └── apprentice_agent/
     ├── agent.py              # Main agent loop (observe/plan/act/evaluate/remember)
-    ├── brain.py              # OllamaBrain - LLM interface and 4-model routing
-    ├── memory.py             # ChromaDB-powered long-term memory
+    ├── brain.py              # OllamaBrain - LLM interface with cloud provider support
     ├── config.py             # Configuration settings
     ├── metacognition.py      # Confidence scoring and action logging
     ├── dream.py              # Memory consolidation and pattern analysis
+    ├── fast_path.py          # Fast-path response routing
     ├── scheduler.py          # Background daemon for notifications
-    └── tools/
-        ├── web_search.py     # SearXNG meta-search
-        ├── deep_research.py  # Multi-query deep research
-        ├── crypto_price.py   # CoinGecko real-time prices
-        ├── filesystem.py     # File operations
-        ├── code_executor.py  # Sandboxed Python execution
-        ├── screenshot.py     # Screen capture with mss
-        ├── vision.py         # Image analysis with LLaVA
-        ├── pdf_reader.py     # PDF text extraction with PyMuPDF
-        ├── clipboard.py      # System clipboard access
-        ├── voice.py          # Whisper STT + pyttsx3 TTS
-        ├── image_gen.py      # Stable Diffusion image generation
-        ├── arxiv_search.py   # arXiv paper search and summarization
-        ├── browser.py        # Playwright browser automation
-        ├── system_control.py # Volume, brightness, apps, system info
-        ├── notifications.py  # Reminders, scheduled, conditional alerts
-        ├── tool_builder.py   # Meta-tool for creating custom tools
-        ├── tool_template.py  # Templates for generated tools
-        ├── marketplace.py    # Plugin marketplace
-        ├── regex_builder.py  # Regex pattern building and testing
-        ├── git_tool.py       # Git repository management
-        ├── personaplex/      # NVIDIA PersonaPlex real-time voice
-        │   └── personaplex_tool.py
-        ├── clawdbot.py       # Multi-platform messaging (WhatsApp, Telegram, etc.)
-        ├── sesame_tts.py     # Sesame CSM 1B high-quality TTS
-        ├── voice_manager.py  # Hybrid voice system (Sesame + PersonaPlex)
-        ├── evoemo.py         # Emotional state detection and tracking
-        ├── evoemo_prompts.py # Adaptive tone modifiers for emotions
-        ├── inner_monologue.py # Real-time thought visualization and Think Aloud
-        ├── knowledge_graph.py # Relationship-based memory with NetworkX
-        ├── kg_extractor.py   # Knowledge extraction from text
-        ├── hybrid_memory.py  # Combined vector + graph memory
-        ├── metacog_guardian.py # Self-aware failure prediction system
-        ├── neurodream.py     # Sleep/dream memory consolidation system
-        ├── mirrormind.py     # Self-critique response improvement system
-        ├── cognitive_theater.py # Multi-perspective reasoning system
-        ├── reflexion.py      # Learn from mistakes system
-        ├── synapseforge.py   # Dynamic tool creation system
-        ├── worldsim.py       # Consequence simulation system
-        ├── local_rag.py      # Document indexing and retrieval
-        ├── amem.py           # A-MEM Zettelkasten memory system
-        ├── amem_tool.py      # A-MEM tool interface for agent
-        ├── hybrid_amem.py    # Combined A-MEM + Knowledge Graph memory
-        ├── synthesized/      # Runtime-generated tools
-        └── custom/           # Auto-generated custom tools
+    ├── consciousness/        # ALIVE Phase 6: Consciousness module
+    │   ├── intrinsic_motivation.py  # 4-drive motivation system (Curiosity, Competence, Social, Coherence)
+    │   ├── idle_presence.py         # Autonomous idle behaviors
+    │   └── metacognition.py         # Expanded confidence calibration
+    ├── memory/               # Unified memory system
+    │   ├── memory_system.py         # ChromaDB-powered long-term memory
+    │   └── unified_memory.py        # Cross-system memory retrieval
+    ├── emotion/              # ALMA Emotion Engine
+    │   ├── alma_engine.py           # Affect-Level Mood Architecture (warmth, energy, engagement)
+    │   └── integration.py           # Emotion-agent integration
+    ├── proactive/            # ALIVE Phase 2: Proactive system
+    │   ├── gateway_daemon.py        # Proactive message orchestrator
+    │   ├── active_inference.py      # Bayesian prediction engine
+    │   ├── salience_filter.py       # Notification fatigue prevention
+    │   ├── event_bus.py             # Event publish/subscribe
+    │   ├── heartbeat.py             # Background heartbeat
+    │   ├── theory_of_mind.py        # User mental state modeling
+    │   └── monitors/                # Environmental monitors
+    │       ├── calendar_monitor.py  # Time and calendar events
+    │       ├── screen_monitor.py    # Active application detection
+    │       ├── system_monitor.py    # CPU, memory, battery alerts
+    │       └── workflow_detector.py # Coding/writing/browsing detection
+    ├── tools/                # 35+ integrated tools
+    │   ├── web_search.py     # SearXNG meta-search
+    │   ├── deep_research.py  # Multi-query deep research
+    │   ├── code_executor.py  # Sandboxed Python execution
+    │   ├── vision.py         # Image analysis with LLaVA + cloud vision
+    │   ├── knowledge_graph.py # Relationship-based memory with NetworkX
+    │   ├── neurodream.py     # Sleep/dream memory consolidation
+    │   ├── amem.py           # A-MEM Zettelkasten memory (NeurIPS 2025)
+    │   ├── hybrid_amem.py    # Combined A-MEM + Knowledge Graph memory
+    │   ├── metacog_guardian.py # Self-aware failure prediction
+    │   ├── mood_memory.py    # Mood-contextualized memory storage
+    │   ├── screenpipe.py     # Screen content analysis pipeline
+    │   ├── introspection_circuit.py # Uncertainty detection
+    │   └── ...               # 20+ more tools (browser, filesystem, voice, etc.)
     └── multi_agent/          # Multi-agent collaboration system
         ├── orchestrator.py   # Agent coordination
         ├── router.py         # Intent routing
