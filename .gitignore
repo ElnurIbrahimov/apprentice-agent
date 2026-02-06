@@ -43,5 +43,17 @@ wheels/
 *.swo
 screenshots/
 
+# Test/debug scripts
+test_ws.py
+test_ws2.py
+test_ws3.py
+test_minimal_ws.py
+minimal_test_server.py
+server_err.log
+nul
+
+# Claude Code
+.claude/
+
 # Node.js
 node_modules/
