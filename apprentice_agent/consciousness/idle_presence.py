@@ -233,15 +233,19 @@ class IdlePresenceEngine:
         except Exception:
             pass
 
-        # 2. NeuroDream load
+        # 2. NeuroDream load (oscillation-aware pulsing)
         try:
             from apprentice_agent.tools.neurodream import get_neurodream
             nd = get_neurodream()
             status = nd.get_status()
             if status.get("is_sleeping"):
-                phase = status.get("phase", "light")
-                phase_loads = {"light": 0.4, "deep": 0.7, "rem": 0.9, "waking": 0.2}
-                load.dream_load = phase_loads.get(phase, 0.3)
+                osc = status.get("oscillation")
+                base_loads = {"light": 0.4, "deep": 0.7, "rem": 0.9, "waking": 0.2}
+                base_load = base_loads.get(status.get("phase", "light"), 0.3)
+                if osc and "modifiers" in osc:
+                    load.dream_load = base_load * osc["modifiers"]["cognitive_intensity"]
+                else:
+                    load.dream_load = base_load
         except Exception:
             pass
 

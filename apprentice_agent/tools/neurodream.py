@@ -10,6 +10,7 @@ and 17.6% increase in zero-shot transfer through latent replay synthesis.
 """
 
 import json
+import math
 import random
 import threading
 import time
@@ -82,6 +83,9 @@ class SleepSession:
     learned_context_generated: bool = False
     learned_context_version: int = 0
 
+    # Oscillation info
+    oscillation_band: str = ""  # Dominant frequency band used
+
     # Overall
     duration_seconds: float = 0
     interrupted: bool = False
@@ -89,6 +93,26 @@ class SleepSession:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+@dataclass
+class NeuralOscillator:
+    """Neural oscillation state for sleep phases (DONN-inspired)."""
+    frequency: float = 0.0      # Hz (dominant frequency)
+    amplitude: float = 0.0      # 0-1 strength
+    phase_angle: float = 0.0    # radians
+    band: str = "none"          # delta/theta/alpha/beta
+    start_time: float = field(default_factory=time.time)
+    last_tick: float = field(default_factory=time.time)
+
+    # Frequency band mapping: phase -> (frequency_hz, band_name)
+    BAND_MAP: Dict[str, Tuple[float, str]] = field(default_factory=lambda: {
+        "awake": (15.0, "beta"),
+        "light": (10.0, "alpha"),
+        "deep": (2.0, "delta"),
+        "rem": (6.0, "theta"),
+        "waking": (8.0, "alpha"),
+    }, repr=False)
 
 
 @dataclass
@@ -223,6 +247,9 @@ class NeuroDreamEngine:
         self._interrupt_flag = threading.Event()
         self._phase_lock = threading.Lock()
 
+        # Neural oscillator (DONN-inspired frequency modulation)
+        self._oscillator = NeuralOscillator()
+
         # Callbacks
         self._on_phase_change: Optional[Callable[[SleepPhase], None]] = None
         self._on_insight: Optional[Callable[[DreamInsight], None]] = None
@@ -287,6 +314,19 @@ class NeuroDreamEngine:
             "idle_minutes": (datetime.now() - self.last_activity_time).total_seconds() / 60,
             "current_session": self.current_session.to_dict() if self.current_session else None,
         }
+        # Neural oscillation info (when sleeping)
+        if self.current_phase != SleepPhase.AWAKE:
+            osc = self._oscillator
+            current_value = math.sin(osc.phase_angle) * osc.amplitude if osc.amplitude > 0 else 0.0
+            status["oscillation"] = {
+                "frequency_hz": osc.frequency,
+                "amplitude": osc.amplitude,
+                "band": osc.band,
+                "current_value": round(current_value, 3),
+                "modifiers": self._tick_oscillator(),
+                "elapsed_seconds": round(time.time() - osc.start_time, 1),
+            }
+
         # Learned context info (Phase 4D)
         if self._learned_context:
             status["learned_context"] = {
@@ -366,6 +406,7 @@ class NeuroDreamEngine:
                 if self.current_session:
                     self.current_session.memories_replayed = light_results.get("memories_replayed", 0)
                     self.current_session.memories_strengthened = light_results.get("memories_strengthened", 0)
+                    self.current_session.oscillation_band = self._oscillator.band
                     self.current_session.phases_completed.append("light")
 
             # Phase 2: Deep Sleep (pattern abstraction)
@@ -379,6 +420,7 @@ class NeuroDreamEngine:
                     self.current_session.nodes_merged = deep_results.get("nodes_merged", 0)
                     self.current_session.learned_context_generated = deep_results.get("learned_context_generated", False)
                     self.current_session.learned_context_version = deep_results.get("learned_context_version", 0)
+                    self.current_session.oscillation_band = self._oscillator.band
                     self.current_session.phases_completed.append("deep")
 
             # Phase 3: REM Sleep (creative synthesis)
@@ -388,6 +430,7 @@ class NeuroDreamEngine:
                 if self.current_session:
                     self.current_session.insights_generated = rem_results.get("insights_generated", 0)
                     self.current_session.novel_connections = rem_results.get("novel_connections", 0)
+                    self.current_session.oscillation_band = self._oscillator.band
                     self.current_session.creative_hypotheses = rem_results.get("creative_hypotheses", 0)
                     self.current_session.phases_completed.append("rem")
 
@@ -403,11 +446,102 @@ class NeuroDreamEngine:
         """Set current phase with thread safety."""
         with self._phase_lock:
             self.current_phase = phase
+
+            # Configure neural oscillator for the new phase
+            phase_name = phase.value
+            if phase_name in self._oscillator.BAND_MAP:
+                freq, band = self._oscillator.BAND_MAP[phase_name]
+                self._oscillator.frequency = freq
+                self._oscillator.amplitude = 0.8 if phase_name not in ("awake",) else 0.0
+                self._oscillator.phase_angle = 0.0
+                self._oscillator.band = band
+                self._oscillator.start_time = time.time()
+                self._oscillator.last_tick = time.time()
+            else:
+                self._oscillator.amplitude = 0.0
+
             if self._on_phase_change:
                 try:
                     self._on_phase_change(phase)
                 except Exception as e:
                     print(f"[NeuroDream] Phase change callback error: {e}")
+
+    def _tick_oscillator(self) -> Dict[str, float]:
+        """Advance neural oscillator and return processing modifiers.
+
+        Returns safe defaults (all 1.0) when awake — zero overhead.
+        Modifier ranges vary by frequency band (delta/theta/alpha).
+        """
+        osc = self._oscillator
+        if osc.amplitude <= 0.0 or osc.frequency <= 0.0:
+            return {
+                "batch_size_mult": 1.0,
+                "consolidation_strength": 1.0,
+                "inter_cycle_delay": 0.01,
+                "cognitive_intensity": 1.0,
+            }
+
+        # Advance phase angle based on elapsed time
+        now = time.time()
+        dt = now - osc.last_tick
+        osc.last_tick = now
+        osc.phase_angle += 2 * math.pi * osc.frequency * dt
+        # Keep angle in [0, 2pi) to avoid float drift
+        osc.phase_angle = osc.phase_angle % (2 * math.pi)
+
+        # Current wave value: -1 to +1 scaled by amplitude
+        wave = math.sin(osc.phase_angle) * osc.amplitude
+
+        # Compute modifiers based on band
+        band = osc.band
+        if band == "delta":
+            # Deep sleep: wide swings — large batches on peaks, deep consolidation, longer delays
+            batch_size_mult = max(0.5, min(1.3, 0.9 + wave * 0.4))
+            consolidation_strength = max(0.5, min(1.5, 1.0 + wave * 0.5))
+            inter_cycle_delay = max(0.005, min(0.05, 0.03 + wave * -0.02))
+            cognitive_intensity = max(0.6, min(1.2, 0.9 + wave * 0.3))
+        elif band == "theta":
+            # REM: moderate swings — faster rhythm, creative bursts
+            batch_size_mult = max(0.5, min(1.3, 0.9 + wave * 0.3))
+            consolidation_strength = max(0.5, min(1.5, 1.0 + wave * 0.35))
+            inter_cycle_delay = max(0.005, min(0.05, 0.02 + wave * -0.015))
+            cognitive_intensity = max(0.6, min(1.2, 1.0 + wave * 0.2))
+        else:
+            # Alpha (light/waking): gentle swings — smooth, steady processing
+            batch_size_mult = max(0.5, min(1.3, 1.0 + wave * 0.2))
+            consolidation_strength = max(0.5, min(1.5, 1.0 + wave * 0.2))
+            inter_cycle_delay = max(0.005, min(0.05, 0.015 + wave * -0.01))
+            cognitive_intensity = max(0.6, min(1.2, 0.9 + wave * 0.15))
+
+        return {
+            "batch_size_mult": round(batch_size_mult, 3),
+            "consolidation_strength": round(consolidation_strength, 3),
+            "inter_cycle_delay": round(inter_cycle_delay, 4),
+            "cognitive_intensity": round(cognitive_intensity, 3),
+        }
+
+    def get_sleep_neuromodulator_influence(self) -> Dict[str, float]:
+        """Return neuromodulator offsets based on current sleep phase and oscillation.
+
+        Returns additive offsets (-0.3 to +0.3) for ALMA neuromodulators,
+        modulated by oscillation amplitude. Returns all zeros when awake.
+        """
+        phase = self.current_phase.value
+        amp = self._oscillator.amplitude
+
+        # Phase-specific base offsets
+        phase_offsets = {
+            "light":  {"dopamine": -0.1,  "serotonin": 0.1,  "norepinephrine": -0.15, "oxytocin": 0.05},
+            "deep":   {"dopamine": -0.25, "serotonin": 0.25, "norepinephrine": -0.3,  "oxytocin": 0.1},
+            "rem":    {"dopamine": 0.2,   "serotonin": -0.1, "norepinephrine": 0.15,  "oxytocin": 0.0},
+            "waking": {"dopamine": 0.0,   "serotonin": 0.0,  "norepinephrine": 0.1,   "oxytocin": 0.0},
+        }
+
+        zeros = {"dopamine": 0.0, "serotonin": 0.0, "norepinephrine": 0.0, "oxytocin": 0.0}
+        offsets = phase_offsets.get(phase, zeros)
+
+        # Modulate by oscillation amplitude (0 amplitude = no effect)
+        return {k: round(v * amp, 3) for k, v in offsets.items()}
 
     def run_light_phase(self) -> Dict[str, Any]:
         """Light Sleep: Replay recent memories (last 24h).
@@ -438,8 +572,10 @@ class NeuroDreamEngine:
             self._log_dream("light", "Light sleep: No recent memories to consolidate.")
             return results
 
-        # Replay and strengthen in Knowledge Graph (limit to 50 for speed)
-        for memory in recent_memories[:50]:
+        # Replay and strengthen in Knowledge Graph (limit modulated by oscillation)
+        mods = self._tick_oscillator()
+        batch_limit = int(50 * mods["batch_size_mult"])
+        for memory in recent_memories[:batch_limit]:
             if self._interrupt_flag.is_set():
                 break
 
@@ -447,8 +583,9 @@ class NeuroDreamEngine:
             strengthened = self._strengthen_memory_connections(memory)
             results["memories_strengthened"] += strengthened
 
-            # Minimal delay
-            time.sleep(0.01)
+            # Oscillation-modulated delay
+            mods = self._tick_oscillator()
+            time.sleep(mods["inter_cycle_delay"])
 
         results["duration_seconds"] = time.time() - start_time
 
@@ -614,7 +751,7 @@ class NeuroDreamEngine:
             insights.extend(hypotheses)
             results["creative_hypotheses"] = len(hypotheses)
 
-        # Save insights
+        # Save insights with oscillation-modulated rhythm
         for insight in insights:
             if self._interrupt_flag.is_set():
                 break
@@ -627,6 +764,10 @@ class NeuroDreamEngine:
                     self._on_insight(insight)
                 except Exception as e:
                     print(f"[NeuroDream] Insight callback error: {e}")
+
+            # Oscillation-modulated delay between insight saves
+            mods = self._tick_oscillator()
+            time.sleep(mods["inter_cycle_delay"])
 
         self._total_insights += results["insights_generated"]
         results["duration_seconds"] = time.time() - start_time
@@ -796,6 +937,9 @@ class NeuroDreamEngine:
         strengthened = 0
         content = memory.get("content", "")
 
+        # Get oscillation-modulated consolidation strength
+        mods = self._tick_oscillator()
+
         # Extract key terms (simple approach)
         words = set(re.findall(r'\b[A-Za-z]{4,}\b', content.lower()))
         important_words = [w for w in words if w not in self._get_stopwords()][:10]
@@ -809,8 +953,8 @@ class NeuroDreamEngine:
                     if hasattr(self.kg, 'graph') and hasattr(self.kg.graph, 'edges'):
                         for edge in self.kg.graph.edges(node.id, data=True):
                             if 'weight' in edge[2]:
-                                # Increase weight slightly
-                                new_weight = min(1.0, edge[2]['weight'] + 0.05)
+                                # Increase weight modulated by oscillation
+                                new_weight = min(1.0, edge[2]['weight'] + 0.05 * mods["consolidation_strength"])
                                 self.kg.graph.edges[edge[0], edge[1]]['weight'] = new_weight
                                 strengthened += 1
             except (AttributeError, KeyError, TypeError):

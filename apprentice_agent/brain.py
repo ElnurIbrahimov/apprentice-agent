@@ -48,12 +48,23 @@ def _get_neuromodulator_levels() -> dict:
 
     Returns dict with dopamine, serotonin, norepinephrine, oxytocin (all 0-1).
     Returns 0.5 for all if ALMA is unavailable.
+    During sleep, applies NeuroDream oscillation-based neuromodulator offsets.
     """
     try:
         from apprentice_agent.emotion.alma_engine import alma_engine
         state = alma_engine.get_emotional_state()
         if state and "neuromodulators" in state:
-            return state["neuromodulators"]
+            base = state["neuromodulators"]
+            # Apply sleep neuromodulator influence from NeuroDream
+            try:
+                from apprentice_agent.tools.neurodream import get_neurodream
+                nd = get_neurodream()
+                if nd.current_phase.value != "awake":
+                    influence = nd.get_sleep_neuromodulator_influence()
+                    return {k: max(0.0, min(1.0, base[k] + influence.get(k, 0.0))) for k in base}
+            except Exception:
+                pass
+            return base
     except Exception:
         pass
     return {"dopamine": 0.5, "serotonin": 0.5, "norepinephrine": 0.5, "oxytocin": 0.5}
