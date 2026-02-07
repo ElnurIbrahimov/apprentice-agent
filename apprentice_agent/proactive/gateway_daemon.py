@@ -776,86 +776,173 @@ class GatewayDaemon:
         return None
 
     def _generate_rich_message(self, beliefs: 'BeliefState') -> Optional[str]:
-        """Generate a rich, varied proactive message using the message library.
+        """Generate a contextual proactive message using the LLM.
 
-        Gathers context (emotional state, drives, idle time, topics) and
-        delegates to the proactive_messages module for personality-rich,
-        non-repetitive message generation.
+        Gathers REAL context — recent chat history, memories, emotional state,
+        drives — and asks the LLM to generate something genuinely relevant.
+        Falls back to template library only if the LLM is unavailable.
         """
-        from .proactive_messages import generate_proactive_content
+        # ---- Gather context ----
+        # 1. Recent chat history
+        recent_chat = []
+        try:
+            from api.services.agent_service import agent_service
+            if agent_service.agent and agent_service.agent.brain:
+                history = agent_service.agent.brain.conversation_history
+                recent_chat = history[-6:] if history else []
+        except BaseException:
+            pass
 
-        # Gather emotional state
-        emotional_state = {}
+        # 2. Memories relevant to recent conversation
+        memory_snippets = []
+        if recent_chat:
+            try:
+                from apprentice_agent.memory.unified_memory import get_unified_memory
+                um = get_unified_memory()
+                # Use last user message as memory query
+                last_user_msgs = [m["content"] for m in recent_chat if m.get("role") == "user"]
+                if last_user_msgs:
+                    query = last_user_msgs[-1][:200]
+                    results = um.query(query, k=3, min_score=0.3)
+                    memory_snippets = [r.content[:150] for r in results[:3]]
+            except BaseException:
+                pass
+
+        # 3. Emotional state
+        emotional_summary = ""
         try:
             from apprentice_agent.emotion.alma_engine import alma_engine
             state = alma_engine.get_emotional_state()
             if state:
-                emotional_state = state.get("pad", {})
+                pad = state.get("pad", {})
+                mood = state.get("mood", {})
+                warmth = mood.get("warmth", 0.5)
+                energy = mood.get("energy", 0.5)
+                engagement = mood.get("engagement", 0.5)
+                emotional_summary = (
+                    f"Current mood — warmth: {warmth:.1f}, energy: {energy:.1f}, "
+                    f"engagement: {engagement:.1f}"
+                )
         except BaseException:
             pass
 
-        # Calculate idle hours
-        idle_hours = 0.0
+        # 4. Idle time
+        idle_minutes = 0.0
         if self.user_context.last_interaction:
-            idle_hours = (
+            idle_minutes = (
                 datetime.now() - self.user_context.last_interaction
-            ).total_seconds() / 3600
+            ).total_seconds() / 60
         elif self._stats.get("start_time"):
-            # Never interacted this session — use uptime
-            idle_hours = (
+            idle_minutes = (
                 datetime.now() - self._stats["start_time"]
-            ).total_seconds() / 3600
+            ).total_seconds() / 60
 
-        # Check if first session (no interaction ever recorded)
-        # Wait at least 2 minutes before first greeting so it doesn't feel instant/robotic
-        is_first_session = (
-            self.user_context.last_interaction is None
-            and self._stats.get("start_time") is not None
-            and (datetime.now() - self._stats["start_time"]).total_seconds() > 120
-            and self._messages_this_session == 0  # Only once
-        )
-
-        # Get drive info
-        drive_type = None
-        topics = []
-        weak_areas = None
+        # 5. Drive info
+        drive_summary = ""
         try:
             from apprentice_agent.consciousness.intrinsic_motivation import get_intrinsic_motivation
             im = get_intrinsic_motivation()
             im.assess_drives()
             drives = im._drives
             dominant = max(drives.values(), key=lambda d: d.urgency)
-
-            if dominant.urgency >= 0.45:
-                drive_type = dominant.drive_type.value
-                im.satisfy_drive(dominant.drive_type, 0.15)
-
-                # Get topics for curiosity
-                if drive_type == "curiosity":
-                    try:
-                        from api.routes.context import get_tracker
-                        ctx = get_tracker()
-                        focus = ctx.get_focus_state(limit=3)
-                        topics = [i["name"] for i in focus.get("items", [])[:2]]
-                    except Exception:
-                        pass
-
-                # Get weak areas for competence
-                if drive_type == "competence" and dominant.triggers:
-                    t = dominant.triggers[0]
-                    if "weak areas:" in t:
-                        weak_areas = t.replace("weak areas: ", "")
+            if dominant.urgency >= 0.3:
+                drive_summary = f"Dominant drive: {dominant.drive_type.value} (urgency: {dominant.urgency:.2f})"
+                if dominant.triggers:
+                    drive_summary += f" — triggers: {', '.join(dominant.triggers[:2])}"
         except BaseException:
             pass
 
+        # 6. Time of day
+        hour = datetime.now().hour
+        time_period = (
+            "morning" if 5 <= hour < 12 else
+            "afternoon" if 12 <= hour < 17 else
+            "evening" if 17 <= hour < 21 else
+            "night"
+        )
+
+        # ---- Decide if there's a reason to speak ----
+        has_chat_context = len(recent_chat) > 0
+        is_first_session = (
+            not has_chat_context
+            and self._stats.get("start_time") is not None
+            and (datetime.now() - self._stats["start_time"]).total_seconds() > 120
+            and self._messages_this_session == 0
+        )
+        idle_enough = idle_minutes > 5
+
+        if not (has_chat_context or is_first_session or idle_enough):
+            logger.debug("[GatewayDaemon] No reason to generate message — no context")
+            return None
+
+        # ---- Build LLM prompt ----
+        context_parts = []
+        context_parts.append(f"Time: {time_period} ({datetime.now().strftime('%H:%M')})")
+        context_parts.append(f"User idle for: {idle_minutes:.0f} minutes")
+
+        if emotional_summary:
+            context_parts.append(emotional_summary)
+        if drive_summary:
+            context_parts.append(drive_summary)
+
+        if recent_chat:
+            chat_lines = []
+            for msg in recent_chat:
+                role = "User" if msg.get("role") == "user" else "AURA"
+                content = msg.get("content", "")[:200]
+                chat_lines.append(f"  {role}: {content}")
+            context_parts.append("Recent conversation:\n" + "\n".join(chat_lines))
+
+        if memory_snippets:
+            context_parts.append(
+                "Relevant memories:\n  " + "\n  ".join(memory_snippets)
+            )
+
+        if is_first_session:
+            context_parts.append("This is the start of a new session — user just opened the app.")
+
+        context_block = "\n".join(context_parts)
+
+        prompt = (
+            f"You are about to send an UNPROMPTED proactive message to the user. "
+            f"This is NOT a reply — the user did NOT ask you anything. You're reaching out on your own.\n\n"
+            f"CONTEXT:\n{context_block}\n\n"
+            f"RULES:\n"
+            f"- Write ONE short message (1-2 sentences max)\n"
+            f"- It MUST reference something specific from the context above — "
+            f"a recent topic, a memory, the time of day, their mood, or what they were working on\n"
+            f"- Do NOT be generic. Do NOT say 'I'm here if you need me' or 'How can I help'\n"
+            f"- Be natural, like texting a friend. Use contractions. Be witty or sarcastic when appropriate\n"
+            f"- If referencing past conversation, be specific about WHAT was discussed\n"
+            f"- Match energy to time of day and mood\n"
+            f"- Output ONLY the message text, nothing else\n"
+        )
+
+        # ---- Call LLM ----
+        try:
+            from api.services.agent_service import agent_service
+            if agent_service.agent and agent_service.agent.brain:
+                response = agent_service.agent.brain.think(
+                    prompt=prompt,
+                    use_history=False,  # Don't pollute chat history
+                )
+                if response and len(response.strip()) > 5:
+                    msg = response.strip().strip('"').strip("'")
+                    # Sanity: reject if too long or looks like an error
+                    if len(msg) < 300 and not msg.lower().startswith("i'm sorry"):
+                        logger.info(f"[GatewayDaemon] LLM generated proactive message")
+                        return msg
+                    logger.debug(f"[GatewayDaemon] LLM response rejected (too long or generic)")
+        except BaseException as e:
+            logger.warning(f"[GatewayDaemon] LLM generation failed ({type(e).__name__}): {e}")
+
+        # ---- Fallback to templates ----
+        logger.debug("[GatewayDaemon] Falling back to template messages")
+        from .proactive_messages import generate_proactive_content
         return generate_proactive_content(
             beliefs=beliefs,
-            emotional_state=emotional_state,
-            idle_hours=idle_hours,
+            idle_hours=idle_minutes / 60,
             is_first_session=is_first_session,
-            topics=topics,
-            drive_type=drive_type,
-            weak_areas=weak_areas,
             task_urgent=beliefs.task_urgent > 0.5,
         )
 
