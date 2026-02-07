@@ -113,7 +113,7 @@ class Config:
     MODEL_FAST_CHAIN = ["mistral:7b", "llama3:8b", "qwen2:1.5b"]
     MODEL_REASON_CHAIN = ["llama3:8b", "deepseek-v3.1:671b-cloud", "cogito-2.1:671b-cloud", "mistral:7b"]
     MODEL_CODE_CHAIN = ["qwen2.5-coder:7b", "devstral-2:123b-cloud", "glm-4.7-cloud", "deepseek-coder:6.7b"]
-    MODEL_VISION_CHAIN = ["llava", "qwen3-vl:235b-cloud", "kimi-k2.5-cloud", "llava:7b"]
+    MODEL_VISION_CHAIN = ["minicpm-v", "qwen2.5-vl:7b", "llava", "qwen3-vl:235b-cloud", "llava:7b"]
 
     # Primary models - LOCAL for fast response
     MODEL_FAST: str = os.getenv("MODEL_FAST", "mistral:7b")
@@ -234,23 +234,6 @@ class Config:
                 'code_cloud': cls.MODEL_CODE_CLOUD,
                 'vision_cloud': cls.MODEL_VISION_CLOUD,
             }
-
-    # Vision model fallback chain (tried in order)
-    MODEL_VISION_CHAIN: list = [
-        "minicpm-v",            # Best local (8B, fits 8GB, strong OCR + UI)
-        "qwen2.5-vl:7b",       # Local fallback (multilingual)
-        "llava",                # Legacy fallback
-    ]
-
-    @classmethod
-    def get_model(cls, task_type: str) -> str:
-        """Get the configured model for a task type."""
-        return {
-            "fast": cls.MODEL_FAST,
-            "reason": cls.MODEL_REASON,
-            "code": cls.MODEL_CODE,
-            "vision": cls.MODEL_VISION,
-        }.get(task_type, cls.MODEL_NAME)
 
     MEMORY_COLLECTION_NAME: str = "agent_memory"
     MAX_MEMORY_RESULTS: int = 5
