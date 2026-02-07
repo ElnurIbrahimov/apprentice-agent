@@ -114,6 +114,12 @@ class IdlePresenceEngine:
         # Callbacks registered
         self._callbacks_registered = False
 
+        # Sleep scheduler config
+        self._sleep_idle_threshold = 30 * 60    # 30 min idle before triggering sleep
+        self._sleep_cooldown = 4 * 3600         # 4 hours between auto-sleep cycles
+        self._last_auto_sleep_time: float = 0.0
+        self._conversation_threshold = 5        # Min messages before first sleep is useful
+
         # Stats
         self._stats = {
             "activities_recorded": 0,
@@ -459,6 +465,10 @@ class IdlePresenceEngine:
         if idle_seconds > 90:
             self._run_kg_maintenance()
 
+        # Task 4: Auto-trigger NeuroDream sleep when idle long enough
+        if idle_seconds > self._sleep_idle_threshold:
+            self._check_and_trigger_sleep(idle_seconds)
+
     def _run_self_reflection(self) -> None:
         """Generate a self-reflection on recent interactions."""
         try:
@@ -518,12 +528,78 @@ class IdlePresenceEngine:
             pass
 
     # ====================================================================
+    # Sleep Scheduling
+    # ====================================================================
+
+    def _check_and_trigger_sleep(self, idle_seconds: float) -> None:
+        """Check guards and trigger NeuroDream sleep if appropriate."""
+        try:
+            now = time.time()
+
+            # Guard: cooldown period
+            if now - self._last_auto_sleep_time < self._sleep_cooldown:
+                return
+
+            # Guard: enough conversations to make sleep useful
+            if not self._has_enough_conversations():
+                return
+
+            from apprentice_agent.tools.neurodream import get_neurodream
+            nd = get_neurodream()
+
+            # Guard: NeuroDream must be awake
+            if nd.current_phase.value != "awake":
+                return
+
+            # All guards passed — trigger sleep
+            logger.info(
+                f"[IdlePresence] Auto-triggered NeuroDream sleep cycle "
+                f"(idle {idle_seconds:.0f}s)"
+            )
+            nd.enter_sleep(trigger="idle")
+            self._last_auto_sleep_time = now
+            self._record_activity(
+                IdleActivity.DREAM_LIGHT,
+                "auto-triggered sleep consolidation after extended idle",
+                cognitive_load=0.5,
+            )
+
+        except Exception as e:
+            logger.debug(f"[IdlePresence] Sleep trigger check failed: {e}")
+
+    def _has_enough_conversations(self) -> bool:
+        """Check if there are enough conversations to justify a sleep cycle."""
+        try:
+            from api.services.agent_service import agent_service
+            if not agent_service.is_ready:
+                return False
+            count = len(agent_service.agent.brain.conversation_history)
+            return count >= self._conversation_threshold
+        except Exception:
+            return False
+
+    def record_user_activity(self) -> None:
+        """Record user activity, keeping NeuroDream timers in sync.
+
+        Call from chat handler when the user sends a message.
+        """
+        try:
+            from apprentice_agent.tools.neurodream import get_neurodream
+            nd = get_neurodream()
+            nd.record_activity()
+        except Exception:
+            pass
+
+    # ====================================================================
     # Full State for UI
     # ====================================================================
 
     def get_state(self) -> Dict[str, Any]:
         """Get full idle presence state for the UI."""
         load = self.compute_cognitive_load()
+
+        now = time.time()
+        cooldown_remaining = max(0.0, self._sleep_cooldown - (now - self._last_auto_sleep_time))
 
         with self._lock:
             return {
@@ -540,6 +616,13 @@ class IdlePresenceEngine:
                         if self._dream_phase_start else 0
                     ),
                 },
+                "sleep_scheduler": {
+                    "enabled": True,
+                    "idle_threshold_minutes": self._sleep_idle_threshold / 60,
+                    "cooldown_hours": self._sleep_cooldown / 3600,
+                    "last_auto_sleep": self._last_auto_sleep_time or None,
+                    "next_eligible_in_minutes": round(cooldown_remaining / 60, 1),
+                },
                 "background_running": self._running,
                 "stats": dict(self._stats),
             }
@@ -547,6 +630,8 @@ class IdlePresenceEngine:
     def get_status(self) -> Dict[str, Any]:
         """Get concise status for API."""
         load = self.compute_cognitive_load()
+        now = time.time()
+        cooldown_remaining = max(0.0, self._sleep_cooldown - (now - self._last_auto_sleep_time))
         return {
             "active": True,
             "cognitive_load": round(load.total_load, 3),
@@ -556,6 +641,13 @@ class IdlePresenceEngine:
             "dream_phase": self._current_dream_phase,
             "activities_recorded": self._stats["activities_recorded"],
             "background_running": self._running,
+            "sleep_scheduler": {
+                "enabled": True,
+                "idle_threshold_minutes": self._sleep_idle_threshold / 60,
+                "cooldown_hours": self._sleep_cooldown / 3600,
+                "last_auto_sleep": self._last_auto_sleep_time or None,
+                "next_eligible_in_minutes": round(cooldown_remaining / 60, 1),
+            },
         }
 
 

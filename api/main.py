@@ -101,6 +101,13 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"[API] Proactive system failed to start: {e}")
 
+        # Start Idle Presence Engine (sleep scheduling)
+        try:
+            from api.routes.idle_behaviors import init_idle_presence
+            init_idle_presence()
+        except Exception as e:
+            logger.warning(f"[API] Idle presence init failed: {e}")
+
     asyncio.create_task(_start_proactive_system())
 
     yield
@@ -117,6 +124,13 @@ async def lifespan(app: FastAPI):
         logger.info("[API] Proactive system stopped")
     except Exception as e:
         logger.warning(f"[API] Proactive shutdown error: {e}")
+
+    # Stop Idle Presence Engine
+    try:
+        from apprentice_agent.consciousness.idle_presence import get_idle_presence_engine
+        get_idle_presence_engine().stop_background_tasks()
+    except Exception:
+        pass
 
     # Close proactive persistence database
     try:
