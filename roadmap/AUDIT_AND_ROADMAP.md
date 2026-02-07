@@ -71,7 +71,7 @@
 
 ### Consciousness & Cognition
 2. **Active Inference (pymdp)** - Optional/decorative; simplified engine doesn't learn from outcomes
-3. **Metacognitive Evaluation** - Assessment exists but no execution of improvement goals (read-only metacognition)
+3. ~~**Metacognitive Evaluation** - Assessment exists but no execution of improvement goals (read-only metacognition)~~ FIXED: Self-Improvement Engine now records real outcomes, executes enhanced strategies, and runs background improvement cycles
 
 ### Ambient Presence & UI
 4. **Idle Behavior Panel** - Displays real data but behavior generation could be richer
@@ -90,15 +90,11 @@
 | 7 | **Neural Oscillations** | `27d8646` - Add DONN-inspired neural oscillations to NeuroDream sleep phases | DONE |
 | - | **ContextHeatmap + MemoryRecallIndicator Wiring** | `ba9abfe` - Wire real data to both UI components across REST + all memory systems | DONE |
 | 3 | **Global Workspace Theory** | `3530ed0` - Implement GWT for unified conscious attention (8 codelets, cognitive cycles, attention schema, EventBus broadcast) | DONE |
+| 4 | **Self-Improvement Loop** | `e537f14` - Implement self-improvement loop: outcome recording from brain.py, enhanced strategy execution (LLM practice, param tuning, pattern extraction), background scheduler, quality evaluator | DONE |
 
 ---
 
-## Missing (3 items) - THE ROADMAP
-
-### Priority 1: High Impact, High Complexity
-| # | Item | Description | Files to Create/Modify | Estimated Effort |
-|---|------|-------------|----------------------|-----------------|
-| 4 | **Self-Improvement Loop** | Execute metacognitive goals, not just assess them. Agent edits own code/config, tracks improvement metrics, RAGAS evaluation. | `apprentice_agent/consciousness/self_improvement.py`, modify `metacognition.py` | 3-5 days |
+## Missing (2 items) - THE ROADMAP
 
 ### Priority 2: Medium Impact, Medium Complexity
 | # | Item | Description | Files to Create/Modify | Estimated Effort |
@@ -138,9 +134,9 @@
 Week 1:  SQLite Persistence (#1) + LLM-Powered Salience (#2)        ✅ DONE
 Week 2:  Sleep-Time Compute Scheduler (#6) + Neural Oscillations (#7) ✅ DONE
 Week 3:  Global Workspace Theory (#3)                                 ✅ DONE
-Week 4:  Advanced Vision Models (#5)
-Week 5:  Self-Improvement Loop (#4)
+Week 4:  Self-Improvement Loop (#4)                                 ✅ DONE
+Week 5:  Advanced Vision Models (#5)
 Week 6:  Voice Presence (#8)
 ```
 
-**Target: 100% research goal achievement in ~6 weeks (3 remaining)**
+**Target: 100% research goal achievement in ~6 weeks (2 remaining)**

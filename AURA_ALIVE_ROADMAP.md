@@ -534,16 +534,18 @@ Transform AURA from a system with genuine cognitive subsystems wrapped in cosmet
   - Naturally balances exploration/exploitation
 - **Files to modify:** `apprentice_agent/proactive/active_inference.py`
 
-#### 6.2 Metacognitive Self-Improvement
-- **Current:** SynapseForge creates tools, Reflexion learns from mistakes
-- **Target:** Autonomous self-assessment and improvement
-- **Implementation:**
+#### 6.2 Metacognitive Self-Improvement — DONE ✅
+- **Current:** Full self-improvement loop operational
+- **Implemented:**
   - Metacognitive knowledge: track what AURA is good/bad at
   - Metacognitive planning: decide what to learn next
   - Metacognitive evaluation: reflect on learning effectiveness
-  - Use Reflexion lessons + FluxMind confidence to identify weak areas
-  - Autonomously improve via: new tool synthesis, pattern learning, skill practice
-- **Key files to create:** `aura/consciousness/metacognition.py`
+  - Self-Improvement Engine records real interaction outcomes from brain.py
+  - Enhanced strategies: LLM-powered practice, param tuning, pattern extraction, skill refinement, tool synthesis
+  - Background scheduler runs improvement cycles driven by intrinsic motivation
+  - Quality evaluator tracks domain trends, strategy effectiveness, improvement velocity
+  - Tunable parameters registry with bounded auto-adjustment
+- **Key files:** `apprentice_agent/consciousness/metacognition.py`, `apprentice_agent/consciousness/self_improvement.py`
 
 #### 6.3 Theory of Mind (User Modeling)
 - **Current:** Basic user profile in markdown
@@ -602,7 +604,7 @@ Transform AURA from a system with genuine cognitive subsystems wrapped in cosmet
 
 ### Transformative but Complex
 13. Active Inference with pymdp (2 weeks)
-14. Metacognitive self-improvement (2-3 weeks)
+14. ~~Metacognitive self-improvement (2-3 weeks)~~ ✅ DONE
 15. Theory of Mind user modeling (1-2 weeks)
 16. Intrinsic motivation system (2-3 weeks)
 
