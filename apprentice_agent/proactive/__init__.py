@@ -28,6 +28,7 @@ from .gateway_daemon import (
     start_gateway_daemon,
     stop_gateway_daemon
 )
+from .persistence import ProactivePersistence, get_persistence
 
 __all__ = [
     # Event Bus
@@ -48,5 +49,8 @@ __all__ = [
     "get_gateway_daemon",
     "start_gateway_daemon",
     "stop_gateway_daemon",
+    # Persistence
+    "ProactivePersistence",
+    "get_persistence",
 ]
 

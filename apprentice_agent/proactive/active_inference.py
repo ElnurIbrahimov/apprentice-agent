@@ -329,6 +329,24 @@ class SimplifiedActiveInference:
             }
         )
 
+    def restore_action_history(
+        self, history: List[Tuple[str, datetime]]
+    ) -> None:
+        """Restore action history from persistence.
+
+        Args:
+            history: List of (action_value_string, taken_at) tuples.
+        """
+        self.action_history = []
+        for action_str, taken_at in history:
+            try:
+                action = ProactiveAction(action_str)
+            except (ValueError, KeyError):
+                continue
+            self.action_history.append((action, taken_at))
+        if self.action_history:
+            self.last_action_time = self.action_history[-1][1]
+
     def should_act_proactively(self) -> Tuple[bool, str]:
         """
         Determine if proactive action is warranted.
@@ -644,6 +662,20 @@ class ActiveInferenceEngine:
     def get_beliefs(self) -> BeliefState:
         """Get current belief state."""
         return self._simple_engine.beliefs
+
+    def restore_beliefs(self, beliefs: BeliefState) -> None:
+        """Restore beliefs from persistence."""
+        self._simple_engine.beliefs = beliefs
+
+    def restore_action_history(
+        self, history: List[Tuple[str, datetime]]
+    ) -> None:
+        """Restore action history from persistence.
+
+        Args:
+            history: List of (action_value_string, taken_at) tuples.
+        """
+        self._simple_engine.restore_action_history(history)
 
     def set_intrinsic_preferences(self, preferences: Dict[str, float]) -> None:
         """Update intrinsic motivation priors in the generative model (Phase 6E).

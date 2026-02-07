@@ -141,7 +141,82 @@ class GatewayDaemon:
             "start_time": None,
         }
 
+        # Load persisted state (graceful degradation)
+        self._load_persisted_state()
+
         logger.info("[GatewayDaemon] Initialized")
+
+    def _load_persisted_state(self) -> None:
+        """Load persisted daemon state from SQLite."""
+        try:
+            from .persistence import get_persistence
+            persistence = get_persistence()
+
+            # Restore daemon stats and context
+            ds = persistence.load_daemon_state()
+            if ds:
+                self._stats["events_received"] = ds.get("events_received", 0)
+                self._stats["events_filtered"] = ds.get("events_filtered", 0)
+                self._stats["decisions_made"] = ds.get("decisions_made", 0)
+                self._stats["messages_sent"] = ds.get("messages_sent", 0)
+                self._last_proactive_message_time = ds.get(
+                    "last_proactive_message_time", 0.0
+                )
+                ctx = ds.get("user_context", {})
+                if ctx:
+                    self.user_context.current_app = ctx.get("current_app")
+                    self.user_context.current_task = ctx.get("current_task")
+                    self.user_context.focus_keywords = ctx.get("focus_keywords", [])
+                    self.user_context.do_not_disturb = ctx.get("do_not_disturb", False)
+                logger.info("[GatewayDaemon] Restored persisted daemon state")
+
+            # Restore beliefs into inference engine
+            beliefs_data = persistence.load_beliefs()
+            if beliefs_data:
+                restored = BeliefState(
+                    user_busy=beliefs_data["user_busy"],
+                    user_receptive=beliefs_data["user_receptive"],
+                    task_urgent=beliefs_data["task_urgent"],
+                    context_stable=beliefs_data["context_stable"],
+                    uncertainty=beliefs_data["uncertainty"],
+                )
+                self.inference_engine.restore_beliefs(restored)
+                logger.info("[GatewayDaemon] Restored persisted beliefs")
+
+            # Restore action history into inference engine
+            history = persistence.load_action_history(limit=100)
+            if history:
+                self.inference_engine.restore_action_history(history)
+                logger.info(
+                    f"[GatewayDaemon] Restored {len(history)} action history entries"
+                )
+
+        except Exception as e:
+            logger.debug(f"[GatewayDaemon] Persisted state load skipped: {e}")
+
+    def _persist_state(self) -> None:
+        """Save current state to SQLite persistence."""
+        try:
+            from .persistence import get_persistence
+            persistence = get_persistence()
+
+            # Save daemon stats + user context
+            ctx_dict = {
+                "current_app": self.user_context.current_app,
+                "current_task": self.user_context.current_task,
+                "focus_keywords": self.user_context.focus_keywords,
+                "do_not_disturb": self.user_context.do_not_disturb,
+            }
+            persistence.save_daemon_state(
+                self._stats, ctx_dict, self._last_proactive_message_time
+            )
+
+            # Save beliefs
+            persistence.save_beliefs(self.inference_engine.get_beliefs())
+
+            logger.debug("[GatewayDaemon] State persisted")
+        except Exception as e:
+            logger.debug(f"[GatewayDaemon] Persist state error: {e}")
 
     def set_notification_callback(
         self,
@@ -246,6 +321,9 @@ class GatewayDaemon:
         self.state = DaemonState.STOPPING
         logger.info("[GatewayDaemon] Stopping...")
 
+        # Persist state before stopping
+        self._persist_state()
+
         # Cancel decision loop
         if self._task:
             self._task.cancel()
@@ -292,6 +370,13 @@ class GatewayDaemon:
 
         logger.debug(f"[GatewayDaemon] Processing: {event.source}.{event.event_type} "
                     f"(salience={filtered.salience_score:.2f})")
+
+        # Log event to persistence
+        try:
+            from .persistence import get_persistence
+            get_persistence().log_event(event, filtered.salience_score)
+        except Exception:
+            pass
 
         # Convert event to observations for belief update
         observations = self._event_to_observations(event, filtered)
@@ -422,6 +507,22 @@ class GatewayDaemon:
                 # Make proactive decision
                 decision = self.inference_engine.select_action()
                 self._stats["decisions_made"] += 1
+
+                # Persist decisions and beliefs
+                try:
+                    from .persistence import get_persistence
+                    persistence = get_persistence()
+                    if decision.action != ProactiveAction.WAIT:
+                        persistence.save_decision(
+                            decision, self.inference_engine.get_beliefs()
+                        )
+                    # Save beliefs every 10th cycle (~50s at 5s interval)
+                    if self._stats["decisions_made"] % 10 == 0:
+                        persistence.save_beliefs(
+                            self.inference_engine.get_beliefs()
+                        )
+                except Exception:
+                    pass
 
                 # Notify decision callback if set
                 if self._decision_callback:

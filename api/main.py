@@ -90,6 +90,7 @@ async def lifespan(app: FastAPI):
             app.state.system_monitor = sys_monitor
 
             logger.info("[API] Proactive system started (Gateway Daemon + SystemMonitor)")
+            logger.info("[API] SQLite persistence active for proactive subsystem")
         except Exception as e:
             logger.warning(f"[API] Proactive system failed to start: {e}")
 
@@ -109,6 +110,14 @@ async def lifespan(app: FastAPI):
         logger.info("[API] Proactive system stopped")
     except Exception as e:
         logger.warning(f"[API] Proactive shutdown error: {e}")
+
+    # Close proactive persistence database
+    try:
+        from apprentice_agent.proactive.persistence import get_persistence
+        get_persistence().close()
+        logger.info("[API] Proactive persistence closed")
+    except Exception as e:
+        logger.warning(f"[API] Persistence shutdown error: {e}")
 
 
 # Create FastAPI app

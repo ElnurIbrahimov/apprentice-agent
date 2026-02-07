@@ -144,6 +144,17 @@ class SalienceFilter:
             "events_filtered": 0,
         }
 
+        # Load persisted seen events (graceful degradation)
+        try:
+            from .persistence import get_persistence
+            self._seen_events = get_persistence().load_seen_events(self.seen_event_ttl)
+            if self._seen_events:
+                logger.info(
+                    f"[SalienceFilter] Restored {len(self._seen_events)} seen events"
+                )
+        except Exception:
+            pass  # Graceful degradation — start with empty dict
+
         logger.info(f"[SalienceFilter] Initialized with threshold={threshold}")
 
     def set_context(self, keywords: List[str], activity: Optional[str] = None) -> None:
@@ -285,6 +296,13 @@ class SalienceFilter:
 
         # Update seen events
         self._seen_events[event_hash] = now
+
+        # Persist seen event
+        try:
+            from .persistence import get_persistence
+            get_persistence().save_seen_event(event_hash, now)
+        except Exception:
+            pass
 
         # Cleanup old entries
         if len(self._seen_events) > self._seen_event_limit:
