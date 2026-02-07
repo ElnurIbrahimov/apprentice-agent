@@ -3,7 +3,7 @@ import { useChatStore } from '../store/chatStore';
 import { MessageBubble } from './MessageBubble';
 import { MessageInput } from './MessageInput';
 import { useWebSocket } from '../hooks/useWebSocket';
-// import { useProactiveMessages } from '../hooks/useProactiveMessages';
+import { useProactiveMessages } from '../hooks/useProactiveMessages';
 // import { useConversationStarters } from '../hooks/useConversationStarters';
 import type { FileAttachment } from '../types';
 import {
@@ -41,7 +41,7 @@ export function ChatContainer() {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
 
-  // useProactiveMessages(connectionStatus === 'connected');
+  useProactiveMessages(connectionStatus === 'connected');
   // useConversationStarters(connectionStatus === 'connected');
 
   // Check if user is near the bottom of scroll area

@@ -75,8 +75,8 @@ export function useProactiveMessages(enabled: boolean = true) {
     }
   }, [addMessage]);
 
-  // Poll every 30 seconds (proactive messages aren't time-critical)
-  usePolling(fetchAndAddMessages, 30000, { enabled: enabled && connectionStatus === 'connected' });
+  // Poll every 15 seconds for proactive messages
+  usePolling(fetchAndAddMessages, 15000, { enabled: enabled && connectionStatus === 'connected' });
 
   return {
     lastCheck: lastCheckRef.current,

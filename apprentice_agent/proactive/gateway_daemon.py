@@ -130,7 +130,7 @@ class GatewayDaemon:
 
         # Phase 6E: Proactive message rate limiting
         self._last_proactive_message_time: float = 0.0
-        self._min_message_interval = 120.0  # Minimum 2 minutes between proactive messages
+        self._min_message_interval = 45.0  # Minimum 45 seconds between proactive messages
 
         # Statistics
         self._stats = {
@@ -504,6 +504,11 @@ class GatewayDaemon:
                 except Exception as e:
                     logger.debug(f"[GatewayDaemon] Emotional drift error: {e}")
 
+                # Autonomous belief drift toward idle/receptive when no events
+                # This prevents PREPARE from winning forever by gradually shifting
+                # beliefs so SUGGEST/social check-ins can trigger
+                self.inference_engine.drift_beliefs_toward_idle()
+
                 # Make proactive decision
                 decision = self.inference_engine.select_action()
                 self._stats["decisions_made"] += 1
@@ -536,8 +541,11 @@ class GatewayDaemon:
 
             except asyncio.CancelledError:
                 break
-            except Exception as e:
-                logger.error(f"[GatewayDaemon] Decision loop error: {e}")
+            except BaseException as e:
+                # Catch BaseException to survive Rust panics (pyo3 PanicException)
+                # and other non-Exception errors that would kill the loop
+                logger.error(f"[GatewayDaemon] Decision loop error ({type(e).__name__}): {e}")
+                await asyncio.sleep(5)  # Brief pause before retrying
 
         logger.info("[GatewayDaemon] Decision loop stopped")
 
@@ -558,26 +566,33 @@ class GatewayDaemon:
             ProactiveAction.REMIND,
             ProactiveAction.ASK
         ):
-            logger.debug(f"[GatewayDaemon] Suppressing {decision.action} (DND mode)")
+            logger.info(f"[GatewayDaemon] Suppressing {decision.action} (DND mode)")
             return
 
         # Check confidence threshold
         if decision.confidence < 0.4:
-            logger.debug(f"[GatewayDaemon] Suppressing {decision.action} "
+            logger.info(f"[GatewayDaemon] Suppressing {decision.action} "
                         f"(low confidence: {decision.confidence:.2f})")
             return
 
-        # Phase 6E: Rate limit proactive messages (min 2 min between messages)
+        # Rate limit proactive messages
         import time as _time
         now = _time.time()
         if now - self._last_proactive_message_time < self._min_message_interval:
-            logger.debug("[GatewayDaemon] Rate limited - too soon since last message")
+            logger.info(f"[GatewayDaemon] Rate limited {decision.action.value} "
+                       f"({now - self._last_proactive_message_time:.0f}s < {self._min_message_interval}s)")
             return
 
-        # Generate message content
-        content = self._generate_message_content(decision.action)
+        # Generate message content (protected against crashes)
+        logger.info(f"[GatewayDaemon] Generating content for {decision.action.value}...")
+        try:
+            content = self._generate_message_content(decision.action)
+        except BaseException as e:
+            logger.error(f"[GatewayDaemon] Content generation crashed ({type(e).__name__}): {e}")
+            content = None
 
         if not content:
+            logger.info(f"[GatewayDaemon] No content generated for {decision.action.value}")
             return
 
         # Create message
@@ -628,6 +643,10 @@ class GatewayDaemon:
         if action == ProactiveAction.SUGGEST:
             return self._generate_suggestion(beliefs)
 
+        elif action == ProactiveAction.NOTIFY:
+            # Notification: similar to suggest but more direct
+            return self._generate_suggestion(beliefs)
+
         elif action == ProactiveAction.REMIND:
             return self._generate_reminder(beliefs)
 
@@ -676,7 +695,7 @@ class GatewayDaemon:
         1. Screen error detected → debug help
         2. Relevant memory recall → share insight
         3. Pattern-based suggestion → proactive help
-        4. Emotional check-in → wellbeing
+        4. Rich message generation with personality, variety, and deduplication
         """
         # 1. Screen-aware suggestions (Phase 3D)
         screen_ctx = self._get_screen_context()
@@ -694,21 +713,8 @@ class GatewayDaemon:
         if pattern_suggestion:
             return pattern_suggestion
 
-        # 4. Emotional check-in (if user seems stressed or it's been a while)
-        emotional_suggestion = self._suggest_emotional_checkin(beliefs)
-        if emotional_suggestion:
-            return emotional_suggestion
-
-        # 5. Phase 6E: Intrinsic motivation-driven suggestions
-        drive_suggestion = self._suggest_from_drives()
-        if drive_suggestion:
-            return drive_suggestion
-
-        # 6. Generic task help
-        if beliefs.task_urgent > 0.5:
-            return "I notice you might need help with something. Would you like me to assist?"
-
-        return None
+        # 4. Rich proactive message generation with full personality
+        return self._generate_rich_message(beliefs)
 
     def _suggest_from_memory(self) -> Optional[str]:
         """Check unified memory for relevant suggestions based on current context."""
@@ -733,8 +739,8 @@ class GatewayDaemon:
                         f"This might be relevant to what you're working on: "
                         f"\"{content_preview}...\" (from {top.source})"
                     )
-        except Exception as e:
-            logger.debug(f"[GatewayDaemon] Memory suggestion error: {e}")
+        except BaseException as e:
+            logger.debug(f"[GatewayDaemon] Memory suggestion error ({type(e).__name__}): {e}")
         return None
 
     def _suggest_from_patterns(self) -> Optional[str]:
@@ -756,142 +762,91 @@ class GatewayDaemon:
                         desc = p.get("description", "")
                         if desc:
                             return f"Based on your patterns: {desc}. Want me to help?"
-        except Exception as e:
-            logger.debug(f"[GatewayDaemon] Pattern suggestion error: {e}")
+        except BaseException as e:
+            logger.debug(f"[GatewayDaemon] Pattern suggestion error ({type(e).__name__}): {e}")
         return None
 
-    def _suggest_emotional_checkin(self, beliefs: 'BeliefState') -> Optional[str]:
-        """Suggest an emotional check-in if appropriate."""
+    def _generate_rich_message(self, beliefs: 'BeliefState') -> Optional[str]:
+        """Generate a rich, varied proactive message using the message library.
+
+        Gathers context (emotional state, drives, idle time, topics) and
+        delegates to the proactive_messages module for personality-rich,
+        non-repetitive message generation.
+        """
+        from .proactive_messages import generate_proactive_content
+
+        # Gather emotional state
+        emotional_state = {}
         try:
             from apprentice_agent.emotion.alma_engine import alma_engine
             state = alma_engine.get_emotional_state()
+            if state:
+                emotional_state = state.get("pad", {})
+        except BaseException:
+            pass
 
-            if not state:
-                return None
+        # Calculate idle hours
+        idle_hours = 0.0
+        if self.user_context.last_interaction:
+            idle_hours = (
+                datetime.now() - self.user_context.last_interaction
+            ).total_seconds() / 3600
+        elif self._stats.get("start_time"):
+            # Never interacted this session — use uptime
+            idle_hours = (
+                datetime.now() - self._stats["start_time"]
+            ).total_seconds() / 3600
 
-            pad = state.get("pad", {})
-            pleasure = pad.get("pleasure", 0.0)
+        # Check if first session (no interaction ever recorded)
+        is_first_session = (
+            self.user_context.last_interaction is None
+            and self._stats.get("start_time") is not None
+            and (datetime.now() - self._stats["start_time"]).total_seconds() > 60
+        )
 
-            # If AURA's emotional state is low, suggest checking in
-            if pleasure < -0.3:
-                return "I sense things might be a bit tough right now. How are you doing?"
-
-            # If it's been a long time since interaction
-            if self.user_context.last_interaction:
-                hours_since = (
-                    datetime.now() - self.user_context.last_interaction
-                ).total_seconds() / 3600
-                if hours_since > 4:
-                    return "It's been a while! How's everything going?"
-        except Exception as e:
-            logger.debug(f"[GatewayDaemon] Emotional check-in error: {e}")
-        return None
-
-    def _suggest_from_drives(self) -> Optional[str]:
-        """Generate suggestion from intrinsic motivation drives (Phase 6E).
-
-        Checks AURA's active drives and generates natural-sounding messages
-        when a drive is urgent enough to warrant speaking up.
-        """
+        # Get drive info
+        drive_type = None
+        topics = []
+        weak_areas = None
         try:
             from apprentice_agent.consciousness.intrinsic_motivation import get_intrinsic_motivation
             im = get_intrinsic_motivation()
             im.assess_drives()
-
-            # Get the most urgent drive
             drives = im._drives
             dominant = max(drives.values(), key=lambda d: d.urgency)
 
-            # Only speak up if drive urgency is high enough
-            if dominant.urgency < 0.5:
-                return None
+            if dominant.urgency >= 0.25:
+                drive_type = dominant.drive_type.value
+                im.satisfy_drive(dominant.drive_type, 0.15)
 
-            drive_type = dominant.drive_type.value
+                # Get topics for curiosity
+                if drive_type == "curiosity":
+                    try:
+                        from api.routes.context import get_tracker
+                        ctx = get_tracker()
+                        focus = ctx.get_focus_state(limit=3)
+                        topics = [i["name"] for i in focus.get("items", [])[:2]]
+                    except Exception:
+                        pass
 
-            if drive_type == "curiosity":
-                # Curiosity: ask about something or share a connection
-                topics = []
-                try:
-                    from api.routes.context import get_tracker
-                    ctx = get_tracker()
-                    focus = ctx.get_focus_state(limit=3)
-                    topics = [i["name"] for i in focus.get("items", [])[:2]]
-                except Exception:
-                    pass
+                # Get weak areas for competence
+                if drive_type == "competence" and dominant.triggers:
+                    t = dominant.triggers[0]
+                    if "weak areas:" in t:
+                        weak_areas = t.replace("weak areas: ", "")
+        except BaseException:
+            pass
 
-                if topics and len(topics) >= 2:
-                    im.satisfy_drive(dominant.drive_type, 0.2)
-                    return (
-                        f"I just connected something — {topics[0]} and {topics[1]} "
-                        f"seem related in a way I hadn't considered before. "
-                        f"Want me to explore that connection?"
-                    )
-                elif topics:
-                    im.satisfy_drive(dominant.drive_type, 0.2)
-                    return (
-                        f"My curiosity drive is active right now — I've been thinking "
-                        f"about {topics[0]} and I'm wondering if there's more to explore there. "
-                        f"Mind if I ask you something about it?"
-                    )
-                else:
-                    im.satisfy_drive(dominant.drive_type, 0.15)
-                    return (
-                        "I've been reflecting on our recent conversations and "
-                        "I'm curious about something. Mind if I ask?"
-                    )
-
-            elif drive_type == "social":
-                # Social: check in warmly
-                idle_hours = 0
-                try:
-                    from api.routes.idle_behaviors import get_manager
-                    mgr = get_manager()
-                    idle_hours = mgr.get_idle_duration() / 3600.0
-                except Exception:
-                    pass
-
-                im.satisfy_drive(dominant.drive_type, 0.3)
-                if idle_hours > 2:
-                    return (
-                        "Hey — I noticed you've been quiet for a while. "
-                        "Everything okay? I'm here if you need anything."
-                    )
-                elif idle_hours > 0.5:
-                    return (
-                        "Just checking in — I've been processing in the background "
-                        "and I'm ready whenever you need me."
-                    )
-                else:
-                    return None  # Don't interrupt active conversation with social
-
-            elif drive_type == "competence":
-                # Competence: offer insight from learning
-                weak_areas = dominant.triggers[0] if dominant.triggers else None
-                if weak_areas and "weak areas:" in weak_areas:
-                    areas = weak_areas.replace("weak areas: ", "")
-                    im.satisfy_drive(dominant.drive_type, 0.2)
-                    return (
-                        f"I've been working on improving my understanding of {areas}. "
-                        f"If you have any tasks in that area, I'd like to try — "
-                        f"it'll help me get better."
-                    )
-                return None
-
-            elif drive_type == "coherence":
-                # Coherence: flag something that needs clarification
-                if dominant.urgency > 0.6:
-                    im.satisfy_drive(dominant.drive_type, 0.2)
-                    return (
-                        "I noticed some things in my knowledge base that seem "
-                        "contradictory. When you have a moment, could you help me "
-                        "clarify something?"
-                    )
-                return None
-
-        except Exception as e:
-            logger.debug(f"[GatewayDaemon] Drive suggestion error: {e}")
-
-        return None
+        return generate_proactive_content(
+            beliefs=beliefs,
+            emotional_state=emotional_state,
+            idle_hours=idle_hours,
+            is_first_session=is_first_session,
+            topics=topics,
+            drive_type=drive_type,
+            weak_areas=weak_areas,
+            task_urgent=beliefs.task_urgent > 0.5,
+        )
 
     def _generate_reminder(self, beliefs: 'BeliefState') -> Optional[str]:
         """Generate a contextual reminder."""
@@ -1010,22 +965,25 @@ class GatewayDaemon:
         """
         Deliver a proactive message to the user.
 
+        Always queues to _pending_messages for frontend polling.
+        Also calls notification callback if set (for logging/real-time delivery).
+
         Args:
             message: The message to deliver
         """
+        # Always queue for frontend polling via GET /api/proactive/messages
+        self._pending_messages.append(message)
+        self._stats["messages_sent"] += 1
+
         if self._notification_callback:
             try:
                 self._notification_callback(message)
                 message.delivered = True
-                self._stats["messages_sent"] += 1
-                logger.info(f"[GatewayDaemon] Delivered: {message.action.value} - "
-                           f"{message.content[:50]}...")
             except Exception as e:
-                logger.error(f"[GatewayDaemon] Delivery failed: {e}")
-        else:
-            # Queue if no callback set
-            self._pending_messages.append(message)
-            logger.warning("[GatewayDaemon] No callback - message queued")
+                logger.error(f"[GatewayDaemon] Notification callback error: {e}")
+
+        logger.info(f"[GatewayDaemon] Queued: {message.action.value} - "
+                   f"{message.content[:80]}...")
 
     async def publish_event(self, event: Event, channel: Optional[str] = None) -> bool:
         """

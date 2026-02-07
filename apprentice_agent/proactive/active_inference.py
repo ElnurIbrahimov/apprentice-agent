@@ -95,6 +95,8 @@ class SimplifiedActiveInference:
         self.beliefs = BeliefState()
         self.action_history: List[Tuple[ProactiveAction, datetime]] = []
         self.last_action_time: Optional[datetime] = None
+        # Per-action cooldown tracking (action -> last time it was taken)
+        self._last_action_times: Dict[ProactiveAction, datetime] = {}
 
         # Preferences (what we "want" to observe)
         self.preferences = {
@@ -107,7 +109,7 @@ class SimplifiedActiveInference:
         self.cooldowns = {
             ProactiveAction.WAIT: 0,
             ProactiveAction.NOTIFY: 60,
-            ProactiveAction.SUGGEST: 120,
+            ProactiveAction.SUGGEST: 90,
             ProactiveAction.REMIND: 180,
             ProactiveAction.ASK: 300,
             ProactiveAction.PREPARE: 30,
@@ -169,6 +171,19 @@ class SimplifiedActiveInference:
         """Blend prior belief with new observation."""
         return np.clip(prior * (1 - rate) + observation * rate, 0.0, 1.0)
 
+    def drift_beliefs_toward_idle(self, drift_rate: float = 0.02) -> None:
+        """Drift beliefs toward idle/receptive when no observations arrive.
+
+        Called each decision cycle. Without fresh observations, beliefs
+        gradually shift: user becomes less busy, more receptive, uncertainty
+        rises slightly. This allows SUGGEST/ASK to eventually win over PREPARE.
+        """
+        self.beliefs.user_busy = self._blend(self.beliefs.user_busy, 0.2, drift_rate)
+        self.beliefs.user_receptive = self._blend(self.beliefs.user_receptive, 0.75, drift_rate)
+        self.beliefs.uncertainty = self._blend(self.beliefs.uncertainty, 0.45, drift_rate * 0.5)
+        # Task urgency decays naturally without new urgent events
+        self.beliefs.task_urgent = self._blend(self.beliefs.task_urgent, 0.0, drift_rate * 0.5)
+
     def compute_expected_free_energy(
         self,
         action: ProactiveAction
@@ -207,8 +222,12 @@ class SimplifiedActiveInference:
         elif action == ProactiveAction.SUGGEST:
             # Good if user receptive and not too busy
             if self.beliefs.user_receptive > 0.6 and self.beliefs.user_busy < 0.5:
-                pragmatic = 0.3
+                pragmatic = 0.25
                 reasoning = "User seems receptive to suggestions"
+            elif self.beliefs.user_busy < 0.4:
+                # User is idle - good time for a suggestion
+                pragmatic = 0.35
+                reasoning = "User appears idle, good time to engage"
             else:
                 pragmatic = 0.6
                 reasoning = "Suggestion may not be welcome now"
@@ -232,9 +251,13 @@ class SimplifiedActiveInference:
                 reasoning = "Already have sufficient information"
 
         elif action == ProactiveAction.PREPARE:
-            # Generally safe, good with anticipated needs
-            pragmatic = 0.4
-            reasoning = "Background preparation is low-risk"
+            # Only useful when there's something to prepare for
+            if self.beliefs.task_urgent > 0.3 or self.beliefs.user_busy > 0.6:
+                pragmatic = 0.4
+                reasoning = "Background preparation for anticipated needs"
+            else:
+                pragmatic = 0.55  # Less attractive when idle/nothing pending
+                reasoning = "Nothing urgent to prepare for"
 
         elif action == ProactiveAction.INTERVENE:
             # Only good in urgent situations
@@ -268,11 +291,12 @@ class SimplifiedActiveInference:
         return G, reasoning
 
     def _can_take_action(self, action: ProactiveAction) -> bool:
-        """Check if action is off cooldown."""
-        if self.last_action_time is None:
+        """Check if this specific action is off its cooldown."""
+        last_time = self._last_action_times.get(action)
+        if last_time is None:
             return True
 
-        elapsed = (datetime.now() - self.last_action_time).total_seconds()
+        elapsed = (datetime.now() - last_time).total_seconds()
         cooldown = self.cooldowns.get(action, 0)
         return elapsed >= cooldown
 
@@ -311,10 +335,12 @@ class SimplifiedActiveInference:
         # Compute confidence (inverse of G, normalized)
         confidence = 1.0 - best_G
 
-        # Record action
+        # Record action with per-action cooldown tracking
         if best_action != ProactiveAction.WAIT:
-            self.action_history.append((best_action, datetime.now()))
-            self.last_action_time = datetime.now()
+            now = datetime.now()
+            self.action_history.append((best_action, now))
+            self.last_action_time = now
+            self._last_action_times[best_action] = now
             # Trim history
             self.action_history = self.action_history[-100:]
 
@@ -338,12 +364,15 @@ class SimplifiedActiveInference:
             history: List of (action_value_string, taken_at) tuples.
         """
         self.action_history = []
+        self._last_action_times = {}
         for action_str, taken_at in history:
             try:
                 action = ProactiveAction(action_str)
             except (ValueError, KeyError):
                 continue
             self.action_history.append((action, taken_at))
+            # Track per-action times (last occurrence wins)
+            self._last_action_times[action] = taken_at
         if self.action_history:
             self.last_action_time = self.action_history[-1][1]
 
@@ -636,8 +665,10 @@ class ActiveInferenceEngine:
 
                 # Record in simplified engine for cooldown tracking
                 if action != ProactiveAction.WAIT:
-                    self._simple_engine.action_history.append((action, datetime.now()))
-                    self._simple_engine.last_action_time = datetime.now()
+                    now = datetime.now()
+                    self._simple_engine.action_history.append((action, now))
+                    self._simple_engine.last_action_time = now
+                    self._simple_engine._last_action_times[action] = now
 
                 return ProactiveDecision(
                     action=action,
@@ -658,6 +689,10 @@ class ActiveInferenceEngine:
     def should_act_proactively(self) -> Tuple[bool, str]:
         """Determine if proactive action is warranted."""
         return self._simple_engine.should_act_proactively()
+
+    def drift_beliefs_toward_idle(self, drift_rate: float = 0.02) -> None:
+        """Drift beliefs toward idle/receptive when no events arrive."""
+        self._simple_engine.drift_beliefs_toward_idle(drift_rate)
 
     def get_beliefs(self) -> BeliefState:
         """Get current belief state."""

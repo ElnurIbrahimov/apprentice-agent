@@ -75,6 +75,13 @@ async def lifespan(app: FastAPI):
 
             daemon = get_gateway_daemon()
 
+            # Wire the notification callback so messages go to the pending queue
+            # AND get logged. The frontend polls get_pending_messages() via API.
+            def _on_proactive_message(msg):
+                logger.info(f"[Proactive] {msg.action.value}: {msg.content[:80]}...")
+
+            daemon.set_notification_callback(_on_proactive_message)
+
             # Start the daemon (creates event bus, decision loop)
             await daemon.start()
 

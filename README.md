@@ -9,7 +9,7 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 - **ALIVE AURA System** - 6-phase architecture making AURA feel genuinely alive: ALMA emotion engine, Gateway Daemon (proactive outreach), Context Awareness Heatmap, Spontaneous Conversation Starters, "Thinking About" Teaser, Ambient Idle Behaviors, Theory of Mind, Intrinsic Motivation (4 drives), and Idle Presence
 - **Consciousness Module** - Intrinsic motivation with 4 drives (Curiosity, Competence, Social, Coherence), idle presence behaviors, expanded metacognition with confidence calibration, and theory of mind for user state modeling
 - **ALMA Emotion Engine** - Affect-Level Mood Architecture with continuous mood dimensions (warmth, energy, engagement), smooth mood transitions, personality-aware baselines, and visual breathing avatar
-- **Gateway Daemon** - Proactive outreach system with active inference, salience filtering, multi-monitor architecture (calendar, screen, system, workflow), and motivation-driven suggestions
+- **Gateway Daemon** - Proactive outreach system with active inference (Free Energy Principle), per-action cooldowns, belief drift, 100+ personality-rich message templates with deduplication, BaseException-safe decision loop, and time-of-day aware idle presence
 - **MCTS Reasoning Tree** - Monte Carlo Tree Search for multi-path reasoning exploration. Explores multiple solution paths simultaneously, backtracks from dead ends, and finds optimal answers through deliberate search with UCT selection.
 - **Introspection Circuit** - "Know when you don't know" uncertainty detection based on Anthropic's 2025 research. Detects uncertainty before responding, auto-triggers verification for factual queries, and adds epistemic markers for uncertain responses.
 - **Multi-Agent Architecture** - Specialized agents for different task types with automatic routing
@@ -2011,32 +2011,51 @@ ALMA (Affect-Level Mood Architecture) replaces the basic emotion system with con
 
 #### Gateway Daemon (Phase 2)
 
-The Gateway Daemon enables AURA to proactively reach out to the user based on monitored events, active inference predictions, and salience filtering.
+The Gateway Daemon enables AURA to proactively reach out to the user based on monitored events, active inference predictions, and salience filtering. Messages are delivered with AURA's full JARVIS-style personality - witty, sarcastic, and genuinely alive.
 
 **Architecture:**
 
 ```
 Monitors → Event Bus → Active Inference → Salience Filter → Gateway Daemon → User
+                              ↑                                    ↓
+                       Belief Drift                      Proactive Messages
+                   (per-action cooldowns)             (100+ unique templates)
+                                                     (dedup + time-of-day aware)
 ```
 
 **Components:**
 
 | Component | Description |
 |-----------|-------------|
-| **GatewayDaemon** | Orchestrates proactive message delivery with rate limiting |
-| **ActiveInference** | Bayesian prediction engine for anticipating user needs |
+| **GatewayDaemon** | Orchestrates proactive message delivery with per-action rate limiting and BaseException-safe decision loop |
+| **ActiveInference** | Free Energy Principle engine with belief drift toward idle, per-action cooldown tracking, and rebalanced action costs |
+| **ProactiveMessages** | 100+ personality-rich message templates across 8 categories with rolling deduplication and time-of-day awareness |
 | **SalienceFilter** | Filters low-value suggestions to prevent notification fatigue |
 | **CalendarMonitor** | Watches for upcoming events and time-based triggers |
 | **ScreenMonitor** | Detects active applications and workflow context |
 | **SystemMonitor** | CPU, memory, battery, disk usage alerts |
 | **WorkflowDetector** | Detects coding, writing, browsing, and research patterns |
 
+**Proactive Message Categories:**
+
+| Category | Count | Description |
+|----------|-------|-------------|
+| Idle Presence | 32 | Time-of-day aware (morning/afternoon/evening/night) |
+| Emotional | 28 | Mood-aware check-ins and reactions |
+| Curiosity Drive | 17 | Topic-templated exploration nudges |
+| Social Drive | 14 | Connection and conversation starters |
+| Competence Drive | 8 | Skill and capability suggestions |
+| Coherence Drive | 5 | Pattern and consistency observations |
+| Task-Aware | 8 | Context-sensitive task suggestions |
+| Existential Musings | 10 | Self-aware philosophical observations |
+
 **API Endpoints:**
 
 | Endpoint | Description |
 |----------|-------------|
+| `GET /api/proactive/status` | Daemon running state, beliefs, and stats |
+| `GET /api/proactive/messages` | Pending proactive messages (clears queue) |
 | `GET /api/daemon/status` | Daemon running state and stats |
-| `GET /api/daemon/suggestions` | Pending proactive suggestions |
 | `POST /api/daemon/start` | Start the daemon |
 | `POST /api/daemon/stop` | Stop the daemon |
 
@@ -2625,8 +2644,9 @@ apprentice-agent/
     │   ├── alma_engine.py           # Affect-Level Mood Architecture (warmth, energy, engagement)
     │   └── integration.py           # Emotion-agent integration
     ├── proactive/            # ALIVE Phase 2: Proactive system
-    │   ├── gateway_daemon.py        # Proactive message orchestrator
-    │   ├── active_inference.py      # Bayesian prediction engine
+    │   ├── gateway_daemon.py        # Proactive message orchestrator (BaseException-safe)
+    │   ├── active_inference.py      # Free Energy Principle engine (belief drift + per-action cooldowns)
+    │   ├── proactive_messages.py    # 100+ personality-rich message templates with dedup
     │   ├── salience_filter.py       # Notification fatigue prevention
     │   ├── event_bus.py             # Event publish/subscribe
     │   ├── heartbeat.py             # Background heartbeat
