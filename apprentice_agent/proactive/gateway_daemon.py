@@ -130,7 +130,8 @@ class GatewayDaemon:
 
         # Phase 6E: Proactive message rate limiting
         self._last_proactive_message_time: float = 0.0
-        self._min_message_interval = 45.0  # Minimum 45 seconds between proactive messages
+        self._min_message_interval = 180.0  # Minimum 3 minutes between proactive messages
+        self._messages_this_session = 0  # Track total messages to slow down over time
 
         # Statistics
         self._stats = {
@@ -278,6 +279,8 @@ class GatewayDaemon:
         self.user_context.last_interaction = datetime.now()
         self.user_context.idle_since = None
         self.user_context.activity_level = min(1.0, self.user_context.activity_level + 0.2)
+        # Reset progressive slowdown — user is engaged, fresh conversation
+        self._messages_this_session = 0
 
     def record_idle(self) -> None:
         """Record that user appears idle."""
@@ -507,7 +510,8 @@ class GatewayDaemon:
                 # Autonomous belief drift toward idle/receptive when no events
                 # This prevents PREPARE from winning forever by gradually shifting
                 # beliefs so SUGGEST/social check-ins can trigger
-                self.inference_engine.drift_beliefs_toward_idle()
+                # Slow drift: 0.005 per cycle (5s) = ~0.06/min, takes several minutes
+                self.inference_engine.drift_beliefs_toward_idle(drift_rate=0.005)
 
                 # Make proactive decision
                 decision = self.inference_engine.select_action()
@@ -575,12 +579,16 @@ class GatewayDaemon:
                         f"(low confidence: {decision.confidence:.2f})")
             return
 
-        # Rate limit proactive messages
+        # Rate limit proactive messages with progressive slowdown
         import time as _time
         now = _time.time()
-        if now - self._last_proactive_message_time < self._min_message_interval:
+        # After 3 messages, add 60s per message (3min → 4min → 5min → ...)
+        effective_interval = self._min_message_interval + max(0, self._messages_this_session - 3) * 60
+        # Cap at 10 minutes
+        effective_interval = min(effective_interval, 600)
+        if now - self._last_proactive_message_time < effective_interval:
             logger.info(f"[GatewayDaemon] Rate limited {decision.action.value} "
-                       f"({now - self._last_proactive_message_time:.0f}s < {self._min_message_interval}s)")
+                       f"({now - self._last_proactive_message_time:.0f}s < {effective_interval:.0f}s)")
             return
 
         # Generate message content (protected against crashes)
@@ -610,6 +618,7 @@ class GatewayDaemon:
         # Deliver and record time
         self._deliver_message(message)
         self._last_proactive_message_time = now
+        self._messages_this_session += 1
 
     def _generate_message_content(
         self,
@@ -798,10 +807,12 @@ class GatewayDaemon:
             ).total_seconds() / 3600
 
         # Check if first session (no interaction ever recorded)
+        # Wait at least 2 minutes before first greeting so it doesn't feel instant/robotic
         is_first_session = (
             self.user_context.last_interaction is None
             and self._stats.get("start_time") is not None
-            and (datetime.now() - self._stats["start_time"]).total_seconds() > 60
+            and (datetime.now() - self._stats["start_time"]).total_seconds() > 120
+            and self._messages_this_session == 0  # Only once
         )
 
         # Get drive info
@@ -815,7 +826,7 @@ class GatewayDaemon:
             drives = im._drives
             dominant = max(drives.values(), key=lambda d: d.urgency)
 
-            if dominant.urgency >= 0.25:
+            if dominant.urgency >= 0.45:
                 drive_type = dominant.drive_type.value
                 im.satisfy_drive(dominant.drive_type, 0.15)
 

@@ -378,49 +378,81 @@ def generate_proactive_content(
     """
     Generate a varied, non-repetitive proactive message.
 
-    Selects from multiple message categories based on context,
-    with weighted randomization for natural variety.
+    Returns None when there's no genuine reason to speak — AURA should
+    stay quiet most of the time and only talk when something is actually
+    worth saying. A real person doesn't announce their existence every minute.
 
-    Returns None only if something is genuinely wrong.
+    Reasons to speak:
+    - First session greeting (once)
+    - Task urgency detected
+    - Strong drive urgency (curiosity found something, social need)
+    - Emotional state worth commenting on
+    - User idle long enough that a check-in is natural (>5 min)
+    - Random chance for flavor (low probability)
     """
     pad = emotional_state or {}
     pleasure = pad.get("pleasure", 0.0)
     arousal = pad.get("arousal", 0.0)
 
     # Build weighted candidates: (weight, generator_func)
+    # Only add categories that have a genuine REASON to fire
     candidates = []
+    has_reason = False
 
-    # Drive-specific messages get highest priority
-    if drive_type == "curiosity":
+    # First session greeting — always valid
+    if is_first_session:
+        emo_msg = get_emotional_message(pleasure, arousal, idle_hours, is_first_session)
+        if emo_msg:
+            candidates.append((10, lambda m=emo_msg: m))
+            has_reason = True
+
+    # Task urgency — real reason to speak
+    if task_urgent:
+        candidates.append((8, lambda: get_task_message(urgent=True)))
+        has_reason = True
+
+    # Drive-specific messages — only if drive urgency was high enough
+    # (the daemon already checked urgency >= 0.25 before passing drive_type)
+    if drive_type == "curiosity" and topics:
+        # Only if we actually have topics to be curious about
         candidates.append((5, lambda: get_curiosity_message(topics)))
-    elif drive_type == "social":
+        has_reason = True
+    elif drive_type == "social" and idle_hours > 0.15:
+        # Social drive + user has been quiet 9+ minutes
         msg = get_social_message(idle_hours)
         if msg:
             candidates.append((5, lambda m=msg: m))
-    elif drive_type == "competence":
+            has_reason = True
+    elif drive_type == "competence" and weak_areas:
         msg = get_competence_message(weak_areas)
         if msg:
             candidates.append((4, lambda m=msg: m))
+            has_reason = True
     elif drive_type == "coherence":
         candidates.append((3, lambda: get_coherence_message()))
+        has_reason = True
 
-    # Emotional messages
-    emo_msg = get_emotional_message(pleasure, arousal, idle_hours, is_first_session)
-    if emo_msg:
-        candidates.append((4, lambda m=emo_msg: m))
+    # Emotional messages — only on notable emotional states
+    if not is_first_session and (pleasure > 0.3 or pleasure < -0.3 or arousal > 0.5):
+        emo_msg = get_emotional_message(pleasure, arousal, idle_hours, False)
+        if emo_msg:
+            candidates.append((3, lambda m=emo_msg: m))
+            has_reason = True
 
-    # Task urgency
-    if task_urgent:
-        candidates.append((5, lambda: get_task_message(urgent=True)))
+    # Idle presence — only if user has been idle a meaningful amount of time (>5 min)
+    if idle_hours > 0.08:
+        candidates.append((2, get_idle_message))
+        has_reason = True
 
-    # Idle presence (always available as fallback)
-    candidates.append((2, get_idle_message))
+    # Existential musings — rare random flavor (30% chance, only after 10+ min idle)
+    if idle_hours > 0.17 and random.random() < 0.3:
+        candidates.append((1, get_musing))
+        has_reason = True
 
-    # Existential musings (occasional spice)
-    candidates.append((1, get_musing))
-
-    if not candidates:
-        return get_idle_message()
+    # No genuine reason to speak — stay quiet
+    if not has_reason:
+        logger.debug("[ProactiveMessages] No reason to speak right now, staying quiet")
+        return None
 
     # Weighted random selection
     total_weight = sum(w for w, _ in candidates)
@@ -435,5 +467,4 @@ def generate_proactive_content(
                 logger.debug(f"[ProactiveMessages] Generator error: {e}")
                 continue
 
-    # Final fallback
-    return get_idle_message()
+    return None

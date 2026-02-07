@@ -105,14 +105,14 @@ class SimplifiedActiveInference:
             "tasks_handled": 0.9,     # Prefer tasks being handled
         }
 
-        # Action cooldowns (seconds) to prevent spam
+        # Action cooldowns (seconds) — slow and intentional, not NPC-like
         self.cooldowns = {
             ProactiveAction.WAIT: 0,
-            ProactiveAction.NOTIFY: 60,
-            ProactiveAction.SUGGEST: 90,
-            ProactiveAction.REMIND: 180,
-            ProactiveAction.ASK: 300,
-            ProactiveAction.PREPARE: 30,
+            ProactiveAction.NOTIFY: 180,   # 3 minutes
+            ProactiveAction.SUGGEST: 240,  # 4 minutes
+            ProactiveAction.REMIND: 300,   # 5 minutes
+            ProactiveAction.ASK: 600,      # 10 minutes
+            ProactiveAction.PREPARE: 60,   # 1 minute (silent, no message)
             ProactiveAction.INTERVENE: 600,
         }
 
