@@ -825,6 +825,15 @@ class OllamaBrain:
         except Exception:
             pass  # Intrinsic motivation not available
 
+        # === CONSCIOUS FOCUS INJECTION (Phase 7: Global Workspace Theory) ===
+        try:
+            from apprentice_agent.consciousness.global_workspace import get_global_workspace
+            conscious_ctx = get_global_workspace().get_conscious_state().to_prompt_context()
+            if conscious_ctx:
+                full_system_prompt = f"{full_system_prompt}\n\n{conscious_ctx}"
+        except Exception:
+            pass  # Global Workspace not available
+
         # Apply emotional tone modifier - auto-generate from ALMA if not provided
         if tone_modifier:
             full_system_prompt = f"{full_system_prompt}\n\n{tone_modifier}"
@@ -1031,6 +1040,15 @@ class OllamaBrain:
                 full_system_prompt = f"{full_system_prompt}\n\n{motivation_ctx}"
         except Exception:
             pass  # Intrinsic motivation not available
+
+        # === CONSCIOUS FOCUS INJECTION (Phase 7: Global Workspace Theory) ===
+        try:
+            from apprentice_agent.consciousness.global_workspace import get_global_workspace
+            conscious_ctx = get_global_workspace().get_conscious_state().to_prompt_context()
+            if conscious_ctx:
+                full_system_prompt = f"{full_system_prompt}\n\n{conscious_ctx}"
+        except Exception:
+            pass  # Global Workspace not available
 
         # Apply emotional tone modifier - auto-generate from ALMA if not provided
         if tone_modifier:

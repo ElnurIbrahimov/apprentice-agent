@@ -270,6 +270,7 @@ class EventBus:
         "system": "System events (low battery, etc.)",
         "user": "User activity events",
         "aura": "AURA internal events",
+        "workspace": "Global Workspace conscious broadcasts",
     }
 
     def __init__(self, use_redis: bool = False, redis_url: str = "redis://localhost:6379"):

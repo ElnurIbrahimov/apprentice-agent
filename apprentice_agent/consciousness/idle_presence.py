@@ -65,6 +65,7 @@ class CognitiveLoadState:
     daemon_load: float = 0.0          # From Gateway Daemon
     inner_thoughts_load: float = 0.0  # From inner thoughts engine
     metacognition_load: float = 0.0   # From metacognitive engine
+    workspace_load: float = 0.0       # From Global Workspace engine
     last_computed: float = 0.0
 
     def to_dict(self) -> Dict[str, float]:
@@ -75,6 +76,7 @@ class CognitiveLoadState:
             "daemon_load": round(self.daemon_load, 3),
             "inner_thoughts_load": round(self.inner_thoughts_load, 3),
             "metacognition_load": round(self.metacognition_load, 3),
+            "workspace_load": round(self.workspace_load, 3),
         }
 
 
@@ -285,13 +287,21 @@ class IdlePresenceEngine:
         except Exception:
             pass
 
+        # 6. Global Workspace load
+        try:
+            from apprentice_agent.consciousness.global_workspace import get_global_workspace
+            load.workspace_load = get_global_workspace().get_cognitive_load_contribution()
+        except Exception:
+            pass
+
         # Weighted aggregate
         load.total_load = min(1.0, (
-            load.thinking_load * 0.25 +
-            load.dream_load * 0.30 +
-            load.daemon_load * 0.15 +
-            load.inner_thoughts_load * 0.15 +
-            load.metacognition_load * 0.15
+            load.thinking_load * 0.20 +
+            load.dream_load * 0.25 +
+            load.daemon_load * 0.12 +
+            load.inner_thoughts_load * 0.12 +
+            load.metacognition_load * 0.12 +
+            load.workspace_load * 0.19
         ))
 
         with self._lock:

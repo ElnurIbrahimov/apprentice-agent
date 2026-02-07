@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from api.routes import chat, status, upload, features, multi_agent, reasoning_tree, introspection, proactive, memory, context, conversation_starters, thinking, idle_behaviors
+from api.routes import chat, status, upload, features, multi_agent, reasoning_tree, introspection, proactive, memory, context, conversation_starters, thinking, idle_behaviors, consciousness
 # Lazy-loaded agent_service (import removed - now lazy in routes)
 # from api.services.agent_service import agent_service
 
@@ -101,6 +101,14 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"[API] Proactive system failed to start: {e}")
 
+        # Start Global Workspace Engine (consciousness)
+        try:
+            from apprentice_agent.consciousness.global_workspace import get_global_workspace
+            get_global_workspace().start()
+            logger.info("[API] Global Workspace Engine started")
+        except Exception as e:
+            logger.warning(f"[API] Global Workspace Engine failed to start: {e}")
+
         # Start Idle Presence Engine (sleep scheduling)
         try:
             from api.routes.idle_behaviors import init_idle_presence
@@ -124,6 +132,14 @@ async def lifespan(app: FastAPI):
         logger.info("[API] Proactive system stopped")
     except Exception as e:
         logger.warning(f"[API] Proactive shutdown error: {e}")
+
+    # Stop Global Workspace Engine
+    try:
+        from apprentice_agent.consciousness.global_workspace import get_global_workspace
+        get_global_workspace().stop()
+        logger.info("[API] Global Workspace Engine stopped")
+    except Exception:
+        pass
 
     # Stop Idle Presence Engine
     try:
@@ -174,6 +190,7 @@ app.include_router(context.router)
 app.include_router(conversation_starters.router)
 app.include_router(thinking.router)
 app.include_router(idle_behaviors.router)
+app.include_router(consciousness.router)
 
 # Serve static files in production (built React app)
 # NOTE: Only mount SPA routes when NOT in dev mode (Vite serves the frontend in dev)
