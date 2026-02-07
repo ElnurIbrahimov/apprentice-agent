@@ -12,6 +12,7 @@ Only events passing the salience threshold reach the Gateway Daemon.
 
 import logging
 import math
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -137,11 +138,29 @@ class SalienceFilter:
         # Custom importance rules
         self.importance_rules: Dict[str, float] = self.DEFAULT_IMPORTANCE.copy()
 
+        # LLM-powered scoring config
+        self._llm_enabled = True
+        self._llm_pre_filter_threshold = 0.25
+        self._llm_skip_threshold = 0.75
+        self._llm_weight = 0.6
+        self._llm_skip_types: Set[str] = {
+            "screen_change", "app_switch", "idle_detected",
+            "background_update", "window_change",
+        }
+        self._context_cache_ttl = 30.0
+        self._context_cache: Optional[Dict[str, Any]] = None
+        self._context_cache_time: float = 0.0
+
         # Statistics
         self._stats = {
             "events_processed": 0,
             "events_passed": 0,
             "events_filtered": 0,
+            "llm_scored": 0,
+            "llm_failures": 0,
+            "llm_skipped_low": 0,
+            "llm_skipped_high": 0,
+            "llm_skipped_type": 0,
         }
 
         # Load persisted seen events (graceful degradation)
@@ -320,9 +339,147 @@ class SalienceFilter:
         for h in expired:
             del self._seen_events[h]
 
+    # ================================================================
+    # LLM-Powered Scoring
+    # ================================================================
+
+    def enable_llm_scoring(self) -> None:
+        """Enable LLM-powered salience scoring for mid-range events."""
+        self._llm_enabled = True
+        logger.info("[SalienceFilter] LLM scoring enabled")
+
+    def disable_llm_scoring(self) -> None:
+        """Disable LLM-powered salience scoring (heuristic only)."""
+        self._llm_enabled = False
+        logger.info("[SalienceFilter] LLM scoring disabled")
+
+    def _gather_context(self) -> Dict[str, Any]:
+        """Gather user context for LLM scoring. Cached for 30s."""
+        now = time.time()
+        if (
+            self._context_cache is not None
+            and now - self._context_cache_time < self._context_cache_ttl
+        ):
+            return self._context_cache
+
+        ctx: Dict[str, Any] = {}
+
+        # Recent chat (last 3 user messages)
+        try:
+            from api.services.agent_service import agent_service
+            if agent_service.agent and agent_service.agent.brain:
+                history = agent_service.agent.brain.conversation_history
+                if history:
+                    user_msgs = [
+                        m["content"][:150]
+                        for m in history[-6:]
+                        if m.get("role") == "user"
+                    ]
+                    ctx["recent_chat"] = user_msgs[-3:]
+        except Exception:
+            pass
+
+        # Focus keywords and current activity
+        if self.context_keywords:
+            ctx["focus_keywords"] = list(self.context_keywords)[:10]
+        if self.current_activity:
+            ctx["current_activity"] = self.current_activity
+
+        # User mood from Theory of Mind
+        try:
+            from .theory_of_mind import get_theory_of_mind
+            tom = get_theory_of_mind()
+            emo = tom.get_emotional_state()
+            ctx["user_mood"] = emo.describe()
+        except Exception:
+            pass
+
+        self._context_cache = ctx
+        self._context_cache_time = now
+        return ctx
+
+    def _llm_score_event(self, event: Event, heuristic_score: float) -> Optional[float]:
+        """Ask the LLM to score an event on urgency/relevance/preference/impact.
+
+        Returns a normalized 0.0-1.0 score, or None on failure.
+        """
+        ctx = self._gather_context()
+
+        # Build compact event summary
+        event_summary = (
+            f"type={event.event_type}, source={event.source}, "
+            f"priority={event.priority.value}"
+        )
+        payload_preview = json.dumps(event.payload, default=str)[:200]
+
+        # Build context block
+        ctx_lines = []
+        if ctx.get("recent_chat"):
+            ctx_lines.append(
+                "Recent user messages: " + " | ".join(ctx["recent_chat"])
+            )
+        if ctx.get("focus_keywords"):
+            ctx_lines.append(
+                "User focus: " + ", ".join(ctx["focus_keywords"])
+            )
+        if ctx.get("current_activity"):
+            ctx_lines.append(f"Activity: {ctx['current_activity']}")
+        if ctx.get("user_mood"):
+            ctx_lines.append(f"Mood: {ctx['user_mood']}")
+        context_block = "\n".join(ctx_lines) if ctx_lines else "No user context available."
+
+        prompt = (
+            f"Score this event's salience (importance to the user right now) from 0 to 10.\n\n"
+            f"EVENT: {event_summary}\n"
+            f"PAYLOAD: {payload_preview}\n"
+            f"HEURISTIC SCORE: {heuristic_score:.2f}\n\n"
+            f"USER CONTEXT:\n{context_block}\n\n"
+            f"Score on four dimensions, then give a FINAL score:\n"
+            f"- Urgency (time-sensitive?)\n"
+            f"- Relevance (related to user's current focus?)\n"
+            f"- User preference (would user want to know?)\n"
+            f"- Impact of inaction (what happens if ignored?)\n\n"
+            f"Reply with ONLY a single integer 0-10 as the final salience score."
+        )
+
+        try:
+            from api.services.agent_service import agent_service
+            if not (agent_service.agent and agent_service.agent.brain):
+                return None
+
+            response = agent_service.agent.brain.think(
+                prompt=prompt,
+                use_history=False,
+            )
+            return self._parse_llm_score(response)
+        except Exception as e:
+            logger.debug(f"[SalienceFilter] LLM scoring failed: {e}")
+            return None
+
+    def _parse_llm_score(self, response: Optional[str]) -> Optional[float]:
+        """Extract first integer 0-10 from LLM response. Returns 0.0-1.0 or None."""
+        if not response:
+            return None
+        match = re.search(r'\b(\d{1,2})\b', response)
+        if not match:
+            return None
+        value = int(match.group(1))
+        if value > 10:
+            return None
+        return value / 10.0
+
+    # ================================================================
+    # Salience Computation
+    # ================================================================
+
     def compute_salience(self, event: Event) -> FilteredEvent:
         """
         Compute salience score for an event.
+
+        Uses a two-tier hybrid approach:
+        1. Heuristic score (always computed)
+        2. LLM score for mid-range events (0.25-0.75) when enabled
+        Final = blended score or heuristic-only fallback.
 
         Args:
             event: Event to evaluate
@@ -330,14 +487,14 @@ class SalienceFilter:
         Returns:
             FilteredEvent with score and breakdown
         """
-        # Compute individual components
+        # Compute individual heuristic components
         recency = self._compute_recency(event)
         relevance = self._compute_relevance(event)
         importance = self._compute_importance(event)
         novelty = self._compute_novelty(event)
 
-        # Weighted combination
-        salience = (
+        # Weighted combination (heuristic)
+        heuristic_score = (
             self.weights.recency * recency +
             self.weights.relevance * relevance +
             self.weights.importance * importance +
@@ -350,18 +507,56 @@ class SalienceFilter:
             "relevance": round(relevance, 3),
             "importance": round(importance, 3),
             "novelty": round(novelty, 3),
+            "scoring_method": "heuristic",
         }
+
+        final_score = heuristic_score
+
+        # LLM scoring for mid-range events
+        if self._llm_enabled:
+            if heuristic_score < self._llm_pre_filter_threshold:
+                self._stats["llm_skipped_low"] += 1
+            elif heuristic_score > self._llm_skip_threshold:
+                self._stats["llm_skipped_high"] += 1
+            elif event.event_type in self._llm_skip_types:
+                self._stats["llm_skipped_type"] += 1
+            else:
+                # Mid-range event — ask the LLM
+                llm_score = self._llm_score_event(event, heuristic_score)
+                if llm_score is not None:
+                    heuristic_weight = 1.0 - self._llm_weight
+                    final_score = (
+                        heuristic_weight * heuristic_score
+                        + self._llm_weight * llm_score
+                    )
+                    breakdown["llm_score"] = round(llm_score, 3)
+                    breakdown["scoring_method"] = "hybrid"
+                    self._stats["llm_scored"] += 1
+                    logger.info(
+                        f"[SalienceFilter] LLM scoring {event.source}.{event.event_type}: "
+                        f"heuristic={heuristic_score:.3f} llm={llm_score:.3f} "
+                        f"final={final_score:.3f}"
+                    )
+                else:
+                    # LLM failed — fall back to heuristic
+                    self._stats["llm_failures"] += 1
+                    logger.debug(
+                        f"[SalienceFilter] LLM fallback for "
+                        f"{event.source}.{event.event_type}"
+                    )
+
+        breakdown["heuristic_score"] = round(heuristic_score, 3)
 
         # Update stats
         self._stats["events_processed"] += 1
-        if salience >= self.threshold:
+        if final_score >= self.threshold:
             self._stats["events_passed"] += 1
         else:
             self._stats["events_filtered"] += 1
 
         return FilteredEvent(
             event=event,
-            salience_score=round(salience, 4),
+            salience_score=round(final_score, 4),
             salience_breakdown=breakdown
         )
 
@@ -388,7 +583,12 @@ class SalienceFilter:
             "seen_events_cached": len(self._seen_events),
             "pass_rate": (
                 self._stats["events_passed"] / max(1, self._stats["events_processed"])
-            )
+            ),
+            "llm_enabled": self._llm_enabled,
+            "llm_score_rate": (
+                self._stats["llm_scored"]
+                / max(1, self._stats["events_processed"])
+            ),
         }
 
 
