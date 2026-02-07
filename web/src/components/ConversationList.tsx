@@ -79,10 +79,44 @@ export function ConversationList() {
     }
   }, [setConversations, setCurrentConversationId, currentConversationId]);
 
+  // Load messages for a conversation from the switch endpoint
+  const loadConversationMessages = useCallback(async (id: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/conversations/${id}/switch`, { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        setCurrentConversationId(data.id);
+        clearMessages();
+        if (data.messages && data.messages.length > 0) {
+          for (const msg of data.messages) {
+            addMessage({
+              role: msg.role,
+              content: msg.content,
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[ConversationList] Load messages error:', e);
+    }
+  }, [setCurrentConversationId, clearMessages, addMessage]);
+
   // Fetch on mount
   useEffect(() => {
     fetchConversations();
   }, [fetchConversations]);
+
+  // Load messages for the active conversation on initial mount
+  const initialLoadDone = useRef(false);
+  useEffect(() => {
+    if (!initialLoadDone.current && currentConversationId && conversations.length > 0) {
+      const active = conversations.find((c) => c.id === currentConversationId);
+      if (active && active.message_count > 0) {
+        initialLoadDone.current = true;
+        loadConversationMessages(currentConversationId);
+      }
+    }
+  }, [currentConversationId, conversations, loadConversationMessages]);
 
   // Close context menu on outside click
   useEffect(() => {
@@ -123,26 +157,8 @@ export function ConversationList() {
   // Switch conversation
   const handleSwitch = async (id: string) => {
     if (id === currentConversationId) return;
-    try {
-      const res = await fetch(`${API_BASE}/conversations/${id}/switch`, { method: 'POST' });
-      if (res.ok) {
-        const data = await res.json();
-        setCurrentConversationId(data.id);
-        // Replace messages with the switched conversation's messages
-        clearMessages();
-        if (data.messages && data.messages.length > 0) {
-          for (const msg of data.messages) {
-            addMessage({
-              role: msg.role,
-              content: msg.content,
-            });
-          }
-        }
-        await fetchConversations();
-      }
-    } catch (e) {
-      console.error('[ConversationList] Switch error:', e);
-    }
+    await loadConversationMessages(id);
+    await fetchConversations();
   };
 
   // Delete conversation

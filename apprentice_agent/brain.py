@@ -711,14 +711,16 @@ class OllamaBrain:
         logger.info("[BRAIN] Full reset completed")
 
     def _check_auto_reset(self):
-        """Check if auto-reset is needed and perform it."""
+        """Check if auto-reset is needed and perform it.
+
+        Resets the query counter periodically but preserves full conversation
+        history on disk. Only the LLM context window is trimmed (via
+        MAX_HISTORY_LENGTH) at query time — saved history is never deleted.
+        """
         self._query_count += 1
         self._total_query_count += 1  # Total count never resets
         if self._query_count >= self.AUTO_RESET_INTERVAL:
-            logger.info(f"[BRAIN] Auto-reset triggered after {self._query_count} queries (total: {self._total_query_count})")
-            # Keep last 4 messages (2 exchanges) for continuity
-            if len(self.conversation_history) > 4:
-                self.conversation_history = self.conversation_history[-4:]
+            logger.info(f"[BRAIN] Auto-reset counter after {self._query_count} queries (total: {self._total_query_count})")
             self._query_count = 0
             self._save_history()
 
@@ -827,7 +829,7 @@ class OllamaBrain:
         if full_system_prompt:
             messages.append({"role": "system", "content": full_system_prompt})
         if use_history:
-            messages.extend(self.conversation_history)
+            messages.extend(self.conversation_history[-self.MAX_HISTORY_LENGTH:])
         messages.append({"role": "user", "content": prompt})
 
         # Neuromodulator: Serotonin modulates patience (timeout)
@@ -919,10 +921,7 @@ class OllamaBrain:
         if use_history:
             self.conversation_history.append({"role": "user", "content": prompt})
             self.conversation_history.append({"role": "assistant", "content": assistant_message})
-            # Enforce history limit to prevent unbounded memory growth
-            if len(self.conversation_history) > self.MAX_HISTORY_LENGTH:
-                self.conversation_history = self.conversation_history[-self.MAX_HISTORY_LENGTH:]
-            # Persist to disk
+            # Persist full history to disk (LLM context is trimmed at query time)
             self._save_history()
 
         return assistant_message
@@ -1037,7 +1036,7 @@ class OllamaBrain:
         if full_system_prompt:
             messages.append({"role": "system", "content": full_system_prompt})
         if use_history:
-            messages.extend(self.conversation_history)
+            messages.extend(self.conversation_history[-self.MAX_HISTORY_LENGTH:])
         messages.append({"role": "user", "content": prompt})
 
         logger.debug(f"[BRAIN] Streaming call to {model}")
