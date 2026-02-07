@@ -944,6 +944,13 @@ class OllamaBrain:
             # Persist full history to disk (LLM context is trimmed at query time)
             self._save_history()
 
+        # === SELF-IMPROVEMENT: Record interaction outcome ===
+        try:
+            from apprentice_agent.consciousness.self_improvement import get_self_improvement_engine
+            get_self_improvement_engine().record_chat_outcome(prompt, assistant_message, actual_model)
+        except Exception:
+            pass
+
         return assistant_message
 
     def think_stream(
@@ -1112,6 +1119,13 @@ class OllamaBrain:
                 self.conversation_history = self.conversation_history[-self.MAX_HISTORY_LENGTH:]
             # Persist to disk
             self._save_history()
+
+        # === SELF-IMPROVEMENT: Record interaction outcome ===
+        try:
+            from apprentice_agent.consciousness.self_improvement import get_self_improvement_engine
+            get_self_improvement_engine().record_chat_outcome(prompt, full_response, actual_model)
+        except Exception:
+            pass
 
     def _is_complex_query(self, prompt: str) -> bool:
         """Detect if a query is complex and needs cloud model.
