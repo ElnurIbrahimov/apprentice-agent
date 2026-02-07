@@ -92,7 +92,7 @@ The entire sophisticated proactive stack (Gateway Daemon, Active Inference, Even
 - **Missing:**
   - Mood-congruent memory retrieval (emotions don't influence which memories are recalled)
   - Emotional influence on response generation style (partially implemented)
-  - Neuromodulators don't actually modulate learning rate, exploration, or attention
+  - Neuromodulators don't fully modulate learning rate, exploration, or attention (sleep-phase influence on LLM params now implemented via NeuroDream oscillations)
   - No Affect Infusion Model (AIM) integration
 
 #### EvoEmo (AURA Emotional Engine) — GENUINELY FUNCTIONAL
@@ -134,7 +134,12 @@ The entire sophisticated proactive stack (Gateway Daemon, Active Inference, Even
   - Pattern extraction from logs (temporal, topical, emotional)
   - Novel connection generation between distant concepts
   - Edge pruning and consolidation
-- **Missing:** ADM-style chunking/reassembly, Letta-style learned context
+  - Letta-style learned context generation (Phase 4D) ✅
+  - DONN-inspired neural oscillations (delta/theta/alpha bands) ✅
+  - Oscillation-modulated batch size, consolidation strength, and processing rhythm ✅
+  - Sleep neuromodulator influence on ALMA (serotonin/dopamine offsets) ✅
+  - Pulsing cognitive load driving avatar breathing during sleep ✅
+- **Missing:** ADM-style chunking/reassembly
 
 #### Local RAG — FULLY FUNCTIONAL
 - **Location:** `apprentice_agent/tools/local_rag.py`
@@ -393,10 +398,12 @@ Transform AURA from a system with genuine cognitive subsystems wrapped in cosmet
   - Apply Affect Infusion Model (AIM) conditions
 - **Files to modify:** `aura_episodic_memory/memory_store.py`, `apprentice_agent/tools/amem.py`
 
-#### 3.2 Functional Neuromodulators
-- **Current:** ALMA has dopamine/serotonin/noradrenaline/acetylcholine values but they don't modulate anything
-- **Target:** Each neuromodulator actually controls a system parameter
-- **Implementation:**
+#### 3.2 Functional Neuromodulators — PARTIALLY DONE
+- **Current:** ALMA neuromodulators now influence LLM parameters during sleep via NeuroDream oscillations, and `brain.py` uses `_neuro_scale()` to modulate temperature/timeout from neuromodulator levels
+- **Completed:**
+  - ✅ Sleep-phase neuromodulator offsets (deep sleep → +serotonin → patient LLM; REM → +dopamine → creative LLM)
+  - ✅ `_neuro_scale()` in brain.py maps neuromodulator levels to LLM parameter multipliers
+- **Remaining:** Each neuromodulator should control a distinct system parameter beyond LLM tuning:
   - **Dopamine analog** → modulates learning rate (how quickly new patterns are weighted)
   - **Serotonin analog** → controls temporal horizon (short-term vs long-term focus)
   - **Noradrenaline analog** → controls exploration vs exploitation (try new tools vs use known ones)
@@ -458,15 +465,17 @@ Transform AURA from a system with genuine cognitive subsystems wrapped in cosmet
   - Deduplication across sources
   - Source attribution in results
 
-#### 4.4 Sleep-Time Compute Enhancement (Letta-style)
-- **Current:** NeuroDream does pattern mining and novel connections
-- **Target:** Add Letta-style "learned context" generation
-- **Implementation:**
-  - During sleep, transform raw conversation logs into distilled knowledge
-  - Generate summaries, extract principles, update user model
-  - ADM-style: chunk knowledge into retrievable units, reassemble for reasoning
-  - Store as "learned context" that's injected into future system prompts
-- **Files to modify:** `apprentice_agent/tools/neurodream.py`
+#### 4.4 Sleep-Time Compute Enhancement (Letta-style) — MOSTLY DONE ✅
+- **Current:** NeuroDream does pattern mining, novel connections, Letta-style learned context generation, and DONN-inspired neural oscillations
+- **Completed:**
+  - ✅ Letta-style learned context: LLM distills conversation logs into structured knowledge (user_summary, key_facts, preferences, principles, ongoing_topics, emotional_patterns)
+  - ✅ Learned context injected into future system prompts via `get_learned_context_prompt()`
+  - ✅ DONN-inspired neural oscillations: delta (2Hz deep), theta (6Hz REM), alpha (10Hz light) frequency bands modulate processing rhythm
+  - ✅ Oscillation-modulated batch sizes, consolidation strength, inter-cycle delays, and cognitive intensity
+  - ✅ Sleep neuromodulator influence on ALMA (deep sleep → high serotonin/patient LLM; REM → high dopamine/creative LLM)
+  - ✅ Pulsing cognitive load that syncs avatar breathing with dream processing rhythm
+- **Remaining:** ADM-style chunking/reassembly for more granular knowledge retrieval
+- **Files modified:** `apprentice_agent/tools/neurodream.py`, `apprentice_agent/consciousness/idle_presence.py`, `apprentice_agent/brain.py`
 
 ---
 
@@ -546,16 +555,18 @@ Transform AURA from a system with genuine cognitive subsystems wrapped in cosmet
   - Adapt communication style to user preference history
 - **Key files to create:** `apprentice_agent/proactive/theory_of_mind.py`
 
-#### 6.4 Genuine Idle Presence
-- **Current:** Fake random behavior messages
-- **Target:** Real background activity during idle
-- **Implementation:**
-  - Idle triggers: NeuroDream consolidation, KG pruning, pattern mining
-  - Inner thought generation (curiosity-driven exploration of knowledge)
-  - Memory reorganization and deduplication
-  - Self-reflection on recent interactions
-  - All visible in real-time through sidebar panels
-  - Breathing avatar driven by actual cognitive load, not CSS
+#### 6.4 Genuine Idle Presence — MOSTLY DONE ✅
+- **Current:** Real `IdlePresenceEngine` with cognitive load tracking, background tasks, and NeuroDream integration
+- **Completed:**
+  - ✅ Cognitive load computed from all subsystems (thinking, NeuroDream, daemon, inner thoughts, metacognition)
+  - ✅ Breathing avatar driven by actual cognitive load (not CSS)
+  - ✅ Oscillation-aware pulsing cognitive load during sleep (syncs breathing with dream rhythm)
+  - ✅ NeuroDream auto-triggered after idle threshold
+  - ✅ Background tasks: self-reflection, pattern scanning, KG maintenance
+  - ✅ Real activity reporting (not template messages)
+- **Remaining:**
+  - Memory reorganization and deduplication during idle
+  - Curiosity-driven exploration of knowledge gaps
 
 #### 6.5 Intrinsic Motivation System
 - **Concept:** AURA has genuine drives beyond user requests
@@ -579,8 +590,8 @@ Transform AURA from a system with genuine cognitive subsystems wrapped in cosmet
 
 ### High Impact, Medium Effort
 5. Mood-congruent memory retrieval (2-3 days)
-6. Functional neuromodulators (2-3 days)
-7. Real inner thoughts via background LLM (3-5 days)
+6. Functional neuromodulators (2-3 days) — partially done: sleep-phase neuromodulator influence on LLM params via NeuroDream oscillations ✅
+7. Real inner thoughts via background LLM (3-5 days) — DONN-inspired neural oscillations (delta/theta/alpha frequency bands) now modulate sleep processing ✅
 8. Ebbinghaus curves across all memory systems (2-3 days)
 
 ### High Impact, High Effort
