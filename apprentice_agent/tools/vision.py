@@ -1,4 +1,4 @@
-"""Vision tool for analyzing images using Ollama's LLaVA model."""
+"""Vision tool for analyzing images using Ollama vision models with fallback chain."""
 
 import json
 import base64
@@ -13,16 +13,89 @@ logger = logging.getLogger(__name__)
 
 
 class VisionTool:
-    """Tool for analyzing images using vision LLM."""
+    """Tool for analyzing images using vision LLM with model fallback chain."""
 
-    def __init__(self, model: str = "llava"):
+    def __init__(self, model: str = None, brain=None):
         """Initialize vision tool.
 
         Args:
-            model: Vision model to use (default: llava)
+            model: Vision model to use (default: from Config)
+            brain: Optional OllamaBrain reference for client reuse.
+                   If None, creates a local ollama.Client.
         """
-        self.model = model
-        self.client = ollama.Client(host=Config.OLLAMA_HOST)
+        self.model = model or Config.get_model("vision")
+        self._brain = brain
+        if brain is None:
+            self._local_client = ollama.Client(host=Config.OLLAMA_HOST)
+        else:
+            self._local_client = None  # use brain's client
+
+    def _get_client(self, model: str):
+        """Get an ollama client and resolved model name.
+
+        If brain is available, uses brain's client. Otherwise uses local client.
+        Cloud-suffixed models (e.g. 'qwen3-vl:235b-cloud') are stripped to their
+        local name since we only have local Ollama connectivity.
+
+        Returns:
+            Tuple of (client, actual_model_name)
+        """
+        actual_model = model
+        if model.endswith("-cloud"):
+            local_name = model.replace("-cloud", "")
+            logger.warning(
+                "Cloud model %s requested but no cloud routing available. "
+                "Falling back to local name: %s", model, local_name
+            )
+            actual_model = local_name
+
+        if self._brain is not None:
+            return self._brain.client, actual_model
+        return self._local_client, actual_model
+
+    def _analyze_with_fallback(self, img_data: str, question: str) -> tuple:
+        """Try vision models from the fallback chain until one succeeds.
+
+        Args:
+            img_data: Base64-encoded image data
+            question: Question to ask about the image
+
+        Returns:
+            Tuple of (response_content, model_used)
+
+        Raises:
+            RuntimeError: If all models in the chain fail
+        """
+        # Build ordered list: primary model first, then chain (deduped)
+        chain = [self.model]
+        for m in Config.MODEL_VISION_CHAIN:
+            if m not in chain:
+                chain.append(m)
+
+        errors = []
+        for model in chain:
+            try:
+                client, actual_model = self._get_client(model)
+                logger.info("Trying vision model: %s", actual_model)
+                response = client.chat(
+                    model=actual_model,
+                    messages=[{
+                        'role': 'user',
+                        'content': question,
+                        'images': [img_data]
+                    }]
+                )
+                content = response['message']['content']
+                logger.info("Vision analysis succeeded with model: %s", actual_model)
+                return content, actual_model
+            except Exception as e:
+                logger.warning("Vision model %s failed: %s", model, e)
+                errors.append(f"{model}: {e}")
+
+        raise RuntimeError(
+            f"All vision models failed. Tried: {', '.join(chain)}. "
+            f"Errors: {'; '.join(errors)}"
+        )
 
     def analyze_image(
         self,
@@ -36,24 +109,16 @@ class VisionTool:
             question: Question to ask about the image
 
         Returns:
-            dict with success status and description/error
+            dict with success status, description/error, and model_used
         """
-        # Validate image path
         path = Path(image_path)
         if not path.exists():
-            return {
-                "success": False,
-                "error": f"Image not found: {image_path}"
-            }
+            return {"success": False, "error": f"Image not found: {image_path}"}
 
         if not path.is_file():
-            return {
-                "success": False,
-                "error": f"Path is not a file: {image_path}"
-            }
+            return {"success": False, "error": f"Path is not a file: {image_path}"}
 
-        # Check for supported image formats
-        supported_formats = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'}
+        supported_formats = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tiff', '.tif'}
         if path.suffix.lower() not in supported_formats:
             return {
                 "success": False,
@@ -61,84 +126,146 @@ class VisionTool:
             }
 
         try:
-            # Read and encode image as base64
             with open(path, 'rb') as f:
                 img_data = base64.b64encode(f.read()).decode()
 
-            # Call ollama with the vision model
-            response = self.client.chat(
-                model=self.model,
-                messages=[{
-                    'role': 'user',
-                    'content': question,
-                    'images': [img_data]
-                }]
-            )
-
-            description = response['message']['content']
+            description, model_used = self._analyze_with_fallback(img_data, question)
 
             return {
                 "success": True,
                 "description": description,
                 "image_path": str(path.absolute()),
                 "question": question,
-                "model": self.model
+                "model": model_used
             }
 
-        except ollama.ResponseError as e:
-            return {
-                "success": False,
-                "error": f"Ollama error: {str(e)}"
-            }
+        except RuntimeError as e:
+            return {"success": False, "error": str(e)}
         except ConnectionError:
             return {
                 "success": False,
                 "error": "Cannot connect to Ollama. Is it running? Try: ollama serve"
             }
         except Exception as e:
-            return {
-                "success": False,
-                "error": f"Failed to analyze image: {str(e)}"
-            }
+            return {"success": False, "error": f"Failed to analyze image: {e}"}
 
     def describe_screen(self, screenshot_path: str) -> dict:
-        """Describe what's on a screenshot.
-
-        Args:
-            screenshot_path: Path to the screenshot
-
-        Returns:
-            dict with success status and description
-        """
+        """Describe what's on a screenshot."""
         return self.analyze_image(
             screenshot_path,
-            question="Describe what you see on this screen. What application or content is visible? Be specific about any text, UI elements, or notable features."
+            question=(
+                "Describe what you see on this screen. What application or content is visible? "
+                "Be specific about any text, UI elements, or notable features."
+            )
         )
 
-    def read_text(self, image_path: str) -> dict:
+    def read_text(self, image_path: str, language_hint: str = None) -> dict:
         """Extract and read text from an image (OCR-like).
 
         Args:
             image_path: Path to the image
+            language_hint: Optional language hint (e.g. 'japanese', 'arabic', 'chinese').
+                          Helps the model preserve non-Latin scripts accurately.
 
         Returns:
             dict with success status and extracted text
         """
-        return self.analyze_image(
-            image_path,
-            question="Read and transcribe all visible text in this image. List the text exactly as it appears."
+        prompt = "Read and transcribe all visible text in this image. List the text exactly as it appears."
+        if language_hint:
+            prompt += (
+                f" The text may contain {language_hint} characters. "
+                "Preserve all non-Latin scripts exactly as they appear — do not transliterate."
+            )
+        return self.analyze_image(image_path, question=prompt)
+
+    def analyze_ui(self, image_path: str) -> dict:
+        """Analyze UI elements in a screenshot for structured extraction.
+
+        Args:
+            image_path: Path to the screenshot
+
+        Returns:
+            dict with structured UI analysis including elements, text, state, errors
+        """
+        prompt = (
+            "Analyze the UI in this screenshot. Provide a structured analysis with:\n"
+            "APPLICATION: What application or webpage is shown\n"
+            "UI_ELEMENTS: List each visible UI element with approximate position "
+            "(top-left, center, bottom-right, etc.) and type (button, input, menu, tab, etc.)\n"
+            "TEXT_CONTENT: All readable text in the interface\n"
+            "ACTIVE_STATE: What appears to be focused/selected/active\n"
+            "ERRORS: Any error messages or warnings visible\n"
+            "SUGGESTED_ACTIONS: What actions appear available to the user"
         )
 
-    def analyze_screen_context(self, screenshot_path: str) -> Dict[str, Any]:
-        """
-        Analyze a screenshot and return structured context.
+        result = self.analyze_image(image_path, question=prompt)
+        if not result.get("success"):
+            return result
 
-        Instead of a free-form description, returns categorized info:
-        - app_type: What kind of application (code_editor, browser, terminal, etc.)
-        - has_errors: Whether errors/exceptions are visible
-        - error_text: The error content if detected
-        - main_content: What the user is working on
-        - suggested_action: What AURA could proactively help with
+        # Parse structured response into fields
+        description = result["description"]
+        parsed = {
+            "application": "",
+            "ui_elements": [],
+            "text_content": "",
+            "active_state": "",
+            "errors": "",
+            "suggested_actions": "",
+        }
+
+        current_section = None
+        section_map = {
+            "APPLICATION": "application",
+            "UI_ELEMENTS": "ui_elements",
+            "TEXT_CONTENT": "text_content",
+            "ACTIVE_STATE": "active_state",
+            "ERRORS": "errors",
+            "SUGGESTED_ACTIONS": "suggested_actions",
+        }
+
+        for line in description.split("\n"):
+            stripped = line.strip()
+            if not stripped:
+                continue
+
+            # Check if this line starts a new section
+            matched = False
+            for label, key in section_map.items():
+                if stripped.upper().startswith(label):
+                    current_section = key
+                    # Grab text after the label and colon
+                    remainder = stripped[len(label):].lstrip(":").strip()
+                    if remainder:
+                        if key == "ui_elements":
+                            parsed[key].append(remainder)
+                        else:
+                            parsed[key] = remainder
+                    matched = True
+                    break
+
+            if not matched and current_section:
+                if current_section == "ui_elements":
+                    if stripped.startswith(("-", "*", "•")) or stripped[0].isdigit():
+                        parsed[current_section].append(stripped.lstrip("-*• ").strip())
+                    elif parsed[current_section]:
+                        # Continuation of previous element
+                        parsed[current_section][-1] += " " + stripped
+                    else:
+                        parsed[current_section].append(stripped)
+                else:
+                    if parsed[current_section]:
+                        parsed[current_section] += " " + stripped
+                    else:
+                        parsed[current_section] = stripped
+
+        result["ui_analysis"] = parsed
+        return result
+
+    def analyze_screen_context(self, screenshot_path: str) -> dict:
+        """Analyze a screenshot and return structured context.
+
+        Returns categorized info: app_type, has_errors, error_text,
+        main_content, language, suggested_help.
 
         Args:
             screenshot_path: Path to the screenshot
@@ -221,18 +348,16 @@ Be concise. Only report what you actually see."""
         """Execute a vision action.
 
         Args:
-            action: Action to perform (analyze, describe, read)
-            **kwargs: Additional arguments (image_path, question)
+            action: Action to perform (analyze, describe, read, ui, dom, element)
+            **kwargs: Additional arguments (image_path, question, language_hint)
 
         Returns:
             dict with action result
         """
         action_lower = action.lower()
 
-        # Extract image path from action or kwargs
         image_path = kwargs.get("image_path")
         if not image_path:
-            # Try to extract path from action string
             image_path = self._extract_path(action)
 
         if not image_path:
@@ -241,13 +366,13 @@ Be concise. Only report what you actually see."""
                 "error": "No image path provided. Specify the path to analyze."
             }
 
-        # Determine action type
         if "read" in action_lower or "text" in action_lower or "ocr" in action_lower:
-            return self.read_text(image_path)
+            return self.read_text(image_path, language_hint=kwargs.get("language_hint"))
+        elif "ui" in action_lower or "dom" in action_lower or "element" in action_lower:
+            return self.analyze_ui(image_path)
         elif "screen" in action_lower:
             return self.describe_screen(image_path)
         else:
-            # Default: analyze with custom or default question
             question = kwargs.get("question", "What is in this image? Describe what you see.")
             return self.analyze_image(image_path, question)
 
@@ -261,7 +386,7 @@ Be concise. Only report what you actually see."""
             return quoted[0]
 
         # Look for paths with image extensions
-        path_pattern = r'[\w./\\:-]+\.(?:png|jpg|jpeg|gif|webp|bmp)'
+        path_pattern = r'[\w./\\:-]+\.(?:png|jpg|jpeg|gif|webp|bmp|tiff|tif)'
         paths = re.findall(path_pattern, action, re.IGNORECASE)
         if paths:
             return paths[0]

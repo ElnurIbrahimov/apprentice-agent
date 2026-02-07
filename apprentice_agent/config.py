@@ -235,6 +235,23 @@ class Config:
                 'vision_cloud': cls.MODEL_VISION_CLOUD,
             }
 
+    # Vision model fallback chain (tried in order)
+    MODEL_VISION_CHAIN: list = [
+        "minicpm-v",            # Best local (8B, fits 8GB, strong OCR + UI)
+        "qwen2.5-vl:7b",       # Local fallback (multilingual)
+        "llava",                # Legacy fallback
+    ]
+
+    @classmethod
+    def get_model(cls, task_type: str) -> str:
+        """Get the configured model for a task type."""
+        return {
+            "fast": cls.MODEL_FAST,
+            "reason": cls.MODEL_REASON,
+            "code": cls.MODEL_CODE,
+            "vision": cls.MODEL_VISION,
+        }.get(task_type, cls.MODEL_NAME)
+
     MEMORY_COLLECTION_NAME: str = "agent_memory"
     MAX_MEMORY_RESULTS: int = 5
 

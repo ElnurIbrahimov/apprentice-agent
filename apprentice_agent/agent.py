@@ -340,7 +340,7 @@ class ApprenticeAgent:
         if not fast_init:
             self.tools.update({
                 "screenshot": ScreenshotTool(),
-                "vision": VisionTool(),
+                "vision": VisionTool(brain=self.brain),
                 "pdf_reader": PDFReaderTool(),
                 "arxiv_search": ArxivSearchTool(),
                 "browser": BrowserTool(),
@@ -828,7 +828,7 @@ class ApprenticeAgent:
         elif tool_name == "screenshot":
             self.tools["screenshot"] = ScreenshotTool()
         elif tool_name == "vision":
-            self.tools["vision"] = VisionTool()
+            self.tools["vision"] = VisionTool(brain=self.brain)
         elif tool_name == "pdf_reader":
             self.tools["pdf_reader"] = PDFReaderTool()
         elif tool_name == "arxiv_search":
@@ -2212,8 +2212,10 @@ Guidelines:
                 return {"success": False, "error": "No image path found. Take a screenshot first or specify an image path."}
 
             # Determine question from action
-            if "read" in action_lower or "text" in action_lower:
+            if "read" in action_lower or "text" in action_lower or "ocr" in action_lower:
                 return tool.read_text(image_path)
+            elif "ui" in action_lower or "dom" in action_lower or "element" in action_lower:
+                return tool.analyze_ui(image_path)
             elif "screen" in action_lower:
                 return tool.describe_screen(image_path)
             else:
