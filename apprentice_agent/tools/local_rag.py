@@ -529,6 +529,12 @@ class LocalRAG:
                         record_memory_recall("rag", len(results), query, [r.chunk.content[:80] for r in results[:5]])
                 except Exception:
                     pass
+                try:
+                    from api.routes.context import track_context_from_memory
+                    if results:
+                        track_context_from_memory([r.chunk.content[:80] for r in results[:5]])
+                except Exception:
+                    pass
                 return results
 
         # Fallback to keyword search

@@ -379,6 +379,11 @@ tool: web_search | search the internet"""
                 )
             except Exception:
                 pass
+            try:
+                from api.routes.context import track_context_from_memory
+                track_context_from_memory([r.content[:80] for r in final[:5]])
+            except Exception:
+                pass
 
         return final
 

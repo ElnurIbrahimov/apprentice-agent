@@ -133,6 +133,16 @@ async def chat(request: ChatRequest) -> ChatResponse:
             lambda: _get_agent_service().chat(request.message, speak=request.speak, model_override=request.model)
         )
 
+        # === Track assistant response and emotion in ContextHeatmap ===
+        try:
+            from api.routes.context import track_context_from_message, track_context_from_emotion
+            track_context_from_message(result["response"], is_user=False)
+            mood_raw = result.get("mood")
+            if mood_raw and isinstance(mood_raw, dict) and mood_raw.get("emotion"):
+                track_context_from_emotion(mood_raw["emotion"], mood_raw.get("confidence", 50) / 100.0)
+        except Exception:
+            pass
+
         mood = result.get("mood")
         if mood and isinstance(mood, dict):
             mood = MoodState(**mood)
@@ -170,6 +180,13 @@ async def run(request: RunRequest) -> RunResponse:
                 max_iterations=request.max_iterations
             )
         )
+
+        # === Track goal as user message in ContextHeatmap ===
+        try:
+            from api.routes.context import track_context_from_message
+            track_context_from_message(request.goal, is_user=True)
+        except Exception:
+            pass
 
         mood = result.get("mood")
         if mood and isinstance(mood, dict):

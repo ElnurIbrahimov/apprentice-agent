@@ -427,6 +427,12 @@ class AMEMSystem:
                                 record_memory_recall("amem", len(final), query, [n.content[:80] for n, _ in final[:5]])
                         except Exception:
                             pass
+                        try:
+                            from api.routes.context import track_context_from_memory
+                            if final:
+                                track_context_from_memory([n.content[:80] for n, _ in final[:5]])
+                        except Exception:
+                            pass
                         return final
                 except Exception as e:
                     logger.warning(f"ChromaDB search failed: {e}")
@@ -443,6 +449,12 @@ class AMEMSystem:
                             record_memory_recall("amem", len(emb_results), query, [n.content[:80] for n, _ in emb_results[:5]])
                     except Exception:
                         pass
+                    try:
+                        from api.routes.context import track_context_from_memory
+                        if emb_results:
+                            track_context_from_memory([n.content[:80] for n, _ in emb_results[:5]])
+                    except Exception:
+                        pass
                     return emb_results
 
             # Final fallback: keyword search
@@ -452,6 +464,12 @@ class AMEMSystem:
                 from api.routes.memory import record_memory_recall
                 if results:
                     record_memory_recall("amem", len(results), query, [n.content[:80] for n, _ in results[:5]])
+            except Exception:
+                pass
+            try:
+                from api.routes.context import track_context_from_memory
+                if results:
+                    track_context_from_memory([n.content[:80] for n, _ in results[:5]])
             except Exception:
                 pass
             return results
@@ -536,6 +554,13 @@ class AMEMSystem:
 
             # Sort by relevance
             results.sort(key=lambda x: x["relevance"], reverse=True)
+            try:
+                from api.routes.memory import record_memory_recall
+                from api.routes.context import track_context_from_memory
+                record_memory_recall("amem", len(results), query, [r["content"][:80] for r in results[:5]])
+                track_context_from_memory([r["content"][:80] for r in results[:5]])
+            except Exception:
+                pass
             return results[:k * 2]
 
     def update(

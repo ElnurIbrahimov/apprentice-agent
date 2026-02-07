@@ -351,7 +351,14 @@ class KnowledgeGraphTool:
 
             # Sort by score and return top matches
             matches.sort(key=lambda x: x[0], reverse=True)
-            return [node for _, node in matches[:limit]]
+            final_nodes = [node for _, node in matches[:limit]]
+            try:
+                from api.routes.memory import record_memory_recall
+                if final_nodes:
+                    record_memory_recall("kg", len(final_nodes), query, [n.label for n in final_nodes[:5]])
+            except Exception:
+                pass
+            return final_nodes
 
     def update_node(self, node_id: str, properties: Dict[str, Any]) -> bool:
         """Update node properties."""
@@ -784,6 +791,12 @@ class KnowledgeGraphTool:
             from api.routes.memory import record_memory_recall
             if results:
                 record_memory_recall("kg", len(results), question, [n.label for n in results[:5]])
+        except Exception:
+            pass
+        try:
+            from api.routes.context import track_context_from_memory
+            if results:
+                track_context_from_memory([n.label for n in results[:5]])
         except Exception:
             pass
         return results
