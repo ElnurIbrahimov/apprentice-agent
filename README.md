@@ -8,7 +8,7 @@ An AI agent with memory and reasoning capabilities, powered by local LLMs via Ol
 - **30+ Integrated Tools** - Web search, browser automation, code execution, vision, voice, PDF reading, system control, notifications, tool builder, plugin marketplace, FluxMind, regex builder, git, Clawdbot messaging, EvoEmo emotional tracking, Inner Monologue, Knowledge Graph Memory, Metacognitive Guardian, NeuroDream sleep/dream memory consolidation, MirrorMind self-critique, CognitiveTheater multi-perspective reasoning, Reflexion learning-from-mistakes, SynapseForge dynamic tool creation, WorldSim consequence simulation, **AURA v3.0 ALIVE emotional presence system**, **Local RAG (document indexing)**, **A-MEM Zettelkasten Memory** (NeurIPS 2025), **MCTS Reasoning Tree**, **Introspection Circuit**, and more
 - **ALIVE AURA System** - 6-phase architecture making AURA feel genuinely alive: ALMA emotion engine, Gateway Daemon (proactive outreach), Context Awareness Heatmap, Spontaneous Conversation Starters, "Thinking About" Teaser, Ambient Idle Behaviors, Theory of Mind, Intrinsic Motivation (4 drives), and Idle Presence
 - **Consciousness Module** - Intrinsic motivation with 4 drives (Curiosity, Competence, Social, Coherence), idle presence behaviors, expanded metacognition with confidence calibration, and theory of mind for user state modeling
-- **ALMA Emotion Engine** - Affect-Level Mood Architecture with continuous mood dimensions (warmth, energy, engagement), smooth mood transitions, personality-aware baselines, and visual breathing avatar
+- **ALMA Emotion Engine** - Affect-Level Mood Architecture with continuous mood dimensions (warmth, energy, engagement), smooth mood transitions, personality-aware baselines, visual breathing avatar, **genuine emotional dynamics** (circadian rhythm, boredom→curiosity transitions, 5 neuromodulators including acetylcholine, mood-congruent memory recall, dopamine-scaled learning, serotonin temporal horizons, and emotion-driven response style modulation)
 - **Gateway Daemon** - Proactive outreach system with active inference (Free Energy Principle), per-action cooldowns, belief drift, 100+ personality-rich message templates with deduplication, BaseException-safe decision loop, and time-of-day aware idle presence
 - **MCTS Reasoning Tree** - Monte Carlo Tree Search for multi-path reasoning exploration. Explores multiple solution paths simultaneously, backtracks from dead ends, and finds optimal answers through deliberate search with UCT selection.
 - **Introspection Circuit** - "Know when you don't know" uncertainty detection based on Anthropic's 2025 research. Detects uncertainty before responding, auto-triggers verification for factual queries, and adds epistemic markers for uncertain responses.
@@ -2000,6 +2000,14 @@ ALMA (Affect-Level Mood Architecture) replaces the basic emotion system with con
 - Visual breathing avatar that reflects emotional state
 - Emotion history and trend tracking
 - Personality trait editor in Settings modal
+- **Circadian rhythm** — gentle time-of-day PAD nudges (morning energy, midday focus, afternoon lull, evening warmth, night contemplation, deep night stillness)
+- **Boredom→curiosity transition** — prolonged idle shifts from boredom to constructive curiosity-seeking
+- **5 neuromodulators** — dopamine (motivation), serotonin (patience), norepinephrine (alertness), oxytocin (warmth), acetylcholine (attention precision)
+- **Mood-congruent memory** — emotional state biases memory retrieval toward congruent memories
+- **Dopamine→learning rate** — high dopamine increases memory importance by up to 20%
+- **Serotonin→temporal horizon** — high serotonin surfaces older memories; low serotonin favors recent
+- **Emotional response modulation** — verbosity, formality, and exploration style adapt to emotional state
+- **Post-sleep satisfaction** — NeuroDream consolidation triggers proportional satisfaction emotion
 
 **API Endpoints:**
 

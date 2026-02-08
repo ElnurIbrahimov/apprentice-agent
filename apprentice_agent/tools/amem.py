@@ -295,11 +295,17 @@ class AMEMSystem:
             )
 
             # Capture current emotional state (PAD) for emotional memory tagging
+            # and modulate importance via dopamine (high dopamine = more significant)
             try:
                 from apprentice_agent.emotion.alma_engine import alma_engine
                 state = alma_engine.get_emotional_state()
                 if state and "pad" in state:
                     note.emotional_pad = state["pad"]
+                if state and "neuromodulators" in state:
+                    dopamine = state["neuromodulators"].get("dopamine", 0.5)
+                    # Scale importance by ±20% based on dopamine
+                    dopamine_factor = 1.0 + (dopamine - 0.5) * 0.4
+                    note.importance = max(0.0, min(1.0, note.importance * dopamine_factor))
             except Exception:
                 pass
 
@@ -376,7 +382,8 @@ class AMEMSystem:
         query: str,
         k: int = 5,
         category: Optional[str] = None,
-        min_importance: float = 0.0
+        min_importance: float = 0.0,
+        mood_pad: Optional[Dict[str, float]] = None
     ) -> List[Tuple[MemoryNote, float]]:
         """
         Semantic search for related notes.
@@ -415,11 +422,29 @@ class AMEMSystem:
                                     distance = results["distances"][0][i] if results["distances"] else 0
                                     similarity = 1.0 - distance
                                     # Phase 4B: Blend similarity with Ebbinghaus recency
+                                    # Serotonin modulates recency bias: high = patient (lower recency weight),
+                                    # low = impatient (higher recency weight)
                                     recency = note.get_recency_score()
-                                    blended = 0.7 * similarity + 0.2 * recency + 0.1 * note.importance
+                                    try:
+                                        from apprentice_agent.emotion.alma_engine import alma_engine
+                                        _s = alma_engine.get_emotional_state()
+                                        _sero = _s.get("neuromodulators", {}).get("serotonin", 0.5) if _s else 0.5
+                                    except Exception:
+                                        _sero = 0.5
+                                    recency_w = 0.2 + (_sero - 0.5) * -0.1  # 0.25 at low, 0.15 at high
+                                    recency_w = max(0.15, min(0.25, recency_w))
+                                    sim_w = 0.9 - recency_w  # remaining budget minus importance
+                                    blended = sim_w * similarity + recency_w * recency + 0.1 * note.importance
                                     matches.append((note, blended))
 
                         final = sorted(matches, key=lambda x: x[1], reverse=True)[:k]
+                        # Apply mood-congruent reranking
+                        try:
+                            from apprentice_agent.tools.mood_memory import apply_mood_bias_to_tuples
+                            final = apply_mood_bias_to_tuples(final, mood_pad)
+                            final.sort(key=lambda x: x[1], reverse=True)
+                        except Exception:
+                            pass
                         # === PHASE 1: Track memory recall ===
                         try:
                             from api.routes.memory import record_memory_recall
@@ -442,6 +467,13 @@ class AMEMSystem:
                 query_embedding = self._embed(query)
                 if query_embedding is not None:
                     emb_results = self._search_by_embedding(query_embedding, k, category, min_importance)
+                    # Apply mood-congruent reranking
+                    try:
+                        from apprentice_agent.tools.mood_memory import apply_mood_bias_to_tuples
+                        emb_results = apply_mood_bias_to_tuples(emb_results, mood_pad)
+                        emb_results.sort(key=lambda x: x[1], reverse=True)
+                    except Exception:
+                        pass
                     # === PHASE 1: Track memory recall ===
                     try:
                         from api.routes.memory import record_memory_recall

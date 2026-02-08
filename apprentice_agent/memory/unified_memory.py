@@ -307,6 +307,8 @@ class UnifiedMemory:
             eq = EpisodeQuery(
                 query_text=query,
                 limit=k,
+                emotional_pad=emotional_pad,
+                emotional_weight=0.15 if emotional_pad else 0.0,
             )
             raw = self._episodic.search(eq)
 

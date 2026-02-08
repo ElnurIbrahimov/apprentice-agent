@@ -382,6 +382,7 @@ class Neuromodulators:
     serotonin: float = 0.5     # 0-1, affects patience/caution
     norepinephrine: float = 0.5  # 0-1, affects alertness/focus
     oxytocin: float = 0.5      # 0-1, affects warmth/connection
+    acetylcholine: float = 0.5  # 0-1, affects attention precision
 
     def update_from_pad(self, pad: PADState):
         """Update neuromodulator levels based on PAD state."""
@@ -397,11 +398,15 @@ class Neuromodulators:
         # Oxytocin correlates with pleasure and negative dominance (openness)
         self.oxytocin = 0.5 + (pad.pleasure * 0.25) - (pad.dominance * 0.1)
 
+        # Acetylcholine correlates with arousal + dominance (focused states)
+        self.acetylcholine = 0.5 + (pad.arousal * 0.25) + (pad.dominance * 0.2)
+
         # Clamp all values
         self.dopamine = max(0, min(1, self.dopamine))
         self.serotonin = max(0, min(1, self.serotonin))
         self.norepinephrine = max(0, min(1, self.norepinephrine))
         self.oxytocin = max(0, min(1, self.oxytocin))
+        self.acetylcholine = max(0, min(1, self.acetylcholine))
 
     def get_processing_modifiers(self) -> Dict[str, float]:
         """Get modifiers for response generation."""
@@ -410,6 +415,7 @@ class Neuromodulators:
             "caution": self.serotonin,
             "alertness": self.norepinephrine,
             "warmth": self.oxytocin,
+            "attention_precision": self.acetylcholine,
         }
 
     def to_dict(self) -> dict:
@@ -418,6 +424,7 @@ class Neuromodulators:
             "serotonin": round(self.serotonin, 3),
             "norepinephrine": round(self.norepinephrine, 3),
             "oxytocin": round(self.oxytocin, 3),
+            "acetylcholine": round(self.acetylcholine, 3),
         }
 
 
@@ -977,11 +984,15 @@ class ALMAEngine:
         with self._lock:
             drift_reason = None
 
-            # 1. Boredom during idle
+            # 1. Boredom during idle → curiosity transition
             idle_seconds = now - self._last_interaction_time if self._last_interaction_time > 0 else 0
-            if idle_seconds > 300:  # More than 5 minutes idle
-                # Gradually decrease pleasure and arousal (boredom)
-                boredom_strength = min(0.03, idle_seconds / 36000)  # caps at ~10 min
+            if idle_seconds > 600:  # More than 10 minutes idle → curiosity-seeking
+                curiosity_strength = min(0.03, idle_seconds / 36000)
+                curiosity_pad = PADState(pleasure=0.2, arousal=0.3, dominance=0.2)
+                self.mood.push_toward(curiosity_pad, curiosity_strength)
+                drift_reason = f"idle for {int(idle_seconds/60)}min, shifting to curiosity-seeking"
+            elif idle_seconds > 300:  # 5-10 minutes idle → boredom
+                boredom_strength = min(0.03, idle_seconds / 36000)
                 boredom_pad = PADState(pleasure=-0.3, arousal=-0.5, dominance=0.0)
                 self.mood.push_toward(boredom_pad, boredom_strength)
                 drift_reason = f"idle for {int(idle_seconds/60)}min, drifting toward boredom"
@@ -1010,6 +1021,42 @@ class ALMAEngine:
                             drift_reason += f"; {recent_events} events detected"
                         else:
                             drift_reason = f"{recent_events} events detected, drifting toward curiosity"
+            except Exception:
+                pass
+
+            # 3b. Circadian rhythm — gentle time-of-day PAD nudges
+            try:
+                import datetime as _dt
+                hour = _dt.datetime.now().hour
+                if 6 <= hour < 10:
+                    # Morning energy
+                    circadian_pad = PADState(pleasure=0.2, arousal=0.3, dominance=0.1)
+                    circadian_label = "morning energy"
+                elif 10 <= hour < 14:
+                    # Midday focus
+                    circadian_pad = PADState(pleasure=0.1, arousal=0.1, dominance=0.3)
+                    circadian_label = "midday focus"
+                elif 14 <= hour < 17:
+                    # Afternoon lull
+                    circadian_pad = PADState(pleasure=-0.1, arousal=-0.2, dominance=0.0)
+                    circadian_label = "afternoon lull"
+                elif 17 <= hour < 21:
+                    # Evening warmth
+                    circadian_pad = PADState(pleasure=0.3, arousal=-0.1, dominance=-0.1)
+                    circadian_label = "evening warmth"
+                elif 21 <= hour or hour < 2:
+                    # Night contemplation
+                    circadian_pad = PADState(pleasure=0.0, arousal=-0.3, dominance=-0.2)
+                    circadian_label = "night contemplation"
+                else:
+                    # Deep night stillness (2-6h)
+                    circadian_pad = PADState(pleasure=-0.1, arousal=-0.4, dominance=-0.3)
+                    circadian_label = "deep night stillness"
+                self.mood.push_toward(circadian_pad, 0.008)
+                if drift_reason:
+                    drift_reason += f"; circadian: {circadian_label}"
+                else:
+                    drift_reason = f"circadian: {circadian_label}"
             except Exception:
                 pass
 

@@ -257,10 +257,30 @@ class AURAEngine:
 
         if self.enable_humanization:
             tone = ResponseTone(context.get("tone", "warm"))
+            alma_modulation = None
+            try:
+                from apprentice_agent.emotion.alma_engine import get_response_modulation
+                alma_modulation = get_response_modulation()
+                # Map high modulation values to tone overrides
+                if alma_modulation:
+                    enthusiasm = alma_modulation.get("enthusiasm", 0.5)
+                    empathy = alma_modulation.get("empathy", 0.5)
+                    warmth = alma_modulation.get("warmth", 0.5)
+                    if enthusiasm > 0.7:
+                        tone = ResponseTone.ENTHUSIASTIC
+                    elif empathy > 0.7:
+                        tone = ResponseTone.EMPATHETIC
+                    elif warmth > 0.7:
+                        tone = ResponseTone.WARM
+                    elif alma_modulation.get("formality", 0.4) > 0.6:
+                        tone = ResponseTone.PROFESSIONAL
+            except Exception:
+                pass
             result = self.humanizer.humanize(
                 response,
                 tone=tone,
-                query=context.get("user_input", "")
+                query=context.get("user_input", ""),
+                context={"modulation": alma_modulation} if alma_modulation else None
             )
             final_response = result.humanized
             humanized = bool(result.modifications)

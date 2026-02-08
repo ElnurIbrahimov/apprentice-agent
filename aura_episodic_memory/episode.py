@@ -213,6 +213,10 @@ class EpisodeQuery:
     importance_weight: float = 0.3
     relevance_weight: float = 0.4
 
+    # Emotional congruence
+    emotional_pad: Optional[Dict[str, float]] = None
+    emotional_weight: float = 0.0
+
     # Limits
     limit: int = 10
     min_score: float = 0.0

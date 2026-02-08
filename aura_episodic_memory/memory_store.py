@@ -458,11 +458,31 @@ class EpisodicMemoryStore:
             relevance = 0.5
         breakdown["relevance"] = relevance
 
+        # Emotional congruence scoring
+        emotional_congruence = 0.5
+        if query.emotional_pad and query.emotional_weight > 0:
+            valence_map = {
+                EmotionalValence.POSITIVE: 1.0,
+                EmotionalValence.NEGATIVE: -1.0,
+                EmotionalValence.NEUTRAL: 0.0,
+                EmotionalValence.MIXED: 0.0,
+            }
+            ep_valence = valence_map.get(episode.emotional_valence, 0.0)
+            mood_pleasure = query.emotional_pad.get("pleasure", 0.0)
+            # Congruence: same-sign valence and mood = boost
+            emotional_congruence = 0.5 + 0.5 * (ep_valence * mood_pleasure)
+            emotional_congruence = max(0.0, min(1.0, emotional_congruence))
+        breakdown["emotional_congruence"] = emotional_congruence
+
         # Weighted combination
+        ew = query.emotional_weight
+        base_scale = 1.0 - ew
         score = (
-            query.recency_weight * recency +
-            query.importance_weight * importance +
-            query.relevance_weight * relevance
+            base_scale * (
+                query.recency_weight * recency +
+                query.importance_weight * importance +
+                query.relevance_weight * relevance
+            ) + ew * emotional_congruence
         )
 
         return score, breakdown

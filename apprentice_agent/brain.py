@@ -845,6 +845,29 @@ class OllamaBrain:
             except Exception as e:
                 logger.debug(f"[BRAIN] ALMA tone generation failed: {e}")
 
+        # ALMA response modulation: verbosity, formality, exploration hints
+        if self._alma_enabled:
+            try:
+                from apprentice_agent.emotion.alma_engine import get_response_modulation
+                mod = get_response_modulation()
+                mod_parts = []
+                if mod.get("verbosity", 0.5) < 0.35:
+                    mod_parts.append("Keep response concise.")
+                elif mod.get("verbosity", 0.5) > 0.65:
+                    mod_parts.append("Feel free to elaborate.")
+                if mod.get("formality", 0.4) > 0.6:
+                    mod_parts.append("Use a formal tone.")
+                elif mod.get("formality", 0.4) < 0.25:
+                    mod_parts.append("Use a casual, conversational tone.")
+                if mod.get("enthusiasm", 0.5) > 0.7:
+                    mod_parts.append("Try creative or novel approaches.")
+                elif mod.get("enthusiasm", 0.5) < 0.3:
+                    mod_parts.append("Prefer proven, reliable approaches.")
+                if mod_parts:
+                    full_system_prompt = f"{full_system_prompt}\n\n[Style guidance: {' '.join(mod_parts)}]"
+            except Exception:
+                pass
+
         messages = []
         if full_system_prompt:
             messages.append({"role": "system", "content": full_system_prompt})
@@ -891,10 +914,17 @@ class OllamaBrain:
         adjusted_top_p = round(base_top_p - (neuro["norepinephrine"] - 0.5) * 0.15, 2)
         adjusted_top_p = max(0.7, min(0.95, adjusted_top_p))
 
+        # Neuromodulator: Acetylcholine modulates repeat_penalty (attention precision)
+        # High acetylcholine = focused attention = higher repeat penalty (less repetitive)
+        base_repeat_penalty = 1.1
+        ach = neuro.get("acetylcholine", 0.5)
+        adjusted_repeat_penalty = round(_neuro_scale(base_repeat_penalty, ach, sensitivity=0.15), 2)
+
         llm_options = {
             "temperature": adjusted_temp,
             "num_predict": adjusted_num_predict,
             "top_p": adjusted_top_p,
+            "repeat_penalty": adjusted_repeat_penalty,
         }
 
         logger.debug(
@@ -1067,6 +1097,29 @@ class OllamaBrain:
                     full_system_prompt = f"{full_system_prompt}\n\n{alma_tone}"
             except Exception as e:
                 logger.debug(f"[BRAIN] ALMA tone generation failed: {e}")
+
+        # ALMA response modulation: verbosity, formality, exploration hints
+        if self._alma_enabled:
+            try:
+                from apprentice_agent.emotion.alma_engine import get_response_modulation
+                mod = get_response_modulation()
+                mod_parts = []
+                if mod.get("verbosity", 0.5) < 0.35:
+                    mod_parts.append("Keep response concise.")
+                elif mod.get("verbosity", 0.5) > 0.65:
+                    mod_parts.append("Feel free to elaborate.")
+                if mod.get("formality", 0.4) > 0.6:
+                    mod_parts.append("Use a formal tone.")
+                elif mod.get("formality", 0.4) < 0.25:
+                    mod_parts.append("Use a casual, conversational tone.")
+                if mod.get("enthusiasm", 0.5) > 0.7:
+                    mod_parts.append("Try creative or novel approaches.")
+                elif mod.get("enthusiasm", 0.5) < 0.3:
+                    mod_parts.append("Prefer proven, reliable approaches.")
+                if mod_parts:
+                    full_system_prompt = f"{full_system_prompt}\n\n[Style guidance: {' '.join(mod_parts)}]"
+            except Exception:
+                pass
 
         messages = []
         if full_system_prompt:

@@ -4610,13 +4610,6 @@ Try these commands:
                 amem_tool = self.tools['amem']
                 # Search for relevant memories (returns List[Tuple[MemoryNote, float]])
                 memories_raw = amem_tool.amem.search(message, k=3)
-                # Apply mood-congruent reranking
-                try:
-                    from apprentice_agent.tools.mood_memory import apply_mood_bias_to_tuples
-                    memories_raw = apply_mood_bias_to_tuples(memories_raw)
-                    memories_raw.sort(key=lambda x: x[1], reverse=True)
-                except Exception:
-                    pass
                 memories = [note for note, score in memories_raw] if memories_raw else []
                 if memories:
                     memory_texts = [f"- {m.content}" for m in memories if m.content]

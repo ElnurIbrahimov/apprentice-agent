@@ -434,6 +434,20 @@ class NeuroDreamEngine:
                     self.current_session.creative_hypotheses = rem_results.get("creative_hypotheses", 0)
                     self.current_session.phases_completed.append("rem")
 
+            # Post-consolidation satisfaction emotion
+            if not self._interrupt_flag.is_set() and self.current_session:
+                try:
+                    from apprentice_agent.emotion.alma_engine import trigger_emotion
+                    items = (
+                        self.current_session.memories_replayed
+                        + self.current_session.patterns_found
+                        + self.current_session.insights_generated
+                    )
+                    intensity = max(0.2, min(0.6, items * 0.05))
+                    trigger_emotion("satisfaction", intensity, f"sleep_consolidation: {items} items")
+                except Exception:
+                    pass
+
             # Natural wake up
             if not self._interrupt_flag.is_set():
                 self.wake_up("cycle_complete")
