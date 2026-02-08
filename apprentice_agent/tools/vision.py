@@ -1,19 +1,142 @@
-"""Vision tool for analyzing images using Ollama vision models with fallback chain."""
+"""Vision tool for analyzing images using Ollama vision models with fallback chain.
+
+Supports:
+- Ollama models (llava, minicpm-v, qwen2.5-vl) via multi-model fallback
+- Florence-2 (microsoft/Florence-2-base) via HuggingFace transformers for fast OCR/UI analysis
+- VRAM-aware model selection to avoid OOM on constrained GPUs
+"""
 
 import json
 import base64
 import logging
 import ollama
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 
 from ..config import Config
 
 logger = logging.getLogger(__name__)
 
+# Florence-2 singleton state (lazy loaded)
+_florence2_model = None
+_florence2_processor = None
+_florence2_available: Optional[bool] = None  # None = not checked yet
+
+
+def _check_florence2_available() -> bool:
+    """Check if Florence-2 dependencies are installed."""
+    global _florence2_available
+    if _florence2_available is not None:
+        return _florence2_available
+    try:
+        import torch
+        import transformers
+        _florence2_available = True
+    except ImportError:
+        _florence2_available = False
+        logger.info("[Vision] Florence-2 unavailable (torch/transformers not installed)")
+    return _florence2_available
+
+
+def _load_florence2():
+    """Lazy-load Florence-2 model (singleton). ~0.5GB VRAM."""
+    global _florence2_model, _florence2_processor
+    if _florence2_model is not None:
+        return _florence2_model, _florence2_processor
+
+    if not Config.FLORENCE2_ENABLED:
+        raise RuntimeError("Florence-2 disabled in config")
+
+    if not _check_florence2_available():
+        raise RuntimeError("Florence-2 dependencies not installed")
+
+    # Check VRAM before loading
+    vram_free = _get_available_vram_gb()
+    if vram_free is not None and vram_free < 0.5:
+        raise RuntimeError(f"Not enough VRAM for Florence-2 (need 0.5GB, have {vram_free:.1f}GB)")
+
+    import torch
+    from transformers import AutoModelForCausalLM, AutoProcessor
+
+    model_name = Config.FLORENCE2_MODEL
+    logger.info("[Vision] Loading Florence-2 from %s...", model_name)
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = torch.float16 if device == "cuda" else torch.float32
+
+    _florence2_model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        torch_dtype=dtype,
+        trust_remote_code=True,
+    ).to(device)
+    _florence2_processor = AutoProcessor.from_pretrained(
+        model_name,
+        trust_remote_code=True,
+    )
+
+    logger.info("[Vision] Florence-2 loaded on %s", device)
+    return _florence2_model, _florence2_processor
+
+
+def _get_available_vram_gb() -> Optional[float]:
+    """Get available GPU VRAM in GB. Returns None if no GPU or torch unavailable."""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            free, total = torch.cuda.mem_get_info()
+            return free / (1024 ** 3)
+    except Exception:
+        pass
+    return None
+
+
+def _can_fit_model(model_name: str) -> bool:
+    """Check if a model can fit in available VRAM."""
+    vram_free = _get_available_vram_gb()
+    if vram_free is None:
+        return True  # Can't check, assume it fits (CPU fallback)
+
+    # Look up estimated size
+    base_name = model_name.split("/")[-1].lower().replace("microsoft/", "")
+    vram_needed = Config.VISION_MODEL_VRAM.get(base_name)
+
+    # Also try the raw model name
+    if vram_needed is None:
+        vram_needed = Config.VISION_MODEL_VRAM.get(model_name)
+
+    if vram_needed is None:
+        return True  # Unknown model, let it try
+
+    if vram_free < vram_needed:
+        logger.info("[Vision] Skipping %s: needs %.1fGB VRAM, only %.1fGB free",
+                     model_name, vram_needed, vram_free)
+        return False
+    return True
+
+
+# Model-specific system prompts for better output quality
+_MODEL_SYSTEM_PROMPTS = {
+    "qwen2.5-vl": (
+        "You are a precise vision analyst. Always respond with structured, "
+        "well-organized output. Use clear section headers and bullet points."
+    ),
+}
+
+
+def _get_model_system_prompt(model_name: str) -> Optional[str]:
+    """Get model-specific system prompt if available."""
+    for prefix, prompt in _MODEL_SYSTEM_PROMPTS.items():
+        if prefix in model_name:
+            return prompt
+    return None
+
 
 class VisionTool:
-    """Tool for analyzing images using vision LLM with model fallback chain."""
+    """Tool for analyzing images using vision LLM with model fallback chain.
+
+    Supports Florence-2 (fast structured OCR/detection) as primary analyzer
+    and Ollama models (llava, minicpm-v, qwen2.5-vl) as fallback.
+    """
 
     def __init__(self, model: str = None, brain=None):
         """Initialize vision tool.
@@ -74,16 +197,29 @@ class VisionTool:
 
         errors = []
         for model in chain:
+            # VRAM check: skip models that won't fit
+            if not _can_fit_model(model):
+                errors.append(f"{model}: skipped (insufficient VRAM)")
+                continue
+
             try:
                 client, actual_model = self._get_client(model)
                 logger.info("Trying vision model: %s", actual_model)
+
+                # Build messages with model-specific system prompt
+                messages = []
+                sys_prompt = _get_model_system_prompt(actual_model)
+                if sys_prompt:
+                    messages.append({'role': 'system', 'content': sys_prompt})
+                messages.append({
+                    'role': 'user',
+                    'content': question,
+                    'images': [img_data]
+                })
+
                 response = client.chat(
                     model=actual_model,
-                    messages=[{
-                        'role': 'user',
-                        'content': question,
-                        'images': [img_data]
-                    }]
+                    messages=messages,
                 )
                 content = response['message']['content']
                 logger.info("Vision analysis succeeded with model: %s", actual_model)
@@ -96,6 +232,71 @@ class VisionTool:
             f"All vision models failed. Tried: {', '.join(chain)}. "
             f"Errors: {'; '.join(errors)}"
         )
+
+    def _analyze_with_florence2(
+        self, image_path: str, task: str = "<OCR>"
+    ) -> Optional[Dict[str, Any]]:
+        """Run Florence-2 on an image for fast structured analysis.
+
+        Args:
+            image_path: Path to the image file
+            task: Florence-2 task token. One of:
+                  "<OCR>" - Extract text
+                  "<OCR_WITH_REGION>" - OCR with bounding boxes
+                  "<OD>" - Object detection
+                  "<CAPTION>" - Short caption
+                  "<DETAILED_CAPTION>" - Detailed caption
+
+        Returns:
+            Dict with parsed results, or None if Florence-2 unavailable
+        """
+        if not Config.FLORENCE2_ENABLED or not _check_florence2_available():
+            return None
+
+        try:
+            model, processor = _load_florence2()
+        except RuntimeError as e:
+            logger.debug("[Vision] Florence-2 not available: %s", e)
+            return None
+
+        try:
+            import torch
+            from PIL import Image
+
+            image = Image.open(image_path).convert("RGB")
+            device = next(model.parameters()).device
+
+            inputs = processor(
+                text=task,
+                images=image,
+                return_tensors="pt",
+            ).to(device)
+
+            with torch.no_grad():
+                generated_ids = model.generate(
+                    input_ids=inputs["input_ids"],
+                    pixel_values=inputs["pixel_values"],
+                    max_new_tokens=1024,
+                    num_beams=3,
+                )
+
+            generated_text = processor.batch_decode(
+                generated_ids, skip_special_tokens=False
+            )[0]
+
+            parsed = processor.post_process_generation(
+                generated_text, task=task, image_size=image.size
+            )
+
+            return {
+                "success": True,
+                "model": "florence-2",
+                "task": task,
+                "result": parsed.get(task, parsed),
+            }
+        except Exception as e:
+            logger.warning("[Vision] Florence-2 analysis failed: %s", e)
+            return None
 
     def analyze_image(
         self,
@@ -162,6 +363,8 @@ class VisionTool:
     def read_text(self, image_path: str, language_hint: str = None) -> dict:
         """Extract and read text from an image (OCR-like).
 
+        Tries Florence-2 first for fast structured OCR, falls back to Ollama models.
+
         Args:
             image_path: Path to the image
             language_hint: Optional language hint (e.g. 'japanese', 'arabic', 'chinese').
@@ -170,6 +373,25 @@ class VisionTool:
         Returns:
             dict with success status and extracted text
         """
+        # Try Florence-2 first for fast OCR
+        florence_result = self._analyze_with_florence2(image_path, "<OCR_WITH_REGION>")
+        if florence_result and florence_result.get("success"):
+            result_data = florence_result["result"]
+            # Extract text from Florence-2 OCR result
+            if isinstance(result_data, dict):
+                text_parts = result_data.get("labels", [])
+                text = "\n".join(text_parts) if text_parts else str(result_data)
+            else:
+                text = str(result_data)
+            return {
+                "success": True,
+                "description": text,
+                "image_path": str(Path(image_path).absolute()),
+                "model": "florence-2",
+                "florence2_raw": florence_result["result"],
+            }
+
+        # Fallback to Ollama vision models
         prompt = "Read and transcribe all visible text in this image. List the text exactly as it appears."
         if language_hint:
             prompt += (
@@ -181,12 +403,57 @@ class VisionTool:
     def analyze_ui(self, image_path: str) -> dict:
         """Analyze UI elements in a screenshot for structured extraction.
 
+        Tries Florence-2 first for fast object detection + OCR, falls back to Ollama.
+
         Args:
             image_path: Path to the screenshot
 
         Returns:
             dict with structured UI analysis including elements, text, state, errors
         """
+        # Try Florence-2 for fast structured UI detection
+        florence_od = self._analyze_with_florence2(image_path, "<OD>")
+        florence_ocr = self._analyze_with_florence2(image_path, "<OCR>")
+
+        if florence_od and florence_od.get("success"):
+            od_result = florence_od["result"]
+            ocr_text = ""
+            if florence_ocr and florence_ocr.get("success"):
+                ocr_data = florence_ocr["result"]
+                if isinstance(ocr_data, str):
+                    ocr_text = ocr_data
+                elif isinstance(ocr_data, dict):
+                    ocr_text = "\n".join(ocr_data.get("labels", [str(ocr_data)]))
+
+            # Build structured UI analysis from Florence-2 detection
+            elements = []
+            if isinstance(od_result, dict):
+                labels = od_result.get("labels", [])
+                bboxes = od_result.get("bboxes", [])
+                for i, label in enumerate(labels):
+                    entry = label
+                    if i < len(bboxes):
+                        bbox = bboxes[i]
+                        entry += f" @ [{bbox[0]:.0f},{bbox[1]:.0f},{bbox[2]:.0f},{bbox[3]:.0f}]"
+                    elements.append(entry)
+
+            result = {
+                "success": True,
+                "description": f"Florence-2 detected {len(elements)} UI elements",
+                "image_path": str(Path(image_path).absolute()),
+                "model": "florence-2",
+                "ui_analysis": {
+                    "application": "",
+                    "ui_elements": elements,
+                    "text_content": ocr_text,
+                    "active_state": "",
+                    "errors": "",
+                    "suggested_actions": "",
+                },
+            }
+            return result
+
+        # Fallback to Ollama models
         prompt = (
             "Analyze the UI in this screenshot. Provide a structured analysis with:\n"
             "APPLICATION: What application or webpage is shown\n"
@@ -245,8 +512,8 @@ class VisionTool:
 
             if not matched and current_section:
                 if current_section == "ui_elements":
-                    if stripped.startswith(("-", "*", "•")) or stripped[0].isdigit():
-                        parsed[current_section].append(stripped.lstrip("-*• ").strip())
+                    if stripped.startswith(("-", "*", "\u2022")) or stripped[0].isdigit():
+                        parsed[current_section].append(stripped.lstrip("-*\u2022 ").strip())
                     elif parsed[current_section]:
                         # Continuation of previous element
                         parsed[current_section][-1] += " " + stripped

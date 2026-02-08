@@ -29,6 +29,13 @@ try:
 except ImportError:
     SCREENPIPE_AVAILABLE = False
 
+# Try to import Florence-2 vision for enhanced analysis
+try:
+    from apprentice_agent.tools.vision import _check_florence2_available, VisionTool
+    FLORENCE2_SUPPORT = True
+except ImportError:
+    FLORENCE2_SUPPORT = False
+
 
 class ScreenMonitor(BaseMonitor):
     """
@@ -72,6 +79,9 @@ class ScreenMonitor(BaseMonitor):
         # Content keywords to watch for
         self._watch_keywords: List[str] = []
 
+        # Florence-2 vision tool (lazy loaded for enhanced analysis)
+        self._vision_tool: Optional['VisionTool'] = None
+
         logger.info(f"[ScreenMonitor] Initialized (screenpipe={self._use_screenpipe})")
 
     @property
@@ -89,7 +99,7 @@ class ScreenMonitor(BaseMonitor):
         logger.debug(f"[ScreenMonitor] Watching for: {self._watch_keywords}")
 
     async def _on_start(self) -> None:
-        """Initialize Screenpipe if available."""
+        """Initialize Screenpipe and Florence-2 if available."""
         if self._use_screenpipe:
             try:
                 self._screenpipe = ScreenpipeClient()
@@ -105,6 +115,14 @@ class ScreenMonitor(BaseMonitor):
                 logger.warning(f"[ScreenMonitor] Screenpipe init failed: {e}")
                 self._screenpipe = None
                 self._use_screenpipe = False
+
+        # Initialize Florence-2 vision tool for enhanced analysis
+        if FLORENCE2_SUPPORT and _check_florence2_available():
+            try:
+                self._vision_tool = VisionTool()
+                logger.info("[ScreenMonitor] Florence-2 vision available for enhanced analysis")
+            except Exception as e:
+                logger.debug(f"[ScreenMonitor] Florence-2 init skipped: {e}")
 
     async def _on_stop(self) -> None:
         """Cleanup Screenpipe connection."""
@@ -293,6 +311,9 @@ class ScreenMonitor(BaseMonitor):
         """
         Check screen content for watched keywords.
 
+        Uses Screenpipe as primary source. When Florence-2 is available,
+        enhances detections with structured OCR for richer context.
+
         Returns:
             List of content_detected events
         """
@@ -314,16 +335,27 @@ class ScreenMonitor(BaseMonitor):
                     # Only trigger if recent (within last poll interval)
                     timestamp = result.get("timestamp")
                     if timestamp:
-                        # Check if this is a new detection
+                        event_data = {
+                            "keyword": keyword,
+                            "app_name": result.get("app_name"),
+                            "window_name": result.get("window_name"),
+                            "text_preview": result.get("text", "")[:200],
+                        }
+
+                        # Enhance with Florence-2 OCR if available
+                        if self._vision_tool:
+                            screenshot = result.get("screenshot_path")
+                            if screenshot:
+                                f2_result = self._vision_tool._analyze_with_florence2(
+                                    screenshot, "<OCR_WITH_REGION>"
+                                )
+                                if f2_result and f2_result.get("success"):
+                                    event_data["florence2_ocr"] = f2_result["result"]
+
                         events.append(self.create_event(
                             "content_detected",
-                            {
-                                "keyword": keyword,
-                                "app_name": result.get("app_name"),
-                                "window_name": result.get("window_name"),
-                                "text_preview": result.get("text", "")[:200]
-                            },
-                            priority=EventPriority.LOW
+                            event_data,
+                            priority=EventPriority.LOW,
                         ))
         except Exception as e:
             logger.debug(f"[ScreenMonitor] Content check failed: {e}")
@@ -399,6 +431,7 @@ class ScreenMonitor(BaseMonitor):
 
         Rate-limited to once per 15 seconds to avoid spam.
         Only fires if a new error is detected (not the same as last time).
+        When Florence-2 is available, uses it for more accurate OCR of error text.
         """
         now = time.time()
         if now - self._last_error_check < 15:
@@ -413,6 +446,19 @@ class ScreenMonitor(BaseMonitor):
             if ctx.get("has_errors"):
                 # Create a hash of the error text to deduplicate
                 error_text = ctx.get("recent_text", "")[:200]
+
+                # Enhance error text with Florence-2 OCR if available
+                if self._vision_tool:
+                    screenshot = ctx.get("screenshot_path")
+                    if screenshot:
+                        f2_result = self._vision_tool._analyze_with_florence2(
+                            screenshot, "<OCR>"
+                        )
+                        if f2_result and f2_result.get("success"):
+                            f2_text = f2_result["result"]
+                            if isinstance(f2_text, str) and len(f2_text) > len(error_text):
+                                error_text = f2_text[:200]
+
                 error_hash = str(hash(error_text))
                 if error_hash == self._last_error_hash:
                     return None  # Same error, don't re-fire

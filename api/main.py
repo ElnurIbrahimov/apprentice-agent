@@ -92,11 +92,47 @@ async def lifespan(app: FastAPI):
             )
             await sys_monitor.start()
 
-            # Store ref for shutdown
+            # Start ScreenMonitor for app/window tracking + Screenpipe OCR
+            screen_monitor = None
+            try:
+                from apprentice_agent.proactive.monitors.screen_monitor import ScreenMonitor
+                screen_monitor = ScreenMonitor(
+                    event_bus=daemon.event_bus,
+                    poll_interval=3.0,
+                )
+                await screen_monitor.start()
+                logger.info("[API] ScreenMonitor started")
+            except Exception as e:
+                logger.warning(f"[API] ScreenMonitor failed to start: {e}")
+
+            # Start CalendarMonitor for meeting/event awareness
+            calendar_monitor = None
+            try:
+                from apprentice_agent.proactive.monitors.calendar_monitor import get_calendar_monitor
+                calendar_monitor = get_calendar_monitor(event_bus=daemon.event_bus)
+                await calendar_monitor.start()
+                logger.info("[API] CalendarMonitor started")
+            except Exception as e:
+                logger.warning(f"[API] CalendarMonitor failed to start: {e}")
+
+            # Start WorkflowDetector for interruption timing
+            workflow_detector = None
+            try:
+                from apprentice_agent.proactive.monitors.workflow_detector import get_workflow_detector
+                workflow_detector = get_workflow_detector(event_bus=daemon.event_bus)
+                await workflow_detector.start()
+                logger.info("[API] WorkflowDetector started")
+            except Exception as e:
+                logger.warning(f"[API] WorkflowDetector failed to start: {e}")
+
+            # Store refs for shutdown
             app.state.proactive_daemon = daemon
             app.state.system_monitor = sys_monitor
+            app.state.screen_monitor = screen_monitor
+            app.state.calendar_monitor = calendar_monitor
+            app.state.workflow_detector = workflow_detector
 
-            logger.info("[API] Proactive system started (Gateway Daemon + SystemMonitor)")
+            logger.info("[API] Proactive system started (Gateway Daemon + SystemMonitor + ScreenMonitor + CalendarMonitor + WorkflowDetector)")
             logger.info("[API] SQLite persistence active for proactive subsystem")
         except Exception as e:
             logger.warning(f"[API] Proactive system failed to start: {e}")
@@ -137,6 +173,12 @@ async def lifespan(app: FastAPI):
             await app.state.proactive_daemon.stop()
         if hasattr(app.state, 'system_monitor') and app.state.system_monitor:
             await app.state.system_monitor.stop()
+        if hasattr(app.state, 'screen_monitor') and app.state.screen_monitor:
+            await app.state.screen_monitor.stop()
+        if hasattr(app.state, 'calendar_monitor') and app.state.calendar_monitor:
+            await app.state.calendar_monitor.stop()
+        if hasattr(app.state, 'workflow_detector') and app.state.workflow_detector:
+            await app.state.workflow_detector.stop()
         logger.info("[API] Proactive system stopped")
     except Exception as e:
         logger.warning(f"[API] Proactive shutdown error: {e}")

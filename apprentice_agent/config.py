@@ -27,8 +27,10 @@ VERIFIED_LOCAL_MODELS = {
     "llama3:8b", "llama3:70b", "llama3.2", "llama3.2:3b",
     "qwen2:1.5b", "qwen2:7b", "qwen2.5:7b", "qwen2.5:14b",
     "qwen2.5-coder:7b", "qwen2.5-coder:14b",
+    "qwen2.5-vl:7b",
     "deepseek-coder:6.7b", "deepseek-coder:33b",
     "mistral", "mistral:7b", "mixtral",
+    "minicpm-v",
     "llava", "llava:7b", "llava:13b",
     "phi3", "phi3:mini",
     "codellama", "codellama:7b",
@@ -289,3 +291,18 @@ class Config:
     GPU_VRAM_GB: int = 8  # RTX 4060
     SESAME_VRAM_GB: float = 4.5
     PERSONAPLEX_VRAM_GB: float = 8.0
+
+    # Florence-2 Vision (HuggingFace transformers, not Ollama)
+    FLORENCE2_MODEL: str = "microsoft/Florence-2-base"
+    FLORENCE2_ENABLED: bool = os.getenv("FLORENCE2_ENABLED", "true").lower() == "true"
+    VISION_VRAM_BUDGET_GB: float = float(os.getenv("VISION_VRAM_BUDGET_GB", "2.0"))
+
+    # Estimated VRAM usage per vision model (GB)
+    VISION_MODEL_VRAM = {
+        "florence-2-base": 0.5,
+        "qwen2.5-vl:7b": 5.0,
+        "minicpm-v": 4.0,
+        "llava": 4.5,
+        "llava:7b": 4.5,
+        "llava:13b": 8.0,
+    }
