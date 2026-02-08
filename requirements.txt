@@ -48,6 +48,9 @@ pyyaml>=6.0
 mesa>=3.0.0
 # dowhy>=0.10.0  # Optional: for causal inference
 
+# Active Inference (Full Free Energy Minimization)
+inferactively-pymdp>=0.0.7  # Optional: for full Active Inference, falls back to heuristic if unavailable
+
 # Messaging (Telegram & WhatsApp)
 python-telegram-bot>=20.0
 websockets>=12.0

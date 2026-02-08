@@ -9,6 +9,7 @@ Based on Karl Friston's Active Inference framework:
 Uses pymdp when available, falls back to simplified implementation.
 """
 
+import copy
 import logging
 import math
 import numpy as np
@@ -575,15 +576,70 @@ class ActiveInferenceEngine:
         D[2] = np.array([0.1, 0.7, 0.2])     # Probably neutral
         D[3] = np.array([0.5, 0.35, 0.15])   # Probably stable
 
+        # Initialize Dirichlet prior for A-matrix learning (pseudo-counts)
+        pA = pymdp_utils.obj_array(n_modalities)
+        for m in range(n_modalities):
+            pA[m] = A[m] * 10.0  # 10x scale = moderate confidence prior
+
         # Create pymdp agent - only factor 0 is controllable
         self._pymdp_agent = PyMDPAgent(
             A=A, B=B, C=C, D=D,
+            pA=pA,
             control_fac_idx=[0],
             policy_len=1,
+            lr_pA=1.0,
         )
+
+        # Store base C-vector for drift-free preference updates
+        self._base_C = copy.deepcopy(C)
 
         # Track last observations for pymdp
         self._last_obs = None
+
+        # Count learning steps for persistence
+        self._learning_steps = 0
+
+    def _sync_pymdp_beliefs_to_simple(self) -> None:
+        """Sync pymdp posterior beliefs back into the simplified BeliefState.
+
+        Reads self._pymdp_agent.qs (list of 4 arrays, shape (3,) each) and maps
+        each factor's categorical distribution to a continuous 0-1 value via
+        expected value: E = dot(qs[factor], [0.0, 0.5, 1.0]).
+        """
+        try:
+            qs = self._pymdp_agent.qs
+            if qs is None:
+                return
+
+            levels = np.array([0.0, 0.5, 1.0])
+
+            # Factor 0: user (idle/shallow/focused) → user_busy, user_receptive
+            user_engagement = float(np.dot(qs[0], levels))
+            self._simple_engine.beliefs.user_busy = user_engagement
+            # Receptive is inverse-weighted: idle users are more receptive
+            receptive_weights = np.array([1.0, 0.5, 0.0])
+            self._simple_engine.beliefs.user_receptive = float(np.dot(qs[0], receptive_weights))
+
+            # Factor 1: task (none/pending/urgent) → task_urgent
+            self._simple_engine.beliefs.task_urgent = float(np.dot(qs[1], levels))
+
+            # Factor 3: context (stable/shifting/chaotic) → context_stable (inverse)
+            context_chaos = float(np.dot(qs[3], levels))
+            self._simple_engine.beliefs.context_stable = 1.0 - context_chaos
+
+            # Uncertainty: max entropy across factors
+            max_entropy = 0.0
+            max_possible = np.log(3.0)  # 3 states per factor
+            for f in range(len(qs)):
+                q = qs[f]
+                q_safe = np.clip(q, 1e-10, 1.0)
+                entropy = -float(np.sum(q_safe * np.log(q_safe)))
+                normalized = entropy / max_possible if max_possible > 0 else 0.0
+                max_entropy = max(max_entropy, normalized)
+            self._simple_engine.beliefs.uncertainty = max_entropy
+
+        except Exception as e:
+            logger.debug(f"[ActiveInference] Belief sync error: {e}")
 
     def _discretize_observations(self, observations: Dict[str, float]) -> List[int]:
         """Convert continuous observations to discrete indices for pymdp.
@@ -626,10 +682,12 @@ class ActiveInferenceEngine:
                 self._last_obs = obs
                 # pymdp infer_states
                 self._pymdp_agent.infer_states(obs)
+                # Sync pymdp posteriors back to simplified beliefs
+                self._sync_pymdp_beliefs_to_simple()
             except Exception as e:
                 logger.debug(f"[ActiveInference] pymdp belief update error: {e}")
 
-        return simple_beliefs
+        return self._simple_engine.beliefs
 
     def select_action(self) -> ProactiveDecision:
         """Select best proactive action."""
@@ -670,6 +728,9 @@ class ActiveInferenceEngine:
                     self._simple_engine.last_action_time = now
                     self._simple_engine._last_action_times[action] = now
 
+                # Advance pymdp time step (enables learning)
+                self._pymdp_agent.step_time()
+
                 return ProactiveDecision(
                     action=action,
                     confidence=confidence,
@@ -688,11 +749,48 @@ class ActiveInferenceEngine:
 
     def should_act_proactively(self) -> Tuple[bool, str]:
         """Determine if proactive action is warranted."""
+        if self.use_pymdp and self._last_obs is not None:
+            decision = self.select_action()
+            should_act = (
+                decision.action != ProactiveAction.WAIT
+                and decision.confidence > 0.4
+            )
+            return should_act, decision.reasoning
         return self._simple_engine.should_act_proactively()
+
+    def record_outcome(self, observations: Dict[str, float]) -> None:
+        """Record outcome observation for A-matrix learning.
+
+        After taking a non-WAIT action, feed the resulting observation so
+        pymdp can update its likelihood model P(observation|state).
+
+        Args:
+            observations: Current observation dict (same format as update_beliefs).
+        """
+        if not self.use_pymdp:
+            return
+
+        try:
+            obs = self._discretize_observations(observations)
+            if hasattr(self._pymdp_agent, 'update_A'):
+                self._pymdp_agent.update_A(obs)
+                self._learning_steps += 1
+                logger.debug(f"[ActiveInference] A-matrix updated (step {self._learning_steps})")
+        except Exception as e:
+            logger.debug(f"[ActiveInference] record_outcome error: {e}")
 
     def drift_beliefs_toward_idle(self, drift_rate: float = 0.02) -> None:
         """Drift beliefs toward idle/receptive when no events arrive."""
         self._simple_engine.drift_beliefs_toward_idle(drift_rate)
+
+        if self.use_pymdp:
+            try:
+                # Feed idle observations: inactivity, no_tasks, calm, same_app
+                idle_obs = [0, 0, 1, 0]
+                self._pymdp_agent.infer_states(idle_obs)
+                self._sync_pymdp_beliefs_to_simple()
+            except Exception as e:
+                logger.debug(f"[ActiveInference] pymdp idle drift error: {e}")
 
     def get_beliefs(self) -> BeliefState:
         """Get current belief state."""
@@ -725,26 +823,69 @@ class ActiveInferenceEngine:
             return
 
         try:
+            # Start from base C to avoid drift from repeated calls
+            fresh_C = copy.deepcopy(self._base_C)
+
             # Modify C vector based on intrinsic drives
             if "curiosity" in preferences:
                 # Curiosity: prefer context shifts (exploration)
-                self._pymdp_agent.C[3][2] += preferences["curiosity"] * 0.3
+                fresh_C[3][2] += preferences["curiosity"] * 0.3
 
             if "social" in preferences:
                 # Social drive: prefer user engagement
-                self._pymdp_agent.C[0][1] += preferences["social"] * 0.2
-                self._pymdp_agent.C[0][2] += preferences["social"] * 0.3
+                fresh_C[0][1] += preferences["social"] * 0.2
+                fresh_C[0][2] += preferences["social"] * 0.3
 
             if "competence" in preferences:
                 # Competence: prefer task resolution
-                self._pymdp_agent.C[1][0] += preferences["competence"] * 0.3
+                fresh_C[1][0] += preferences["competence"] * 0.3
 
             if "coherence" in preferences:
                 # Coherence: prefer stable context
-                self._pymdp_agent.C[3][0] += preferences["coherence"] * 0.2
+                fresh_C[3][0] += preferences["coherence"] * 0.2
+
+            # Overwrite (not accumulate)
+            self._pymdp_agent.C = fresh_C
 
         except Exception as e:
             logger.debug(f"[ActiveInference] Failed to set preferences: {e}")
+
+    def get_pymdp_state(self) -> Optional[dict]:
+        """Serialize learned pymdp state for persistence.
+
+        Returns:
+            Dict with learned pA matrices and step count, or None if pymdp inactive.
+        """
+        if not self.use_pymdp:
+            return None
+
+        try:
+            state = {"learning_steps": self._learning_steps}
+            if hasattr(self._pymdp_agent, 'pA') and self._pymdp_agent.pA is not None:
+                state["pA"] = [arr.tolist() for arr in self._pymdp_agent.pA]
+            return state
+        except Exception as e:
+            logger.debug(f"[ActiveInference] get_pymdp_state error: {e}")
+            return None
+
+    def restore_pymdp_state(self, state: dict) -> None:
+        """Restore learned pymdp state from persistence.
+
+        Args:
+            state: Dict with 'pA' (list of nested lists) and 'learning_steps'.
+        """
+        if not self.use_pymdp or not state:
+            return
+
+        try:
+            if "pA" in state and hasattr(self._pymdp_agent, 'pA') and self._pymdp_agent.pA is not None:
+                for i, arr_data in enumerate(state["pA"]):
+                    if i < len(self._pymdp_agent.pA):
+                        self._pymdp_agent.pA[i] = np.array(arr_data)
+            self._learning_steps = state.get("learning_steps", 0)
+            logger.info(f"[ActiveInference] Restored pymdp state ({self._learning_steps} learning steps)")
+        except Exception as e:
+            logger.debug(f"[ActiveInference] restore_pymdp_state error: {e}")
 
 
 if __name__ == "__main__":
@@ -752,7 +893,7 @@ if __name__ == "__main__":
     print("Active Inference Engine Test")
     print("=" * 60)
 
-    engine = ActiveInferenceEngine(use_pymdp=False)
+    engine = ActiveInferenceEngine(use_pymdp=True)
 
     # Simulate different scenarios
     scenarios = [

@@ -125,6 +125,13 @@ class ProactivePersistence:
                     created_at REAL
                 )
             """)
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS pymdp_state (
+                    id INTEGER PRIMARY KEY,
+                    state_json TEXT,
+                    updated_at TEXT
+                )
+            """)
             c.commit()
 
     # ── Beliefs ──────────────────────────────────────────────────────
@@ -428,6 +435,36 @@ class ProactivePersistence:
         except Exception as e:
             logger.warning(f"[Persistence] get_recent_events error: {e}")
             return []
+
+    # ── pymdp state ───────────────────────────────────────────────────
+
+    def save_pymdp_state(self, state: dict) -> None:
+        """Save pymdp learned state (single-row upsert, id=1)."""
+        try:
+            state_json = json.dumps(state)
+            with self._lock:
+                self._conn.execute(
+                    """INSERT OR REPLACE INTO pymdp_state
+                       (id, state_json, updated_at)
+                       VALUES (1, ?, ?)""",
+                    (state_json, datetime.now().isoformat()),
+                )
+                self._conn.commit()
+        except Exception as e:
+            logger.warning(f"[Persistence] save_pymdp_state error: {e}")
+
+    def load_pymdp_state(self) -> Optional[dict]:
+        """Load pymdp learned state. Returns dict or None."""
+        try:
+            with self._lock:
+                row = self._conn.execute(
+                    "SELECT state_json FROM pymdp_state WHERE id=1"
+                ).fetchone()
+            if row and row[0]:
+                return json.loads(row[0])
+        except Exception as e:
+            logger.warning(f"[Persistence] load_pymdp_state error: {e}")
+        return None
 
     # ── Lifecycle ────────────────────────────────────────────────────
 

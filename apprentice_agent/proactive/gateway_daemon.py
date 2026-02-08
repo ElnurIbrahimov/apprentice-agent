@@ -99,7 +99,7 @@ class GatewayDaemon:
         use_redis: bool = False,
         redis_url: str = "redis://localhost:6379",
         salience_threshold: float = 0.3,
-        use_pymdp: bool = False
+        use_pymdp: bool = True
     ):
         """
         Initialize the Gateway Daemon.
@@ -127,6 +127,9 @@ class GatewayDaemon:
         # Background task
         self._task: Optional[asyncio.Task] = None
         self._decision_interval = 5.0  # Seconds between decision cycles
+
+        # Track last non-WAIT decision for outcome feedback
+        self._last_non_wait_decision: Optional[ProactiveDecision] = None
 
         # Phase 6E: Proactive message rate limiting
         self._last_proactive_message_time: float = 0.0
@@ -192,6 +195,12 @@ class GatewayDaemon:
                     f"[GatewayDaemon] Restored {len(history)} action history entries"
                 )
 
+            # Restore pymdp learned state
+            pymdp_state = persistence.load_pymdp_state()
+            if pymdp_state:
+                self.inference_engine.restore_pymdp_state(pymdp_state)
+                logger.info("[GatewayDaemon] Restored pymdp learned state")
+
         except Exception as e:
             logger.debug(f"[GatewayDaemon] Persisted state load skipped: {e}")
 
@@ -214,6 +223,11 @@ class GatewayDaemon:
 
             # Save beliefs
             persistence.save_beliefs(self.inference_engine.get_beliefs())
+
+            # Save pymdp learned state
+            pymdp_state = self.inference_engine.get_pymdp_state()
+            if pymdp_state:
+                persistence.save_pymdp_state(pymdp_state)
 
             logger.debug("[GatewayDaemon] State persisted")
         except Exception as e:
@@ -389,6 +403,35 @@ class GatewayDaemon:
         if event.priority == EventPriority.CRITICAL:
             self._handle_urgent_event(filtered)
 
+    def _build_current_observations(self) -> Dict[str, float]:
+        """Build observation dict from current user context and beliefs.
+
+        Used for A-matrix learning: after a non-WAIT action, feed the
+        resulting observations so pymdp can learn P(observation|state).
+        """
+        observations: Dict[str, float] = {}
+
+        # User activity from context
+        observations["user_activity"] = self.user_context.activity_level
+
+        # Interaction recency
+        if self.user_context.last_interaction:
+            seconds_since = (datetime.now() - self.user_context.last_interaction).total_seconds()
+            recency = max(0.0, 1.0 - (seconds_since / 300))
+            observations["interaction_recency"] = recency
+
+        # Task urgency from current beliefs
+        beliefs = self.inference_engine.get_beliefs()
+        observations["urgent_events"] = beliefs.task_urgent
+
+        # Context stability
+        observations["context_changes"] = 1.0 - beliefs.context_stable
+
+        # Default confidence
+        observations["observation_confidence"] = 0.5
+
+        return observations
+
     def _event_to_observations(
         self,
         event: Event,
@@ -513,9 +556,22 @@ class GatewayDaemon:
                 # Slow drift: 0.005 per cycle (5s) = ~0.06/min, takes several minutes
                 self.inference_engine.drift_beliefs_toward_idle(drift_rate=0.005)
 
+                # A-matrix learning: feed outcome from last non-WAIT action
+                if self._last_non_wait_decision is not None:
+                    try:
+                        outcome_obs = self._build_current_observations()
+                        self.inference_engine.record_outcome(outcome_obs)
+                    except Exception as e:
+                        logger.debug(f"[GatewayDaemon] Outcome feedback error: {e}")
+                    self._last_non_wait_decision = None
+
                 # Make proactive decision
                 decision = self.inference_engine.select_action()
                 self._stats["decisions_made"] += 1
+
+                # Track non-WAIT decisions for outcome feedback next cycle
+                if decision.action != ProactiveAction.WAIT:
+                    self._last_non_wait_decision = decision
 
                 # Persist decisions and beliefs
                 try:
