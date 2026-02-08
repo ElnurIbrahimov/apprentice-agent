@@ -4,7 +4,7 @@ import asyncio
 import logging
 from typing import Optional, List, Dict, Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -572,32 +572,48 @@ def _get_fluxmind_sync() -> dict:
 # VOICE / TTS
 # ============================================================================
 
-class VoiceResponse(BaseModel):
-    available: bool = False
-    engine: str = "none"
-    sesame_loaded: bool = False
-
-
-@router.get("/voice", response_model=VoiceResponse)
+@router.get("/voice")
 async def get_voice_status():
-    """Get voice/TTS status."""
+    """Get voice/TTS status from VoicePresenceService."""
     try:
-        # TTS is typically a separate singleton, check if agent has TTS
-        agent = _get_agent_service().agent
-
-        # Check for PersonaPlex tool
-        if "personaplex" in agent.tools:
-            pp = agent.tools["personaplex"]
-            return {
-                "available": True,
-                "engine": "personaplex",
-                "sesame_loaded": pp.is_loaded() if hasattr(pp, 'is_loaded') else False
-            }
-
-        return {"available": False, "engine": "none", "sesame_loaded": False}
+        from apprentice_agent.services.voice_presence import get_voice_presence
+        vps = get_voice_presence()
+        return vps.get_status()
     except Exception as e:
         logger.error(f"[Voice] Error: {e}")
-        return VoiceResponse()
+        return {"available": False, "engine": "none", "enabled": False, "error": str(e)}
+
+
+class SynthesizeRequest(BaseModel):
+    text: str
+    emotion: Optional[str] = None
+
+
+@router.post("/voice/synthesize")
+async def synthesize_speech(req: SynthesizeRequest):
+    """Synthesize speech and return WAV bytes."""
+    from apprentice_agent.services.voice_presence import get_voice_presence
+    vps = get_voice_presence()
+    if not vps._enabled:
+        raise HTTPException(status_code=503, detail="Voice not enabled")
+
+    wav_bytes = await asyncio.get_event_loop().run_in_executor(
+        None, vps.synthesize_wav, req.text, req.emotion
+    )
+    return Response(content=wav_bytes, media_type="audio/wav")
+
+
+class VoiceToggleRequest(BaseModel):
+    enabled: bool
+
+
+@router.post("/voice/toggle")
+async def toggle_voice(req: VoiceToggleRequest):
+    """Enable or disable voice output."""
+    from apprentice_agent.services.voice_presence import get_voice_presence
+    vps = get_voice_presence()
+    vps.set_enabled(req.enabled)
+    return {"enabled": vps._enabled}
 
 
 # ============================================================================

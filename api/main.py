@@ -137,6 +137,17 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"[API] Proactive system failed to start: {e}")
 
+        # Start Voice Presence Service
+        try:
+            from apprentice_agent.services.voice_presence import get_voice_presence
+            voice_svc = get_voice_presence()
+            voice_svc.start()
+            app.state.voice_presence = voice_svc
+            logger.info("[API] VoicePresenceService started (pyttsx3)")
+        except Exception as e:
+            logger.warning(f"[API] VoicePresenceService failed to start: {e}")
+            app.state.voice_presence = None
+
         # Start Global Workspace Engine (consciousness)
         try:
             from apprentice_agent.consciousness.global_workspace import get_global_workspace
@@ -182,6 +193,14 @@ async def lifespan(app: FastAPI):
         logger.info("[API] Proactive system stopped")
     except Exception as e:
         logger.warning(f"[API] Proactive shutdown error: {e}")
+
+    # Stop Voice Presence Service
+    try:
+        if hasattr(app.state, 'voice_presence') and app.state.voice_presence:
+            app.state.voice_presence.stop()
+            logger.info("[API] VoicePresenceService stopped")
+    except Exception as e:
+        logger.warning(f"[API] Voice shutdown error: {e}")
 
     # Stop Global Workspace Engine
     try:

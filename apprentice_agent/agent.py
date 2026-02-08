@@ -5730,17 +5730,10 @@ Voice: {soul.voice_style[:100]}..."""
     def _speak(self, text: str, emotion: Optional[str] = None):
         """Speak text using TTS with optional emotional adaptation."""
         try:
-            from .tools.voice import VoiceTool
-            voice = VoiceTool()
-
-            # Adapt voice parameters based on emotion if available
-            if emotion:
-                from .tools.evoemo_prompts import get_voice_params
-                params = get_voice_params(emotion)
-                # Voice tools may support rate/pitch adjustment
-                voice.speak(text, rate=params.get("rate", 1.0))
-            else:
-                voice.speak(text)
+            from .services.voice_presence import get_voice_presence
+            vps = get_voice_presence()
+            if vps._enabled:
+                vps.speak(text, emotion=emotion, block=False)
         except Exception as e:
             print(f"TTS error: {e}")
 

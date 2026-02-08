@@ -1139,6 +1139,21 @@ class GatewayDaemon:
         logger.info(f"[GatewayDaemon] Queued: {message.action.value} - "
                    f"{message.content[:80]}...")
 
+        # Speak proactive message aloud via VoicePresenceService
+        try:
+            from apprentice_agent.services.voice_presence import get_voice_presence
+            vps = get_voice_presence()
+            if vps._enabled:
+                emotion = None
+                try:
+                    from apprentice_agent.emotion.alma_engine import alma_engine
+                    emotion = alma_engine.get_current_emotion()
+                except Exception:
+                    pass
+                vps.speak(message.content, emotion=emotion, block=False)
+        except Exception as e:
+            logger.debug(f"[GatewayDaemon] Voice delivery error: {e}")
+
     async def publish_event(self, event: Event, channel: Optional[str] = None) -> bool:
         """
         Publish an event to the event bus.

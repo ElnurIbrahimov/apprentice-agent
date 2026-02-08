@@ -92,6 +92,7 @@ class WebSocketMessage(BaseModel):
     response: Optional[str] = None
     mood: Optional[MoodState] = None
     error: Optional[str] = None
+    audio_url: Optional[str] = None  # URL to fetch WAV audio for this response
 
 
 class ClearHistoryResponse(BaseModel):

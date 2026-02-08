@@ -551,10 +551,20 @@ async def websocket_chat(websocket: WebSocket):
                         except Exception:
                             pass
 
+                        # Build audio_url for frontend
+                        audio_url = None
+                        try:
+                            from apprentice_agent.services.voice_presence import get_voice_presence
+                            if get_voice_presence()._enabled:
+                                audio_url = "/api/voice/synthesize"
+                        except Exception:
+                            pass
+
                         await websocket.send_json({
                             "type": "done",
                             "response": full_response,
-                            "mood": mood_dict
+                            "mood": mood_dict,
+                            "audio_url": audio_url,
                         })
                     elif item.get("type") == "error":
                         await websocket.send_json({
