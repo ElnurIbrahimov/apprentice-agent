@@ -40,7 +40,7 @@ def _check_florence2_available() -> bool:
 
 def _load_florence2():
     """Lazy-load Florence-2 model (singleton). ~0.5GB VRAM."""
-    global _florence2_model, _florence2_processor
+    global _florence2_model, _florence2_processor, _florence2_available
     if _florence2_model is not None:
         return _florence2_model, _florence2_processor
 
@@ -61,18 +61,25 @@ def _load_florence2():
     model_name = Config.FLORENCE2_MODEL
     logger.info("[Vision] Loading Florence-2 from %s...", model_name)
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype = torch.float16 if device == "cuda" else torch.float32
+    try:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        dtype = torch.float16 if device == "cuda" else torch.float32
 
-    _florence2_model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        torch_dtype=dtype,
-        trust_remote_code=True,
-    ).to(device)
-    _florence2_processor = AutoProcessor.from_pretrained(
-        model_name,
-        trust_remote_code=True,
-    )
+        _florence2_model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            torch_dtype=dtype,
+            trust_remote_code=True,
+        ).to(device)
+        _florence2_processor = AutoProcessor.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+        )
+    except Exception as e:
+        # Mark as permanently unavailable so we don't retry
+        _florence2_available = False
+        _florence2_model = None
+        _florence2_processor = None
+        raise RuntimeError(f"Florence-2 model loading failed: {e}") from e
 
     logger.info("[Vision] Florence-2 loaded on %s", device)
     return _florence2_model, _florence2_processor
@@ -255,7 +262,7 @@ class VisionTool:
 
         try:
             model, processor = _load_florence2()
-        except RuntimeError as e:
+        except Exception as e:
             logger.debug("[Vision] Florence-2 not available: %s", e)
             return None
 
