@@ -1,7 +1,7 @@
 # AURA Codebase Audit vs Research Goals
 
-**Date:** 2026-02-08
-**Overall Score: ~88% of research goals achieved** (29 fully done, 6 partially done, 3 missing)
+**Date:** 2026-02-09
+**Overall Score: ~91% of research goals achieved** (30 fully done, 6 partially done, 2 missing)
 
 ---
 
@@ -13,8 +13,9 @@
 | Consciousness & Cognition | 86% | 10 | 2 | 1 |
 | Memory Architecture | 100% | 5 | 0 | 0 |
 | Screen/Vision | 75% | 3 | 0 | 1 |
+| Voice & Presence | 100% | 1 | 0 | 0 |
 | Ambient Presence & UI | 83% | 5 | 3 | 0 |
-| **TOTAL** | **~88%** | **29** | **6** | **3** |
+| **TOTAL** | **~91%** | **30** | **6** | **2** |
 
 ---
 
@@ -91,20 +92,16 @@
 | - | **ContextHeatmap + MemoryRecallIndicator Wiring** | `ba9abfe` - Wire real data to both UI components across REST + all memory systems | DONE |
 | 3 | **Global Workspace Theory** | `3530ed0` - Implement GWT for unified conscious attention (8 codelets, cognitive cycles, attention schema, EventBus broadcast) | DONE |
 | 4 | **Self-Improvement Loop** | `e537f14` - Implement self-improvement loop: outcome recording from brain.py, enhanced strategy execution (LLM practice, param tuning, pattern extraction), background scheduler, quality evaluator | DONE |
+| 8 | **Voice Presence** | `c1fa7c7` - Add VoicePresenceService singleton: dedicated pyttsx3 worker thread (COM-safe), emotion-adaptive voice params from VOICE_PARAMS, WAV synthesis REST endpoint, voice toggle, wired to agent._speak() + GatewayDaemon proactive messages, audio_url in WebSocket done messages | DONE |
 
 ---
 
-## Missing (2 items) - THE ROADMAP
+## Missing (1 item) - THE ROADMAP
 
 ### Priority 2: Medium Impact, Medium Complexity
 | # | Item | Description | Files to Create/Modify | Estimated Effort |
 |---|------|-------------|----------------------|-----------------|
 | 5 | **Florence-2/Qwen2.5-VL/OmniParser** | Advanced vision models for UI understanding, multilingual OCR, structured DOM extraction. Currently only LLaVA. | Modify `vision.py`, add model backends | 2-3 days |
-
-### Priority 3: Nice to Have
-| # | Item | Description | Files to Create/Modify | Estimated Effort |
-|---|------|-------------|----------------------|-----------------|
-| 8 | **Voice Presence** | Breathing sounds, natural pauses, prosodic variation. Sesame CSM-style emotional voice. | `apprentice_agent/tools/voice_presence.py`, new UI audio components | 3-5 days |
 
 ---
 
@@ -136,7 +133,7 @@ Week 2:  Sleep-Time Compute Scheduler (#6) + Neural Oscillations (#7) ✅ DONE
 Week 3:  Global Workspace Theory (#3)                                 ✅ DONE
 Week 4:  Self-Improvement Loop (#4)                                 ✅ DONE
 Week 5:  Advanced Vision Models (#5)
-Week 6:  Voice Presence (#8)
+Week 6:  Voice Presence (#8)                                   ✅ DONE
 ```
 
-**Target: 100% research goal achievement in ~6 weeks (2 remaining)**
+**Target: 100% research goal achievement — 1 remaining (Advanced Vision Models)**
