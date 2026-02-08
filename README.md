@@ -1287,6 +1287,11 @@ Insights generated: 2
 Patterns consolidated: 3
 ```
 
+**Emotional Integration:**
+
+- **Post-consolidation satisfaction**: After completing all sleep phases, triggers a satisfaction emotion via ALMA proportional to items processed (memories replayed + patterns found + insights generated)
+- Intensity scales from 0.2 (minimal consolidation) to 0.6 (rich session)
+
 **Safety Features:**
 
 - **Interruptible**: User activity or commands wake the system
@@ -1317,6 +1322,7 @@ The Aura GUI includes a NeuroDream panel with:
 |--------|-------------|
 | ChromaDB | Replays and consolidates vector memories |
 | Knowledge Graph | Strengthens edges, finds new paths, abstracts patterns |
+| ALMA Emotion Engine | Post-consolidation satisfaction emotion, mood-congruent memory recall |
 | EvoEmo | Emotional tagging of memories influences consolidation priority |
 | Inner Monologue | Dreams appear as special "dream" thought type |
 | Metacognitive Guardian | Learns from sleep-discovered patterns |
@@ -2009,11 +2015,34 @@ ALMA (Affect-Level Mood Architecture) replaces the basic emotion system with con
 - **Emotional response modulation** — verbosity, formality, and exploration style adapt to emotional state
 - **Post-sleep satisfaction** — NeuroDream consolidation triggers proportional satisfaction emotion
 
+**Neuromodulators:**
+
+| Neuromodulator | Correlates With | Influences |
+|----------------|----------------|------------|
+| Dopamine | Pleasure + arousal | Temperature (creativity), memory importance (±20%) |
+| Serotonin | Inverse arousal | Timeout (patience), recency weight (0.15–0.25), response length |
+| Norepinephrine | Arousal + dominance | Top-p (focus vs exploration) |
+| Oxytocin | Pleasure − dominance | Warmth, tone selection |
+| Acetylcholine | Arousal + dominance | Repeat penalty (attention precision) |
+
+**Emotional Dynamics Architecture:**
+
+```
+Circadian Rhythm ──┐
+Boredom/Curiosity ─┤
+Success Streak ────┤──→ PAD Mood ──→ Neuromodulators ──┬──→ LLM Parameters
+Event Bus Activity ┘                                    ├──→ Memory Importance
+                                                        ├──→ Recency Weight
+                                                        ├──→ Response Style Prompts
+                                                        ├──→ Humanizer Tone Override
+                                                        └──→ Mood-Congruent Recall
+```
+
 **API Endpoints:**
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /api/emotion/status` | Current mood dimensions and state |
+| `GET /api/emotion/status` | Current mood dimensions, neuromodulators, and state |
 | `GET /api/emotion/history` | Mood history over time |
 | `POST /api/emotion/personality` | Update personality traits |
 
@@ -2649,7 +2678,7 @@ apprentice-agent/
     │   ├── memory_system.py         # ChromaDB-powered long-term memory
     │   └── unified_memory.py        # Cross-system memory retrieval
     ├── emotion/              # ALMA Emotion Engine
-    │   ├── alma_engine.py           # Affect-Level Mood Architecture (warmth, energy, engagement)
+    │   ├── alma_engine.py           # PAD mood model, 5 neuromodulators, circadian rhythm, autonomous drift
     │   └── integration.py           # Emotion-agent integration
     ├── proactive/            # ALIVE Phase 2: Proactive system
     │   ├── gateway_daemon.py        # Proactive message orchestrator (BaseException-safe)
