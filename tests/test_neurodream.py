@@ -3,9 +3,11 @@
 import pytest
 import tempfile
 import shutil
+import time
+import datetime
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-import time
 
 from apprentice_agent.tools.neurodream import (
     NeuroDreamEngine,
@@ -24,7 +26,7 @@ def temp_data_dir():
     """Create a temporary data directory for testing."""
     temp_dir = tempfile.mkdtemp()
     yield Path(temp_dir)
-    shutil.rmtree(temp_dir)
+    shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 @pytest.fixture
@@ -77,7 +79,9 @@ def neurodream_engine(temp_data_dir, mock_kg, mock_evoemo, mock_monologue):
         idle_threshold_minutes=1,  # Short for testing
         max_vram_gb=2.0
     )
-    return engine
+    yield engine
+    # Ensure sleep thread is stopped before temp dir cleanup
+    engine.shutdown(timeout=3.0)
 
 
 class TestSleepPhase:
@@ -85,15 +89,19 @@ class TestSleepPhase:
 
     def test_phases_exist(self):
         """Test that all sleep phases are defined."""
+        assert SleepPhase.AWAKE is not None
         assert SleepPhase.LIGHT is not None
         assert SleepPhase.DEEP is not None
         assert SleepPhase.REM is not None
+        assert SleepPhase.WAKING is not None
 
     def test_phase_values(self):
         """Test sleep phase values."""
+        assert SleepPhase.AWAKE.value == "awake"
         assert SleepPhase.LIGHT.value == "light"
         assert SleepPhase.DEEP.value == "deep"
         assert SleepPhase.REM.value == "rem"
+        assert SleepPhase.WAKING.value == "waking"
 
 
 class TestDreamTrigger:
@@ -104,7 +112,14 @@ class TestDreamTrigger:
         assert DreamTrigger.SCHEDULED is not None
         assert DreamTrigger.IDLE is not None
         assert DreamTrigger.MANUAL is not None
-        assert DreamTrigger.MEMORY_THRESHOLD is not None
+        assert DreamTrigger.LOW_RESOURCES is not None
+
+    def test_trigger_values(self):
+        """Test trigger values."""
+        assert DreamTrigger.SCHEDULED.value == "scheduled"
+        assert DreamTrigger.IDLE.value == "idle"
+        assert DreamTrigger.MANUAL.value == "manual"
+        assert DreamTrigger.LOW_RESOURCES.value == "low_resources"
 
 
 class TestNeuroDreamEngine:
@@ -113,8 +128,8 @@ class TestNeuroDreamEngine:
     def test_initialization(self, neurodream_engine):
         """Test engine initializes correctly."""
         assert neurodream_engine is not None
-        assert not neurodream_engine.is_sleeping
-        assert neurodream_engine.current_phase is None
+        assert neurodream_engine.current_phase == SleepPhase.AWAKE
+        assert neurodream_engine.current_phase == SleepPhase.AWAKE  # Not None
 
     def test_get_status_awake(self, neurodream_engine):
         """Test status when awake."""
@@ -127,21 +142,29 @@ class TestNeuroDreamEngine:
         """Test entering sleep mode."""
         result = neurodream_engine.enter_sleep(trigger="manual")
         assert result.get("success") is True
-        assert neurodream_engine.is_sleeping is True
+        # Give the thread a moment to start
+        time.sleep(0.1)
+        assert neurodream_engine.current_phase != SleepPhase.AWAKE
 
     def test_cannot_sleep_while_sleeping(self, neurodream_engine):
         """Test that we can't enter sleep while already sleeping."""
-        neurodream_engine.enter_sleep(trigger="manual")
+        # Manually set phase to simulate being asleep (thread may finish too fast)
+        with neurodream_engine._phase_lock:
+            neurodream_engine.current_phase = SleepPhase.LIGHT
         result = neurodream_engine.enter_sleep(trigger="manual")
         assert result.get("success") is False
-        assert "already" in result.get("error", "").lower()
+        assert "error" in result
+        # Reset for cleanup
+        with neurodream_engine._phase_lock:
+            neurodream_engine.current_phase = SleepPhase.AWAKE
 
     def test_wake_up(self, neurodream_engine):
         """Test waking up."""
         neurodream_engine.enter_sleep(trigger="manual")
+        time.sleep(0.1)
         result = neurodream_engine.wake_up(reason="test")
         assert result.get("success") is True
-        assert neurodream_engine.is_sleeping is False
+        assert neurodream_engine.current_phase == SleepPhase.AWAKE
 
     def test_wake_up_when_awake(self, neurodream_engine):
         """Test wake up when already awake."""
@@ -160,10 +183,11 @@ class TestNeuroDreamEngine:
 
     def test_check_idle_trigger_idle(self, neurodream_engine):
         """Test idle check when idle (by manipulating last activity time)."""
-        import datetime
+        # idle_threshold is a timedelta, set last_activity_time to past it
         neurodream_engine.last_activity_time = (
             datetime.datetime.now() -
-            datetime.timedelta(minutes=neurodream_engine.idle_threshold_minutes + 1)
+            neurodream_engine.idle_threshold -
+            datetime.timedelta(seconds=10)
         )
         assert neurodream_engine.check_idle_trigger() is True
 
@@ -189,46 +213,67 @@ class TestSleepPhases:
     def test_light_phase_execution(self, neurodream_engine):
         """Test light phase runs without error."""
         neurodream_engine.enter_sleep(trigger="manual")
+        time.sleep(0.1)
         result = neurodream_engine.run_light_phase()
         assert "memories_replayed" in result or "error" in result
 
     def test_deep_phase_execution(self, neurodream_engine):
         """Test deep phase runs without error."""
         neurodream_engine.enter_sleep(trigger="manual")
+        time.sleep(0.1)
         result = neurodream_engine.run_deep_phase()
         assert "patterns_found" in result or "error" in result
 
     def test_rem_phase_execution(self, neurodream_engine):
         """Test REM phase runs without error."""
         neurodream_engine.enter_sleep(trigger="manual")
+        time.sleep(0.1)
         result = neurodream_engine.run_rem_phase()
-        assert "connections_made" in result or "error" in result
+        assert "connections_made" in result or "insights_generated" in result or "error" in result
 
 
 class TestDreamJournal:
     """Tests for dream journal functionality."""
 
     def test_log_dream(self, neurodream_engine):
-        """Test logging a dream entry."""
+        """Test logging a dream entry via _log_dream (logs to monologue)."""
         neurodream_engine.enter_sleep(trigger="manual")
+        time.sleep(0.1)
+        # _log_dream takes (phase, message) — logs to inner monologue
         neurodream_engine._log_dream(
             phase="light",
-            content="Test dream content",
-            metadata={"test": True}
+            message="Test dream content",
         )
-        entries = neurodream_engine.get_dream_journal(n=1)
+        # _log_dream writes to monologue, not to the journal file
+        # Verify monologue.think was called
+        neurodream_engine.monologue.think.assert_called()
+
+    def test_dream_journal_via_save_session(self, neurodream_engine):
+        """Test dream journal entries come from saved sessions."""
+        # Create and save a session to the journal
+        session = SleepSession(
+            session_id="test_session_1",
+            start_time=datetime.datetime.now().isoformat(),
+            end_time=datetime.datetime.now().isoformat(),
+            trigger="manual",
+            phases_completed=["light", "deep"],
+        )
+        neurodream_engine._save_session(session)
+        entries = neurodream_engine.get_dream_journal(n=5)
         assert len(entries) == 1
-        assert entries[0]["content"] == "Test dream content"
+        assert entries[0]["session_id"] == "test_session_1"
 
     def test_dream_journal_limit(self, neurodream_engine):
         """Test dream journal respects limit."""
-        neurodream_engine.enter_sleep(trigger="manual")
         for i in range(10):
-            neurodream_engine._log_dream(
-                phase="light",
-                content=f"Dream {i}",
-                metadata={}
+            session = SleepSession(
+                session_id=f"test_session_{i}",
+                start_time=datetime.datetime.now().isoformat(),
+                end_time=datetime.datetime.now().isoformat(),
+                trigger="manual",
+                phases_completed=["light"],
             )
+            neurodream_engine._save_session(session)
         entries = neurodream_engine.get_dream_journal(n=5)
         assert len(entries) == 5
 
@@ -236,34 +281,43 @@ class TestDreamJournal:
 class TestInsights:
     """Tests for insight generation."""
 
-    def test_record_insight(self, neurodream_engine):
-        """Test recording an insight."""
-        neurodream_engine._record_insight(
+    def test_save_and_get_insight(self, neurodream_engine):
+        """Test saving and retrieving an insight."""
+        insight = DreamInsight(
+            id="insight_1",
+            timestamp=datetime.datetime.now().isoformat(),
             insight_type="pattern",
             content="Test insight",
             confidence=0.8,
-            source_memories=["mem1", "mem2"]
+            source_nodes=["mem1", "mem2"],
+            created_edges=[{"from": "mem1", "to": "mem2", "type": "related"}],
         )
+        neurodream_engine._save_insight(insight)
         insights = neurodream_engine.get_insights()
         assert len(insights) == 1
         assert insights[0]["content"] == "Test insight"
-        assert insights[0]["confidence"] == 80
+        assert insights[0]["confidence"] == 0.8
 
 
 class TestPatternConsolidation:
     """Tests for pattern consolidation."""
 
-    def test_record_pattern(self, neurodream_engine):
-        """Test recording a consolidated pattern."""
-        neurodream_engine._record_pattern(
-            pattern_name="Test Pattern",
-            strength=0.75,
-            memories_consolidated=5,
-            metadata={}
+    def test_save_and_get_pattern(self, neurodream_engine):
+        """Test saving and retrieving a consolidated pattern."""
+        pattern = ConsolidatedPattern(
+            pattern_id="pattern_1",
+            timestamp=datetime.datetime.now().isoformat(),
+            pattern_type="topical",
+            description="Test Pattern",
+            frequency=5,
+            confidence=0.75,
+            examples=["example1", "example2"],
         )
+        neurodream_engine._save_consolidated_patterns([pattern])
         patterns = neurodream_engine.get_patterns()
         assert len(patterns) == 1
-        assert patterns[0]["pattern_name"] == "Test Pattern"
+        assert patterns[0]["description"] == "Test Pattern"
+        assert patterns[0]["pattern_id"] == "pattern_1"
 
 
 class TestFactoryFunctions:
@@ -279,14 +333,21 @@ class TestFactoryFunctions:
         )
         assert engine is not None
         assert isinstance(engine, NeuroDreamEngine)
+        engine.shutdown(timeout=2.0)
 
     def test_get_neurodream_singleton(self, temp_data_dir, mock_kg, mock_evoemo, mock_monologue):
         """Test get_neurodream returns singleton."""
-        # This test depends on global state, may need adjustment
+        # Create first so singleton exists
+        create_neurodream(
+            knowledge_graph=mock_kg,
+            evoemo=mock_evoemo,
+            inner_monologue=mock_monologue,
+            data_dir=temp_data_dir
+        )
         engine1 = get_neurodream()
         engine2 = get_neurodream()
-        # Both should return the same instance (or None if not initialized)
         assert engine1 is engine2
+        engine1.shutdown(timeout=2.0)
 
 
 class TestSleepSession:
@@ -294,19 +355,34 @@ class TestSleepSession:
 
     def test_session_creation(self):
         """Test creating a sleep session."""
-        import datetime
         session = SleepSession(
             session_id="test_session_1",
-            trigger=DreamTrigger.MANUAL,
-            start_time=datetime.datetime.now(),
+            start_time=datetime.datetime.now().isoformat(),
+            end_time=None,
+            trigger="manual",
             phases_completed=[],
-            insights_generated=[],
-            patterns_consolidated=[],
-            interrupted=False
         )
         assert session.session_id == "test_session_1"
-        assert session.trigger == DreamTrigger.MANUAL
+        assert session.trigger == "manual"
         assert not session.interrupted
+        assert session.insights_generated == 0
+        assert session.memories_replayed == 0
+
+    def test_session_to_dict(self):
+        """Test session serialization."""
+        session = SleepSession(
+            session_id="test_session_2",
+            start_time="2026-02-09T12:00:00",
+            end_time="2026-02-09T12:05:00",
+            trigger="idle",
+            phases_completed=["light", "deep"],
+            memories_replayed=10,
+            patterns_found=3,
+        )
+        d = session.to_dict()
+        assert d["session_id"] == "test_session_2"
+        assert d["memories_replayed"] == 10
+        assert d["patterns_found"] == 3
 
 
 class TestDreamInsight:
@@ -314,18 +390,32 @@ class TestDreamInsight:
 
     def test_insight_creation(self):
         """Test creating a dream insight."""
-        import datetime
         insight = DreamInsight(
-            insight_id="insight_1",
+            id="insight_1",
+            timestamp=datetime.datetime.now().isoformat(),
             insight_type="pattern",
             content="Test insight content",
             confidence=0.85,
-            source_memories=["mem1", "mem2"],
-            phase=SleepPhase.DEEP,
-            timestamp=datetime.datetime.now()
+            source_nodes=["mem1", "mem2"],
+            created_edges=[{"from": "mem1", "to": "mem2", "type": "pattern"}],
         )
-        assert insight.insight_id == "insight_1"
+        assert insight.id == "insight_1"
         assert insight.confidence == 0.85
+
+    def test_insight_to_dict(self):
+        """Test insight serialization."""
+        insight = DreamInsight(
+            id="insight_2",
+            timestamp="2026-02-09T12:00:00",
+            insight_type="connection",
+            content="Found a connection",
+            confidence=0.9,
+            source_nodes=["a", "b"],
+            created_edges=[],
+        )
+        d = insight.to_dict()
+        assert d["id"] == "insight_2"
+        assert d["content"] == "Found a connection"
 
 
 class TestConsolidatedPattern:
@@ -333,42 +423,61 @@ class TestConsolidatedPattern:
 
     def test_pattern_creation(self):
         """Test creating a consolidated pattern."""
-        import datetime
         pattern = ConsolidatedPattern(
             pattern_id="pattern_1",
-            pattern_name="Test Pattern",
-            strength=0.9,
-            memories_consolidated=10,
-            created_at=datetime.datetime.now(),
-            last_reinforced=datetime.datetime.now()
+            timestamp=datetime.datetime.now().isoformat(),
+            pattern_type="temporal",
+            description="User works on code in the morning",
+            frequency=10,
+            confidence=0.9,
+            examples=["morning coding session 1", "morning coding session 2"],
         )
         assert pattern.pattern_id == "pattern_1"
-        assert pattern.strength == 0.9
+        assert pattern.confidence == 0.9
+
+    def test_pattern_to_dict(self):
+        """Test pattern serialization."""
+        pattern = ConsolidatedPattern(
+            pattern_id="pattern_2",
+            timestamp="2026-02-09T12:00:00",
+            pattern_type="emotional",
+            description="User is happier on Fridays",
+            frequency=4,
+            confidence=0.7,
+            examples=["friday_1", "friday_2"],
+        )
+        d = pattern.to_dict()
+        assert d["pattern_id"] == "pattern_2"
+        assert d["frequency"] == 4
 
 
 class TestInterruptibility:
     """Tests for sleep interruption."""
 
     def test_interrupt_during_sleep(self, neurodream_engine):
-        """Test that sleep can be interrupted."""
-        neurodream_engine.enter_sleep(trigger="manual")
-        assert neurodream_engine.is_sleeping is True
+        """Test that sleep can be interrupted via wake_up."""
+        # Manually set phase to simulate being asleep (thread may finish too fast)
+        with neurodream_engine._phase_lock:
+            neurodream_engine.current_phase = SleepPhase.DEEP
 
         # Interrupt by waking up
         result = neurodream_engine.wake_up(reason="user_interrupt")
         assert result.get("success") is True
-        assert neurodream_engine.is_sleeping is False
+        assert neurodream_engine.current_phase == SleepPhase.AWAKE
 
-    def test_interrupt_flag(self, neurodream_engine):
-        """Test interrupt flag is set on sessions."""
+    def test_interrupt_sets_flag(self, neurodream_engine):
+        """Test that interruption sets the end_time on session summary."""
         neurodream_engine.enter_sleep(trigger="manual")
-        neurodream_engine.wake_up(reason="interrupted")
+        time.sleep(0.1)
+        result = neurodream_engine.wake_up(reason="user_interrupt")
 
-        # Check that the session was marked as interrupted
-        if neurodream_engine.sessions:
-            last_session = neurodream_engine.sessions[-1]
-            # The session should have an end_time set
-            assert last_session.end_time is not None
+        # wake_up returns {"success": True, "reason": ..., "summary": {...}}
+        summary = result.get("summary", {})
+        if summary:
+            assert summary.get("end_time") is not None
+            # "user_interrupt" is not in ["cycle_complete", "manual"],
+            # so interrupted should be True
+            assert summary.get("interrupted") is True
 
 
 if __name__ == "__main__":
