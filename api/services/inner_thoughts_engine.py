@@ -297,7 +297,7 @@ class InnerThoughtsEngine:
                         thinking_mgr.record_real_thought(
                             thinking_type,
                             thought["content"],
-                            intensity=0.4,  # Lower intensity — background thoughts
+                            intensity=0.65,  # Background thoughts — elevated to dominate templates
                         )
                     except Exception:
                         pass

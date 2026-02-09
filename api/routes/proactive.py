@@ -410,6 +410,20 @@ async def record_interaction():
     }
 
 
+@router.post("/dismiss")
+async def dismiss_proactive_message():
+    """Record that user dismissed a proactive notification.
+
+    Feeds back into active inference to discourage similar actions.
+    """
+    daemon = await _get_daemon()
+    daemon.record_user_response(engaged=False, response_type="dismissed")
+    return {
+        "status": "recorded",
+        "effect": "cooldown_increased",
+    }
+
+
 @router.post("/idle")
 async def record_idle():
     """Record that user appears idle."""

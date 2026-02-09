@@ -233,9 +233,105 @@ class CalendarMonitor(BaseMonitor):
         return events
 
     def _parse_ics_file(self, filepath: Path) -> List[CalendarEvent]:
-        """Parse a single ICS file into CalendarEvent objects.
+        """Parse a single ICS file using icalendar + recurring-ical-events.
 
-        Handles VEVENT components with DTSTART, DTEND, SUMMARY, LOCATION.
+        Handles RRULE, EXDATE, RDATE, DURATION, and VTIMEZONE.
+        Falls back to simple parser if libraries are not installed.
+        """
+        try:
+            import icalendar
+            import recurring_ical_events
+        except ImportError:
+            logger.debug("[CalendarMonitor] icalendar/recurring-ical-events not installed, using simple parser")
+            return self._parse_ics_file_simple(filepath)
+
+        events = []
+        now = datetime.now()
+        lookahead = now + timedelta(hours=self._lookahead_hours)
+
+        try:
+            text = filepath.read_bytes()
+        except (IOError, OSError) as e:
+            logger.warning(f"[CalendarMonitor] Cannot read {filepath}: {e}")
+            return events
+
+        try:
+            cal = icalendar.Calendar.from_ical(text)
+            # Expand recurring events within the lookahead window
+            expanded = recurring_ical_events.of(cal).between(now, lookahead)
+
+            for component in expanded:
+                cal_event = self._icalendar_to_event(component, filepath.stem)
+                if cal_event:
+                    events.append(cal_event)
+
+        except Exception as e:
+            logger.warning(f"[CalendarMonitor] icalendar parse error for {filepath}: {e}")
+            # Fall back to simple parser
+            return self._parse_ics_file_simple(filepath)
+
+        return events
+
+    def _icalendar_to_event(self, component, source_name: str) -> Optional[CalendarEvent]:
+        """Convert an icalendar VEVENT component to CalendarEvent."""
+        try:
+            title = str(component.get("SUMMARY", "Untitled Event"))
+            uid = str(component.get("UID", f"ics_{hash(title)}_{id(component)}"))
+
+            dtstart = component.get("DTSTART")
+            if not dtstart:
+                return None
+            start = dtstart.dt if hasattr(dtstart, 'dt') else dtstart
+
+            # Handle DURATION vs DTEND
+            dtend = component.get("DTEND")
+            duration = component.get("DURATION")
+            if dtend:
+                end = dtend.dt if hasattr(dtend, 'dt') else dtend
+            elif duration:
+                dur = duration.dt if hasattr(duration, 'dt') else duration
+                end = start + dur
+            else:
+                end = start + timedelta(hours=1)
+
+            # Convert timezone-aware datetimes to naive local time
+            from datetime import timezone
+            if hasattr(start, 'tzinfo') and start.tzinfo is not None:
+                start = start.astimezone().replace(tzinfo=None)
+            if hasattr(end, 'tzinfo') and end.tzinfo is not None:
+                end = end.astimezone().replace(tzinfo=None)
+
+            # Handle date-only (all-day) events
+            from datetime import date as date_type
+            is_all_day = isinstance(start, date_type) and not isinstance(start, datetime)
+            if is_all_day:
+                start = datetime.combine(start, datetime.min.time())
+                if isinstance(end, date_type) and not isinstance(end, datetime):
+                    end = datetime.combine(end, datetime.min.time())
+
+            location = str(component.get("LOCATION", "")) or None
+            description = str(component.get("DESCRIPTION", "")) or None
+            status = str(component.get("STATUS", ""))
+
+            return CalendarEvent(
+                id=uid,
+                title=title,
+                start=start,
+                end=end,
+                location=location if location else None,
+                description=description if description else None,
+                is_all_day=is_all_day,
+                source=f"ics:{source_name}",
+                metadata={"ics_status": status},
+            )
+        except Exception as e:
+            logger.debug(f"[CalendarMonitor] Failed to convert icalendar event: {e}")
+            return None
+
+    def _parse_ics_file_simple(self, filepath: Path) -> List[CalendarEvent]:
+        """Simple fallback ICS parser (no RRULE support).
+
+        Handles basic VEVENT blocks with DTSTART, DTEND, SUMMARY, LOCATION.
         """
         events = []
         now = datetime.now()
@@ -247,7 +343,6 @@ class CalendarMonitor(BaseMonitor):
             logger.warning(f"[CalendarMonitor] Cannot read {filepath}: {e}")
             return events
 
-        # Simple ICS parser (handles basic VEVENT blocks)
         in_event = False
         event_data: Dict[str, str] = {}
 
@@ -264,7 +359,6 @@ class CalendarMonitor(BaseMonitor):
                     events.append(cal_event)
             elif in_event and ":" in line:
                 key, _, value = line.partition(":")
-                # Handle properties with parameters (e.g., DTSTART;TZID=...:20260207T...)
                 key = key.split(";")[0]
                 event_data[key] = value
 

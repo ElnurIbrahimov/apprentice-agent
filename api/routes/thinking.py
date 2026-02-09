@@ -294,8 +294,19 @@ class ThinkingStateManager:
                         self._stats["thoughts_dismissed"] += 1
                     break
 
+    def _is_inner_engine_active(self) -> bool:
+        """Check if inner thoughts engine recently produced output (<30s ago)."""
+        try:
+            from api.services.inner_thoughts_engine import get_inner_thoughts_engine
+            engine = get_inner_thoughts_engine()
+            stats = engine.get_stats()
+            last_time = stats.get("last_thought_time", 0)
+            return (time.time() - last_time) < 30
+        except Exception:
+            return False
+
     def decay_thoughts(self):
-        """Decay old thoughts."""
+        """Decay old thoughts with differential rates for real vs template."""
         with self._lock:
             now = time.time()
             to_remove = []
@@ -303,11 +314,17 @@ class ThinkingStateManager:
             for thought in self._active_thoughts:
                 age = thought.age_seconds()
 
-                # Decay intensity over time
-                thought.intensity *= 0.95
+                if thought.is_real:
+                    # Real thoughts: slower decay, longer lifespan
+                    thought.intensity *= 0.985
+                    max_age = 90
+                else:
+                    # Template thoughts: faster decay, shorter lifespan
+                    thought.intensity *= 0.95
+                    max_age = 30
 
-                # Remove very old or faded thoughts
-                if age > 30 or thought.intensity < 0.1:
+                # Remove old or faded thoughts
+                if age > max_age or thought.intensity < 0.1:
                     thought.resolved = True
                     thought.resolution = "faded"
                     to_remove.append(thought)
@@ -324,8 +341,15 @@ class ThinkingStateManager:
             # Only fall back to template generation if no real thoughts recently
             # Real thoughts from record_real_thought() are always preferred
             real_thought_age = time.time() - self._last_real_thought_time
-            if len(self._active_thoughts) < 2 and real_thought_age > 30 and random.random() < 0.15:
-                # No real cognitive activity for 30+ seconds — use template as subtle fallback
+            inner_engine_active = self._is_inner_engine_active()
+
+            # Template suppression: require 60s silence, 10% probability,
+            # and suppress entirely if inner engine recently produced output
+            if (len(self._active_thoughts) < 2
+                    and real_thought_age > 60
+                    and not inner_engine_active
+                    and random.random() < 0.10):
+                # No real cognitive activity for 60+ seconds — use template as subtle fallback
                 self.generate_thought()
 
             active = [t.to_dict() for t in self._active_thoughts]

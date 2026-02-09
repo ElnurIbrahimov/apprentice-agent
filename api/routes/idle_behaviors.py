@@ -339,6 +339,30 @@ class IdleStateManager:
         except Exception:
             pass
 
+        # === Calendar context ===
+        try:
+            from apprentice_agent.proactive.monitors.calendar_monitor import get_calendar_monitor
+            cm = get_calendar_monitor()
+            next_evt = cm.get_next_event()
+            if next_evt:
+                mins = int(next_evt.get("minutes_until", 999))
+                title = next_evt.get("title", "event")
+                if mins < 60:
+                    sources.append(f"upcoming: {title} in {mins} minutes")
+        except Exception:
+            pass
+
+        # === Weather context ===
+        try:
+            from apprentice_agent.emotion.alma_engine import alma_engine
+            weather = alma_engine._get_weather_context()
+            if weather:
+                temp = weather.get("temperature_c", "?")
+                cond = weather.get("condition", "unknown")
+                sources.append(f"weather: {cond}, {temp}°C")
+        except Exception:
+            pass
+
         # Select based on behavior type for variety
         if not sources:
             return None
@@ -388,6 +412,20 @@ class IdleStateManager:
             if emotion in emotion_adjustments:
                 for bt, adj in emotion_adjustments[emotion].items():
                     weights[bt] *= adj
+
+        # Calendar context: boost ANTICIPATING when meeting is near
+        try:
+            from apprentice_agent.proactive.monitors.calendar_monitor import get_calendar_monitor
+            cm = get_calendar_monitor()
+            next_evt = cm.get_next_event()
+            if next_evt:
+                mins = next_evt.get("minutes_until", 999)
+                if mins < 15:
+                    weights[IdleBehaviorType.ANTICIPATING] *= 2.0
+                elif mins < 30:
+                    weights[IdleBehaviorType.ANTICIPATING] *= 1.5
+        except Exception:
+            pass
 
         # Avoid repeating recent behaviors
         recent_types = [b.type for b in self._behavior_history[-3:]]
@@ -492,6 +530,29 @@ class IdleStateManager:
             # Update micro-movement seed for animation variation
             self._micro_movement_seed = random.random()
             self._attention_focus = random.uniform(-0.5, 0.5)
+
+            # Spontaneous micro-emotions: 15% chance per cycle
+            if random.random() < 0.15:
+                micro_emotion_map = {
+                    IdleBehaviorType.CURIOUS: ("curious", 0.15),
+                    IdleBehaviorType.RELAXING: ("calm", 0.1),
+                    IdleBehaviorType.REFLECTING: ("thoughtful", 0.1),
+                    IdleBehaviorType.OBSERVING: ("engaged", 0.1),
+                    IdleBehaviorType.DRIFTING: ("content", 0.08),
+                    IdleBehaviorType.ANTICIPATING: ("hope", 0.12),
+                    IdleBehaviorType.FOCUSING: ("confident", 0.1),
+                    IdleBehaviorType.PROCESSING: ("thoughtful", 0.1),
+                }
+                micro = micro_emotion_map.get(behavior_type)
+                if micro:
+                    try:
+                        from apprentice_agent.emotion.alma_engine import alma_engine
+                        alma_engine.trigger_emotion(
+                            micro[0], intensity=micro[1],
+                            trigger=f"idle_{behavior_type.value}_micro"
+                        )
+                    except Exception:
+                        pass
 
             return behavior
 

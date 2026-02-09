@@ -37,6 +37,11 @@ sentence-transformers>=2.2.0
 chromadb>=0.4.0  # Optional: for vector search, falls back to numpy if unavailable
 networkx>=3.0  # Already used by knowledge_graph.py
 
+# Calendar RRULE Support (recurring events)
+icalendar>=5.0.0
+recurring-ical-events>=3.0.0
+python-dateutil>=2.8.0
+
 # Episodic Time-Travel Memory
 qdrant-client>=1.7.0
 dateparser>=1.2.0

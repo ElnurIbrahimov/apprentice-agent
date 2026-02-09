@@ -810,6 +810,44 @@ class ActiveInferenceEngine:
         """
         self._simple_engine.restore_action_history(history)
 
+    def record_simple_outcome(self, engaged: bool, response_type: str = "unknown") -> None:
+        """Adjust per-action cooldowns based on whether user engaged.
+
+        Engaged = 5% cooldown reduction (encourage that action type).
+        Ignored/dismissed = 10% increase (discourage).
+        Bounds: [60s, 900s].
+
+        Args:
+            engaged: Whether the user engaged with the proactive message.
+            response_type: Type of response ("replied", "dismissed", "ignored").
+        """
+        # Find the most recent non-WAIT action
+        if not self._simple_engine.action_history:
+            return
+
+        last_action, _ = self._simple_engine.action_history[-1]
+        if last_action == ProactiveAction.WAIT:
+            return
+
+        current_cooldown = self._simple_engine.cooldowns.get(last_action, 180)
+
+        if engaged:
+            # Reduce cooldown by 5% (encourage)
+            new_cooldown = current_cooldown * 0.95
+        else:
+            # Increase cooldown by 10% (discourage)
+            new_cooldown = current_cooldown * 1.10
+
+        # Clamp to [60, 900] seconds
+        new_cooldown = max(60, min(900, new_cooldown))
+        self._simple_engine.cooldowns[last_action] = new_cooldown
+
+        logger.info(
+            f"[ActiveInference] Outcome recorded: engaged={engaged}, "
+            f"type={response_type}, action={last_action.value}, "
+            f"cooldown: {current_cooldown:.0f}s -> {new_cooldown:.0f}s"
+        )
+
     def set_intrinsic_preferences(self, preferences: Dict[str, float]) -> None:
         """Update intrinsic motivation priors in the generative model (Phase 6E).
 

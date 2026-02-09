@@ -1170,6 +1170,32 @@ class GatewayDaemon:
         channel = channel or event.source
         return await self.event_bus.publish(channel, event)
 
+    def record_user_response(self, engaged: bool, response_type: str = "unknown") -> None:
+        """Record user response to a proactive message for learning.
+
+        Args:
+            engaged: Whether the user engaged (replied/interacted).
+            response_type: "replied", "dismissed", "ignored".
+        """
+        # Update simplified engine cooldowns
+        self.inference_engine.record_simple_outcome(engaged, response_type)
+
+        # Update beliefs based on engagement signal
+        if engaged:
+            self.inference_engine.update_beliefs({
+                "user_activity": 0.8,
+                "interaction_recency": 1.0,
+                "observation_confidence": 0.8,
+            })
+        else:
+            self.inference_engine.update_beliefs({
+                "user_activity": 0.3,
+                "interaction_recency": 0.5,
+                "observation_confidence": 0.6,
+            })
+
+        logger.info(f"[GatewayDaemon] User response recorded: engaged={engaged}, type={response_type}")
+
     def get_stats(self) -> Dict[str, Any]:
         """Get daemon statistics."""
         uptime = None

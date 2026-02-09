@@ -355,6 +355,18 @@ class AgentService:
             except Exception:
                 pass
 
+            # Active inference outcome learning: if user replied within 60s
+            # of a proactive message, record as engaged
+            try:
+                import time as _time
+                from apprentice_agent.proactive.gateway_daemon import get_gateway_daemon
+                daemon = get_gateway_daemon()
+                time_since_proactive = _time.time() - daemon._last_proactive_message_time
+                if 0 < time_since_proactive < 60:
+                    daemon.record_user_response(engaged=True, response_type="replied")
+            except Exception:
+                pass
+
             # Track context for heatmap (covers direct handlers that bypass agent.chat)
             try:
                 from api.routes.context import track_context_from_message

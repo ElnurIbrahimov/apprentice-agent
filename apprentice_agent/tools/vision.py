@@ -138,6 +138,42 @@ def _get_model_system_prompt(model_name: str) -> Optional[str]:
     return None
 
 
+def _run_florence2(image_path: str, task: str = "<DETAILED_CAPTION>") -> Optional[str]:
+    """Run a Florence-2 task on an image. Returns text result or None.
+
+    Lightweight wrapper around _load_florence2() for use in fast paths
+    (analyze_image generic queries, analyze_screen_context).
+    """
+    if not _check_florence2_available():
+        return None
+    try:
+        from PIL import Image
+        import torch
+
+        model, processor = _load_florence2()
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        image = Image.open(image_path).convert("RGB")
+        inputs = processor(text=task, images=image, return_tensors="pt").to(device)
+        with torch.no_grad():
+            generated_ids = model.generate(
+                input_ids=inputs["input_ids"],
+                pixel_values=inputs["pixel_values"],
+                max_new_tokens=512,
+                num_beams=3,
+            )
+        result = processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
+        parsed = processor.post_process_generation(result, task=task, image_size=image.size)
+        if isinstance(parsed, dict):
+            val = parsed.get(task, parsed)
+            if isinstance(val, dict):
+                return val.get("text", str(val))
+            return str(val)
+        return str(parsed)
+    except Exception as e:
+        logger.debug(f"[Vision] Florence-2 inference failed: {e}")
+        return None
+
+
 class VisionTool:
     """Tool for analyzing images using vision LLM with model fallback chain.
 
@@ -334,6 +370,27 @@ class VisionTool:
             }
 
         try:
+            # Florence-2 fast path: for generic "describe" queries, try Florence-2 first
+            generic_keywords = {"describe", "what is", "what's in", "what do you see"}
+            is_generic = any(kw in question.lower() for kw in generic_keywords)
+
+            if is_generic:
+                florence_result = _run_florence2(str(path), "<DETAILED_CAPTION>")
+                if florence_result:
+                    return {
+                        "success": True,
+                        "description": florence_result,
+                        "image_path": str(path.absolute()),
+                        "question": question,
+                        "model": "florence-2"
+                    }
+            else:
+                # For specific questions, get Florence-2 caption as context enrichment
+                florence_context = _run_florence2(str(path), "<CAPTION>")
+                if florence_context:
+                    question = f"Image context: {florence_context}\n\nQuestion: {question}"
+
+            # Read and encode image as base64
             with open(path, 'rb') as f:
                 img_data = base64.b64encode(f.read()).decode()
 
@@ -547,6 +604,14 @@ class VisionTool:
         Returns:
             Structured dict with screen analysis
         """
+        # Florence-2 fast path: try CAPTION + OCR before expensive Ollama call
+        florence_caption = _run_florence2(screenshot_path, "<CAPTION>")
+        florence_ocr = _run_florence2(screenshot_path, "<OCR>")
+        if florence_caption and florence_ocr:
+            parsed = self._parse_florence2_screen_context(florence_caption, florence_ocr)
+            if parsed.get("app_type") != "other" or parsed.get("has_errors"):
+                return parsed
+
         structured_prompt = """Analyze this screenshot and respond in this EXACT format (one field per line):
 
 APP_TYPE: <one of: code_editor, browser, terminal, file_manager, chat, email, document, media, settings, other>
@@ -617,6 +682,67 @@ Be concise. Only report what you actually see."""
             pass
 
         return parsed
+
+    @staticmethod
+    def _parse_florence2_screen_context(caption: str, ocr_text: str) -> Dict[str, Any]:
+        """Parse Florence-2 caption + OCR into structured screen context."""
+        import re as _re
+        caption_lower = caption.lower()
+        ocr_lower = ocr_text.lower()
+
+        # Detect app type from keywords
+        app_type = "other"
+        app_keywords = {
+            "code_editor": ["code", "editor", "ide", "visual studio", "vscode", "pycharm", "sublime"],
+            "browser": ["browser", "chrome", "firefox", "safari", "edge", "webpage", "website"],
+            "terminal": ["terminal", "console", "command", "shell", "powershell", "cmd"],
+            "file_manager": ["file", "explorer", "finder", "directory", "folder"],
+            "chat": ["chat", "message", "discord", "slack", "telegram", "whatsapp"],
+            "email": ["email", "mail", "inbox", "outlook", "gmail"],
+            "document": ["document", "word", "docs", "notepad", "text editor"],
+            "media": ["video", "music", "player", "spotify", "youtube"],
+        }
+        for atype, keywords in app_keywords.items():
+            if any(kw in caption_lower or kw in ocr_lower for kw in keywords):
+                app_type = atype
+                break
+
+        # Detect errors
+        error_keywords = ["error", "exception", "traceback", "failed", "fatal", "crash"]
+        has_errors = any(kw in ocr_lower for kw in error_keywords)
+        error_text = None
+        if has_errors:
+            for line in ocr_text.split("\n"):
+                if any(kw in line.lower() for kw in error_keywords):
+                    error_text = line.strip()[:200]
+                    break
+
+        # Detect language
+        language = None
+        lang_keywords = {
+            "python": ["python", ".py", "def ", "import ", "class "],
+            "javascript": ["javascript", ".js", "const ", "function ", "=>"],
+            "java": [".java", "public class", "void main"],
+            "rust": [".rs", "fn main", "let mut"],
+            "c++": [".cpp", "#include", "std::"],
+        }
+        for lang, keywords in lang_keywords.items():
+            if any(kw in ocr_lower for kw in keywords):
+                language = lang
+                break
+
+        return {
+            "success": True,
+            "available": True,
+            "app_type": app_type,
+            "has_errors": has_errors,
+            "error_text": error_text,
+            "main_content": caption[:200],
+            "language": language,
+            "suggested_help": None,
+            "raw_analysis": f"Florence-2 caption: {caption}\nOCR: {ocr_text[:300]}",
+            "model": "florence-2",
+        }
 
     def execute(self, action: str, **kwargs) -> dict:
         """Execute a vision action.

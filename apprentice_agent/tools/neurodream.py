@@ -593,9 +593,19 @@ class NeuroDreamEngine:
             if self._interrupt_flag.is_set():
                 break
 
-            # Extract entities and strengthen their connections
-            strengthened = self._strengthen_memory_connections(memory)
-            results["memories_strengthened"] += strengthened
+            # Chunk memory before strengthening (ADM-style)
+            chunks = self._chunk_memory(memory)
+            for chunk in chunks:
+                if self._interrupt_flag.is_set():
+                    break
+                # Build a chunk-memory with parent metadata for strengthening
+                chunk_memory = {
+                    "content": chunk["content"],
+                    "id": f"{chunk['parent_id']}_c{chunk['chunk_idx']}",
+                    "parent_id": chunk["parent_id"],
+                }
+                strengthened = self._strengthen_memory_connections(chunk_memory)
+                results["memories_strengthened"] += strengthened
 
             # Oscillation-modulated delay
             mods = self._tick_oscillator()
@@ -721,6 +731,16 @@ class NeuroDreamEngine:
         # Save consolidated patterns
         all_patterns = temporal_patterns + topical_patterns + emotional_patterns
         self._save_consolidated_patterns(all_patterns)
+
+        # Store atomic facts from recent memories (ADM-style chunking)
+        if not self._interrupt_flag.is_set():
+            try:
+                recent_memories = self._get_recent_memories(hours=24)
+                atomic_count = self._store_atomic_facts(recent_memories)
+                results["atomic_facts_stored"] = atomic_count
+            except Exception as e:
+                print(f"[NeuroDream] Atomic facts storage error: {e}")
+                results["atomic_facts_stored"] = 0
 
         # Log dream thought
         if self.monologue and not self._interrupt_flag.is_set():
@@ -941,6 +961,112 @@ class NeuroDreamEngine:
 
         return memories
 
+    # ==================== ADM-Style Chunking ====================
+
+    def _chunk_memory(self, memory: Dict[str, Any], max_chunk_size: int = 200) -> List[Dict[str, Any]]:
+        """Split a memory into semantic chunks on sentence boundaries.
+
+        Returns list of chunk dicts with parent_id tracking.
+        """
+        content = memory.get("content", "")
+        parent_id = memory.get("id", "unknown")
+
+        if len(content) <= max_chunk_size:
+            return [{"content": content, "parent_id": parent_id, "chunk_idx": 0}]
+
+        # Split on sentence boundaries
+        sentences = re.split(r'(?<=[.!?])\s+', content)
+        chunks = []
+        current_chunk = []
+        current_len = 0
+
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+            if current_len + len(sentence) > max_chunk_size and current_chunk:
+                chunks.append({
+                    "content": " ".join(current_chunk),
+                    "parent_id": parent_id,
+                    "chunk_idx": len(chunks),
+                })
+                current_chunk = [sentence]
+                current_len = len(sentence)
+            else:
+                current_chunk.append(sentence)
+                current_len += len(sentence) + 1
+
+        if current_chunk:
+            chunks.append({
+                "content": " ".join(current_chunk),
+                "parent_id": parent_id,
+                "chunk_idx": len(chunks),
+            })
+
+        return chunks
+
+    def _extract_propositions(self, chunk: Dict[str, Any]) -> List[str]:
+        """Extract atomic fact propositions from a chunk using pattern matching.
+
+        Extracts definitional statements, key verb-object pairs, and named entities.
+        No LLM call — pure regex heuristics.
+        """
+        content = chunk.get("content", "")
+        propositions = []
+
+        # Definitional patterns: "X is Y", "X are Y"
+        for match in re.finditer(r'(\b[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\s+(?:is|are)\s+(.{5,60}?)(?:[.!?,]|$)', content):
+            propositions.append(f"{match.group(1)} is {match.group(2).strip()}")
+
+        # Verb-object patterns: "user wants/needs/likes X"
+        for match in re.finditer(r'(?:user|they|he|she|I)\s+(want|need|like|prefer|use|enjoy|hate|love|know|think|believe)s?\s+(.{3,60}?)(?:[.!?,]|$)', content, re.IGNORECASE):
+            propositions.append(f"user {match.group(1)}s {match.group(2).strip()}")
+
+        # Named entities (capitalized multi-word sequences)
+        for match in re.finditer(r'\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)+)\b', content):
+            entity = match.group(1)
+            if len(entity) > 3 and entity.lower() not in self._get_stopwords():
+                propositions.append(f"entity: {entity}")
+
+        # Key facts: "X can/will/should Y"
+        for match in re.finditer(r'(\b[A-Za-z]+(?:\s+[A-Za-z]+)?)\s+(can|will|should|must|could)\s+(.{5,50}?)(?:[.!?,]|$)', content):
+            propositions.append(f"{match.group(1)} {match.group(2)} {match.group(3).strip()}")
+
+        return propositions[:10]  # Limit per chunk
+
+    def _store_atomic_facts(self, memories: List[Dict[str, Any]]) -> int:
+        """Extract and store atomic facts from memories into ChromaDB.
+
+        Called from run_deep_phase() after pattern finding.
+        Returns count of facts stored.
+        """
+        if not self.chromadb:
+            return 0
+
+        stored = 0
+        for memory in memories:
+            chunks = self._chunk_memory(memory)
+            for chunk in chunks:
+                propositions = self._extract_propositions(chunk)
+                for prop in propositions:
+                    try:
+                        fact_id = f"fact_{hash(prop)}_{int(time.time() * 1000)}"
+                        self.chromadb.add(
+                            documents=[prop],
+                            ids=[fact_id],
+                            metadatas=[{
+                                "type": "atomic_fact",
+                                "parent_id": chunk.get("parent_id", ""),
+                                "chunk_idx": chunk.get("chunk_idx", 0),
+                                "timestamp": datetime.now().isoformat(),
+                            }]
+                        )
+                        stored += 1
+                    except Exception:
+                        continue  # Skip duplicates or DB errors
+
+        return stored
+
     # ==================== Light Phase Helpers ====================
 
     def _strengthen_memory_connections(self, memory: Dict[str, Any]) -> int:
@@ -954,9 +1080,23 @@ class NeuroDreamEngine:
         # Get oscillation-modulated consolidation strength
         mods = self._tick_oscillator()
 
-        # Extract key terms (simple approach)
+        # Extract key terms (simple approach + proposition keywords)
         words = set(re.findall(r'\b[A-Za-z]{4,}\b', content.lower()))
-        important_words = [w for w in words if w not in self._get_stopwords()][:10]
+        stopwords = self._get_stopwords()
+        important_words = [w for w in words if w not in stopwords][:10]
+
+        # Enrich with proposition-derived keywords (ADM-style)
+        try:
+            chunk = {"content": content}
+            propositions = self._extract_propositions(chunk)
+            for prop in propositions:
+                prop_words = set(re.findall(r'\b[A-Za-z]{4,}\b', prop.lower()))
+                for pw in prop_words:
+                    if pw not in stopwords and pw not in important_words:
+                        important_words.append(pw)
+            important_words = important_words[:15]  # Allow slightly more with propositions
+        except Exception:
+            pass  # Fallback to naive words only
 
         # Find related nodes and strengthen edges
         for word in important_words:

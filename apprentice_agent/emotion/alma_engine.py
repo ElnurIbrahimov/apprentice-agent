@@ -945,6 +945,75 @@ class ALMAEngine:
             logger.error(f"Failed to log emotion: {e}")
 
     # -------------------------------------------------------------------------
+    # Environmental Context (Weather)
+    # -------------------------------------------------------------------------
+
+    _weather_cache: Optional[Dict[str, Any]] = None
+    _weather_cache_time: float = 0.0
+
+    # WMO weather code categories
+    _WMO_CATEGORIES = {
+        0: "clear", 1: "clear", 2: "cloudy", 3: "cloudy",
+        45: "foggy", 48: "foggy",
+        51: "rainy", 53: "rainy", 55: "rainy",
+        56: "rainy", 57: "rainy",
+        61: "rainy", 63: "rainy", 65: "rainy",
+        66: "rainy", 67: "rainy",
+        71: "snowy", 73: "snowy", 75: "snowy", 77: "snowy",
+        80: "rainy", 81: "rainy", 82: "rainy",
+        85: "snowy", 86: "snowy",
+        95: "stormy", 96: "stormy", 99: "stormy",
+    }
+
+    def _get_weather_context(self) -> Optional[Dict[str, Any]]:
+        """Fetch weather from OpenMeteo API (free, no key required).
+
+        Uses ip-api.co for geolocation. Cached for 30 minutes.
+        Returns {condition, temperature_c, is_day} or None on failure.
+        """
+        import time as _time
+        now = _time.time()
+
+        # Return cached result if fresh
+        if self._weather_cache and (now - self._weather_cache_time) < 1800:
+            return self._weather_cache
+
+        try:
+            import requests
+
+            # Get approximate location from IP
+            geo = requests.get("https://ipapi.co/json/", timeout=5).json()
+            lat = geo.get("latitude")
+            lon = geo.get("longitude")
+            if not lat or not lon:
+                return None
+
+            # Fetch current weather
+            weather_url = (
+                f"https://api.open-meteo.com/v1/forecast?"
+                f"latitude={lat}&longitude={lon}"
+                f"&current=temperature_2m,weather_code,is_day"
+            )
+            resp = requests.get(weather_url, timeout=5).json()
+            current = resp.get("current", {})
+
+            wmo_code = current.get("weather_code", 0)
+            condition = self._WMO_CATEGORIES.get(wmo_code, "clear")
+
+            self._weather_cache = {
+                "condition": condition,
+                "temperature_c": current.get("temperature_2m", 20),
+                "is_day": bool(current.get("is_day", 1)),
+            }
+            self._weather_cache_time = now
+            logger.debug(f"[ALMA] Weather: {self._weather_cache}")
+            return self._weather_cache
+
+        except Exception as e:
+            logger.debug(f"[ALMA] Weather fetch failed: {e}")
+            return None
+
+    # -------------------------------------------------------------------------
     # Autonomous Emotional Drift (Phase 2D)
     # -------------------------------------------------------------------------
 
@@ -1062,6 +1131,25 @@ class ALMAEngine:
 
             # 4. Natural baseline pull (enhanced)
             self.mood.decay_toward_baseline()
+
+            # 5. Weather influence — very gentle PAD nudge from environment
+            weather = self._get_weather_context()
+            if weather:
+                weather_nudges = {
+                    "clear": PADState(pleasure=0.1, arousal=0.0, dominance=0.0),
+                    "cloudy": PADState(pleasure=0.0, arousal=-0.05, dominance=0.0),
+                    "foggy": PADState(pleasure=-0.03, arousal=-0.08, dominance=0.0),
+                    "rainy": PADState(pleasure=0.0, arousal=-0.1, dominance=0.0),
+                    "snowy": PADState(pleasure=0.05, arousal=-0.05, dominance=0.0),
+                    "stormy": PADState(pleasure=-0.1, arousal=0.1, dominance=0.0),
+                }
+                nudge = weather_nudges.get(weather["condition"])
+                if nudge:
+                    self.mood.push_toward(nudge, 0.005)
+                    if drift_reason:
+                        drift_reason += f"; weather: {weather['condition']}"
+                    else:
+                        drift_reason = f"weather influence: {weather['condition']}, {weather['temperature_c']}°C"
 
             # Update neuromodulators after drift
             self._update_neuromodulators()
