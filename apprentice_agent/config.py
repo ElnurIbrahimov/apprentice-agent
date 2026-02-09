@@ -237,6 +237,14 @@ class Config:
                 'vision_cloud': cls.MODEL_VISION_CLOUD,
             }
 
+    # System 1/System 2 confidence thresholds (Kahneman dual-process routing)
+    S1_CONFIDENCE_THRESHOLD: float = 0.7   # Above this → System 1 (fast)
+    S2_CONFIDENCE_THRESHOLD: float = 0.4   # Below this → System 2 (deliberative)
+
+    # Perceptual hashing thresholds (dHash Hamming distance, 256-bit hash)
+    PHASH_CHANGE_THRESHOLD: int = 12       # Visual change detection (cursor blinks < 12)
+    PHASH_MAJOR_THRESHOLD: int = 20        # Major visual change (workflow transition)
+
     MEMORY_COLLECTION_NAME: str = "agent_memory"
     MAX_MEMORY_RESULTS: int = 5
 

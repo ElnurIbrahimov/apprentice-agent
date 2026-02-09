@@ -21,6 +21,15 @@ from urllib.parse import urlencode
 
 logger = logging.getLogger(__name__)
 
+# Perceptual hashing for visual change detection
+try:
+    import imagehash
+    from PIL import Image
+    IMAGEHASH_AVAILABLE = True
+except ImportError:
+    IMAGEHASH_AVAILABLE = False
+    logger.debug("[Screenpipe] imagehash not installed, visual change detection disabled")
+
 # Try httpx first (async-capable), fall back to requests
 try:
     import httpx
@@ -77,6 +86,9 @@ class ScreenpipeClient:
         self._last_content_hash: str = ""
         self._last_app_name: str = ""
         self._delta_threshold: float = 0.3  # 30% content change = significant
+
+        # Perceptual hashing for visual change detection
+        self._last_perceptual_hash = None  # imagehash.ImageHash or None
 
         # Privacy filtering (Phase 5A)
         self._privacy_apps: Set[str] = set(self.DEFAULT_PRIVACY_APPS)
@@ -371,6 +383,24 @@ class ScreenpipeClient:
     # DELTA DETECTION (Phase 5A)
     # =========================================================================
 
+    def _compute_perceptual_hash(self, file_path: str):
+        """Compute dHash perceptual hash for an image file.
+
+        Uses dHash (difference hash) for fast visual similarity detection.
+        Hash size 16 gives 256-bit hash for good granularity.
+
+        Returns:
+            imagehash.ImageHash object, or None on failure.
+        """
+        if not IMAGEHASH_AVAILABLE or not file_path:
+            return None
+        try:
+            img = Image.open(file_path)
+            return imagehash.dhash(img, hash_size=16)
+        except Exception as e:
+            logger.debug(f"[Screenpipe] Perceptual hash failed for {file_path}: {e}")
+            return None
+
     def has_significant_change(self, minutes: int = 1) -> Dict[str, Any]:
         """
         Check if screen content has changed significantly since last check.
@@ -413,16 +443,41 @@ class ScreenpipeClient:
                 "previous_app": prev_app,
             }
 
-        # Check for content change
-        changed = content_hash != self._last_content_hash and self._last_content_hash != ""
+        # Check for text content change
+        text_changed = content_hash != self._last_content_hash and self._last_content_hash != ""
         self._last_app_name = current_app
         self._last_content_hash = content_hash
 
+        # Perceptual hash for visual change detection
+        visual_changed = False
+        visual_distance = 0
+        file_path = current.get("file_path", "")
+        if file_path:
+            new_hash = self._compute_perceptual_hash(file_path)
+            if new_hash is not None and self._last_perceptual_hash is not None:
+                visual_distance = new_hash - self._last_perceptual_hash
+                from apprentice_agent.config import Config
+                visual_changed = visual_distance > Config.PHASH_CHANGE_THRESHOLD
+            self._last_perceptual_hash = new_hash
+
+        # Combine text and visual signals
+        if text_changed and visual_changed:
+            change_type = "major_change"
+        elif visual_changed:
+            change_type = "visual_change"
+        elif text_changed:
+            change_type = "content_change"
+        else:
+            change_type = "none"
+
+        changed = text_changed or visual_changed
+
         return {
             "changed": changed,
-            "change_type": "content_change" if changed else "none",
+            "change_type": change_type,
             "current_app": current_app,
             "previous_app": current_app,
+            "visual_distance": visual_distance,
         }
 
     # =========================================================================

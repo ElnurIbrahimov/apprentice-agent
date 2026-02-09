@@ -1226,12 +1226,71 @@ class OllamaBrain:
         else:
             logger.info("[BRAIN] Model override cleared, returning to auto-selection")
 
+    def _get_domain_confidence(self, prompt: str) -> tuple:
+        """Get domain and confidence score from metacognition for a prompt.
+
+        Returns:
+            (domain_name: str, confidence: float) tuple.
+            Falls back to (None, 0.5) if metacognition unavailable.
+        """
+        try:
+            from apprentice_agent.consciousness.metacognition import get_metacognitive_engine
+            engine = get_metacognitive_engine()
+            domain = engine.get_domain_for_query(prompt)
+            if domain is None:
+                return (None, 0.5)
+            caps = engine.assess_capabilities()
+            cap = caps.get(domain.value)
+            if cap and cap.confidence > 0.1:
+                return (domain.value, cap.score)
+            return (domain.value, 0.5)
+        except Exception:
+            return (None, 0.5)
+
+    def _should_escalate_to_system2(self, prompt: str, task_type: Optional[TaskType] = None) -> tuple:
+        """Decide whether to use System 2 (deliberative) over System 1 (fast).
+
+        Implements Kahneman-inspired dual-process routing:
+        - Direct System 2 triggers for known complex patterns
+        - Confidence-based escalation via metacognition
+        - Neuromodulator tie-breaking for mid-range confidence
+
+        Returns:
+            (use_system2: bool, domain: str, confidence: float, reason: str)
+        """
+        # Direct System 2 triggers
+        if self._is_complex_query(prompt):
+            return (True, None, 0.0, "complex_query_heuristic")
+        if len(prompt.split()) > 50:
+            return (True, None, 0.0, "long_prompt")
+        if task_type == TaskType.REASONING:
+            return (True, None, 0.0, "explicit_reasoning_task")
+
+        # Confidence-based escalation
+        domain, confidence = self._get_domain_confidence(prompt)
+
+        if confidence < Config.S2_CONFIDENCE_THRESHOLD:
+            return (True, domain, confidence, "low_confidence")
+        if confidence > Config.S1_CONFIDENCE_THRESHOLD:
+            return (False, domain, confidence, "high_confidence")
+
+        # Mid-range confidence: use neuromodulator state as tie-breaker
+        neuro = _get_neuromodulator_levels()
+        if neuro["norepinephrine"] > 0.6:
+            return (True, domain, confidence, "high_norepinephrine")
+        if neuro["dopamine"] > 0.7:
+            return (False, domain, confidence, "high_dopamine")
+
+        return (False, domain, confidence, "default_fast")
+
     def _select_model(self, prompt: str, task_type: Optional[TaskType] = None) -> str:
         """Select the appropriate model based on task type and complexity.
 
-        HYBRID ROUTING:
-        - Simple queries -> Local models (fast: mistral:7b, llama3:8b)
-        - Complex queries -> Cloud models (gpt-oss:120b-cloud, etc.)
+        SYSTEM 1/SYSTEM 2 HYBRID ROUTING (Kahneman dual-process):
+        - System 1 (fast): Simple queries, high confidence → MODEL_FAST
+        - System 2 (deliberative): Complex queries, low confidence → MODEL_REASON
+        - Specialized: Vision/Code tasks use dedicated model chains
+        - Cloud: Complex queries that need cloud-scale models
 
         Args:
             prompt: The prompt to analyze
@@ -1245,63 +1304,17 @@ class OllamaBrain:
             logger.info(f"[BRAIN] Using manual model override: {self._model_override}")
             return self._model_override
 
-        # Check if this is a complex query that needs cloud model
         use_cloud = self._is_complex_query(prompt)
-
-        # If task type is explicitly provided, use it
-        if task_type:
-            if task_type == TaskType.SIMPLE:
-                return Config.MODEL_FAST
-            elif task_type == TaskType.VISION:
-                return getattr(Config, 'MODEL_VISION_CLOUD', Config.MODEL_VISION) if use_cloud else Config.MODEL_VISION
-            elif task_type == TaskType.CODE:
-                return getattr(Config, 'MODEL_CODE_CLOUD', Config.MODEL_CODE) if use_cloud else Config.MODEL_CODE
-            else:  # REASONING
-                return getattr(Config, 'MODEL_REASON_CLOUD', Config.MODEL_REASON) if use_cloud else Config.MODEL_REASON
-
-        # Auto-detect task type from prompt
         prompt_lower = prompt.lower()
 
-        # Vision tasks
-        if any(kw in prompt_lower for kw in ['image', 'picture', 'screenshot', 'photo', 'analyze image']):
+        # Specialized task routing (Vision/Code have dedicated models)
+        if task_type == TaskType.VISION or any(kw in prompt_lower for kw in ['image', 'picture', 'screenshot', 'photo', 'analyze image']):
             return getattr(Config, 'MODEL_VISION_CLOUD', Config.MODEL_VISION) if use_cloud else Config.MODEL_VISION
 
-        # Identity questions - route to reasoning model (follows system prompts better)
-        identity_patterns = [
-            'what is your name', 'who are you', 'your name', 'are you called',
-            'what should i call you', 'introduce yourself', 'tell me about yourself',
-            'what are you', 'are you an ai', 'are you a bot', 'what model are you'
-        ]
-        if any(pattern in prompt_lower for pattern in identity_patterns):
-            return getattr(Config, 'MODEL_REASON_CLOUD', Config.MODEL_REASON) if use_cloud else Config.MODEL_REASON
+        if task_type == TaskType.CODE:
+            return getattr(Config, 'MODEL_CODE_CLOUD', Config.MODEL_CODE) if use_cloud else Config.MODEL_CODE
 
-        # Simple tasks - greetings, basic questions (excluding identity questions)
-        simple_patterns = [
-            'hello', 'hi ', 'hey', 'good morning', 'good afternoon', 'good evening',
-            'how are you', 'thanks', 'thank you',
-            'bye', 'goodbye', 'yes', 'no', 'ok', 'okay'
-        ]
-        if any(pattern in prompt_lower for pattern in simple_patterns):
-            # Check if it's ONLY a simple greeting (short prompt)
-            if len(prompt.split()) < 10:
-                # Neuromodulator: High norepinephrine (alertness) -> prefer reasoning
-                # even for simple queries (more attentive, careful responses)
-                neuro = _get_neuromodulator_levels()
-                if neuro["norepinephrine"] > 0.7:
-                    logger.debug(f"[BRAIN] Norepinephrine={neuro['norepinephrine']:.2f} -> upgrading simple to reasoning model")
-                    return Config.MODEL_REASON
-                return Config.MODEL_FAST
-
-        # Browser tasks - route to reasoning model
-        browser_patterns = [
-            'browse', 'open website', 'go to', 'visit url', 'visit site',
-            'navigate to', 'click', 'google search', 'open page', 'web page',
-            'browser', 'url'
-        ]
-        if any(pattern in prompt_lower for pattern in browser_patterns):
-            return Config.MODEL_REASON
-
-        # Code/calculation tasks - route to specialized code model
+        # Code detection from prompt keywords
         code_patterns = [
             'calculate', 'compute', 'factorial', 'fibonacci', 'prime',
             'print(', 'import ', 'def ', 'for ', 'while ', 'python',
@@ -1313,10 +1326,26 @@ class OllamaBrain:
         if any(pattern in prompt_lower for pattern in code_patterns):
             return getattr(Config, 'MODEL_CODE_CLOUD', Config.MODEL_CODE) if use_cloud else Config.MODEL_CODE
 
-        # Default to reasoning model
-        if use_cloud:
-            return getattr(Config, 'MODEL_REASON_CLOUD', Config.MODEL_REASON)
-        return Config.MODEL_REASON
+        # Identity questions always use reasoning model
+        identity_patterns = [
+            'what is your name', 'who are you', 'your name', 'are you called',
+            'what should i call you', 'introduce yourself', 'tell me about yourself',
+            'what are you', 'are you an ai', 'are you a bot', 'what model are you'
+        ]
+        if any(pattern in prompt_lower for pattern in identity_patterns):
+            return getattr(Config, 'MODEL_REASON_CLOUD', Config.MODEL_REASON) if use_cloud else Config.MODEL_REASON
+
+        # System 1/System 2 decision for all other queries
+        use_s2, domain, confidence, reason = self._should_escalate_to_system2(prompt, task_type)
+
+        if use_s2:
+            model = getattr(Config, 'MODEL_REASON_CLOUD', Config.MODEL_REASON) if use_cloud else Config.MODEL_REASON
+            logger.info(f"[BRAIN] System 2 (deliberative): domain={domain}, confidence={confidence:.2f}, reason={reason}, model={model}")
+            return model
+        else:
+            model = Config.MODEL_FAST
+            logger.info(f"[BRAIN] System 1 (fast): domain={domain}, confidence={confidence:.2f}, reason={reason}, model={model}")
+            return model
 
     def get_last_model_used(self) -> str:
         """Get the model used in the last think() call."""

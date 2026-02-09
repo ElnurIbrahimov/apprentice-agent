@@ -823,6 +823,35 @@ class MetacognitiveEngine:
     # Helpers
     # ====================================================================
 
+    def get_domain_for_query(self, prompt: str) -> CapabilityDomain:
+        """Map a prompt to the most relevant CapabilityDomain.
+
+        Used by brain.py System 1/System 2 routing to determine
+        domain-specific confidence for model selection.
+        """
+        prompt_lower = prompt.lower()
+        best_domain = CapabilityDomain.CONVERSATION
+        best_hits = 0
+
+        domain_keywords = {
+            CapabilityDomain.CODING: ["code", "python", "debug", "function", "script", "program", "api", "bug", "implement", "refactor"],
+            CapabilityDomain.RESEARCH: ["research", "analyze", "investigate", "find", "search", "lookup", "source", "study"],
+            CapabilityDomain.WRITING: ["write", "essay", "document", "summarize", "email", "draft", "compose", "report"],
+            CapabilityDomain.ANALYSIS: ["analyze", "data", "chart", "statistics", "compare", "evaluate", "pros and cons"],
+            CapabilityDomain.CREATIVE: ["creative", "imagine", "brainstorm", "idea", "generate", "story", "poem"],
+            CapabilityDomain.TOOL_USE: ["tool", "execute", "command", "run", "browser", "file", "open", "download"],
+            CapabilityDomain.MEMORY: ["remember", "recall", "memory", "context", "history", "last time"],
+            CapabilityDomain.EMOTIONAL: ["feeling", "emotion", "support", "mood", "empathy", "how are you"],
+        }
+
+        for domain, keywords in domain_keywords.items():
+            hits = sum(1 for kw in keywords if kw in prompt_lower)
+            if hits > best_hits:
+                best_hits = hits
+                best_domain = domain
+
+        return best_domain
+
     def _domain_keywords(self, domain: str) -> List[str]:
         """Get keywords associated with a capability domain."""
         keyword_map = {

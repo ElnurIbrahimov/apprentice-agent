@@ -22,6 +22,14 @@ from ..event_bus import Event, EventPriority
 
 logger = logging.getLogger(__name__)
 
+# Perceptual hashing for visual change detection
+try:
+    import imagehash
+    from PIL import Image
+    IMAGEHASH_AVAILABLE = True
+except ImportError:
+    IMAGEHASH_AVAILABLE = False
+
 # Try to import screenpipe client
 try:
     from apprentice_agent.tools.screenpipe import ScreenpipeClient
@@ -78,6 +86,9 @@ class ScreenMonitor(BaseMonitor):
 
         # Content keywords to watch for
         self._watch_keywords: List[str] = []
+
+        # Perceptual hash for visual change detection
+        self._last_screen_hash = None  # imagehash.ImageHash or None
 
         # Florence-2 vision tool (lazy loaded for enhanced analysis)
         self._vision_tool: Optional['VisionTool'] = None
@@ -168,6 +179,19 @@ class ScreenMonitor(BaseMonitor):
             error_event = await self._check_screen_errors()
             if error_event:
                 events.append(error_event)
+
+        # Check for visual changes via perceptual hashing (if Screenpipe available)
+        if self._screenpipe and IMAGEHASH_AVAILABLE:
+            try:
+                results = self._screenpipe.search(limit=1, content_type="ocr")
+                if results:
+                    screenshot_path = results[0].get("file_path", "")
+                    if screenshot_path:
+                        visual_event = self._check_visual_change(screenshot_path)
+                        if visual_event:
+                            events.append(visual_event)
+            except Exception:
+                pass
 
         # Check for idle state
         idle_event = self._check_idle()
@@ -361,6 +385,42 @@ class ScreenMonitor(BaseMonitor):
             logger.debug(f"[ScreenMonitor] Content check failed: {e}")
 
         return events
+
+    def _check_visual_change(self, screenshot_path: str) -> Optional[Event]:
+        """Check for significant visual changes using perceptual hashing.
+
+        Computes dHash of screenshot and compares with previous hash.
+        Hamming distance > 12 indicates a significant visual change.
+
+        Returns:
+            visual_change event if significant change detected, None otherwise.
+        """
+        if not IMAGEHASH_AVAILABLE or not screenshot_path:
+            return None
+        try:
+            img = Image.open(screenshot_path)
+            new_hash = imagehash.dhash(img, hash_size=16)
+        except Exception:
+            return None
+
+        if self._last_screen_hash is not None:
+            distance = new_hash - self._last_screen_hash
+            self._last_screen_hash = new_hash
+            from apprentice_agent.config import Config
+            if distance > Config.PHASH_CHANGE_THRESHOLD:
+                return self.create_event(
+                    "visual_change",
+                    {
+                        "visual_distance": distance,
+                        "app_name": self._last_app,
+                        "window_title": self._last_window,
+                    },
+                    priority=EventPriority.BACKGROUND,
+                )
+        else:
+            self._last_screen_hash = new_hash
+
+        return None
 
     def _check_idle(self) -> Optional[Event]:
         """

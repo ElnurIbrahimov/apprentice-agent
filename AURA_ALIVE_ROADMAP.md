@@ -228,6 +228,7 @@ The entire sophisticated proactive stack (Gateway Daemon, Active Inference, Even
 - ✅ Consciousness Prior (sparse conscious state from high-dimensional unconscious)
 - ✅ Metacognitive self-improvement loop
 - ✅ Template vs real thought balance tuned (2026-02-09)
+- ✅ System 1/System 2 dynamic switching based on confidence (2026-02-09)
 
 ---
 

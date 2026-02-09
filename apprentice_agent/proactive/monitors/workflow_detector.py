@@ -28,6 +28,14 @@ from .base_monitor import BaseMonitor
 
 logger = logging.getLogger(__name__)
 
+# Perceptual hashing for visual change detection
+try:
+    import imagehash
+    from PIL import Image
+    IMAGEHASH_AVAILABLE = True
+except ImportError:
+    IMAGEHASH_AVAILABLE = False
+
 
 class BoundaryType(Enum):
     """Types of workflow boundaries."""
@@ -84,6 +92,9 @@ class WorkflowDetector(BaseMonitor):
         # App dwell times (how long in each app)
         self._app_dwell_start: float = time.time()
         self._app_history: List[Dict[str, Any]] = []  # Recent app switches
+
+        # Perceptual hash for visual change detection
+        self._last_visual_hash = None  # imagehash.ImageHash or None
 
         # Boundary scoring
         self._boundary_score: float = 0.0  # 0-1, higher = better time to interrupt
@@ -159,6 +170,24 @@ class WorkflowDetector(BaseMonitor):
         if content_hash and content_hash != self._last_content_hash:
             self._last_activity = now
             self._last_content_hash = content_hash
+
+        # === Detect visual changes via perceptual hashing ===
+        if IMAGEHASH_AVAILABLE:
+            screenshot_path = screen_data.get("screenshot_path", "")
+            if screenshot_path:
+                try:
+                    img = Image.open(screenshot_path)
+                    new_visual_hash = imagehash.dhash(img, hash_size=16)
+                    if self._last_visual_hash is not None:
+                        visual_distance = new_visual_hash - self._last_visual_hash
+                        from apprentice_agent.config import Config
+                        if visual_distance > Config.PHASH_MAJOR_THRESHOLD:
+                            # Rapid large visual change → likely transitioning
+                            self._focus_state = FocusState.TRANSITIONING
+                            self._last_activity = now
+                    self._last_visual_hash = new_visual_hash
+                except Exception:
+                    pass
 
         # === Detect idle pause (typing silence) ===
         silence_seconds = now - self._last_activity

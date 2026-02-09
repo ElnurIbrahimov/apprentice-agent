@@ -44,6 +44,7 @@
 16. **Idle Presence** - Cognitive load from 6 subsystems, background task orchestration (`idle_presence.py`)
 18. **Global Workspace Theory** - Baars/LIDA-inspired central broadcast architecture with 8 competing codelets, cognitive cycles (~300ms), attention schema, habituation, EventBus broadcast, system prompt injection (`global_workspace.py`, `consciousness.py` routes)
 17. **Neuromodulator Integration** - Real DA/5HT/NE/OT scaling in brain inference (`brain.py`)
+19. **System 1/System 2 Dynamic Switching** - Kahneman dual-process routing with metacognition confidence, neuromodulator tie-breaking (`brain.py`, `metacognition.py`, `config.py`)
 
 ### Memory Architecture
 14. **Temporal Knowledge Graph** - Bi-temporal model, edge invalidation, supersession tracking, Ebbinghaus decay (`knowledge_graph.py`)
@@ -55,6 +56,7 @@
 18. **Screenpipe Integration** - REST client, privacy filtering, delta detection (`screenpipe.py`)
 19. **LLaVA Vision + Florence-2** - Multi-model vision with Florence-2 fast path for captions/OCR, VRAM-aware model selection, Ollama fallback chain (`vision.py`)
 20. **Screen Monitor** - Platform-specific window detection, error detection, keyword watching (`screen_monitor.py`)
+21a. **Perceptual Hashing** - dHash visual change detection for screen monitoring, combined text+visual signals (`screenpipe.py`, `screen_monitor.py`, `workflow_detector.py`)
 
 ### Memory Architecture
 21. **ContextHeatmap + MemoryRecallIndicator Wiring** - REST endpoints track assistant responses/emotions, memory recalls feed context heatmap across all systems (A-MEM, RAG, KG, Hybrid), secondary methods record recalls (`chat.py`, `amem.py`, `local_rag.py`, `knowledge_graph.py`, `hybrid_amem.py`)
@@ -94,12 +96,17 @@
 | 3 | **Global Workspace Theory** | `3530ed0` - Implement GWT for unified conscious attention (8 codelets, cognitive cycles, attention schema, EventBus broadcast) | DONE |
 | 4 | **Self-Improvement Loop** | `e537f14` - Implement self-improvement loop: outcome recording from brain.py, enhanced strategy execution (LLM practice, param tuning, pattern extraction), background scheduler, quality evaluator | DONE |
 | 8 | **Voice Presence** | `c1fa7c7` - Add VoicePresenceService singleton: dedicated pyttsx3 worker thread (COM-safe), emotion-adaptive voice params from VOICE_PARAMS, WAV synthesis REST endpoint, voice toggle, wired to agent._speak() + GatewayDaemon proactive messages, audio_url in WebSocket done messages | DONE |
+<<<<<<< HEAD
 | 9 | **Florence-2 End-to-End Vision** | `401ec0c` - Florence-2 fast path in analyze_image() and analyze_screen_context(), VRAM-aware loading, `_run_florence2` wrapper, Ollama fallback chain | DONE |
 | 10 | **Calendar RRULE Support** | `401ec0c` - icalendar + recurring-ical-events parser with RRULE/EXDATE/RDATE/DURATION/VTIMEZONE, simple parser fallback, `_icalendar_to_event` converter | DONE |
 | 11 | **ADM-Style Chunking** | `401ec0c` - Sentence-boundary chunking, proposition extraction (definitional/verb-object/entity/modal), atomic fact storage in ChromaDB, enriched KG strengthening | DONE |
 | 12 | **Active Inference Outcome Learning** | `401ec0c` - Per-action cooldown adjustment (5% reduction on engage, 10% increase on dismiss), wired from chat handler + POST /proactive/dismiss | DONE |
 | 13 | **Template vs Real Thoughts** | `401ec0c` - Differential decay (real 0.985/90s, template 0.95/30s), intensity 0.4→0.65, silence threshold 30s→60s, probability 15%→10%, inner engine momentum check | DONE |
 | 14 | **Environmental Context** | `401ec0c` - OpenMeteo weather API + ipapi.co geolocation influence on ALMA mood drift, calendar-aware idle behaviors (ANTICIPATING boost), spontaneous micro-emotions (15%/cycle) | DONE |
+=======
+| 9 | **System 1/System 2 Dynamic Switching** | Kahneman dual-process routing in brain.py: confidence-based cascading via metacognition, neuromodulator tie-breaking, configurable thresholds | DONE |
+| 10 | **Perceptual Hashing (Screen Vision)** | dHash-based visual change detection in screenpipe.py + screen_monitor.py + workflow_detector.py, imagehash dependency, combined text+visual change signals | DONE |
+>>>>>>> 49212ae (Add System 1/System 2 dynamic switching and perceptual hashing)
 
 ---
 
@@ -141,4 +148,9 @@ Week 6:  Voice Presence (#8)                                     ✅ DONE
 Week 7:  Final 6 Gaps (#9-14)                                    ✅ DONE
 ```
 
+<<<<<<< HEAD
 **Target: 100% research goal achievement — ALL COMPLETE**
+=======
+**Target: 100% research goal achievement — 1 remaining (Advanced Vision Models #5)**
+**System 1/System 2 + Perceptual Hashing completed 2026-02-09**
+>>>>>>> 49212ae (Add System 1/System 2 dynamic switching and perceptual hashing)
