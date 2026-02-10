@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useChatStore } from '../store/chatStore';
-import type { Conversation, Message } from '../types';
+import type { Conversation } from '../types';
 import {
   PlusIcon,
   TrashIcon,
@@ -17,7 +17,6 @@ const API_BASE = '/api/chat';
 
 /** Group conversations by date */
 function groupByDate(conversations: Conversation[]): Record<string, Conversation[]> {
-  const now = Date.now() / 1000;
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   const todayTs = todayStart.getTime() / 1000;
@@ -49,7 +48,6 @@ export function ConversationList() {
     setCurrentConversationId,
     clearMessages,
     addMessage,
-    setIsLoading,
   } = useChatStore();
 
   const [collapsed, setCollapsed] = useState(false);

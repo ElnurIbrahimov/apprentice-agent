@@ -35,7 +35,7 @@ const QUICK_ACTIONS = [
 ];
 
 export function ChatContainer() {
-  const { messages, isLoading, error, connectionStatus, currentConversationId } = useChatStore();
+  const { messages, isLoading, error, connectionStatus } = useChatStore();
   const { sendMessage, stopGeneration } = useWebSocket();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
