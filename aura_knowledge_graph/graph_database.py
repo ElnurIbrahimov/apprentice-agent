@@ -149,10 +149,10 @@ class AURAKnowledgeGraph:
             logger.debug(f"MENTIONED_IN table may exist: {e}")
 
     def _escape_string(self, s: str) -> str:
-        """Escape single quotes in strings for Cypher queries."""
+        """Escape special characters in strings for Kuzu Cypher queries."""
         if s is None:
             return ""
-        return s.replace("'", "''").replace("\\", "\\\\")
+        return s.replace("\\", "\\\\").replace("'", "\\'").replace('"', '\\"')
 
     def add_entity(self, entity: Entity) -> str:
         """
@@ -270,18 +270,26 @@ class AURAKnowledgeGraph:
         """
         self.total_queries += 1
 
-        type_filter = ""
-        if entity_type:
-            type_filter = f"AND e.entity_type = '{entity_type.value}'"
-
         query_escaped = self._escape_string(query).lower()
+
+        # Build WHERE clause
+        conditions = []
+        if query_escaped:
+            conditions.append(
+                f"(toLower(e.name) CONTAINS '{query_escaped}'"
+                f" OR toLower(e.description) CONTAINS '{query_escaped}')"
+            )
+        if entity_type:
+            conditions.append(f"e.entity_type = '{entity_type.value}'")
+
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
 
         try:
             result = self.conn.execute(f"""
                 MATCH (e:Entity)
-                WHERE toLower(e.name) CONTAINS '{query_escaped}'
-                   OR toLower(e.description) CONTAINS '{query_escaped}'
-                {type_filter}
+                {where_clause}
                 RETURN e.id, e.name, e.entity_type, e.description,
                        e.importance, e.access_count
                 ORDER BY e.importance DESC

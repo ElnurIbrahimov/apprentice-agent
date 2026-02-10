@@ -274,7 +274,20 @@ class KGQueryEngine:
         Answer a question using only the knowledge graph.
         Useful for "What do I know about X?" type questions.
         """
-        result = self.query(question, mode=QueryMode.HYBRID, max_entities=10)
+        # Extract keywords by stripping common question/stop words
+        stop_words = {
+            "what", "who", "where", "when", "why", "how", "which",
+            "is", "are", "was", "were", "do", "does", "did",
+            "the", "a", "an", "of", "in", "on", "at", "to", "for",
+            "and", "or", "but", "not", "with", "about", "can", "could",
+            "will", "would", "should", "have", "has", "had",
+            "tell", "me", "know", "think", "my", "your", "i", "you",
+        }
+        words = question.lower().strip().rstrip("?!.").split()
+        keywords = [w for w in words if w not in stop_words]
+        search_query = " ".join(keywords) if keywords else question
+
+        result = self.query(search_query, mode=QueryMode.HYBRID, max_entities=10)
 
         if not result.entities:
             return "I don't have any information about that in my knowledge graph."
