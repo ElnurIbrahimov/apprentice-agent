@@ -90,9 +90,10 @@ def validate_custom_tool_code(code: str, tool_path: str) -> Tuple[bool, str]:
                 if module_base not in ALLOWED_TOOL_IMPORTS:
                     return False, f"Forbidden import 'from {node.module}' in {tool_path}"
 
-    # 4. Check for required class structure
+    # 4. Check for required class structure OR module-level execute() function
     has_tool_class = False
     has_execute = False
+    has_module_execute = False
 
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef):
@@ -103,14 +104,20 @@ def validate_custom_tool_code(code: str, tool_path: str) -> Tuple[bool, str]:
                     if isinstance(item, ast.FunctionDef):
                         if item.name in ("execute", "run", "__call__"):
                             has_execute = True
+        elif isinstance(node, ast.FunctionDef) and node.name == "execute":
+            # SynapseForge-generated tools use a module-level execute() function
+            has_module_execute = True
+
+    if has_tool_class and has_execute:
+        return True, "Valid"
+
+    if has_module_execute:
+        return True, "Valid (module-level execute)"
 
     if not has_tool_class:
         return False, f"No Tool class found in {tool_path}"
 
-    if not has_execute:
-        return False, f"Tool class missing execute/run method in {tool_path}"
-
-    return True, "Valid"
+    return False, f"Tool class missing execute/run method in {tool_path}"
 
 # Timeout constants
 AGENT_TIMEOUT = 120  # Overall agent loop timeout (2 minutes)
@@ -361,24 +368,24 @@ class ApprenticeAgent:
 
             # image_gen
             try:
-                from .tools.image_gen import ImageGenTool
-                self.tools['image_gen'] = ImageGenTool()
+                from .tools.image_gen import ImageGenerationTool
+                self.tools['image_gen'] = ImageGenerationTool()
                 logger.info("[LOADED] image_gen")
             except Exception as e:
                 logger.warning(f"image_gen not loaded: {e}")
 
             # hybrid_memory
             try:
-                from .tools.hybrid_memory import HybridMemoryTool
-                self.tools['hybrid_memory'] = HybridMemoryTool()
+                from .tools.hybrid_memory import HybridMemory
+                self.tools['hybrid_memory'] = HybridMemory()
                 logger.info("[LOADED] hybrid_memory")
             except Exception as e:
                 logger.warning(f"hybrid_memory not loaded: {e}")
 
             # sesame_tts
             try:
-                from .tools.sesame_tts import SesameTTSTool
-                self.tools['sesame_tts'] = SesameTTSTool()
+                from .tools.sesame_tts import SesameTTS
+                self.tools['sesame_tts'] = SesameTTS()
                 logger.info("[LOADED] sesame_tts")
             except Exception as e:
                 logger.warning(f"sesame_tts not loaded: {e}")
@@ -451,6 +458,18 @@ class ApprenticeAgent:
                                     tool_class = getattr(module, f'{tool_name}Tool', None)
                                 if tool_class:
                                     self.tools[tool_name] = tool_class()
+                                    logger.info(f"[LOADED] synthesized/{tool_name}")
+                                elif hasattr(module, 'execute'):
+                                    # SynapseForge-generated tools with module-level execute()
+                                    # Wrap in a simple object so tool dispatch works uniformly
+                                    exec_fn = module.execute
+                                    wrapper = type(f'{tool_name}_tool', (), {
+                                        'execute': staticmethod(exec_fn),
+                                        'run': staticmethod(exec_fn),
+                                        'name': tool_name,
+                                        'description': getattr(module, '__doc__', '') or tool_name,
+                                    })()
+                                    self.tools[tool_name] = wrapper
                                     logger.info(f"[LOADED] synthesized/{tool_name}")
                             except Exception as e:
                                 logger.warning(f"synthesized/{tool_name} not loaded: {e}")

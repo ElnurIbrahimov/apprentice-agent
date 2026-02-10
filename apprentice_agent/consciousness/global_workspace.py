@@ -664,10 +664,11 @@ class GlobalWorkspaceEngine:
     def _emit_broadcast(self, broadcast: BroadcastEvent):
         """Publish broadcast to EventBus 'workspace' channel."""
         try:
+            import asyncio
             from apprentice_agent.proactive.gateway_daemon import get_gateway_daemon
             daemon = get_gateway_daemon()
             if hasattr(daemon, "event_bus") and daemon.event_bus is not None:
-                daemon.event_bus.publish("workspace", {
+                payload = {
                     "type": "conscious_broadcast",
                     "cycle": broadcast.cycle_number,
                     "source": broadcast.conscious_state.attention_focus,
@@ -678,7 +679,14 @@ class GlobalWorkspaceEngine:
                     "intensity": broadcast.conscious_state.attention_intensity,
                     "competing_count": broadcast.competing_count,
                     "timestamp": broadcast.timestamp,
-                })
+                }
+                # event_bus.publish() is async — schedule it on the running loop
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(daemon.event_bus.publish("workspace", payload))
+                except RuntimeError:
+                    # No running event loop (sync context) — skip silently
+                    pass
         except Exception as e:
             logger.debug(f"[GWT] EventBus emit failed: {e}")
 
