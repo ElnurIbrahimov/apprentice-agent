@@ -721,19 +721,102 @@ class OllamaBrain:
         self.reset_context()
         logger.info("[BRAIN] Full reset completed")
 
+    def _quick_generate(self, prompt: str) -> str:
+        """Use MODEL_FAST for cheap/fast generation (summarization, planning).
+
+        No history, no system prompt injection — just prompt -> response.
+
+        Args:
+            prompt: The prompt to send
+
+        Returns:
+            Generated response string
+        """
+        from .config import Config
+        fast_model = Config.MODEL_FAST
+        try:
+            client, actual_model = self._get_client_for_model(fast_model)
+            response = client.chat(
+                model=actual_model,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            return response["message"]["content"]
+        except Exception as e:
+            logger.error(f"[BRAIN] Quick generate failed: {e}")
+            return ""
+
+    def compact_history(self, focus: str = None) -> str:
+        """Compact conversation history by summarizing older messages.
+
+        Takes the oldest 2/3 of conversation_history, asks LLM to summarize
+        them in 2-4 sentences, then replaces history with:
+        [summary as system message] + recent 1/3.
+
+        Args:
+            focus: Optional topic to focus the summary on
+
+        Returns:
+            The summary text, or empty string if nothing to compact
+        """
+        history = self.conversation_history
+        if len(history) < 6:
+            return ""
+
+        # Split: oldest 2/3 to summarize, keep recent 1/3
+        split_point = (len(history) * 2) // 3
+        old_messages = history[:split_point]
+        recent_messages = history[split_point:]
+
+        # Build summary prompt
+        conversation_text = "\n".join(
+            f"{msg['role'].upper()}: {msg['content'][:300]}"
+            for msg in old_messages
+        )
+
+        focus_instruction = ""
+        if focus:
+            focus_instruction = f" Focus especially on topics related to: {focus}."
+
+        summary_prompt = (
+            f"Summarize this conversation in 2-4 concise sentences. "
+            f"Capture the key topics, decisions, and any important context.{focus_instruction}\n\n"
+            f"{conversation_text}"
+        )
+
+        summary = self._quick_generate(summary_prompt)
+        if not summary:
+            return ""
+
+        # Replace history: summary as system message + recent messages
+        self.conversation_history = [
+            {"role": "system", "content": f"[Conversation summary] {summary}"}
+        ] + recent_messages
+        self._save_history()
+
+        logger.info(f"[BRAIN] Compacted {len(old_messages)} messages into summary, kept {len(recent_messages)} recent")
+        return summary
+
     def _check_auto_reset(self):
         """Check if auto-reset is needed and perform it.
 
-        Resets the query counter periodically but preserves full conversation
-        history on disk. Only the LLM context window is trimmed (via
-        MAX_HISTORY_LENGTH) at query time — saved history is never deleted.
+        Instead of just resetting the counter, compacts history to preserve
+        context. Falls back to simple reset if compaction fails.
         """
         self._query_count += 1
         self._total_query_count += 1  # Total count never resets
         if self._query_count >= self.AUTO_RESET_INTERVAL:
-            logger.info(f"[BRAIN] Auto-reset counter after {self._query_count} queries (total: {self._total_query_count})")
+            logger.info(f"[BRAIN] Auto-compact after {self._query_count} queries (total: {self._total_query_count})")
             self._query_count = 0
-            self._save_history()
+            # Try to compact instead of just saving
+            try:
+                summary = self.compact_history()
+                if summary:
+                    logger.info(f"[BRAIN] Auto-compacted history: {summary[:100]}...")
+                else:
+                    self._save_history()
+            except Exception as e:
+                logger.warning(f"[BRAIN] Auto-compact failed, saving history: {e}")
+                self._save_history()
 
     def think(
         self,

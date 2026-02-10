@@ -840,6 +840,37 @@ class ApprenticeAgent:
         elif not LIFE_MODELING_AVAILABLE:
             print("[INFO] Life Modeling not available (install mesa: pip install mesa)")
 
+        # Initialize Hooks / Event System
+        self.hooks = None
+        try:
+            from .hooks import HooksManager
+            self.hooks = HooksManager(tools=self.tools)
+            self.hooks.start_background(interval=15)
+            hook_count = len(self.hooks.list_hooks())
+            if hook_count:
+                print(f"[LOADED] Hooks - {hook_count} active hooks")
+            else:
+                print("[LOADED] Hooks - event system ready")
+        except Exception as e:
+            print(f"[INFO] Hooks system not available: {e}")
+
+        # Initialize Multi-Agent Orchestrator
+        self.orchestrator = None
+        try:
+            from .multi_agent.orchestrator import MultiAgentOrchestrator
+
+            def _orchestrator_llm(system_prompt, user_message):
+                return self.brain.think(user_message, system_prompt=system_prompt, use_history=False)
+
+            self.orchestrator = MultiAgentOrchestrator(
+                tool_registry=self.tools,
+                llm_func=_orchestrator_llm
+            )
+            specialists = list(self.orchestrator.specialists.keys())
+            print(f"[LOADED] Multi-Agent Orchestrator - {', '.join(specialists)}")
+        except Exception as e:
+            print(f"[INFO] Multi-Agent Orchestrator not available: {e}")
+
     def _proto_agi_llm(self, prompt: str) -> str:
         """LLM function for Proto-AGI - uses brain.think()"""
         try:
@@ -4882,6 +4913,308 @@ Try these commands:
             # Session will auto-close on next chat or after timeout
 
         return response
+
+    def chat_stream(self, message: str, speak: bool = False):
+        """Streaming chat interface that yields response chunks in real-time.
+
+        Pre-processes (fast path, emotion, context) BEFORE streaming starts,
+        then streams LLM output via brain.think_stream(), and runs
+        post-processing (MirrorMind, AURA humanizer, KG extraction) after.
+
+        Args:
+            message: User message
+            speak: If True, speak the final response using TTS
+
+        Yields:
+            str: Response text chunks as they arrive
+        """
+        # Start inner monologue session
+        if hasattr(self, 'monologue') and self.monologue:
+            self.monologue.start_session()
+            self.monologue.think("perceive", f"Received: '{message[:80]}{'...' if len(message) > 80 else ''}'")
+
+        # Track context for UI heatmap
+        try:
+            from api.routes.context import track_context_from_message
+            track_context_from_message(message, is_user=True)
+        except Exception:
+            pass
+
+        # ===== FAST PATH - yield entire response as single chunk =====
+        if self.use_fastpath and hasattr(self, 'fast_path_handler') and self.fast_path_handler:
+            fast_response = self.fast_path_handler.try_fast_path(message)
+            if fast_response:
+                if speak:
+                    self._speak(fast_response)
+                yield fast_response
+                return
+
+        # ===== PRE-PROCESSING (runs before streaming starts) =====
+
+        # AURA context
+        aura_context = None
+        if self.aura_enabled and self.aura:
+            try:
+                aura_context = self.aura.process_input(message)
+            except Exception:
+                pass
+
+        # Emotion analysis
+        emotion_reading = self._analyze_emotion(message)
+
+        # FluxMind / EvoEmo / AURA command checks — yield as single chunk
+        fluxmind_result = self._handle_fluxmind_command(message)
+        if fluxmind_result:
+            if speak:
+                self._speak(fluxmind_result, emotion=emotion_reading.emotion if emotion_reading else None)
+            yield fluxmind_result
+            return
+
+        evoemo_result = self._handle_evoemo_command(message)
+        if evoemo_result:
+            if speak:
+                self._speak(evoemo_result)
+            yield evoemo_result
+            return
+
+        if self.aura_enabled and self.aura:
+            aura_result = self._handle_aura_command(message)
+            if aura_result:
+                if speak:
+                    self._speak(aura_result)
+                yield aura_result
+                return
+
+        # CognitiveTheater for decision questions — yield as single chunk
+        message_lower = message.lower()
+        is_self_referential = any(pattern in message_lower for pattern in [
+            'compare yourself', 'compare you', 'how do you compare',
+            'are you better', 'are you worse', 'about yourself', 'about you',
+            'tell me about you', 'describe yourself', 'what are you',
+        ])
+        has_file_attachment = "[FILE_ATTACHMENT_CONTEXT]" in message
+        if self.theater_enabled and is_decision_question(message) and not is_self_referential and not has_file_attachment:
+            try:
+                if hasattr(self.brain, '_model_override') and self.brain._model_override:
+                    self.theater.set_model(self.brain._model_override)
+                response = self.theater.quick_debate(message)
+                if speak:
+                    self._speak(response, emotion=emotion_reading.emotion if emotion_reading else None)
+                yield response
+                return
+            except Exception:
+                pass
+
+        # Direct search/crypto/code handlers — yield as single chunk
+        search_response = self._handle_direct_search(message)
+        if search_response:
+            if speak:
+                self._speak(search_response, emotion=emotion_reading.emotion if emotion_reading else None)
+            yield search_response
+            return
+
+        crypto_response = self._handle_direct_crypto(message)
+        if crypto_response:
+            if speak:
+                self._speak(crypto_response, emotion=emotion_reading.emotion if emotion_reading else None)
+            yield crypto_response
+            return
+
+        code_response = self._handle_direct_code(message)
+        if code_response:
+            if speak:
+                self._speak(code_response, emotion=emotion_reading.emotion if emotion_reading else None)
+            yield code_response
+            return
+
+        # ===== CONTEXT GATHERING (before streaming) =====
+        is_simple = self._is_simple_query(message)
+
+        # Detect task type for model routing
+        code_patterns = [
+            'calculate', 'compute', 'factorial', 'fibonacci', 'prime',
+            'run code', 'execute code', 'run python', 'execute python',
+            'write code', 'write a function', 'write a script', 'implement',
+            'algorithm', 'sort', 'binary search', 'recursion',
+            'what is', 'what\'s'
+        ]
+        math_patterns = ['!', '+', '-', '*', '/', '^', '**', 'squared', 'cubed', 'power of']
+        is_code_task = any(p in message_lower for p in code_patterns)
+        is_math_task = any(p in message for p in math_patterns) and any(c.isdigit() for c in message)
+
+        if is_simple:
+            task_type = TaskType.SIMPLE
+        elif is_code_task or is_math_task:
+            task_type = TaskType.CODE
+        else:
+            task_type = None
+
+        # KG context
+        kg_context = ""
+        if not is_simple and self.kg_bridge is not None:
+            try:
+                kg_context = self.kg_bridge.get_context_for_query(message, max_entities=3)
+            except Exception:
+                pass
+
+        # RAG context
+        rag_context = ""
+        if not is_simple and 'local_rag' in self.tools:
+            try:
+                rag_tool = self.tools['local_rag']
+                rag_context = rag_tool.rag.get_context(message, top_k=3, max_tokens=1500)
+            except Exception:
+                pass
+
+        # A-MEM context
+        amem_context = ""
+        if 'amem' in self.tools:
+            try:
+                amem_tool = self.tools['amem']
+                memories_raw = amem_tool.amem.search(message, k=3)
+                memories = [note for note, score in memories_raw] if memories_raw else []
+                if memories:
+                    memory_texts = [f"- {m.content}" for m in memories if m.content]
+                    if memory_texts:
+                        amem_context = "RELEVANT MEMORIES:\n" + "\n".join(memory_texts)
+            except Exception:
+                pass
+
+        # Tone modifier
+        tone_modifier = None
+        if aura_context and aura_context.get("tone"):
+            tone_modifier = f"Respond in a {aura_context['tone']} manner."
+        elif emotion_reading and emotion_reading.confidence >= 50:
+            tone_modifier = get_tone_modifier(emotion_reading.emotion)
+
+        # System prompt addon with contexts
+        system_prompt_addon = None
+        context_parts = []
+        if amem_context:
+            context_parts.append(amem_context)
+        if kg_context:
+            context_parts.append(kg_context)
+        if rag_context:
+            context_parts.append(rag_context)
+        if context_parts:
+            system_prompt_addon = "\n\n".join(context_parts) + "\n\nUse this knowledge and memories when relevant to the conversation. Remember personal details about the user."
+
+        # ===== STREAMING LLM RESPONSE =====
+        full_response = ""
+        for chunk in self.brain.think_stream(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon):
+            full_response += chunk
+            yield chunk
+
+        # ===== POST-PROCESSING =====
+
+        # MirrorMind self-critique
+        if self.mirrormind_enabled and not is_simple:
+            try:
+                critique_result = self.mirrormind.refine(message, full_response)
+                if critique_result.was_improved():
+                    # Yield correction as extra chunk
+                    correction = "\n\n[Refined] " + critique_result.improved
+                    full_response = critique_result.improved
+                    yield correction
+            except Exception:
+                pass
+
+        # AURA humanizer
+        if self.aura_enabled and self.aura and aura_context:
+            try:
+                aura_response = self.aura.process_response(full_response, aura_context)
+                if aura_response.content != full_response:
+                    thinking_prefix = ""
+                    if aura_context.get("thinking_prefix"):
+                        thinking_prefix = aura_context["thinking_prefix"] + "\n\n"
+                    humanized = thinking_prefix + aura_response.content
+                    # Yield the difference as a correction
+                    yield "\n\n[AURA] " + humanized
+                    full_response = humanized
+            except Exception:
+                pass
+
+        # TTS on full response
+        if speak:
+            self._speak(full_response, emotion=emotion_reading.emotion if emotion_reading else None)
+
+        # KG entity extraction (background)
+        if not is_simple and self.kg_bridge is not None:
+            try:
+                if len(full_response) > 20:
+                    extraction_text = f"User: {message}\nAssistant: {full_response[:500]}"
+                    self.kg_bridge.extraction_queue.append({
+                        "trace_id": f"chat_{time.time()}",
+                        "content": extraction_text,
+                        "surprise": 0.6,
+                        "timestamp": time.time()
+                    })
+                    if len(self.kg_bridge.extraction_queue) >= self.kg_bridge.config.batch_size:
+                        self.kg_bridge.flush()
+            except Exception:
+                pass
+
+        # End monologue session
+        if hasattr(self, 'monologue') and self.monologue:
+            self.monologue.think("reflect", "Streaming chat response completed")
+
+    def create_plan(self, task: str) -> dict:
+        """Create an execution plan without acting.
+
+        Asks the LLM to plan using the available tools list.
+
+        Args:
+            task: The task description to plan for
+
+        Returns:
+            dict with keys: task, steps (list), tools (list), complexity (str)
+        """
+        # Build tools list for the planner
+        tool_names = list(self.tools.keys())
+        tools_desc = ", ".join(tool_names[:30])  # Limit for prompt size
+
+        plan_prompt = (
+            f"You are a planning assistant. Create a step-by-step execution plan for this task. "
+            f"Do NOT execute anything — only plan.\n\n"
+            f"Available tools: {tools_desc}\n\n"
+            f"Task: {task}\n\n"
+            f"Respond in this exact format:\n"
+            f"COMPLEXITY: simple|medium|complex\n"
+            f"TOOLS: tool1, tool2, tool3\n"
+            f"STEPS:\n"
+            f"1. First step\n"
+            f"2. Second step\n"
+            f"3. Third step\n"
+        )
+
+        raw = self.brain._quick_generate(plan_prompt)
+
+        # Parse response
+        steps = []
+        tools = []
+        complexity = "medium"
+
+        for line in raw.split("\n"):
+            line = line.strip()
+            if line.upper().startswith("COMPLEXITY:"):
+                complexity = line.split(":", 1)[1].strip().lower()
+            elif line.upper().startswith("TOOLS:"):
+                tools = [t.strip() for t in line.split(":", 1)[1].split(",") if t.strip()]
+            elif line and line[0].isdigit() and "." in line[:4]:
+                # Numbered step like "1. Do something"
+                step_text = line.split(".", 1)[1].strip() if "." in line else line
+                steps.append(step_text)
+
+        # Fallback if parsing failed — use entire response as single step
+        if not steps:
+            steps = [line.strip() for line in raw.split("\n") if line.strip() and not line.startswith(("COMPLEXITY", "TOOLS"))]
+
+        return {
+            "task": task,
+            "steps": steps,
+            "tools": tools,
+            "complexity": complexity,
+        }
 
     def _analyze_emotion(self, message: str):
         """Analyze emotional state from user message."""

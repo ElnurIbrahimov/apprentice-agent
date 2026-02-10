@@ -5,6 +5,7 @@ import argparse
 import sys
 
 from apprentice_agent import ApprenticeAgent
+from apprentice_agent.config import Config
 from apprentice_agent.dream import run_dream_mode
 from apprentice_agent.tools.voice import VoiceConversation
 
@@ -105,7 +106,8 @@ def run_chat_mode(agent: ApprenticeAgent, speak: bool = False):
     print("  \033[90mAutonomous Universal Reasoning Agent\033[0m\n")
     if speak:
         print("  \033[33mVoice output ENABLED\033[0m")
-    print("  \033[90mCommands: /goal <text> | /recall <query> | /clear | /quit\033[0m")
+    print("  \033[90mCommands: /model | /compact | /plan | /browse | /agent | /hook\033[0m")
+    print("  \033[90m          /goal <text> | /recall <query> | /clear | /quit\033[0m")
     print("  \033[90mModes:    aura --voice | aura --dream | aura \"<goal>\"\033[0m")
     print("  " + "\033[90m" + "-" * 54 + "\033[0m")
 
@@ -122,8 +124,10 @@ def run_chat_mode(agent: ApprenticeAgent, speak: bool = False):
         if user_input.startswith("/"):
             handle_command(agent, user_input, speak=speak)
         else:
-            response = agent.chat(user_input, speak=speak)
-            print(f"\nAgent: {response}")
+            print("\nAURA: ", end="", flush=True)
+            for chunk in agent.chat_stream(user_input, speak=speak):
+                print(chunk, end="", flush=True)
+            print()
 
 
 def handle_command(agent: ApprenticeAgent, command: str, speak: bool = False):
@@ -158,8 +162,285 @@ def handle_command(agent: ApprenticeAgent, command: str, speak: bool = False):
             print(f"[Spoke: {arg}]")
         else:
             print("Usage: /speak <text to speak>")
+    elif cmd == "/model":
+        if not arg:
+            # Show current model + all available
+            models = Config.get_all_models()
+            override = agent.brain._model_override
+            print("\n  Model Configuration:")
+            print(f"    Override:  {override or '(auto)'}")
+            print(f"    fast:      {models.get('fast', 'N/A')}")
+            print(f"    reason:    {models.get('reason', 'N/A')}")
+            print(f"    code:      {models.get('code', 'N/A')}")
+            print(f"    vision:    {models.get('vision', 'N/A')}")
+            if models.get('reason_cloud'):
+                print(f"    cloud:     {models.get('reason_cloud', 'N/A')}")
+            print("\n  Usage: /model <name> | /model auto")
+        elif arg.lower() == "auto":
+            agent.brain.set_model_override(None)
+            print("Model override cleared. Using auto-selection.")
+        else:
+            agent.brain.set_model_override(arg)
+            print(f"Model locked to: {arg}")
+    elif cmd == "/compact":
+        focus = arg if arg else None
+        print("Compacting conversation history...")
+        summary = agent.brain.compact_history(focus=focus)
+        if summary:
+            print(f"Compacted. Summary: {summary[:200]}...")
+        else:
+            print("Nothing to compact (history too short).")
+    elif cmd == "/plan":
+        if arg:
+            print("\nCreating execution plan...")
+            plan = agent.create_plan(arg)
+            print(f"\n  Task: {plan.get('task', arg)}")
+            print(f"  Complexity: {plan.get('complexity', 'unknown')}")
+            print(f"  Steps:")
+            for i, step in enumerate(plan.get('steps', []), 1):
+                print(f"    {i}. {step}")
+            if plan.get('tools'):
+                print(f"  Tools needed: {', '.join(plan['tools'])}")
+            print()
+            try:
+                confirm = input("  Execute this plan? (yes/no): ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                confirm = "no"
+            if confirm in ("yes", "y"):
+                print("\n  Executing plan...")
+                result = agent.run(arg)
+                print_result(result, is_fastpath=result.get("fast_path", False))
+            else:
+                print("  Plan cancelled.")
+        else:
+            print("Usage: /plan <task description>")
+    elif cmd == "/browse":
+        if not arg:
+            print("Usage: /browse <url> | /browse search <query> | /browse text | /browse screenshot | /browse click <selector> | /browse links")
+        else:
+            _handle_browse_command(agent, arg)
+    elif cmd == "/agent":
+        _handle_agent_command(agent, arg)
+    elif cmd == "/hook":
+        _handle_hook_command(agent, arg)
     else:
         print(f"Unknown command: {cmd}")
+
+
+def _handle_browse_command(agent: ApprenticeAgent, arg: str):
+    """Handle /browse subcommands using the existing BrowserTool."""
+    # Get or create the browser tool
+    if 'browser' not in agent.tools:
+        try:
+            from apprentice_agent.tools.browser import BrowserTool
+            agent.tools['browser'] = BrowserTool(headless=False)
+        except ImportError:
+            print("Browser tool not available. Install playwright: pip install playwright && playwright install")
+            return
+
+    browser = agent.tools['browser']
+    parts = arg.split(maxsplit=1)
+    subcmd = parts[0].lower()
+    subarg = parts[1] if len(parts) > 1 else ""
+
+    if subcmd == "search":
+        if not subarg:
+            print("Usage: /browse search <query>")
+            return
+        query_url = f"https://www.google.com/search?q={subarg.replace(' ', '+')}"
+        result = browser.open(query_url)
+        if result.get("success"):
+            print(f"  Searched: {subarg}")
+            print(f"  Title: {result.get('title', 'N/A')}")
+            links = browser.get_links()
+            if links.get("success"):
+                print(f"  Top results:")
+                count = 0
+                for link in links.get("links", []):
+                    href = link.get("href", "")
+                    text = link.get("text", "").strip()
+                    if text and "google" not in href and len(text) > 5:
+                        print(f"    - {text[:80]}")
+                        print(f"      {href}")
+                        count += 1
+                        if count >= 5:
+                            break
+        else:
+            print(f"  Error: {result.get('error', 'Unknown error')}")
+
+    elif subcmd == "text":
+        result = browser.get_text()
+        if result.get("success"):
+            print(f"  Page: {result.get('title', 'N/A')}")
+            print(f"  URL: {result.get('url', 'N/A')}")
+            text = result.get("text", "")
+            print(f"  Text ({result.get('length', 0)} chars):\n")
+            # Print first 2000 chars
+            print(text[:2000])
+            if len(text) > 2000:
+                print(f"\n  ... ({len(text) - 2000} more chars)")
+        else:
+            print(f"  Error: {result.get('error', 'No page loaded')}")
+
+    elif subcmd == "screenshot":
+        result = browser.screenshot(subarg if subarg else None)
+        if result.get("success"):
+            print(f"  Screenshot saved: {result.get('path', 'N/A')}")
+        else:
+            print(f"  Error: {result.get('error', 'Screenshot failed')}")
+
+    elif subcmd == "click":
+        if not subarg:
+            print("Usage: /browse click <css-selector>")
+            return
+        result = browser.click(subarg)
+        if result.get("success"):
+            print(f"  Clicked: {subarg}")
+            print(f"  Now at: {result.get('url', 'N/A')}")
+        else:
+            print(f"  Error: {result.get('error', 'Click failed')}")
+
+    elif subcmd == "links":
+        result = browser.get_links()
+        if result.get("success"):
+            print(f"  URL: {result.get('url', 'N/A')}")
+            print(f"  Links ({result.get('count', 0)}):")
+            for link in result.get("links", [])[:20]:
+                text = link.get("text", "").strip()
+                href = link.get("href", "")
+                if text:
+                    print(f"    [{text[:60]}] {href}")
+        else:
+            print(f"  Error: {result.get('error', 'No page loaded')}")
+
+    else:
+        # Treat as URL
+        result = browser.open(arg)
+        if result.get("success"):
+            print(f"  Title: {result.get('title', 'N/A')}")
+            print(f"  URL: {result.get('url', 'N/A')}")
+            print(f"  Status: {result.get('status', 'N/A')}")
+        else:
+            print(f"  Error: {result.get('error', 'Navigation failed')}")
+
+
+def _handle_agent_command(agent: ApprenticeAgent, arg: str):
+    """Handle /agent subcommands using the multi-agent orchestrator."""
+    # Initialize orchestrator if needed
+    if not hasattr(agent, 'orchestrator') or agent.orchestrator is None:
+        try:
+            from apprentice_agent.multi_agent.orchestrator import MultiAgentOrchestrator
+
+            def llm_func(system_prompt, user_message):
+                return agent.brain.think(user_message, system_prompt=system_prompt, use_history=False)
+
+            agent.orchestrator = MultiAgentOrchestrator(
+                tool_registry=agent.tools,
+                llm_func=llm_func
+            )
+        except Exception as e:
+            print(f"Multi-agent system not available: {e}")
+            return
+
+    specialists = list(agent.orchestrator.specialists.keys())
+
+    if not arg:
+        print("\n  Available specialists:")
+        for name in specialists:
+            spec = agent.orchestrator.specialists[name]
+            desc = getattr(spec, 'description', name.capitalize())
+            print(f"    {name:12s} - {desc}")
+        print(f"\n  Usage: /agent <specialist> <task>")
+        print(f"         /agent parallel <task>")
+        return
+
+    parts = arg.split(maxsplit=1)
+    specialist = parts[0].lower()
+    task = parts[1] if len(parts) > 1 else ""
+
+    if not task:
+        print(f"Usage: /agent {specialist} <task>")
+        return
+
+    if specialist == "parallel":
+        # Run all specialists in parallel
+        print(f"  Running all specialists in parallel on: {task[:60]}...")
+        from apprentice_agent.multi_agent.protocol import AgentMessage, CollaborationMode
+        message = AgentMessage(content=task, sender="user")
+        results = agent.orchestrator._execute_parallel(specialists, message)
+        for result in results:
+            status = "OK" if result.success else "FAIL"
+            print(f"\n  [{result.agent.upper()}] ({status}):")
+            print(f"  {result.response[:500]}")
+    elif specialist in specialists:
+        # Run specific specialist
+        print(f"  [{specialist.upper()}] Working on: {task[:60]}...")
+        from apprentice_agent.multi_agent.protocol import AgentMessage
+        message = AgentMessage(content=task, sender="user")
+        result = agent.orchestrator._execute_single(specialist, message)
+        if result.success:
+            print(f"\n  [{specialist.upper()}]:")
+            print(f"  {result.response}")
+        else:
+            print(f"  Error: {result.response}")
+    else:
+        print(f"  Unknown specialist: {specialist}")
+        print(f"  Available: {', '.join(specialists)}, parallel")
+
+
+def _handle_hook_command(agent: ApprenticeAgent, arg: str):
+    """Handle /hook subcommands."""
+    if not hasattr(agent, 'hooks') or agent.hooks is None:
+        try:
+            from apprentice_agent.hooks import HooksManager
+            agent.hooks = HooksManager(tools=agent.tools)
+            agent.hooks.start_background(interval=15)
+        except Exception as e:
+            print(f"Hooks system not available: {e}")
+            return
+
+    if not arg:
+        print("Usage: /hook list | /hook add <event> <condition> <action> <args> | /hook remove <id>")
+        return
+
+    parts = arg.split(maxsplit=1)
+    subcmd = parts[0].lower()
+    subarg = parts[1] if len(parts) > 1 else ""
+
+    if subcmd == "list":
+        hooks = agent.hooks.list_hooks()
+        if not hooks:
+            print("  No hooks registered.")
+        else:
+            print(f"\n  Registered hooks ({len(hooks)}):")
+            for h in hooks:
+                print(f"    [{h['id']}] {h['event']}:{h['condition']} -> {h['action']} {h.get('action_args', '')}")
+    elif subcmd == "add":
+        # Parse: /hook add schedule 09:00 notify "Good morning"
+        add_parts = subarg.split(maxsplit=3)
+        if len(add_parts) < 3:
+            print("Usage: /hook add <event> <condition> <action> [args]")
+            print("  Events:  schedule, file_modified, system_alert, clipboard_changed")
+            print("  Actions: notify, speak, run_tool, log")
+            print("  Example: /hook add schedule 09:00 notify Good morning!")
+            return
+        event = add_parts[0]
+        condition = add_parts[1]
+        action = add_parts[2]
+        action_args = add_parts[3] if len(add_parts) > 3 else ""
+        hook_id = agent.hooks.register(event, condition, action, action_args)
+        print(f"  Hook registered with ID: {hook_id}")
+    elif subcmd == "remove":
+        if not subarg:
+            print("Usage: /hook remove <id>")
+            return
+        success = agent.hooks.unregister(subarg)
+        if success:
+            print(f"  Hook {subarg} removed.")
+        else:
+            print(f"  Hook {subarg} not found.")
+    else:
+        print(f"  Unknown hook command: {subcmd}")
 
 
 def print_result(result: dict, is_fastpath: bool = False):
