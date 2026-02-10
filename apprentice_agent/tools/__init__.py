@@ -100,6 +100,7 @@ from .api_tester import APITesterTool
 from .database_tool import DatabaseTool
 from .audio_transcriber import AudioTranscriberTool
 from .clipboard_history import ClipboardHistoryTool
+from .research_tool import ResearchTool
 
 # Import FluxMind from external tools directory
 import sys
@@ -261,4 +262,6 @@ __all__ = [
     "AudioTranscriberTool",
     # Clipboard History
     "ClipboardHistoryTool",
+    # Research
+    "ResearchTool",
 ]

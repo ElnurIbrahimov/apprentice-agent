@@ -2036,7 +2036,8 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
             "api_tester": "api_tester - test HTTP APIs and REST endpoints. ACTION: 'GET <url>' or 'POST <url> body:<json>' or 'PUT <url> body:<json>' or 'DELETE <url>' or 'history' or 'inspect <id>'",
             "database": "database - query SQLite databases, inspect schemas, import/export CSV. ACTION: SQL query like 'SELECT * FROM table' or 'schema' or 'tables' or 'import <csv> <table>' or 'export <table>'",
             "audio_transcriber": "audio_transcriber - transcribe audio/video files to text using Whisper. ACTION: 'transcribe <path>' or 'translate <path>' or 'detect <path>' or 'list' or 'status'",
-            "clipboard_history": "clipboard_history - clipboard history with search, pinning, categories. ACTION: 'capture' or 'list' or 'search <query>' or 'pin <id>' or 'restore <id>' or 'stats'"
+            "clipboard_history": "clipboard_history - clipboard history with search, pinning, categories. ACTION: 'capture' or 'list' or 'search <query>' or 'pin <id>' or 'restore <id>' or 'stats'",
+            "research": "research - save, search, and organize research notes and findings. ACTION: 'save title:<title> content:<text> category:<cat>' or 'search <query>' or 'list' or 'list <category>' or 'read <filename>' or 'stats' or 'skills' or 'tag <tagname>'"
         }
         return "\n".join(descriptions.get(t, t) for t in available_tools)
 
@@ -2096,6 +2097,8 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
                     tool = "audio_transcriber"
                 elif "clipboard_history" in tool or "clip hist" in tool:
                     tool = "clipboard_history"
+                elif "research" in tool or "save research" in tool or "notes" in tool:
+                    tool = "research"
                 result["tool"] = tool
             elif line.upper().startswith("ACTION:"):
                 action = line[7:].strip()
@@ -2152,6 +2155,8 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
                 result["tool"] = "audio_transcriber"
             elif "clipboard_history" in response_lower or "clipboard history" in response_lower or "clip history" in response_lower:
                 result["tool"] = "clipboard_history"
+            elif "save research" in response_lower or "research note" in response_lower or "save finding" in response_lower:
+                result["tool"] = "research"
 
         if not result["action"] and result["tool"] == "web_search":
             # Try to extract a search query from the response

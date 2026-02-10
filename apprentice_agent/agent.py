@@ -129,7 +129,7 @@ from .identity import load_identity, get_identity_prompt, detect_name_change, de
 from .memory import MemorySystem
 from .metacognition import MetacognitionLogger
 from .config import Config
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, build_adaptive_system_prompt, get_monologue, KnowledgeGraphTool, get_knowledge_graph, MetacognitiveGuardian, GuardianConfig, NeuroDreamEngine, SleepPhase, ReflexionEngine, code_syntax_evaluator, SynapseForge, WorldSim, RiskLevel, CalendarTool, SpacedRepetitionTool, TaskManagerTool, ClipboardHistoryTool, APITesterTool, DatabaseTool, AudioTranscriberTool
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, build_adaptive_system_prompt, get_monologue, KnowledgeGraphTool, get_knowledge_graph, MetacognitiveGuardian, GuardianConfig, NeuroDreamEngine, SleepPhase, ReflexionEngine, code_syntax_evaluator, SynapseForge, WorldSim, RiskLevel, CalendarTool, SpacedRepetitionTool, TaskManagerTool, ClipboardHistoryTool, APITesterTool, DatabaseTool, AudioTranscriberTool, ResearchTool
 from .tools.mirrormind import MirrorMind
 from .tools.cognitive_theater import CognitiveTheater, is_decision_question
 from .tools.crypto_price import CryptoPriceTool
@@ -344,6 +344,7 @@ class ApprenticeAgent:
             "spaced_repetition": SpacedRepetitionTool(),
             "task_manager": TaskManagerTool(),
             "clipboard_history": ClipboardHistoryTool(),
+            "research": ResearchTool(),
         }
         logger.info("[LOADED] crypto_price - Real-time crypto prices from CoinGecko")
 
@@ -945,6 +946,9 @@ class ApprenticeAgent:
         elif tool_name == "audio_transcriber":
             from .tools.audio_transcriber import AudioTranscriberTool
             self.tools["audio_transcriber"] = AudioTranscriberTool()
+        elif tool_name == "research":
+            from .tools.research_tool import ResearchTool
+            self.tools["research"] = ResearchTool()
 
         return self.tools.get(tool_name)
 

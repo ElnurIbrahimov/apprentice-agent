@@ -783,3 +783,111 @@ def _clipboard_stats_sync() -> dict:
     if "clipboard_history" in agent.tools:
         return agent.tools["clipboard_history"].stats()
     return {"success": False, "error": "Clipboard history tool not loaded"}
+
+
+# ============================================================================
+# RESEARCH
+# ============================================================================
+
+class SaveResearchRequest(BaseModel):
+    title: str
+    content: str
+    category: str = "tools"
+    tags: Optional[List[str]] = None
+    sources: Optional[List[str]] = None
+
+
+@router.get("/research/list")
+async def research_list(category: Optional[str] = None):
+    """List research files."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, lambda: _research_list_sync(category))
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _research_list_sync(category: Optional[str]) -> dict:
+    agent = _get_agent_service().agent
+    if "research" in agent.tools:
+        return agent.tools["research"].list_research(category=category)
+    return {"success": False, "error": "Research tool not loaded"}
+
+
+@router.post("/research/save")
+async def research_save(request: SaveResearchRequest):
+    """Save a research note."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, lambda: _research_save_sync(request))
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _research_save_sync(request: SaveResearchRequest) -> dict:
+    agent = _get_agent_service().agent
+    if "research" in agent.tools:
+        return agent.tools["research"].save(
+            title=request.title,
+            content=request.content,
+            category=request.category,
+            tags=request.tags,
+            sources=request.sources,
+        )
+    return {"success": False, "error": "Research tool not loaded"}
+
+
+@router.get("/research/search")
+async def research_search(query: str, category: Optional[str] = None):
+    """Search research files."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, lambda: _research_search_sync(query, category))
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _research_search_sync(query: str, category: Optional[str]) -> dict:
+    agent = _get_agent_service().agent
+    if "research" in agent.tools:
+        return agent.tools["research"].search(query, category=category)
+    return {"success": False, "error": "Research tool not loaded"}
+
+
+@router.get("/research/stats")
+async def research_stats():
+    """Research statistics."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, _research_stats_sync)
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _research_stats_sync() -> dict:
+    agent = _get_agent_service().agent
+    if "research" in agent.tools:
+        return agent.tools["research"].stats()
+    return {"success": False, "error": "Research tool not loaded"}
+
+
+@router.get("/research/skills")
+async def research_skills():
+    """List saved skills."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, _research_skills_sync)
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _research_skills_sync() -> dict:
+    agent = _get_agent_service().agent
+    if "research" in agent.tools:
+        return agent.tools["research"].list_skills()
+    return {"success": False, "error": "Research tool not loaded"}
