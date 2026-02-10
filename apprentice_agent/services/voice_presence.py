@@ -104,6 +104,29 @@ class VoicePresenceService:
         self._enabled = enabled
         logger.info(f"[VoicePresence] Enabled: {enabled}")
 
+    def synthesize_audio_array(self, text: str) -> tuple:
+        """Synthesize text to a numpy array via the worker thread.
+
+        Returns:
+            (np.ndarray, sample_rate) or (None, 0) on failure.
+        """
+        import wave as _wave
+        import numpy as _np
+
+        wav_bytes = self.synthesize_wav(text)
+        if not wav_bytes:
+            return None, 0
+
+        try:
+            import io as _io
+            with _wave.open(_io.BytesIO(wav_bytes), 'rb') as wf:
+                sr = wf.getframerate()
+                frames = wf.readframes(wf.getnframes())
+                audio = _np.frombuffer(frames, dtype=_np.int16).astype(_np.float32) / 32768.0
+                return audio, sr
+        except Exception:
+            return None, 0
+
     def is_speaking(self) -> bool:
         """Check if currently speaking."""
         return self._speaking.is_set()

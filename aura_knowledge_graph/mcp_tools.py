@@ -224,6 +224,79 @@ def create_kg_tools(kg: AURAKnowledgeGraph) -> Dict[str, MCPTool]:
         else:
             return {"success": False, "error": f"Unknown action: {action}"}
 
+    # Tool: Invalidate Relationship
+    def invalidate_relationship(params: Dict) -> Dict:
+        source = params.get("source", "")
+        target = params.get("target", "")
+        relationship = params.get("relationship", "")
+
+        if not source or not target or not relationship:
+            return {"success": False, "error": "source, target, and relationship are required"}
+
+        source_entities = kg.query_entities(source, limit=1)
+        target_entities = kg.query_entities(target, limit=1)
+
+        if not source_entities:
+            return {"success": False, "error": f"Source entity not found: {source}"}
+        if not target_entities:
+            return {"success": False, "error": f"Target entity not found: {target}"}
+
+        success = kg.invalidate_relationship(
+            source_entities[0]["id"], target_entities[0]["id"], relationship
+        )
+        return {
+            "success": success,
+            "message": f"Invalidated: {source} --[{relationship}]--> {target}" if success else "Failed to invalidate"
+        }
+
+    # Tool: Query at Time
+    def query_at_time(params: Dict) -> Dict:
+        query = params.get("query", "")
+        at_time = params.get("at_time")
+
+        if not query:
+            return {"success": False, "error": "Query is required"}
+        if at_time is None:
+            return {"success": False, "error": "at_time (epoch seconds) is required"}
+
+        result = query_engine.query(
+            query, mode=QueryMode.TEMPORAL, at_time=int(at_time)
+        )
+        return {
+            "success": True,
+            "entities": result.entities,
+            "relationships": result.relationships,
+            "context": result.context_string,
+            "metadata": result.metadata,
+        }
+
+    # Tool: Relationship History
+    def relationship_history(params: Dict) -> Dict:
+        source = params.get("source", "")
+        target = params.get("target", "")
+
+        if not source or not target:
+            return {"success": False, "error": "source and target are required"}
+
+        source_entities = kg.query_entities(source, limit=1)
+        target_entities = kg.query_entities(target, limit=1)
+
+        if not source_entities:
+            return {"success": False, "error": f"Source entity not found: {source}"}
+        if not target_entities:
+            return {"success": False, "error": f"Target entity not found: {target}"}
+
+        history = kg.get_relationship_history(
+            source_entities[0]["id"], target_entities[0]["id"]
+        )
+        return {
+            "success": True,
+            "source": source,
+            "target": target,
+            "history": history,
+            "count": len(history),
+        }
+
     # Create tool definitions
     tools = {
         "query_knowledge_graph": MCPTool(
@@ -399,7 +472,50 @@ def create_kg_tools(kg: AURAKnowledgeGraph) -> Dict[str, MCPTool]:
                 "required": ["action"]
             },
             execute_func=maintenance
-        )
+        ),
+
+        "invalidate_relationship": MCPTool(
+            name="invalidate_relationship",
+            description="Invalidate (soft-delete) a relationship between two entities. The edge is kept for history but marked inactive.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "source": {"type": "string", "description": "Source entity name"},
+                    "target": {"type": "string", "description": "Target entity name"},
+                    "relationship": {"type": "string", "description": "Relationship type to invalidate"}
+                },
+                "required": ["source", "target", "relationship"]
+            },
+            execute_func=invalidate_relationship
+        ),
+
+        "query_at_time": MCPTool(
+            name="query_at_time",
+            description="Time-travel query: find entities and relationships that were active at a specific point in time.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query (entity name or keyword)"},
+                    "at_time": {"type": "integer", "description": "Unix epoch timestamp for point-in-time query"}
+                },
+                "required": ["query", "at_time"]
+            },
+            execute_func=query_at_time
+        ),
+
+        "relationship_history": MCPTool(
+            name="relationship_history",
+            description="Get the full history of all relationship versions between two entities, showing when facts were valid.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "source": {"type": "string", "description": "Source entity name"},
+                    "target": {"type": "string", "description": "Target entity name"}
+                },
+                "required": ["source", "target"]
+            },
+            execute_func=relationship_history
+        ),
     }
 
     return tools

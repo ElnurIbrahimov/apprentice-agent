@@ -166,6 +166,9 @@ class TitansKGBridge:
             self._queue_start_time = None
             return []
 
+        # Derive valid_from from earliest trace timestamp in the batch
+        earliest_ts = int(min(item["timestamp"] for item in self.extraction_queue))
+
         # Store entities in graph
         entity_ids = []
         for entity in result.entities:
@@ -173,13 +176,14 @@ class TitansKGBridge:
             entity_ids.append(eid)
             self.total_entities_extracted += 1
 
-        # Store relationships
+        # Store relationships with valid_from from trace timestamps
         for rel in result.relationships:
+            rel.valid_from = earliest_ts
             self.kg.add_relationship(rel)
 
         # Create co-occurrence relationships if enabled
         if self.config.create_co_occurrence and len(entity_ids) > 1:
-            self._create_co_occurrences(entity_ids, combined_text)
+            self._create_co_occurrences(entity_ids, combined_text, valid_from=earliest_ts)
 
         # Clear queue
         self.extraction_queue = []
@@ -196,7 +200,7 @@ class TitansKGBridge:
         """Get names of existing entities for deduplication."""
         return self.kg.get_all_entity_names(limit=limit)
 
-    def _create_co_occurrences(self, entity_ids: List[str], evidence: str):
+    def _create_co_occurrences(self, entity_ids: List[str], evidence: str, valid_from: Optional[int] = None):
         """Create CO_OCCURS relationships between entities found together."""
         evidence_short = evidence[:200] + "..." if len(evidence) > 200 else evidence
 
@@ -207,7 +211,8 @@ class TitansKGBridge:
                     target_id=eid2,
                     relationship_type="CO_OCCURS",
                     weight=0.5,
-                    evidence=evidence_short
+                    evidence=evidence_short,
+                    valid_from=valid_from,
                 ))
 
     def force_extract(self, text: str, context: str = "manual extraction") -> List[str]:

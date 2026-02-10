@@ -54,6 +54,12 @@ class Relationship:
     relationship_type: str
     weight: float = 1.0
     evidence: str = ""  # Source text that supports this relationship
+    # Bi-temporal fields
+    valid_from: Optional[int] = None     # When this fact became true (epoch seconds)
+    valid_to: Optional[int] = None       # When it stopped being true (None = current)
+    ingested_at: Optional[int] = None    # When recorded (immutable)
+    updated_at: Optional[int] = None     # Last modification time
+    is_active: bool = True               # Soft-delete flag
 
 
 class AURAKnowledgeGraph:
@@ -84,6 +90,7 @@ class AURAKnowledgeGraph:
         self.conn = kuzu.Connection(self.db)
 
         self._init_schema()
+        self._migrate_temporal_schema()
 
         # Statistics
         self.total_entities_added = 0
@@ -147,6 +154,41 @@ class AURAKnowledgeGraph:
             """)
         except Exception as e:
             logger.debug(f"MENTIONED_IN table may exist: {e}")
+
+    def _migrate_temporal_schema(self):
+        """Add bi-temporal columns to RELATES_TO if they don't exist yet (idempotent)."""
+        columns = [
+            ("valid_from", "INT64"),
+            ("valid_to", "INT64"),
+            ("ingested_at", "INT64"),
+            ("updated_at", "INT64"),
+            ("is_active", "BOOLEAN"),
+        ]
+        for col_name, col_type in columns:
+            try:
+                self.conn.execute(
+                    f"ALTER TABLE RELATES_TO ADD {col_name} {col_type}"
+                )
+                logger.info(f"[KG] Migrated: added RELATES_TO.{col_name}")
+            except Exception:
+                pass  # Column already exists
+
+        # Back-fill existing edges that have NULL temporal fields
+        self._migrate_existing_edges()
+
+    def _migrate_existing_edges(self):
+        """Set default temporal values on pre-existing edges."""
+        try:
+            self.conn.execute("""
+                MATCH ()-[r:RELATES_TO]->()
+                WHERE r.is_active IS NULL
+                SET r.valid_from = r.created_at,
+                    r.ingested_at = r.created_at,
+                    r.updated_at = r.created_at,
+                    r.is_active = true
+            """)
+        except Exception as e:
+            logger.debug(f"[KG] Edge migration (may be no-op): {e}")
 
     def _escape_string(self, s: str) -> str:
         """Escape special characters in strings for Kuzu Cypher queries."""
@@ -224,29 +266,35 @@ class AURAKnowledgeGraph:
         rel_type_escaped = self._escape_string(rel.relationship_type)
 
         try:
-            # Check if relationship exists
+            # Check if an active relationship of this type already exists
             result = self.conn.execute(f"""
                 MATCH (s:Entity {{id: '{rel.source_id}'}})-[r:RELATES_TO]->(t:Entity {{id: '{rel.target_id}'}})
-                WHERE r.relationship_type = '{rel_type_escaped}'
+                WHERE r.relationship_type = '{rel_type_escaped}' AND r.is_active = true
                 RETURN r.weight
             """)
 
             if result.has_next():
-                # Strengthen existing relationship
+                # Strengthen existing active relationship
                 self.conn.execute(f"""
                     MATCH (s:Entity {{id: '{rel.source_id}'}})-[r:RELATES_TO]->(t:Entity {{id: '{rel.target_id}'}})
-                    WHERE r.relationship_type = '{rel_type_escaped}'
-                    SET r.weight = r.weight + {rel.weight * 0.1}
+                    WHERE r.relationship_type = '{rel_type_escaped}' AND r.is_active = true
+                    SET r.weight = r.weight + {rel.weight * 0.1},
+                        r.updated_at = {now}
                 """)
             else:
-                # Create new relationship
+                # Create new relationship with temporal fields
+                valid_from = rel.valid_from if rel.valid_from else now
                 self.conn.execute(f"""
                     MATCH (s:Entity {{id: '{rel.source_id}'}}), (t:Entity {{id: '{rel.target_id}'}})
                     CREATE (s)-[:RELATES_TO {{
                         relationship_type: '{rel_type_escaped}',
                         weight: {rel.weight},
                         evidence: '{evidence_escaped}',
-                        created_at: {now}
+                        created_at: {now},
+                        valid_from: {valid_from},
+                        ingested_at: {now},
+                        updated_at: {now},
+                        is_active: true
                     }}]->(t)
                 """)
                 self.total_relationships_added += 1
@@ -381,6 +429,7 @@ class AURAKnowledgeGraph:
         """
         Get entities within N hops of a given entity.
         Returns entities with their relationship path.
+        Only follows active edges.
         """
         try:
             result = self.conn.execute(f"""
@@ -412,23 +461,34 @@ class AURAKnowledgeGraph:
     def get_relationships(
         self,
         entity_id: str,
-        direction: str = "both"  # "outgoing", "incoming", "both"
+        direction: str = "both",  # "outgoing", "incoming", "both"
+        include_inactive: bool = False
     ) -> List[Dict]:
-        """Get all relationships for an entity."""
+        """Get all relationships for an entity.
+
+        Args:
+            entity_id: Entity to query.
+            direction: "outgoing", "incoming", or "both".
+            include_inactive: If False (default), only return active edges.
+        """
+        active_filter = "" if include_inactive else "AND r.is_active = true "
         try:
             if direction == "outgoing":
                 query = f"""
                     MATCH (e:Entity {{id: '{entity_id}'}})-[r:RELATES_TO]->(t:Entity)
+                    WHERE true {active_filter}
                     RETURN e.name, r.relationship_type, t.name, t.id, r.weight
                 """
             elif direction == "incoming":
                 query = f"""
                     MATCH (s:Entity)-[r:RELATES_TO]->(e:Entity {{id: '{entity_id}'}})
+                    WHERE true {active_filter}
                     RETURN s.name, r.relationship_type, e.name, s.id, r.weight
                 """
             else:
                 query = f"""
                     MATCH (e:Entity {{id: '{entity_id}'}})-[r:RELATES_TO]-(other:Entity)
+                    WHERE true {active_filter}
                     RETURN e.name, r.relationship_type, other.name, other.id, r.weight
                 """
 
@@ -479,16 +539,17 @@ class AURAKnowledgeGraph:
             logger.error(f"[KG] Boost importance error: {e}")
 
     def prune_low_importance(self, threshold: float = 0.05):
-        """Remove entities below importance threshold."""
+        """Invalidate edges of low-importance entities instead of deleting."""
+        now = int(time.time())
         try:
-            # First remove relationships to/from low importance entities
+            # Invalidate relationships to/from low importance entities
             self.conn.execute(f"""
                 MATCH (e:Entity)-[r:RELATES_TO]-()
-                WHERE e.importance < {threshold}
-                DELETE r
+                WHERE e.importance < {threshold} AND r.is_active = true
+                SET r.is_active = false, r.valid_to = {now}, r.updated_at = {now}
             """)
 
-            # Then remove entities
+            # Count affected entities
             result = self.conn.execute(f"""
                 MATCH (e:Entity)
                 WHERE e.importance < {threshold}
@@ -499,6 +560,7 @@ class AURAKnowledgeGraph:
             if result.has_next():
                 count = result.get_next()[0]
 
+            # Still delete the entities themselves (nodes, not edges)
             self.conn.execute(f"""
                 MATCH (e:Entity)
                 WHERE e.importance < {threshold}
@@ -524,6 +586,12 @@ class AURAKnowledgeGraph:
             )
             rel_count = rel_result.get_next()[0] if rel_result.has_next() else 0
 
+            # Active vs inactive relationship counts
+            active_rel_result = self.conn.execute(
+                "MATCH ()-[r:RELATES_TO]->() WHERE r.is_active = true RETURN COUNT(r)"
+            )
+            active_rel_count = active_rel_result.get_next()[0] if active_rel_result.has_next() else rel_count
+
             # Entity type distribution
             type_result = self.conn.execute("""
                 MATCH (e:Entity)
@@ -545,6 +613,8 @@ class AURAKnowledgeGraph:
             return {
                 "total_entities": entity_count,
                 "total_relationships": rel_count,
+                "active_relationships": active_rel_count,
+                "inactive_relationships": rel_count - active_rel_count,
                 "entity_type_distribution": type_distribution,
                 "average_importance": avg_importance,
                 "total_entities_added": self.total_entities_added,
@@ -592,6 +662,131 @@ class AURAKnowledgeGraph:
         except Exception as e:
             logger.error(f"[KG] Cypher error: {e}")
             return []
+
+    # ------------------------------------------------------------------
+    # Temporal edge methods
+    # ------------------------------------------------------------------
+
+    def invalidate_relationship(
+        self, source_id: str, target_id: str, rel_type: str
+    ) -> bool:
+        """Soft-invalidate an active relationship (sets is_active=false, valid_to=now)."""
+        now = int(time.time())
+        rel_type_escaped = self._escape_string(rel_type)
+        try:
+            self.conn.execute(f"""
+                MATCH (s:Entity {{id: '{source_id}'}})-[r:RELATES_TO]->(t:Entity {{id: '{target_id}'}})
+                WHERE r.relationship_type = '{rel_type_escaped}' AND r.is_active = true
+                SET r.is_active = false, r.valid_to = {now}, r.updated_at = {now}
+            """)
+            logger.info(f"[KG] Invalidated: {source_id} --[{rel_type}]--> {target_id}")
+            return True
+        except Exception as e:
+            logger.error(f"[KG] Invalidate relationship error: {e}")
+            return False
+
+    def supersede_relationship(
+        self,
+        source_id: str,
+        target_id: str,
+        rel_type: str,
+        new_evidence: str = "",
+        new_weight: float = 1.0,
+    ) -> bool:
+        """Invalidate old relationship and create a new version atomically."""
+        if not self.invalidate_relationship(source_id, target_id, rel_type):
+            return False
+        return self.add_relationship(Relationship(
+            source_id=source_id,
+            target_id=target_id,
+            relationship_type=rel_type,
+            weight=new_weight,
+            evidence=new_evidence,
+        ))
+
+    def get_relationships_at_time(
+        self, entity_id: str, at_time: int, direction: str = "both"
+    ) -> List[Dict]:
+        """Point-in-time query: return relationships that were active at ``at_time``."""
+        # valid_from <= at_time AND (valid_to is unset/0/NULL OR valid_to > at_time)
+        # Kuzu may store unset INT64 as 0 after ALTER TABLE ADD, so treat 0 as "no end time"
+        time_filter = (
+            f"AND r.valid_from <= {at_time} "
+            f"AND (r.valid_to IS NULL OR r.valid_to = 0 OR r.valid_to > {at_time})"
+        )
+        try:
+            if direction == "outgoing":
+                query = f"""
+                    MATCH (e:Entity {{id: '{entity_id}'}})-[r:RELATES_TO]->(t:Entity)
+                    WHERE true {time_filter}
+                    RETURN e.name, r.relationship_type, t.name, t.id, r.weight,
+                           r.valid_from, r.valid_to, r.is_active
+                """
+            elif direction == "incoming":
+                query = f"""
+                    MATCH (s:Entity)-[r:RELATES_TO]->(e:Entity {{id: '{entity_id}'}})
+                    WHERE true {time_filter}
+                    RETURN s.name, r.relationship_type, e.name, s.id, r.weight,
+                           r.valid_from, r.valid_to, r.is_active
+                """
+            else:
+                query = f"""
+                    MATCH (e:Entity {{id: '{entity_id}'}})-[r:RELATES_TO]-(other:Entity)
+                    WHERE true {time_filter}
+                    RETURN e.name, r.relationship_type, other.name, other.id, r.weight,
+                           r.valid_from, r.valid_to, r.is_active
+                """
+
+            result = self.conn.execute(query)
+            rows = []
+            while result.has_next():
+                row = result.get_next()
+                rows.append({
+                    "source": row[0],
+                    "relationship": row[1],
+                    "target": row[2],
+                    "target_id": row[3],
+                    "weight": row[4],
+                    "valid_from": row[5],
+                    "valid_to": row[6],
+                    "is_active": row[7],
+                })
+            return rows
+        except Exception as e:
+            logger.error(f"[KG] Time-travel query error: {e}")
+            return []
+
+    def get_relationship_history(
+        self, source_id: str, target_id: str
+    ) -> List[Dict]:
+        """Return all versions of a relationship sorted by valid_from."""
+        try:
+            result = self.conn.execute(f"""
+                MATCH (s:Entity {{id: '{source_id}'}})-[r:RELATES_TO]->(t:Entity {{id: '{target_id}'}})
+                RETURN r.relationship_type, r.weight, r.evidence,
+                       r.valid_from, r.valid_to, r.is_active, r.created_at
+                ORDER BY r.valid_from
+            """)
+            rows = []
+            while result.has_next():
+                row = result.get_next()
+                rows.append({
+                    "relationship_type": row[0],
+                    "weight": row[1],
+                    "evidence": row[2],
+                    "valid_from": row[3],
+                    "valid_to": row[4],
+                    "is_active": row[5],
+                    "created_at": row[6],
+                })
+            return rows
+        except Exception as e:
+            logger.error(f"[KG] Relationship history error: {e}")
+            return []
+
+    def get_active_relationships(self, entity_id: str) -> List[Dict]:
+        """Convenience: get only active relationships for an entity."""
+        return self.get_relationships(entity_id, include_inactive=False)
 
     def close(self):
         """Close database connection."""

@@ -341,6 +341,10 @@ class AgentService:
             Dict with response, fast_path flag, and mood
         """
         with self._agent_lock:
+            # Handle /think command for System 1/2 switching
+            if message.strip().startswith("/think"):
+                return self._handle_thinking_mode_command(message.strip())
+
             # Detect action mode and auto-select model
             detected_action = detect_action_mode(message)
             effective_model = model_override
@@ -1091,6 +1095,49 @@ Keep it concise, readable, and well-formatted with markdown."""
                 dominance=0.0,
                 emoji='🤖'
             )
+
+    def _handle_thinking_mode_command(self, message: str) -> Dict[str, Any]:
+        """Handle /think s1|s2|auto|status commands."""
+        try:
+            from apprentice_agent.thinking_mode import get_thinking_mode_manager, ThinkingMode
+            tmm = get_thinking_mode_manager()
+
+            parts = message.split(maxsplit=1)
+            arg = parts[1].strip().lower() if len(parts) > 1 else "status"
+
+            if arg in ("s1", "system1"):
+                tmm.mode = ThinkingMode.SYSTEM1
+                response = "Thinking mode set to **System 1** (fast/intuitive). All queries will use the fast model."
+            elif arg in ("s2", "system2"):
+                tmm.mode = ThinkingMode.SYSTEM2
+                response = "Thinking mode set to **System 2** (deliberative/reasoning). All queries will use the reasoning model."
+            elif arg == "auto":
+                tmm.mode = ThinkingMode.AUTO
+                response = "Thinking mode set to **Auto**. The system will choose S1/S2 based on query complexity and cognitive load."
+            elif arg == "status":
+                state = tmm.get_state()
+                load = state["cognitive_load"]
+                response = (
+                    f"**Thinking Mode:** {state['mode']}\n"
+                    f"**Cognitive Load:** {load['load_score']:.2f} "
+                    f"(window: {load['window_size']}, suggestion: {load['suggestion']})"
+                )
+            else:
+                response = "Usage: `/think s1` | `/think s2` | `/think auto` | `/think status`"
+
+            return {
+                "response": response,
+                "fast_path": True,
+                "mood": self._get_mood(),
+                "model_used": "command",
+            }
+        except Exception as e:
+            return {
+                "response": f"Thinking mode command failed: {e}",
+                "fast_path": True,
+                "mood": "neutral",
+                "model_used": "command",
+            }
 
     def _was_fast_path(self, message: str) -> bool:
         """Check if message was handled via fast path."""

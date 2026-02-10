@@ -25,6 +25,7 @@ class QueryMode(Enum):
     TRAVERSAL = "traversal"  # Graph walk from seed entities
     GLOBAL = "global"  # High-level overview
     HYBRID = "hybrid"  # Combine multiple strategies
+    TEMPORAL = "temporal"  # Point-in-time query
 
 
 @dataclass
@@ -53,22 +54,26 @@ class KGQueryEngine:
         mode: QueryMode = QueryMode.HYBRID,
         max_entities: int = 10,
         max_hops: int = 2,
-        entity_type: Optional[EntityType] = None
+        entity_type: Optional[EntityType] = None,
+        at_time: Optional[int] = None
     ) -> QueryResult:
         """
         Query the knowledge graph.
 
         Args:
             query_text: Natural language query
-            mode: Query mode (entity, traversal, global, hybrid)
+            mode: Query mode (entity, traversal, global, hybrid, temporal)
             max_entities: Maximum entities to return
             max_hops: Maximum relationship hops for traversal
             entity_type: Optional filter by entity type
+            at_time: Epoch timestamp for temporal/time-travel queries
 
         Returns:
             QueryResult with entities, relationships, and formatted context
         """
-        if mode == QueryMode.ENTITY:
+        if mode == QueryMode.TEMPORAL:
+            return self._temporal_query(query_text, at_time, max_entities, entity_type)
+        elif mode == QueryMode.ENTITY:
             return self._entity_query(query_text, max_entities, entity_type)
         elif mode == QueryMode.TRAVERSAL:
             return self._traversal_query(query_text, max_entities, max_hops, entity_type)
@@ -213,6 +218,61 @@ class KGQueryEngine:
                 "traversal_matches": len(traversal_result.entities)
             }
         )
+
+    def _temporal_query(
+        self,
+        query_text: str,
+        at_time: Optional[int],
+        max_entities: int,
+        entity_type: Optional[EntityType] = None,
+    ) -> QueryResult:
+        """Point-in-time query: find entities and their relationships at a specific time."""
+        import time as _time
+
+        if at_time is None:
+            at_time = int(_time.time())
+
+        # Find seed entities matching the text
+        entities = self.kg.query_entities(query_text, entity_type=entity_type, limit=max_entities)
+        all_relationships = []
+
+        for entity in entities:
+            rels = self.kg.get_relationships_at_time(entity["id"], at_time)
+            all_relationships.extend(rels)
+
+        return QueryResult(
+            entities=entities,
+            relationships=all_relationships,
+            context_string=self._format_temporal(entities, all_relationships, at_time),
+            query_mode=QueryMode.TEMPORAL,
+            metadata={"at_time": at_time, "matches": len(entities), "relationships": len(all_relationships)},
+        )
+
+    def _format_temporal(self, entities: List[Dict], relationships: List[Dict], at_time: int) -> str:
+        """Format temporal query results."""
+        from datetime import datetime
+
+        time_str = datetime.fromtimestamp(at_time).strftime("%Y-%m-%d %H:%M:%S")
+        lines = [f"KNOWLEDGE GRAPH (point-in-time: {time_str}):"]
+
+        if entities:
+            lines.append("\nEntities:")
+            for e in entities:
+                desc = e.get("description", "") or ""
+                lines.append(f"  [{e['entity_type']}] {e['name']}")
+                if desc:
+                    lines.append(f"    {desc}")
+
+        if relationships:
+            lines.append("\nRelationships (active at that time):")
+            seen = set()
+            for r in relationships:
+                key = f"{r['source']}-{r['relationship']}-{r['target']}"
+                if key not in seen:
+                    seen.add(key)
+                    lines.append(f"  {r['source']} --[{r['relationship']}]--> {r['target']}")
+
+        return "\n".join(lines)
 
     def _format_entities(self, entities: List[Dict]) -> str:
         """Format entities as context string."""

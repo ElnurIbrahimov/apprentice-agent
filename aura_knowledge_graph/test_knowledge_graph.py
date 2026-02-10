@@ -464,5 +464,131 @@ class TestQueryEngine(unittest.TestCase):
         self.assertIn("USES", summary)  # Relationship
 
 
+@unittest.skipUnless(KUZU_AVAILABLE, "Kuzu not installed")
+class TestTemporalKnowledgeGraph(unittest.TestCase):
+    """Test bi-temporal edge features."""
+
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+        self.db_path = Path(self.test_dir) / "kg_db"
+        if self.db_path.exists():
+            shutil.rmtree(self.db_path)
+        self.kg = AURAKnowledgeGraph(str(self.db_path))
+
+        # Add two entities
+        self.e1_id = self.kg.add_entity(Entity(
+            name="Alice", entity_type=EntityType.PERSON, description="Engineer"
+        ))
+        self.e2_id = self.kg.add_entity(Entity(
+            name="ProjectX", entity_type=EntityType.PROJECT, description="Secret project"
+        ))
+
+    def tearDown(self):
+        self.kg.close()
+        shutil.rmtree(self.test_dir, ignore_errors=True)
+
+    def test_new_relationship_has_temporal_fields(self):
+        """New edges should have valid_from, ingested_at, is_active=true."""
+        import time
+        before = int(time.time())
+        self.kg.add_relationship(Relationship(
+            self.e1_id, self.e2_id, "WORKS_ON", evidence="Alice works on ProjectX"
+        ))
+        after = int(time.time())
+
+        history = self.kg.get_relationship_history(self.e1_id, self.e2_id)
+        self.assertEqual(len(history), 1)
+        edge = history[0]
+        self.assertTrue(edge["is_active"])
+        self.assertGreaterEqual(edge["valid_from"], before)
+        self.assertLessEqual(edge["valid_from"], after)
+        self.assertIsNone(edge["valid_to"])
+
+    def test_invalidate_relationship(self):
+        """Invalidated edges should have is_active=false and valid_to set."""
+        self.kg.add_relationship(Relationship(self.e1_id, self.e2_id, "WORKS_ON"))
+        result = self.kg.invalidate_relationship(self.e1_id, self.e2_id, "WORKS_ON")
+        self.assertTrue(result)
+
+        history = self.kg.get_relationship_history(self.e1_id, self.e2_id)
+        self.assertEqual(len(history), 1)
+        self.assertFalse(history[0]["is_active"])
+        self.assertIsNotNone(history[0]["valid_to"])
+
+    def test_invalidated_not_returned_by_default(self):
+        """get_relationships should not return inactive edges by default."""
+        self.kg.add_relationship(Relationship(self.e1_id, self.e2_id, "WORKS_ON"))
+        self.kg.invalidate_relationship(self.e1_id, self.e2_id, "WORKS_ON")
+
+        active = self.kg.get_relationships(self.e1_id)
+        self.assertEqual(len(active), 0)
+
+        # But include_inactive should return it
+        all_rels = self.kg.get_relationships(self.e1_id, include_inactive=True)
+        self.assertEqual(len(all_rels), 1)
+
+    def test_get_relationships_at_time(self):
+        """Point-in-time query should return edges valid at that timestamp."""
+        import time
+
+        # Use a past timestamp so invalidation (which uses time.time()) is strictly later
+        t1 = int(time.time()) - 10
+        self.kg.add_relationship(Relationship(
+            self.e1_id, self.e2_id, "WORKS_ON", valid_from=t1
+        ))
+
+        # Before invalidation, query at t1 should find it
+        rels_at_t1 = self.kg.get_relationships_at_time(self.e1_id, t1)
+        self.assertGreaterEqual(len(rels_at_t1), 1)
+
+        # Now invalidate (sets valid_to = now, which is > t1)
+        self.kg.invalidate_relationship(self.e1_id, self.e2_id, "WORKS_ON")
+
+        # Query at t1 should still find it (valid_from <= t1 AND valid_to > t1)
+        rels_at_t1_after = self.kg.get_relationships_at_time(self.e1_id, t1)
+        self.assertGreaterEqual(len(rels_at_t1_after), 1)
+
+        # Query well before t1 should not find it
+        rels_before = self.kg.get_relationships_at_time(self.e1_id, t1 - 100)
+        works_on = [r for r in rels_before if r["relationship"] == "WORKS_ON"]
+        self.assertEqual(len(works_on), 0)
+
+    def test_get_relationship_history(self):
+        """History should show all versions sorted by valid_from."""
+        self.kg.add_relationship(Relationship(self.e1_id, self.e2_id, "WORKS_ON", evidence="v1"))
+        self.kg.invalidate_relationship(self.e1_id, self.e2_id, "WORKS_ON")
+        self.kg.add_relationship(Relationship(self.e1_id, self.e2_id, "WORKS_ON", evidence="v2"))
+
+        history = self.kg.get_relationship_history(self.e1_id, self.e2_id)
+        self.assertEqual(len(history), 2)
+        # First should be inactive (old), second should be active (new)
+        self.assertFalse(history[0]["is_active"])
+        self.assertTrue(history[1]["is_active"])
+
+    def test_supersede_relationship(self):
+        """Supersede should invalidate old and create new."""
+        self.kg.add_relationship(Relationship(self.e1_id, self.e2_id, "WORKS_ON", evidence="old"))
+        result = self.kg.supersede_relationship(
+            self.e1_id, self.e2_id, "WORKS_ON",
+            new_evidence="new", new_weight=0.8
+        )
+        self.assertTrue(result)
+
+        history = self.kg.get_relationship_history(self.e1_id, self.e2_id)
+        self.assertEqual(len(history), 2)
+        self.assertFalse(history[0]["is_active"])
+        self.assertTrue(history[1]["is_active"])
+
+    def test_traversal_respects_active_flag(self):
+        """get_active_relationships should only return active edges."""
+        self.kg.add_relationship(Relationship(self.e1_id, self.e2_id, "WORKS_ON"))
+        active = self.kg.get_active_relationships(self.e1_id)
+        self.assertEqual(len(active), 1)
+
+        self.kg.invalidate_relationship(self.e1_id, self.e2_id, "WORKS_ON")
+        active = self.kg.get_active_relationships(self.e1_id)
+        self.assertEqual(len(active), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
