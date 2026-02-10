@@ -30,6 +30,8 @@ CATEGORIES = {
     "integrations": "integrations",
     "patterns": "patterns",
     "troubleshooting": "troubleshooting",
+    "claude-code": "claude-code",
+    "claude": "claude-code",
 }
 
 # Skill categories
