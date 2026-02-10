@@ -95,6 +95,11 @@ from .shell_executor import ShellExecutorTool
 from .screen_reader import ScreenReaderTool
 from .email_tool import EmailTool
 from .spaced_repetition import SpacedRepetitionTool
+from .task_manager import TaskManagerTool
+from .api_tester import APITesterTool
+from .database_tool import DatabaseTool
+from .audio_transcriber import AudioTranscriberTool
+from .clipboard_history import ClipboardHistoryTool
 
 # Import FluxMind from external tools directory
 import sys
@@ -246,4 +251,14 @@ __all__ = [
     "EmailTool",
     # Spaced Repetition
     "SpacedRepetitionTool",
+    # Task Manager
+    "TaskManagerTool",
+    # API Tester
+    "APITesterTool",
+    # Database
+    "DatabaseTool",
+    # Audio Transcriber
+    "AudioTranscriberTool",
+    # Clipboard History
+    "ClipboardHistoryTool",
 ]

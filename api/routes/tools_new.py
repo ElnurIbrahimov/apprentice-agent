@@ -369,3 +369,417 @@ def _shell_sessions_sync() -> dict:
     if "shell_executor" in agent.tools:
         return agent.tools["shell_executor"].list_sessions()
     return {"success": False, "error": "Shell executor tool not loaded"}
+
+
+# ============================================================================
+# TASK MANAGER
+# ============================================================================
+
+class AddTaskRequest(BaseModel):
+    title: str
+    description: str = ""
+    priority: str = "medium"
+    project: Optional[str] = None
+    due_date: Optional[str] = None
+    tags: List[str] = []
+
+
+class UpdateTaskRequest(BaseModel):
+    task_id: str
+    status: Optional[str] = None
+    priority: Optional[str] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+
+
+@router.get("/tasks/list")
+async def tasks_list(status: Optional[str] = None, project: Optional[str] = None):
+    """List tasks, optionally filtered by status or project."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, lambda: _tasks_list_sync(status, project))
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _tasks_list_sync(status: Optional[str], project: Optional[str]) -> dict:
+    agent = _get_agent_service().agent
+    if "task_manager" in agent.tools:
+        return agent.tools["task_manager"].list_tasks(status=status, project=project)
+    return {"success": False, "error": "Task manager tool not loaded"}
+
+
+@router.get("/tasks/board")
+async def tasks_board():
+    """Get kanban board view."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, _tasks_board_sync)
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _tasks_board_sync() -> dict:
+    agent = _get_agent_service().agent
+    if "task_manager" in agent.tools:
+        return agent.tools["task_manager"].board()
+    return {"success": False, "error": "Task manager tool not loaded"}
+
+
+@router.post("/tasks/add")
+async def tasks_add(request: AddTaskRequest):
+    """Add a new task."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, lambda: _tasks_add_sync(request))
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _tasks_add_sync(request: AddTaskRequest) -> dict:
+    agent = _get_agent_service().agent
+    if "task_manager" in agent.tools:
+        return agent.tools["task_manager"].add_task(
+            title=request.title,
+            description=request.description,
+            priority=request.priority,
+            project=request.project,
+            due_date=request.due_date,
+            tags=request.tags,
+        )
+    return {"success": False, "error": "Task manager tool not loaded"}
+
+
+@router.put("/tasks/update")
+async def tasks_update(request: UpdateTaskRequest):
+    """Update a task."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, lambda: _tasks_update_sync(request))
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _tasks_update_sync(request: UpdateTaskRequest) -> dict:
+    agent = _get_agent_service().agent
+    if "task_manager" in agent.tools:
+        kwargs = {}
+        if request.status:
+            kwargs["status"] = request.status
+        if request.priority:
+            kwargs["priority"] = request.priority
+        if request.title:
+            kwargs["title"] = request.title
+        if request.description:
+            kwargs["description"] = request.description
+        return agent.tools["task_manager"].update_task(request.task_id, **kwargs)
+    return {"success": False, "error": "Task manager tool not loaded"}
+
+
+@router.delete("/tasks/{task_id}")
+async def tasks_remove(task_id: str):
+    """Remove a task."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, lambda: _tasks_remove_sync(task_id))
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _tasks_remove_sync(task_id: str) -> dict:
+    agent = _get_agent_service().agent
+    if "task_manager" in agent.tools:
+        return agent.tools["task_manager"].remove_task(task_id)
+    return {"success": False, "error": "Task manager tool not loaded"}
+
+
+@router.get("/tasks/overdue")
+async def tasks_overdue():
+    """Get overdue tasks."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, _tasks_overdue_sync)
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _tasks_overdue_sync() -> dict:
+    agent = _get_agent_service().agent
+    if "task_manager" in agent.tools:
+        return agent.tools["task_manager"].overdue()
+    return {"success": False, "error": "Task manager tool not loaded"}
+
+
+# ============================================================================
+# API TESTER
+# ============================================================================
+
+class APITestRequest(BaseModel):
+    method: str = "GET"
+    url: str
+    headers: Optional[dict] = None
+    body: Optional[str] = None
+    timeout: int = 30
+
+
+@router.post("/api-tester/run")
+async def api_tester_run(request: APITestRequest):
+    """Execute an HTTP request."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, lambda: _api_tester_run_sync(request))
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _api_tester_run_sync(request: APITestRequest) -> dict:
+    agent = _get_agent_service().agent
+    if "api_tester" in agent.tools:
+        return agent.tools["api_tester"].request(
+            method=request.method,
+            url=request.url,
+            headers=request.headers,
+            body=request.body,
+            timeout=request.timeout,
+        )
+    return {"success": False, "error": "API tester tool not loaded"}
+
+
+@router.get("/api-tester/history")
+async def api_tester_history(limit: int = 20):
+    """Get API request history."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, lambda: _api_tester_history_sync(limit))
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _api_tester_history_sync(limit: int) -> dict:
+    agent = _get_agent_service().agent
+    if "api_tester" in agent.tools:
+        return agent.tools["api_tester"].history(limit=limit)
+    return {"success": False, "error": "API tester tool not loaded"}
+
+
+# ============================================================================
+# DATABASE
+# ============================================================================
+
+class SQLQueryRequest(BaseModel):
+    sql: str
+    db: str = "default"
+
+
+class CSVImportRequest(BaseModel):
+    csv_path: str
+    table: str
+    db: str = "default"
+
+
+@router.post("/database/query")
+async def database_query(request: SQLQueryRequest):
+    """Execute a SQL query."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, lambda: _database_query_sync(request))
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _database_query_sync(request: SQLQueryRequest) -> dict:
+    agent = _get_agent_service().agent
+    if "database" in agent.tools:
+        return agent.tools["database"].query(sql=request.sql, db=request.db)
+    return {"success": False, "error": "Database tool not loaded"}
+
+
+@router.get("/database/schema")
+async def database_schema(db: str = "default", table: Optional[str] = None):
+    """Get database schema."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, lambda: _database_schema_sync(db, table))
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _database_schema_sync(db: str, table: Optional[str]) -> dict:
+    agent = _get_agent_service().agent
+    if "database" in agent.tools:
+        return agent.tools["database"].schema(db=db, table=table)
+    return {"success": False, "error": "Database tool not loaded"}
+
+
+@router.post("/database/import-csv")
+async def database_import_csv(request: CSVImportRequest):
+    """Import CSV into a database table."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, lambda: _database_import_sync(request))
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _database_import_sync(request: CSVImportRequest) -> dict:
+    agent = _get_agent_service().agent
+    if "database" in agent.tools:
+        return agent.tools["database"].import_csv(
+            csv_path=request.csv_path, table=request.table, db=request.db
+        )
+    return {"success": False, "error": "Database tool not loaded"}
+
+
+# ============================================================================
+# AUDIO TRANSCRIBER
+# ============================================================================
+
+class TranscribeRequest(BaseModel):
+    file_path: str
+    language: Optional[str] = None
+    model_size: Optional[str] = None
+
+
+@router.post("/audio/transcribe")
+async def audio_transcribe(request: TranscribeRequest):
+    """Transcribe an audio/video file."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, lambda: _audio_transcribe_sync(request))
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _audio_transcribe_sync(request: TranscribeRequest) -> dict:
+    agent = _get_agent_service().agent
+    if "audio_transcriber" in agent.tools:
+        return agent.tools["audio_transcriber"].transcribe(
+            file_path=request.file_path,
+            language=request.language,
+            model_size=request.model_size,
+        )
+    return {"success": False, "error": "Audio transcriber tool not loaded"}
+
+
+@router.get("/audio/transcripts")
+async def audio_transcripts():
+    """List saved transcripts."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, _audio_transcripts_sync)
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _audio_transcripts_sync() -> dict:
+    agent = _get_agent_service().agent
+    if "audio_transcriber" in agent.tools:
+        return agent.tools["audio_transcriber"].list_transcripts()
+    return {"success": False, "error": "Audio transcriber tool not loaded"}
+
+
+@router.get("/audio/status")
+async def audio_status():
+    """Check Whisper availability."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, _audio_status_sync)
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _audio_status_sync() -> dict:
+    agent = _get_agent_service().agent
+    if "audio_transcriber" in agent.tools:
+        return agent.tools["audio_transcriber"].status()
+    return {"success": False, "error": "Audio transcriber tool not loaded"}
+
+
+# ============================================================================
+# CLIPBOARD HISTORY
+# ============================================================================
+
+@router.get("/clipboard/history")
+async def clipboard_history(limit: int = 20, category: Optional[str] = None):
+    """Get clipboard history."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, lambda: _clipboard_history_sync(limit, category))
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _clipboard_history_sync(limit: int, category: Optional[str]) -> dict:
+    agent = _get_agent_service().agent
+    if "clipboard_history" in agent.tools:
+        return agent.tools["clipboard_history"].list_history(limit=limit, category=category)
+    return {"success": False, "error": "Clipboard history tool not loaded"}
+
+
+@router.post("/clipboard/capture")
+async def clipboard_capture():
+    """Capture current clipboard content."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, _clipboard_capture_sync)
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _clipboard_capture_sync() -> dict:
+    agent = _get_agent_service().agent
+    if "clipboard_history" in agent.tools:
+        return agent.tools["clipboard_history"].capture()
+    return {"success": False, "error": "Clipboard history tool not loaded"}
+
+
+@router.get("/clipboard/search")
+async def clipboard_search(query: str):
+    """Search clipboard history."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, lambda: _clipboard_search_sync(query))
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _clipboard_search_sync(query: str) -> dict:
+    agent = _get_agent_service().agent
+    if "clipboard_history" in agent.tools:
+        return agent.tools["clipboard_history"].search(query)
+    return {"success": False, "error": "Clipboard history tool not loaded"}
+
+
+@router.get("/clipboard/stats")
+async def clipboard_stats():
+    """Clipboard usage statistics."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, _clipboard_stats_sync)
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _clipboard_stats_sync() -> dict:
+    agent = _get_agent_service().agent
+    if "clipboard_history" in agent.tools:
+        return agent.tools["clipboard_history"].stats()
+    return {"success": False, "error": "Clipboard history tool not loaded"}

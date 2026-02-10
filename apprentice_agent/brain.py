@@ -2031,7 +2031,12 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
             "shell_executor": "shell_executor - execute shell/terminal commands with persistent sessions. ACTION: the command to run (e.g. 'ls -la', 'git status', 'python script.py')",
             "screen_reader": "screen_reader - read text from screen via OCR, detect active window, monitor for changes. ACTION: 'read' or 'read_region x y w h' or 'active_window' or 'watch <keyword>'",
             "email": "email - read and send emails. ACTION: 'fetch' or 'fetch unread' or 'read <id>' or 'send to:<addr> subject:<subj> body:<text>' or 'search <query>' or 'setup'",
-            "spaced_repetition": "spaced_repetition - flashcard learning with spaced repetition. ACTION: 'review' or 'add front:<q> back:<a>' or 'answer <id> <quality 0-5>' or 'due' or 'stats' or 'auto_generate <text>'"
+            "spaced_repetition": "spaced_repetition - flashcard learning with spaced repetition. ACTION: 'review' or 'add front:<q> back:<a>' or 'answer <id> <quality 0-5>' or 'due' or 'stats' or 'auto_generate <text>'",
+            "task_manager": "task_manager - manage tasks, projects, kanban boards. ACTION: 'add <title>' or 'list' or 'board' or 'update <id> status:<status>' or 'projects' or 'overdue' or 'search <query>'",
+            "api_tester": "api_tester - test HTTP APIs and REST endpoints. ACTION: 'GET <url>' or 'POST <url> body:<json>' or 'PUT <url> body:<json>' or 'DELETE <url>' or 'history' or 'inspect <id>'",
+            "database": "database - query SQLite databases, inspect schemas, import/export CSV. ACTION: SQL query like 'SELECT * FROM table' or 'schema' or 'tables' or 'import <csv> <table>' or 'export <table>'",
+            "audio_transcriber": "audio_transcriber - transcribe audio/video files to text using Whisper. ACTION: 'transcribe <path>' or 'translate <path>' or 'detect <path>' or 'list' or 'status'",
+            "clipboard_history": "clipboard_history - clipboard history with search, pinning, categories. ACTION: 'capture' or 'list' or 'search <query>' or 'pin <id>' or 'restore <id>' or 'stats'"
         }
         return "\n".join(descriptions.get(t, t) for t in available_tools)
 
@@ -2081,6 +2086,16 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
                     tool = "email"
                 elif "flashcard" in tool or "spaced" in tool or "repetition" in tool or "review card" in tool:
                     tool = "spaced_repetition"
+                elif "task_manager" in tool or "task" in tool or "kanban" in tool or "todo" in tool:
+                    tool = "task_manager"
+                elif "api_tester" in tool or "api test" in tool or "http" in tool or "rest" in tool:
+                    tool = "api_tester"
+                elif "database" in tool or "sqlite" in tool or "sql" in tool or "db" in tool:
+                    tool = "database"
+                elif "audio" in tool or "transcrib" in tool or "whisper" in tool or "speech" in tool:
+                    tool = "audio_transcriber"
+                elif "clipboard_history" in tool or "clip hist" in tool:
+                    tool = "clipboard_history"
                 result["tool"] = tool
             elif line.upper().startswith("ACTION:"):
                 action = line[7:].strip()
@@ -2127,6 +2142,16 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
                 result["tool"] = "email"
             elif "flashcard" in response_lower or "spaced repetition" in response_lower or "review card" in response_lower:
                 result["tool"] = "spaced_repetition"
+            elif "task_manager" in response_lower or "kanban" in response_lower or "todo list" in response_lower or "project board" in response_lower:
+                result["tool"] = "task_manager"
+            elif "api_tester" in response_lower or "test api" in response_lower or "http request" in response_lower or "rest api" in response_lower:
+                result["tool"] = "api_tester"
+            elif "database" in response_lower or "sql query" in response_lower or "sqlite" in response_lower or "run query" in response_lower:
+                result["tool"] = "database"
+            elif "audio_transcriber" in response_lower or "transcribe" in response_lower or "speech to text" in response_lower or "whisper" in response_lower:
+                result["tool"] = "audio_transcriber"
+            elif "clipboard_history" in response_lower or "clipboard history" in response_lower or "clip history" in response_lower:
+                result["tool"] = "clipboard_history"
 
         if not result["action"] and result["tool"] == "web_search":
             # Try to extract a search query from the response

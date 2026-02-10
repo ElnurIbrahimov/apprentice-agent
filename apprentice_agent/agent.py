@@ -129,7 +129,7 @@ from .identity import load_identity, get_identity_prompt, detect_name_change, de
 from .memory import MemorySystem
 from .metacognition import MetacognitionLogger
 from .config import Config
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, build_adaptive_system_prompt, get_monologue, KnowledgeGraphTool, get_knowledge_graph, MetacognitiveGuardian, GuardianConfig, NeuroDreamEngine, SleepPhase, ReflexionEngine, code_syntax_evaluator, SynapseForge, WorldSim, RiskLevel, CalendarTool, SpacedRepetitionTool
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, build_adaptive_system_prompt, get_monologue, KnowledgeGraphTool, get_knowledge_graph, MetacognitiveGuardian, GuardianConfig, NeuroDreamEngine, SleepPhase, ReflexionEngine, code_syntax_evaluator, SynapseForge, WorldSim, RiskLevel, CalendarTool, SpacedRepetitionTool, TaskManagerTool, ClipboardHistoryTool, APITesterTool, DatabaseTool, AudioTranscriberTool
 from .tools.mirrormind import MirrorMind
 from .tools.cognitive_theater import CognitiveTheater, is_decision_question
 from .tools.crypto_price import CryptoPriceTool
@@ -342,6 +342,8 @@ class ApprenticeAgent:
             "clawdbot": ClawdbotTool(),
             "calendar": CalendarTool(),
             "spaced_repetition": SpacedRepetitionTool(),
+            "task_manager": TaskManagerTool(),
+            "clipboard_history": ClipboardHistoryTool(),
         }
         logger.info("[LOADED] crypto_price - Real-time crypto prices from CoinGecko")
 
@@ -456,6 +458,27 @@ class ApprenticeAgent:
             except Exception as e:
                 logger.warning(f"email not loaded: {e}")
 
+            # api_tester
+            try:
+                self.tools['api_tester'] = APITesterTool()
+                logger.info("[LOADED] api_tester")
+            except Exception as e:
+                logger.warning(f"api_tester not loaded: {e}")
+
+            # database
+            try:
+                self.tools['database'] = DatabaseTool()
+                logger.info("[LOADED] database")
+            except Exception as e:
+                logger.warning(f"database not loaded: {e}")
+
+            # audio_transcriber
+            try:
+                self.tools['audio_transcriber'] = AudioTranscriberTool()
+                logger.info("[LOADED] audio_transcriber")
+            except Exception as e:
+                logger.warning(f"audio_transcriber not loaded: {e}")
+
             # Auto-load ALL synthesized tools (with security validation)
             try:
                 import os
@@ -507,7 +530,8 @@ class ApprenticeAgent:
             self._lazy_tools = [
                 "screenshot", "vision", "pdf_reader", "arxiv_search",
                 "browser", "system_control", "tool_builder", "marketplace",
-                "knowledge_graph", "shell_executor", "screen_reader", "email"
+                "knowledge_graph", "shell_executor", "screen_reader", "email",
+                "api_tester", "database", "audio_transcriber"
             ]
 
         # Connect inner monologue to EvoEmo for emotional awareness
@@ -906,6 +930,21 @@ class ApprenticeAgent:
         elif tool_name == "spaced_repetition":
             from .tools.spaced_repetition import SpacedRepetitionTool
             self.tools["spaced_repetition"] = SpacedRepetitionTool()
+        elif tool_name == "task_manager":
+            from .tools.task_manager import TaskManagerTool
+            self.tools["task_manager"] = TaskManagerTool()
+        elif tool_name == "clipboard_history":
+            from .tools.clipboard_history import ClipboardHistoryTool
+            self.tools["clipboard_history"] = ClipboardHistoryTool()
+        elif tool_name == "api_tester":
+            from .tools.api_tester import APITesterTool
+            self.tools["api_tester"] = APITesterTool()
+        elif tool_name == "database":
+            from .tools.database_tool import DatabaseTool
+            self.tools["database"] = DatabaseTool()
+        elif tool_name == "audio_transcriber":
+            from .tools.audio_transcriber import AudioTranscriberTool
+            self.tools["audio_transcriber"] = AudioTranscriberTool()
 
         return self.tools.get(tool_name)
 
