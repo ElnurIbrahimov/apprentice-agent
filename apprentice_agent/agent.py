@@ -5846,13 +5846,13 @@ Voice: {soul.voice_style[:100]}..."""
         except Exception as e:
             results["errors"].append(f"KG save: {e}")
 
-        # 7. Clear conversation history
+        # 7. Save conversation history (preserve on disk, only clear in-memory)
         try:
             if hasattr(self, 'brain') and self.brain:
-                self.brain.clear_history()
-                results["freed_resources"].append("conversation_history")
+                self.brain._save_history()
+                results["freed_resources"].append("conversation_history:saved")
         except Exception as e:
-            results["errors"].append(f"History clear: {e}")
+            results["errors"].append(f"History save: {e}")
 
         # 8. Reset guardian session
         try:
