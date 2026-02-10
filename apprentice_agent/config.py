@@ -269,6 +269,12 @@ class Config:
     # WorldSim Configuration (Tool #27) - Consequence Simulation
     WORLDSIM_ENABLED: bool = os.getenv("WORLDSIM_ENABLED", "true").lower() == "true"
 
+    # API Security Configuration
+    API_AUTH_ENABLED: bool = os.getenv("AURA_API_AUTH_ENABLED", "false").lower() == "true"
+    API_KEY: str = os.getenv("AURA_API_KEY", "")  # Set to enable API key auth
+    API_RATE_LIMIT: int = int(os.getenv("AURA_API_RATE_LIMIT", "60"))  # requests per minute
+    API_CORS_ORIGINS: str = os.getenv("AURA_CORS_ORIGINS", "*")  # comma-separated origins, or * for dev
+
     # AURA v3.0 ALIVE System Configuration
     AURA_ENABLED: bool = os.getenv("AURA_ENABLED", "true").lower() == "true"
     AURA_SOUL: str = os.getenv("AURA_SOUL", "SOUL_PERSONAL")  # SOUL_PERSONAL or SOUL_ENTERPRISE

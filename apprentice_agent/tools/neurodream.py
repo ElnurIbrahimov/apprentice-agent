@@ -1006,33 +1006,107 @@ class NeuroDreamEngine:
         return chunks
 
     def _extract_propositions(self, chunk: Dict[str, Any]) -> List[str]:
-        """Extract atomic fact propositions from a chunk using pattern matching.
+        """Extract atomic fact propositions from a chunk using ADM-style pattern matching.
 
-        Extracts definitional statements, key verb-object pairs, and named entities.
-        No LLM call — pure regex heuristics.
+        Extracts 6 proposition types following the ADM (Atomic Decomposition of Memory) approach:
+        1. Definitional: "X is/are Y" — identity and classification
+        2. Verb-object: "subject verb object" — actions and preferences
+        3. Entity: Named entities (capitalized multi-word)
+        4. Modal: "X can/will/should Y" — capabilities and obligations
+        5. Relational: "X has/contains/includes Y" — part-whole and possession
+        6. Temporal: "X happened/started/ended at/in/on Y" — time-bound facts
+        7. Causal: "X because/since/due to Y" — cause-effect relationships
+        8. Comparative: "X is better/worse/more/less than Y" — comparisons
+
+        No LLM call — pure regex heuristics for speed during sleep-time compute.
         """
         content = chunk.get("content", "")
         propositions = []
+        seen = set()  # Deduplicate
 
-        # Definitional patterns: "X is Y", "X are Y"
-        for match in re.finditer(r'(\b[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\s+(?:is|are)\s+(.{5,60}?)(?:[.!?,]|$)', content):
-            propositions.append(f"{match.group(1)} is {match.group(2).strip()}")
+        def _add(prop: str):
+            prop = prop.strip().rstrip(".")
+            if prop and len(prop) > 8 and prop not in seen:
+                seen.add(prop)
+                propositions.append(prop)
 
-        # Verb-object patterns: "user wants/needs/likes X"
-        for match in re.finditer(r'(?:user|they|he|she|I)\s+(want|need|like|prefer|use|enjoy|hate|love|know|think|believe)s?\s+(.{3,60}?)(?:[.!?,]|$)', content, re.IGNORECASE):
-            propositions.append(f"user {match.group(1)}s {match.group(2).strip()}")
+        # 1. Definitional patterns: "X is Y", "X are Y", "X was Y", "X means Y"
+        for match in re.finditer(
+            r'(\b[A-Z][a-zA-Z]+(?:\s+[A-Z]?[a-zA-Z]+){0,3})\s+(?:is|are|was|were|means?)\s+(.{5,80}?)(?:[.!?,;]|$)',
+            content
+        ):
+            _add(f"{match.group(1)} is {match.group(2).strip()}")
 
-        # Named entities (capitalized multi-word sequences)
+        # Also catch lowercase definitional: "the X is Y"
+        for match in re.finditer(
+            r'(?:the|a|an)\s+(\b[a-zA-Z]+(?:\s+[a-zA-Z]+){0,2})\s+(?:is|are|was|were)\s+(.{5,80}?)(?:[.!?,;]|$)',
+            content, re.IGNORECASE
+        ):
+            _add(f"{match.group(1)} is {match.group(2).strip()}")
+
+        # 2. Verb-object patterns: "subject verb object"
+        for match in re.finditer(
+            r'(?:user|they|he|she|I|we|it)\s+(want|need|like|prefer|use|enjoy|hate|love|know|think|believe|work|learn|study|play|create|build|develop|manage|run|own|have|maintain)s?\s+(.{3,80}?)(?:[.!?,;]|$)',
+            content, re.IGNORECASE
+        ):
+            _add(f"user {match.group(1)}s {match.group(2).strip()}")
+
+        # 3. Named entities (capitalized multi-word sequences)
         for match in re.finditer(r'\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)+)\b', content):
             entity = match.group(1)
             if len(entity) > 3 and entity.lower() not in self._get_stopwords():
-                propositions.append(f"entity: {entity}")
+                _add(f"entity: {entity}")
 
-        # Key facts: "X can/will/should Y"
-        for match in re.finditer(r'(\b[A-Za-z]+(?:\s+[A-Za-z]+)?)\s+(can|will|should|must|could)\s+(.{5,50}?)(?:[.!?,]|$)', content):
-            propositions.append(f"{match.group(1)} {match.group(2)} {match.group(3).strip()}")
+        # Also extract single capitalized words that look like proper nouns (not sentence starts)
+        for match in re.finditer(r'(?<=[.!?]\s{1,3})(?!.)|(?<=,\s)([A-Z][a-z]{2,})\b', content):
+            if match.group(1):
+                word = match.group(1)
+                if word.lower() not in self._get_stopwords() and len(word) > 2:
+                    _add(f"entity: {word}")
 
-        return propositions[:10]  # Limit per chunk
+        # 4. Modal patterns: "X can/will/should/must Y"
+        for match in re.finditer(
+            r'(\b[A-Za-z]+(?:\s+[A-Za-z]+){0,2})\s+(can|will|should|must|could|would|might|may)\s+(.{5,60}?)(?:[.!?,;]|$)',
+            content
+        ):
+            _add(f"{match.group(1)} {match.group(2)} {match.group(3).strip()}")
+
+        # 5. Relational patterns: "X has/contains/includes Y"
+        for match in re.finditer(
+            r'(\b[A-Z]?[a-zA-Z]+(?:\s+[a-zA-Z]+){0,2})\s+(?:has|have|had|contains?|includes?|consists?\s+of|belongs?\s+to|owns?)\s+(.{3,60}?)(?:[.!?,;]|$)',
+            content, re.IGNORECASE
+        ):
+            _add(f"{match.group(1)} has {match.group(2).strip()}")
+
+        # 6. Temporal patterns: "X happened/started/ended in/on/at Y"
+        for match in re.finditer(
+            r'(\b[A-Za-z]+(?:\s+[A-Za-z]+){0,3})\s+(?:happened|started|began|ended|finished|occurred|was born|died|launched|released|created|founded)\s+(?:in|on|at|during|around)?\s*(.{3,40}?)(?:[.!?,;]|$)',
+            content, re.IGNORECASE
+        ):
+            _add(f"temporal: {match.group(1).strip()} at {match.group(2).strip()}")
+
+        # Also extract date/time references
+        for match in re.finditer(
+            r'(?:in|on|at|since|from|until|by)\s+(\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{4}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:,?\s+\d{4})?)',
+            content, re.IGNORECASE
+        ):
+            _add(f"temporal_ref: {match.group(1).strip()}")
+
+        # 7. Causal patterns: "X because/since/due to Y"
+        for match in re.finditer(
+            r'(.{10,60}?)\s+(?:because|since|due\s+to|caused\s+by|as\s+a\s+result\s+of|thanks\s+to|owing\s+to)\s+(.{5,60}?)(?:[.!?,;]|$)',
+            content, re.IGNORECASE
+        ):
+            _add(f"cause: {match.group(2).strip()} -> {match.group(1).strip()}")
+
+        # 8. Comparative patterns: "X is better/worse/more/less than Y"
+        for match in re.finditer(
+            r'(\b[A-Za-z]+(?:\s+[A-Za-z]+){0,2})\s+(?:is|are)\s+(better|worse|faster|slower|more|less|bigger|smaller|stronger|weaker|easier|harder)\s+(?:than)\s+(.{3,40}?)(?:[.!?,;]|$)',
+            content, re.IGNORECASE
+        ):
+            _add(f"comparison: {match.group(1)} is {match.group(2)} than {match.group(3).strip()}")
+
+        return propositions[:15]  # Limit per chunk (raised from 10)
 
     def _store_atomic_facts(self, memories: List[Dict[str, Any]]) -> int:
         """Extract and store atomic facts from memories into ChromaDB.

@@ -1567,11 +1567,29 @@ def seed_initial_knowledge(kg: 'KnowledgeGraphTool') -> Dict[str, int]:
     }
 
 
+_kg_atexit_registered: bool = False
+
+
+def _kg_atexit_save():
+    """Save KG data on interpreter shutdown to prevent data loss."""
+    global _kg_instance
+    if _kg_instance is not None:
+        try:
+            _kg_instance.save()
+            logger.info("[KG] atexit: data saved successfully")
+        except Exception as e:
+            logger.warning(f"[KG] atexit: save failed: {e}")
+
+
 def get_knowledge_graph() -> KnowledgeGraphTool:
     """Get or create the global KnowledgeGraphTool instance."""
-    global _kg_instance
+    global _kg_instance, _kg_atexit_registered
     if _kg_instance is None:
         _kg_instance = KnowledgeGraphTool()
+        if not _kg_atexit_registered:
+            import atexit
+            atexit.register(_kg_atexit_save)
+            _kg_atexit_registered = True
     return _kg_instance
 
 

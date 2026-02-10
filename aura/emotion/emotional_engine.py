@@ -115,6 +115,8 @@ class EmotionalEngine:
     - Natural mood decay toward neutral
     - Emotional reactions to interactions
     - Context-aware emotional responses
+    - ALMA bridge: forwards interactions to the richer ALMA 3-layer engine
+      when available, and enriches status output with PAD/neuromodulator data.
     """
 
     # How quickly mood decays toward neutral (per hour)
@@ -144,7 +146,24 @@ class EmotionalEngine:
         self.state = self._load_state()
         self.interaction_history: List[Dict] = []
 
+        # ALMA bridge — lazy-loaded to avoid circular imports
+        self._alma = None
+        self._alma_checked = False
+
         logger.info(f"EmotionalEngine initialized. Current mood: {self.state.mood.value}")
+
+    def _get_alma(self):
+        """Lazy-load the ALMA engine singleton (returns None if unavailable)."""
+        if not self._alma_checked:
+            self._alma_checked = True
+            try:
+                from apprentice_agent.emotion.alma_engine import alma_engine
+                self._alma = alma_engine
+                logger.info("EmotionalEngine: ALMA bridge connected")
+            except Exception as e:
+                logger.debug(f"EmotionalEngine: ALMA unavailable ({e}), running standalone")
+                self._alma = None
+        return self._alma
 
     def _load_state(self) -> EmotionalState:
         """Load emotional state from file."""
@@ -260,6 +279,18 @@ class EmotionalEngine:
         # Save state
         self._save_state()
 
+        # Forward to ALMA so the richer 3-layer engine stays in sync
+        alma = self._get_alma()
+        if alma is not None:
+            try:
+                alma.update_from_interaction(
+                    user_message=user_input,
+                    interaction_success=response_success,
+                    topic_interest=self.state.curiosity,
+                )
+            except Exception as e:
+                logger.debug(f"ALMA forward failed: {e}")
+
         return self.state
 
     def _determine_mood(self) -> Mood:
@@ -305,6 +336,18 @@ class EmotionalEngine:
         self.state.mood_reason = "Baseline state"
         return Mood.NEUTRAL
 
+    # Mapping from EvoEmo Mood enum to approximate ALMA PAD coordinates
+    _MOOD_TO_PAD = {
+        Mood.EXCITED:    (0.7, 0.8, 0.4),
+        Mood.HAPPY:      (0.6, 0.3, 0.2),
+        Mood.CONTENT:    (0.3, 0.0, 0.1),
+        Mood.NEUTRAL:    (0.0, 0.0, 0.0),
+        Mood.THOUGHTFUL: (0.1, -0.2, 0.3),
+        Mood.TIRED:      (-0.1, -0.6, -0.2),
+        Mood.CONCERNED:  (-0.3, 0.3, -0.1),
+        Mood.FRUSTRATED: (-0.5, 0.5, -0.3),
+    }
+
     def set_mood(self, mood: Mood, reason: str = "") -> None:
         """
         Manually set mood (for external triggers).
@@ -316,6 +359,16 @@ class EmotionalEngine:
         self.state.mood = mood
         self.state.mood_reason = reason
         self._save_state()
+
+        # Sync to ALMA if available
+        alma = self._get_alma()
+        if alma is not None:
+            try:
+                p, a, d = self._MOOD_TO_PAD.get(mood, (0.0, 0.0, 0.0))
+                from apprentice_agent.emotion.alma_engine import PADState
+                alma.set_mood(PADState(p, a, d))
+            except Exception:
+                pass
 
     def boost_energy(self, amount: float = 0.2) -> None:
         """Boost energy (e.g., at start of session)."""
@@ -355,8 +408,12 @@ class EmotionalEngine:
         )
 
     def get_status(self) -> Dict:
-        """Get current emotional status for debugging/display."""
-        return {
+        """Get current emotional status for debugging/display.
+
+        When ALMA is available, enriches the output with PAD space
+        coordinates and neuromodulator levels for richer context.
+        """
+        status = {
             "mood": self.state.mood.value,
             "mood_reason": self.state.mood_reason,
             "energy": round(self.state.energy, 2),
@@ -364,8 +421,21 @@ class EmotionalEngine:
             "engagement": round(self.state.engagement, 2),
             "curiosity": round(self.state.curiosity, 2),
             "tone": self.state.get_tone_modifier(),
-            "proactive": self.should_be_proactive()
+            "proactive": self.should_be_proactive(),
         }
+
+        # Enrich with ALMA's richer state when available
+        alma = self._get_alma()
+        if alma is not None:
+            try:
+                alma_state = alma.get_emotional_state()
+                status["alma_emotion"] = alma_state.get("dominant_emotion")
+                status["pad"] = alma_state.get("pad")
+                status["neuromodulators"] = alma_state.get("neuromodulators")
+            except Exception:
+                pass
+
+        return status
 
 
 if __name__ == "__main__":

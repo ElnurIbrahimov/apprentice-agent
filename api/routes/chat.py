@@ -31,6 +31,54 @@ UPLOAD_DIR = Path(__file__).parent.parent / "data" / "uploads"
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
+# ---------------------------------------------------------------------------
+# WebSocket connection registry for server-push (proactive messages, etc.)
+# ---------------------------------------------------------------------------
+_active_websockets: List[WebSocket] = []
+_ws_lock = threading.Lock()
+
+
+def register_websocket(ws: WebSocket) -> None:
+    """Add a WebSocket to the active connection set."""
+    with _ws_lock:
+        _active_websockets.append(ws)
+
+
+def unregister_websocket(ws: WebSocket) -> None:
+    """Remove a WebSocket from the active connection set."""
+    with _ws_lock:
+        try:
+            _active_websockets.remove(ws)
+        except ValueError:
+            pass
+
+
+async def _broadcast_json(payload: dict) -> None:
+    """Send a JSON message to all active WebSocket connections."""
+    with _ws_lock:
+        targets = list(_active_websockets)
+    for ws in targets:
+        try:
+            await ws.send_json(payload)
+        except Exception:
+            pass  # Connection may have closed; unregister handles cleanup
+
+
+async def broadcast_proactive_message(msg) -> None:
+    """Push a Gateway Daemon ProactiveMessage to all connected clients.
+
+    Called from the notification callback wired in api/main.py.
+    """
+    payload = {
+        "type": "proactive",
+        "content": msg.content,
+        "action": msg.action.value if hasattr(msg.action, "value") else str(msg.action),
+        "priority": msg.priority.name if hasattr(msg.priority, "name") else str(msg.priority),
+        "timestamp": msg.timestamp.isoformat() if hasattr(msg.timestamp, "isoformat") else str(msg.timestamp),
+        "metadata": getattr(msg, "metadata", {}),
+    }
+    await _broadcast_json(payload)
+
 
 async def process_attachments(attachments: List[dict], loop) -> str:
     """Process attachments and return context to prepend to message.
@@ -338,6 +386,7 @@ async def websocket_chat(websocket: WebSocket):
         Server -> Client: {"type": "stopped"} - Generation was stopped
     """
     await websocket.accept()
+    register_websocket(websocket)
     logger.info("[WebSocket] Client connected")
 
     # Flag to signal stop to the streaming thread
@@ -589,3 +638,5 @@ async def websocket_chat(websocket: WebSocket):
     except Exception as e:
         logger.error(f"[WebSocket] Connection error: {e}")
         stop_generation.set()  # Kill any running stream_worker thread
+    finally:
+        unregister_websocket(websocket)

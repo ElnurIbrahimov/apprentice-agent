@@ -598,7 +598,9 @@ class ApprenticeAgent:
             self.fast_path_handler = None
 
         # Initialize Proto-AGI Core - Autonomous Cognitive Loop
-        # This REPLACES the old heartbeat/proactive system with a true autonomous mind
+        # NOTE: Proto-AGI is initialized but NOT auto-started. It runs on-demand
+        # via start_proto_agi() or when explicitly triggered (e.g., by Telegram bot).
+        # The Gateway Daemon (api/main.py) handles production proactive behavior.
         self.proto_agi = None
         self._proto_agi_output_callback = None  # Set by Telegram bot
 
@@ -749,7 +751,8 @@ class ApprenticeAgent:
             print("[INFO] Skill Library not available (install sentence-transformers: pip install sentence-transformers)")
 
         # Initialize Predictive Life Modeling - World Simulator for Personal Decisions
-        # Enables "what-if" scenario simulations for major life decisions
+        # NOTE: On-demand tool — accessed via life_update_state(), simulate_decision(),
+        # compare_decisions(), what_if_analysis(), etc. Not auto-triggered.
         self.life_modeling = None
         self.life_modeling_enabled = getattr(Config, 'LIFE_MODELING_ENABLED', True)
 

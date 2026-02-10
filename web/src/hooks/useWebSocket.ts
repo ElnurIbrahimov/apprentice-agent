@@ -104,6 +104,31 @@ export function useWebSocket() {
         currentMessageId.current = null;
         setIsLoading(false);
         break;
+
+      case 'proactive': {
+        // Real-time push from Gateway Daemon (instant, no polling delay)
+        const actionLabels: Record<string, string> = {
+          notify: 'noticed something',
+          suggest: 'has a suggestion',
+          remind: 'wants to remind you',
+          ask: 'is curious',
+          intervene: 'needs your attention',
+          prepare: 'prepared something',
+        };
+        const triggerLabel = actionLabels[data.action || ''] || 'wants to share';
+        addMessage({
+          role: 'assistant',
+          content: data.content || '',
+          proactive: {
+            action: data.action || 'notify',
+            trigger: triggerLabel,
+            confidence: typeof data.metadata?.confidence === 'number'
+              ? data.metadata.confidence
+              : undefined,
+          },
+        });
+        break;
+      }
     }
   }, [addMessage, appendToMessage, setMessageStreaming, setMood, setIsLoading, setError]);
 

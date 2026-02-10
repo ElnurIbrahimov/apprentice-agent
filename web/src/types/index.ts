@@ -67,12 +67,16 @@ export interface StatusResponse {
 }
 
 export interface WebSocketMessage {
-  type: 'chat' | 'chunk' | 'done' | 'error' | 'ping' | 'pong' | 'stopped';
+  type: 'chat' | 'chunk' | 'done' | 'error' | 'ping' | 'pong' | 'stopped' | 'proactive';
   content?: string;
   message?: string;
   response?: string;
   mood?: MoodState;
   error?: string;
+  action?: string;
+  priority?: string;
+  timestamp?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';

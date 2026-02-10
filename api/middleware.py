@@ -1,0 +1,133 @@
+"""API middleware for authentication, rate limiting, and security."""
+
+import time
+import logging
+import secrets
+from collections import defaultdict
+from typing import Dict, Tuple
+
+from fastapi import Request, Response, WebSocket
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
+
+logger = logging.getLogger(__name__)
+
+
+class APIKeyAuthMiddleware(BaseHTTPMiddleware):
+    """API key authentication middleware.
+
+    Validates requests against a configured API key.
+    Skips auth for health/status endpoints and when auth is disabled.
+    """
+
+    # Endpoints that don't require authentication
+    PUBLIC_PATHS = {
+        "/",
+        "/health",
+        "/api/status",
+        "/docs",
+        "/openapi.json",
+        "/redoc",
+    }
+
+    def __init__(self, app, api_key: str = "", enabled: bool = False):
+        super().__init__(app)
+        self.api_key = api_key
+        self.enabled = enabled and bool(api_key)
+        if self.enabled:
+            logger.info("[Auth] API key authentication enabled")
+        else:
+            logger.info("[Auth] API key authentication disabled (set AURA_API_KEY and AURA_API_AUTH_ENABLED=true to enable)")
+
+    async def dispatch(self, request: Request, call_next):
+        if not self.enabled:
+            return await call_next(request)
+
+        # Skip auth for public paths
+        if request.url.path in self.PUBLIC_PATHS:
+            return await call_next(request)
+
+        # Skip auth for static files
+        if request.url.path.startswith("/static") or request.url.path.startswith("/assets"):
+            return await call_next(request)
+
+        # Check API key in header or query param
+        api_key = request.headers.get("X-API-Key") or request.query_params.get("api_key")
+
+        if not api_key:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Missing API key. Provide X-API-Key header or api_key query parameter."}
+            )
+
+        if not secrets.compare_digest(api_key, self.api_key):
+            logger.warning(f"[Auth] Invalid API key from {request.client.host}")
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Invalid API key."}
+            )
+
+        return await call_next(request)
+
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    """Simple in-memory rate limiting per IP address.
+
+    Uses a sliding window counter approach.
+    """
+
+    def __init__(self, app, requests_per_minute: int = 60, enabled: bool = True):
+        super().__init__(app)
+        self.requests_per_minute = requests_per_minute
+        self.enabled = enabled and requests_per_minute > 0
+        # Track requests: ip -> list of timestamps
+        self._requests: Dict[str, list] = defaultdict(list)
+        self._cleanup_interval = 300  # Clean old entries every 5 min
+        self._last_cleanup = time.time()
+        if self.enabled:
+            logger.info(f"[RateLimit] Enabled: {requests_per_minute} requests/minute per IP")
+
+    def _cleanup_old_entries(self):
+        """Remove entries older than 2 minutes to prevent memory growth."""
+        now = time.time()
+        if now - self._last_cleanup < self._cleanup_interval:
+            return
+        cutoff = now - 120
+        stale_ips = []
+        for ip, timestamps in self._requests.items():
+            self._requests[ip] = [t for t in timestamps if t > cutoff]
+            if not self._requests[ip]:
+                stale_ips.append(ip)
+        for ip in stale_ips:
+            del self._requests[ip]
+        self._last_cleanup = now
+
+    async def dispatch(self, request: Request, call_next):
+        if not self.enabled:
+            return await call_next(request)
+
+        # Skip rate limiting for WebSocket upgrades (handled differently)
+        if request.headers.get("upgrade", "").lower() == "websocket":
+            return await call_next(request)
+
+        client_ip = request.client.host if request.client else "unknown"
+        now = time.time()
+        window_start = now - 60
+
+        # Count requests in the current window
+        self._requests[client_ip] = [
+            t for t in self._requests[client_ip] if t > window_start
+        ]
+
+        if len(self._requests[client_ip]) >= self.requests_per_minute:
+            retry_after = int(60 - (now - self._requests[client_ip][0]))
+            return JSONResponse(
+                status_code=429,
+                content={"detail": f"Rate limit exceeded. Try again in {max(1, retry_after)}s."},
+                headers={"Retry-After": str(max(1, retry_after))}
+            )
+
+        self._requests[client_ip].append(now)
+        self._cleanup_old_entries()
+
+        return await call_next(request)

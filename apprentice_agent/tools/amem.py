@@ -1280,13 +1280,29 @@ Guidelines:
 
 # Singleton instance
 _amem_instance: Optional[AMEMSystem] = None
+_amem_atexit_registered: bool = False
+
+
+def _amem_atexit_save():
+    """Save A-MEM data on interpreter shutdown to prevent data loss."""
+    global _amem_instance
+    if _amem_instance is not None:
+        try:
+            _amem_instance.save()
+            logger.info("[A-MEM] atexit: data saved successfully")
+        except Exception as e:
+            logger.warning(f"[A-MEM] atexit: save failed: {e}")
 
 
 def get_amem(llm_func: Optional[callable] = None) -> AMEMSystem:
     """Get or create the global A-MEM instance."""
-    global _amem_instance
+    global _amem_instance, _amem_atexit_registered
     if _amem_instance is None:
         _amem_instance = AMEMSystem(llm_func=llm_func)
+        if not _amem_atexit_registered:
+            import atexit
+            atexit.register(_amem_atexit_save)
+            _amem_atexit_registered = True
     return _amem_instance
 
 

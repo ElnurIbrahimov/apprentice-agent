@@ -14,6 +14,8 @@ from starlette.websockets import WebSocket as StarletteWebSocket
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
+from api.middleware import APIKeyAuthMiddleware, RateLimitMiddleware
+
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -75,10 +77,16 @@ async def lifespan(app: FastAPI):
 
             daemon = get_gateway_daemon()
 
-            # Wire the notification callback so messages go to the pending queue
-            # AND get logged. The frontend polls get_pending_messages() via API.
+            # Wire the notification callback so messages go to the pending queue,
+            # get logged, AND pushed to connected WebSocket clients in real-time.
             def _on_proactive_message(msg):
                 logger.info(f"[Proactive] {msg.action.value}: {msg.content[:80]}...")
+                # Push to all connected WebSocket clients (instant delivery)
+                try:
+                    from api.routes.chat import broadcast_proactive_message
+                    asyncio.create_task(broadcast_proactive_message(msg))
+                except Exception as e:
+                    logger.debug(f"[Proactive] WebSocket push failed: {e}")
 
             daemon.set_notification_callback(_on_proactive_message)
 
@@ -225,6 +233,21 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
 
+    # Save memory systems before shutdown (prevent data loss)
+    try:
+        from apprentice_agent.tools.amem import get_amem
+        get_amem().save()
+        logger.info("[API] A-MEM data saved")
+    except Exception as e:
+        logger.warning(f"[API] A-MEM save error: {e}")
+
+    try:
+        from apprentice_agent.tools.knowledge_graph import get_knowledge_graph
+        get_knowledge_graph().save()
+        logger.info("[API] Knowledge Graph data saved")
+    except Exception as e:
+        logger.warning(f"[API] KG save error: {e}")
+
     # Close proactive persistence database
     try:
         from apprentice_agent.proactive.persistence import get_persistence
@@ -242,16 +265,40 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Configure CORS for development
+# Configure CORS
 # NOTE: Starlette 0.50+ CORSMiddleware rejects WebSocket with 403 when
 # specific origins are listed. Use wildcard for dev to allow WebSocket.
+try:
+    from apprentice_agent.config import Config as _cfg
+    _cors_origins_str = getattr(_cfg, 'API_CORS_ORIGINS', '*')
+except Exception:
+    _cors_origins_str = '*'
+
+_cors_origins = ["*"] if _cors_origins_str == "*" else [o.strip() for o in _cors_origins_str.split(",")]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=_cors_origins,
+    allow_credentials=_cors_origins != ["*"],
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*", "X-API-Key"],
 )
+
+# API key authentication middleware (disabled by default, enable via env vars)
+try:
+    from apprentice_agent.config import Config as _auth_cfg
+    app.add_middleware(
+        APIKeyAuthMiddleware,
+        api_key=getattr(_auth_cfg, 'API_KEY', ''),
+        enabled=getattr(_auth_cfg, 'API_AUTH_ENABLED', False),
+    )
+    app.add_middleware(
+        RateLimitMiddleware,
+        requests_per_minute=getattr(_auth_cfg, 'API_RATE_LIMIT', 60),
+        enabled=getattr(_auth_cfg, 'API_AUTH_ENABLED', False),
+    )
+except Exception as e:
+    logger.warning(f"[API] Auth middleware setup skipped: {e}")
 
 # Include all routers - frontend uses 2s stagger + 30s intervals to prevent thread pool exhaustion
 app.include_router(chat.router)
