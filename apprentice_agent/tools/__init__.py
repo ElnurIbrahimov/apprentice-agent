@@ -90,6 +90,11 @@ from .introspection_circuit import (
     quick_confidence_check
 )
 from .introspection_tool import IntrospectionTool, get_introspection_tool
+from .calendar_tool import CalendarTool
+from .shell_executor import ShellExecutorTool
+from .screen_reader import ScreenReaderTool
+from .email_tool import EmailTool
+from .spaced_repetition import SpacedRepetitionTool
 
 # Import FluxMind from external tools directory
 import sys
@@ -231,4 +236,14 @@ __all__ = [
     "quick_confidence_check",
     "IntrospectionTool",
     "get_introspection_tool",
+    # Calendar
+    "CalendarTool",
+    # Shell Executor
+    "ShellExecutorTool",
+    # Screen Reader
+    "ScreenReaderTool",
+    # Email
+    "EmailTool",
+    # Spaced Repetition
+    "SpacedRepetitionTool",
 ]

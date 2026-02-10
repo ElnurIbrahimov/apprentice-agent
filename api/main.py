@@ -19,7 +19,7 @@ from api.middleware import APIKeyAuthMiddleware, RateLimitMiddleware
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from api.routes import chat, status, upload, features, multi_agent, reasoning_tree, introspection, proactive, memory, context, conversation_starters, thinking, idle_behaviors, consciousness, self_improvement
+from api.routes import chat, status, upload, features, multi_agent, reasoning_tree, introspection, proactive, memory, context, conversation_starters, thinking, idle_behaviors, consciousness, self_improvement, thinking_mode, state_machine, tools_new
 # Lazy-loaded agent_service (import removed - now lazy in routes)
 # from api.services.agent_service import agent_service
 
@@ -316,6 +316,9 @@ app.include_router(thinking.router)
 app.include_router(idle_behaviors.router)
 app.include_router(consciousness.router)
 app.include_router(self_improvement.router)
+app.include_router(thinking_mode.router)
+app.include_router(state_machine.router)
+app.include_router(tools_new.router)
 
 # Serve static files in production (built React app)
 # NOTE: Only mount SPA routes when NOT in dev mode (Vite serves the frontend in dev)

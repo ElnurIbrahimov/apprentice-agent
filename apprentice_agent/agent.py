@@ -129,7 +129,7 @@ from .identity import load_identity, get_identity_prompt, detect_name_change, de
 from .memory import MemorySystem
 from .metacognition import MetacognitionLogger
 from .config import Config
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, build_adaptive_system_prompt, get_monologue, KnowledgeGraphTool, get_knowledge_graph, MetacognitiveGuardian, GuardianConfig, NeuroDreamEngine, SleepPhase, ReflexionEngine, code_syntax_evaluator, SynapseForge, WorldSim, RiskLevel
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, build_adaptive_system_prompt, get_monologue, KnowledgeGraphTool, get_knowledge_graph, MetacognitiveGuardian, GuardianConfig, NeuroDreamEngine, SleepPhase, ReflexionEngine, code_syntax_evaluator, SynapseForge, WorldSim, RiskLevel, CalendarTool, SpacedRepetitionTool
 from .tools.mirrormind import MirrorMind
 from .tools.cognitive_theater import CognitiveTheater, is_decision_question
 from .tools.crypto_price import CryptoPriceTool
@@ -340,6 +340,8 @@ class ApprenticeAgent:
             "evoemo": EvoEmoTool(),
             "inner_monologue": get_monologue(),
             "clawdbot": ClawdbotTool(),
+            "calendar": CalendarTool(),
+            "spaced_repetition": SpacedRepetitionTool(),
         }
         logger.info("[LOADED] crypto_price - Real-time crypto prices from CoinGecko")
 
@@ -430,6 +432,30 @@ class ApprenticeAgent:
             except Exception as e:
                 print(f"[WARNING] hybrid_amem not loaded: {e}")
 
+            # shell_executor
+            try:
+                from .tools.shell_executor import ShellExecutorTool
+                self.tools['shell_executor'] = ShellExecutorTool()
+                logger.info("[LOADED] shell_executor")
+            except Exception as e:
+                logger.warning(f"shell_executor not loaded: {e}")
+
+            # screen_reader
+            try:
+                from .tools.screen_reader import ScreenReaderTool
+                self.tools['screen_reader'] = ScreenReaderTool()
+                logger.info("[LOADED] screen_reader")
+            except Exception as e:
+                logger.warning(f"screen_reader not loaded: {e}")
+
+            # email
+            try:
+                from .tools.email_tool import EmailTool
+                self.tools['email'] = EmailTool()
+                logger.info("[LOADED] email")
+            except Exception as e:
+                logger.warning(f"email not loaded: {e}")
+
             # Auto-load ALL synthesized tools (with security validation)
             try:
                 import os
@@ -481,7 +507,7 @@ class ApprenticeAgent:
             self._lazy_tools = [
                 "screenshot", "vision", "pdf_reader", "arxiv_search",
                 "browser", "system_control", "tool_builder", "marketplace",
-                "knowledge_graph"
+                "knowledge_graph", "shell_executor", "screen_reader", "email"
             ]
 
         # Connect inner monologue to EvoEmo for emotional awareness
@@ -865,6 +891,21 @@ class ApprenticeAgent:
             self.tools["marketplace"] = MarketplaceTool()
         elif tool_name == "clawdbot":
             self.tools["clawdbot"] = ClawdbotTool()
+        elif tool_name == "shell_executor":
+            from .tools.shell_executor import ShellExecutorTool
+            self.tools["shell_executor"] = ShellExecutorTool()
+        elif tool_name == "screen_reader":
+            from .tools.screen_reader import ScreenReaderTool
+            self.tools["screen_reader"] = ScreenReaderTool()
+        elif tool_name == "email":
+            from .tools.email_tool import EmailTool
+            self.tools["email"] = EmailTool()
+        elif tool_name == "calendar":
+            from .tools.calendar_tool import CalendarTool
+            self.tools["calendar"] = CalendarTool()
+        elif tool_name == "spaced_repetition":
+            from .tools.spaced_repetition import SpacedRepetitionTool
+            self.tools["spaced_repetition"] = SpacedRepetitionTool()
 
         return self.tools.get(tool_name)
 
@@ -1560,6 +1601,24 @@ Guidelines:
         # Start metacognition tracking for this goal
         self.metacognition.start_goal(goal)
 
+        # Start state machine tracking
+        try:
+            from apprentice_agent.state_machine import get_agent_state_machine, Phase as _SMPhase
+            self._state_machine = get_agent_state_machine()
+            # Hook: long ACT phases bump cognitive load
+            def _act_exit_hook(from_phase, to_phase, duration_ms, metadata):
+                if duration_ms > 5000:
+                    try:
+                        from apprentice_agent.thinking_mode import get_thinking_mode_manager
+                        tmm = get_thinking_mode_manager()
+                        tmm.cognitive_load.record_query(0.3, True, True)
+                    except Exception:
+                        pass
+            self._state_machine.on_exit(_SMPhase.ACT, _act_exit_hook)
+            self._state_machine.start_run(goal)
+        except Exception:
+            self._state_machine = None
+
         # Start inner monologue session
         self.monologue.start_session()
         self.monologue.think("perceive", f"Received: '{goal[:80]}{'...' if len(goal) > 80 else ''}'")
@@ -1596,31 +1655,63 @@ Guidelines:
             try:
                 # Phase 1: OBSERVE
                 logger.debug("[AGENT] Phase: OBSERVE")
+                if self._state_machine:
+                    from apprentice_agent.state_machine import Phase as _Phase
+                    self._state_machine.set_iteration(self.state.iteration)
+                    if self.state.iteration > 1:
+                        self._state_machine.transition(_Phase.OBSERVE)
                 self._observe(context)
 
                 # Phase 2: PLAN
                 logger.debug("[AGENT] Phase: PLAN")
+                if self._state_machine:
+                    from apprentice_agent.state_machine import Phase as _Phase
+                    self._state_machine.transition(_Phase.PLAN)
                 self._plan()
 
                 # Phase 3: ACT
                 logger.debug("[AGENT] Phase: ACT")
+                if self._state_machine:
+                    from apprentice_agent.state_machine import Phase as _Phase
+                    self._state_machine.transition(_Phase.ACT)
                 self._act()
 
                 # Phase 4: EVALUATE
                 logger.debug("[AGENT] Phase: EVALUATE")
+                if self._state_machine:
+                    from apprentice_agent.state_machine import Phase as _Phase
+                    self._state_machine.transition(_Phase.EVALUATE)
                 self._evaluate()
 
                 # Phase 5: REMEMBER
                 logger.debug("[AGENT] Phase: REMEMBER")
+                if self._state_machine:
+                    from apprentice_agent.state_machine import Phase as _Phase
+                    self._state_machine.transition(_Phase.REMEMBER)
                 self._remember()
 
             except Exception as e:
                 logger.error(f"[AGENT] Error in iteration {self.state.iteration}: {e}")
+                if self._state_machine:
+                    try:
+                        from apprentice_agent.state_machine import Phase as _Phase
+                        self._state_machine.transition(_Phase.ERROR)
+                        self._state_machine.transition(_Phase.OBSERVE)
+                    except Exception:
+                        pass
                 # Continue to next iteration on error
                 continue
 
         elapsed = time.time() - start_time
         logger.info(f"[AGENT] Completed in {elapsed:.1f}s after {self.state.iteration} iterations")
+
+        # End state machine run
+        if self._state_machine:
+            try:
+                self._state_machine.end_run(completed=self.state.completed)
+            except Exception:
+                pass
+
         return self._get_final_result()
 
     def _format_timeout_response(self, goal: str, iteration: int, elapsed: float) -> dict:

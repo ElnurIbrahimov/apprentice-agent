@@ -1338,6 +1338,17 @@ class OllamaBrain:
         # System 1/System 2 decision for all other queries
         use_s2, domain, confidence, reason = self._should_escalate_to_system2(prompt, task_type)
 
+        # Apply explicit thinking-mode override + cognitive load
+        try:
+            from apprentice_agent.thinking_mode import get_thinking_mode_manager
+            tmm = get_thinking_mode_manager()
+            use_s2, reason = tmm.get_effective_decision(use_s2)
+            # Track this query in cognitive load window
+            was_complex = use_cloud or (task_type == TaskType.CODE)
+            tmm.cognitive_load.record_query(confidence, was_complex, use_s2)
+        except Exception:
+            pass  # Graceful fallback if thinking_mode not available
+
         if use_s2:
             model = getattr(Config, 'MODEL_REASON_CLOUD', Config.MODEL_REASON) if use_cloud else Config.MODEL_REASON
             logger.info(f"[BRAIN] System 2 (deliberative): domain={domain}, confidence={confidence:.2f}, reason={reason}, model={model}")
@@ -2015,7 +2026,12 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
             "system_control": "system_control - get system info (CPU, RAM, GPU, disk), control volume/brightness, open apps, lock screen. ACTION: 'get_system_info' or 'get_volume' or 'set_volume <level>' or 'open_app <name>'",
             "notifications": "notifications - set reminders, schedule notifications, create conditional alerts. ACTION: 'add_reminder <msg> in <time>' or 'add_scheduled <msg> <time> <repeat>' or 'list' or 'remove <id>'",
             "tool_builder": "tool_builder - create, test, enable, disable, or list custom tools. ACTION: 'list' or 'test <name>' or 'enable <name>' or 'disable <name>' or 'rollback <name>'",
-            "summarize": "summarize - summarize gathered information. ACTION: 'results'"
+            "summarize": "summarize - summarize gathered information. ACTION: 'results'",
+            "calendar": "calendar - manage events, appointments, schedules. ACTION: 'add <title> on <date> at <time>' or 'today' or 'upcoming' or 'list <date>' or 'remove <id>' or 'search <query>'",
+            "shell_executor": "shell_executor - execute shell/terminal commands with persistent sessions. ACTION: the command to run (e.g. 'ls -la', 'git status', 'python script.py')",
+            "screen_reader": "screen_reader - read text from screen via OCR, detect active window, monitor for changes. ACTION: 'read' or 'read_region x y w h' or 'active_window' or 'watch <keyword>'",
+            "email": "email - read and send emails. ACTION: 'fetch' or 'fetch unread' or 'read <id>' or 'send to:<addr> subject:<subj> body:<text>' or 'search <query>' or 'setup'",
+            "spaced_repetition": "spaced_repetition - flashcard learning with spaced repetition. ACTION: 'review' or 'add front:<q> back:<a>' or 'answer <id> <quality 0-5>' or 'due' or 'stats' or 'auto_generate <text>'"
         }
         return "\n".join(descriptions.get(t, t) for t in available_tools)
 
@@ -2055,6 +2071,16 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
                     tool = "notifications"
                 elif "tool_builder" in tool or "builder" in tool or "create tool" in tool or "custom tool" in tool:
                     tool = "tool_builder"
+                elif "calendar" in tool or "event" in tool or "schedule" in tool or "agenda" in tool:
+                    tool = "calendar"
+                elif "shell" in tool or "terminal" in tool or "command" in tool or "bash" in tool:
+                    tool = "shell_executor"
+                elif "screen_reader" in tool or "ocr" in tool or "monitor" in tool or "active window" in tool:
+                    tool = "screen_reader"
+                elif "email" in tool or "mail" in tool or "inbox" in tool or "send email" in tool:
+                    tool = "email"
+                elif "flashcard" in tool or "spaced" in tool or "repetition" in tool or "review card" in tool:
+                    tool = "spaced_repetition"
                 result["tool"] = tool
             elif line.upper().startswith("ACTION:"):
                 action = line[7:].strip()
@@ -2091,6 +2117,16 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
                 result["tool"] = "notifications"
             elif "tool_builder" in response_lower or "create tool" in response_lower or "custom tool" in response_lower or "list tools" in response_lower:
                 result["tool"] = "tool_builder"
+            elif "calendar" in response_lower or "event" in response_lower or "agenda" in response_lower or "appointment" in response_lower:
+                result["tool"] = "calendar"
+            elif "shell" in response_lower or "terminal" in response_lower or "command line" in response_lower or "run command" in response_lower:
+                result["tool"] = "shell_executor"
+            elif "screen reader" in response_lower or "ocr" in response_lower or "read screen" in response_lower or "active window" in response_lower:
+                result["tool"] = "screen_reader"
+            elif "email" in response_lower or "inbox" in response_lower or "send mail" in response_lower or "check mail" in response_lower:
+                result["tool"] = "email"
+            elif "flashcard" in response_lower or "spaced repetition" in response_lower or "review card" in response_lower:
+                result["tool"] = "spaced_repetition"
 
         if not result["action"] and result["tool"] == "web_search":
             # Try to extract a search query from the response
