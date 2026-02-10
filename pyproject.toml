@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aura"
+version = "1.0.0"
+description = "AURA - Autonomous Universal Reasoning Agent"
+requires-python = ">=3.10"
+
+[project.scripts]
+aura = "main:main"
+
+[tool.setuptools]
+py-modules = ["main"]
+packages = ["apprentice_agent", "apprentice_agent.tools", "apprentice_agent.services", "api", "api.routes"]

@@ -11,7 +11,8 @@ from apprentice_agent.tools.voice import VoiceConversation
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Apprentice Agent - An AI agent with memory and reasoning"
+        description="AURA - Autonomous Universal Reasoning Agent",
+        prog="aura"
     )
     parser.add_argument(
         "goal",
@@ -55,6 +56,11 @@ def main():
         action="store_true",
         help="Enable text-to-speech for agent responses in chat mode"
     )
+    parser.add_argument(
+        "--no-barge-in",
+        action="store_true",
+        help="Disable barge-in detection in voice mode (use blocking TTS)"
+    )
 
     args = parser.parse_args()
 
@@ -68,19 +74,18 @@ def main():
     agent.use_fastpath = not args.no_fastpath
 
     if args.voice:
-        run_voice_mode(agent)
-    elif args.chat:
-        run_chat_mode(agent, speak=args.speak)
+        run_voice_mode(agent, enable_barge_in=not args.no_barge_in)
     elif args.goal:
         result = agent.run(args.goal)
         print_result(result, is_fastpath=result.get("fast_path", False))
     else:
-        parser.print_help()
+        # Default: interactive chat mode (just type 'aura' to start)
+        run_chat_mode(agent, speak=args.speak)
 
 
-def run_voice_mode(agent: ApprenticeAgent):
+def run_voice_mode(agent: ApprenticeAgent, enable_barge_in: bool = True):
     """Run the agent in voice conversation mode."""
-    conversation = VoiceConversation(agent, whisper_model="base")
+    conversation = VoiceConversation(agent, whisper_model="base", enable_barge_in=enable_barge_in)
     conversation.start()
 
 
@@ -91,11 +96,18 @@ def run_chat_mode(agent: ApprenticeAgent, speak: bool = False):
         agent: The agent instance
         speak: If True, speak responses using TTS
     """
-    print("Apprentice Agent - Interactive Mode")
+    print("\n  \033[1;36m█████╗ ██╗   ██╗██████╗  █████╗\033[0m")
+    print("  \033[1;36m██╔══██╗██║   ██║██╔══██╗██╔══██╗\033[0m")
+    print("  \033[1;36m███████║██║   ██║██████╔╝███████║\033[0m")
+    print("  \033[1;36m██╔══██║██║   ██║██╔══██╗██╔══██║\033[0m")
+    print("  \033[1;36m██║  ██║╚██████╔╝██║  ██║██║  ██║\033[0m")
+    print("  \033[1;36m╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝\033[0m")
+    print("  \033[90mAutonomous Universal Reasoning Agent\033[0m\n")
     if speak:
-        print("Voice output ENABLED")
-    print("Commands: /goal <text>, /recall <query>, /clear, /quit")
-    print("-" * 40)
+        print("  \033[33mVoice output ENABLED\033[0m")
+    print("  \033[90mCommands: /goal <text> | /recall <query> | /clear | /quit\033[0m")
+    print("  \033[90mModes:    aura --voice | aura --dream | aura \"<goal>\"\033[0m")
+    print("  " + "\033[90m" + "-" * 54 + "\033[0m")
 
     while True:
         try:
