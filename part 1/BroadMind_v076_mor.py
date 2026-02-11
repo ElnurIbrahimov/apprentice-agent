@@ -1,0 +1,1625 @@
+"""
+BroadMind v0.76: Mixture of Recursions (MoR)
+=============================================
+
+Builds on v0.75 (Task Scaling / Length Generalization) with:
+- Adaptive inner recursion: within each solver step, shared weights run 1-4 times
+- Learned router selects depth based on operation complexity
+- Simple ops exit early; complex ops get iterative refinement
+- Orthogonal to the Halter (which decides when to stop across steps)
+
+Key insight: MoR decides *how deeply to process each step*, not *when to stop*.
+~445K params (+24K over v0.75's ~421K).
+"""
+
+import math
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
+from collections import defaultdict
+import random
+
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+
+class Config:
+    n_variables = 3
+    n_task_families = 4
+    max_program_length = 4        # training max (unchanged)
+    max_eval_length = 16          # max inference length for OOD eval
+    value_range = 10
+    comparison_scale = 30.0       # replaces hardcoded /10 in comparisons
+
+    # Architecture
+    d_model = 192
+    d_latent = 96
+    d_wisdom = 48
+    n_wisdom_slots = 5
+
+    # Halting
+    halt_threshold = 0.5
+
+    # Distillation
+    distill_batch_size = 32
+
+    # Training
+    batch_size = 256
+
+    # Phased training (critical for success)
+    n_iterations_phase1 = 2500   # Solver only
+    n_iterations_phase2 = 1500   # Wisdom distillation
+    n_iterations_phase2b = 800   # Wisdom matching
+    n_iterations_phase3 = 1500   # Halter only
+    n_iterations_phase4 = 1500   # End-to-end
+    n_iterations_phase5 = 500    # Length generalization fine-tuning
+
+    # Noise for Phase 5
+    noise_std = 0.05
+
+    lr = 1e-3
+    lr_fine = 1e-4
+    grad_clip = 1.0
+    dropout = 0.1
+    weight_decay = 1e-4
+
+    # MoR (Mixture of Recursions) — v0.76
+    max_recursion_depth = 4       # inner recursion passes (1-4)
+    recursion_enc_dim = 24        # d_model // 8, sinusoidal encoding for recursion depth
+    compute_cost_weight = 0.005   # penalty to discourage always-max-depth routing
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+config = Config()
+
+# ============================================================================
+# TASK FAMILIES
+# ============================================================================
+
+TASK_FAMILIES = {
+    0: {'name': 'ACCUMULATE', 'ops': ['ACC_X', 'ACC_Y', 'ACC_Z']},
+    1: {'name': 'TRANSFER', 'ops': ['TRANSFER_XY', 'TRANSFER_YZ', 'TRANSFER_ZX']},
+    2: {'name': 'COMPARE', 'ops': ['IF_X_GT_Y_INC_Z', 'IF_Y_GT_Z_INC_X', 'IF_Z_GT_X_INC_Y']},
+    3: {'name': 'DECREMENT', 'ops': ['DEC_X', 'DEC_Y', 'DEC_Z']},
+}
+
+ALL_OPS = []
+for fam in TASK_FAMILIES.values():
+    ALL_OPS.extend(fam['ops'])
+ALL_OPS.append('PAD')
+PAD_IDX = len(ALL_OPS) - 1
+
+N_OPS = len(ALL_OPS)
+OP_TO_IDX = {op: i for i, op in enumerate(ALL_OPS)}
+
+def get_family_id(op_idx):
+    """Get family ID from operation index."""
+    if op_idx >= PAD_IDX:
+        return -1
+    for fam_id, fam in TASK_FAMILIES.items():
+        if ALL_OPS[op_idx] in fam['ops']:
+            return fam_id
+    return -1
+
+# ============================================================================
+# OPERATIONS
+# ============================================================================
+
+def execute_op(state, op_name):
+    x, y, z = state
+    if op_name == 'ACC_X': return (x + 1, y, z)
+    if op_name == 'ACC_Y': return (x, y + 1, z)
+    if op_name == 'ACC_Z': return (x, y, z + 1)
+    if op_name == 'TRANSFER_XY': return (x - 1, y + 1, z)
+    if op_name == 'TRANSFER_YZ': return (x, y - 1, z + 1)
+    if op_name == 'TRANSFER_ZX': return (x + 1, y, z - 1)
+    if op_name == 'IF_X_GT_Y_INC_Z': return (x, y, z + 1) if x > y else (x, y, z)
+    if op_name == 'IF_Y_GT_Z_INC_X': return (x + 1, y, z) if y > z else (x, y, z)
+    if op_name == 'IF_Z_GT_X_INC_Y': return (x, y + 1, z) if z > x else (x, y, z)
+    if op_name == 'DEC_X': return (x - 1, y, z)
+    if op_name == 'DEC_Y': return (x, y - 1, z)
+    if op_name == 'DEC_Z': return (x, y, z - 1)
+    if op_name == 'PAD': return (x, y, z)
+    raise ValueError(f"Unknown op: {op_name}")
+
+def execute_program(initial_state, program_ops):
+    states = [initial_state]
+    state = initial_state
+    for op_name in program_ops:
+        state = execute_op(state, op_name)
+        states.append(state)
+    return states
+
+# ============================================================================
+# SINUSOIDAL STEP ENCODING (replaces nn.Embedding for step position)
+# ============================================================================
+
+def sinusoidal_step_encoding(step_num, d, batch_size, device):
+    """Sinusoidal positional encoding for a single step.
+
+    Works for any step_num (no upper bound), zero learnable parameters.
+    Solver uses d=48 (d_model//4), Halter uses d=96 (d_model//2).
+    """
+    position = torch.tensor([step_num], dtype=torch.float, device=device)
+    div_term = torch.exp(
+        torch.arange(0, d, 2, device=device).float() * -(math.log(10000.0) / d)
+    )
+    pe = torch.zeros(1, d, device=device)
+    pe[0, 0::2] = torch.sin(position * div_term)
+    pe[0, 1::2] = torch.cos(position * div_term)
+    return pe.expand(batch_size, -1)
+
+# ============================================================================
+# DATA GENERATION
+# ============================================================================
+
+def generate_batch(batch_size, min_len=1, max_len=4, mixed_prob=0.0):
+    program_indices = []
+    initial_states = []
+    all_intermediate = []
+    lengths = []
+    family_ids = []
+
+    # Collect all ops across families for mixed programs
+    all_family_ops = []
+    for fam in TASK_FAMILIES.values():
+        all_family_ops.extend(fam['ops'])
+
+    for _ in range(batch_size):
+        prog_len = random.randint(min_len, max_len)
+
+        if random.random() < mixed_prob:
+            # Mixed program: draw ops from ALL families
+            prog_ops = [random.choice(all_family_ops) for _ in range(prog_len)]
+            # family_id = family of first op (for wisdom matching)
+            family_id = get_family_id(OP_TO_IDX[prog_ops[0]])
+        else:
+            # Single-family program
+            family_id = random.randint(0, config.n_task_families - 1)
+            ops = TASK_FAMILIES[family_id]['ops']
+            prog_ops = [random.choice(ops) for _ in range(prog_len)]
+
+        init = tuple(np.random.randint(0, config.value_range) for _ in range(3))
+        prog_indices = [OP_TO_IDX[op] for op in prog_ops]
+
+        states = execute_program(init, prog_ops)
+
+        # Pad to max_len
+        while len(prog_indices) < max_len:
+            prog_indices.append(PAD_IDX)
+
+        intermediate = list(states[1:])
+        while len(intermediate) < max_len:
+            intermediate.append(intermediate[-1])
+
+        program_indices.append(prog_indices)
+        initial_states.append(init)
+        all_intermediate.append(intermediate)
+        lengths.append(prog_len)
+        family_ids.append(family_id)
+
+    return {
+        'program_indices': torch.tensor(program_indices, dtype=torch.long, device=config.device),
+        'initial_states': torch.tensor(initial_states, dtype=torch.float, device=config.device),
+        'intermediate': torch.tensor(all_intermediate, dtype=torch.float, device=config.device),
+        'lengths': torch.tensor(lengths, dtype=torch.long, device=config.device),
+        'family_ids': torch.tensor(family_ids, dtype=torch.long, device=config.device),
+    }
+
+
+def generate_family_batch(family_id, batch_size, prog_len=4):
+    """Generate batch from single family (for wisdom distillation)."""
+    ops = TASK_FAMILIES[family_id]['ops']
+
+    program_indices = []
+    initial_states = []
+    all_intermediate = []
+
+    for _ in range(batch_size):
+        init = tuple(np.random.randint(0, config.value_range) for _ in range(3))
+        prog_ops = [random.choice(ops) for _ in range(prog_len)]
+        prog_indices = [OP_TO_IDX[op] for op in prog_ops]
+
+        states = execute_program(init, prog_ops)
+
+        program_indices.append(prog_indices)
+        initial_states.append(init)
+        all_intermediate.append(states[1:])
+
+    return {
+        'program_indices': torch.tensor(program_indices, dtype=torch.long, device=config.device),
+        'initial_states': torch.tensor(initial_states, dtype=torch.float, device=config.device),
+        'intermediate': torch.tensor(all_intermediate, dtype=torch.float, device=config.device),
+    }
+
+# ============================================================================
+# WISDOM COMPONENTS (from v0.72b)
+# ============================================================================
+
+class WisdomDistiller(nn.Module):
+    """Compress N experiences into ONE wisdom code."""
+
+    def __init__(self, config):
+        super().__init__()
+
+        self.experience_encoder = nn.Sequential(
+            nn.Linear(config.n_variables * 2 + N_OPS, config.d_model),
+            nn.LayerNorm(config.d_model),
+            nn.GELU(),
+            nn.Dropout(config.dropout),
+            nn.Linear(config.d_model, config.d_model),
+            nn.GELU(),
+        )
+
+        self.aggregator = nn.Sequential(
+            nn.Linear(config.d_model, config.d_model),
+            nn.GELU(),
+            nn.Linear(config.d_model, config.d_wisdom),
+        )
+
+        self.compressor = nn.Sequential(
+            nn.LayerNorm(config.d_wisdom),
+            nn.Linear(config.d_wisdom, config.d_wisdom),
+            nn.Tanh(),
+        )
+
+    def forward(self, states, next_states, op_indices):
+        N = states.shape[0]
+        op_onehot = F.one_hot(op_indices, N_OPS).float()
+        experience = torch.cat([states, next_states, op_onehot], dim=-1)
+        encoded = self.experience_encoder(experience)
+        aggregated = self.aggregator(encoded)
+        pooled = aggregated.mean(dim=0)
+        wisdom = self.compressor(pooled)
+        return wisdom
+
+
+class WisdomBank(nn.Module):
+    """Store wisdom nuggets."""
+
+    def __init__(self, config):
+        super().__init__()
+        self.wisdom_codes = nn.Parameter(
+            torch.randn(config.n_wisdom_slots, config.d_wisdom) * 0.1
+        )
+
+    def write_wisdom(self, slot_idx, wisdom_code):
+        with torch.no_grad():
+            self.wisdom_codes.data[slot_idx] = wisdom_code
+
+    def read_all(self):
+        return self.wisdom_codes
+
+
+class WisdomMatcher(nn.Module):
+    """Match problems to wisdom."""
+
+    def __init__(self, config):
+        super().__init__()
+
+        self.problem_encoder = nn.Sequential(
+            nn.Linear(config.n_variables + N_OPS, config.d_model),
+            nn.LayerNorm(config.d_model),
+            nn.GELU(),
+            nn.Dropout(config.dropout),
+            nn.Linear(config.d_model, config.d_wisdom),
+        )
+
+        self.temperature = nn.Parameter(torch.tensor(1.0))
+
+    def forward(self, initial_state, first_op_idx, wisdom_bank):
+        batch_size = initial_state.shape[0]
+
+        op_onehot = F.one_hot(first_op_idx, N_OPS).float()
+        problem = torch.cat([initial_state, op_onehot], dim=-1)
+        problem_enc = self.problem_encoder(problem)
+
+        all_wisdom = wisdom_bank.read_all()
+        scores = torch.matmul(problem_enc, all_wisdom.T)
+        scores = scores / (self.temperature.abs() + 0.1)
+
+        attention = F.softmax(scores, dim=-1)
+        wisdom = torch.matmul(attention, all_wisdom)
+
+        return wisdom, attention
+
+# ============================================================================
+# SOLVER (wisdom-guided, sinusoidal step encoding, MoR inner recursion)
+# ============================================================================
+
+class Solver(nn.Module):
+    """Wisdom-guided program executor with Mixture of Recursions (MoR)."""
+
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+
+        self.state_encoder = nn.Sequential(
+            nn.Linear(config.n_variables, config.d_model),
+            nn.LayerNorm(config.d_model),
+            nn.GELU(),
+            nn.Dropout(config.dropout),
+        )
+
+        self.op_embedding = nn.Embedding(N_OPS, config.d_model)
+
+        # Wisdom integration
+        self.wisdom_encoder = nn.Sequential(
+            nn.Linear(config.d_wisdom, config.d_model // 2),
+            nn.GELU(),
+        )
+
+        # MoR: Recursion router — decides depth 1-4 per sample
+        # Input: state_enc (192) + op_enc (192) = 384
+        # Output: max_recursion_depth logits (4)
+        self.recursion_router = nn.Sequential(
+            nn.Linear(config.d_model * 2, config.d_model // 4),  # 384 -> 48
+            nn.GELU(),
+            nn.Linear(config.d_model // 4, config.max_recursion_depth),  # 48 -> 4
+        )
+        # Bias initialization: favor depth 1 at start so early training is stable
+        # softmax([2, 0, -1, -2]) ≈ [0.73, 0.10, 0.04, 0.01] — depth 1 dominates
+        with torch.no_grad():
+            self.recursion_router[-1].bias.data = torch.tensor([2.0, 0.0, -1.0, -2.0])
+
+        # Latent generator: now includes recursion_enc_dim (24) in input
+        # Old: d_model*2 + d_model//4 + d_model//2 = 192*2 + 48 + 96 = 528
+        # New: 528 + recursion_enc_dim = 528 + 24 = 552
+        self.latent_gen = nn.Sequential(
+            nn.Linear(config.d_model * 2 + config.d_model // 4 + config.d_model // 2 + config.recursion_enc_dim, config.d_model),
+            nn.LayerNorm(config.d_model),
+            nn.GELU(),
+            nn.Dropout(config.dropout),
+            nn.Linear(config.d_model, config.d_latent),
+        )
+
+        self.comparison_enc = nn.Sequential(
+            nn.Linear(6, config.d_model // 4),
+            nn.GELU(),
+        )
+
+        self.latent_enc = nn.Sequential(
+            nn.Linear(config.d_latent, config.d_model),
+            nn.LayerNorm(config.d_model),
+            nn.GELU(),
+        )
+
+        self.executor = nn.Sequential(
+            nn.Linear(config.d_model * 2 + config.d_model // 4, config.d_model),
+            nn.LayerNorm(config.d_model),
+            nn.GELU(),
+            nn.Dropout(config.dropout),
+            nn.Linear(config.d_model, config.d_model),
+            nn.GELU(),
+            nn.Linear(config.d_model, config.n_variables),
+        )
+
+        self.predictor = nn.Linear(config.n_variables, config.n_variables)
+
+    def _comparison_features(self, state):
+        """Extract comparison features from state."""
+        x, y, z = state[:, 0], state[:, 1], state[:, 2]
+        return torch.stack([
+            (x > y).float(), (y > z).float(), (z > x).float(),
+            (x - y) / self.config.comparison_scale,
+            (y - z) / self.config.comparison_scale,
+            (z - x) / self.config.comparison_scale,
+        ], dim=-1)
+
+    def step(self, state, op_idx, step_num, wisdom, training_noise_std=0.0):
+        batch_size = state.shape[0]
+
+        # Fixed encodings (computed ONCE per step)
+        op_enc = self.op_embedding(op_idx)           # (batch, 192)
+        step_enc = sinusoidal_step_encoding(
+            step_num, self.config.d_model // 4, batch_size, state.device
+        )                                             # (batch, 48)
+        wisdom_enc = self.wisdom_encoder(wisdom)      # (batch, 96)
+
+        # Router decision (based on initial state + operation)
+        initial_state_enc = self.state_encoder(state)  # (batch, 192)
+        router_logits = self.recursion_router(
+            torch.cat([initial_state_enc, op_enc], dim=-1)
+        )  # (batch, 4)
+
+        if self.training:
+            # Straight-through Gumbel-Softmax: discrete forward, differentiable backward
+            # Avoids noisy soft-mixture of 4 recursive states during training
+            router_weights = F.gumbel_softmax(router_logits, tau=1.0, hard=True)
+        else:
+            router_weights = F.one_hot(
+                router_logits.argmax(dim=-1), self.config.max_recursion_depth
+            ).float()  # hard select
+
+        # Inner recursion (SHARED weights: state_encoder, latent_gen, executor, etc.)
+        recursive_state = state
+        outputs = []
+        for r in range(self.config.max_recursion_depth):
+            state_enc_r = self.state_encoder(recursive_state)  # re-encode (state changed)
+            rec_enc = sinusoidal_step_encoding(
+                r, self.config.recursion_enc_dim, batch_size, state.device
+            )  # recursion depth encoding (batch, 24)
+
+            latent = self.latent_gen(
+                torch.cat([state_enc_r, op_enc, step_enc, wisdom_enc, rec_enc], dim=-1)
+            )
+
+            comp_enc = self.comparison_enc(self._comparison_features(recursive_state))
+            latent_enc = self.latent_enc(latent)
+
+            delta = self.executor(
+                torch.cat([state_enc_r, latent_enc, comp_enc], dim=-1)
+            )
+            recursive_state = recursive_state + delta
+            outputs.append(recursive_state)
+
+        # Weighted combination
+        stacked = torch.stack(outputs, dim=1)  # (batch, 4, 3)
+        new_state = (stacked * router_weights.unsqueeze(-1)).sum(dim=1)  # (batch, 3)
+
+        # Compute cost (for regularization)
+        depths = torch.tensor(
+            [1.0, 2.0, 3.0, 4.0], device=state.device
+        )  # (4,)
+        compute_cost = (router_weights * depths).sum(-1).mean()  # scalar
+
+        # Noise injection for length generalization
+        if training_noise_std > 0.0 and self.training:
+            new_state = new_state + torch.randn_like(new_state) * training_noise_std
+
+        return new_state, compute_cost
+
+    def forward(self, programs, initial_states, wisdom, training_noise_std=0.0):
+        n_steps = programs.shape[1]
+
+        state = initial_states
+        all_preds = []
+        all_states = []
+        total_compute_cost = 0.0
+
+        for t in range(n_steps):
+            op_idx = programs[:, t]
+            state, compute_cost = self.step(
+                state, op_idx, t, wisdom, training_noise_std=training_noise_std
+            )
+            pred = self.predictor(state)
+            all_preds.append(pred)
+            all_states.append(state)
+            total_compute_cost = total_compute_cost + compute_cost
+
+        return torch.stack(all_preds, dim=1), torch.stack(all_states, dim=1), total_compute_cost
+
+# ============================================================================
+# HALTER (length-agnostic, mean-pooled program encoding)
+# ============================================================================
+
+class Halter(nn.Module):
+    """Length-agnostic halter with mean-pooled program encoding."""
+
+    def __init__(self, config):
+        super().__init__()
+
+        self.op_embedding = nn.Embedding(N_OPS, config.d_model // 2)  # 96 dims
+
+        # Mean-pool op embeddings (mask PAD) + concat op count -> Linear(97, 192)
+        self.program_encoder = nn.Sequential(
+            nn.Linear(config.d_model // 2 + 1, config.d_model),
+            nn.LayerNorm(config.d_model),
+            nn.GELU(),
+            nn.Dropout(config.dropout),
+        )
+
+        # Classifier: d_model (192 from program) + d_model//2 (96 from step) = 288
+        self.classifier = nn.Sequential(
+            nn.Linear(config.d_model + config.d_model // 2, config.d_model // 2),
+            nn.LayerNorm(config.d_model // 2),
+            nn.GELU(),
+            nn.Dropout(config.dropout),
+            nn.Linear(config.d_model // 2, 1),
+        )
+
+    def forward(self, programs, step):
+        batch_size = programs.shape[0]
+        seq_len = programs.shape[1]
+
+        # Embed all ops
+        op_emb = self.op_embedding(programs)  # (batch, seq_len, 96)
+
+        # Mask out PAD tokens
+        pad_mask = (programs != PAD_IDX).float().unsqueeze(-1)  # (batch, seq_len, 1)
+        op_count = pad_mask.sum(dim=1)  # (batch, 1) — number of real ops
+
+        # Mean pool over non-PAD ops
+        masked_emb = op_emb * pad_mask
+        pooled = masked_emb.sum(dim=1) / op_count.clamp(min=1)  # (batch, 96)
+
+        # Normalize op count to [0,1] range
+        op_count_norm = op_count / config.max_eval_length  # (batch, 1)
+
+        # Concat pooled embedding + op count -> program encoding
+        program_input = torch.cat([pooled, op_count_norm], dim=-1)  # (batch, 97)
+        program_enc = self.program_encoder(program_input)  # (batch, 192)
+
+        # Sinusoidal step encoding (d_model//2 = 96)
+        step_enc = sinusoidal_step_encoding(
+            step, config.d_model // 2, batch_size, programs.device
+        )
+
+        x = torch.cat([program_enc, step_enc], dim=-1)  # (batch, 288)
+        logit = self.classifier(x)
+
+        return logit
+
+# ============================================================================
+# COMPLETE MODEL
+# ============================================================================
+
+class BroadMindV076(nn.Module):
+    """
+    BroadMind v0.76: Mixture of Recursions (MoR)
+
+    Builds on v0.75 with:
+    - Adaptive inner recursion (1-4 passes per solver step)
+    - Learned router selects depth based on operation complexity
+    - Simple ops exit early; complex ops get iterative refinement
+    """
+
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+
+        # Wisdom components
+        self.distiller = WisdomDistiller(config)
+        self.wisdom_bank = WisdomBank(config)
+        self.matcher = WisdomMatcher(config)
+
+        # Solver (wisdom-guided, MoR)
+        self.solver = Solver(config)
+
+        # Halter (adaptive compute)
+        self.halter = Halter(config)
+
+    def get_wisdom(self, programs, initial_states):
+        """Get wisdom for batch (via matching)."""
+        first_ops = programs[:, 0]
+        wisdom, attention = self.matcher(initial_states, first_ops, self.wisdom_bank)
+        return wisdom, attention
+
+    def forward_all_steps(self, programs, initial_states, wisdom=None, training_noise_std=0.0):
+        """Run all steps, return predictions, halt logits, and compute cost."""
+        if wisdom is None:
+            wisdom, _ = self.get_wisdom(programs, initial_states)
+
+        preds, states, compute_cost = self.solver(
+            programs, initial_states, wisdom,
+            training_noise_std=training_noise_std
+        )
+
+        halt_logits = []
+        for t in range(programs.shape[1]):
+            logit = self.halter(programs, t)
+            halt_logits.append(logit)
+
+        return preds, torch.stack(halt_logits, dim=1), wisdom, compute_cost
+
+    def forward_adaptive(self, programs, initial_states, training_noise_std=0.0):
+        """Forward with adaptive halting. Returns (pred, steps_used, compute_cost)."""
+        batch_size = programs.shape[0]
+        max_steps = programs.shape[1]
+
+        # Get wisdom
+        wisdom, _ = self.get_wisdom(programs, initial_states)
+
+        state = initial_states
+        halted = torch.zeros(batch_size, dtype=torch.bool, device=state.device)
+        final_states = state.clone()
+        steps_used = torch.zeros(batch_size, device=state.device)
+        total_compute_cost = 0.0
+
+        for t in range(max_steps):
+            if halted.all():
+                break
+
+            op_idx = programs[:, t]
+            new_state, compute_cost = self.solver.step(
+                state, op_idx, t, wisdom,
+                training_noise_std=training_noise_std
+            )
+            total_compute_cost = total_compute_cost + compute_cost
+
+            state = torch.where(halted.unsqueeze(1), state, new_state)
+
+            halt_logit = self.halter(programs, t)
+            halt_prob = torch.sigmoid(halt_logit).squeeze(-1)
+
+            should_halt = (halt_prob > self.config.halt_threshold) & ~halted
+
+            final_states = torch.where(should_halt.unsqueeze(1), state, final_states)
+            steps_used = steps_used + (~halted).float()
+            halted = halted | should_halt
+
+        final_states = torch.where(~halted.unsqueeze(1), state, final_states)
+
+        pred = self.solver.predictor(final_states)
+        return pred, steps_used, total_compute_cost
+
+    def count_parameters(self):
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+# ============================================================================
+# TRAINING
+# ============================================================================
+
+def train_solver_only(model, optimizer, batch):
+    """Phase 1: Train solver with zero wisdom. Includes compute cost regularization."""
+    model.train()
+    optimizer.zero_grad()
+
+    programs = batch['program_indices']
+    initial_states = batch['initial_states']
+    intermediate = batch['intermediate']
+    lengths = batch['lengths']
+
+    batch_size = programs.shape[0]
+    zero_wisdom = torch.zeros(batch_size, config.d_wisdom, device=config.device)
+
+    preds, _, compute_cost = model.solver(programs, initial_states, zero_wisdom)
+
+    batch_size, max_steps, n_vars = preds.shape
+    mask = torch.arange(max_steps, device=preds.device).unsqueeze(0) < lengths.unsqueeze(1)
+    mask = mask.unsqueeze(-1).float()
+
+    task_loss = ((preds - intermediate) ** 2 * mask).sum() / mask.sum()
+    cost_loss = config.compute_cost_weight * compute_cost
+    loss = task_loss + cost_loss
+
+    loss.backward()
+    torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
+    optimizer.step()
+
+    return task_loss.item(), cost_loss.item()
+
+
+def train_wisdom(model, optimizer):
+    """Phase 2: Train wisdom distillation. Includes compute cost regularization."""
+    model.train()
+    optimizer.zero_grad()
+
+    total_loss = 0.0
+    total_compute_cost = 0.0
+
+    for family_id in range(config.n_task_families):
+        # Generate distillation batch
+        distill_batch = generate_family_batch(family_id, config.distill_batch_size, prog_len=4)
+
+        # Collect transitions
+        states_list = []
+        next_states_list = []
+        ops_list = []
+
+        for b in range(config.distill_batch_size):
+            for t in range(4):
+                if t == 0:
+                    state = distill_batch['initial_states'][b]
+                else:
+                    state = distill_batch['intermediate'][b, t-1]
+                next_state = distill_batch['intermediate'][b, t]
+                op_idx = distill_batch['program_indices'][b, t]
+
+                states_list.append(state)
+                next_states_list.append(next_state)
+                ops_list.append(op_idx)
+
+        states = torch.stack(states_list)
+        next_states = torch.stack(next_states_list)
+        ops = torch.stack(ops_list)
+
+        # Distill
+        wisdom = model.distiller(states, next_states, ops)
+        model.wisdom_bank.write_wisdom(family_id, wisdom.detach())
+
+        # Test wisdom
+        test_batch = generate_family_batch(family_id, config.batch_size // 4, prog_len=4)
+        batch_size = test_batch['program_indices'].shape[0]
+        wisdom_expanded = wisdom.unsqueeze(0).expand(batch_size, -1)
+
+        preds, _, compute_cost = model.solver(
+            test_batch['program_indices'], test_batch['initial_states'], wisdom_expanded
+        )
+
+        loss = F.mse_loss(preds, test_batch['intermediate'])
+        total_loss = total_loss + loss
+        total_compute_cost = total_compute_cost + config.compute_cost_weight * compute_cost
+
+    combined_loss = total_loss + total_compute_cost
+    combined_loss.backward()
+    torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
+    optimizer.step()
+
+    return total_loss.item() / config.n_task_families
+
+
+def train_matcher(model, optimizer, batch):
+    """Phase 2b: Train matcher to route problems to correct wisdom."""
+    model.matcher.train()
+    model.wisdom_bank.train()
+    model.distiller.eval()
+    model.solver.eval()
+    model.halter.eval()
+
+    optimizer.zero_grad()
+
+    programs = batch['program_indices']
+    initial_states = batch['initial_states']
+    family_ids = batch['family_ids']
+
+    first_ops = programs[:, 0]
+
+    # Compute matching scores (logits)
+    op_onehot = F.one_hot(first_ops, N_OPS).float()
+    problem = torch.cat([initial_states, op_onehot], dim=-1)
+    problem_enc = model.matcher.problem_encoder(problem)
+
+    all_wisdom = model.wisdom_bank.read_all()
+    scores = torch.matmul(problem_enc, all_wisdom.T)
+    scores = scores / (model.matcher.temperature.abs() + 0.1)
+
+    # Classification loss over task families
+    loss = F.cross_entropy(scores[:, :config.n_task_families], family_ids)
+
+    loss.backward()
+    torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
+    optimizer.step()
+
+    return loss.item()
+
+
+def train_halter_only(model, optimizer, batch):
+    """Phase 3: Train halter (solver frozen). No compute cost — solver is frozen."""
+    model.halter.train()
+    model.solver.eval()
+    model.distiller.eval()
+    model.matcher.eval()
+
+    optimizer.zero_grad()
+
+    programs = batch['program_indices']
+    lengths = batch['lengths']
+    max_steps = programs.shape[1]
+
+    total_loss = 0.0
+
+    for t in range(max_steps):
+        halt_logit = model.halter(programs, t)
+        should_halt = (t >= lengths - 1).float().unsqueeze(-1)
+        loss = F.binary_cross_entropy_with_logits(halt_logit, should_halt)
+        total_loss = total_loss + loss
+
+    total_loss = total_loss / max_steps
+
+    total_loss.backward()
+    torch.nn.utils.clip_grad_norm_(model.halter.parameters(), config.grad_clip)
+    optimizer.step()
+
+    return total_loss.item()
+
+
+def train_end_to_end(model, optimizer, batch):
+    """Phase 4: Fine-tune everything. Includes compute cost regularization."""
+    model.train()
+    optimizer.zero_grad()
+
+    programs = batch['program_indices']
+    initial_states = batch['initial_states']
+    intermediate = batch['intermediate']
+    lengths = batch['lengths']
+
+    preds, halt_logits, wisdom, compute_cost = model.forward_all_steps(programs, initial_states)
+
+    batch_size, max_steps, n_vars = preds.shape
+
+    # Task loss
+    mask = torch.arange(max_steps, device=preds.device).unsqueeze(0) < lengths.unsqueeze(1)
+    mask = mask.unsqueeze(-1).float()
+    task_loss = ((preds - intermediate) ** 2 * mask).sum() / mask.sum()
+
+    # Halt loss
+    halt_loss = 0.0
+    for t in range(max_steps):
+        should_halt = (t >= lengths - 1).float().unsqueeze(-1)
+        loss = F.binary_cross_entropy_with_logits(halt_logits[:, t], should_halt)
+        halt_loss = halt_loss + loss
+    halt_loss = halt_loss / max_steps
+
+    # Matching loss (preserve wisdom routing during fine-tuning)
+    family_ids = batch['family_ids']
+    first_ops = programs[:, 0]
+    op_onehot = F.one_hot(first_ops, N_OPS).float()
+    problem = torch.cat([initial_states, op_onehot], dim=-1)
+    problem_enc = model.matcher.problem_encoder(problem)
+    all_wisdom = model.wisdom_bank.read_all()
+    scores = torch.matmul(problem_enc, all_wisdom.T)
+    scores = scores / (model.matcher.temperature.abs() + 0.1)
+    match_loss = F.cross_entropy(scores[:, :config.n_task_families], family_ids)
+
+    loss = task_loss + 0.5 * halt_loss + 0.5 * match_loss + config.compute_cost_weight * compute_cost
+
+    loss.backward()
+    torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
+    optimizer.step()
+
+    return task_loss.item(), halt_loss.item()
+
+
+def train_phase5(model, optimizer, iteration, total_iterations):
+    """Phase 5: Length generalization fine-tuning with Gaussian noise.
+
+    - Solver only trainable, lr=5e-5
+    - Training data: still length 1-4 (in-distribution)
+    - Gaussian noise on recurrent state, linearly annealed 0.05 -> 0.02
+    - Mixed programs at 50%
+    - Consistency loss: run batch twice (with/without noise), penalize divergence
+    - Includes compute cost regularization
+    """
+    model.solver.train()
+    model.halter.eval()
+    model.distiller.eval()
+    model.matcher.eval()
+
+    optimizer.zero_grad()
+
+    # Linearly anneal noise: 0.05 -> 0.02
+    progress = iteration / max(total_iterations - 1, 1)
+    noise_std = config.noise_std * (1.0 - progress) + 0.02 * progress
+
+    batch = generate_batch(config.batch_size, min_len=1, max_len=4, mixed_prob=0.5)
+
+    programs = batch['program_indices']
+    initial_states = batch['initial_states']
+    intermediate = batch['intermediate']
+    lengths = batch['lengths']
+
+    # Get wisdom (detached — we're not training matcher/bank)
+    with torch.no_grad():
+        wisdom, _ = model.get_wisdom(programs, initial_states)
+
+    # Run WITH noise
+    preds_noisy, _, compute_cost = model.solver(
+        programs, initial_states, wisdom,
+        training_noise_std=noise_std
+    )
+
+    # Task loss (masked)
+    batch_size, max_steps, n_vars = preds_noisy.shape
+    mask = torch.arange(max_steps, device=preds_noisy.device).unsqueeze(0) < lengths.unsqueeze(1)
+    mask = mask.unsqueeze(-1).float()
+    task_loss = ((preds_noisy - intermediate) ** 2 * mask).sum() / mask.sum()
+
+    # Consistency loss: run WITHOUT noise, penalize divergence
+    with torch.no_grad():
+        preds_clean, _, _ = model.solver(
+            programs, initial_states, wisdom,
+            training_noise_std=0.0
+        )
+
+    consistency_loss = ((preds_noisy - preds_clean.detach()) ** 2 * mask).sum() / mask.sum()
+
+    cost_loss = config.compute_cost_weight * compute_cost
+    loss = task_loss + 0.1 * consistency_loss + cost_loss
+
+    loss.backward()
+    torch.nn.utils.clip_grad_norm_(model.solver.parameters(), config.grad_clip)
+    optimizer.step()
+
+    return task_loss.item(), consistency_loss.item(), noise_std, cost_loss.item()
+
+# ============================================================================
+# EVALUATION
+# ============================================================================
+
+def evaluate(model, n_batches=10, mixed_prob=0.0):
+    model.eval()
+
+    results = {
+        'exact': 0, 'total': 0,
+        'steps_used': [], 'steps_needed': [],
+        'compute_costs': [],
+        'by_length': defaultdict(lambda: {'correct': 0, 'total': 0, 'steps': []}),
+        'by_family': defaultdict(lambda: {'correct': 0, 'total': 0}),
+    }
+
+    with torch.no_grad():
+        for _ in range(n_batches):
+            batch = generate_batch(config.batch_size, min_len=1, max_len=4, mixed_prob=mixed_prob)
+
+            final_targets = torch.stack([
+                batch['intermediate'][b, batch['lengths'][b] - 1]
+                for b in range(config.batch_size)
+            ])
+
+            predictions, steps_used, compute_cost = model.forward_adaptive(
+                batch['program_indices'],
+                batch['initial_states']
+            )
+
+            pred_rounded = predictions.round()
+            exact = (pred_rounded == final_targets).all(dim=-1)
+
+            results['exact'] += exact.sum().item()
+            results['total'] += config.batch_size
+            results['steps_used'].extend(steps_used.cpu().tolist())
+            results['steps_needed'].extend(batch['lengths'].cpu().tolist())
+            results['compute_costs'].append(compute_cost.item() if torch.is_tensor(compute_cost) else compute_cost)
+
+            for b in range(config.batch_size):
+                length = batch['lengths'][b].item()
+                family_id = batch['family_ids'][b].item()
+                family_name = TASK_FAMILIES[family_id]['name']
+
+                results['by_length'][length]['total'] += 1
+                results['by_length'][length]['steps'].append(steps_used[b].item())
+                results['by_family'][family_name]['total'] += 1
+
+                if exact[b]:
+                    results['by_length'][length]['correct'] += 1
+                    results['by_family'][family_name]['correct'] += 1
+
+    results['accuracy'] = results['exact'] / results['total'] * 100
+    results['avg_steps_used'] = np.mean(results['steps_used'])
+    results['avg_steps_needed'] = np.mean(results['steps_needed'])
+    results['avg_compute_cost'] = np.mean(results['compute_costs'])
+
+    for length in results['by_length']:
+        r = results['by_length'][length]
+        r['accuracy'] = r['correct'] / r['total'] * 100 if r['total'] > 0 else 0
+        r['avg_steps'] = np.mean(r['steps']) if r['steps'] else 0
+
+    for family in results['by_family']:
+        r = results['by_family'][family]
+        r['accuracy'] = r['correct'] / r['total'] * 100 if r['total'] > 0 else 0
+
+    return results
+
+
+def evaluate_solver_only(model, n_batches=10):
+    model.eval()
+    correct = 0
+    total = 0
+
+    with torch.no_grad():
+        for _ in range(n_batches):
+            batch = generate_batch(config.batch_size, min_len=1, max_len=4)
+            batch_size = batch['program_indices'].shape[0]
+
+            zero_wisdom = torch.zeros(batch_size, config.d_wisdom, device=config.device)
+            preds, _, _ = model.solver(batch['program_indices'], batch['initial_states'], zero_wisdom)
+
+            for b in range(batch_size):
+                length = batch['lengths'][b].item()
+                pred = preds[b, length - 1].round()
+                target = batch['intermediate'][b, length - 1]
+                if (pred == target).all():
+                    correct += 1
+                total += 1
+
+    return correct / total * 100
+
+
+def evaluate_wisdom_matching(model, n_examples=100):
+    model.eval()
+    correct = 0
+    total = 0
+
+    with torch.no_grad():
+        for family_id in range(config.n_task_families):
+            batch = generate_family_batch(family_id, n_examples, prog_len=4)
+
+            first_ops = batch['program_indices'][:, 0]
+            _, attention = model.matcher(batch['initial_states'], first_ops, model.wisdom_bank)
+
+            predicted = attention[:, :config.n_task_families].argmax(dim=-1)
+            correct += (predicted == family_id).sum().item()
+            total += n_examples
+
+    return correct / total * 100
+
+
+def generate_scaling_batch(batch_size, prog_len, mixed_prob=0.5):
+    """Generate a batch with a fixed program length for scaling evaluation."""
+    program_indices = []
+    initial_states = []
+    all_intermediate = []
+    lengths = []
+    family_ids = []
+
+    all_family_ops = []
+    for fam in TASK_FAMILIES.values():
+        all_family_ops.extend(fam['ops'])
+
+    for _ in range(batch_size):
+        if random.random() < mixed_prob:
+            prog_ops = [random.choice(all_family_ops) for _ in range(prog_len)]
+            family_id = get_family_id(OP_TO_IDX[prog_ops[0]])
+        else:
+            family_id = random.randint(0, config.n_task_families - 1)
+            ops = TASK_FAMILIES[family_id]['ops']
+            prog_ops = [random.choice(ops) for _ in range(prog_len)]
+
+        init = tuple(np.random.randint(0, config.value_range) for _ in range(3))
+        prog_indices = [OP_TO_IDX[op] for op in prog_ops]
+
+        states = execute_program(init, prog_ops)
+
+        # No padding — exact length
+        program_indices.append(prog_indices)
+        initial_states.append(init)
+        all_intermediate.append(states[1:])
+        lengths.append(prog_len)
+        family_ids.append(family_id)
+
+    return {
+        'program_indices': torch.tensor(program_indices, dtype=torch.long, device=config.device),
+        'initial_states': torch.tensor(initial_states, dtype=torch.float, device=config.device),
+        'intermediate': torch.tensor(all_intermediate, dtype=torch.float, device=config.device),
+        'lengths': torch.tensor(lengths, dtype=torch.long, device=config.device),
+        'family_ids': torch.tensor(family_ids, dtype=torch.long, device=config.device),
+    }
+
+
+def evaluate_scaling(model, n_batches=20):
+    """Evaluate at lengths [4, 8, 12, 16] for length generalization.
+    Now also tracks avg recursion depth at each test length.
+    """
+    model.eval()
+
+    test_lengths = [4, 8, 12, 16]
+    scaling_results = {}
+
+    with torch.no_grad():
+        for prog_len in test_lengths:
+            results = {
+                'exact': 0, 'total': 0,
+                'steps_used': [], 'steps_needed': [],
+                'compute_costs': [],
+                'by_family': defaultdict(lambda: {'correct': 0, 'total': 0}),
+            }
+
+            for _ in range(n_batches):
+                batch = generate_scaling_batch(config.batch_size, prog_len, mixed_prob=0.5)
+
+                final_targets = batch['intermediate'][:, prog_len - 1]
+
+                predictions, steps_used, compute_cost = model.forward_adaptive(
+                    batch['program_indices'],
+                    batch['initial_states']
+                )
+
+                pred_rounded = predictions.round()
+                exact = (pred_rounded == final_targets).all(dim=-1)
+
+                results['exact'] += exact.sum().item()
+                results['total'] += config.batch_size
+                results['steps_used'].extend(steps_used.cpu().tolist())
+                results['steps_needed'].extend([prog_len] * config.batch_size)
+                results['compute_costs'].append(compute_cost.item() if torch.is_tensor(compute_cost) else compute_cost)
+
+                for b in range(config.batch_size):
+                    family_id = batch['family_ids'][b].item()
+                    family_name = TASK_FAMILIES[family_id]['name']
+                    results['by_family'][family_name]['total'] += 1
+                    if exact[b]:
+                        results['by_family'][family_name]['correct'] += 1
+
+            results['accuracy'] = results['exact'] / results['total'] * 100
+            results['avg_steps_used'] = np.mean(results['steps_used'])
+            results['avg_steps_needed'] = np.mean(results['steps_needed'])
+            results['avg_compute_cost'] = np.mean(results['compute_costs'])
+            # Avg recursion depth: compute_cost per step ~ avg depth
+            # Total compute cost is sum over steps, each step's cost is avg depth for that step
+            # So avg depth ~ total_compute_cost / num_steps_executed
+            results['avg_depth'] = results['avg_compute_cost'] / max(np.mean(results['steps_used']), 1.0)
+
+            for family in results['by_family']:
+                r = results['by_family'][family]
+                r['accuracy'] = r['correct'] / r['total'] * 100 if r['total'] > 0 else 0
+
+            scaling_results[prog_len] = results
+
+    return scaling_results
+
+
+def analyze_recursion_depths(model, n_batches=20):
+    """Analyze recursion router depth selections per operation.
+
+    Runs model on batches, tracks router's selected depth per operation.
+    Groups by: operation name, task family, program length.
+    Key validation: COMPARE ops should get higher depth than ACC/DEC.
+    """
+    model.eval()
+
+    # Track depths per operation
+    op_depths = defaultdict(list)       # op_name -> list of selected depths
+    family_depths = defaultdict(list)   # family_name -> list of selected depths
+    length_depths = defaultdict(list)   # program_length -> list of selected depths
+
+    with torch.no_grad():
+        for _ in range(n_batches):
+            batch = generate_batch(config.batch_size, min_len=1, max_len=4, mixed_prob=0.5)
+            programs = batch['program_indices']
+            initial_states = batch['initial_states']
+            lengths = batch['lengths']
+
+            wisdom, _ = model.get_wisdom(programs, initial_states)
+
+            state = initial_states
+            for t in range(programs.shape[1]):
+                op_idx = programs[:, t]
+
+                # Get router decision
+                op_enc = model.solver.op_embedding(op_idx)
+                state_enc = model.solver.state_encoder(state)
+                router_logits = model.solver.recursion_router(
+                    torch.cat([state_enc, op_enc], dim=-1)
+                )
+                selected_depth = router_logits.argmax(dim=-1) + 1  # 1-indexed depth
+
+                # Step forward (to get updated state for next step)
+                state, _ = model.solver.step(state, op_idx, t, wisdom)
+
+                # Record depths per sample
+                for b in range(config.batch_size):
+                    prog_len = lengths[b].item()
+                    if t >= prog_len:
+                        continue  # skip PAD ops
+
+                    op_name = ALL_OPS[op_idx[b].item()]
+                    fam_id = get_family_id(op_idx[b].item())
+                    if fam_id >= 0:
+                        fam_name = TASK_FAMILIES[fam_id]['name']
+                    else:
+                        fam_name = 'UNKNOWN'
+
+                    depth_val = selected_depth[b].item()
+                    op_depths[op_name].append(depth_val)
+                    family_depths[fam_name].append(depth_val)
+                    length_depths[prog_len].append(depth_val)
+
+    # Compute statistics
+    results = {
+        'by_op': {},
+        'by_family': {},
+        'by_length': {},
+        'overall_mean_depth': 0.0,
+    }
+
+    all_depths = []
+    for op_name in sorted(op_depths.keys()):
+        depths = op_depths[op_name]
+        all_depths.extend(depths)
+        results['by_op'][op_name] = {
+            'mean_depth': np.mean(depths),
+            'depth_distribution': {
+                d: depths.count(d) / len(depths) * 100
+                for d in range(1, config.max_recursion_depth + 1)
+            },
+            'count': len(depths),
+        }
+
+    for fam_name in sorted(family_depths.keys()):
+        depths = family_depths[fam_name]
+        results['by_family'][fam_name] = {
+            'mean_depth': np.mean(depths),
+            'count': len(depths),
+        }
+
+    for prog_len in sorted(length_depths.keys()):
+        depths = length_depths[prog_len]
+        results['by_length'][prog_len] = {
+            'mean_depth': np.mean(depths),
+            'count': len(depths),
+        }
+
+    if all_depths:
+        results['overall_mean_depth'] = np.mean(all_depths)
+
+    return results
+
+# ============================================================================
+# MAIN
+# ============================================================================
+
+def main():
+    print("=" * 70)
+    print("BroadMind v0.76: Mixture of Recursions (MoR)")
+    print("Wisdom Distillation + Adaptive Compute + Length Gen + MoR")
+    print("=" * 70)
+
+    print(f"\nDevice: {config.device}")
+
+    model = BroadMindV076(config).to(config.device)
+    print(f"Parameters: {model.count_parameters():,}")
+
+    # ========================================================================
+    # PHASE 1: Train SOLVER only
+    # ========================================================================
+    print("\n" + "=" * 70)
+    print("PHASE 1: Train SOLVER only (no wisdom)")
+    print("=" * 70)
+
+    solver_optimizer = torch.optim.AdamW(
+        model.solver.parameters(),
+        lr=config.lr,
+        weight_decay=config.weight_decay
+    )
+
+    for i in range(config.n_iterations_phase1):
+        batch = generate_batch(config.batch_size)
+        task_loss, cost_loss = train_solver_only(model, solver_optimizer, batch)
+
+        if (i + 1) % 500 == 0:
+            acc = evaluate_solver_only(model, n_batches=5)
+            print(f"[{i+1}/{config.n_iterations_phase1}] Loss: {task_loss:.4f} | "
+                  f"Cost: {cost_loss:.4f} | Solver Acc: {acc:.1f}%")
+
+    # ========================================================================
+    # PHASE 2: Train WISDOM distillation
+    # ========================================================================
+    print("\n" + "=" * 70)
+    print("PHASE 2: Train WISDOM distillation")
+    print("=" * 70)
+
+    wisdom_optimizer = torch.optim.AdamW(
+        list(model.distiller.parameters()) + list(model.matcher.parameters()) + list(model.solver.parameters()),
+        lr=config.lr,
+        weight_decay=config.weight_decay
+    )
+
+    for i in range(config.n_iterations_phase2):
+        loss = train_wisdom(model, wisdom_optimizer)
+
+        if (i + 1) % 500 == 0:
+            wisdom_acc = evaluate_wisdom_matching(model)
+            results = evaluate(model, n_batches=5)
+            print(f"[{i+1}/{config.n_iterations_phase2}] Wisdom Loss: {loss:.4f} | "
+                  f"Wisdom Match: {wisdom_acc:.1f}% | Task Acc: {results['accuracy']:.1f}%")
+
+    # ========================================================================
+    # PHASE 2b: Train MATCHER (wisdom routing)
+    # ========================================================================
+    print("\n" + "=" * 70)
+    print("PHASE 2b: Train MATCHER (wisdom routing)")
+    print("=" * 70)
+
+    for param in model.solver.parameters():
+        param.requires_grad = False
+    for param in model.distiller.parameters():
+        param.requires_grad = False
+    for param in model.halter.parameters():
+        param.requires_grad = False
+    for param in model.matcher.parameters():
+        param.requires_grad = True
+    model.wisdom_bank.wisdom_codes.requires_grad = True
+
+    matcher_optimizer = torch.optim.AdamW(
+        list(model.matcher.parameters()) + [model.wisdom_bank.wisdom_codes],
+        lr=config.lr,
+        weight_decay=config.weight_decay
+    )
+
+    for i in range(config.n_iterations_phase2b):
+        batch = generate_batch(config.batch_size)
+        loss = train_matcher(model, matcher_optimizer, batch)
+
+        if (i + 1) % 200 == 0:
+            wisdom_acc = evaluate_wisdom_matching(model)
+            print(f"[{i+1}/{config.n_iterations_phase2b}] Match Loss: {loss:.4f} | Wisdom Match: {wisdom_acc:.1f}%")
+
+    # ========================================================================
+    # PHASE 3: Train HALTER only
+    # ========================================================================
+    print("\n" + "=" * 70)
+    print("PHASE 3: Train HALTER only (others frozen)")
+    print("=" * 70)
+
+    for param in model.parameters():
+        param.requires_grad = False
+    for param in model.halter.parameters():
+        param.requires_grad = True
+
+    halter_optimizer = torch.optim.AdamW(
+        model.halter.parameters(),
+        lr=config.lr,
+        weight_decay=config.weight_decay
+    )
+
+    for i in range(config.n_iterations_phase3):
+        batch = generate_batch(config.batch_size)
+        loss = train_halter_only(model, halter_optimizer, batch)
+
+        if (i + 1) % 500 == 0:
+            results = evaluate(model, n_batches=5)
+            print(f"[{i+1}/{config.n_iterations_phase3}] Halt Loss: {loss:.4f} | "
+                  f"Acc: {results['accuracy']:.1f}% | Steps: {results['avg_steps_used']:.1f}/{results['avg_steps_needed']:.1f}")
+
+    # ========================================================================
+    # PHASE 4: Fine-tune EVERYTHING
+    # ========================================================================
+    print("\n" + "=" * 70)
+    print("PHASE 4: Fine-tune everything")
+    print("=" * 70)
+
+    for param in model.parameters():
+        param.requires_grad = True
+
+    full_optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=config.lr_fine,
+        weight_decay=config.weight_decay
+    )
+
+    for i in range(config.n_iterations_phase4):
+        batch = generate_batch(config.batch_size, mixed_prob=0.3)
+        task_loss, halt_loss = train_end_to_end(model, full_optimizer, batch)
+
+        if (i + 1) % 500 == 0:
+            results = evaluate(model, n_batches=5)
+            mixed_results = evaluate(model, n_batches=5, mixed_prob=0.5)
+            print(f"[{i+1}/{config.n_iterations_phase4}] Task: {task_loss:.4f} | Halt: {halt_loss:.4f} | "
+                  f"Acc: {results['accuracy']:.1f}% | Mixed: {mixed_results['accuracy']:.1f}% | "
+                  f"Steps: {results['avg_steps_used']:.1f}/{results['avg_steps_needed']:.1f}")
+
+    # ========================================================================
+    # PHASE 5: Length generalization fine-tuning
+    # ========================================================================
+    print("\n" + "=" * 70)
+    print("PHASE 5: Length generalization (noise injection)")
+    print("=" * 70)
+
+    # Only solver trainable
+    for param in model.parameters():
+        param.requires_grad = False
+    for param in model.solver.parameters():
+        param.requires_grad = True
+
+    phase5_optimizer = torch.optim.AdamW(
+        model.solver.parameters(),
+        lr=5e-5,
+        weight_decay=config.weight_decay
+    )
+
+    for i in range(config.n_iterations_phase5):
+        task_loss, cons_loss, noise, cost_loss = train_phase5(
+            model, phase5_optimizer, i, config.n_iterations_phase5
+        )
+
+        if (i + 1) % 100 == 0:
+            results = evaluate(model, n_batches=5)
+            print(f"[{i+1}/{config.n_iterations_phase5}] Task: {task_loss:.4f} | "
+                  f"Cons: {cons_loss:.4f} | Noise: {noise:.3f} | "
+                  f"Cost: {cost_loss:.4f} | Acc: {results['accuracy']:.1f}%")
+
+    # Re-enable all params for eval
+    for param in model.parameters():
+        param.requires_grad = True
+
+    # ========================================================================
+    # FINAL EVALUATION (v0.74-compatible, lengths 1-4)
+    # ========================================================================
+    print("\n" + "=" * 70)
+    print("FINAL EVALUATION (in-distribution, lengths 1-4)")
+    print("=" * 70)
+
+    results = evaluate(model, n_batches=50)
+    mixed_results = evaluate(model, n_batches=50, mixed_prob=0.5)
+    wisdom_acc = evaluate_wisdom_matching(model, n_examples=200)
+
+    print(f"\nOverall Accuracy: {results['accuracy']:.1f}%")
+    print(f"Mixed-Program Accuracy: {mixed_results['accuracy']:.1f}%")
+    print(f"Wisdom Matching: {wisdom_acc:.1f}%")
+    print(f"Steps Used: {results['avg_steps_used']:.2f}")
+    print(f"Steps Needed: {results['avg_steps_needed']:.2f}")
+    print(f"Avg Compute Cost: {results['avg_compute_cost']:.3f}")
+
+    print("\nBy Task Family:")
+    for family, r in results['by_family'].items():
+        print(f"  {family}: {r['accuracy']:.1f}%")
+
+    print("\nBy Program Length:")
+    for length in sorted(results['by_length'].keys()):
+        r = results['by_length'][length]
+        match = "[Y]" if abs(r['avg_steps'] - length) < 0.5 else "[N]"
+        print(f"  Length {length}: {r['accuracy']:.1f}% acc, {r['avg_steps']:.1f} steps {match}")
+
+    # ========================================================================
+    # RECURSION DEPTH ANALYSIS (MoR-specific)
+    # ========================================================================
+    print("\n" + "=" * 70)
+    print("RECURSION DEPTH ANALYSIS (MoR)")
+    print("=" * 70)
+
+    depth_results = analyze_recursion_depths(model, n_batches=20)
+
+    print("\n  Operation          | Avg Depth")
+    print("  -------------------+----------")
+    for op_name, stats in sorted(depth_results['by_op'].items(), key=lambda x: -x[1]['mean_depth']):
+        print(f"  {op_name:<19s} | {stats['mean_depth']:>6.2f}")
+
+    print("\n  Family             | Avg Depth")
+    print("  -------------------+----------")
+    for fam_name, stats in sorted(depth_results['by_family'].items(), key=lambda x: -x[1]['mean_depth']):
+        print(f"  {fam_name:<19s} | {stats['mean_depth']:>6.2f}")
+
+    print(f"\n  Overall Mean Depth: {depth_results['overall_mean_depth']:.2f}")
+
+    # ========================================================================
+    # SCALING EVALUATION (lengths 4, 8, 12, 16)
+    # ========================================================================
+    print("\n" + "=" * 70)
+    print("SCALING EVALUATION (length generalization)")
+    print("=" * 70)
+
+    scaling_results = evaluate_scaling(model, n_batches=20)
+
+    print("\n  Length | Accuracy | Steps Used | Steps Needed | Avg Depth")
+    print("  -------+----------+------------+--------------+----------")
+    for prog_len in [4, 8, 12, 16]:
+        sr = scaling_results[prog_len]
+        print(f"  {prog_len:>5d}  | {sr['accuracy']:>6.1f}%  | "
+              f"{sr['avg_steps_used']:>10.1f} | {sr['avg_steps_needed']:>10.1f}   | "
+              f"{sr['avg_depth']:>6.2f}")
+
+    print("\n  Per-family breakdown at each length:")
+    for prog_len in [4, 8, 12, 16]:
+        sr = scaling_results[prog_len]
+        fam_strs = []
+        for fam_name in ['ACCUMULATE', 'TRANSFER', 'COMPARE', 'DECREMENT']:
+            if fam_name in sr['by_family']:
+                fam_strs.append(f"{fam_name}={sr['by_family'][fam_name]['accuracy']:.0f}%")
+        print(f"    Length {prog_len:>2d}: {', '.join(fam_strs)}")
+
+    # ========================================================================
+    # THE COMPLETE BROADMIND v0.76 TEST
+    # ========================================================================
+    print("\n" + "=" * 70)
+    print("THE COMPLETE BROADMIND v0.76 TEST")
+    print("=" * 70)
+
+    l1 = results['by_length'][1]
+    l4 = results['by_length'][4]
+
+    accurate = results['accuracy'] > 95
+    mixed_accurate = mixed_results['accuracy'] > 90
+    wise = wisdom_acc > 90
+    efficient_easy = l1['avg_steps'] < 1.5
+    efficient_hard = l4['avg_steps'] > 3.5
+    steps_match = abs(results['avg_steps_used'] - results['avg_steps_needed']) < 0.3
+
+    # Scaling criteria
+    scale_4 = scaling_results[4]['accuracy'] > 99
+    scale_8 = scaling_results[8]['accuracy'] > 90
+    scale_12 = scaling_results[12]['accuracy'] > 85
+    scale_16 = scaling_results[16]['accuracy'] > 80
+
+    # MoR criteria
+    compare_depth = depth_results['by_family'].get('COMPARE', {}).get('mean_depth', 0)
+    transfer_depth = depth_results['by_family'].get('TRANSFER', {}).get('mean_depth', 0)
+    acc_depth = depth_results['by_family'].get('ACCUMULATE', {}).get('mean_depth', 0)
+    dec_depth = depth_results['by_family'].get('DECREMENT', {}).get('mean_depth', 0)
+    simple_depth = (acc_depth + dec_depth) / 2.0 if (acc_depth + dec_depth) > 0 else 0
+
+    depth_hierarchy = compare_depth > transfer_depth > simple_depth
+    efficient_routing = depth_results['overall_mean_depth'] < 3.0
+
+    all_pass = (accurate and mixed_accurate and wise and
+                efficient_easy and efficient_hard and steps_match)
+    all_scale = scale_4 and scale_8 and scale_12 and scale_16
+    all_mor = depth_hierarchy and efficient_routing
+
+    print(f"""
+[+] Wisdom Distillation ("keeps the juice"):
+    Wisdom Matching: {wisdom_acc:.1f}% {'[PASS]' if wise else '[FAIL]'}
+
+[+] Adaptive Compute ("sips power"):
+    Easy (len=1): {l1['avg_steps']:.1f} steps {'[PASS]' if efficient_easy else '[FAIL]'}
+    Hard (len=4): {l4['avg_steps']:.1f} steps {'[PASS]' if efficient_hard else '[FAIL]'}
+    Steps Match: {results['avg_steps_used']:.2f} ~ {results['avg_steps_needed']:.2f} {'[PASS]' if steps_match else '[FAIL]'}
+
+[+] Overall Performance:
+    Accuracy: {results['accuracy']:.1f}% {'[PASS]' if accurate else '[FAIL]'}
+    Mixed-Program: {mixed_results['accuracy']:.1f}% {'[PASS]' if mixed_accurate else '[FAIL]'}
+
+[+] Length Generalization:
+    Length  4: {scaling_results[4]['accuracy']:.1f}% {'[PASS]' if scale_4 else '[FAIL]'} (target >99%)
+    Length  8: {scaling_results[8]['accuracy']:.1f}% {'[PASS]' if scale_8 else '[FAIL]'} (target >90%)
+    Length 12: {scaling_results[12]['accuracy']:.1f}% {'[PASS]' if scale_12 else '[FAIL]'} (target >85%)
+    Length 16: {scaling_results[16]['accuracy']:.1f}% {'[PASS]' if scale_16 else '[FAIL]'} (target >80%)
+
+[+] Mixture of Recursions (MoR):
+    Depth Hierarchy (COMPARE > TRANSFER > SIMPLE):
+      COMPARE:  {compare_depth:.2f}
+      TRANSFER: {transfer_depth:.2f}
+      SIMPLE:   {simple_depth:.2f}
+      {'[PASS]' if depth_hierarchy else '[FAIL]'}
+    Efficient Routing (mean < 3.0): {depth_results['overall_mean_depth']:.2f} {'[PASS]' if efficient_routing else '[FAIL]'}
+
+BROADMIND v0.74 COMPAT: {'PASS' if all_pass else 'PARTIAL'}
+SCALING STATUS:          {'PASS' if all_scale else 'PARTIAL'}
+MoR STATUS:              {'PASS' if all_mor else 'PARTIAL'}
+BROADMIND v0.76 STATUS:  {'COMPLETE' if all_pass and all_scale and all_mor else 'PARTIAL'}
+""")
+
+    # ========================================================================
+    # SUMMARY
+    # ========================================================================
+    print("=" * 70)
+    print("SUMMARY")
+    print("=" * 70)
+
+    print(f"""
+BroadMind v0.76: Mixture of Recursions (MoR)
+---------------------------------------------
+Parameters: {model.count_parameters():,}
+
+Capabilities:
+  [+] Latent program induction (invents reasoning circuits)
+  [+] Wisdom distillation (keeps the juice, forgets the fluff)
+  [+] Adaptive compute (sips power, drops insight)
+  [+] Mixed-program execution (ops from any family)
+  [+] Length generalization (sinusoidal encoding + noise injection)
+  [+] Mixture of Recursions (adaptive inner depth per operation)
+
+Results (in-distribution, lengths 1-4):
+  Accuracy:        {results['accuracy']:.1f}%
+  Mixed-Program:   {mixed_results['accuracy']:.1f}%
+  Wisdom Match:    {wisdom_acc:.1f}%
+  Steps Used:      {results['avg_steps_used']:.2f}
+  Steps Needed:    {results['avg_steps_needed']:.2f}
+  Avg Compute Cost: {results['avg_compute_cost']:.3f}
+
+Per-Family:
+  ACCUMULATE: {results['by_family']['ACCUMULATE']['accuracy']:.0f}%
+  TRANSFER:   {results['by_family']['TRANSFER']['accuracy']:.0f}%
+  COMPARE:    {results['by_family']['COMPARE']['accuracy']:.0f}%
+  DECREMENT:  {results['by_family']['DECREMENT']['accuracy']:.0f}%
+
+Per-Length (in-distribution):
+  Len 1: {results['by_length'][1]['accuracy']:.0f}% @ {results['by_length'][1]['avg_steps']:.1f} steps
+  Len 2: {results['by_length'][2]['accuracy']:.0f}% @ {results['by_length'][2]['avg_steps']:.1f} steps
+  Len 3: {results['by_length'][3]['accuracy']:.0f}% @ {results['by_length'][3]['avg_steps']:.1f} steps
+  Len 4: {results['by_length'][4]['accuracy']:.0f}% @ {results['by_length'][4]['avg_steps']:.1f} steps
+
+Recursion Depth (MoR):
+  Overall Mean Depth: {depth_results['overall_mean_depth']:.2f}
+  ACCUMULATE: {depth_results['by_family'].get('ACCUMULATE', {}).get('mean_depth', 0):.2f}
+  TRANSFER:   {depth_results['by_family'].get('TRANSFER', {}).get('mean_depth', 0):.2f}
+  COMPARE:    {depth_results['by_family'].get('COMPARE', {}).get('mean_depth', 0):.2f}
+  DECREMENT:  {depth_results['by_family'].get('DECREMENT', {}).get('mean_depth', 0):.2f}
+
+Scaling (out-of-distribution):
+  Length  4: {scaling_results[4]['accuracy']:.1f}% acc, {scaling_results[4]['avg_steps_used']:.1f} steps, {scaling_results[4].get('avg_depth', 0):.2f} avg depth
+  Length  8: {scaling_results[8]['accuracy']:.1f}% acc, {scaling_results[8]['avg_steps_used']:.1f} steps, {scaling_results[8].get('avg_depth', 0):.2f} avg depth
+  Length 12: {scaling_results[12]['accuracy']:.1f}% acc, {scaling_results[12]['avg_steps_used']:.1f} steps, {scaling_results[12].get('avg_depth', 0):.2f} avg depth
+  Length 16: {scaling_results[16]['accuracy']:.1f}% acc, {scaling_results[16]['avg_steps_used']:.1f} steps, {scaling_results[16].get('avg_depth', 0):.2f} avg depth
+""")
+
+    torch.save({
+        'model_state_dict': model.state_dict(),
+        'accuracy': results['accuracy'],
+        'mixed_accuracy': mixed_results['accuracy'],
+        'wisdom_accuracy': wisdom_acc,
+        'avg_steps_used': results['avg_steps_used'],
+        'scaling_results': {k: v['accuracy'] for k, v in scaling_results.items()},
+        'depth_results': {
+            'overall_mean_depth': depth_results['overall_mean_depth'],
+            'by_family': {k: v['mean_depth'] for k, v in depth_results['by_family'].items()},
+            'by_op': {k: v['mean_depth'] for k, v in depth_results['by_op'].items()},
+        },
+    }, 'broadmind_v076_mor.pt')
+    print("Saved to broadmind_v076_mor.pt")
+
+    return model, results, scaling_results, depth_results
+
+
+if __name__ == "__main__":
+    model, results, scaling_results, depth_results = main()
