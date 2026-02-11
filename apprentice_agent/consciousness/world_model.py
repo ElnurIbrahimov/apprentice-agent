@@ -1436,6 +1436,39 @@ class WorldModel:
             finally:
                 conn.close()
 
+    def get_insight_engagement_rates(self, days: int = 30) -> Dict[str, Dict]:
+        """Compute engagement rates per insight type over the last N days.
+
+        Returns {insight_type: {total, engaged, dismissed, engagement_rate}}.
+        """
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT insight_type,
+                          COUNT(*) as total,
+                          SUM(CASE WHEN acted_on_at IS NOT NULL THEN 1 ELSE 0 END) as engaged,
+                          SUM(CASE WHEN dismissed_at IS NOT NULL THEN 1 ELSE 0 END) as dismissed
+                   FROM proactive_insights
+                   WHERE generated_at > ?
+                   GROUP BY insight_type""",
+                (cutoff,),
+            ).fetchall()
+            result = {}
+            for row in rows:
+                engaged = row["engaged"]
+                dismissed = row["dismissed"]
+                engagement_rate = engaged / max(1, engaged + dismissed)
+                result[row["insight_type"]] = {
+                    "total": row["total"],
+                    "engaged": engaged,
+                    "dismissed": dismissed,
+                    "engagement_rate": engagement_rate,
+                }
+            return result
+        finally:
+            conn.close()
+
     def get_recent_insights(
         self, insight_type: Optional[str] = None, hours: int = 24
     ) -> List[Dict]:
@@ -1611,16 +1644,74 @@ class WorldModel:
     # Maintenance
     # ----------------------------------------------------------------
 
+    def compute_adaptive_half_life(self) -> float:
+        """Compute adaptive belief decay half-life from actual reinforcement intervals.
+
+        Analyzes beliefs that have been reinforced at least once (last_reinforced != first_formed)
+        to calibrate the half-life. Clamped between 168h (1 week) and 672h (4 weeks).
+        Falls back to BELIEF_DECAY_HALF_LIFE (336h) if insufficient data.
+        Results are cached with a 1-hour TTL.
+        """
+        now = time.monotonic()
+        if (
+            hasattr(self, "_adaptive_half_life")
+            and hasattr(self, "_half_life_computed_at")
+            and now - self._half_life_computed_at < 3600
+        ):
+            return self._adaptive_half_life
+
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT first_formed, last_reinforced FROM beliefs
+                   WHERE valid_to IS NULL
+                   AND last_reinforced != first_formed"""
+            ).fetchall()
+        finally:
+            conn.close()
+
+        if len(rows) < 5:
+            self._adaptive_half_life = self.BELIEF_DECAY_HALF_LIFE
+            self._half_life_computed_at = now
+            return self._adaptive_half_life
+
+        intervals = []
+        for row in rows:
+            try:
+                formed = datetime.fromisoformat(row["first_formed"])
+                reinforced = datetime.fromisoformat(row["last_reinforced"])
+                if formed.tzinfo is None:
+                    formed = formed.replace(tzinfo=timezone.utc)
+                if reinforced.tzinfo is None:
+                    reinforced = reinforced.replace(tzinfo=timezone.utc)
+                hours = (reinforced - formed).total_seconds() / 3600
+                if hours > 0:
+                    intervals.append(hours)
+            except (ValueError, TypeError):
+                continue
+
+        if len(intervals) < 5:
+            self._adaptive_half_life = self.BELIEF_DECAY_HALF_LIFE
+            self._half_life_computed_at = now
+            return self._adaptive_half_life
+
+        intervals.sort()
+        median_interval = intervals[len(intervals) // 2]
+        self._adaptive_half_life = max(168, min(672, median_interval * 2))
+        self._half_life_computed_at = now
+        return self._adaptive_half_life
+
     def decay_beliefs(self) -> int:
         """
         Apply Ebbinghaus-style decay to stale belief confidence.
 
         confidence *= e^(-decay_rate * hours_since_reinforced)
-        where decay_rate = ln(2) / BELIEF_DECAY_HALF_LIFE
+        where decay_rate = ln(2) / adaptive_half_life
 
         Returns count of beliefs whose confidence dropped.
         """
-        decay_rate = math.log(2) / self.BELIEF_DECAY_HALF_LIFE
+        half_life = self.compute_adaptive_half_life()
+        decay_rate = math.log(2) / half_life
         decayed_count = 0
         now = datetime.now(timezone.utc)
 

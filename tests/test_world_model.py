@@ -703,3 +703,132 @@ class TestThreadSafety:
         assert errors == [], f"Thread errors: {errors}"
         assert len(wm.get_all_projects()) == 20
         assert len(wm.get_current_beliefs()) == 20
+
+
+# ============================================================================
+# TestInsightEngagementRates — ADV-02 Phase 5
+# ============================================================================
+
+
+class TestInsightEngagementRates:
+    """Tests for get_insight_engagement_rates()."""
+
+    def test_empty_returns_empty(self, wm):
+        """No insights = empty engagement rates."""
+        result = wm.get_insight_engagement_rates(days=30)
+        assert result == {}
+
+    def test_mixed_feedback(self, wm):
+        """Mixed engaged/dismissed insights compute correct rates."""
+        from apprentice_agent.consciousness.proactive_awareness import (
+            InsightType,
+            ProactiveInsight,
+        )
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc).isoformat()
+        # 3 staleness insights: 2 engaged, 1 dismissed
+        for i in range(3):
+            insight = ProactiveInsight(
+                id=f"eng_{i}",
+                insight_type=InsightType.STALENESS_ALERT,
+                title=f"Stale {i}",
+                description="Desc",
+                urgency=0.7,
+                confidence=0.7,
+                generated_at=now,
+                related_entity_type="project",
+                related_entity_id=f"proj_{i}",
+            )
+            wm.store_insight(insight)
+
+        wm.update_insight_feedback("eng_0", "engaged")
+        wm.update_insight_feedback("eng_1", "engaged")
+        wm.update_insight_feedback("eng_2", "dismissed")
+
+        rates = wm.get_insight_engagement_rates(days=30)
+        assert "staleness_alert" in rates
+        assert rates["staleness_alert"]["total"] == 3
+        assert rates["staleness_alert"]["engaged"] == 2
+        assert rates["staleness_alert"]["dismissed"] == 1
+        # engagement_rate = 2 / max(1, 2 + 1) = 2/3
+        assert abs(rates["staleness_alert"]["engagement_rate"] - 2 / 3) < 0.01
+
+    def test_single_type(self, wm):
+        """Single insight type with no feedback returns 0 engagement rate."""
+        from apprentice_agent.consciousness.proactive_awareness import (
+            InsightType,
+            ProactiveInsight,
+        )
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc).isoformat()
+        insight = ProactiveInsight(
+            id="single_1",
+            insight_type=InsightType.DEADLINE_APPROACHING,
+            title="Due soon",
+            description="Desc",
+            urgency=0.8,
+            confidence=0.7,
+            generated_at=now,
+        )
+        wm.store_insight(insight)
+
+        rates = wm.get_insight_engagement_rates(days=30)
+        assert "deadline_approaching" in rates
+        assert rates["deadline_approaching"]["total"] == 1
+        assert rates["deadline_approaching"]["engagement_rate"] == 0.0
+
+
+# ============================================================================
+# TestAdaptiveHalfLife — ADV-02 Phase 5
+# ============================================================================
+
+
+class TestAdaptiveHalfLife:
+    """Tests for compute_adaptive_half_life()."""
+
+    def test_insufficient_data_returns_default(self, wm):
+        """With fewer than 5 reinforced beliefs, return default half-life."""
+        # Add 3 beliefs (not reinforced, so first_formed == last_reinforced)
+        for i in range(3):
+            wm.add_belief(f"Belief {i}")
+
+        result = wm.compute_adaptive_half_life()
+        assert result == wm.BELIEF_DECAY_HALF_LIFE  # 336
+
+    def test_sufficient_data_computes_value(self, wm):
+        """With 5+ reinforced beliefs, compute adaptive value from median interval."""
+        import sqlite3
+        from datetime import datetime, timedelta, timezone
+
+        now = datetime.now(timezone.utc)
+
+        # Add 6 beliefs with varying reinforcement intervals
+        intervals_hours = [48, 100, 200, 300, 400, 500]
+        for i, hours in enumerate(intervals_hours):
+            belief = wm.add_belief(f"Adaptive belief {i}")
+            formed = (now - timedelta(hours=hours)).isoformat()
+            reinforced = now.isoformat()
+            # Manually set first_formed and last_reinforced so they differ
+            conn = sqlite3.connect(wm._db_path)
+            conn.execute(
+                "UPDATE beliefs SET first_formed=?, last_reinforced=? WHERE id=?",
+                (formed, reinforced, belief.id),
+            )
+            conn.commit()
+            conn.close()
+            wm._beliefs[belief.id].first_formed = formed
+            wm._beliefs[belief.id].last_reinforced = reinforced
+
+        # Clear cache to force recomputation
+        if hasattr(wm, "_half_life_computed_at"):
+            wm._half_life_computed_at = 0
+
+        result = wm.compute_adaptive_half_life()
+
+        # Sorted intervals: [48, 100, 200, 300, 400, 500]
+        # Median (index 3 of 6): 300
+        # Adaptive = max(168, min(672, 300 * 2)) = max(168, min(672, 600)) = 600
+        assert result != wm.BELIEF_DECAY_HALF_LIFE  # Not default
+        assert 168 <= result <= 672  # Within clamp range

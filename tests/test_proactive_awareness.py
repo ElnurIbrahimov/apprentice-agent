@@ -853,3 +853,113 @@ class TestDriveSignals:
 
         signals = engine.get_drive_signals()
         assert signals["coherence"] < 0.5  # Reduced by contradiction
+
+
+# ============================================================================
+# Phase 5 Tests — Threshold Tuning
+# ============================================================================
+
+
+class TestTuneThresholds:
+    """Tests for _tune_thresholds() feedback loop."""
+
+    def test_no_data_no_change(self, engine, wm):
+        """No insight history = no threshold changes."""
+        engine._tune_thresholds()
+        assert engine._confidence_overrides == {}
+
+    def test_high_engagement_lowers_threshold(self, engine, wm):
+        """Types with engagement_rate > 0.6 should get lowered threshold."""
+        # Create 6 staleness insights, all engaged (engagement_rate = 1.0)
+        now = datetime.now(timezone.utc).isoformat()
+        for i in range(6):
+            insight = ProactiveInsight(
+                id=f"tune_hi_{i}",
+                insight_type=InsightType.STALENESS_ALERT,
+                title=f"Stale {i}",
+                description="Desc",
+                urgency=0.7,
+                confidence=0.7,
+                generated_at=now,
+                related_entity_type="project",
+                related_entity_id=f"proj_tune_{i}",
+            )
+            wm.store_insight(insight)
+            wm.update_insight_feedback(f"tune_hi_{i}", "engaged")
+
+        # Force tune (reset rate limit)
+        engine._last_tune_time = 0
+        engine._tune_thresholds()
+
+        assert "staleness_alert" in engine._confidence_overrides
+        # Default MIN_CONFIDENCE is 0.4, should be lowered by 0.02 to 0.38
+        assert engine._confidence_overrides["staleness_alert"] < engine.MIN_CONFIDENCE
+
+    def test_low_engagement_raises_threshold(self, engine, wm):
+        """Types with engagement_rate < 0.2 should get raised threshold."""
+        now = datetime.now(timezone.utc).isoformat()
+        for i in range(6):
+            insight = ProactiveInsight(
+                id=f"tune_lo_{i}",
+                insight_type=InsightType.CONTRADICTION_ALERT,
+                title=f"Contradiction {i}",
+                description="Desc",
+                urgency=0.6,
+                confidence=0.6,
+                generated_at=now,
+                related_entity_type="contradiction",
+                related_entity_id=f"contra_tune_{i}",
+            )
+            wm.store_insight(insight)
+            wm.update_insight_feedback(f"tune_lo_{i}", "dismissed")
+
+        engine._last_tune_time = 0
+        engine._tune_thresholds()
+
+        assert "contradiction_alert" in engine._confidence_overrides
+        # Default MIN_CONFIDENCE is 0.4, should be raised by 0.02 to 0.42
+        assert engine._confidence_overrides["contradiction_alert"] > engine.MIN_CONFIDENCE
+
+
+# ============================================================================
+# Phase 5 Tests — Confidence Overrides in Filter
+# ============================================================================
+
+
+class TestConfidenceOverrides:
+    """Tests for per-type confidence overrides in _filter_and_dedup."""
+
+    def test_override_applied_in_filter(self, engine):
+        """Insight below MIN_CONFIDENCE but above override should pass."""
+        # Set a low override for staleness
+        engine._confidence_overrides["staleness_alert"] = 0.25
+
+        insight = ProactiveInsight(
+            id="override_pass",
+            insight_type=InsightType.STALENESS_ALERT,
+            title="Low conf stale",
+            description="Desc",
+            urgency=0.7,
+            confidence=0.3,  # Below MIN_CONFIDENCE (0.4), above override (0.25)
+            generated_at=datetime.now(timezone.utc).isoformat(),
+            related_entity_type="project",
+            related_entity_id="proj_override",
+        )
+        result = engine._filter_and_dedup([insight])
+        assert len(result) == 1
+
+    def test_default_used_when_no_override(self, engine):
+        """Insight type without override uses default MIN_CONFIDENCE."""
+        insight = ProactiveInsight(
+            id="no_override",
+            insight_type=InsightType.OPPORTUNITY,
+            title="An opportunity",
+            description="Desc",
+            urgency=0.7,
+            confidence=0.3,  # Below MIN_CONFIDENCE (0.4), no override for OPPORTUNITY
+            generated_at=datetime.now(timezone.utc).isoformat(),
+            related_entity_type="global",
+            related_entity_id="global",
+        )
+        result = engine._filter_and_dedup([insight])
+        assert len(result) == 0

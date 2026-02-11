@@ -284,6 +284,7 @@ class GlobalWorkspaceEngine:
             Codelet("neurodream", self._gather_neurodream, priority_weight=1.1, cooldown_seconds=3.0),
             Codelet("active_inference", self._gather_active_inference, priority_weight=0.9, cooldown_seconds=1.5),
             Codelet("strategy_bandit", self._gather_strategy_bandit, priority_weight=0.8, cooldown_seconds=5.0),
+            Codelet("world_model", self._gather_world_model, priority_weight=0.9, cooldown_seconds=2.0),
         ]
         for c in codelets:
             self._codelets[c.name] = c
@@ -586,6 +587,25 @@ class GlobalWorkspaceEngine:
         except Exception as e:
             logger.debug(f"[GWT] Strategy bandit gather error: {e}")
             return None
+
+    def _gather_world_model(self) -> Optional[WorkspaceContent]:
+        """Gather world model state when notable insights exist."""
+        from apprentice_agent.consciousness.proactive_awareness import get_proactive_awareness_engine
+        engine = get_proactive_awareness_engine()
+        pending = engine.get_pending_insights(max_count=1)
+        if not pending:
+            return None
+
+        top = pending[0]
+        urgency = top.get("urgency", 0.5)
+        return WorkspaceContent(
+            source_module="world_model",
+            content_type="proactive_insight",
+            summary=top.get("title", "World model insight"),
+            activation=urgency,
+            salience=min(1.0, urgency * 1.1),
+            payload={"insight_type": top.get("insight_type"), "entity": top.get("related_entity_id")},
+        )
 
     # ====================================================================
     # Core Cognitive Cycle

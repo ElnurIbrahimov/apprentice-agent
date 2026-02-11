@@ -35,6 +35,19 @@ Your job: analyze the conversation below and extract any changes to the user's w
 ## Conversation to Analyze:
 {conversation}
 
+## Examples
+
+Example 1 — Project mention + belief:
+USER: "I'm working on the dashboard with React, Sarah is helping"
+Extract: project "dashboard" (action: "new" or "mention", technologies: ["React"]),
+person "Sarah" (role: "collaborator", context: "helping with dashboard"),
+belief "User is building a dashboard with React" (category: "project_state").
+
+Example 2 — Goal + environment:
+USER: "I need to finish the API docs by Friday, switched to VS Code"
+Extract: goal "Finish the API docs" (horizon: "short_term", evidence: "due by Friday"),
+environment change (key: "editor", category: "tool", value: "VS Code").
+
 ## Extract the following (JSON format):
 
 {{
@@ -61,7 +74,7 @@ Your job: analyze the conversation below and extract any changes to the user's w
   "beliefs": [
     {{
       "statement": "string",
-      "category": "user_intent|technical_constraint|preference|habit|schedule",
+      "category": "user_intent|technical_constraint|preference|project_state|relationship|schedule|habit|environment",
       "confidence": 0.7,
       "contradicts_existing": null
     }}
@@ -116,6 +129,7 @@ class StateExtractor:
         self._brain_lock = threading.Lock()
         self._last_extract_time: float = 0.0
         self._extraction_count: int = 0
+        self._stats = {"total": 0, "successes": 0, "parse_failures": 0, "empty_results": 0}
 
     def _get_brain(self):
         """Lazy-load a dedicated OllamaBrain (double-checked locking)."""
@@ -148,6 +162,8 @@ class StateExtractor:
         if not messages:
             return None
 
+        self._stats["total"] += 1
+
         # Format conversation
         conversation_text = self._format_conversation(messages)
         if not conversation_text.strip():
@@ -172,9 +188,22 @@ class StateExtractor:
 
         # Parse JSON response
         result = self._parse_json(response)
-        if result is not None:
-            self._extraction_count += 1
-            self._last_extract_time = time.monotonic()
+        if result is None:
+            self._stats["parse_failures"] += 1
+            return None
+
+        self._stats["successes"] += 1
+        self._extraction_count += 1
+        self._last_extract_time = time.monotonic()
+
+        # Check if all extracted arrays are empty
+        all_empty = all(
+            not result.get(key) for key in
+            ("projects", "goals", "beliefs", "people_mentioned", "environment_changes")
+        )
+        if all_empty:
+            self._stats["empty_results"] += 1
+
         return result
 
     def should_extract(self, messages: List[Dict[str, str]]) -> bool:
@@ -212,6 +241,10 @@ class StateExtractor:
             return False
 
         return True
+
+    def get_stats(self) -> Dict[str, int]:
+        """Return extraction statistics."""
+        return dict(self._stats)
 
     def _format_conversation(self, messages: List[Dict[str, str]]) -> str:
         """

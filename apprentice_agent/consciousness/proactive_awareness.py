@@ -85,6 +85,8 @@ class ProactiveAwarenessEngine:
         self._world_model = world_model
         self._enabled = enabled
         self._lock = threading.RLock()
+        self._confidence_overrides: Dict[str, float] = {}
+        self._last_tune_time: float = 0.0
 
     # ----------------------------------------------------------------
     # Analysis entry points
@@ -94,6 +96,8 @@ class ProactiveAwarenessEngine:
         """Run all 8 checks, filter, dedup, store, and return insights."""
         if not self._enabled:
             return []
+
+        self._tune_thresholds()
 
         all_insights = []
         all_insights.extend(self.check_staleness())
@@ -592,6 +596,37 @@ class ProactiveAwarenessEngine:
         return insights
 
     # ----------------------------------------------------------------
+    # Threshold Tuning (ADV-02 Phase 5)
+    # ----------------------------------------------------------------
+
+    def _tune_thresholds(self) -> None:
+        """Adjust per-type confidence thresholds based on engagement rates.
+
+        Rate-limited to once per hour. Types with high engagement get a
+        lower threshold (more insights); types with low engagement get a
+        higher threshold (less noise).
+        """
+        import time as _time
+        now = _time.monotonic()
+        if now - self._last_tune_time < 3600:
+            return
+        self._last_tune_time = now
+
+        try:
+            rates = self._world_model.get_insight_engagement_rates(days=30)
+        except Exception:
+            return
+
+        for insight_type, data in rates.items():
+            if data["total"] < 5:
+                continue
+            current = self._confidence_overrides.get(insight_type, self.MIN_CONFIDENCE)
+            if data["engagement_rate"] > 0.6:
+                self._confidence_overrides[insight_type] = max(0.3, current - 0.02)
+            elif data["engagement_rate"] < 0.2:
+                self._confidence_overrides[insight_type] = min(0.7, current + 0.02)
+
+    # ----------------------------------------------------------------
     # Filtering & Storage
     # ----------------------------------------------------------------
 
@@ -605,8 +640,13 @@ class ProactiveAwarenessEngine:
         3. Sort by delivery_score descending
         4. Cap at MAX_INSIGHTS_PER_RUN
         """
-        # Step 1: confidence filter
-        filtered = [i for i in insights if i.confidence >= self.MIN_CONFIDENCE]
+        # Step 1: confidence filter (per-type overrides from _tune_thresholds)
+        filtered = [
+            i for i in insights
+            if i.confidence >= self._confidence_overrides.get(
+                i.insight_type.value, self.MIN_CONFIDENCE
+            )
+        ]
 
         # Step 2: dedup against recent insights in DB
         deduped = []

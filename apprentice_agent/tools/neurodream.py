@@ -726,6 +726,19 @@ class NeuroDreamEngine:
                 print(f"[NeuroDream] Intrinsic motivation cycle error: {e}")
                 results["motivation_ran"] = False
 
+        # === World Model maintenance (ADV-02 Phase 5) ===
+        if not self._interrupt_flag.is_set():
+            try:
+                from apprentice_agent.consciousness.world_model import get_world_model
+                wm = get_world_model()
+                maintenance = wm.run_maintenance()
+                results["world_model_maintenance"] = True
+                results["beliefs_decayed"] = maintenance.get("beliefs_decayed", 0)
+                results["health_changes"] = maintenance.get("health_changes", 0)
+            except Exception as e:
+                print(f"[NeuroDream] World model maintenance error: {e}")
+                results["world_model_maintenance"] = False
+
         results["duration_seconds"] = time.time() - start_time
 
         # Save consolidated patterns
