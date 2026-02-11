@@ -917,6 +917,16 @@ class OllamaBrain:
         except Exception:
             pass  # Global Workspace not available
 
+        # === WORLD STATE INJECTION (ADV-02: Persistent World Model) ===
+        try:
+            from apprentice_agent.consciousness.world_model import get_world_model
+            wm = get_world_model()
+            world_ctx = wm.get_context_summary()
+            if world_ctx:
+                full_system_prompt = f"{full_system_prompt}\n\n{world_ctx}"
+        except Exception:
+            pass  # World Model not available
+
         # Apply emotional tone modifier - auto-generate from ALMA if not provided
         if tone_modifier:
             full_system_prompt = f"{full_system_prompt}\n\n{tone_modifier}"
@@ -1169,6 +1179,16 @@ class OllamaBrain:
                 full_system_prompt = f"{full_system_prompt}\n\n{conscious_ctx}"
         except Exception:
             pass  # Global Workspace not available
+
+        # === WORLD STATE INJECTION (ADV-02: Persistent World Model) ===
+        try:
+            from apprentice_agent.consciousness.world_model import get_world_model
+            wm = get_world_model()
+            world_ctx = wm.get_context_summary()
+            if world_ctx:
+                full_system_prompt = f"{full_system_prompt}\n\n{world_ctx}"
+        except Exception:
+            pass  # World Model not available
 
         # Apply emotional tone modifier - auto-generate from ALMA if not provided
         if tone_modifier:

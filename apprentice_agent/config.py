@@ -281,6 +281,10 @@ class Config:
     PROMPT_EVOLUTION_ENABLED: bool = os.getenv("PROMPT_EVOLUTION_ENABLED", "false").lower() == "true"
     PROMPT_EVOLUTION_INTERVAL: int = int(os.getenv("PROMPT_EVOLUTION_INTERVAL", "50"))
 
+    # World Model Configuration — ADV-02: Persistent situational awareness
+    WORLD_MODEL_ENABLED: bool = os.getenv("WORLD_MODEL_ENABLED", "true").lower() == "true"
+    WORLD_MODEL_DB_PATH: str = os.getenv("WORLD_MODEL_DB_PATH", "")
+
     # API Security Configuration
     API_AUTH_ENABLED: bool = os.getenv("AURA_API_AUTH_ENABLED", "false").lower() == "true"
     API_KEY: str = os.getenv("AURA_API_KEY", "")  # Set to enable API key auth
