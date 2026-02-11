@@ -7,6 +7,7 @@ from .global_workspace import GlobalWorkspaceEngine, get_global_workspace
 from .self_improvement import SelfImprovementEngine, get_self_improvement_engine
 from .strategy_bandit import StrategyBandit, get_strategy_bandit
 from .reasoning_templates import ReasoningTemplateLibrary, get_template_library
+from .prompt_evolution import PromptEvolutionEngine, get_prompt_evolution_engine
 
 __all__ = [
     "MetacognitiveEngine", "get_metacognitive_engine",
@@ -16,4 +17,5 @@ __all__ = [
     "SelfImprovementEngine", "get_self_improvement_engine",
     "StrategyBandit", "get_strategy_bandit",
     "ReasoningTemplateLibrary", "get_template_library",
+    "PromptEvolutionEngine", "get_prompt_evolution_engine",
 ]

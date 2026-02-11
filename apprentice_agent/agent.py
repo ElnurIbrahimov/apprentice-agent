@@ -182,6 +182,13 @@ try:
 except ImportError:
     TEMPLATE_LIBRARY_AVAILABLE = False
 
+# Prompt Evolution Engine - Self-modifying system prompts
+try:
+    from apprentice_agent.consciousness.prompt_evolution import get_prompt_evolution_engine
+    PROMPT_EVOLUTION_AVAILABLE = True
+except ImportError:
+    PROMPT_EVOLUTION_AVAILABLE = False
+
 # Knowledge Graph Brain - Structured Long-Term Memory
 try:
     from aura_knowledge_graph import (
@@ -4900,6 +4907,22 @@ Try these commands:
         else:
             selected_strategy = ReasoningStrategy.CHAIN_OF_THOUGHT
 
+        # ===== Prompt Evolution Engine — Inject evolved prompt =====
+        if PROMPT_EVOLUTION_AVAILABLE and getattr(Config, 'PROMPT_EVOLUTION_ENABLED', False):
+            try:
+                evo_engine = get_prompt_evolution_engine()
+                evolved_prompt = evo_engine.get_active_prompt("reasoner")
+                if evolved_prompt is None:
+                    from apprentice_agent.consciousness.prompt_evolution import DEFAULT_REASONER_PROMPT
+                    evo_engine.seed_prompt("reasoner", DEFAULT_REASONER_PROMPT)
+                    evolved_prompt = DEFAULT_REASONER_PROMPT
+                if system_prompt_addon:
+                    system_prompt_addon = evolved_prompt + "\n\n" + system_prompt_addon
+                else:
+                    system_prompt_addon = evolved_prompt
+            except Exception as e:
+                print(f"[PromptEvolution] Injection error: {e}")
+
         # ===== Reasoning Template Library — Retrieve template guidance (top-K) =====
         template_match = None       # backward compat: best match
         template_matches = []       # all top-K matches
@@ -5092,6 +5115,15 @@ Try these commands:
             except Exception as e:
                 composite_reward = 0.5
                 print(f"[StrategyBandit] Outcome recording error: {e}")
+
+        # ===== Prompt Evolution Engine — Record invocation =====
+        if PROMPT_EVOLUTION_AVAILABLE and getattr(Config, 'PROMPT_EVOLUTION_ENABLED', False):
+            try:
+                evo_engine = get_prompt_evolution_engine()
+                _failure = "low_quality" if composite_reward < 0.4 else None
+                evo_engine.record_invocation("reasoner", composite_reward, failure_type=_failure)
+            except Exception as e:
+                print(f"[PromptEvolution] Record error: {e}")
 
         # ===== Reasoning Template Library — Collect trace + record usage =====
         if TEMPLATE_LIBRARY_AVAILABLE and getattr(Config, 'REASONING_TEMPLATES_ENABLED', False):

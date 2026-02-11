@@ -277,6 +277,10 @@ class Config:
     # Reasoning Template Library Configuration — Phase 3
     REASONING_TEMPLATES_ENABLED: bool = os.getenv("REASONING_TEMPLATES_ENABLED", "true").lower() == "true"
 
+    # Prompt Evolution Engine Configuration — Phase 4
+    PROMPT_EVOLUTION_ENABLED: bool = os.getenv("PROMPT_EVOLUTION_ENABLED", "false").lower() == "true"
+    PROMPT_EVOLUTION_INTERVAL: int = int(os.getenv("PROMPT_EVOLUTION_INTERVAL", "50"))
+
     # API Security Configuration
     API_AUTH_ENABLED: bool = os.getenv("AURA_API_AUTH_ENABLED", "false").lower() == "true"
     API_KEY: str = os.getenv("AURA_API_KEY", "")  # Set to enable API key auth
