@@ -158,6 +158,17 @@ except ImportError:
     PROTO_AGI_AVAILABLE = False
     ProtoAGI = None
 
+# Strategy Bandit - Adaptive reasoning strategy selection
+try:
+    from apprentice_agent.consciousness.strategy_bandit import (
+        get_strategy_bandit,
+        BanditSelection,
+        ReasoningStrategy,
+    )
+    STRATEGY_BANDIT_AVAILABLE = True
+except ImportError:
+    STRATEGY_BANDIT_AVAILABLE = False
+
 # Knowledge Graph Brain - Structured Long-Term Memory
 try:
     from aura_knowledge_graph import (
@@ -4831,9 +4842,20 @@ Try these commands:
         if aura_context and aura_context.get("thinking_prefix"):
             thinking_prefix = aura_context["thinking_prefix"] + "\n\n"
 
-        # Inject KG context, RAG context, and A-MEM context into system prompt if available
+        # Inject user profile, KG context, RAG context, and A-MEM context into system prompt
         system_prompt_addon = None
         context_parts = []
+
+        # Always load user profile so AURA knows who it's talking to
+        try:
+            profile_path = Path("data/memory/user_profile.md")
+            if profile_path.exists():
+                profile_text = profile_path.read_text(encoding='utf-8').strip()
+                if profile_text:
+                    context_parts.append(f"USER PROFILE:\n{profile_text}")
+        except Exception:
+            pass
+
         if amem_context:
             context_parts.append(amem_context)
         if kg_context:
@@ -4841,21 +4863,95 @@ Try these commands:
         if rag_context:
             context_parts.append(rag_context)
         if context_parts:
-            system_prompt_addon = "\n\n".join(context_parts) + "\n\nUse this knowledge and memories when relevant to the conversation. Remember personal details about the user."
+            system_prompt_addon = "\n\n".join(context_parts) + "\n\nUse this knowledge and memories when relevant to the conversation. Remember personal details about the user. Always address the user by their name if known."
 
         # Record reasoning in monologue
         if hasattr(self, 'monologue') and self.monologue:
             self.monologue.think("reason", f"Processing query with task_type={task_type}")
 
         _record_thought("formulating", f"reasoning about: {message[:50]}...", 0.7, "agent")
-        response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
 
-        # Record response generation in monologue
-        if hasattr(self, 'monologue') and self.monologue:
-            self.monologue.think("respond", f"Generated response ({len(response)} chars)")
+        # ===== Strategy Bandit — Adaptive Reasoning Strategy Selection =====
+        bandit_selection = None
+        _strategy_start = time.time()
 
-        # Apply MirrorMind self-critique if enabled (Tool #21)
-        if self.mirrormind_enabled and not self._is_simple_query(message):
+        if STRATEGY_BANDIT_AVAILABLE and getattr(Config, 'STRATEGY_BANDIT_ENABLED', False):
+            try:
+                bandit = get_strategy_bandit()
+                bandit_selection = bandit.select_strategy(message)
+                selected_strategy = bandit_selection.strategy
+                print(f"[StrategyBandit] selected: {selected_strategy.value} for {bandit_selection.category.value}")
+            except Exception as e:
+                print(f"[StrategyBandit] Selection error, falling back to CoT: {e}")
+                selected_strategy = ReasoningStrategy.CHAIN_OF_THOUGHT
+        else:
+            selected_strategy = ReasoningStrategy.CHAIN_OF_THOUGHT
+
+        # Execute the selected strategy
+        try:
+            if selected_strategy == ReasoningStrategy.CHAIN_OF_THOUGHT:
+                response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
+
+            elif selected_strategy == ReasoningStrategy.COGNITIVE_THEATER:
+                if hasattr(self, 'theater') and self.theater:
+                    response = self.theater.quick_debate(message)
+                else:
+                    response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
+
+            elif selected_strategy == ReasoningStrategy.DEBATE:
+                if hasattr(self, 'theater') and self.theater:
+                    response = self.theater.quick_debate(message)
+                else:
+                    response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
+
+            elif selected_strategy == ReasoningStrategy.REFLEXION:
+                if hasattr(self, 'reflexion') and self.reflexion and self.reflexion_enabled:
+                    try:
+                        reflexion_result = self.reflexion.solve(message)
+                        response = reflexion_result if isinstance(reflexion_result, str) else getattr(reflexion_result, 'final_output', str(reflexion_result))
+                    except Exception as e:
+                        print(f"[StrategyBandit] Reflexion error, falling back to CoT: {e}")
+                        response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
+                else:
+                    response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
+
+            elif selected_strategy == ReasoningStrategy.MCTS:
+                if hasattr(self, 'reasoning_tree') and self.reasoning_tree:
+                    try:
+                        mcts_result = self.reasoning_tree.execute("solve", problem=message)
+                        response = mcts_result.get("answer", "") or mcts_result.get("result", "")
+                        if not response:
+                            response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
+                    except Exception as e:
+                        print(f"[StrategyBandit] MCTS error, falling back to CoT: {e}")
+                        response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
+                else:
+                    response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
+
+            elif selected_strategy == ReasoningStrategy.MIRRORMIND:
+                # think + refine (replaces the old MirrorMind post-process block)
+                response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
+                if self.mirrormind_enabled and hasattr(self, 'mirrormind') and self.mirrormind:
+                    _record_thought("analyzing", "self-critiquing response with MirrorMind...", 0.5, "agent")
+                    try:
+                        critique_result = self.mirrormind.refine(message, response)
+                        if critique_result.was_improved():
+                            _record_thought("observing", "MirrorMind improved the response", 0.6, "agent")
+                            response = critique_result.improved
+                    except Exception as e:
+                        print(f"[MirrorMind] Error: {e}")
+
+            else:
+                # Unknown strategy — safe fallback
+                response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
+
+        except Exception as e:
+            print(f"[StrategyBandit] Strategy execution error, falling back to CoT: {e}")
+            response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
+
+        # Apply MirrorMind self-critique if enabled AND bandit didn't already select it
+        if (selected_strategy != ReasoningStrategy.MIRRORMIND
+                and self.mirrormind_enabled and not self._is_simple_query(message)):
             _record_thought("analyzing", "self-critiquing response with MirrorMind...", 0.5, "agent")
             try:
                 critique_result = self.mirrormind.refine(message, response)
@@ -4863,8 +4959,11 @@ Try these commands:
                     _record_thought("observing", "MirrorMind improved the response", 0.6, "agent")
                     response = critique_result.improved
             except Exception as e:
-                # Never crash on MirrorMind failure, just use original response
                 print(f"[MirrorMind] Error: {e}")
+
+        # Record response generation in monologue
+        if hasattr(self, 'monologue') and self.monologue:
+            self.monologue.think("respond", f"Generated response ({len(response)} chars)")
 
         # AURA v3.0 - Process response through AURA's humanizer
         if self.aura_enabled and self.aura and aura_context:
@@ -4905,6 +5004,52 @@ Try these commands:
                         self.kg_bridge.flush()
             except Exception as e:
                 logger.debug(f"[KG BRAIN] Chat entity extraction error: {e}")
+
+        # ===== Strategy Bandit — Record Outcome =====
+        if bandit_selection is not None and STRATEGY_BANDIT_AVAILABLE:
+            try:
+                _strategy_latency = (time.time() - _strategy_start) * 1000  # ms
+                bandit = get_strategy_bandit()
+                metrics = {}
+
+                # Async LLM-based evaluation if enabled
+                if getattr(Config, 'STRATEGY_BANDIT_EVAL_ENABLED', False):
+                    try:
+                        from apprentice_agent.consciousness.reward_signals import RewardSignalCollector
+                        collector = RewardSignalCollector()
+                        eval_future = collector.collect_async(
+                            message, response,
+                            lambda prompt: self.brain.think(prompt, task_type=None),
+                        )
+                        # Fire-and-forget: update outcome when eval completes
+                        def _on_eval_done(fut):
+                            try:
+                                eval_metrics = fut.result(timeout=30)
+                                bandit.record_outcome(
+                                    request_id=bandit_selection.request_id + "_eval",
+                                    strategy=bandit_selection.strategy,
+                                    category=bandit_selection.category,
+                                    latency_ms=_strategy_latency,
+                                    response_length=len(response),
+                                    metrics=eval_metrics,
+                                )
+                            except Exception as ex:
+                                print(f"[StrategyBandit] Async eval error: {ex}")
+                        eval_future.add_done_callback(_on_eval_done)
+                    except Exception as e:
+                        print(f"[StrategyBandit] Eval setup error: {e}")
+
+                # Always record basic outcome with latency
+                bandit.record_outcome(
+                    request_id=bandit_selection.request_id,
+                    strategy=bandit_selection.strategy,
+                    category=bandit_selection.category,
+                    latency_ms=_strategy_latency,
+                    response_length=len(response),
+                    metrics=metrics,
+                )
+            except Exception as e:
+                print(f"[StrategyBandit] Outcome recording error: {e}")
 
         # End inner monologue session
         if hasattr(self, 'monologue') and self.monologue:
@@ -5090,6 +5235,17 @@ Try these commands:
         # System prompt addon with contexts
         system_prompt_addon = None
         context_parts = []
+
+        # Always load user profile so AURA knows who it's talking to
+        try:
+            profile_path = Path("data/memory/user_profile.md")
+            if profile_path.exists():
+                profile_text = profile_path.read_text(encoding='utf-8').strip()
+                if profile_text:
+                    context_parts.append(f"USER PROFILE:\n{profile_text}")
+        except Exception:
+            pass
+
         if amem_context:
             context_parts.append(amem_context)
         if kg_context:
@@ -5097,7 +5253,7 @@ Try these commands:
         if rag_context:
             context_parts.append(rag_context)
         if context_parts:
-            system_prompt_addon = "\n\n".join(context_parts) + "\n\nUse this knowledge and memories when relevant to the conversation. Remember personal details about the user."
+            system_prompt_addon = "\n\n".join(context_parts) + "\n\nUse this knowledge and memories when relevant to the conversation. Remember personal details about the user. Always address the user by their name if known."
 
         # ===== STREAMING LLM RESPONSE =====
         full_response = ""
@@ -5119,7 +5275,7 @@ Try these commands:
             except Exception:
                 pass
 
-        # AURA humanizer
+        # AURA humanizer (apply silently — don't re-print the whole response)
         if self.aura_enabled and self.aura and aura_context:
             try:
                 aura_response = self.aura.process_response(full_response, aura_context)
@@ -5127,10 +5283,7 @@ Try these commands:
                     thinking_prefix = ""
                     if aura_context.get("thinking_prefix"):
                         thinking_prefix = aura_context["thinking_prefix"] + "\n\n"
-                    humanized = thinking_prefix + aura_response.content
-                    # Yield the difference as a correction
-                    yield "\n\n[AURA] " + humanized
-                    full_response = humanized
+                    full_response = thinking_prefix + aura_response.content
             except Exception:
                 pass
 

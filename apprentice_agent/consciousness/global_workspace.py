@@ -283,6 +283,7 @@ class GlobalWorkspaceEngine:
             Codelet("inner_thoughts", self._gather_inner_thoughts, priority_weight=0.8, cooldown_seconds=1.0),
             Codelet("neurodream", self._gather_neurodream, priority_weight=1.1, cooldown_seconds=3.0),
             Codelet("active_inference", self._gather_active_inference, priority_weight=0.9, cooldown_seconds=1.5),
+            Codelet("strategy_bandit", self._gather_strategy_bandit, priority_weight=0.8, cooldown_seconds=5.0),
         ]
         for c in codelets:
             self._codelets[c.name] = c
@@ -523,6 +524,68 @@ class GlobalWorkspaceEngine:
             salience=max_polarization * 1.5,
             payload={"beliefs": belief_dict, "most_polarized": most_polarized},
         )
+
+    def _gather_strategy_bandit(self) -> Optional[WorkspaceContent]:
+        """Gather strategy performance awareness when meaningful spread exists."""
+        from apprentice_agent.consciousness.strategy_bandit import get_strategy_bandit, ProblemCategory
+
+        try:
+            bandit = get_strategy_bandit()
+            if not bandit.enabled:
+                return None
+
+            stats = bandit.get_arm_stats()
+            if not stats:
+                return None
+
+            # Find category with most meaningful spread between best/worst
+            best_spread = 0.0
+            best_category = None
+            best_info = None
+
+            for cat_name, arms in stats.items():
+                if not arms:
+                    continue
+                active_arms = [a for a in arms if a["total_pulls"] > 0]
+                if len(active_arms) < 2:
+                    continue
+
+                rewards = [a["mean_reward"] for a in active_arms]
+                spread = max(rewards) - min(rewards)
+
+                if spread > best_spread:
+                    best_spread = spread
+                    best_category = cat_name
+                    best_arm = max(active_arms, key=lambda a: a["mean_reward"])
+                    worst_arm = min(active_arms, key=lambda a: a["mean_reward"])
+                    best_info = {
+                        "category": cat_name,
+                        "best": best_arm["strategy"],
+                        "best_reward": best_arm["mean_reward"],
+                        "worst": worst_arm["strategy"],
+                        "worst_reward": worst_arm["mean_reward"],
+                        "spread": round(spread, 3),
+                    }
+
+            # Only broadcast when there's a meaningful spread (>0.1)
+            if best_spread < 0.1 or best_info is None:
+                return None
+
+            return WorkspaceContent(
+                source_module="strategy_bandit",
+                content_type="performance_insight",
+                summary=(
+                    f"Strategy insight: {best_info['best']} outperforms "
+                    f"{best_info['worst']} for {best_category} "
+                    f"(spread={best_info['spread']:.2f})"
+                ),
+                activation=min(1.0, best_spread * 2),
+                salience=min(1.0, best_spread * 1.5),
+                payload=best_info,
+            )
+        except Exception as e:
+            logger.debug(f"[GWT] Strategy bandit gather error: {e}")
+            return None
 
     # ====================================================================
     # Core Cognitive Cycle

@@ -269,6 +269,11 @@ class Config:
     # WorldSim Configuration (Tool #27) - Consequence Simulation
     WORLDSIM_ENABLED: bool = os.getenv("WORLDSIM_ENABLED", "true").lower() == "true"
 
+    # Strategy Bandit Configuration — Adaptive reasoning strategy selection
+    STRATEGY_BANDIT_ENABLED: bool = os.getenv("STRATEGY_BANDIT_ENABLED", "true").lower() == "true"
+    STRATEGY_BANDIT_EPSILON: float = float(os.getenv("STRATEGY_BANDIT_EPSILON", "0.1"))
+    STRATEGY_BANDIT_EVAL_ENABLED: bool = os.getenv("STRATEGY_BANDIT_EVAL_ENABLED", "false").lower() == "true"
+
     # API Security Configuration
     API_AUTH_ENABLED: bool = os.getenv("AURA_API_AUTH_ENABLED", "false").lower() == "true"
     API_KEY: str = os.getenv("AURA_API_KEY", "")  # Set to enable API key auth
