@@ -339,9 +339,18 @@ class GlobalWorkspaceEngine:
 
     def _gather_tom(self) -> Optional[WorkspaceContent]:
         """Gather user state when frustration high or engagement low."""
-        from apprentice_agent.proactive.theory_of_mind import get_theory_of_mind
-        tom = get_theory_of_mind()
-        es = tom.get_emotional_state()
+        from apprentice_agent.config import Config
+        if Config.MULTI_USER_ENABLED:
+            from apprentice_agent.multi_user import get_multi_user_manager
+            manager = get_multi_user_manager()
+            user_model = manager.get_active_user_model()
+            if not user_model:
+                return None
+            es = user_model.emotional_state
+        else:
+            from apprentice_agent.proactive.theory_of_mind import get_theory_of_mind
+            tom = get_theory_of_mind()
+            es = tom.get_emotional_state()
 
         frustration = getattr(es, "frustration", 0)
         engagement = getattr(es, "engagement", 0.5)

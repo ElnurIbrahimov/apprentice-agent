@@ -907,16 +907,27 @@ class OllamaBrain:
         except Exception:
             pass  # Metacognition not available
 
-        # === USER MODEL INJECTION (Phase 6C: Theory of Mind) ===
+        # === USER MODEL INJECTION (Phase 6C / ADV-04: Theory of Mind) ===
         try:
-            from apprentice_agent.proactive.theory_of_mind import get_theory_of_mind
-            tom = get_theory_of_mind()
-            tom.observe_message(prompt, role="user")
-            user_model_ctx = tom.get_context_for_prompt()
-            if user_model_ctx:
-                full_system_prompt = f"{full_system_prompt}\n\n{user_model_ctx}"
+            from apprentice_agent.config import Config
+            if Config.MULTI_USER_ENABLED:
+                from apprentice_agent.multi_user import get_multi_user_manager
+                manager = get_multi_user_manager()
+                user_model = manager.get_active_user_model()
+                if user_model:
+                    user_model.observe_message(prompt, role="user")
+                    user_model_ctx = user_model.get_context_for_prompt()
+                    if user_model_ctx:
+                        full_system_prompt = f"{full_system_prompt}\n\n{user_model_ctx}"
+            else:
+                from apprentice_agent.proactive.theory_of_mind import get_theory_of_mind
+                tom = get_theory_of_mind()
+                tom.observe_message(prompt, role="user")
+                user_model_ctx = tom.get_context_for_prompt()
+                if user_model_ctx:
+                    full_system_prompt = f"{full_system_prompt}\n\n{user_model_ctx}"
         except Exception:
-            pass  # Theory of Mind not available
+            pass  # Theory of Mind / Multi-User not available
 
         # === MOTIVATION INJECTION (Phase 6E: Intrinsic Motivation) ===
         try:
@@ -1188,16 +1199,27 @@ class OllamaBrain:
         except Exception:
             pass  # Metacognition not available
 
-        # === USER MODEL INJECTION (Phase 6C: Theory of Mind) ===
+        # === USER MODEL INJECTION (Phase 6C / ADV-04: Theory of Mind) ===
         try:
-            from apprentice_agent.proactive.theory_of_mind import get_theory_of_mind
-            tom = get_theory_of_mind()
-            tom.observe_message(prompt, role="user")
-            user_model_ctx = tom.get_context_for_prompt()
-            if user_model_ctx:
-                full_system_prompt = f"{full_system_prompt}\n\n{user_model_ctx}"
+            from apprentice_agent.config import Config
+            if Config.MULTI_USER_ENABLED:
+                from apprentice_agent.multi_user import get_multi_user_manager
+                manager = get_multi_user_manager()
+                user_model = manager.get_active_user_model()
+                if user_model:
+                    user_model.observe_message(prompt, role="user")
+                    user_model_ctx = user_model.get_context_for_prompt()
+                    if user_model_ctx:
+                        full_system_prompt = f"{full_system_prompt}\n\n{user_model_ctx}"
+            else:
+                from apprentice_agent.proactive.theory_of_mind import get_theory_of_mind
+                tom = get_theory_of_mind()
+                tom.observe_message(prompt, role="user")
+                user_model_ctx = tom.get_context_for_prompt()
+                if user_model_ctx:
+                    full_system_prompt = f"{full_system_prompt}\n\n{user_model_ctx}"
         except Exception:
-            pass  # Theory of Mind not available
+            pass  # Theory of Mind / Multi-User not available
 
         # === MOTIVATION INJECTION (Phase 6E: Intrinsic Motivation) ===
         try:

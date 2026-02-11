@@ -294,6 +294,11 @@ class Config:
     PROACTIVE_AWARENESS_ENABLED: bool = os.getenv("PROACTIVE_AWARENESS_ENABLED", "true").lower() == "true"
     PROACTIVE_AWARENESS_QUICK_AFTER_CHAT: bool = os.getenv("PROACTIVE_AWARENESS_QUICK_AFTER_CHAT", "true").lower() == "true"
 
+    # Multi-User Consciousness Configuration (ADV-04)
+    MULTI_USER_ENABLED: bool = os.getenv("AURA_MULTI_USER", "false").lower() == "true"
+    MULTI_USER_DEFAULT_ID: str = os.getenv("AURA_DEFAULT_USER_ID", "default_user")
+    MULTI_USER_SESSION_TIMEOUT: int = int(os.getenv("AURA_SESSION_TIMEOUT_MIN", "30"))
+
     # API Security Configuration
     API_AUTH_ENABLED: bool = os.getenv("AURA_API_AUTH_ENABLED", "false").lower() == "true"
     API_KEY: str = os.getenv("AURA_API_KEY", "")  # Set to enable API key auth
