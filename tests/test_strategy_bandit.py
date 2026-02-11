@@ -281,6 +281,8 @@ class TestStrategyBandit:
 
     def test_decay_arms(self, bandit):
         """Decay should move arms toward prior Beta(1,1)."""
+        import sqlite3
+
         # Give one arm a strong signal
         bandit.record_outcome(
             request_id="decay_test",
@@ -290,14 +292,23 @@ class TestStrategyBandit:
             metrics={"judge_score": 1.0},
         )
 
+        # Backdate last_updated by 1 day so decay has elapsed time to act on
+        conn = sqlite3.connect(bandit._db_path)
+        conn.execute(
+            "UPDATE strategy_arms SET last_updated = last_updated - 86400 "
+            "WHERE strategy = 'chain_of_thought' AND category = 'math'"
+        )
+        conn.commit()
+        conn.close()
+
         stats_before = bandit.get_arm_stats()
         math_before = next(
             a for a in stats_before["math"]
             if a["strategy"] == "chain_of_thought"
         )
 
-        # Apply heavy decay (very short half-life)
-        bandit.decay_arms(half_life_days=0.00001)
+        # Apply decay with a 1-day half-life (arm is 1 day old → 50% decay)
+        bandit.decay_arms(half_life_days=1.0)
 
         stats_after = bandit.get_arm_stats()
         math_after = next(
@@ -305,7 +316,7 @@ class TestStrategyBandit:
             if a["strategy"] == "chain_of_thought"
         )
 
-        # After heavy decay, alpha/beta should be closer to 1.0
+        # After decay, alpha should be closer to the prior of 1.0
         assert abs(math_after["alpha"] - 1.0) < abs(math_before["alpha"] - 1.0)
 
     def test_get_stats_summary(self, bandit):
