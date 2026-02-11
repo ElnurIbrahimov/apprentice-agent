@@ -4,6 +4,7 @@ import os
 import re
 import json
 import logging
+import threading
 import time
 import shutil
 import concurrent.futures
@@ -41,6 +42,16 @@ WARMUP_TIMEOUT = 10  # 10 seconds for warmup
 # Neuromodulator bounds for safety (multipliers on default values)
 NEURO_MIN_MULTIPLIER = 0.7   # Never reduce below 70% of default
 NEURO_MAX_MULTIPLIER = 1.4   # Never increase above 140% of default
+
+
+def _run_world_model_extraction(conversation_id, messages):
+    """Background thread target for world model extraction (ADV-02 Phase 2)."""
+    try:
+        from apprentice_agent.consciousness.world_model import get_world_model
+        wm = get_world_model()
+        wm.process_conversation(conversation_id, messages)
+    except Exception as e:
+        logger.debug(f"[BRAIN] World model extraction failed: {e}")
 
 
 def _get_neuromodulator_levels() -> dict:
@@ -1074,6 +1085,24 @@ class OllamaBrain:
         except Exception:
             pass
 
+        # === WORLD MODEL EXTRACTION (ADV-02 Phase 2) ===
+        try:
+            from apprentice_agent.consciousness.world_model import get_world_model
+            wm = get_world_model()
+            if wm.enabled:
+                conv_id = self.get_current_conversation_id()
+                recent = self.conversation_history[-6:] if use_history else [
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "content": assistant_message},
+                ]
+                threading.Thread(
+                    target=_run_world_model_extraction,
+                    args=(conv_id, list(recent)),
+                    daemon=True, name="wm-extract",
+                ).start()
+        except Exception:
+            pass
+
         return assistant_message
 
     def think_stream(
@@ -1280,6 +1309,24 @@ class OllamaBrain:
         try:
             from apprentice_agent.consciousness.self_improvement import get_self_improvement_engine
             get_self_improvement_engine().record_chat_outcome(prompt, full_response, actual_model)
+        except Exception:
+            pass
+
+        # === WORLD MODEL EXTRACTION (ADV-02 Phase 2) ===
+        try:
+            from apprentice_agent.consciousness.world_model import get_world_model
+            wm = get_world_model()
+            if wm.enabled:
+                conv_id = self.get_current_conversation_id()
+                recent = self.conversation_history[-6:] if use_history else [
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "content": full_response},
+                ]
+                threading.Thread(
+                    target=_run_world_model_extraction,
+                    args=(conv_id, list(recent)),
+                    daemon=True, name="wm-extract",
+                ).start()
         except Exception:
             pass
 

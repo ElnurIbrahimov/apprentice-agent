@@ -285,6 +285,11 @@ class Config:
     WORLD_MODEL_ENABLED: bool = os.getenv("WORLD_MODEL_ENABLED", "true").lower() == "true"
     WORLD_MODEL_DB_PATH: str = os.getenv("WORLD_MODEL_DB_PATH", "")
 
+    # World Model Extraction Configuration — ADV-02 Phase 2
+    WORLD_MODEL_EXTRACTION_ENABLED: bool = os.getenv("WORLD_MODEL_EXTRACTION_ENABLED", "true").lower() == "true"
+    WORLD_MODEL_EXTRACTION_MODEL: str = os.getenv("WORLD_MODEL_EXTRACTION_MODEL", "")
+    WORLD_MODEL_EXTRACTION_MIN_INTERVAL: float = float(os.getenv("WORLD_MODEL_EXTRACTION_MIN_INTERVAL", "5.0"))
+
     # API Security Configuration
     API_AUTH_ENABLED: bool = os.getenv("AURA_API_AUTH_ENABLED", "false").lower() == "true"
     API_KEY: str = os.getenv("AURA_API_KEY", "")  # Set to enable API key auth

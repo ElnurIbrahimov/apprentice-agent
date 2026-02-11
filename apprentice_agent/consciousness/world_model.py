@@ -1616,6 +1616,494 @@ class WorldModel:
         )
         return round(min(max(priority, 0.0), 1.0), 3)
 
+    # ----------------------------------------------------------------
+    # Extraction Pipeline — ADV-02 Phase 2
+    # ----------------------------------------------------------------
+
+    def process_conversation(
+        self,
+        conversation_id: Optional[str],
+        messages: List[Dict[str, str]],
+    ) -> Dict[str, int]:
+        """
+        Orchestrate extraction and application of world state changes.
+
+        Called from brain.py after each think()/think_stream() call.
+        Runs the StateExtractor, then applies each entity type.
+
+        Returns:
+            Counts dict: {projects_updated, goals_updated, beliefs_updated,
+                          relationships_updated, environment_updated,
+                          contradictions_detected}
+        """
+        counts = {
+            "projects_updated": 0,
+            "goals_updated": 0,
+            "beliefs_updated": 0,
+            "relationships_updated": 0,
+            "environment_updated": 0,
+            "contradictions_detected": 0,
+        }
+
+        if not self.enabled:
+            return counts
+
+        # Get extractor
+        try:
+            from apprentice_agent.consciousness.state_extractor import get_state_extractor
+            extractor = get_state_extractor()
+        except Exception as e:
+            logger.debug(f"[WorldModel] Failed to get StateExtractor: {e}")
+            return counts
+
+        if extractor is None:
+            return counts
+
+        # Check if extraction should run
+        if not extractor.should_extract(messages):
+            return counts
+
+        # Run extraction
+        state_summary = self.get_context_summary()
+        try:
+            extraction = extractor.extract(messages, state_summary)
+        except Exception as e:
+            logger.debug(f"[WorldModel] Extraction failed: {e}")
+            return counts
+
+        if not extraction or not isinstance(extraction, dict):
+            return counts
+
+        # Apply each entity type
+        for proj_data in extraction.get("projects", []):
+            try:
+                counts["projects_updated"] += self._apply_project(proj_data, conversation_id)
+            except Exception as e:
+                logger.debug(f"[WorldModel] Apply project failed: {e}")
+
+        for goal_data in extraction.get("goals", []):
+            try:
+                counts["goals_updated"] += self._apply_goal(goal_data, conversation_id)
+            except Exception as e:
+                logger.debug(f"[WorldModel] Apply goal failed: {e}")
+
+        for belief_data in extraction.get("beliefs", []):
+            try:
+                updated, contradictions = self._apply_belief(belief_data, conversation_id)
+                counts["beliefs_updated"] += updated
+                counts["contradictions_detected"] += contradictions
+            except Exception as e:
+                logger.debug(f"[WorldModel] Apply belief failed: {e}")
+
+        for person_data in extraction.get("people_mentioned", []):
+            try:
+                counts["relationships_updated"] += self._apply_relationship(person_data, conversation_id)
+            except Exception as e:
+                logger.debug(f"[WorldModel] Apply relationship failed: {e}")
+
+        for env_data in extraction.get("environment_changes", []):
+            try:
+                counts["environment_updated"] += self._apply_environment(env_data, conversation_id)
+            except Exception as e:
+                logger.debug(f"[WorldModel] Apply environment failed: {e}")
+
+        logger.info(f"[WorldModel] Extraction applied: {counts}")
+        return counts
+
+    def _apply_project(self, data: Dict, conv_id: Optional[str]) -> int:
+        """Apply a project extraction. Create or update. Returns 1 if applied."""
+        name = data.get("name", "").strip()
+        if not name:
+            return 0
+
+        action = data.get("action", "mention")
+        existing = self._find_project_by_name(name)
+
+        if existing:
+            # Update existing project
+            update_fields = {}
+            status_change = data.get("status_change")
+            if status_change:
+                update_fields["status"] = status_change
+
+            techs = data.get("technologies_mentioned", [])
+            if techs and isinstance(techs, list):
+                merged = list(set(existing.technologies + techs))
+                update_fields["technologies"] = merged
+
+            desc = data.get("progress_notes", "")
+            if desc and existing.description:
+                update_fields["description"] = f"{existing.description}; {desc}"
+            elif desc:
+                update_fields["description"] = desc
+
+            self.update_project(existing.id, conversation_id=conv_id, **update_fields)
+
+            # Handle blockers
+            for blocker_desc in data.get("new_blockers", []):
+                if blocker_desc:
+                    self.add_blocker(existing.id, blocker_desc, conversation_id=conv_id)
+
+            for resolved_desc in data.get("resolved_blockers", []):
+                if resolved_desc:
+                    self._resolve_blocker_by_description(existing.id, resolved_desc, conv_id)
+
+            return 1
+
+        elif action == "new":
+            # Create new project
+            techs = data.get("technologies_mentioned", [])
+            desc = data.get("progress_notes", "")
+            proj = self.add_project(
+                name=name,
+                description=desc,
+                technologies=techs if isinstance(techs, list) else [],
+                conversation_id=conv_id,
+            )
+
+            # Add any blockers
+            for blocker_desc in data.get("new_blockers", []):
+                if blocker_desc:
+                    self.add_blocker(proj.id, blocker_desc, conversation_id=conv_id)
+
+            return 1
+
+        return 0
+
+    def _apply_goal(self, data: Dict, conv_id: Optional[str]) -> int:
+        """Apply a goal extraction. Create or update. Returns 1 if applied."""
+        desc = data.get("description", "").strip()
+        if not desc:
+            return 0
+
+        action = data.get("action", "new")
+        horizon_str = data.get("horizon", "short_term")
+
+        # Try to find existing similar goal
+        existing = self._find_similar_goal(desc)
+
+        if existing and action in ("update", "achieved"):
+            update_fields = {}
+
+            if action == "achieved":
+                update_fields["status"] = "achieved"
+                update_fields["progress"] = 1.0
+            else:
+                delta = data.get("progress_delta", 0.0)
+                if isinstance(delta, (int, float)) and delta > 0:
+                    update_fields["progress"] = min(1.0, existing.progress + delta)
+
+            evidence_text = data.get("evidence", "")
+            if evidence_text:
+                new_evidence = list(existing.evidence) + [evidence_text]
+                update_fields["evidence"] = new_evidence
+
+            self.update_goal(existing.id, conversation_id=conv_id, **update_fields)
+            return 1
+
+        elif action == "new" and not existing:
+            try:
+                horizon = GoalHorizon(horizon_str)
+            except ValueError:
+                horizon = GoalHorizon.SHORT_TERM
+
+            evidence_text = data.get("evidence", "")
+            self.add_goal(
+                description=desc,
+                horizon=horizon,
+                conversation_id=conv_id,
+            )
+            return 1
+
+        elif existing:
+            # "mention" of existing goal — just reinforce
+            evidence_text = data.get("evidence", "")
+            if evidence_text:
+                update_fields = {"evidence": list(existing.evidence) + [evidence_text]}
+                self.update_goal(existing.id, conversation_id=conv_id, **update_fields)
+            return 1
+
+        return 0
+
+    def _apply_belief(self, data: Dict, conv_id: Optional[str]) -> Tuple[int, int]:
+        """
+        Apply a belief extraction. Create, reinforce, or supersede.
+
+        Returns (beliefs_updated, contradictions_detected).
+        """
+        statement = data.get("statement", "").strip()
+        if not statement:
+            return 0, 0
+
+        category_str = data.get("category", "user_intent")
+        try:
+            category = BeliefCategory(category_str)
+        except ValueError:
+            category = BeliefCategory.USER_INTENT
+
+        confidence = data.get("confidence", 0.7)
+        if not isinstance(confidence, (int, float)):
+            confidence = 0.7
+        confidence = min(max(float(confidence), 0.0), 1.0)
+
+        contradicts = data.get("contradicts_existing")
+        contradictions = 0
+
+        # Check for similar existing belief
+        existing = self._find_similar_belief(statement, category)
+
+        if existing and contradicts:
+            # LLM flagged a contradiction — supersede old belief
+            new_belief = self.supersede_belief(
+                old_id=existing.id,
+                new_statement=statement,
+                new_category=category,
+                new_confidence=confidence,
+                new_evidence=[f"Contradicts: {contradicts}"],
+                conversation_id=conv_id,
+            )
+            if new_belief:
+                self.add_contradiction(
+                    belief_a_id=existing.id,
+                    belief_b_id=new_belief.id,
+                    description=str(contradicts),
+                    conversation_id=conv_id,
+                )
+                contradictions = 1
+            return 1, contradictions
+
+        elif existing:
+            # Check if new statement negates the existing one
+            negation_signals = [
+                "not ", "no longer", "switched from", "instead of",
+                "stopped", "don't", "doesn't", "won't", "never",
+            ]
+            has_negation = any(sig in statement.lower() for sig in negation_signals)
+
+            if has_negation:
+                # Negation detected — create as new belief and run contradiction check
+                new_belief = self.add_belief(
+                    statement=statement,
+                    category=category,
+                    confidence=confidence,
+                    evidence=[],
+                    conversation_id=conv_id,
+                )
+                contradictions = self._check_local_contradictions(new_belief, conv_id)
+                return 1, contradictions
+            else:
+                # Reinforce existing belief
+                self.reinforce_belief(
+                    existing.id,
+                    evidence=statement,
+                    confidence_boost=0.05,
+                )
+                return 1, 0
+
+        else:
+            # New belief
+            new_belief = self.add_belief(
+                statement=statement,
+                category=category,
+                confidence=confidence,
+                evidence=[],
+                conversation_id=conv_id,
+            )
+
+            # Local contradiction check
+            contradictions = self._check_local_contradictions(new_belief, conv_id)
+            return 1, contradictions
+
+    def _apply_relationship(self, data: Dict, conv_id: Optional[str]) -> int:
+        """Apply a relationship extraction. Create or update. Returns 1 if applied."""
+        name = data.get("name", "").strip()
+        if not name:
+            return 0
+
+        # Try to find existing relationship
+        existing = self.get_relationship(name)
+
+        if existing:
+            role = data.get("role")
+            context = data.get("context")
+            sentiment = data.get("sentiment")
+            self.update_relationship(
+                existing.id,
+                role=role,
+                context_note=context,
+                sentiment=sentiment,
+                conversation_id=conv_id,
+            )
+            return 1
+        else:
+            self.add_relationship(
+                name=name,
+                role=data.get("role", ""),
+                context=data.get("context"),
+                sentiment=data.get("sentiment", "neutral"),
+                conversation_id=conv_id,
+            )
+            return 1
+
+    def _apply_environment(self, data: Dict, conv_id: Optional[str]) -> int:
+        """Apply an environment extraction. Returns 1 if applied."""
+        key = data.get("key", "").strip()
+        if not key:
+            return 0
+
+        category = data.get("category", "preference")
+        value = data.get("value", "")
+        if not value:
+            return 0
+
+        self.set_environment(
+            key=key,
+            category=category,
+            value=value,
+            conversation_id=conv_id,
+        )
+        return 1
+
+    # ----------------------------------------------------------------
+    # Extraction helpers
+    # ----------------------------------------------------------------
+
+    def _find_project_by_name(self, name: str) -> Optional[Project]:
+        """Find a project by name: case-insensitive exact, then substring match."""
+        name_lower = name.lower()
+
+        # Exact match (case-insensitive)
+        for proj in self._projects.values():
+            if proj.name.lower() == name_lower:
+                return proj
+
+        # Substring match
+        for proj in self._projects.values():
+            if name_lower in proj.name.lower() or proj.name.lower() in name_lower:
+                return proj
+
+        return None
+
+    def _find_similar_goal(self, description: str) -> Optional[Goal]:
+        """Find a similar active goal using word overlap (Jaccard > 0.4)."""
+        desc_words = set(description.lower().split())
+        if not desc_words:
+            return None
+
+        best_match = None
+        best_score = 0.0
+
+        for goal in self._goals.values():
+            if goal.status != "active":
+                continue
+            goal_words = set(goal.description.lower().split())
+            if not goal_words:
+                continue
+
+            intersection = desc_words & goal_words
+            union = desc_words | goal_words
+            jaccard = len(intersection) / len(union) if union else 0.0
+
+            if jaccard > 0.4 and jaccard > best_score:
+                best_score = jaccard
+                best_match = goal
+
+        return best_match
+
+    def _find_similar_belief(
+        self, statement: str, category: BeliefCategory
+    ) -> Optional[Belief]:
+        """Find a similar current belief using Jaccard word overlap > 0.4."""
+        stmt_words = set(statement.lower().split())
+        if not stmt_words:
+            return None
+
+        best_match = None
+        best_score = 0.0
+
+        for belief in self._beliefs.values():
+            # Prefer same-category matches
+            belief_words = set(belief.statement.lower().split())
+            if not belief_words:
+                continue
+
+            intersection = stmt_words & belief_words
+            union = stmt_words | belief_words
+            jaccard = len(intersection) / len(union) if union else 0.0
+
+            # Lower threshold for same-category
+            threshold = 0.3 if belief.category == category else 0.5
+            if jaccard > threshold and jaccard > best_score:
+                best_score = jaccard
+                best_match = belief
+
+        return best_match
+
+    def _check_local_contradictions(
+        self, new_belief: Belief, conv_id: Optional[str]
+    ) -> int:
+        """
+        Scan same-category beliefs for local contradiction signals.
+
+        Looks for negation patterns: "not", "no longer", "switched from",
+        "instead of", "stopped", "don't".
+
+        Returns count of contradictions detected.
+        """
+        negation_signals = [
+            "not ", "no longer", "switched from", "instead of",
+            "stopped", "don't", "doesn't", "won't", "never",
+        ]
+
+        new_lower = new_belief.statement.lower()
+        has_negation = any(sig in new_lower for sig in negation_signals)
+        if not has_negation:
+            return 0
+
+        contradictions = 0
+        new_words = set(new_lower.split()) - {"not", "no", "don't", "doesn't", "won't", "never", "longer"}
+
+        for belief in list(self._beliefs.values()):
+            if belief.id == new_belief.id:
+                continue
+            if belief.category != new_belief.category:
+                continue
+
+            belief_words = set(belief.statement.lower().split())
+            overlap = new_words & belief_words
+
+            # Need significant word overlap (excluding negation words) to flag
+            if len(overlap) >= 2:
+                self.add_contradiction(
+                    belief_a_id=belief.id,
+                    belief_b_id=new_belief.id,
+                    description=f"Potential negation: '{new_belief.statement}' vs '{belief.statement}'",
+                    conversation_id=conv_id,
+                )
+                contradictions += 1
+
+        return contradictions
+
+    def _resolve_blocker_by_description(
+        self, project_id: str, description: str, conv_id: Optional[str]
+    ) -> bool:
+        """Match a blocker by description substring and resolve it."""
+        desc_lower = description.lower()
+        blockers = self.get_project_blockers(project_id)
+
+        for blocker in blockers:
+            if blocker.get("status") != "ongoing":
+                continue
+            blocker_desc = (blocker.get("description") or "").lower()
+            if desc_lower in blocker_desc or blocker_desc in desc_lower:
+                return self.resolve_blocker(
+                    blocker["id"],
+                    resolution=description,
+                    conversation_id=conv_id,
+                )
+
+        return False
+
     def run_maintenance(self) -> Dict[str, int]:
         """
         Run all maintenance tasks.

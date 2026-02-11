@@ -9,6 +9,7 @@ from .strategy_bandit import StrategyBandit, get_strategy_bandit
 from .reasoning_templates import ReasoningTemplateLibrary, get_template_library
 from .prompt_evolution import PromptEvolutionEngine, get_prompt_evolution_engine
 from .world_model import WorldModel, get_world_model
+from .state_extractor import StateExtractor, get_state_extractor
 
 __all__ = [
     "MetacognitiveEngine", "get_metacognitive_engine",
@@ -20,4 +21,5 @@ __all__ = [
     "ReasoningTemplateLibrary", "get_template_library",
     "PromptEvolutionEngine", "get_prompt_evolution_engine",
     "WorldModel", "get_world_model",
+    "StateExtractor", "get_state_extractor",
 ]
