@@ -1305,6 +1305,41 @@ class WorldModel:
         finally:
             conn.close()
 
+    def get_state_change_counts(
+        self, entity_type: str, since: str, until: Optional[str] = None
+    ) -> Dict[str, int]:
+        """Count state changes per entity_id within a time window.
+
+        Args:
+            entity_type: Filter by entity type (e.g. "project").
+            since: ISO timestamp for window start.
+            until: ISO timestamp for window end (default: now).
+
+        Returns:
+            Dict mapping entity_id to change count.
+        """
+        conn = self._connect()
+        try:
+            if until:
+                rows = conn.execute(
+                    """SELECT entity_id, COUNT(*) as cnt
+                       FROM state_changes
+                       WHERE entity_type = ? AND timestamp >= ? AND timestamp < ?
+                       GROUP BY entity_id""",
+                    (entity_type, since, until),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT entity_id, COUNT(*) as cnt
+                       FROM state_changes
+                       WHERE entity_type = ? AND timestamp >= ?
+                       GROUP BY entity_id""",
+                    (entity_type, since),
+                ).fetchall()
+            return {row["entity_id"]: row["cnt"] for row in rows}
+        finally:
+            conn.close()
+
     def get_recent_changes(self, limit: int = 20) -> List[StateChange]:
         """Get the most recent state changes from DB."""
         conn = self._connect()

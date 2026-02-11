@@ -386,20 +386,210 @@ class ProactiveAwarenessEngine:
         return insights
 
     # ----------------------------------------------------------------
-    # Check methods — stubs for Phase 4
+    # Check methods — Phase 4 implementations
     # ----------------------------------------------------------------
 
     def check_patterns(self) -> List[ProactiveInsight]:
-        """Phase 4: Pattern detection across conversations."""
-        return []
+        """Detect high-confidence recurring patterns across conversations."""
+        insights = []
+        try:
+            from apprentice_agent.patterns import get_pattern_prophet
+            prophet = get_pattern_prophet()
+
+            candidates = []
+            for pattern in prophet.patterns.values():
+                if pattern.confidence < 0.5 or pattern.occurrences < 3:
+                    continue
+                # Skip stale patterns (not seen in 14+ days)
+                if pattern.last_seen:
+                    hours = self._hours_since(pattern.last_seen)
+                    if hours is not None and hours > 336:  # 14 days
+                        continue
+                candidates.append(pattern)
+
+            # Cap at 3 candidates, sorted by confidence descending
+            candidates.sort(key=lambda p: p.confidence, reverse=True)
+            for pattern in candidates[:3]:
+                urgency = min(0.8, 0.4 + pattern.confidence * 0.3)
+                insights.append(ProactiveInsight(
+                    id=f"pattern_{uuid.uuid4().hex[:8]}",
+                    insight_type=InsightType.PATTERN_ALERT,
+                    title=f"Recurring pattern: {pattern.name}",
+                    description=(
+                        f"Pattern '{pattern.name}' detected with "
+                        f"{pattern.occurrences} occurrences "
+                        f"(confidence: {pattern.confidence:.0%}). "
+                        f"{pattern.description or ''}"
+                    ),
+                    urgency=urgency,
+                    confidence=pattern.confidence,
+                    generated_at=datetime.now(timezone.utc).isoformat(),
+                    related_entity_type="pattern",
+                    related_entity_id=pattern.name,
+                    reasoning=f"occurrences={pattern.occurrences}, confidence={pattern.confidence:.2f}",
+                ))
+
+        except Exception as e:
+            logger.debug(f"[ProactiveAwareness] check_patterns error: {e}")
+
+        return insights
 
     def check_priority_shifts(self) -> List[ProactiveInsight]:
-        """Phase 4: Detect implicit priority changes."""
-        return []
+        """Detect implicit priority changes by comparing state_change activity windows."""
+        insights = []
+        try:
+            now = datetime.now(timezone.utc)
+            recent_since = (now - timedelta(days=7)).isoformat()
+            prior_since = (now - timedelta(days=14)).isoformat()
+            prior_until = recent_since
+
+            recent_counts = self._world_model.get_state_change_counts(
+                "project", since=recent_since
+            )
+            prior_counts = self._world_model.get_state_change_counts(
+                "project", since=prior_since, until=prior_until
+            )
+
+            # Collect all project IDs from both windows
+            all_ids = set(recent_counts.keys()) | set(prior_counts.keys())
+
+            for proj_id in all_ids:
+                recent = recent_counts.get(proj_id, 0)
+                prior = prior_counts.get(proj_id, 0)
+
+                shift_type = None
+                if recent >= 5 and prior <= 1:
+                    shift_type = "surging"
+                    urgency = 0.6
+                    confidence = 0.65
+                elif prior >= 5 and recent <= 1:
+                    shift_type = "dropped off"
+                    urgency = 0.7
+                    confidence = 0.6
+                else:
+                    continue
+
+                # Resolve project name
+                project = self._world_model.get_project(proj_id)
+                proj_name = project.name if project else proj_id
+
+                insights.append(ProactiveInsight(
+                    id=f"prishift_{proj_id}_{uuid.uuid4().hex[:6]}",
+                    insight_type=InsightType.PRIORITY_SHIFT,
+                    title=f"Activity {shift_type} on '{proj_name}'",
+                    description=(
+                        f"Project '{proj_name}' activity has {shift_type}: "
+                        f"{prior} changes in prior week vs {recent} in recent week."
+                    ),
+                    urgency=urgency,
+                    confidence=confidence,
+                    generated_at=datetime.now(timezone.utc).isoformat(),
+                    related_entity_type="project",
+                    related_entity_id=proj_id,
+                    reasoning=f"recent_changes={recent}, prior_changes={prior}",
+                ))
+
+        except Exception as e:
+            logger.debug(f"[ProactiveAwareness] check_priority_shifts error: {e}")
+
+        return insights
 
     def check_stress_correlations(self) -> List[ProactiveInsight]:
-        """Phase 4: Correlate stress signals with workload."""
-        return []
+        """Correlate stress signals from ALMA + ToM with workload context."""
+        insights = []
+        stress_score = 0.0
+        stress_sources = []
+
+        # Source 1: ALMA emotional engine
+        try:
+            from apprentice_agent.emotion.alma_engine import get_emotional_state
+            state = get_emotional_state()
+            pad = state.get("pad", {})
+            arousal = pad.get("arousal", 0.0)
+            pleasure = pad.get("pleasure", 0.0)
+            if arousal > 0.5 and pleasure < 0.0:
+                alma_stress = (arousal - 0.5) * abs(pleasure)
+                stress_score += alma_stress
+                stress_sources.append(
+                    f"ALMA: high arousal ({arousal:.2f}) + negative valence ({pleasure:.2f})"
+                )
+        except Exception as e:
+            logger.debug(f"[ProactiveAwareness] ALMA stress check error: {e}")
+
+        # Source 2: Theory of Mind
+        try:
+            from apprentice_agent.proactive.theory_of_mind import get_theory_of_mind
+            tom = get_theory_of_mind()
+            emo = tom.get_emotional_state()
+            if emo.frustration > 0.5:
+                tom_stress = (emo.frustration - 0.5) * 0.5
+                stress_score += tom_stress
+                stress_sources.append(
+                    f"ToM: user frustration ({emo.frustration:.2f})"
+                )
+        except Exception as e:
+            logger.debug(f"[ProactiveAwareness] ToM stress check error: {e}")
+
+        # Only generate insight if combined stress exceeds threshold
+        if stress_score < 0.3 or not stress_sources:
+            return insights
+
+        # Enrich with workload context
+        workload_parts = []
+        try:
+            from apprentice_agent.consciousness.world_model import ProjectStatus
+            active = self._world_model.get_projects_by_status(ProjectStatus.ACTIVE)
+            if active:
+                workload_parts.append(f"{len(active)} active project(s)")
+
+            # Count ongoing blockers
+            blocker_count = 0
+            for proj in active:
+                blockers = self._world_model.get_project_blockers(proj.id)
+                blocker_count += sum(1 for b in blockers if b.get("status") == "ongoing")
+            if blocker_count:
+                workload_parts.append(f"{blocker_count} ongoing blocker(s)")
+
+            # Check approaching deadlines
+            goals = self._world_model.get_active_goals()
+            approaching = 0
+            for g in goals:
+                if g.target_date:
+                    try:
+                        target = datetime.fromisoformat(g.target_date)
+                        if target.tzinfo is None:
+                            target = target.replace(tzinfo=timezone.utc)
+                        days_left = (target - datetime.now(timezone.utc)).days
+                        if 0 <= days_left <= 7:
+                            approaching += 1
+                    except (ValueError, TypeError):
+                        pass
+            if approaching:
+                workload_parts.append(f"{approaching} deadline(s) within 7 days")
+        except Exception:
+            pass
+
+        workload_context = "; ".join(workload_parts) if workload_parts else "no specific workload data"
+        urgency = min(0.9, 0.5 + stress_score)
+        confidence = min(0.8, 0.5 + len(stress_sources) * 0.15)
+
+        insights.append(ProactiveInsight(
+            id=f"stress_{uuid.uuid4().hex[:8]}",
+            insight_type=InsightType.STRESS_CORRELATION,
+            title="Stress signals detected with active workload",
+            description=(
+                f"Stress indicators from {', '.join(stress_sources)}. "
+                f"Current workload: {workload_context}."
+            ),
+            urgency=urgency,
+            confidence=confidence,
+            generated_at=datetime.now(timezone.utc).isoformat(),
+            related_entity_type="global",
+            related_entity_id="global",
+            reasoning=f"stress_score={stress_score:.2f}, sources={len(stress_sources)}",
+        ))
+
+        return insights
 
     # ----------------------------------------------------------------
     # Filtering & Storage

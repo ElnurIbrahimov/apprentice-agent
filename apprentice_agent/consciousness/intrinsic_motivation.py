@@ -156,6 +156,7 @@ class IntrinsicMotivationEngine:
             self._assess_competence()
             self._assess_social()
             self._assess_coherence()
+            self._apply_awareness_modifiers()
 
             self._last_full_assessment = now
             self._stats["assessments_run"] += 1
@@ -357,6 +358,36 @@ class IntrinsicMotivationEngine:
         drive.satisfaction = 1.0 - drive.intensity
         drive.triggers = triggers
         drive.last_assessed = time.time()
+
+    def _apply_awareness_modifiers(self) -> None:
+        """Blend proactive awareness drive signals into current drive intensities.
+
+        Applies a 15% blend: drive = drive * 0.85 + signal * 0.15.
+        Default signal is 0.5 (neutral), so this barely changes intensity
+        when nothing is flagged. Deviations nudge matching drives.
+        """
+        try:
+            from apprentice_agent.consciousness.proactive_awareness import (
+                get_proactive_awareness_engine,
+            )
+            engine = get_proactive_awareness_engine()
+            signals = engine.get_drive_signals()
+
+            drive_map = {
+                "curiosity": DriveType.CURIOSITY,
+                "coherence": DriveType.COHERENCE,
+                "social": DriveType.SOCIAL,
+                "competence": DriveType.COMPETENCE,
+            }
+
+            for signal_name, drive_type in drive_map.items():
+                signal_value = signals.get(signal_name, 0.5)
+                drive = self._drives.get(drive_type)
+                if drive is not None:
+                    drive.intensity = drive.intensity * 0.85 + signal_value * 0.15
+                    drive.intensity = min(1.0, max(0.0, drive.intensity))
+        except Exception as e:
+            logger.debug(f"[IntrinsicMotivation] awareness modifiers error: {e}")
 
     # ====================================================================
     # Action Generation

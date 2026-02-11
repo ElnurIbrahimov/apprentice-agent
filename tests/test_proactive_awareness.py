@@ -1,14 +1,16 @@
-"""Tests for ProactiveAwarenessEngine — ADV-02 Phase 3."""
+"""Tests for ProactiveAwarenessEngine — ADV-02 Phase 3 + Phase 4."""
 
 import shutil
 import tempfile
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from apprentice_agent.consciousness.world_model import (
+    ChangeType,
     GoalHorizon,
     ProjectStatus,
     WorldModel,
@@ -575,3 +577,279 @@ class TestRunQuickAnalysis:
         types = [r.insight_type for r in results]
         assert InsightType.STALENESS_ALERT in types
         assert InsightType.RELATIONSHIP_GAP not in types
+
+
+# ============================================================================
+# Phase 4 Tests — check_patterns
+# ============================================================================
+
+
+class TestCheckPatterns:
+    def test_empty_patterns(self, engine):
+        """No patterns available = no alerts."""
+        mock_prophet = MagicMock()
+        mock_prophet.patterns = {}
+        with patch(
+            "apprentice_agent.patterns.get_pattern_prophet",
+            return_value=mock_prophet,
+        ):
+            result = engine.check_patterns()
+        assert result == []
+
+    def test_high_confidence_pattern(self, engine):
+        """Pattern with confidence >= 0.5 and occurrences >= 3 should generate alert."""
+        mock_pattern = MagicMock()
+        mock_pattern.name = "morning_coding"
+        mock_pattern.confidence = 0.75
+        mock_pattern.occurrences = 5
+        mock_pattern.last_seen = _past_iso(days=2)
+        mock_pattern.description = "User codes every morning"
+
+        mock_prophet = MagicMock()
+        mock_prophet.patterns = {"morning_coding": mock_pattern}
+
+        with patch(
+            "apprentice_agent.patterns.get_pattern_prophet",
+            return_value=mock_prophet,
+        ):
+            result = engine.check_patterns()
+
+        assert len(result) == 1
+        assert result[0].insight_type == InsightType.PATTERN_ALERT
+        assert "morning_coding" in result[0].title
+        assert result[0].confidence == 0.75
+
+    def test_low_confidence_filtered(self, engine):
+        """Pattern with confidence < 0.5 should be filtered out."""
+        mock_pattern = MagicMock()
+        mock_pattern.name = "weak_signal"
+        mock_pattern.confidence = 0.3
+        mock_pattern.occurrences = 5
+        mock_pattern.last_seen = _past_iso(days=1)
+        mock_pattern.description = "Weak"
+
+        mock_prophet = MagicMock()
+        mock_prophet.patterns = {"weak_signal": mock_pattern}
+
+        with patch(
+            "apprentice_agent.patterns.get_pattern_prophet",
+            return_value=mock_prophet,
+        ):
+            result = engine.check_patterns()
+
+        assert result == []
+
+
+# ============================================================================
+# Phase 4 Tests — check_priority_shifts
+# ============================================================================
+
+
+class TestCheckPriorityShifts:
+    def test_empty_state_changes(self, engine):
+        """No state changes = no priority shifts."""
+        result = engine.check_priority_shifts()
+        assert result == []
+
+    def test_surge_detected(self, engine, wm):
+        """Project with recent surge (>=5 recent, <=1 prior) should trigger."""
+        proj = wm.add_project("Surging Project")
+
+        # Add 6 recent state changes (within last 7 days)
+        now = datetime.now(timezone.utc)
+        for i in range(6):
+            ts = (now - timedelta(days=i % 5, hours=i)).isoformat()
+            conn = wm._connect()
+            try:
+                conn.execute(
+                    """INSERT INTO state_changes
+                       (timestamp, change_type, entity_type, entity_id, reasoning)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (ts, "project_update", "project", proj.id, f"change_{i}"),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        result = engine.check_priority_shifts()
+        assert len(result) == 1
+        assert result[0].insight_type == InsightType.PRIORITY_SHIFT
+        assert "surging" in result[0].title.lower()
+        assert result[0].related_entity_id == proj.id
+
+    def test_drop_detected(self, engine, wm):
+        """Project with activity drop (>=5 prior, <=1 recent) should trigger."""
+        proj = wm.add_project("Dropping Project")
+
+        # Add 6 state changes in prior window (7-14 days ago)
+        now = datetime.now(timezone.utc)
+        for i in range(6):
+            ts = (now - timedelta(days=8 + i % 5, hours=i)).isoformat()
+            conn = wm._connect()
+            try:
+                conn.execute(
+                    """INSERT INTO state_changes
+                       (timestamp, change_type, entity_type, entity_id, reasoning)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (ts, "project_update", "project", proj.id, f"change_{i}"),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        result = engine.check_priority_shifts()
+        assert len(result) == 1
+        assert result[0].insight_type == InsightType.PRIORITY_SHIFT
+        assert "dropped off" in result[0].title.lower()
+
+
+# ============================================================================
+# Phase 4 Tests — check_stress_correlations
+# ============================================================================
+
+
+class TestCheckStressCorrelations:
+    def test_no_stress(self, engine):
+        """When both ALMA and ToM report no stress, no insight generated."""
+        mock_alma_state = {
+            "pad": {"arousal": 0.3, "pleasure": 0.2, "dominance": 0.5},
+        }
+        mock_emo = MagicMock()
+        mock_emo.frustration = 0.2
+
+        mock_tom = MagicMock()
+        mock_tom.get_emotional_state.return_value = mock_emo
+
+        with patch(
+            "apprentice_agent.emotion.alma_engine.get_emotional_state",
+            return_value=mock_alma_state,
+        ), patch(
+            "apprentice_agent.proactive.theory_of_mind.get_theory_of_mind",
+            return_value=mock_tom,
+        ):
+            result = engine.check_stress_correlations()
+
+        assert result == []
+
+    def test_stress_with_workload(self, engine, wm):
+        """Combined stress from ALMA + ToM with workload should trigger insight."""
+        # Set up workload context
+        proj = wm.add_project("Stressful Project")
+        wm.add_blocker(proj.id, "CI broken", severity="high")
+        wm.add_goal(
+            "Ship feature",
+            target_date=_future_iso(days=3),
+            related_project_ids=[proj.id],
+        )
+
+        # ALMA: high arousal + strong negative pleasure
+        # stress = (0.9 - 0.5) * abs(-0.8) = 0.4 * 0.8 = 0.32
+        mock_alma_state = {
+            "pad": {"arousal": 0.9, "pleasure": -0.8, "dominance": 0.3},
+        }
+
+        # ToM: high frustration
+        # stress = (0.8 - 0.5) * 0.5 = 0.15
+        # Combined = 0.32 + 0.15 = 0.47, above 0.3 threshold
+        mock_emo = MagicMock()
+        mock_emo.frustration = 0.8
+
+        mock_tom = MagicMock()
+        mock_tom.get_emotional_state.return_value = mock_emo
+
+        with patch(
+            "apprentice_agent.emotion.alma_engine.get_emotional_state",
+            return_value=mock_alma_state,
+        ), patch(
+            "apprentice_agent.proactive.theory_of_mind.get_theory_of_mind",
+            return_value=mock_tom,
+        ):
+            result = engine.check_stress_correlations()
+
+        assert len(result) == 1
+        assert result[0].insight_type == InsightType.STRESS_CORRELATION
+        assert result[0].related_entity_id == "global"
+        assert "ALMA" in result[0].description
+        assert "ToM" in result[0].description
+
+
+# ============================================================================
+# Phase 4 Tests — get_state_change_counts
+# ============================================================================
+
+
+class TestStateChangeCounts:
+    def test_empty(self, wm):
+        """No state changes returns empty dict."""
+        result = wm.get_state_change_counts(
+            "project", since=_past_iso(days=7)
+        )
+        assert result == {}
+
+    def test_with_data(self, wm):
+        """State changes within window are counted correctly."""
+        proj1 = wm.add_project("P1")
+        proj2 = wm.add_project("P2")
+        # add_project already logs 1 state_change per project
+
+        now = datetime.now(timezone.utc)
+        # Add 3 more for proj1, 2 more for proj2
+        for i in range(3):
+            ts = (now - timedelta(days=i + 1)).isoformat()
+            conn = wm._connect()
+            try:
+                conn.execute(
+                    """INSERT INTO state_changes
+                       (timestamp, change_type, entity_type, entity_id, reasoning)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (ts, "project_update", "project", proj1.id, f"c{i}"),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        for i in range(2):
+            ts = (now - timedelta(days=i + 1)).isoformat()
+            conn = wm._connect()
+            try:
+                conn.execute(
+                    """INSERT INTO state_changes
+                       (timestamp, change_type, entity_type, entity_id, reasoning)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (ts, "project_update", "project", proj2.id, f"c{i}"),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        result = wm.get_state_change_counts(
+            "project", since=_past_iso(days=7)
+        )
+        # 1 (from add_project) + 3 manual = 4
+        assert result[proj1.id] == 4
+        # 1 (from add_project) + 2 manual = 3
+        assert result[proj2.id] == 3
+
+
+# ============================================================================
+# Phase 4 Tests — Drive Signals + Motivation Wiring
+# ============================================================================
+
+
+class TestDriveSignals:
+    def test_neutral_signals(self, engine):
+        """Empty world model should return neutral drive signals."""
+        signals = engine.get_drive_signals()
+        assert signals["curiosity"] == 0.5
+        assert signals["coherence"] == 0.5
+        assert signals["social"] == 0.5
+        assert signals["competence"] == 0.5
+
+    def test_signals_with_contradictions(self, engine, wm):
+        """Unresolved contradictions should lower coherence signal."""
+        b1 = wm.add_belief("A is true")
+        b2 = wm.add_belief("A is false")
+        wm.add_contradiction(b1.id, b2.id, "Contradiction about A")
+
+        signals = engine.get_drive_signals()
+        assert signals["coherence"] < 0.5  # Reduced by contradiction
