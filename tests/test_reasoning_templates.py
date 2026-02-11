@@ -16,6 +16,8 @@ from apprentice_agent.consciousness.reasoning_templates import (
     ReasoningTrace,
     TemplateMatch,
     _EmbeddingHelper,
+    build_trace_from_mcts,
+    build_trace_from_reflexion,
 )
 
 
@@ -455,3 +457,297 @@ class TestFormatGuidance:
         assert "1." in guidance
         assert "2." in guidance
         assert "3." in guidance
+
+
+# ============================================================================
+# TestRichTraceBuilders
+# ============================================================================
+
+
+class TestRichTraceBuilders:
+    """Test build_trace_from_mcts and build_trace_from_reflexion."""
+
+    def test_mcts_basic_trace(self):
+        """MCTS result with reasoning_steps produces structured trace."""
+        mcts_result = {
+            "reasoning_steps": [
+                {"type": "expand", "content": "Consider sorting", "confidence": 0.9, "value": 0.85},
+                {"type": "evaluate", "content": "Merge sort is O(n log n)", "confidence": 0.95, "value": 0.92},
+            ],
+            "metadata": {"iterations": 10, "nodes_explored": 25, "time_taken": 1.5},
+            "confidence": 0.93,
+            "success": True,
+        }
+        trace_str = build_trace_from_mcts(mcts_result)
+        trace = json.loads(trace_str)
+        assert trace["strategy"] == "mcts"
+        assert len(trace["steps"]) == 2
+        assert trace["steps"][0]["type"] == "expand"
+        assert trace["metadata"]["iterations"] == 10
+        assert trace["confidence"] == 0.93
+        assert trace["success"] is True
+
+    def test_mcts_empty_steps(self):
+        """MCTS result with no reasoning_steps still produces valid trace."""
+        mcts_result = {"answer": "42", "confidence": 0.5}
+        trace_str = build_trace_from_mcts(mcts_result)
+        trace = json.loads(trace_str)
+        assert trace["strategy"] == "mcts"
+        assert trace["steps"] == []
+
+    def test_mcts_truncates_content(self):
+        """Step content longer than 500 chars is truncated."""
+        mcts_result = {
+            "reasoning_steps": [
+                {"type": "expand", "content": "x" * 1000, "confidence": 0.5, "value": 0.5},
+            ],
+        }
+        trace_str = build_trace_from_mcts(mcts_result)
+        trace = json.loads(trace_str)
+        assert len(trace["steps"][0]["content"]) == 500
+
+    def test_mcts_fallback_on_error(self):
+        """Non-dict input triggers fallback trace."""
+        trace_str = build_trace_from_mcts("not a dict")
+        trace = json.loads(trace_str)
+        # Fallback is a list with a single fallback step
+        assert isinstance(trace, list)
+        assert trace[0]["step"] == "mcts_fallback"
+
+    def test_reflexion_basic_trace(self):
+        """Reflexion result with attributes produces structured trace."""
+
+        class FakeResult:
+            attempts = 3
+            reflections_used = ["lesson1", "lesson2"]
+            new_reflection = "new insight"
+            success = True
+            final_output = "The answer is 42"
+
+        trace_str = build_trace_from_reflexion(FakeResult())
+        trace = json.loads(trace_str)
+        assert trace["strategy"] == "reflexion"
+        assert trace["attempts"] == 3
+        assert len(trace["reflections_used"]) == 2
+        assert trace["new_reflection"] == "new insight"
+        assert trace["success"] is True
+
+    def test_reflexion_string_input_fallback(self):
+        """String input (no attributes) produces graceful trace with Nones."""
+        trace_str = build_trace_from_reflexion("just a string response")
+        trace = json.loads(trace_str)
+        assert trace["strategy"] == "reflexion"
+        assert trace["attempts"] is None
+        assert trace["success"] is None
+
+
+# ============================================================================
+# TestTopKRetrieval
+# ============================================================================
+
+
+class TestTopKRetrieval:
+    """Test retrieve_templates() top-K retrieval."""
+
+    @patch.object(_EmbeddingHelper, "embed", side_effect=_similar_embed)
+    @patch.object(_EmbeddingHelper, "available", new_callable=PropertyMock, return_value=True)
+    def test_returns_multiple_matches(self, mock_avail, mock_embed, library):
+        """retrieve_templates() returns up to top_k matches."""
+        import sqlite3
+
+        vec = _similar_embed("test")
+        blob = _EmbeddingHelper.serialize_embedding(vec)
+        conn = sqlite3.connect(library._db_path)
+        for i in range(5):
+            conn.execute(
+                """INSERT INTO reasoning_templates
+                   (template_id, name, description, abstract_steps,
+                    applicable_categories, source_trace_ids, embedding,
+                    times_used, avg_reward_when_used, avg_reward_baseline,
+                    status, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    f"tmpl_topk_{i}", f"Pattern {i}", f"Description {i}",
+                    json.dumps([f"step_{i}"]), json.dumps(["code"]),
+                    json.dumps([]), blob, 0, 0.0, 0.0,
+                    "active", "2025-01-01T00:00:00",
+                ),
+            )
+        conn.commit()
+        conn.close()
+
+        results = library.retrieve_templates("test problem", top_k=3)
+        assert len(results) == 3
+        assert all(isinstance(r, TemplateMatch) for r in results)
+
+    @patch.object(_EmbeddingHelper, "embed", side_effect=_similar_embed)
+    @patch.object(_EmbeddingHelper, "available", new_callable=PropertyMock, return_value=True)
+    def test_top_k_one_delegates_correctly(self, mock_avail, mock_embed, library):
+        """retrieve_template() delegates to retrieve_templates(top_k=1)."""
+        import sqlite3
+
+        vec = _similar_embed("test")
+        blob = _EmbeddingHelper.serialize_embedding(vec)
+        conn = sqlite3.connect(library._db_path)
+        conn.execute(
+            """INSERT INTO reasoning_templates
+               (template_id, name, description, abstract_steps,
+                applicable_categories, source_trace_ids, embedding,
+                times_used, avg_reward_when_used, avg_reward_baseline,
+                status, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "tmpl_single", "Single", "Desc",
+                json.dumps(["s1"]), json.dumps(["code"]),
+                json.dumps([]), blob, 0, 0.0, 0.0,
+                "active", "2025-01-01T00:00:00",
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        result = library.retrieve_template("test problem")
+        assert result is not None
+        assert result.template.template_id == "tmpl_single"
+
+    def test_empty_library_returns_empty(self, library):
+        """Empty library returns empty list."""
+        with patch.object(_EmbeddingHelper, "embed", side_effect=_mock_embed):
+            results = library.retrieve_templates("test problem")
+        assert results == []
+
+    def test_disabled_returns_empty(self, disabled_library):
+        """Disabled library returns empty list."""
+        results = disabled_library.retrieve_templates("test problem")
+        assert results == []
+
+
+# ============================================================================
+# TestGranularity
+# ============================================================================
+
+
+class TestGranularity:
+    """Test granularity column and filtering."""
+
+    def test_granularity_default_in_dataclass(self):
+        """ReasoningTemplate defaults granularity to 'pattern'."""
+        t = ReasoningTemplate(
+            template_id="t1", name="n", description="d",
+            abstract_steps="[]", applicable_categories="[]",
+            source_trace_ids="[]", created_at="2025-01-01",
+        )
+        assert t.granularity == "pattern"
+
+    def test_granularity_column_exists_after_init(self, library):
+        """The granularity column should exist in the DB after init."""
+        import sqlite3
+
+        conn = sqlite3.connect(library._db_path)
+        cursor = conn.execute("PRAGMA table_info(reasoning_templates)")
+        columns = [row[1] for row in cursor.fetchall()]
+        conn.close()
+        assert "granularity" in columns
+
+    @patch.object(_EmbeddingHelper, "embed", side_effect=_similar_embed)
+    @patch.object(_EmbeddingHelper, "available", new_callable=PropertyMock, return_value=True)
+    def test_granularity_filter(self, mock_avail, mock_embed, library):
+        """retrieve_templates with granularity filter only returns matching rows."""
+        import sqlite3
+
+        vec = _similar_embed("test")
+        blob = _EmbeddingHelper.serialize_embedding(vec)
+        conn = sqlite3.connect(library._db_path)
+        # Insert one 'pattern' and one 'atomic' template
+        conn.execute(
+            """INSERT INTO reasoning_templates
+               (template_id, name, description, abstract_steps,
+                applicable_categories, source_trace_ids, embedding,
+                times_used, avg_reward_when_used, avg_reward_baseline,
+                status, created_at, granularity)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "tmpl_pat", "Pattern Tmpl", "A pattern",
+                json.dumps(["s1"]), json.dumps(["code"]),
+                json.dumps([]), blob, 0, 0.0, 0.0,
+                "active", "2025-01-01T00:00:00", "pattern",
+            ),
+        )
+        conn.execute(
+            """INSERT INTO reasoning_templates
+               (template_id, name, description, abstract_steps,
+                applicable_categories, source_trace_ids, embedding,
+                times_used, avg_reward_when_used, avg_reward_baseline,
+                status, created_at, granularity)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "tmpl_atom", "Atomic Tmpl", "An atomic step",
+                json.dumps(["s1"]), json.dumps(["code"]),
+                json.dumps([]), blob, 0, 0.0, 0.0,
+                "active", "2025-01-01T00:00:00", "atomic",
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        # Filter by 'atomic' — should get only the atomic one
+        results = library.retrieve_templates("test", granularity="atomic", top_k=10)
+        assert len(results) == 1
+        assert results[0].template.template_id == "tmpl_atom"
+
+        # Filter by 'pattern' — should get only the pattern one
+        results = library.retrieve_templates("test", granularity="pattern", top_k=10)
+        assert len(results) == 1
+        assert results[0].template.template_id == "tmpl_pat"
+
+        # No filter — should get both
+        results = library.retrieve_templates("test", top_k=10)
+        assert len(results) == 2
+
+
+# ============================================================================
+# TestFormatGuidanceMulti
+# ============================================================================
+
+
+class TestFormatGuidanceMulti:
+    """Test _format_guidance_multi static method."""
+
+    def test_empty_list(self):
+        """Empty list returns empty string."""
+        assert ReasoningTemplateLibrary._format_guidance_multi([]) == ""
+
+    def test_single_match(self):
+        """Single match returns guidance_text directly (no header)."""
+        match = TemplateMatch(
+            template=ReasoningTemplate(
+                template_id="t1", name="P1", description="d",
+                abstract_steps="[]", applicable_categories="[]",
+                source_trace_ids="[]", created_at="2025-01-01",
+            ),
+            similarity_score=0.85,
+            guidance_text="Follow these steps...",
+        )
+        result = ReasoningTemplateLibrary._format_guidance_multi([match])
+        assert result == "Follow these steps..."
+        assert "Template #" not in result
+
+    def test_multiple_matches(self):
+        """Multiple matches include ranking markers."""
+        matches = []
+        for i in range(3):
+            matches.append(TemplateMatch(
+                template=ReasoningTemplate(
+                    template_id=f"t{i}", name=f"P{i}", description="d",
+                    abstract_steps="[]", applicable_categories="[]",
+                    source_trace_ids="[]", created_at="2025-01-01",
+                ),
+                similarity_score=0.9 - i * 0.1,
+                guidance_text=f"Guidance {i}",
+            ))
+        result = ReasoningTemplateLibrary._format_guidance_multi(matches)
+        assert "Template #1 (similarity=0.90)" in result
+        assert "Template #2 (similarity=0.80)" in result
+        assert "Template #3 (similarity=0.70)" in result
+        assert "Guidance 0" in result
+        assert "Guidance 2" in result

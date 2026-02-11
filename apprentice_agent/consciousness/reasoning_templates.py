@@ -25,6 +25,77 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================================
+# Rich Trace Builders (module-level — strategy-aware trace construction)
+# ============================================================================
+
+def build_trace_from_mcts(mcts_result: dict) -> str:
+    """Build a structured trace string from an MCTS result dict.
+
+    Extracts reasoning_steps (type/content/confidence/value per node) and
+    metadata (iterations, nodes_explored, time_taken, reflections_count).
+    Truncates step content to 500 chars.
+
+    Returns JSON string; falls back to simple fallback on any error.
+    """
+    try:
+        steps = []
+        for step in mcts_result.get("reasoning_steps", []):
+            steps.append({
+                "type": step.get("type", "unknown"),
+                "content": str(step.get("content", ""))[:500],
+                "confidence": step.get("confidence"),
+                "value": step.get("value"),
+            })
+
+        metadata = {}
+        raw_meta = mcts_result.get("metadata", {})
+        for key in ("iterations", "nodes_explored", "time_taken", "reflections_count"):
+            if key in raw_meta:
+                metadata[key] = raw_meta[key]
+
+        trace = {
+            "strategy": "mcts",
+            "steps": steps,
+            "metadata": metadata,
+            "confidence": mcts_result.get("confidence"),
+            "success": mcts_result.get("success"),
+        }
+        return json.dumps(trace)
+    except Exception as e:
+        logger.warning(f"[TemplateLib] build_trace_from_mcts fallback: {e}")
+        return json.dumps([{"step": "mcts_fallback", "content": str(mcts_result)[:500]}])
+
+
+def build_trace_from_reflexion(reflexion_result) -> str:
+    """Build a structured trace string from a Reflexion result.
+
+    Uses getattr() for graceful degradation — result may be a string or
+    a ReflexionResult dataclass.
+
+    Returns JSON string; falls back to simple fallback on any error.
+    """
+    try:
+        attempts = getattr(reflexion_result, "attempts", None)
+        reflections_used = getattr(reflexion_result, "reflections_used", [])
+        new_reflection = getattr(reflexion_result, "new_reflection", None)
+        success = getattr(reflexion_result, "success", None)
+        final_output = str(getattr(reflexion_result, "final_output", ""))[:500]
+
+        trace = {
+            "strategy": "reflexion",
+            "attempts": attempts,
+            "reflections_used": list(reflections_used) if reflections_used else [],
+            "new_reflection": str(new_reflection)[:500] if new_reflection else None,
+            "success": success,
+            "final_output_preview": final_output,
+        }
+        return json.dumps(trace)
+    except Exception as e:
+        logger.warning(f"[TemplateLib] build_trace_from_reflexion fallback: {e}")
+        return json.dumps([{"step": "reflexion_fallback", "content": str(reflexion_result)[:500]}])
+
+
+# ============================================================================
 # Data Classes
 # ============================================================================
 
@@ -52,6 +123,7 @@ class ReasoningTemplate:
     applicable_categories: str  # JSON array
     source_trace_ids: str    # JSON array
     embedding: Optional[bytes] = None
+    granularity: str = "pattern"  # atomic | pattern | meta
     times_used: int = 0
     avg_reward_when_used: float = 0.0
     avg_reward_baseline: float = 0.0
@@ -227,6 +299,12 @@ class ReasoningTemplateLibrary:
                 ON reasoning_templates(status);
         """)
 
+        # Schema migration: add granularity column if missing
+        try:
+            conn.execute("ALTER TABLE reasoning_templates ADD COLUMN granularity TEXT DEFAULT 'pattern'")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
         conn.commit()
         conn.close()
         logger.info(f"[TemplateLib] DB initialized at {self._db_path}")
@@ -313,49 +391,55 @@ class ReasoningTemplateLibrary:
     # Template Retrieval
     # ----------------------------------------------------------------
 
-    def retrieve_template(
+    def retrieve_templates(
         self,
         problem: str,
         category: Optional[str] = None,
-    ) -> Optional[TemplateMatch]:
-        """Retrieve the best matching template for a problem.
+        granularity: Optional[str] = None,
+        top_k: int = 3,
+    ) -> List[TemplateMatch]:
+        """Retrieve the top-K matching templates for a problem.
 
         Args:
             problem: The problem/query text.
             category: Optional problem category for bonus scoring.
+            granularity: Optional filter — 'atomic', 'pattern', or 'meta'.
+            top_k: Maximum number of matches to return.
 
         Returns:
-            TemplateMatch if a good match is found, None otherwise.
+            List of TemplateMatch objects, sorted by score descending.
         """
         if not self.enabled:
-            return None
+            return []
 
         # Embed the problem
         problem_vec = self._embedder.embed(problem)
         if problem_vec is None:
-            return None
+            return []
 
         # Load active templates
         try:
             conn = sqlite3.connect(self._db_path)
-            rows = conn.execute(
-                """SELECT template_id, name, description, abstract_steps,
-                          applicable_categories, source_trace_ids, embedding,
-                          times_used, avg_reward_when_used, avg_reward_baseline,
-                          status, created_at, last_used
-                   FROM reasoning_templates
-                   WHERE status = 'active' AND embedding IS NOT NULL"""
-            ).fetchall()
+            query = """SELECT template_id, name, description, abstract_steps,
+                              applicable_categories, source_trace_ids, embedding,
+                              times_used, avg_reward_when_used, avg_reward_baseline,
+                              status, created_at, last_used
+                       FROM reasoning_templates
+                       WHERE status = 'active' AND embedding IS NOT NULL"""
+            params = []
+            if granularity is not None:
+                query += " AND granularity = ?"
+                params.append(granularity)
+            rows = conn.execute(query, params).fetchall()
             conn.close()
         except Exception as e:
             logger.error(f"[TemplateLib] Template retrieval DB error: {e}")
-            return None
+            return []
 
         if not rows:
-            return None
+            return []
 
-        best_match = None
-        best_score = -1.0
+        scored: List[tuple] = []  # (total_score, similarity, template)
 
         for row in rows:
             template = ReasoningTemplate(
@@ -387,27 +471,51 @@ class ReasoningTemplateLibrary:
                 performance_bonus = min(0.1, (template.avg_reward_when_used - template.avg_reward_baseline) * 0.5)
 
             total_score = similarity + category_bonus + performance_bonus
+            scored.append((total_score, similarity, template))
 
-            if total_score > best_score:
-                best_score = total_score
-                best_match = (template, similarity)
+        # Sort descending by total_score, filter by similarity threshold, take top_k
+        scored.sort(key=lambda x: x[0], reverse=True)
+        results = []
+        for total_score, similarity, template in scored:
+            if similarity < self.SIMILARITY_THRESHOLD:
+                continue
+            guidance_text = self._format_guidance(template)
+            results.append(TemplateMatch(
+                template=template,
+                similarity_score=similarity,
+                guidance_text=guidance_text,
+            ))
+            if len(results) >= top_k:
+                break
 
-        if best_match is None or best_match[1] < self.SIMILARITY_THRESHOLD:
-            return None
+        if results:
+            logger.info(
+                f"[TemplateLib] Retrieved {len(results)} template(s), "
+                f"best: {results[0].template.name} (similarity={results[0].similarity_score:.3f})"
+            )
 
-        template, similarity = best_match
-        guidance_text = self._format_guidance(template)
+        return results
 
-        logger.info(
-            f"[TemplateLib] Retrieved template: {template.name} "
-            f"(similarity={similarity:.3f}, score={best_score:.3f})"
-        )
+    def retrieve_template(
+        self,
+        problem: str,
+        category: Optional[str] = None,
+        granularity: Optional[str] = None,
+    ) -> Optional[TemplateMatch]:
+        """Retrieve the best matching template for a problem.
 
-        return TemplateMatch(
-            template=template,
-            similarity_score=similarity,
-            guidance_text=guidance_text,
-        )
+        Delegates to retrieve_templates(top_k=1) for backward compatibility.
+
+        Args:
+            problem: The problem/query text.
+            category: Optional problem category for bonus scoring.
+            granularity: Optional filter — 'atomic', 'pattern', or 'meta'.
+
+        Returns:
+            TemplateMatch if a good match is found, None otherwise.
+        """
+        matches = self.retrieve_templates(problem, category=category, granularity=granularity, top_k=1)
+        return matches[0] if matches else None
 
     # ----------------------------------------------------------------
     # Usage Recording
@@ -712,6 +820,26 @@ class ReasoningTemplateLibrary:
     # ----------------------------------------------------------------
     # Guidance Formatting
     # ----------------------------------------------------------------
+
+    @staticmethod
+    def _format_guidance_multi(matches: List[TemplateMatch]) -> str:
+        """Format multiple template matches into combined guidance text.
+
+        - 0 matches: returns ""
+        - 1 match: returns its guidance_text directly (no ranking header)
+        - 2+ matches: wraps each with ranking markers
+        """
+        if not matches:
+            return ""
+        if len(matches) == 1:
+            return matches[0].guidance_text
+        parts = []
+        for i, m in enumerate(matches, 1):
+            parts.append(
+                f"--- Template #{i} (similarity={m.similarity_score:.2f}) ---\n"
+                f"{m.guidance_text}"
+            )
+        return "\n\n".join(parts)
 
     @staticmethod
     def _format_guidance(template: ReasoningTemplate) -> str:

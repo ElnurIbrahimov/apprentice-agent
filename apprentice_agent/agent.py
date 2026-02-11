@@ -172,7 +172,12 @@ except ImportError:
 
 # Reasoning Template Library - Learn reusable reasoning patterns
 try:
-    from apprentice_agent.consciousness.reasoning_templates import get_template_library, TemplateMatch
+    from apprentice_agent.consciousness.reasoning_templates import (
+        get_template_library,
+        TemplateMatch,
+        build_trace_from_mcts,
+        build_trace_from_reflexion,
+    )
     TEMPLATE_LIBRARY_AVAILABLE = True
 except ImportError:
     TEMPLATE_LIBRARY_AVAILABLE = False
@@ -4895,22 +4900,30 @@ Try these commands:
         else:
             selected_strategy = ReasoningStrategy.CHAIN_OF_THOUGHT
 
-        # ===== Reasoning Template Library — Retrieve template guidance =====
-        template_match = None
+        # ===== Reasoning Template Library — Retrieve template guidance (top-K) =====
+        template_match = None       # backward compat: best match
+        template_matches = []       # all top-K matches
         if TEMPLATE_LIBRARY_AVAILABLE and getattr(Config, 'REASONING_TEMPLATES_ENABLED', False):
             try:
                 template_lib = get_template_library()
                 category_str = bandit_selection.category.value if bandit_selection else None
-                template_match = template_lib.retrieve_template(message, category=category_str)
-                if template_match is not None:
-                    # Inject template guidance into system prompt
-                    if system_prompt_addon:
-                        system_prompt_addon = system_prompt_addon + "\n\n" + template_match.guidance_text
-                    else:
-                        system_prompt_addon = template_match.guidance_text
-                    print(f"[TemplateLib] Injected template: {template_match.template.name}")
+                template_matches = template_lib.retrieve_templates(message, category=category_str, top_k=3)
+                if template_matches:
+                    template_match = template_matches[0]
+                    # Inject multi-template guidance into system prompt
+                    guidance = template_lib._format_guidance_multi(template_matches)
+                    if guidance:
+                        if system_prompt_addon:
+                            system_prompt_addon = system_prompt_addon + "\n\n" + guidance
+                        else:
+                            system_prompt_addon = guidance
+                    print(f"[TemplateLib] Injected {len(template_matches)} template(s), best: {template_match.template.name}")
             except Exception as e:
                 print(f"[TemplateLib] Retrieval error: {e}")
+
+        # Raw strategy results for rich trace capture
+        _mcts_raw_result = None
+        _reflexion_raw_result = None
 
         # Execute the selected strategy
         try:
@@ -4933,6 +4946,7 @@ Try these commands:
                 if hasattr(self, 'reflexion') and self.reflexion and self.reflexion_enabled:
                     try:
                         reflexion_result = self.reflexion.solve(message)
+                        _reflexion_raw_result = reflexion_result
                         response = reflexion_result if isinstance(reflexion_result, str) else getattr(reflexion_result, 'final_output', str(reflexion_result))
                     except Exception as e:
                         print(f"[StrategyBandit] Reflexion error, falling back to CoT: {e}")
@@ -4944,6 +4958,7 @@ Try these commands:
                 if hasattr(self, 'reasoning_tree') and self.reasoning_tree:
                     try:
                         mcts_result = self.reasoning_tree.execute("solve", problem=message)
+                        _mcts_raw_result = mcts_result
                         response = mcts_result.get("answer", "") or mcts_result.get("result", "")
                         if not response:
                             response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
@@ -5084,25 +5099,38 @@ Try these commands:
                 template_lib = get_template_library()
                 _cr = composite_reward if bandit_selection is not None else 0.5
 
-                # Collect high-reward traces
+                # Collect high-reward traces (strategy-aware)
                 if _cr > 0.8 and bandit_selection is not None:
-                    simple_trace = json.dumps([
-                        {"step": "problem_understanding", "content": message[:500]},
-                        {"step": "reasoning", "content": response[:1000]},
-                    ])
+                    strategy_name = bandit_selection.strategy.value
+                    # Build rich trace for MCTS / Reflexion; simple trace for others
+                    try:
+                        if strategy_name == "mcts" and _mcts_raw_result is not None:
+                            full_trace = build_trace_from_mcts(_mcts_raw_result)
+                        elif strategy_name == "reflexion" and _reflexion_raw_result is not None:
+                            full_trace = build_trace_from_reflexion(_reflexion_raw_result)
+                        else:
+                            full_trace = json.dumps([
+                                {"step": "problem_understanding", "content": message[:500]},
+                                {"step": "reasoning", "content": response[:1000]},
+                            ])
+                    except Exception:
+                        full_trace = json.dumps([
+                            {"step": "problem_understanding", "content": message[:500]},
+                            {"step": "reasoning", "content": response[:1000]},
+                        ])
                     template_lib.collect_trace(
                         request_id=bandit_selection.request_id,
                         problem=message,
                         category=bandit_selection.category.value,
-                        strategy=bandit_selection.strategy.value,
-                        full_trace=simple_trace,
+                        strategy=strategy_name,
+                        full_trace=full_trace,
                         reward=_cr,
                     )
 
-                # Record template usage if one was injected
-                if template_match is not None:
+                # Record template usage for all injected templates
+                for _tm in template_matches:
                     template_lib.record_template_usage(
-                        template_match.template.template_id,
+                        _tm.template.template_id,
                         _cr,
                     )
             except Exception as e:
