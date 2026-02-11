@@ -1,5 +1,6 @@
 """Main agent implementation with observe/plan/act/evaluate/remember loop."""
 
+import json
 import time
 import logging
 import concurrent.futures
@@ -168,6 +169,13 @@ try:
     STRATEGY_BANDIT_AVAILABLE = True
 except ImportError:
     STRATEGY_BANDIT_AVAILABLE = False
+
+# Reasoning Template Library - Learn reusable reasoning patterns
+try:
+    from apprentice_agent.consciousness.reasoning_templates import get_template_library, TemplateMatch
+    TEMPLATE_LIBRARY_AVAILABLE = True
+except ImportError:
+    TEMPLATE_LIBRARY_AVAILABLE = False
 
 # Knowledge Graph Brain - Structured Long-Term Memory
 try:
@@ -4887,6 +4895,23 @@ Try these commands:
         else:
             selected_strategy = ReasoningStrategy.CHAIN_OF_THOUGHT
 
+        # ===== Reasoning Template Library — Retrieve template guidance =====
+        template_match = None
+        if TEMPLATE_LIBRARY_AVAILABLE and getattr(Config, 'REASONING_TEMPLATES_ENABLED', False):
+            try:
+                template_lib = get_template_library()
+                category_str = bandit_selection.category.value if bandit_selection else None
+                template_match = template_lib.retrieve_template(message, category=category_str)
+                if template_match is not None:
+                    # Inject template guidance into system prompt
+                    if system_prompt_addon:
+                        system_prompt_addon = system_prompt_addon + "\n\n" + template_match.guidance_text
+                    else:
+                        system_prompt_addon = template_match.guidance_text
+                    print(f"[TemplateLib] Injected template: {template_match.template.name}")
+            except Exception as e:
+                print(f"[TemplateLib] Retrieval error: {e}")
+
         # Execute the selected strategy
         try:
             if selected_strategy == ReasoningStrategy.CHAIN_OF_THOUGHT:
@@ -5006,6 +5031,7 @@ Try these commands:
                 logger.debug(f"[KG BRAIN] Chat entity extraction error: {e}")
 
         # ===== Strategy Bandit — Record Outcome =====
+        composite_reward = 0.5  # Default if bandit is skipped
         if bandit_selection is not None and STRATEGY_BANDIT_AVAILABLE:
             try:
                 _strategy_latency = (time.time() - _strategy_start) * 1000  # ms
@@ -5040,7 +5066,7 @@ Try these commands:
                         print(f"[StrategyBandit] Eval setup error: {e}")
 
                 # Always record basic outcome with latency
-                bandit.record_outcome(
+                composite_reward = bandit.record_outcome(
                     request_id=bandit_selection.request_id,
                     strategy=bandit_selection.strategy,
                     category=bandit_selection.category,
@@ -5049,7 +5075,38 @@ Try these commands:
                     metrics=metrics,
                 )
             except Exception as e:
+                composite_reward = 0.5
                 print(f"[StrategyBandit] Outcome recording error: {e}")
+
+        # ===== Reasoning Template Library — Collect trace + record usage =====
+        if TEMPLATE_LIBRARY_AVAILABLE and getattr(Config, 'REASONING_TEMPLATES_ENABLED', False):
+            try:
+                template_lib = get_template_library()
+                _cr = composite_reward if bandit_selection is not None else 0.5
+
+                # Collect high-reward traces
+                if _cr > 0.8 and bandit_selection is not None:
+                    simple_trace = json.dumps([
+                        {"step": "problem_understanding", "content": message[:500]},
+                        {"step": "reasoning", "content": response[:1000]},
+                    ])
+                    template_lib.collect_trace(
+                        request_id=bandit_selection.request_id,
+                        problem=message,
+                        category=bandit_selection.category.value,
+                        strategy=bandit_selection.strategy.value,
+                        full_trace=simple_trace,
+                        reward=_cr,
+                    )
+
+                # Record template usage if one was injected
+                if template_match is not None:
+                    template_lib.record_template_usage(
+                        template_match.template.template_id,
+                        _cr,
+                    )
+            except Exception as e:
+                print(f"[TemplateLib] Trace/usage recording error: {e}")
 
         # End inner monologue session
         if hasattr(self, 'monologue') and self.monologue:

@@ -274,6 +274,9 @@ class Config:
     STRATEGY_BANDIT_EPSILON: float = float(os.getenv("STRATEGY_BANDIT_EPSILON", "0.1"))
     STRATEGY_BANDIT_EVAL_ENABLED: bool = os.getenv("STRATEGY_BANDIT_EVAL_ENABLED", "false").lower() == "true"
 
+    # Reasoning Template Library Configuration — Phase 3
+    REASONING_TEMPLATES_ENABLED: bool = os.getenv("REASONING_TEMPLATES_ENABLED", "true").lower() == "true"
+
     # API Security Configuration
     API_AUTH_ENABLED: bool = os.getenv("AURA_API_AUTH_ENABLED", "false").lower() == "true"
     API_KEY: str = os.getenv("AURA_API_KEY", "")  # Set to enable API key auth
