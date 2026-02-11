@@ -1,11 +1,62 @@
 {
-  "entries": [],
+  "entries": [
+    {
+      "id": "adv-01",
+      "title": "Meta-Cognitive Self-Improvement",
+      "path": "advanced/01-meta-cognitive-self-improvement.md",
+      "category": "advanced",
+      "date": "2026-02-10",
+      "summary": "Strategy Bandit (Thompson Sampling) for adaptive reasoning engine selection, Prompt Evolution Engine (DSPy + Constitutional AI) for self-modifying system prompts, Reasoning Pattern Store (Voyager/Mem^p templates)",
+      "tags": ["meta-cognition", "thompson-sampling", "prompt-evolution", "reasoning-templates", "self-improvement"],
+      "dependencies": ["consciousness/cognitive-theater.md", "memory-systems/mcts-reasoning.md"],
+      "lines": 583
+    },
+    {
+      "id": "adv-02",
+      "title": "Persistent World Model",
+      "path": "advanced/02-persistent-world-model.md",
+      "category": "advanced",
+      "date": "2026-02-10",
+      "summary": "WorldModel + ProactiveAwarenessEngine that synthesizes all existing memory systems into a coherent situational picture. Based on Endsley SA framework (Perception/Comprehension/Projection) and BDI architecture",
+      "tags": ["world-model", "situation-awareness", "BDI", "proactive", "active-inference"],
+      "dependencies": ["architecture/aura-core-architecture.md", "memory-systems/knowledge-graph.md", "memory-systems/amem-zettelkasten.md"],
+      "lines": 1777
+    },
+    {
+      "id": "adv-03",
+      "title": "3D Neural Visualization",
+      "path": "advanced/03-3d-neural-visualization.md",
+      "category": "advanced",
+      "date": "2026-02-10",
+      "summary": "Real-time 3D brain visualization using React Three Fiber, force-directed graphs mapping AURA subsystems, WebSocket event protocol, GLSL shaders for neural activity, GPGPU particle flow for neuromodulators",
+      "tags": ["visualization", "react-three-fiber", "3d", "webgl", "shaders", "websocket"],
+      "dependencies": ["consciousness/cognitive-theater.md", "consciousness/neurodream-consolidation.md", "consciousness/evoemo-emotional-intelligence.md"],
+      "lines": 1860
+    },
+    {
+      "id": "adv-04",
+      "title": "Multi-User Consciousness",
+      "path": "advanced/04-multi-user-consciousness.md",
+      "category": "advanced",
+      "date": "2026-02-10",
+      "summary": "Per-user Theory of Mind (UserMindModel), 4-layer IdentityCore (Constitutional/Deep/Adaptive/Expressive), privacy-preserving cross-user learning, SQLite schemas, full integration with GWT/ALMA/CognitiveTheater/NeuroDream/KG",
+      "tags": ["multi-user", "theory-of-mind", "identity", "privacy", "consciousness", "authentication"],
+      "dependencies": ["consciousness/cognitive-theater.md", "consciousness/evoemo-emotional-intelligence.md", "memory-systems/knowledge-graph.md"],
+      "lines": 2101
+    }
+  ],
+  "categories": {
+    "architecture": "Core AURA architecture and patterns",
+    "consciousness": "Consciousness, cognition, and emotional systems",
+    "memory-systems": "Memory backends and retrieval",
+    "tools": "Tool implementations and inventories",
+    "ai-models": "LLM and vision model integrations",
+    "claude-code": "Claude Code CLI reference",
+    "integrations": "Cross-system integrations",
+    "advanced": "Next-generation capabilities (post-97% audit)"
+  },
   "tags": {
-    "test": [
-      "b599103b"
-    ],
-    "verification": [
-      "b599103b"
-    ]
+    "test": ["b599103b"],
+    "verification": ["b599103b"]
   }
 }

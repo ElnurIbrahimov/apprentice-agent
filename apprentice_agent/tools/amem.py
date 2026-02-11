@@ -924,11 +924,17 @@ Guidelines:
             'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so',
             'than', 'too', 'very', 'just', 'and', 'but', 'if', 'or',
             'because', 'until', 'while', 'this', 'that', 'these', 'those',
-            'i', 'me', 'my', 'we', 'our', 'you', 'your', 'he', 'she', 'it'
+            'we', 'our', 'he', 'she', 'it'
         }
 
         words = re.findall(r'\b[a-zA-Z]{3,}\b', text.lower())
         words = [w for w in words if w not in stopwords]
+
+        # Fallback: if all words were filtered, use original meaningful words
+        if not words:
+            words = [w for w in re.findall(r'\b[a-zA-Z]{3,}\b', text.lower())
+                     if w not in {'the', 'a', 'an', 'is', 'are', 'was', 'were',
+                                  'and', 'but', 'or', 'not', 'for', 'with'}]
 
         counts = Counter(words)
         return [word for word, _ in counts.most_common(7)]
