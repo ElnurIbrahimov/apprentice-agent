@@ -14,6 +14,9 @@ logs/
 # Generated plugin packages (marketplace publish output)
 plugins/
 
+# Model checkpoints (large binary files)
+*.pt
+
 # Python
 __pycache__/
 *.py[cod]
@@ -57,3 +60,7 @@ nul
 
 # Node.js
 node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
