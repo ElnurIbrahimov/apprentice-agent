@@ -479,6 +479,10 @@ class IdlePresenceEngine:
         if idle_seconds > 90:
             self._run_kg_maintenance()
 
+        # Task 3.5: Proactive awareness full analysis (ADV-02 Phase 3)
+        if idle_seconds > 90:
+            self._run_awareness_analysis()
+
         # Task 4: Auto-trigger NeuroDream sleep when idle long enough
         if idle_seconds > self._sleep_idle_threshold:
             self._check_and_trigger_sleep(idle_seconds)
@@ -540,6 +544,18 @@ class IdlePresenceEngine:
                     self._record_activity(IdleActivity.KG_PRUNING, desc, cognitive_load=0.15)
         except Exception:
             pass
+
+    def _run_awareness_analysis(self) -> None:
+        """Run proactive awareness full analysis (ADV-02 Phase 3)."""
+        try:
+            from apprentice_agent.consciousness.proactive_awareness import get_proactive_awareness_engine
+            engine = get_proactive_awareness_engine()
+            insights = engine.run_full_analysis()
+            if insights:
+                desc = f"proactive awareness: generated {len(insights)} insight(s)"
+                self._record_activity(IdleActivity.PATTERN_MINING, desc, cognitive_load=0.2)
+        except Exception as e:
+            logger.debug(f"[IdlePresence] Awareness analysis error: {e}")
 
     # ====================================================================
     # Sleep Scheduling

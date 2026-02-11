@@ -290,6 +290,10 @@ class Config:
     WORLD_MODEL_EXTRACTION_MODEL: str = os.getenv("WORLD_MODEL_EXTRACTION_MODEL", "")
     WORLD_MODEL_EXTRACTION_MIN_INTERVAL: float = float(os.getenv("WORLD_MODEL_EXTRACTION_MIN_INTERVAL", "5.0"))
 
+    # Proactive Awareness Configuration — ADV-02 Phase 3
+    PROACTIVE_AWARENESS_ENABLED: bool = os.getenv("PROACTIVE_AWARENESS_ENABLED", "true").lower() == "true"
+    PROACTIVE_AWARENESS_QUICK_AFTER_CHAT: bool = os.getenv("PROACTIVE_AWARENESS_QUICK_AFTER_CHAT", "true").lower() == "true"
+
     # API Security Configuration
     API_AUTH_ENABLED: bool = os.getenv("AURA_API_AUTH_ENABLED", "false").lower() == "true"
     API_KEY: str = os.getenv("AURA_API_KEY", "")  # Set to enable API key auth

@@ -167,6 +167,16 @@ class InnerThoughtsEngine:
             except Exception:
                 pass
 
+        # ADV-02 Phase 3: Proactive awareness context
+        try:
+            from apprentice_agent.consciousness.proactive_awareness import get_proactive_awareness_engine
+            engine = get_proactive_awareness_engine()
+            awareness = engine.get_awareness_context()
+            if awareness:
+                parts.append(awareness)
+        except Exception:
+            pass
+
         # Recent thinking activity
         try:
             from api.routes.thinking import get_manager as get_thinking_manager

@@ -1330,6 +1330,103 @@ class WorldModel:
             conn.close()
 
     # ----------------------------------------------------------------
+    # Proactive Insights — ADV-02 Phase 3
+    # ----------------------------------------------------------------
+
+    def store_insight(self, insight) -> None:
+        """Store a ProactiveInsight into the proactive_insights table."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    """INSERT OR REPLACE INTO proactive_insights
+                       (id, insight_type, title, description, urgency,
+                        confidence, generated_at, delivered_at, dismissed_at,
+                        acted_on_at, related_entity_type, related_entity_id,
+                        reasoning)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        insight.id, insight.insight_type.value, insight.title,
+                        insight.description, insight.urgency, insight.confidence,
+                        insight.generated_at, insight.delivered_at,
+                        insight.dismissed_at, insight.acted_on_at,
+                        insight.related_entity_type, insight.related_entity_id,
+                        insight.reasoning,
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def get_pending_insights(self, max_count: int = 3) -> List[Dict]:
+        """Get undelivered, non-dismissed insights ordered by urgency."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT * FROM proactive_insights
+                   WHERE delivered_at IS NULL AND dismissed_at IS NULL
+                   ORDER BY urgency DESC
+                   LIMIT ?""",
+                (max_count,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def update_insight_feedback(self, insight_id: str, feedback: str) -> bool:
+        """Update insight based on feedback: 'engaged', 'dismissed', or 'delivered'."""
+        now = _now_iso()
+        with self._lock:
+            conn = self._connect()
+            try:
+                if feedback == "engaged":
+                    cursor = conn.execute(
+                        "UPDATE proactive_insights SET acted_on_at=? WHERE id=?",
+                        (now, insight_id),
+                    )
+                elif feedback == "dismissed":
+                    cursor = conn.execute(
+                        "UPDATE proactive_insights SET dismissed_at=? WHERE id=?",
+                        (now, insight_id),
+                    )
+                elif feedback == "delivered":
+                    cursor = conn.execute(
+                        "UPDATE proactive_insights SET delivered_at=? WHERE id=?",
+                        (now, insight_id),
+                    )
+                else:
+                    return False
+                conn.commit()
+                return cursor.rowcount > 0
+            finally:
+                conn.close()
+
+    def get_recent_insights(
+        self, insight_type: Optional[str] = None, hours: int = 24
+    ) -> List[Dict]:
+        """Get insights generated within the last N hours, optionally filtered by type."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        conn = self._connect()
+        try:
+            if insight_type:
+                rows = conn.execute(
+                    """SELECT * FROM proactive_insights
+                       WHERE generated_at > ? AND insight_type = ?
+                       ORDER BY generated_at DESC""",
+                    (cutoff, insight_type),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT * FROM proactive_insights
+                       WHERE generated_at > ?
+                       ORDER BY generated_at DESC""",
+                    (cutoff,),
+                ).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    # ----------------------------------------------------------------
     # Context Summary — for brain.py system prompt injection
     # ----------------------------------------------------------------
 
@@ -1407,6 +1504,14 @@ class WorldModel:
         unresolved = self.get_unresolved_contradictions()
         if unresolved:
             sections.append(f"Contradictions: {len(unresolved)} unresolved")
+
+        # Pending proactive insight
+        try:
+            pending = self.get_pending_insights(max_count=1)
+            if pending:
+                sections.append(f"Pending insight: {pending[0]['title']}")
+        except Exception:
+            pass
 
         if not sections:
             return ""

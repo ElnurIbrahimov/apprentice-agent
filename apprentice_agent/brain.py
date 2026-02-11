@@ -53,6 +53,16 @@ def _run_world_model_extraction(conversation_id, messages):
     except Exception as e:
         logger.debug(f"[BRAIN] World model extraction failed: {e}")
 
+    # ADV-02 Phase 3: Quick proactive awareness analysis after extraction
+    try:
+        from apprentice_agent.config import Config
+        if getattr(Config, "PROACTIVE_AWARENESS_QUICK_AFTER_CHAT", True):
+            from apprentice_agent.consciousness.proactive_awareness import get_proactive_awareness_engine
+            engine = get_proactive_awareness_engine()
+            engine.run_quick_analysis()
+    except Exception as e:
+        logger.debug(f"[BRAIN] Proactive awareness quick analysis failed: {e}")
+
 
 def _get_neuromodulator_levels() -> dict:
     """Get current neuromodulator levels from ALMA, with safe defaults.
