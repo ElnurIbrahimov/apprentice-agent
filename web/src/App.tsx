@@ -58,9 +58,6 @@ function App() {
 
   const renderTabContent = () => {
     switch (activeTab) {
-      case 'chat':
-        return <ChatContainer />;
-
       case 'monitoring':
         return (
           <div className="h-full overflow-y-auto p-4 space-y-4">
@@ -96,7 +93,7 @@ function App() {
         );
 
       default:
-        return <ChatContainer />;
+        return null;
     }
   };
 
@@ -164,9 +161,16 @@ function App() {
           <div className="w-10 lg:hidden" />
         </header>
 
-        {/* Tab content */}
-        <div className="flex-1 overflow-hidden">
-          {renderTabContent()}
+        {/* Tab content — ChatContainer is always mounted to keep WebSocket alive */}
+        <div className="flex-1 overflow-hidden relative">
+          <div style={{ display: activeTab === 'chat' ? 'flex' : 'none' }} className="h-full flex-col">
+            <ChatContainer />
+          </div>
+          {activeTab !== 'chat' && (
+            <div className="h-full overflow-hidden">
+              {renderTabContent()}
+            </div>
+          )}
         </div>
       </main>
     </div>

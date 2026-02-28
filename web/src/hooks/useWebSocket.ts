@@ -2,8 +2,9 @@ import { useEffect, useRef, useCallback } from 'react';
 import { useChatStore } from '../store/chatStore';
 import type { WebSocketMessage, FileAttachment } from '../types';
 
-// Connect WebSocket directly to backend
-const WS_URL = `ws://127.0.0.1:8000/api/chat/stream`;
+// Connect directly to backend — CORS does not apply to WebSocket in Starlette 0.52+
+// (CORSMiddleware passes websocket scope through unchanged, and auth middleware also bypasses ws)
+const WS_URL = 'ws://127.0.0.1:8000/api/chat/stream';
 
 const INITIAL_RECONNECT_DELAY = 1000;
 const MAX_RECONNECT_DELAY = 30000;
