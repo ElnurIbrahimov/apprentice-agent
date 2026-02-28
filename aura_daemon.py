@@ -99,8 +99,10 @@ class AuraDaemon:
         while self._running:
             now = time.time()
 
-            # 5s: screen monitoring
-            self._tick_screen()
+            # 5s: screen monitoring (non-blocking)
+            t = threading.Thread(target=self._tick_screen, daemon=True)
+            t.start()
+            # Don't join — fire-and-forget, keeps loop non-blocking
 
             # 30s: hooks + system health
             if now - self._last_hooks_tick >= self.TICK_HOOKS:
@@ -220,11 +222,24 @@ class AuraDaemon:
     def is_running() -> bool:
         if not PID_FILE.exists():
             return False
-        pid = int(PID_FILE.read_text().strip())
         try:
-            os.kill(pid, 0)
-            return True
-        except OSError:
+            pid = int(PID_FILE.read_text().strip())
+        except (ValueError, OSError):
+            return False
+        try:
+            import psutil
+            return psutil.pid_exists(pid)
+        except ImportError:
+            pass
+        # Fallback: tasklist check on Windows
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                capture_output=True, text=True, timeout=3
+            )
+            return str(pid) in result.stdout
+        except Exception:
             return False
 
 
@@ -277,6 +292,7 @@ class ProactiveEngine:
     def __init__(self, event_bus: EventBus):
         self._event_bus = event_bus
         self._last_proactive = 0.0
+        self._cooldown_lock = threading.Lock()
         event_bus.subscribe("screen:error_detected", self._on_event)
         event_bus.subscribe("daemon:agent_ready", self._on_agent_ready)
 
@@ -290,9 +306,10 @@ class ProactiveEngine:
 
     def _maybe_surface(self, event_type: str, data: dict, score: float):
         now = time.time()
-        if now - self._last_proactive < self.COOLDOWN:
-            return
-        self._last_proactive = now
+        with self._cooldown_lock:
+            if now - self._last_proactive < self.COOLDOWN:
+                return
+            self._last_proactive = now
         self._event_bus.emit("proactive:suggestion", {
             "trigger": event_type,
             "score": score,
@@ -349,7 +366,15 @@ class IPCServer:
 
     def _handle_client(self, conn):
         try:
-            data = conn.recv(4096).decode("utf-8").strip()
+            chunks = []
+            while True:
+                chunk = conn.recv(4096)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                if b"\n" in chunk or len(b"".join(chunks)) > 65536:
+                    break
+            data = b"".join(chunks).decode("utf-8").strip()
             if data:
                 msg = json.loads(data)
                 self._event_bus.emit(f"ipc:{msg.get('type', 'message')}", msg)

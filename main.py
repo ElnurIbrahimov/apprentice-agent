@@ -125,7 +125,7 @@ def run_chat_mode(agent, speak: bool = False):
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.settimeout(0.1)
                 s.connect(("127.0.0.1", 19733))
-                s.send(json.dumps({"type": "activity"}).encode())
+                s.send((json.dumps({"type": "activity"}) + "\n").encode())
         except Exception:
             pass  # Daemon not running — fine
 

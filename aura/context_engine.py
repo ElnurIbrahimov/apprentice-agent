@@ -8,6 +8,7 @@ Single entry point: context_engine.gather(message) -> ContextBundle
 import re
 import time
 import logging
+import threading
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional, List
@@ -95,6 +96,7 @@ class AlwaysOnContextEngine:
         self._executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="ace")
         self._screen_cache = {"content": "", "ts": 0.0}
         self._screen_cache_ttl = 5.0
+        self._screen_cache_lock = threading.Lock()
 
     def gather(self, message: str) -> ContextBundle:
         """Main entry point. Gather all context in parallel, return bundle."""
@@ -120,9 +122,11 @@ class AlwaysOnContextEngine:
         for i, url in enumerate(urls[:2]):
             futures[f"url_{i}"] = self._executor.submit(self._fetch_url, url)
 
+        deadline = time.time() + GATHER_TIMEOUT
         for key, future in futures.items():
+            remaining = max(0.0, deadline - time.time())
             try:
-                block = future.result(timeout=GATHER_TIMEOUT)
+                block = future.result(timeout=remaining)
                 if block and block.content:
                     bundle.blocks.append(block)
             except (TimeoutError, Exception) as e:
@@ -148,20 +152,23 @@ class AlwaysOnContextEngine:
 
     def _get_screen_context(self) -> Optional[ContextBlock]:
         now = time.time()
-        if now - self._screen_cache["ts"] < self._screen_cache_ttl:
-            cached = self._screen_cache["content"]
-            return ContextBlock("Screen", cached, priority=85) if cached else None
+        with self._screen_cache_lock:
+            if now - self._screen_cache["ts"] < self._screen_cache_ttl:
+                cached = self._screen_cache["content"]
+                return ContextBlock("Screen", cached, priority=85) if cached else None
         try:
             tools = getattr(self.agent, 'tools', {})
             if "screenpipe" in tools:
                 result = tools["screenpipe"].get_current_context()
                 if result and result.get("success"):
                     content = (result.get("text") or result.get("content", ""))[:800]
-                    self._screen_cache.update({"content": content, "ts": now})
+                    with self._screen_cache_lock:
+                        self._screen_cache.update({"content": content, "ts": now})
                     return ContextBlock("Screen", content, priority=85)
         except Exception as e:
             logger.debug(f"[ACE] Screen failed: {e}")
-        self._screen_cache.update({"content": "", "ts": now})
+        with self._screen_cache_lock:
+            self._screen_cache.update({"content": "", "ts": now})
         return None
 
     def _get_user_profile(self) -> Optional[ContextBlock]:
