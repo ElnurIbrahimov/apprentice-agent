@@ -35,7 +35,7 @@ class MoodResponse(BaseModel):
 async def get_mood():
     """Get current mood state from EvoEmo."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, _get_mood_sync)
         return result
     except Exception as e:
@@ -64,7 +64,7 @@ def _get_mood_sync() -> dict:
 async def get_mood_history():
     """Get mood history and patterns."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, _get_mood_history_sync)
         return result
     except Exception as e:
@@ -105,7 +105,7 @@ class AuraStatusResponse(BaseModel):
 async def get_aura_status():
     """Get AURA ALIVE status."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, _get_aura_sync)
         return result
     except Exception as e:
@@ -115,23 +115,35 @@ async def get_aura_status():
 
 def _get_aura_sync() -> dict:
     agent = _get_agent_service().agent
-    if hasattr(agent, 'aura') and agent.aura:
-        aura = agent.aura
-        try:
-            status = aura.get_status()
-            return {
-                "enabled": True,
-                "mood": status['mood']['mood'],
-                "energy": status['mood']['energy'],
-                "warmth": status['mood']['warmth'],
-                "engagement": status['mood']['engagement'],
-                "soul_name": aura.soul.name if hasattr(aura, 'soul') else "AURA",
-                "patterns_learned": status['patterns']['total_patterns'],
-                "turns": status['turns']
-            }
-        except:
-            return {"enabled": True, "mood": "neutral", "energy": 0.5, "soul_name": "AURA"}
-    return {"enabled": False}
+    if not getattr(agent, 'aura_enabled', False):
+        return {"enabled": False}
+    try:
+        mood = "neutral"
+        energy = 0.5
+        warmth = 0.5
+        engagement = 0.5
+        if "evoemo" in agent.tools:
+            evoemo = agent.tools["evoemo"]
+            state = evoemo.get_state() if hasattr(evoemo, 'get_state') else {}
+            mood = state.get("emotion", "neutral")
+            # Map valence/arousal to warmth/energy
+            energy = min(1.0, max(0.0, (state.get("arousal", 0.0) + 1.0) / 2.0))
+            warmth = min(1.0, max(0.0, (state.get("valence", 0.0) + 1.0) / 2.0))
+            session = evoemo.get_session_summary() if hasattr(evoemo, 'get_session_summary') else {}
+            engagement = min(1.0, session.get("readings", 0) / 20.0)
+        return {
+            "enabled": True,
+            "mood": mood,
+            "energy": energy,
+            "warmth": warmth,
+            "engagement": engagement,
+            "soul_name": "AURA",
+            "patterns_learned": 0,
+            "turns": 0,
+        }
+    except Exception:
+        return {"enabled": True, "mood": "neutral", "energy": 0.5, "warmth": 0.5,
+                "engagement": 0.5, "soul_name": "AURA", "patterns_learned": 0, "turns": 0}
 
 
 class RememberRequest(BaseModel):
@@ -142,7 +154,7 @@ class RememberRequest(BaseModel):
 async def aura_remember(request: RememberRequest):
     """Store a fact in AURA memory."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None, lambda: _aura_remember_sync(request.fact)
         )
@@ -181,7 +193,7 @@ class ThoughtsResponse(BaseModel):
 async def get_thoughts():
     """Get recent thoughts from inner monologue."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, _get_thoughts_sync)
         return result
     except Exception as e:
@@ -217,7 +229,7 @@ def _get_thoughts_sync() -> dict:
 async def get_reasoning_chain():
     """Get the reasoning chain for 'why did you do that?' queries."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, _get_reasoning_sync)
         return {"reasoning": result}
     except Exception as e:
@@ -257,7 +269,7 @@ class KnowledgeGraphResponse(BaseModel):
 async def get_knowledge_graph(center: Optional[str] = None, depth: int = 2):
     """Get knowledge graph nodes and edges."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None, lambda: _get_kg_sync(center, depth)
         )
@@ -331,7 +343,7 @@ class GuardianResponse(BaseModel):
 async def get_guardian_status():
     """Get Metacognitive Guardian status."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, _get_guardian_sync)
         return result
     except Exception as e:
@@ -386,7 +398,7 @@ class NeuroDreamResponse(BaseModel):
 async def get_neurodream_status():
     """Get NeuroDream sleep/dream status."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, _get_neurodream_sync)
         return result
     except Exception as e:
@@ -479,7 +491,7 @@ def _trigger_wake_sync() -> dict:
 async def trigger_wake():
     """Wake up from sleep."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, _trigger_wake_sync)
         return result
     except Exception as e:
@@ -517,7 +529,7 @@ def _generate_learned_context_sync() -> dict:
 async def generate_learned_context():
     """Manually trigger Letta-style learned context generation (Phase 4D)."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, _generate_learned_context_sync)
         return result
     except Exception as e:
@@ -539,7 +551,7 @@ class FluxMindResponse(BaseModel):
 async def get_fluxmind_status():
     """Get FluxMind calibrated reasoning status."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, _get_fluxmind_sync)
         return result
     except Exception as e:
@@ -576,7 +588,7 @@ def _get_fluxmind_sync() -> dict:
 async def get_voice_status():
     """Get voice/TTS status from VoicePresenceService."""
     try:
-        from apprentice_agent.services.voice_presence import get_voice_presence
+        from aura.services.voice_presence import get_voice_presence
         vps = get_voice_presence()
         return vps.get_status()
     except Exception as e:
@@ -592,12 +604,12 @@ class SynthesizeRequest(BaseModel):
 @router.post("/voice/synthesize")
 async def synthesize_speech(req: SynthesizeRequest):
     """Synthesize speech and return WAV bytes."""
-    from apprentice_agent.services.voice_presence import get_voice_presence
+    from aura.services.voice_presence import get_voice_presence
     vps = get_voice_presence()
     if not vps._enabled:
         raise HTTPException(status_code=503, detail="Voice not enabled")
 
-    wav_bytes = await asyncio.get_event_loop().run_in_executor(
+    wav_bytes = await asyncio.get_running_loop().run_in_executor(
         None, vps.synthesize_wav, req.text, req.emotion
     )
     return Response(content=wav_bytes, media_type="audio/wav")
@@ -610,7 +622,7 @@ class VoiceToggleRequest(BaseModel):
 @router.post("/voice/toggle")
 async def toggle_voice(req: VoiceToggleRequest):
     """Enable or disable voice output."""
-    from apprentice_agent.services.voice_presence import get_voice_presence
+    from aura.services.voice_presence import get_voice_presence
     vps = get_voice_presence()
     vps.set_enabled(req.enabled)
     return {"enabled": vps._enabled}
@@ -644,7 +656,7 @@ async def get_available_tools():
 async def get_metacognition_stats():
     """Get metacognition statistics."""
     try:
-        from apprentice_agent.metacognition import MetacognitionLogger
+        from aura.metacognition import MetacognitionLogger
         stats = MetacognitionLogger.get_stats()
         return stats
     except Exception as e:
@@ -708,7 +720,7 @@ async def get_rag_files():
 async def index_documents(request: RAGIndexRequest):
     """Index a file or directory."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None, lambda: _index_documents_sync(request.path, request.recursive)
         )
@@ -736,7 +748,7 @@ def _index_documents_sync(path: str, recursive: bool) -> dict:
 async def search_documents(request: RAGSearchRequest):
     """Search indexed documents."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None, lambda: _search_documents_sync(request.query, request.top_k)
         )
@@ -824,7 +836,7 @@ class AMEMRememberRequest(BaseModel):
 async def get_amem_stats():
     """Get A-MEM statistics."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, _get_amem_stats_sync)
         return result
     except Exception as e:
@@ -849,7 +861,7 @@ def _get_amem_stats_sync() -> dict:
 async def get_amem_notes(limit: int = 20, category: Optional[str] = None):
     """Get recent A-MEM notes."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None, lambda: _get_amem_notes_sync(limit, category)
         )
@@ -911,7 +923,7 @@ def _get_amem_notes_sync(limit: int, category: Optional[str]) -> dict:
 async def get_amem_note(note_id: str):
     """Get a specific A-MEM note with linked notes."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None, lambda: _get_amem_note_sync(note_id)
         )
@@ -972,7 +984,7 @@ def _get_amem_note_sync(note_id: str) -> dict:
 async def search_amem(request: AMEMSearchRequest):
     """Search A-MEM notes."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None, lambda: _search_amem_sync(request.query, request.k, request.follow_links)
         )
@@ -1021,7 +1033,7 @@ def _search_amem_sync(query: str, k: int, follow_links: bool) -> dict:
 async def amem_remember(request: AMEMRememberRequest):
     """Store a new memory in A-MEM."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None, lambda: _amem_remember_sync(
                 request.content, request.tags, request.category, request.importance
@@ -1101,7 +1113,7 @@ async def get_amem_boxes():
 async def consolidate_amem():
     """Consolidate A-MEM (merge duplicates, prune weak links)."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, _consolidate_amem_sync)
         return result
     except Exception as e:
@@ -1145,7 +1157,7 @@ class ProtoAGIResponse(BaseModel):
 async def get_proto_agi_status():
     """Get Proto-AGI Truth Spine status."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, _get_proto_agi_sync)
         return result
     except Exception as e:
@@ -1222,7 +1234,7 @@ async def stop_proto_agi_loop():
 async def get_proto_agi_traces(limit: int = 10):
     """Get recent verification traces."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None, lambda: _get_traces_sync(limit)
         )
@@ -1274,7 +1286,7 @@ async def get_hybrid_memory_stats():
 async def search_hybrid_memory(request: AMEMSearchRequest):
     """Search across both A-MEM and Knowledge Graph."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None, lambda: _search_hybrid_sync(request.query, request.k)
         )
@@ -1334,7 +1346,7 @@ async def get_memory_context(query: str, max_tokens: int = 500):
 async def get_metacognition_status():
     """Get metacognitive engine status: capabilities, goals, improvements."""
     try:
-        from apprentice_agent.consciousness.metacognition import get_metacognitive_engine
+        from aura.consciousness.metacognition import get_metacognitive_engine
         mc = get_metacognitive_engine()
         return mc.get_status()
     except Exception as e:
@@ -1345,7 +1357,7 @@ async def get_metacognition_status():
 async def get_capabilities():
     """Get AURA's self-assessed capability profile."""
     try:
-        from apprentice_agent.consciousness.metacognition import get_metacognitive_engine
+        from aura.consciousness.metacognition import get_metacognitive_engine
         mc = get_metacognitive_engine()
         caps = mc.assess_capabilities()
         return {
@@ -1363,7 +1375,7 @@ async def get_capabilities():
 async def get_evaluation():
     """Get metacognitive evaluation report."""
     try:
-        from apprentice_agent.consciousness.metacognition import get_metacognitive_engine
+        from aura.consciousness.metacognition import get_metacognitive_engine
         mc = get_metacognitive_engine()
         return mc.evaluate_progress()
     except Exception as e:
@@ -1374,9 +1386,9 @@ async def get_evaluation():
 async def run_metacognitive_cycle():
     """Trigger a full metacognitive cycle: assess -> plan -> improve -> evaluate."""
     try:
-        from apprentice_agent.consciousness.metacognition import get_metacognitive_engine
+        from aura.consciousness.metacognition import get_metacognitive_engine
         mc = get_metacognitive_engine()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, mc.run_metacognitive_cycle)
         return result
     except Exception as e:
@@ -1387,7 +1399,7 @@ async def run_metacognitive_cycle():
 async def get_self_model():
     """Get AURA's self-model and system prompt injection preview."""
     try:
-        from apprentice_agent.consciousness.metacognition import get_metacognitive_engine
+        from aura.consciousness.metacognition import get_metacognitive_engine
         mc = get_metacognitive_engine()
         model = mc.get_self_model()
         return {
@@ -1415,7 +1427,7 @@ async def get_self_model():
 async def get_tom_status():
     """Get Theory of Mind engine status and summary."""
     try:
-        from apprentice_agent.proactive.theory_of_mind import get_theory_of_mind
+        from aura.proactive.theory_of_mind import get_theory_of_mind
         tom = get_theory_of_mind()
         status = tom.get_status()
         return {"active": True, **status}
@@ -1427,7 +1439,7 @@ async def get_tom_status():
 async def get_user_model():
     """Get the full user mental model."""
     try:
-        from apprentice_agent.proactive.theory_of_mind import get_theory_of_mind
+        from aura.proactive.theory_of_mind import get_theory_of_mind
         tom = get_theory_of_mind()
         return {
             "full_model": tom.get_full_model(),
@@ -1442,7 +1454,7 @@ async def get_user_model():
 async def get_topic_knowledge():
     """Get tracked topic knowledge levels."""
     try:
-        from apprentice_agent.proactive.theory_of_mind import get_theory_of_mind
+        from aura.proactive.theory_of_mind import get_theory_of_mind
         tom = get_theory_of_mind()
         return {
             "topics": tom.get_knowledge_summary(top_n=20),
@@ -1455,7 +1467,7 @@ async def get_topic_knowledge():
 async def observe_message(request: dict):
     """Manually feed a message for Theory of Mind to observe."""
     try:
-        from apprentice_agent.proactive.theory_of_mind import get_theory_of_mind
+        from aura.proactive.theory_of_mind import get_theory_of_mind
         tom = get_theory_of_mind()
         message = request.get("message", "")
         role = request.get("role", "user")
@@ -1479,7 +1491,7 @@ async def observe_message(request: dict):
 async def get_idle_presence_status():
     """Get genuine idle presence engine status."""
     try:
-        from apprentice_agent.consciousness.idle_presence import get_idle_presence_engine
+        from aura.consciousness.idle_presence import get_idle_presence_engine
         ipe = get_idle_presence_engine()
         return ipe.get_status()
     except Exception as e:
@@ -1490,7 +1502,7 @@ async def get_idle_presence_status():
 async def get_idle_presence_state():
     """Get full idle presence state with cognitive load and activities."""
     try:
-        from apprentice_agent.consciousness.idle_presence import get_idle_presence_engine
+        from aura.consciousness.idle_presence import get_idle_presence_engine
         ipe = get_idle_presence_engine()
         return ipe.get_state()
     except Exception as e:
@@ -1501,7 +1513,7 @@ async def get_idle_presence_state():
 async def get_cognitive_load():
     """Get current cognitive load breakdown."""
     try:
-        from apprentice_agent.consciousness.idle_presence import get_idle_presence_engine
+        from aura.consciousness.idle_presence import get_idle_presence_engine
         ipe = get_idle_presence_engine()
         load = ipe.compute_cognitive_load()
         return {
@@ -1517,7 +1529,7 @@ async def get_cognitive_load():
 async def get_idle_activities():
     """Get recent background activities."""
     try:
-        from apprentice_agent.consciousness.idle_presence import get_idle_presence_engine
+        from aura.consciousness.idle_presence import get_idle_presence_engine
         ipe = get_idle_presence_engine()
         return {"activities": ipe.get_recent_activities(limit=20)}
     except Exception as e:
@@ -1532,7 +1544,7 @@ async def get_idle_activities():
 async def get_motivation_status():
     """Get intrinsic motivation engine status."""
     try:
-        from apprentice_agent.consciousness.intrinsic_motivation import get_intrinsic_motivation
+        from aura.consciousness.intrinsic_motivation import get_intrinsic_motivation
         im = get_intrinsic_motivation()
         return im.get_status()
     except Exception as e:
@@ -1543,7 +1555,7 @@ async def get_motivation_status():
 async def get_drives():
     """Get current drive urgency levels."""
     try:
-        from apprentice_agent.consciousness.intrinsic_motivation import get_intrinsic_motivation
+        from aura.consciousness.intrinsic_motivation import get_intrinsic_motivation
         im = get_intrinsic_motivation()
         return {"drives": im.get_drives_summary()}
     except Exception as e:
@@ -1554,9 +1566,9 @@ async def get_drives():
 async def run_motivation_cycle():
     """Run a full intrinsic motivation cycle."""
     try:
-        from apprentice_agent.consciousness.intrinsic_motivation import get_intrinsic_motivation
+        from aura.consciousness.intrinsic_motivation import get_intrinsic_motivation
         im = get_intrinsic_motivation()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, im.run_motivation_cycle)
         return result
     except Exception as e:
@@ -1567,7 +1579,7 @@ async def run_motivation_cycle():
 async def get_motivation_actions():
     """Get drive-motivated pending actions."""
     try:
-        from apprentice_agent.consciousness.intrinsic_motivation import get_intrinsic_motivation
+        from aura.consciousness.intrinsic_motivation import get_intrinsic_motivation
         im = get_intrinsic_motivation()
         actions = im.generate_actions()
         return {
@@ -1585,7 +1597,7 @@ async def get_motivation_actions():
 async def get_motivation_prompt():
     """Get the motivation system prompt injection preview."""
     try:
-        from apprentice_agent.consciousness.intrinsic_motivation import get_intrinsic_motivation
+        from aura.consciousness.intrinsic_motivation import get_intrinsic_motivation
         im = get_intrinsic_motivation()
         return {"prompt": im.get_context_for_prompt()}
     except Exception as e:
