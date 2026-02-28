@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 """Main entry point for the Apprentice Agent."""
 
+import os
+os.environ["TQDM_DISABLE"] = "1"
+
 import argparse
 import sys
-
-from apprentice_agent import ApprenticeAgent
-from apprentice_agent.config import Config
-from apprentice_agent.dream import run_dream_mode
-from apprentice_agent.tools.voice import VoiceConversation
-
 
 def main():
     parser = argparse.ArgumentParser(
@@ -65,6 +62,11 @@ def main():
 
     args = parser.parse_args()
 
+    # Heavy imports deferred until after argparse (so --help is instant)
+    from aura import ApprenticeAgent
+    from aura.config import Config
+    from aura.dream import run_dream_mode
+
     # Handle dream mode first (doesn't need agent)
     if args.dream:
         result = run_dream_mode(args.dream_date)
@@ -84,38 +86,32 @@ def main():
         run_chat_mode(agent, speak=args.speak)
 
 
-def run_voice_mode(agent: ApprenticeAgent, enable_barge_in: bool = True):
+def run_voice_mode(agent, enable_barge_in: bool = True):
     """Run the agent in voice conversation mode."""
+    from aura.tools.voice import VoiceConversation  # lazy: avoids ~7s sesame_tts load
     conversation = VoiceConversation(agent, whisper_model="base", enable_barge_in=enable_barge_in)
     conversation.start()
 
 
-def run_chat_mode(agent: ApprenticeAgent, speak: bool = False):
-    """Run the agent in interactive chat mode.
+def run_chat_mode(agent, speak: bool = False):
+    """Interactive CLI — every input goes through the full agent loop with all tools."""
+    import io
+    import sys
+    import threading
+    from aura.cli.display import console, show_banner, show_thinking, show_response, show_error, show_info
+    from aura.cli.input import create_session, get_input
 
-    Args:
-        agent: The agent instance
-        speak: If True, speak responses using TTS
-    """
-    print("\n  \033[1;36m█████╗ ██╗   ██╗██████╗  █████╗\033[0m")
-    print("  \033[1;36m██╔══██╗██║   ██║██╔══██╗██╔══██╗\033[0m")
-    print("  \033[1;36m███████║██║   ██║██████╔╝███████║\033[0m")
-    print("  \033[1;36m██╔══██║██║   ██║██╔══██╗██╔══██║\033[0m")
-    print("  \033[1;36m██║  ██║╚██████╔╝██║  ██║██║  ██║\033[0m")
-    print("  \033[1;36m╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝\033[0m")
-    print("  \033[90mAutonomous Universal Reasoning Agent\033[0m\n")
+    show_banner()
     if speak:
-        print("  \033[33mVoice output ENABLED\033[0m")
-    print("  \033[90mCommands: /model | /compact | /plan | /browse | /agent | /hook\033[0m")
-    print("  \033[90m          /goal <text> | /recall <query> | /clear | /quit\033[0m")
-    print("  \033[90mModes:    aura --voice | aura --dream | aura \"<goal>\"\033[0m")
-    print("  " + "\033[90m" + "-" * 54 + "\033[0m")
+        show_info("Voice output enabled")
+
+    session = create_session()
 
     while True:
-        try:
-            user_input = input("\nYou: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print("\nGoodbye!")
+        user_input = get_input(session)
+
+        if user_input is None:
+            console.print("\n[dim]Goodbye.[/dim]\n")
             break
 
         if not user_input:
@@ -123,14 +119,45 @@ def run_chat_mode(agent: ApprenticeAgent, speak: bool = False):
 
         if user_input.startswith("/"):
             handle_command(agent, user_input, speak=speak)
-        else:
-            print("\nAURA: ", end="", flush=True)
-            for chunk in agent.chat_stream(user_input, speak=speak):
-                print(chunk, end="", flush=True)
-            print()
+            continue
+
+        # Run agent in thread, capture its verbose stdout, show spinner while working
+        result_holder = {}
+        captured_output = io.StringIO()
+
+        def _run():
+            old_stdout = sys.stdout
+            sys.stdout = captured_output
+            try:
+                result_holder["result"] = agent.run(user_input)
+            except Exception as exc:
+                result_holder["error"] = str(exc)
+            finally:
+                sys.stdout = old_stdout
+
+        thread = threading.Thread(target=_run, daemon=True)
+        thread.start()
+
+        with show_thinking():
+            thread.join()
+
+        if "error" in result_holder:
+            show_error(result_holder["error"])
+            continue
+
+        result = result_holder["result"]
+        response_text = result.get("response", "")
+
+        show_response(response_text)
+
+        if speak and response_text:
+            try:
+                agent._speak(response_text)
+            except Exception:
+                pass
 
 
-def handle_command(agent: ApprenticeAgent, command: str, speak: bool = False):
+def handle_command(agent, command: str, speak: bool = False):
     """Handle special commands in chat mode."""
     parts = command.split(maxsplit=1)
     cmd = parts[0].lower()
@@ -227,12 +254,12 @@ def handle_command(agent: ApprenticeAgent, command: str, speak: bool = False):
         print(f"Unknown command: {cmd}")
 
 
-def _handle_browse_command(agent: ApprenticeAgent, arg: str):
+def _handle_browse_command(agent, arg: str):
     """Handle /browse subcommands using the existing BrowserTool."""
     # Get or create the browser tool
     if 'browser' not in agent.tools:
         try:
-            from apprentice_agent.tools.browser import BrowserTool
+            from aura.tools.browser import BrowserTool
             agent.tools['browser'] = BrowserTool(headless=False)
         except ImportError:
             print("Browser tool not available. Install playwright: pip install playwright && playwright install")
@@ -324,12 +351,12 @@ def _handle_browse_command(agent: ApprenticeAgent, arg: str):
             print(f"  Error: {result.get('error', 'Navigation failed')}")
 
 
-def _handle_agent_command(agent: ApprenticeAgent, arg: str):
+def _handle_agent_command(agent, arg: str):
     """Handle /agent subcommands using the multi-agent orchestrator."""
     # Initialize orchestrator if needed
     if not hasattr(agent, 'orchestrator') or agent.orchestrator is None:
         try:
-            from apprentice_agent.multi_agent.orchestrator import MultiAgentOrchestrator
+            from aura.multi_agent.orchestrator import MultiAgentOrchestrator
 
             def llm_func(system_prompt, user_message):
                 return agent.brain.think(user_message, system_prompt=system_prompt, use_history=False)
@@ -365,7 +392,7 @@ def _handle_agent_command(agent: ApprenticeAgent, arg: str):
     if specialist == "parallel":
         # Run all specialists in parallel
         print(f"  Running all specialists in parallel on: {task[:60]}...")
-        from apprentice_agent.multi_agent.protocol import AgentMessage, CollaborationMode
+        from aura.multi_agent.protocol import AgentMessage, CollaborationMode
         message = AgentMessage(content=task, sender="user")
         results = agent.orchestrator._execute_parallel(specialists, message)
         for result in results:
@@ -375,7 +402,7 @@ def _handle_agent_command(agent: ApprenticeAgent, arg: str):
     elif specialist in specialists:
         # Run specific specialist
         print(f"  [{specialist.upper()}] Working on: {task[:60]}...")
-        from apprentice_agent.multi_agent.protocol import AgentMessage
+        from aura.multi_agent.protocol import AgentMessage
         message = AgentMessage(content=task, sender="user")
         result = agent.orchestrator._execute_single(specialist, message)
         if result.success:
@@ -388,11 +415,11 @@ def _handle_agent_command(agent: ApprenticeAgent, arg: str):
         print(f"  Available: {', '.join(specialists)}, parallel")
 
 
-def _handle_hook_command(agent: ApprenticeAgent, arg: str):
+def _handle_hook_command(agent, arg: str):
     """Handle /hook subcommands."""
     if not hasattr(agent, 'hooks') or agent.hooks is None:
         try:
-            from apprentice_agent.hooks import HooksManager
+            from aura.hooks import HooksManager
             agent.hooks = HooksManager(tools=agent.tools)
             agent.hooks.start_background(interval=15)
         except Exception as e:
@@ -443,7 +470,7 @@ def _handle_hook_command(agent: ApprenticeAgent, arg: str):
         print(f"  Unknown hook command: {subcmd}")
 
 
-def print_result(result: dict, is_fastpath: bool = False):
+def print_result(result, is_fastpath: bool = False):
     """Print the agent run result."""
     print("\n" + "=" * 60)
     if is_fastpath:
