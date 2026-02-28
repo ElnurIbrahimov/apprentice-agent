@@ -1413,17 +1413,16 @@ class OllamaBrain:
         if len(words) > 50:
             return True
 
-        # Complex task indicators
+        # Complex task indicators — must be explicit task requests, not conversational references
+        # Bad: 'research', 'review', 'tell me about' — match casual questions like
+        #      "what do you think about this research?" → wrongly triggers 397B model
         complex_patterns = [
-            'analyze', 'research', 'compare', 'explain in detail',
-            'write an essay', 'write a report', 'comprehensive',
-            'thorough', 'in-depth', 'deep dive', 'deep search', 'investigate',
-            'pros and cons', 'advantages and disadvantages',
-            'step by step', 'detailed explanation', 'summarize',
-            'review', 'evaluate', 'assess', 'critique',
-            # Additional patterns for research/analysis
-            'explain how', 'how does', 'what are the', 'tell me about',
-            'architecture', 'technical', 'detailed', 'overview'
+            'write an essay', 'write a report', 'write a detailed',
+            'comprehensive analysis', 'in-depth analysis', 'thorough analysis',
+            'deep dive into', 'deep search', 'investigate in detail',
+            'pros and cons of', 'advantages and disadvantages',
+            'step by step guide', 'detailed explanation of',
+            'compare and contrast',
         ]
 
         if any(pattern in prompt_lower for pattern in complex_patterns):
