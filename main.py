@@ -79,6 +79,8 @@ def main():
     if args.voice:
         run_voice_mode(agent, enable_barge_in=not args.no_barge_in)
     elif args.goal:
+        from aura.cli.display import show_banner
+        show_banner()
         result = agent.run(args.goal)
         print_result(result, is_fastpath=result.get("fast_path", False))
     else:
@@ -471,21 +473,15 @@ def _handle_hook_command(agent, arg: str):
 
 
 def print_result(result, is_fastpath: bool = False):
-    """Print the agent run result."""
-    print("\n" + "=" * 60)
-    if is_fastpath:
-        print("FAST-PATH RESPONSE COMPLETE")
+    """Print the agent run result using rich."""
+    from aura.cli.display import console, show_response
+
+    response = result.get("response", "")
+    if response:
+        show_response(response)
     else:
-        print("AGENT RUN COMPLETE")
-    print("=" * 60)
-    print(f"Goal: {result['goal']}")
-    print(f"Completed: {result['completed']}")
-    if is_fastpath:
-        print(f"Mode: Fast-path (no tool execution)")
-    else:
-        print(f"Iterations: {result['iterations']}")
-    if result.get("final_evaluation"):
-        print(f"Final evaluation: {result['final_evaluation'].get('progress', 'N/A')}")
+        mode = "Fast-path" if is_fastpath else f"{result.get('iterations', '?')} iterations"
+        console.print(f"[dim]Completed ({mode})[/dim]")
 
 
 if __name__ == "__main__":
