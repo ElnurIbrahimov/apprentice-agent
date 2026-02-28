@@ -350,8 +350,8 @@ class Config:
     # API Security Configuration
     API_AUTH_ENABLED: bool = os.getenv("AURA_API_AUTH_ENABLED", "false").lower() == "true"
     API_KEY: str = os.getenv("AURA_API_KEY", "")  # Set to enable API key auth
-    API_RATE_LIMIT: int = int(os.getenv("AURA_API_RATE_LIMIT", "60"))  # requests per minute
-    API_CORS_ORIGINS: str = os.getenv("AURA_CORS_ORIGINS", "http://localhost:3000,http://localhost:5173")  # comma-separated origins
+    API_RATE_LIMIT: int = int(os.getenv("AURA_API_RATE_LIMIT", "200"))  # requests per minute
+    API_CORS_ORIGINS: str = os.getenv("AURA_CORS_ORIGINS", "*")  # wildcard required for WebSocket in Starlette 0.50+
 
     # AURA v3.0 ALIVE System Configuration
     AURA_ENABLED: bool = os.getenv("AURA_ENABLED", "true").lower() == "true"
