@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI):
     # The backend has 20+ polling endpoints all using run_in_executor(None, ...),
     # and chat requests can block for 30-60s waiting for Ollama.
     # With only 5 threads, 3 chat requests + polling = total starvation.
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     loop.set_default_executor(ThreadPoolExecutor(max_workers=20))
     logger.info("[API] Thread pool set to 20 workers")
 
@@ -72,19 +72,24 @@ async def lifespan(app: FastAPI):
             logger.warning("[API] Agent not ready after 60s, starting proactive system anyway")
 
         try:
-            from apprentice_agent.proactive.gateway_daemon import get_gateway_daemon
-            from apprentice_agent.proactive.monitors.system_monitor import SystemMonitor
+            from aura.proactive.gateway_daemon import get_gateway_daemon
+            from aura.proactive.monitors.system_monitor import SystemMonitor
 
             daemon = get_gateway_daemon()
 
             # Wire the notification callback so messages go to the pending queue,
             # get logged, AND pushed to connected WebSocket clients in real-time.
+            _proactive_loop = asyncio.get_running_loop()
+
             def _on_proactive_message(msg):
                 logger.info(f"[Proactive] {msg.action.value}: {msg.content[:80]}...")
                 # Push to all connected WebSocket clients (instant delivery)
                 try:
                     from api.routes.chat import broadcast_proactive_message
-                    asyncio.create_task(broadcast_proactive_message(msg))
+                    _proactive_loop.call_soon_threadsafe(
+                        _proactive_loop.create_task,
+                        broadcast_proactive_message(msg)
+                    )
                 except Exception as e:
                     logger.debug(f"[Proactive] WebSocket push failed: {e}")
 
@@ -103,7 +108,7 @@ async def lifespan(app: FastAPI):
             # Start ScreenMonitor for app/window tracking + Screenpipe OCR
             screen_monitor = None
             try:
-                from apprentice_agent.proactive.monitors.screen_monitor import ScreenMonitor
+                from aura.proactive.monitors.screen_monitor import ScreenMonitor
                 screen_monitor = ScreenMonitor(
                     event_bus=daemon.event_bus,
                     poll_interval=3.0,
@@ -116,7 +121,7 @@ async def lifespan(app: FastAPI):
             # Start CalendarMonitor for meeting/event awareness
             calendar_monitor = None
             try:
-                from apprentice_agent.proactive.monitors.calendar_monitor import get_calendar_monitor
+                from aura.proactive.monitors.calendar_monitor import get_calendar_monitor
                 calendar_monitor = get_calendar_monitor(event_bus=daemon.event_bus)
                 await calendar_monitor.start()
                 logger.info("[API] CalendarMonitor started")
@@ -126,7 +131,7 @@ async def lifespan(app: FastAPI):
             # Start WorkflowDetector for interruption timing
             workflow_detector = None
             try:
-                from apprentice_agent.proactive.monitors.workflow_detector import get_workflow_detector
+                from aura.proactive.monitors.workflow_detector import get_workflow_detector
                 workflow_detector = get_workflow_detector(event_bus=daemon.event_bus)
                 await workflow_detector.start()
                 logger.info("[API] WorkflowDetector started")
@@ -147,7 +152,7 @@ async def lifespan(app: FastAPI):
 
         # Start Voice Presence Service
         try:
-            from apprentice_agent.services.voice_presence import get_voice_presence
+            from aura.services.voice_presence import get_voice_presence
             voice_svc = get_voice_presence()
             voice_svc.start()
             app.state.voice_presence = voice_svc
@@ -158,7 +163,7 @@ async def lifespan(app: FastAPI):
 
         # Start Global Workspace Engine (consciousness)
         try:
-            from apprentice_agent.consciousness.global_workspace import get_global_workspace
+            from aura.consciousness.global_workspace import get_global_workspace
             get_global_workspace().start()
             logger.info("[API] Global Workspace Engine started")
         except Exception as e:
@@ -173,13 +178,13 @@ async def lifespan(app: FastAPI):
 
         # Start Self-Improvement Engine
         try:
-            from apprentice_agent.consciousness.self_improvement import get_self_improvement_engine
+            from aura.consciousness.self_improvement import get_self_improvement_engine
             get_self_improvement_engine().start()
             logger.info("[API] Self-Improvement Engine started")
         except Exception as e:
             logger.warning(f"[API] Self-Improvement Engine failed to start: {e}")
 
-    asyncio.create_task(_start_proactive_system())
+    asyncio.get_running_loop().create_task(_start_proactive_system())
 
     yield
 
@@ -212,7 +217,7 @@ async def lifespan(app: FastAPI):
 
     # Stop Global Workspace Engine
     try:
-        from apprentice_agent.consciousness.global_workspace import get_global_workspace
+        from aura.consciousness.global_workspace import get_global_workspace
         get_global_workspace().stop()
         logger.info("[API] Global Workspace Engine stopped")
     except Exception:
@@ -220,7 +225,7 @@ async def lifespan(app: FastAPI):
 
     # Stop Self-Improvement Engine
     try:
-        from apprentice_agent.consciousness.self_improvement import get_self_improvement_engine
+        from aura.consciousness.self_improvement import get_self_improvement_engine
         get_self_improvement_engine().stop()
         logger.info("[API] Self-Improvement Engine stopped")
     except Exception:
@@ -228,21 +233,21 @@ async def lifespan(app: FastAPI):
 
     # Stop Idle Presence Engine
     try:
-        from apprentice_agent.consciousness.idle_presence import get_idle_presence_engine
+        from aura.consciousness.idle_presence import get_idle_presence_engine
         get_idle_presence_engine().stop_background_tasks()
     except Exception:
         pass
 
     # Save memory systems before shutdown (prevent data loss)
     try:
-        from apprentice_agent.tools.amem import get_amem
+        from aura.tools.amem import get_amem
         get_amem().save()
         logger.info("[API] A-MEM data saved")
     except Exception as e:
         logger.warning(f"[API] A-MEM save error: {e}")
 
     try:
-        from apprentice_agent.tools.knowledge_graph import get_knowledge_graph
+        from aura.tools.knowledge_graph import get_knowledge_graph
         get_knowledge_graph().save()
         logger.info("[API] Knowledge Graph data saved")
     except Exception as e:
@@ -250,7 +255,7 @@ async def lifespan(app: FastAPI):
 
     # Close proactive persistence database
     try:
-        from apprentice_agent.proactive.persistence import get_persistence
+        from aura.proactive.persistence import get_persistence
         get_persistence().close()
         logger.info("[API] Proactive persistence closed")
     except Exception as e:
@@ -258,23 +263,43 @@ async def lifespan(app: FastAPI):
 
 
 # Create FastAPI app
+_is_production = os.environ.get("AURA_ENV") == "production"
 app = FastAPI(
     title="AURA Web API",
     description="Modern web interface for AURA - Autonomous Universal Reasoning Agent",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url=None if _is_production else "/docs",
+    redoc_url=None if _is_production else "/redoc",
+    openapi_url=None if _is_production else "/openapi.json",
 )
 
 # Configure CORS
-# NOTE: Starlette 0.50+ CORSMiddleware rejects WebSocket with 403 when
-# specific origins are listed. Use wildcard for dev to allow WebSocket.
+# NOTE: Starlette's CORSMiddleware rejects WebSocket upgrade requests with 403
+# when specific origins are listed (it validates the Origin header).  Browsers
+# always send an Origin header on WebSocket handshakes, and Starlette treats a
+# missing/unmatched origin as a CORS violation → 403.
+# Fix: In development we force allow_origins=["*"] so WebSocket works.
+# In production the explicit list is kept for HTTP but we add a lightweight
+# middleware that lets WebSocket upgrades pass through before CORS runs.
 try:
-    from apprentice_agent.config import Config as _cfg
+    from aura.config import Config as _cfg
     _cors_origins_str = getattr(_cfg, 'API_CORS_ORIGINS', '*')
 except Exception:
     _cors_origins_str = '*'
 
 _cors_origins = ["*"] if _cors_origins_str == "*" else [o.strip() for o in _cors_origins_str.split(",")]
+
+# When specific origins are configured, also accept 127.0.0.1 variants
+# so that localhost:5173 -> 127.0.0.1:8000 WebSocket works regardless.
+if _cors_origins != ["*"]:
+    _extra = []
+    for _o in _cors_origins:
+        if "localhost" in _o:
+            _extra.append(_o.replace("localhost", "127.0.0.1"))
+        elif "127.0.0.1" in _o:
+            _extra.append(_o.replace("127.0.0.1", "localhost"))
+    _cors_origins = list(dict.fromkeys(_cors_origins + _extra))  # dedupe, preserve order
 
 app.add_middleware(
     CORSMiddleware,
@@ -282,20 +307,23 @@ app.add_middleware(
     allow_credentials=_cors_origins != ["*"],
     allow_methods=["*"],
     allow_headers=["*", "X-API-Key"],
+    # allow_origin_regex can be used as an alternative if origin list grows
 )
 
 # API key authentication middleware (disabled by default, enable via env vars)
 try:
-    from apprentice_agent.config import Config as _auth_cfg
+    from aura.config import Config as _auth_cfg
+    _api_key = getattr(_auth_cfg, 'API_KEY', '')
+    _auth_enabled = getattr(_auth_cfg, 'API_AUTH_ENABLED', bool(_api_key))
     app.add_middleware(
         APIKeyAuthMiddleware,
-        api_key=getattr(_auth_cfg, 'API_KEY', ''),
-        enabled=getattr(_auth_cfg, 'API_AUTH_ENABLED', False),
+        api_key=_api_key,
+        enabled=_auth_enabled,
     )
     app.add_middleware(
         RateLimitMiddleware,
-        requests_per_minute=getattr(_auth_cfg, 'API_RATE_LIMIT', 60),
-        enabled=getattr(_auth_cfg, 'API_AUTH_ENABLED', False),
+        requests_per_minute=getattr(_auth_cfg, 'API_RATE_LIMIT', 200),
+        enabled=True,
     )
 except Exception as e:
     logger.warning(f"[API] Auth middleware setup skipped: {e}")
@@ -340,9 +368,15 @@ if os.path.exists(static_path) and not _is_dev:
             from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="API endpoint not found")
 
-        file_path = os.path.join(static_path, full_path)
-        if os.path.exists(file_path) and os.path.isfile(file_path):
-            return FileResponse(file_path)
+        # Canonicalize to prevent path traversal
+        real_static = os.path.realpath(static_path)
+        candidate = os.path.realpath(os.path.join(static_path, full_path))
+        # Ensure candidate is inside the static directory (separator prevents prefix confusion)
+        if not (candidate.startswith(real_static + os.sep) or candidate == real_static):
+            return FileResponse(os.path.join(static_path, "index.html"))
+
+        if os.path.exists(candidate) and os.path.isfile(candidate):
+            return FileResponse(candidate)
         return FileResponse(os.path.join(static_path, "index.html"))
 
 
@@ -350,7 +384,7 @@ if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
         "api.main:app",
-        host="0.0.0.0",
+        host=os.environ.get("AURA_HOST", "127.0.0.1"),
         port=8000,
         reload=False,
         log_level="info"

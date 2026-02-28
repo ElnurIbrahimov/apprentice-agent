@@ -9,19 +9,53 @@ from typing import Optional, Dict, Any, Generator
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from apprentice_agent import ApprenticeAgent
+from aura import ApprenticeAgent
 from api.models.schemas import MoodState
 
 # Import ALMA directly for mood detection
 try:
-    from apprentice_agent.emotion.alma_engine import alma_engine
-    from apprentice_agent.emotion.integration import get_mood_emoji
+    from aura.emotion.alma_engine import alma_engine
+    from aura.emotion.integration import get_mood_emoji
     ALMA_AVAILABLE = True
 except ImportError:
     ALMA_AVAILABLE = False
     alma_engine = None
 
 logger = logging.getLogger(__name__)
+
+# Truth Spine singleton — shared across all chat() calls to avoid per-call disk I/O
+_truth_spine_instance = None
+_truth_spine_lock = threading.Lock()
+_MemoryTier = None  # lazy import
+
+
+def _get_truth_spine():
+    """Get or create the VerifiedMemory singleton. Thread-safe."""
+    global _truth_spine_instance, _MemoryTier
+    if _truth_spine_instance is None:
+        with _truth_spine_lock:
+            if _truth_spine_instance is None:
+                try:
+                    from aura.truth_spine import VerifiedMemory, MemoryTier
+                    _truth_spine_instance = VerifiedMemory()
+                    _MemoryTier = MemoryTier
+                except Exception as e:
+                    logger.warning(f"[TruthSpine] Init failed: {e}")
+                    return None
+    return _truth_spine_instance
+
+
+# Re-export MemoryTier lazily so callers can use the tier values
+class _MemoryTierProxy:
+    """Proxy for MemoryTier enum that resolves lazily."""
+    @property
+    def FACT(self): return _MemoryTier.FACT if _MemoryTier else None
+    @property
+    def BELIEF(self): return _MemoryTier.BELIEF if _MemoryTier else None
+    @property
+    def SPECULATION(self): return _MemoryTier.SPECULATION if _MemoryTier else None
+
+MemoryTier = _MemoryTierProxy()
 
 # Thinking system integration — safe import
 def _record_thought(thought_type: str, content: str, intensity: float = 0.6, source: str = "service"):
@@ -129,38 +163,38 @@ ACTION_TRIGGERS = {
 # Best models for each action mode
 ACTION_MODE_MODELS = {
     "search": {
-        "preferred": "devstral-small-2:24b-cloud",
-        "fallbacks": ["qwen2.5:7b", "llama3.2:3b"],
+        "preferred": "gemini-3-flash-preview:cloud",
+        "fallbacks": ["nemotron-3-nano:30b-cloud", "kimi-k2.5:cloud"],
         "description": "Quick web search"
     },
     "research": {
-        "preferred": "deepseek-v3.1:671b-cloud",
-        "fallbacks": ["cogito-2.1:671b-cloud", "qwen3-next:80b-cloud"],
+        "preferred": "qwen3.5:397b-cloud",
+        "fallbacks": ["cogito-2.1:671b-cloud", "deepseek-v3.2:cloud"],
         "description": "Comprehensive research"
     },
     "agent": {
-        "preferred": "kimi-k2.5-cloud",
-        "fallbacks": ["devstral-2:123b-cloud", "deepseek-v3.1:671b-cloud"],
+        "preferred": "kimi-k2.5:cloud",
+        "fallbacks": ["devstral-2:123b-cloud", "deepseek-v3.2:cloud"],
         "description": "Autonomous task execution"
     },
     "code": {
-        "preferred": "glm-4.7-cloud",
-        "fallbacks": ["devstral-2:123b-cloud", "qwen3-coder:480b-cloud"],
+        "preferred": "qwen3-coder:480b-cloud",
+        "fallbacks": ["devstral-2:123b-cloud", "qwen3-coder-next:cloud"],
         "description": "Code generation and analysis"
     },
     "vision": {
         "preferred": "qwen3-vl:235b-cloud",
-        "fallbacks": ["kimi-k2.5-cloud", "llava:13b"],
+        "fallbacks": ["kimi-k2.5:cloud", "gemini-3-flash-preview:cloud"],
         "description": "Image analysis"
     },
     "deep_research": {
-        "preferred": "deepseek-v3.1:671b-cloud",
-        "fallbacks": ["cogito-2.1:671b-cloud", "kimi-k2.5-cloud"],
+        "preferred": "kimi-k2-thinking:cloud",
+        "fallbacks": ["qwen3.5:397b-cloud", "cogito-2.1:671b-cloud"],
         "description": "Multi-source deep research with page reading"
     },
     "swarm": {
-        "preferred": "deepseek-v3.1:671b-cloud",
-        "fallbacks": ["cogito-2.1:671b-cloud", "kimi-k2.5-cloud"],
+        "preferred": "qwen3.5:397b-cloud",
+        "fallbacks": ["cogito-2.1:671b-cloud", "kimi-k2.5:cloud"],
         "description": "Multi-agent parallel collaboration"
     }
 }
@@ -190,36 +224,65 @@ def detect_action_mode(message: str) -> Optional[str]:
     return None
 
 
-def get_model_for_action(action_mode: str) -> Optional[str]:
-    """Get the best model for an action mode.
+_available_models: set = set()
+_models_loaded: bool = False
+_models_loaded_at: float = 0.0
+_MODELS_TTL_SECONDS: int = 300  # 5 minutes
+_models_lock = threading.Lock()
 
-    Returns:
-        Model name to use, or None to use default
+
+def _load_available_models() -> None:
+    """Populate _available_models cache from Ollama. Thread-safe, auto-refreshes every 5 minutes."""
+    import time as _time
+    global _available_models, _models_loaded, _models_loaded_at
+    with _models_lock:
+        now = _time.time()
+        if _models_loaded and (now - _models_loaded_at) < _MODELS_TTL_SECONDS:
+            return  # Cache still fresh
+        try:
+            import ollama as _ollama_client
+            result = _ollama_client.list()
+            _available_models = {m.model for m in result.models}
+            _models_loaded_at = now
+            _models_loaded = True
+            logger.info(f"[AutoModel] Loaded {len(_available_models)} models (refreshed)")
+        except Exception as e:
+            logger.warning(f"[AutoModel] Could not list Ollama models: {e}")
+            if not _models_loaded:
+                _available_models = set()
+            # On refresh failure: keep old data, don't reset _models_loaded
+
+
+def _is_model_available(model: str) -> bool:
+    """Check if a model is available locally or is a cloud model."""
+    if not model:
+        return False
+    # Cloud models end with -cloud or :cloud; Ollama.com serves them on demand
+    if model.endswith(("-cloud", ":cloud")):
+        return True
+    return model in _available_models
+
+
+def get_model_for_action(action_mode: str) -> Optional[str]:
+    """Get the best available model for an action mode.
+
+    Checks Ollama availability before returning a model.
+    Returns None to use the default model if nothing matches.
     """
     if action_mode not in ACTION_MODE_MODELS:
         return None
 
+    _load_available_models()
+
     config = ACTION_MODE_MODELS[action_mode]
-    preferred = config["preferred"]
+    candidates = [config.get("preferred")] + config.get("fallbacks", [])
 
-    # For cloud models, just return them (Ollama.com handles availability)
-    if preferred.endswith("-cloud"):
-        logger.info(f"[AutoModel] Action '{action_mode}' -> using cloud model: {preferred}")
-        return preferred
+    for model in candidates:
+        if _is_model_available(model):
+            logger.info(f"[AutoModel] Action '{action_mode}' -> {model}")
+            return model
 
-    # For local models, validate availability
-    from apprentice_agent.config import validate_model
-    if validate_model(preferred):
-        logger.info(f"[AutoModel] Action '{action_mode}' -> using local model: {preferred}")
-        return preferred
-
-    # Try fallbacks
-    for fallback in config["fallbacks"]:
-        if fallback.endswith("-cloud") or validate_model(fallback):
-            logger.info(f"[AutoModel] Action '{action_mode}' -> using fallback: {fallback}")
-            return fallback
-
-    logger.warning(f"[AutoModel] No model available for action '{action_mode}'")
+    logger.warning(f"[AutoModel] No available model for action '{action_mode}'")
     return None
 
 
@@ -258,9 +321,11 @@ class AgentService:
         Non-blocking - returns immediately. The agent will be available
         once initialization completes.
         """
-        if self._agent is not None or self._initializing:
-            return
-        self._initializing = True
+        with self._agent_lock:
+            if self._agent is not None or self._initializing:
+                return
+            self._initializing = True
+        # Start thread OUTSIDE the lock
         thread = threading.Thread(target=self._background_init, daemon=True)
         thread.start()
         logger.info("[AgentService] Background initialization started")
@@ -299,7 +364,14 @@ class AgentService:
     def agent(self) -> ApprenticeAgent:
         """Get the agent instance, initializing if needed."""
         if self._agent is None:
-            self.initialize()
+            if self._initializing:
+                # Wait for background init to complete (up to 30s)
+                import time
+                deadline = time.time() + 30
+                while self._agent is None and time.time() < deadline:
+                    time.sleep(0.2)
+            if self._agent is None:
+                self.initialize(fast_init=False)
         return self._agent
 
     def _needs_tools(self, message: str) -> bool:
@@ -354,7 +426,7 @@ class AgentService:
 
             # Record interaction for ALMA emotional drift (Phase 2D)
             try:
-                from apprentice_agent.emotion.alma_engine import alma_engine
+                from aura.emotion.alma_engine import alma_engine
                 alma_engine.record_interaction(success=True)
             except Exception:
                 pass
@@ -363,7 +435,7 @@ class AgentService:
             # of a proactive message, record as engaged
             try:
                 import time as _time
-                from apprentice_agent.proactive.gateway_daemon import get_gateway_daemon
+                from aura.proactive.gateway_daemon import get_gateway_daemon
                 daemon = get_gateway_daemon()
                 time_since_proactive = _time.time() - daemon._last_proactive_message_time
                 if 0 < time_since_proactive < 60:
@@ -425,7 +497,7 @@ class AgentService:
                             topic = topic.strip(" :,.-")
 
                             # Use the search tool to get real data
-                            from apprentice_agent.tools.web_search import WebSearchTool
+                            from aura.tools.web_search import WebSearchTool
                             search_tool = WebSearchTool()
                             search_results = search_tool.search(topic, num_results=8)
 
@@ -509,7 +581,7 @@ Keep it concise, readable, and well-formatted with markdown."""
                 # ===== DEEP RESEARCH HANDLER =====
                 if detected_action == "deep_research":
                     _record_thought("analyzing", "initiating deep research pipeline...", 0.8, "service")
-                    from apprentice_agent.tools.deep_research import DeepResearchTool
+                    from aura.tools.deep_research import DeepResearchTool
                     deep_tool = DeepResearchTool()
 
                     topic = message.lower()
@@ -539,7 +611,7 @@ Provide key findings and cite sources."""
                 # Screen context injection (Phase 3D)
                 screen_hint = ""
                 try:
-                    from apprentice_agent.tools.screenpipe import get_screenpipe_client
+                    from aura.tools.screenpipe import get_screenpipe_client
                     sp = get_screenpipe_client()
                     if sp.is_available():
                         ctx = sp.get_screen_context(minutes=1, max_chars=500)
@@ -557,6 +629,40 @@ Provide key findings and cite sources."""
 
                 # Use agent.chat() which has direct handlers for search/crypto
                 response = self.agent.chat(enriched_msg, speak=speak)
+
+                # Truth Spine: classify response and tag to VerifiedMemory (non-blocking)
+                # Uses module-level singleton to avoid per-call disk reads.
+                try:
+                    _verified_mem = _get_truth_spine()
+                    _resp_lower = response.lower()
+                    import re as _re
+                    # FACT: actual URL present (not just the word "verified")
+                    _has_url = bool(_re.search(r'https?://\S+', response))
+                    _has_artifact = any(m in response for m in ["sha256:", "✓"])
+                    if _has_url or _has_artifact:
+                        _tier = MemoryTier.BELIEF  # URL ≠ verified fact; downgrade to BELIEF
+                        _verified_mem.store_belief(
+                            content=response[:500],
+                            source="chat",
+                            reasoning="Response cites a URL or artifact (unverified by agent)"
+                        )
+                    elif any(m in _resp_lower for m in ["i think", "i believe", "likely", "probably", "it seems"]):
+                        _tier = MemoryTier.BELIEF
+                        _verified_mem.store_belief(
+                            content=response[:500],
+                            source="chat",
+                            reasoning="Response contains inference or belief language"
+                        )
+                    else:
+                        _tier = MemoryTier.SPECULATION
+                        _verified_mem.store_speculation(
+                            content=response[:500],
+                            source="chat",
+                            reason="Unverified LLM output"
+                        )
+                    logger.debug(f"[TruthSpine] Response classified as {_tier.value}")
+                except Exception as _ts_err:
+                    logger.debug(f"[TruthSpine] Classification error: {_ts_err}")
 
                 return {
                     "response": response,
@@ -584,6 +690,8 @@ Provide key findings and cite sources."""
             CRITICAL FIX: Lock is only held briefly for setup/teardown, NOT during streaming.
             This prevents blocking concurrent requests (WebSocket, health checks, etc.).
         """
+        brain = None
+        effective_model = None
         # ===== SETUP PHASE - Brief lock =====
         with self._agent_lock:
             effective_model = model_override
@@ -643,7 +751,7 @@ Provide key findings and cite sources."""
             # ===== DEEP RESEARCH HANDLER =====
             if detected_action == "deep_research":
                 try:
-                    from apprentice_agent.tools.deep_research import DeepResearchTool
+                    from aura.tools.deep_research import DeepResearchTool
                     deep_tool = DeepResearchTool()
 
                     topic = message.lower()
@@ -707,7 +815,7 @@ Provide a well-structured, informative summary with key findings and cite source
                                 topic = topic.replace(trigger, "").strip()
                             topic = topic.strip(" :,.-")
 
-                            from apprentice_agent.tools.web_search import WebSearchTool
+                            from aura.tools.web_search import WebSearchTool
                             search_tool = WebSearchTool()
                             search_results = search_tool.search(topic, num_results=8)
 
@@ -810,7 +918,7 @@ Keep it concise, readable, and well-formatted with markdown."""
             # Inject screen awareness so AURA knows what the user is looking at
             screen_hint = ""
             try:
-                from apprentice_agent.tools.screenpipe import get_screenpipe_client
+                from aura.tools.screenpipe import get_screenpipe_client
                 sp = get_screenpipe_client()
                 if sp.is_available():
                     ctx = sp.get_screen_context(minutes=1, max_chars=500)
@@ -838,10 +946,12 @@ Keep it concise, readable, and well-formatted with markdown."""
                 yield {"type": "done", "mood": self._get_mood(), "model_used": brain.get_last_model_used()}
 
         finally:
-            # ===== TEARDOWN - Brief lock to clear model override =====
-            if effective_model:
-                with self._agent_lock:
-                    brain.set_model_override(None)
+            # ===== TEARDOWN =====
+            # NOTE: Model override NOT cleared here. The override persists for subsequent requests
+            # until explicitly replaced by a new request's model_override or action detection.
+            # Clearing it here would race with subsequent requests and lose user intent.
+            # The override is naturally scoped to the session/context, not per-request.
+            pass
 
     def run(self, goal: str, context: Optional[Dict] = None,
             use_fastpath: Optional[bool] = None, max_iterations: int = 10) -> Dict[str, Any]:
@@ -1099,7 +1209,7 @@ Keep it concise, readable, and well-formatted with markdown."""
     def _handle_thinking_mode_command(self, message: str) -> Dict[str, Any]:
         """Handle /think s1|s2|auto|status commands."""
         try:
-            from apprentice_agent.thinking_mode import get_thinking_mode_manager, ThinkingMode
+            from aura.thinking_mode import get_thinking_mode_manager, ThinkingMode
             tmm = get_thinking_mode_manager()
 
             parts = message.split(maxsplit=1)
@@ -1154,7 +1264,7 @@ Keep it concise, readable, and well-formatted with markdown."""
         """
         try:
             import requests
-            from apprentice_agent.config import VERIFIED_LOCAL_MODELS, VERIFIED_CLOUD_MODELS
+            from aura.config import VERIFIED_LOCAL_MODELS, VERIFIED_CLOUD_MODELS
 
             local_models = []
             cloud_models = list(VERIFIED_CLOUD_MODELS)
