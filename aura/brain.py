@@ -1518,6 +1518,13 @@ class OllamaBrain:
             logger.info(f"[BRAIN] Using manual model override: {self._model_override}")
             return self._model_override
 
+        # Short conversational queries always use fast model — skip all escalation logic.
+        # No 397B model needed for "what do you think?" or "how does this work?"
+        words = prompt.split()
+        if len(words) <= 15 and not self._is_complex_query(prompt):
+            logger.info(f"[BRAIN] Short query ({len(words)} words) → fast model")
+            return Config.MODEL_FAST
+
         use_cloud = self._is_complex_query(prompt)
         prompt_lower = prompt.lower()
 

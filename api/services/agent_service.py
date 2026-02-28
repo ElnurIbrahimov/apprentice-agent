@@ -702,8 +702,9 @@ Provide key findings and cite sources."""
                 if effective_model:
                     logger.info(f"[AgentService] Auto-selected model for {detected_action}: {effective_model}")
 
+            # Always set override (even None) so Auto mode clears any previous selection
+            self.agent.brain.set_model_override(effective_model)
             if effective_model:
-                self.agent.brain.set_model_override(effective_model)
                 logger.info(f"[AgentService] Streaming with model: {effective_model}")
 
             # Get references we need (agent is thread-safe for reads)
