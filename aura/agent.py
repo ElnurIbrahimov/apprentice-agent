@@ -135,6 +135,7 @@ from .config import Config
 from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, build_adaptive_system_prompt, get_monologue, KnowledgeGraphTool, get_knowledge_graph, MetacognitiveGuardian, GuardianConfig, NeuroDreamEngine, SleepPhase, ReflexionEngine, code_syntax_evaluator, SynapseForge, WorldSim, RiskLevel, CalendarTool, SpacedRepetitionTool, TaskManagerTool, ClipboardHistoryTool, APITesterTool, DatabaseTool, AudioTranscriberTool, ResearchTool
 from .tools.mirrormind import MirrorMind
 from .tools.cognitive_theater import CognitiveTheater, is_decision_question
+from .parliament import ParliamentConductor
 
 # IntrospectionCircuit — zero-LLM query triage via heuristic classification
 try:
@@ -884,6 +885,13 @@ class ApprenticeAgent:
                 logger.debug("[ACE] Context engine initialized")
             except Exception as _e:
                 logger.warning(f"[ACE] Failed to initialize: {_e}")
+        # Parliament conductor
+        self.parliament = None
+        try:
+            self.parliament = ParliamentConductor(self)
+            logger.debug("[Parliament] Conductor initialized")
+        except Exception as _e:
+            logger.warning(f"[Parliament] Failed to init: {_e}")
         self.episodic_consolidator = None
         self.episodic_memory_enabled = getattr(Config, 'EPISODIC_MEMORY_ENABLED', True)
 
@@ -1908,24 +1916,40 @@ Guidelines:
         self.state.phase = AgentPhase.OBSERVE
         print(f"[OBSERVE] Analyzing current context...")
 
-        # Gather context including relevant memories
-        relevant_memories = self.memory.recall(self.state.goal, n_results=3)
+        # Gather context from memory and KG in parallel (independent lookups)
+        _ctx_futures = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="observe_ctx") as _pool:
+            # Memory recall
+            if self.memory:
+                _ctx_futures["memory"] = _pool.submit(
+                    self.memory.recall, self.state.goal, 3
+                )
+            # Knowledge Graph context
+            if self.kg_bridge is not None:
+                _ctx_futures["kg"] = _pool.submit(
+                    self.kg_bridge.get_context_for_query, self.state.goal, 5
+                )
+
+            # Collect results with timeout
+            _ctx_results = {}
+            for _key, _fut in _ctx_futures.items():
+                try:
+                    _ctx_results[_key] = _fut.result(timeout=2.0)
+                except Exception:
+                    _ctx_results[_key] = [] if _key == "memory" else ""
+
+        relevant_memories = _ctx_results.get("memory", []) or []
+        kg_context = _ctx_results.get("kg", "") or ""
 
         # Emit recall thought if memories found
         if relevant_memories:
             memory_preview = ", ".join([m["content"][:30] for m in relevant_memories[:2]])
             self.monologue.think("recall", f"Found {len(relevant_memories)} relevant memories: {memory_preview}...")
 
-        # Get Knowledge Graph Brain context (if available)
-        kg_context = ""
-        if self.kg_bridge is not None:
-            try:
-                kg_context = self.kg_bridge.get_context_for_query(self.state.goal, max_entities=5)
-                if kg_context:
-                    self.monologue.think("recall", f"Found relevant knowledge graph entities")
-                    print(f"[KG BRAIN] Retrieved context for query")
-            except Exception as e:
-                logger.debug(f"[KG BRAIN] Context retrieval error: {e}")
+        # Emit KG thought if context found
+        if kg_context:
+            self.monologue.think("recall", f"Found relevant knowledge graph entities")
+            print(f"[KG BRAIN] Retrieved context for query")
 
         observation_context = {
             "goal": self.state.goal,
