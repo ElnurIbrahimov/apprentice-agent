@@ -10,6 +10,7 @@ from typing import Optional, List
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import JSONResponse
+from api.auth import verify_api_key_ws
 
 from api.models.schemas import (
     ChatRequest, ChatResponse, RunRequest, RunResponse,
@@ -28,6 +29,7 @@ def _get_agent_service():
 
 # Upload directory for file cleanup
 UPLOAD_DIR = Path(__file__).parent.parent / "data" / "uploads"
+UPLOAD_DIR_RESOLVED = Path(UPLOAD_DIR).resolve()
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -36,6 +38,7 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 # ---------------------------------------------------------------------------
 _active_websockets: List[WebSocket] = []
 _ws_lock = threading.Lock()
+_ws_async_lock = asyncio.Lock()
 
 
 def register_websocket(ws: WebSocket) -> None:
@@ -55,13 +58,13 @@ def unregister_websocket(ws: WebSocket) -> None:
 
 async def _broadcast_json(payload: dict) -> None:
     """Send a JSON message to all active WebSocket connections."""
-    with _ws_lock:
+    async with _ws_async_lock:
         targets = list(_active_websockets)
     for ws in targets:
         try:
             await ws.send_json(payload)
         except Exception:
-            pass  # Connection may have closed; unregister handles cleanup
+            unregister_websocket(ws)
 
 
 async def broadcast_proactive_message(msg) -> None:
@@ -102,10 +105,15 @@ async def process_attachments(attachments: List[dict], loop) -> str:
                 logger.warning(f"[Attachments] File not found: {file_path}")
                 continue
 
+            file_path_resolved = Path(file_path).resolve()
+            if not (str(file_path_resolved).startswith(str(UPLOAD_DIR_RESOLVED) + os.sep) or str(file_path_resolved) == str(UPLOAD_DIR_RESOLVED)):
+                logger.warning(f"[Attachments] Path traversal blocked: {file_path}")
+                continue
+
             if file_type == AttachmentType.IMAGE.value or file_type == "image":
                 # Use VisionTool to analyze image
                 try:
-                    from apprentice_agent.tools.vision import VisionTool
+                    from aura.tools.vision import VisionTool
                     vision = VisionTool()
                     result = await loop.run_in_executor(
                         None,
@@ -148,17 +156,22 @@ async def process_attachments(attachments: List[dict], loop) -> str:
 
 
 def cleanup_attachment_files(attachments: List[dict]):
-    """Delete attachment files after processing.
-
-    Args:
-        attachments: List of attachment metadata dicts
-    """
+    """Delete attachment files after processing."""
+    # Resolve the allowed upload directory
+    _upload_root = os.path.realpath(UPLOAD_DIR)
     for attachment in attachments:
         try:
             file_path = attachment.get("path")
-            if file_path and os.path.exists(file_path):
-                os.remove(file_path)
-                logger.info(f"[Attachments] Cleaned up: {file_path}")
+            if not file_path:
+                continue
+            real_path = os.path.realpath(file_path)
+            # Only delete files that are inside the upload directory
+            if not (real_path.startswith(_upload_root + os.sep) or real_path == _upload_root):
+                logger.warning(f"[Attachments] Refused to delete file outside upload dir: {file_path}")
+                continue
+            if os.path.exists(real_path):
+                os.remove(real_path)
+                logger.info(f"[Attachments] Cleaned up: {real_path}")
         except Exception as e:
             logger.warning(f"[Attachments] Failed to cleanup {file_path}: {e}")
 
@@ -175,7 +188,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
     """
     try:
         # Run in thread pool to avoid blocking
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None,
             lambda: _get_agent_service().chat(request.message, speak=request.speak, model_override=request.model)
@@ -218,7 +231,7 @@ async def run(request: RunRequest) -> RunResponse:
         Run response with completion status and history
     """
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None,
             lambda: _get_agent_service().run(
@@ -258,7 +271,7 @@ async def run(request: RunRequest) -> RunResponse:
 async def clear_history() -> ClearHistoryResponse:
     """Clear conversation history."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         success = await loop.run_in_executor(None, _get_agent_service().clear_history)
 
         return ClearHistoryResponse(
@@ -279,7 +292,7 @@ async def clear_history() -> ClearHistoryResponse:
 async def list_conversations():
     """List all conversations."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         conversations = await loop.run_in_executor(None, _get_agent_service().list_conversations)
         return conversations
     except Exception as e:
@@ -292,7 +305,7 @@ async def create_conversation(request: CreateConversationRequest = None):
     """Create a new conversation."""
     try:
         title = request.title if request else None
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None, lambda: _get_agent_service().create_conversation(title)
         )
@@ -310,7 +323,7 @@ async def create_conversation(request: CreateConversationRequest = None):
 async def rename_conversation(conversation_id: str, request: RenameConversationRequest):
     """Rename a conversation."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         success = await loop.run_in_executor(
             None, lambda: _get_agent_service().rename_conversation(conversation_id, request.title)
         )
@@ -328,7 +341,7 @@ async def rename_conversation(conversation_id: str, request: RenameConversationR
 async def delete_conversation(conversation_id: str):
     """Delete a conversation."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None, lambda: _get_agent_service().delete_conversation(conversation_id)
         )
@@ -346,7 +359,7 @@ async def delete_conversation(conversation_id: str):
 async def switch_conversation(conversation_id: str):
     """Switch to a different conversation."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None, lambda: _get_agent_service().switch_conversation(conversation_id)
         )
@@ -364,7 +377,7 @@ async def switch_conversation(conversation_id: str):
 async def save_conversation_to_memory(conversation_id: str):
     """Save a conversation to AURA's long-term memory (A-MEM)."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None, lambda: _get_agent_service().save_conversation_to_memory(conversation_id)
         )
@@ -385,6 +398,12 @@ async def websocket_chat(websocket: WebSocket):
         Server -> Client: {"type": "done", "response": "Hi there!", "mood": {...}}
         Server -> Client: {"type": "stopped"} - Generation was stopped
     """
+    # Only accept API key via header, not query params
+    api_key = websocket.headers.get("X-API-Key", "")
+    if not verify_api_key_ws(api_key):
+        await websocket.close(code=1008)
+        return
+
     await websocket.accept()
     register_websocket(websocket)
     logger.info("[WebSocket] Client connected")
@@ -468,7 +487,7 @@ async def websocket_chat(websocket: WebSocket):
 
             # Record interaction for Gateway Daemon (proactive system)
             try:
-                from apprentice_agent.proactive.gateway_daemon import get_gateway_daemon
+                from aura.proactive.gateway_daemon import get_gateway_daemon
                 daemon = get_gateway_daemon()
                 if daemon.state.value == "running":
                     daemon.record_interaction()
@@ -479,7 +498,7 @@ async def websocket_chat(websocket: WebSocket):
             logger.info(f"[WebSocket] Received: {message[:50]}..." + (f" (model: {model_override})" if model_override else "") + (f" ({len(attachments)} attachments)" if attachments else ""))
 
             try:
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
 
                 # Process attachments and prepend context to message
                 if attachments:
@@ -544,14 +563,14 @@ async def websocket_chat(websocket: WebSocket):
 
                 # Send chunks as they arrive (truly async, no busy-wait)
                 # Max 5 minutes for any single response, then timeout
-                stream_deadline = asyncio.get_event_loop().time() + 300
+                stream_deadline = asyncio.get_running_loop().time() + 300
                 while True:
                     if stop_generation.is_set():
                         logger.info("[WebSocket] Breaking loop due to stop request")
                         break
 
                     try:
-                        remaining = max(0.1, stream_deadline - asyncio.get_event_loop().time())
+                        remaining = max(0.1, stream_deadline - asyncio.get_running_loop().time())
                         item = await asyncio.wait_for(chunk_queue.get(), timeout=remaining)
                     except asyncio.TimeoutError:
                         logger.warning("[WebSocket] Stream timed out after 5 minutes")
@@ -603,7 +622,7 @@ async def websocket_chat(websocket: WebSocket):
                         # Build audio_url for frontend
                         audio_url = None
                         try:
-                            from apprentice_agent.services.voice_presence import get_voice_presence
+                            from aura.services.voice_presence import get_voice_presence
                             if get_voice_presence()._enabled:
                                 audio_url = "/api/voice/synthesize"
                         except Exception:
@@ -614,6 +633,7 @@ async def websocket_chat(websocket: WebSocket):
                             "response": full_response,
                             "mood": mood_dict,
                             "audio_url": audio_url,
+                            "model_used": item.get("model_used"),
                         })
                     elif item.get("type") == "error":
                         await websocket.send_json({
