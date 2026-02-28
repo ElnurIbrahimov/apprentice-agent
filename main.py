@@ -119,6 +119,16 @@ def run_chat_mode(agent, speak: bool = False):
         if not user_input:
             continue
 
+        # Signal activity to daemon (if running)
+        try:
+            import socket, json
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(0.1)
+                s.connect(("127.0.0.1", 19733))
+                s.send(json.dumps({"type": "activity"}).encode())
+        except Exception:
+            pass  # Daemon not running — fine
+
         if user_input.startswith("/"):
             handle_command(agent, user_input, speak=speak)
             continue
