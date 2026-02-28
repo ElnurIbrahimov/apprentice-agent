@@ -1269,15 +1269,24 @@ Keep it concise, readable, and well-formatted with markdown."""
             local_models = []
             cloud_models = list(VERIFIED_CLOUD_MODELS)
 
-            # Get locally installed models from Ollama
+            # Non-chat models to exclude from the selector (embeddings, OCR, etc.)
+            NON_CHAT_MODELS = {"nomic-embed-text:latest", "glm-ocr:latest"}
+
+            # Get locally installed models from Ollama — keep only true local chat models
             try:
                 ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
                 response = requests.get(f"{ollama_host}/api/tags", timeout=3)
                 if response.status_code == 200:
-                    local_models = [m["name"] for m in response.json().get("models", [])]
+                    all_ollama = [m["name"] for m in response.json().get("models", [])]
+                    # Cloud models (handled by cloud_models list) and non-chat models excluded
+                    local_models = [
+                        m for m in all_ollama
+                        if not m.endswith(("-cloud", ":cloud"))
+                        and m not in NON_CHAT_MODELS
+                    ]
             except Exception as e:
                 logger.warning(f"[AgentService] Could not fetch local models: {e}")
-                local_models = list(VERIFIED_LOCAL_MODELS)
+                local_models = []
 
             current_model = "auto"
             if self._agent is not None:
