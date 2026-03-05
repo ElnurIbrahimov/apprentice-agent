@@ -70,24 +70,26 @@ def _get_neuromodulator_levels() -> dict:
     Returns 0.5 for all if ALMA is unavailable.
     During sleep, applies NeuroDream oscillation-based neuromodulator offsets.
     """
+    _DEFAULTS = {"dopamine": 0.5, "serotonin": 0.5, "norepinephrine": 0.5, "oxytocin": 0.5}
     try:
         from aura.emotion.alma_engine import alma_engine
         state = alma_engine.get_emotional_state()
-        if state and "neuromodulators" in state:
-            base = state["neuromodulators"]
-            # Apply sleep neuromodulator influence from NeuroDream
-            try:
-                from aura.tools.neurodream import get_neurodream
-                nd = get_neurodream()
-                if nd.current_phase.value != "awake":
-                    influence = nd.get_sleep_neuromodulator_influence()
-                    return {k: max(0.0, min(1.0, base[k] + influence.get(k, 0.0))) for k in base}
-            except Exception:
-                pass
-            return base
+        base = (state or {}).get("neuromodulators") or {}
+        if not base:
+            return _DEFAULTS
+        # Apply sleep neuromodulator influence from NeuroDream
+        try:
+            from aura.tools.neurodream import get_neurodream
+            nd = get_neurodream()
+            if nd.current_phase.value != "awake":
+                influence = nd.get_sleep_neuromodulator_influence()
+                return {k: max(0.0, min(1.0, base[k] + influence.get(k, 0.0))) for k in base}
+        except Exception:
+            pass
+        return base
     except Exception:
         pass
-    return {"dopamine": 0.5, "serotonin": 0.5, "norepinephrine": 0.5, "oxytocin": 0.5}
+    return _DEFAULTS
 
 
 def _neuro_scale(base_value: float, neuro_level: float, sensitivity: float = 0.5) -> float:
@@ -107,12 +109,17 @@ def _neuro_scale(base_value: float, neuro_level: float, sensitivity: float = 0.5
     multiplier = max(NEURO_MIN_MULTIPLIER, min(NEURO_MAX_MULTIPLIER, multiplier))
     return base_value * multiplier
 
-# Shared thread pool to prevent thread leaks (max 3 concurrent LLM calls)
-_SHARED_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="llm_worker")
+# Shared thread pool to prevent thread leaks (max 6 concurrent LLM calls)
+_SHARED_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=6, thread_name_prefix="llm_worker")
+
+# Dedicated background pool for long-running non-user tasks (world model, self-improvement)
+# Keeps these from starving the shared chat pool
+_BG_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="aura-bg")
 
 def _cleanup_executor():
     """Cleanup shared executor on exit."""
     _SHARED_EXECUTOR.shutdown(wait=False, cancel_futures=True)
+    _BG_EXECUTOR.shutdown(wait=False, cancel_futures=True)
 
 atexit.register(_cleanup_executor)
 
@@ -201,12 +208,36 @@ class OllamaBrain:
             logger.debug(f"[BRAIN] Warning: OLLAMA_API_KEY not set, cloud models unavailable")
 
         self.model = Config.MODEL_NAME
+        self._max_history: int = getattr(Config, 'MAX_HISTORY_LENGTH', self._max_history)
         self.conversation_history: list[dict] = []
         self._history_lock = threading.Lock()
         self._last_model_used: str = self.model  # Track for metacognition
         self._query_count: int = 0  # Track queries for auto-reset (resets every 15)
         self._total_query_count: int = 0  # Total queries (never resets)
         self._model_override: Optional[str] = None  # Manual model override (bypasses auto-selection)
+
+        # Phase 4 — compaction notification flag
+        self._compaction_pending: bool = False
+
+        # Phase 4 — per-session token/cost tracking
+        self._session_input_tokens: int = 0
+        self._session_output_tokens: int = 0
+        self._session_cost_usd: float = 0.0
+        self._token_lock = threading.Lock()
+        # Rough USD cost per 1K tokens (input/output) for cloud models
+        self._MODEL_COST_PER_1K: dict = {
+            "gemini-3-flash-preview:cloud": (0.00015, 0.0006),
+            "nemotron-3-nano:30b-cloud":    (0.0004, 0.0004),
+            "kimi-k2.5:cloud":             (0.003,  0.003),
+            "kimi-k2-thinking:cloud":      (0.01,   0.03),
+            "qwen3.5:397b-cloud":          (0.004,  0.004),
+            "cogito-2.1:671b-cloud":       (0.004,  0.004),
+            "deepseek-v3.2:cloud":         (0.003,  0.003),
+            "qwen3-coder:480b-cloud":      (0.004,  0.004),
+            "devstral-2:123b-cloud":       (0.002,  0.002),
+            "minimax-m2.5:cloud":          (0.004,  0.004),
+        }
+        self._DEFAULT_COST_PER_1K = (0.003, 0.003)  # fallback for unknown models
 
         # Setup persistent history storage (legacy single-conversation path)
         self._history_dir = Config.CHROMADB_PATH.parent / "conversation"
@@ -218,10 +249,16 @@ class OllamaBrain:
         self._conversations_dir.mkdir(parents=True, exist_ok=True)
         self._conversations_index_file = self._conversations_dir / "index.json"
         self._current_conversation_id: Optional[str] = None
+        self._conversations_index_cache: dict | None = None
 
         # Migrate legacy history and initialize conversations
         self._migrate_legacy_history()
         self._load_history()
+
+        # System prompt additions TTL cache (Fix 4: prevent 8+ module queries per rapid message)
+        self._cached_system_additions: Optional[str] = None
+        self._system_additions_ts: float = 0.0
+        self._system_additions_lock = threading.RLock()
 
         # ALMA Emotional Intelligence
         self._alma_enabled = ALMA_AVAILABLE
@@ -250,6 +287,41 @@ class OllamaBrain:
                 logger.debug(f"[BRAIN] No OLLAMA_API_KEY — routing {model} via local Ollama bridge")
                 return self.client, model
         return self.client, model
+
+    def _get_fallback_chain(self, model: str) -> list:
+        """Return the fallback chain for the given model (Phase 4 — model fallback)."""
+        chains = [
+            Config.MODEL_FAST_CHAIN,
+            Config.MODEL_REASON_CHAIN,
+            Config.MODEL_CODE_CHAIN,
+            Config.MODEL_VISION_CHAIN,
+            Config.MODEL_THINK_CHAIN,
+            Config.MODEL_LONGCTX_CHAIN,
+        ]
+        for chain in chains:
+            if model in chain:
+                return chain
+        return []
+
+    def _record_tokens(self, model: str, input_tokens: int, output_tokens: int) -> None:
+        """Accumulate session token counts and estimated cost (Phase 4)."""
+        in_rate, out_rate = self._MODEL_COST_PER_1K.get(model, self._DEFAULT_COST_PER_1K)
+        cost = (input_tokens / 1000.0) * in_rate + (output_tokens / 1000.0) * out_rate
+        with self._token_lock:
+            self._session_input_tokens += input_tokens
+            self._session_output_tokens += output_tokens
+            self._session_cost_usd += cost
+
+    def get_session_stats(self) -> dict:
+        """Return per-session token usage and estimated cost (Phase 4)."""
+        with self._token_lock:
+            return {
+                "input_tokens": self._session_input_tokens,
+                "output_tokens": self._session_output_tokens,
+                "total_tokens": self._session_input_tokens + self._session_output_tokens,
+                "cost_usd": round(self._session_cost_usd, 6),
+                "queries": self._total_query_count,
+            }
 
     def _warmup_models(self) -> None:
         """Warm up local Ollama models with a keep-alive ping. Skipped for cloud models."""
@@ -286,20 +358,19 @@ class OllamaBrain:
 
     def _save_history(self) -> None:
         """Save conversation history to disk."""
-        try:
-            data = {
-                "history": self.conversation_history,
-                "query_count": self._query_count,
-                "total_query_count": self._total_query_count
-            }
-            self._history_file.write_text(
-                json.dumps(data, indent=2, ensure_ascii=False),
-                encoding="utf-8"
+        with self._history_lock:
+            data_str = json.dumps(
+                {
+                    "history": self.conversation_history,
+                    "query_count": self._query_count,
+                    "total_query_count": self._total_query_count,
+                },
+                indent=2,
+                ensure_ascii=False,
             )
-            # Update conversation index metadata
-            self._update_conversation_index_entry()
-        except IOError as e:
-            logger.warning(f"[BRAIN] Could not save history: {e}")
+        path = self._history_file
+        _BG_EXECUTOR.submit(lambda: path.write_text(data_str, encoding="utf-8"))
+        self._update_conversation_index_entry()
 
     def _save_history_snapshot(self, history: list, query_count: int, total_query_count: int) -> None:
         """Save a pre-copied history list to disk (called OUTSIDE _history_lock).
@@ -445,11 +516,16 @@ class OllamaBrain:
 
     def _load_conversations_index(self) -> list:
         """Load the conversations index."""
+        if self._conversations_index_cache is not None:
+            return self._conversations_index_cache
         try:
             if self._conversations_index_file.exists():
-                return json.loads(self._conversations_index_file.read_text(encoding="utf-8"))
+                data = json.loads(self._conversations_index_file.read_text(encoding="utf-8"))
+                self._conversations_index_cache = data
+                return data
         except (json.JSONDecodeError, IOError) as e:
             logger.warning(f"[BRAIN] Could not load conversations index: {e}")
+        self._conversations_index_cache = []
         return []
 
     def _save_conversations_index(self, index: list) -> None:
@@ -459,6 +535,7 @@ class OllamaBrain:
                 json.dumps(index, indent=2, ensure_ascii=False),
                 encoding="utf-8"
             )
+            self._conversations_index_cache = index
         except IOError as e:
             logger.warning(f"[BRAIN] Could not save conversations index: {e}")
 
@@ -776,6 +853,11 @@ class OllamaBrain:
             return ""
 
     def compact_history(self, focus: str = None) -> str:
+        """Compact conversation history asynchronously."""
+        _BG_EXECUTOR.submit(self._do_compact_history, focus)
+        return ""
+
+    def _do_compact_history(self, focus: str = None) -> str:
         """Compact conversation history by summarizing older messages.
 
         Takes the oldest 2/3 of conversation_history, asks LLM to summarize
@@ -842,11 +924,122 @@ class OllamaBrain:
                 summary = self.compact_history()
                 if summary:
                     logger.info(f"[BRAIN] Auto-compacted history: {summary[:100]}...")
+                    self._compaction_pending = True  # Phase 4: notify user on next response
                 else:
                     self._save_history()
             except Exception as e:
                 logger.warning(f"[BRAIN] Auto-compact failed, saving history: {e}")
                 self._save_history()
+
+    def _get_cached_system_additions(self) -> str:
+        """Return TTL-cached subsystem additions for the system prompt.
+
+        Queries all consciousness/emotion/user-model modules and caches the
+        combined result for 12 seconds. This prevents 8+ module round-trips on
+        every rapid sequential message. Thread-safe via _system_additions_lock.
+        """
+        with self._system_additions_lock:
+            if self._cached_system_additions is not None and (time.time() - self._system_additions_ts) < 12.0:
+                return self._cached_system_additions
+
+            additions = []
+
+            # === LEARNED CONTEXT INJECTION (Phase 4D: Letta-style) ===
+            try:
+                from aura.tools.neurodream import get_neurodream
+                nd = get_neurodream()
+                learned_ctx = nd.get_learned_context_prompt()
+                if learned_ctx:
+                    additions.append(learned_ctx)
+            except Exception:
+                pass
+
+            # === CALENDAR CONTEXT INJECTION (Phase 5D) ===
+            try:
+                from aura.proactive.monitors.calendar_monitor import get_calendar_monitor
+                cm = get_calendar_monitor()
+                cal_ctx = cm.get_context_for_prompt()
+                if cal_ctx:
+                    additions.append(cal_ctx)
+            except Exception:
+                pass
+
+            # === SELF-MODEL INJECTION (Phase 6B: Metacognitive Self-Improvement) ===
+            try:
+                from aura.consciousness.metacognition import get_metacognitive_engine
+                mc = get_metacognitive_engine()
+                self_model_ctx = mc.get_self_model_prompt()
+                if self_model_ctx:
+                    additions.append(self_model_ctx)
+            except Exception:
+                pass
+
+            # === USER MODEL INJECTION (Phase 6C / ADV-04: Theory of Mind) ===
+            try:
+                from aura.config import Config
+                if Config.MULTI_USER_ENABLED:
+                    from aura.multi_user import get_multi_user_manager
+                    manager = get_multi_user_manager()
+                    user_model = manager.get_active_user_model()
+                    if user_model:
+                        user_model_ctx = user_model.get_context_for_prompt()
+                        if user_model_ctx:
+                            additions.append(user_model_ctx)
+                else:
+                    from aura.proactive.theory_of_mind import get_theory_of_mind
+                    tom = get_theory_of_mind()
+                    user_model_ctx = tom.get_context_for_prompt()
+                    if user_model_ctx:
+                        additions.append(user_model_ctx)
+            except Exception:
+                pass
+
+            # === MOTIVATION INJECTION (Phase 6E: Intrinsic Motivation) ===
+            try:
+                from aura.consciousness.intrinsic_motivation import get_intrinsic_motivation
+                im = get_intrinsic_motivation()
+                motivation_ctx = im.get_context_for_prompt()
+                if motivation_ctx:
+                    additions.append(motivation_ctx)
+            except Exception:
+                pass
+
+            # === CONSCIOUS FOCUS INJECTION (Phase 7: Global Workspace Theory) ===
+            try:
+                from aura.consciousness.global_workspace import get_global_workspace
+                conscious_ctx = get_global_workspace().get_conscious_state().to_prompt_context()
+                if conscious_ctx:
+                    additions.append(conscious_ctx)
+            except Exception:
+                pass
+
+            # === WORLD STATE INJECTION (ADV-02: Persistent World Model) ===
+            try:
+                from aura.consciousness.world_model import get_world_model
+                wm = get_world_model()
+                world_ctx = wm.get_context_summary()
+                if world_ctx:
+                    additions.append(world_ctx)
+            except Exception:
+                pass
+
+            result = "\n\n".join(additions)
+            self._cached_system_additions = result
+            self._system_additions_ts = time.time()
+            return result
+
+    @staticmethod
+    def _classify_budget(query: str) -> int:
+        q = query.lower().strip()
+        if len(q) < 30 or any(q.startswith(p) for p in ("hi", "hello", "thanks", "ok ", "yes", "no")):
+            return 150   # conversational
+        if any(kw in q for kw in ("explain", "analyze", "compare", "research", "write", "implement")):
+            return 800   # complex
+        return 400       # default
+
+    @staticmethod
+    def _build_budget_instruction(budget: int) -> str:
+        return f"\n\n[Response budget: ~{budget} tokens. Be appropriately concise.]"
 
     def think(
         self,
@@ -886,37 +1079,9 @@ class OllamaBrain:
         else:
             full_system_prompt = identity_prompt
 
-        # === LEARNED CONTEXT INJECTION (Phase 4D: Letta-style) ===
-        try:
-            from aura.tools.neurodream import get_neurodream
-            nd = get_neurodream()
-            learned_ctx = nd.get_learned_context_prompt()
-            if learned_ctx:
-                full_system_prompt = f"{full_system_prompt}\n\n{learned_ctx}"
-        except Exception:
-            pass  # NeuroDream not available
-
-        # === CALENDAR CONTEXT INJECTION (Phase 5D) ===
-        try:
-            from aura.proactive.monitors.calendar_monitor import get_calendar_monitor
-            cm = get_calendar_monitor()
-            cal_ctx = cm.get_context_for_prompt()
-            if cal_ctx:
-                full_system_prompt = f"{full_system_prompt}\n\n{cal_ctx}"
-        except Exception:
-            pass  # Calendar monitor not available
-
-        # === SELF-MODEL INJECTION (Phase 6B: Metacognitive Self-Improvement) ===
-        try:
-            from aura.consciousness.metacognition import get_metacognitive_engine
-            mc = get_metacognitive_engine()
-            self_model_ctx = mc.get_self_model_prompt()
-            if self_model_ctx:
-                full_system_prompt = f"{full_system_prompt}\n\n{self_model_ctx}"
-        except Exception:
-            pass  # Metacognition not available
-
-        # === USER MODEL INJECTION (Phase 6C / ADV-04: Theory of Mind) ===
+        # === SUBSYSTEM CONTEXT INJECTION (cached, TTL=12s) ===
+        # Side-effect calls (observe/record) still run every time; only context
+        # retrieval is cached to avoid 8+ module round-trips on rapid messages.
         try:
             from aura.config import Config
             if Config.MULTI_USER_ENABLED:
@@ -925,48 +1090,20 @@ class OllamaBrain:
                 user_model = manager.get_active_user_model()
                 if user_model:
                     user_model.observe_message(prompt, role="user")
-                    user_model_ctx = user_model.get_context_for_prompt()
-                    if user_model_ctx:
-                        full_system_prompt = f"{full_system_prompt}\n\n{user_model_ctx}"
             else:
                 from aura.proactive.theory_of_mind import get_theory_of_mind
                 tom = get_theory_of_mind()
                 tom.observe_message(prompt, role="user")
-                user_model_ctx = tom.get_context_for_prompt()
-                if user_model_ctx:
-                    full_system_prompt = f"{full_system_prompt}\n\n{user_model_ctx}"
         except Exception:
-            pass  # Theory of Mind / Multi-User not available
-
-        # === MOTIVATION INJECTION (Phase 6E: Intrinsic Motivation) ===
+            pass
         try:
             from aura.consciousness.intrinsic_motivation import get_intrinsic_motivation
-            im = get_intrinsic_motivation()
-            im.record_interaction()  # Satisfies social drive
-            motivation_ctx = im.get_context_for_prompt()
-            if motivation_ctx:
-                full_system_prompt = f"{full_system_prompt}\n\n{motivation_ctx}"
+            get_intrinsic_motivation().record_interaction()  # Satisfies social drive
         except Exception:
-            pass  # Intrinsic motivation not available
-
-        # === CONSCIOUS FOCUS INJECTION (Phase 7: Global Workspace Theory) ===
-        try:
-            from aura.consciousness.global_workspace import get_global_workspace
-            conscious_ctx = get_global_workspace().get_conscious_state().to_prompt_context()
-            if conscious_ctx:
-                full_system_prompt = f"{full_system_prompt}\n\n{conscious_ctx}"
-        except Exception:
-            pass  # Global Workspace not available
-
-        # === WORLD STATE INJECTION (ADV-02: Persistent World Model) ===
-        try:
-            from aura.consciousness.world_model import get_world_model
-            wm = get_world_model()
-            world_ctx = wm.get_context_summary()
-            if world_ctx:
-                full_system_prompt = f"{full_system_prompt}\n\n{world_ctx}"
-        except Exception:
-            pass  # World Model not available
+            pass
+        sys_additions = self._get_cached_system_additions()
+        if sys_additions:
+            full_system_prompt = f"{full_system_prompt}\n\n{sys_additions}"
 
         # Apply emotional tone modifier - auto-generate from ALMA if not provided
         if tone_modifier:
@@ -987,7 +1124,7 @@ class OllamaBrain:
                 mod_parts = []
                 if mod.get("verbosity", 0.5) < 0.35:
                     mod_parts.append("Keep response concise.")
-                elif mod.get("verbosity", 0.5) > 0.65:
+                elif mod.get("verbosity", 0.5) > 0.80:
                     mod_parts.append("Feel free to elaborate.")
                 if mod.get("formality", 0.4) > 0.6:
                     mod_parts.append("Use a formal tone.")
@@ -1002,11 +1139,23 @@ class OllamaBrain:
             except Exception:
                 pass
 
+        # Auto-compact if conversation history is getting long
+        if use_history and len(self.conversation_history) > 40:
+            try:
+                summary = self.compact_history()
+                if summary:
+                    logger.info(f"[BRAIN] Auto-compacted history → {len(self.conversation_history)} msgs remain")
+            except Exception:
+                pass
+
+        budget = self._classify_budget(prompt)
+        full_system_prompt = f"{full_system_prompt}{self._build_budget_instruction(budget)}"
+
         messages = []
         if full_system_prompt:
             messages.append({"role": "system", "content": full_system_prompt})
         if use_history:
-            messages.extend(self.conversation_history[-self.MAX_HISTORY_LENGTH:])
+            messages.extend(self.conversation_history[-self._max_history:])
         messages.append({"role": "user", "content": prompt})
 
         # Neuromodulator: Serotonin modulates patience (timeout)
@@ -1097,10 +1246,46 @@ class OllamaBrain:
         )
 
         if response is None:
-            logger.warning(f"[BRAIN] LLM call timed out or failed, returning fallback")
+            # ===== Phase 4 Fix 4B: Try fallback models in chain =====
+            chain = self._get_fallback_chain(actual_model)
+            for fallback_model in chain:
+                if fallback_model == actual_model:
+                    continue
+                try:
+                    fb_client, fb_actual = self._get_client_for_model(fallback_model)
+                    logger.info(f"[BRAIN] Fallback attempt: {actual_model} → {fb_actual}")
+                    response = call_with_timeout(
+                        lambda m=fb_actual, c=fb_client: c.chat(model=m, messages=messages, options=llm_options),
+                        timeout=adjusted_timeout,
+                        default=None,
+                    )
+                    if response is not None:
+                        actual_model = fb_actual
+                        self._last_model_used = actual_model
+                        logger.info(f"[BRAIN] Fallback succeeded with: {actual_model}")
+                        break
+                except Exception:
+                    continue
+
+        if response is None:
+            logger.warning(f"[BRAIN] All models in chain failed, returning error message")
             return "I'm having trouble processing that right now. Please try again."
 
         assistant_message = response["message"]["content"]
+
+        # ===== Phase 4 Fix 4D: Track tokens and cost =====
+        _in_tok = response.get("prompt_eval_count", 0) or 0
+        _out_tok = response.get("eval_count", 0) or 0
+        if _in_tok or _out_tok:
+            self._record_tokens(actual_model, _in_tok, _out_tok)
+
+        # ===== Phase 4 Fix 4C: Compaction notice =====
+        if self._compaction_pending:
+            self._compaction_pending = False
+            assistant_message = (
+                "_[Context compacted — older messages summarized to preserve memory]_\n\n"
+                + assistant_message
+            )
 
         if use_history:
             with self._history_lock:
@@ -1121,30 +1306,14 @@ class OllamaBrain:
         # === SELF-IMPROVEMENT: Record interaction outcome ===
         try:
             from aura.consciousness.self_improvement import get_self_improvement_engine
-            _SHARED_EXECUTOR.submit(
+            _BG_EXECUTOR.submit(
                 get_self_improvement_engine().record_chat_outcome,
                 prompt, assistant_message, actual_model
             )
         except Exception:
             pass
 
-        # === WORLD MODEL EXTRACTION (ADV-02 Phase 2) ===
-        try:
-            from aura.consciousness.world_model import get_world_model
-            wm = get_world_model()
-            if wm.enabled:
-                conv_id = self.get_current_conversation_id()
-                try:
-                    _SHARED_EXECUTOR.submit(_run_world_model_extraction, conv_id, list(recent))
-                except Exception:
-                    threading.Thread(
-                        target=_run_world_model_extraction,
-                        args=(conv_id, list(recent)),
-                        daemon=True,
-                        name=f"wm-extract-{conv_id[:8]}",
-                    ).start()
-        except Exception:
-            pass
+        self._trigger_world_model_extraction(list(recent), _BG_EXECUTOR)
 
         return assistant_message
 
@@ -1191,37 +1360,9 @@ class OllamaBrain:
         else:
             full_system_prompt = identity_prompt
 
-        # === LEARNED CONTEXT INJECTION (Phase 4D: Letta-style) ===
-        try:
-            from aura.tools.neurodream import get_neurodream
-            nd = get_neurodream()
-            learned_ctx = nd.get_learned_context_prompt()
-            if learned_ctx:
-                full_system_prompt = f"{full_system_prompt}\n\n{learned_ctx}"
-        except Exception:
-            pass  # NeuroDream not available
-
-        # === CALENDAR CONTEXT INJECTION (Phase 5D) ===
-        try:
-            from aura.proactive.monitors.calendar_monitor import get_calendar_monitor
-            cm = get_calendar_monitor()
-            cal_ctx = cm.get_context_for_prompt()
-            if cal_ctx:
-                full_system_prompt = f"{full_system_prompt}\n\n{cal_ctx}"
-        except Exception:
-            pass  # Calendar monitor not available
-
-        # === SELF-MODEL INJECTION (Phase 6B: Metacognitive Self-Improvement) ===
-        try:
-            from aura.consciousness.metacognition import get_metacognitive_engine
-            mc = get_metacognitive_engine()
-            self_model_ctx = mc.get_self_model_prompt()
-            if self_model_ctx:
-                full_system_prompt = f"{full_system_prompt}\n\n{self_model_ctx}"
-        except Exception:
-            pass  # Metacognition not available
-
-        # === USER MODEL INJECTION (Phase 6C / ADV-04: Theory of Mind) ===
+        # === SUBSYSTEM CONTEXT INJECTION (cached, TTL=12s) ===
+        # Side-effect calls (observe/record) still run every time; only context
+        # retrieval is cached to avoid 8+ module round-trips on rapid messages.
         try:
             from aura.config import Config
             if Config.MULTI_USER_ENABLED:
@@ -1230,48 +1371,20 @@ class OllamaBrain:
                 user_model = manager.get_active_user_model()
                 if user_model:
                     user_model.observe_message(prompt, role="user")
-                    user_model_ctx = user_model.get_context_for_prompt()
-                    if user_model_ctx:
-                        full_system_prompt = f"{full_system_prompt}\n\n{user_model_ctx}"
             else:
                 from aura.proactive.theory_of_mind import get_theory_of_mind
                 tom = get_theory_of_mind()
                 tom.observe_message(prompt, role="user")
-                user_model_ctx = tom.get_context_for_prompt()
-                if user_model_ctx:
-                    full_system_prompt = f"{full_system_prompt}\n\n{user_model_ctx}"
         except Exception:
-            pass  # Theory of Mind / Multi-User not available
-
-        # === MOTIVATION INJECTION (Phase 6E: Intrinsic Motivation) ===
+            pass
         try:
             from aura.consciousness.intrinsic_motivation import get_intrinsic_motivation
-            im = get_intrinsic_motivation()
-            im.record_interaction()  # Satisfies social drive
-            motivation_ctx = im.get_context_for_prompt()
-            if motivation_ctx:
-                full_system_prompt = f"{full_system_prompt}\n\n{motivation_ctx}"
+            get_intrinsic_motivation().record_interaction()  # Satisfies social drive
         except Exception:
-            pass  # Intrinsic motivation not available
-
-        # === CONSCIOUS FOCUS INJECTION (Phase 7: Global Workspace Theory) ===
-        try:
-            from aura.consciousness.global_workspace import get_global_workspace
-            conscious_ctx = get_global_workspace().get_conscious_state().to_prompt_context()
-            if conscious_ctx:
-                full_system_prompt = f"{full_system_prompt}\n\n{conscious_ctx}"
-        except Exception:
-            pass  # Global Workspace not available
-
-        # === WORLD STATE INJECTION (ADV-02: Persistent World Model) ===
-        try:
-            from aura.consciousness.world_model import get_world_model
-            wm = get_world_model()
-            world_ctx = wm.get_context_summary()
-            if world_ctx:
-                full_system_prompt = f"{full_system_prompt}\n\n{world_ctx}"
-        except Exception:
-            pass  # World Model not available
+            pass
+        sys_additions = self._get_cached_system_additions()
+        if sys_additions:
+            full_system_prompt = f"{full_system_prompt}\n\n{sys_additions}"
 
         # Apply emotional tone modifier - auto-generate from ALMA if not provided
         if tone_modifier:
@@ -1292,7 +1405,7 @@ class OllamaBrain:
                 mod_parts = []
                 if mod.get("verbosity", 0.5) < 0.35:
                     mod_parts.append("Keep response concise.")
-                elif mod.get("verbosity", 0.5) > 0.65:
+                elif mod.get("verbosity", 0.5) > 0.80:
                     mod_parts.append("Feel free to elaborate.")
                 if mod.get("formality", 0.4) > 0.6:
                     mod_parts.append("Use a formal tone.")
@@ -1307,11 +1420,23 @@ class OllamaBrain:
             except Exception:
                 pass
 
+        # Auto-compact if conversation history is getting long
+        if use_history and len(self.conversation_history) > 40:
+            try:
+                summary = self.compact_history()
+                if summary:
+                    logger.info(f"[BRAIN] Auto-compacted history → {len(self.conversation_history)} msgs remain")
+            except Exception:
+                pass
+
+        budget = self._classify_budget(prompt)
+        full_system_prompt = f"{full_system_prompt}{self._build_budget_instruction(budget)}"
+
         messages = []
         if full_system_prompt:
             messages.append({"role": "system", "content": full_system_prompt})
         if use_history:
-            messages.extend(self.conversation_history[-self.MAX_HISTORY_LENGTH:])
+            messages.extend(self.conversation_history[-self._max_history:])
         messages.append({"role": "user", "content": prompt})
 
         logger.debug(f"[BRAIN] Streaming call to {model}")
@@ -1333,21 +1458,53 @@ class OllamaBrain:
             pass
 
         full_response = ""
-        try:
-            # Use Ollama's streaming API
-            stream = client.chat(model=actual_model, messages=messages, stream=True)
 
-            for chunk in stream:
-                if chunk and "message" in chunk and "content" in chunk["message"]:
-                    content = chunk["message"]["content"]
-                    full_response += content
-                    yield content
+        # ===== Phase 4 Fix 4C: Compaction notice on streaming path =====
+        if self._compaction_pending:
+            self._compaction_pending = False
+            notice = "_[Context compacted — older messages summarized to preserve memory]_\n\n"
+            yield notice
+            full_response += notice
 
-        except Exception as e:
-            logger.error(f"[BRAIN] Streaming error: {e}")
-            fallback = "I'm having trouble processing that right now. Please try again."
-            yield fallback
-            full_response = fallback
+        # ===== Phase 4 Fix 4B+4D: Streaming with fallback chain + token tracking =====
+        _stream_in_tok = 0
+        _stream_out_tok = 0
+        _models_to_try = [actual_model] + [
+            m for m in self._get_fallback_chain(actual_model) if m != actual_model
+        ]
+        _succeeded = False
+
+        for _try_model in _models_to_try:
+            try:
+                _try_client, _try_actual = self._get_client_for_model(_try_model)
+                if _try_model != _models_to_try[0]:
+                    logger.info(f"[BRAIN] Stream fallback: {actual_model} → {_try_actual}")
+                stream = _try_client.chat(model=_try_actual, messages=messages, stream=True)
+                for chunk in stream:
+                    if chunk and "message" in chunk and "content" in chunk["message"]:
+                        content = chunk["message"]["content"]
+                        full_response += content
+                        yield content
+                    # Extract token counts from final done chunk
+                    if chunk.get("done"):
+                        _stream_in_tok = chunk.get("prompt_eval_count", 0) or 0
+                        _stream_out_tok = chunk.get("eval_count", 0) or 0
+                actual_model = _try_actual
+                self._last_model_used = actual_model
+                _succeeded = True
+                break
+            except Exception as e:
+                if _try_model == _models_to_try[-1]:
+                    logger.error(f"[BRAIN] All stream models failed: {e}")
+                    fallback = "I'm having trouble processing that right now. Please try again."
+                    yield fallback
+                    full_response += fallback
+                else:
+                    logger.warning(f"[BRAIN] Stream model {_try_model} failed, trying next: {e}")
+                continue
+
+        if _stream_in_tok or _stream_out_tok:
+            self._record_tokens(actual_model, _stream_in_tok, _stream_out_tok)
 
         # Update history after streaming completes
         if use_history and full_response:
@@ -1355,8 +1512,8 @@ class OllamaBrain:
                 self.conversation_history.append({"role": "user", "content": prompt})
                 self.conversation_history.append({"role": "assistant", "content": full_response})
                 # Enforce history limit
-                if len(self.conversation_history) > self.MAX_HISTORY_LENGTH:
-                    self.conversation_history = self.conversation_history[-self.MAX_HISTORY_LENGTH:]
+                if len(self.conversation_history) > self._max_history:
+                    self.conversation_history = self.conversation_history[-self._max_history:]
                 recent = list(self.conversation_history[-6:])
                 _history_snapshot = list(self.conversation_history)
                 _qc = self._query_count
@@ -1379,21 +1536,28 @@ class OllamaBrain:
         except Exception:
             pass
 
-        # === WORLD MODEL EXTRACTION (ADV-02 Phase 2) ===
+        self._trigger_world_model_extraction(list(recent), _SHARED_EXECUTOR)
+
+    def _trigger_world_model_extraction(self, recent: list, executor=None) -> None:
+        """Submit background world model extraction (deduplicates logic from think/think_stream)."""
         try:
             from aura.consciousness.world_model import get_world_model
             wm = get_world_model()
-            if wm.enabled:
-                conv_id = self.get_current_conversation_id()
+            if not wm.enabled:
+                return
+            conv_id = self.get_current_conversation_id()
+            if executor is not None:
                 try:
-                    _SHARED_EXECUTOR.submit(_run_world_model_extraction, conv_id, list(recent))
-                except Exception:
-                    threading.Thread(
-                        target=_run_world_model_extraction,
-                        args=(conv_id, list(recent)),
-                        daemon=True,
-                        name=f"wm-extract-{conv_id[:8]}",
-                    ).start()
+                    executor.submit(_run_world_model_extraction, conv_id, recent)
+                    return
+                except RuntimeError:
+                    pass  # Executor shut down — fall through to daemon thread
+            threading.Thread(
+                target=_run_world_model_extraction,
+                args=(conv_id, recent),
+                daemon=True,
+                name=f"wm-extract-{conv_id[:8]}",
+            ).start()
         except Exception:
             pass
 
@@ -1521,6 +1685,21 @@ class OllamaBrain:
         # Short conversational queries always use fast model — skip all escalation logic.
         # No 397B model needed for "what do you think?" or "how does this work?"
         words = prompt.split()
+        # Code/dev keywords override the short-query fast-model forcing
+        _CODE_KWS = {
+            'code', 'bug', 'fix', 'debug', 'test', 'tests', 'function',
+            'script', 'error', 'implement', 'refactor', 'compile', 'run',
+            'deploy', 'build', 'import', 'class', 'method', 'api',
+            'database', 'query', 'sql', 'python', 'javascript',
+        }
+        if len(words) <= 5 and any(kw in prompt.lower() for kw in _CODE_KWS):
+            logger.info(f"[BRAIN] Short code query ({len(words)} words) → code model")
+            return Config.get_model("code")
+        # Trivial queries (≤5 words): always fast model, no escalation possible
+        if len(words) <= 5:
+            logger.info(f"[BRAIN] Trivial query ({len(words)} words) → fast model (forced)")
+            return Config.MODEL_FAST
+        # Short queries (6-15 words): fast model unless complex
         if len(words) <= 15 and not self._is_complex_query(prompt):
             logger.info(f"[BRAIN] Short query ({len(words)} words) → fast model")
             return Config.MODEL_FAST
