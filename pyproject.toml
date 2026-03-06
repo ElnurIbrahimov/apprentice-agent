@@ -6,11 +6,13 @@ build-backend = "setuptools.build_meta"
 name = "aura"
 version = "1.0.0"
 description = "AURA - Autonomous Universal Reasoning Agent"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 
 [project.scripts]
 aura = "main:main"
 
 [tool.setuptools]
 py-modules = ["main"]
-packages = ["apprentice_agent", "apprentice_agent.tools", "apprentice_agent.services", "api", "api.routes"]
+
+[tool.setuptools.packages.find]
+exclude = ["tests*", "web*", "docs*", "scripts*"]

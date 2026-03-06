@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, KeyboardEvent, FormEvent, DragEvent, ClipboardEvent } from 'react';
-import { PaperAirplaneIcon, PaperClipIcon } from '@heroicons/react/24/solid';
+import { PaperAirplaneIcon, PaperClipIcon, MicrophoneIcon } from '@heroicons/react/24/solid';
 import { MagnifyingGlassIcon, BookOpenIcon, CpuChipIcon, BeakerIcon, UserGroupIcon } from '@heroicons/react/24/outline';
 import { AttachmentList } from './AttachmentPreview';
 import { useFileUpload, isSupported } from '../hooks/useFileUpload';
@@ -29,6 +29,8 @@ export function MessageInput({
   const [actionMode, setActionMode] = useState<ActionMode>('none');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
 
   const {
     attachments,
@@ -56,6 +58,45 @@ export function MessageInput({
   useEffect(() => {
     textareaRef.current?.focus();
   }, []);
+
+  // Keyboard shortcut: Ctrl+K focus input
+  useEffect(() => {
+    const handler = () => textareaRef.current?.focus();
+    document.addEventListener('aura:focus-input', handler);
+    return () => document.removeEventListener('aura:focus-input', handler);
+  }, []);
+
+  // Cleanup speech recognition on unmount
+  useEffect(() => {
+    return () => { recognitionRef.current?.abort(); };
+  }, []);
+
+  const handleVoiceToggle = () => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) return;
+
+    if (isListening && recognitionRef.current) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+      return;
+    }
+
+    const recognition = new SR();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = 'en-US';
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      const transcript = event.results[0][0].transcript;
+      setMessage(prev => prev ? `${prev} ${transcript}` : transcript);
+      setIsListening(false);
+    };
+    recognition.onerror = () => setIsListening(false);
+    recognition.onend = () => setIsListening(false);
+
+    recognitionRef.current = recognition;
+    recognition.start();
+    setIsListening(true);
+  };
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -313,6 +354,7 @@ export function MessageInput({
             type="button"
             onClick={handleFileSelect}
             disabled={disabled}
+            aria-label="Attach file"
             className={`
               p-3 rounded-lg ml-1
               transition-all duration-200
@@ -326,12 +368,32 @@ export function MessageInput({
             <PaperClipIcon className="w-5 h-5" />
           </button>
 
+          {/* Voice input */}
+          <button
+            type="button"
+            onClick={handleVoiceToggle}
+            disabled={disabled}
+            aria-label="Voice input"
+            className={`
+              p-3 rounded-lg transition-all duration-200
+              ${isListening
+                ? 'text-red-400 bg-red-500/20 animate-pulse'
+                : disabled
+                  ? 'text-chat-text-secondary/50 cursor-not-allowed'
+                  : 'text-chat-text-secondary hover:text-aura-purple hover:bg-aura-purple/10'
+              }
+            `}
+            title={isListening ? 'Stop listening' : 'Voice input'}
+          >
+            <MicrophoneIcon className="w-5 h-5" />
+          </button>
+
           {/* Hidden file input */}
           <input
             ref={fileInputRef}
             type="file"
             multiple
-            accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.pdf,.txt,.md,.json,.py,.js,.ts,.tsx,.jsx,.html,.css,.java,.c,.cpp,.h,.go,.rs,.rb,.php,.sh,.yaml,.yml,.toml,.xml,.sql"
+            accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.pdf,.txt,.md,.json,.py,.js,.ts,.tsx,.jsx,.html,.css,.java,.c,.cpp,.h,.go,.rs,.rb,.php,.sh,.yaml,.yml,.toml,.xml,.sql,.zip"
             onChange={handleFileChange}
             className="hidden"
           />
@@ -359,6 +421,7 @@ export function MessageInput({
             <button
               type="button"
               onClick={onStop}
+              aria-label="Stop generation"
               className="absolute right-2 bottom-2 w-10 h-10 rounded-full border border-gray-600 bg-gray-800/90 flex items-center justify-center hover:bg-gray-700 hover:border-gray-500 transition-all duration-150"
               title="Stop generation"
             >
@@ -370,6 +433,7 @@ export function MessageInput({
             <button
               type="submit"
               disabled={!canSend}
+              aria-label="Send message"
               className={`
                 absolute right-2 bottom-2 p-2.5 rounded-lg
                 transition-all duration-300 ease-out

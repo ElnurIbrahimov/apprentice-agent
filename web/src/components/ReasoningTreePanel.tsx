@@ -180,19 +180,91 @@ function TreeNode({ node, depth = 0, expanded, onToggle }: {
   );
 }
 
+// Generate a plain-English explanation from MCTS result data (no LLM call needed)
+function generateExplanation(result: ReasoningResult, tree: TreeVisualization | null): string {
+  if (!result) return '';
+  const { metadata, reasoning_steps, confidence } = result;
+  const nodes = metadata?.nodes_explored || 0;
+  const iters = metadata?.iterations || 0;
+  const reflections = metadata?.reflections_count || 0;
+  const timeTaken = metadata?.time_taken?.toFixed(1) || '?';
+
+  const stepTypes = reasoning_steps?.reduce((acc: Record<string, number>, s) => {
+    acc[s.type] = (acc[s.type] || 0) + 1;
+    return acc;
+  }, {}) || {};
+
+  const typeDescriptions: Record<string, string> = {
+    reasoning: 'analytical reasoning branches',
+    action: 'action steps',
+    conclusion: 'conclusions',
+    observation: 'observations',
+    reflection: 'self-corrections',
+  };
+
+  const stepSummary = Object.entries(stepTypes)
+    .map(([type, count]) => `${count} ${typeDescriptions[type] || type}`)
+    .join(', ');
+
+  const confidenceLabel = confidence >= 0.8 ? 'high' : confidence >= 0.5 ? 'moderate' : 'low';
+  const reflectionNote = reflections > 0
+    ? ` Along the way, ${reflections} self-correction${reflections > 1 ? 's' : ''} helped prune poor paths and refocus the search.`
+    : '';
+
+  const maxDepth = tree?.stats?.max_depth || '?';
+
+  return [
+    `MCTS explored ${nodes} thought nodes across ${iters} iterations in ${timeTaken}s.`,
+    '',
+    stepSummary ? `The winning path consists of: ${stepSummary}.` : '',
+    '',
+    `Search depth reached ${maxDepth} levels.${reflectionNote}`,
+    '',
+    `Final confidence: ${(confidence * 100).toFixed(0)}% (${confidenceLabel}).`,
+    confidence < 0.5 ? 'The low confidence suggests the problem may need more iterations or a different framing.' : '',
+  ].filter(Boolean).join('\n');
+}
+
+function generateMarkdown(problem: string, result: ReasoningResult, tree: TreeVisualization | null): string {
+  const lines = [
+    `# MCTS Reasoning: ${problem}`,
+    '',
+    `**Confidence:** ${(result.confidence * 100).toFixed(0)}%  `,
+    `**Nodes explored:** ${result.metadata?.nodes_explored || 0}  `,
+    `**Iterations:** ${result.metadata?.iterations || 0}  `,
+    `**Time:** ${result.metadata?.time_taken?.toFixed(1) || '?'}s`,
+    '',
+    '## Answer',
+    '',
+    result.answer,
+    '',
+    '## Reasoning Path',
+    '',
+    ...(result.reasoning_steps || []).map((s, i) =>
+      `**Step ${i + 1}** [${s.type}] (${(s.value * 100).toFixed(0)}%)\n${s.content}`
+    ),
+    '',
+    '## Explanation',
+    '',
+    generateExplanation(result, tree),
+  ];
+  return lines.join('\n');
+}
+
 export function ReasoningTreePanel() {
   const [problem, setProblem] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ReasoningResult | null>(null);
   const [tree, setTree] = useState<TreeVisualization | null>(null);
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
-  const [activeTab, setActiveTab] = useState<'input' | 'result' | 'tree'>('input');
+  const [activeTab, setActiveTab] = useState<'input' | 'result' | 'tree' | 'explain'>('input');
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   // Fetch current status
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/reasoning-tree/status');
+      const res = await fetch('/api/reasoning-tree/status');
       if (res.ok) {
         const data = await res.json();
         console.log('[ReasoningTree] Status:', data);
@@ -215,7 +287,7 @@ export function ReasoningTreePanel() {
     setTree(null);
 
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/reasoning-tree/think', {
+      const res = await fetch('/api/reasoning-tree/think', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -235,7 +307,7 @@ export function ReasoningTreePanel() {
 
       // Fetch tree visualization
       if (data.session_id) {
-        const treeRes = await fetch(`http://127.0.0.1:8000/api/reasoning-tree/tree/${data.session_id}`);
+        const treeRes = await fetch(`/api/reasoning-tree/tree/${data.session_id}`);
         if (treeRes.ok) {
           const treeData = await treeRes.json();
           setTree(treeData);
@@ -339,6 +411,20 @@ export function ReasoningTreePanel() {
           title={!tree ? 'Run a reasoning session first' : 'View reasoning tree'}
         >
           Tree View {!tree && '🔒'}
+        </button>
+        <button
+          onClick={() => setActiveTab('explain')}
+          disabled={!result}
+          className={`px-3 py-1 rounded text-sm transition-colors ${
+            activeTab === 'explain'
+              ? 'bg-purple-600 text-white'
+              : !result
+                ? 'text-chat-text-secondary/40 cursor-not-allowed'
+                : 'text-chat-text-secondary hover:text-chat-text hover:bg-chat-assistant'
+          }`}
+          title={!result ? 'Run a reasoning session first' : 'Plain-English explanation'}
+        >
+          Explain {!result && '🔒'}
         </button>
       </div>
 
@@ -515,6 +601,84 @@ export function ReasoningTreePanel() {
             <span>✅ Conclusion</span>
             <span>🪞 Reflection</span>
           </div>
+        </div>
+      )}
+
+      {/* Explain Tab */}
+      {activeTab === 'explain' && result && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm text-chat-text-secondary">Plain-English Explanation</h4>
+            <button
+              onClick={() => {
+                const md = generateMarkdown(problem, result, tree);
+                navigator.clipboard.writeText(md).then(() => {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                });
+              }}
+              className="px-2 py-1 text-xs bg-chat-assistant hover:bg-chat-border rounded text-chat-text-secondary hover:text-chat-text transition-colors"
+            >
+              {copied ? '✓ Copied!' : 'Export Markdown'}
+            </button>
+          </div>
+
+          {/* Explanation */}
+          <div className="bg-chat-assistant rounded p-3 text-sm text-chat-text leading-relaxed whitespace-pre-line">
+            {generateExplanation(result, tree)}
+          </div>
+
+          {/* Visual confidence bar */}
+          <div>
+            <div className="flex justify-between text-xs text-chat-text-secondary mb-1">
+              <span>Confidence</span>
+              <span>{(result.confidence * 100).toFixed(0)}%</span>
+            </div>
+            <div className="bg-chat-assistant rounded-full h-2">
+              <div
+                className={`h-2 rounded-full transition-all ${
+                  result.confidence >= 0.7 ? 'bg-green-500' :
+                  result.confidence >= 0.4 ? 'bg-yellow-500' : 'bg-red-500'
+                }`}
+                style={{ width: `${Math.min(result.confidence * 100, 100)}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Step type breakdown */}
+          {result.reasoning_steps?.length > 0 && (
+            <div>
+              <div className="text-xs text-chat-text-secondary mb-2">Reasoning composition</div>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(
+                  result.reasoning_steps.reduce((acc: Record<string, number>, s) => {
+                    acc[s.type] = (acc[s.type] || 0) + 1;
+                    return acc;
+                  }, {})
+                ).map(([type, count]) => (
+                  <div key={type} className="bg-chat-assistant rounded px-2 py-1 text-xs">
+                    <span className="text-purple-400">{count}×</span>
+                    <span className="text-chat-text-secondary ml-1">{type}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Best path highlight */}
+          {result.reasoning_steps && result.reasoning_steps.length > 0 && (
+            <div>
+              <div className="text-xs text-chat-text-secondary mb-2">Best step (highest value)</div>
+              <div className="bg-green-900/20 border border-green-600/20 rounded p-2 text-sm">
+                <div className="text-green-400 text-xs mb-1">
+                  {(Math.max(...result.reasoning_steps.map((s) => s.value)) * 100).toFixed(0)}% confidence
+                </div>
+                <div className="text-chat-text">
+                  {result.reasoning_steps.reduce((best, s) => s.value > best.value ? s : best).content}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

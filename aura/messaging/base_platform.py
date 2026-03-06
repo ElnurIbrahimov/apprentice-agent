@@ -10,6 +10,8 @@ from datetime import datetime
 from enum import Enum
 import logging
 
+from .sanitizer import sanitize_outgoing
+
 logger = logging.getLogger(__name__)
 
 
@@ -109,50 +111,40 @@ class BasePlatform(ABC):
 
     def _update_user_context(self, message: IncomingMessage):
         """Update AURA's context about this user"""
-        # Store platform-specific user info
-        user_info = {
-            "platform": self.platform_name,
-            "user_id": message.user_id,
-            "username": message.username,
-            "display_name": message.display_name,
-            "last_seen": message.timestamp.isoformat()
-        }
-
-        # Could update AURA's user profile here
-        if hasattr(self.aura, 'memory') and hasattr(self.aura.memory, 'extract_and_store_profile'):
-            # Extract profile from message
-            self.aura.memory.extract_and_store_profile(message.text or "")
+        # Store platform-specific user info — currently informational only.
+        # The agent's memory system handles profile extraction
+        # automatically within its chat() pipeline.
+        pass
 
     async def _process_with_aura(self, text: str, user_id: str) -> str:
-        """Process message through AURA engine"""
+        """Process message through AURA agent.
 
-        # Try fast path first (for instant responses)
-        if hasattr(self.aura, 'fast_path'):
-            from aura.fast_path import FastPathHandler
-            fast_handler = FastPathHandler(self.aura)
-            fast_response = fast_handler.try_fast_path(text)
-            if fast_response:
-                return fast_response
+        Uses ApprenticeAgent.chat() which handles fast-path, memory,
+        emotion, LLM generation, and humanization internally.
+        """
+        try:
+            if hasattr(self.aura, 'chat'):
+                response = self.aura.chat(text)
+                if response:
+                    return response
+        except Exception as e:
+            logger.error(f"Agent chat error: {e}")
 
-        # Fall back to full AURA processing
-        if hasattr(self.aura, 'process_input'):
-            # Use the engine's process_input/process_response flow
-            context = self.aura.process_input(text)
-
-            # For messaging, we need to generate a response
-            # This would normally come from the LLM, but for fast responses:
-            mock_response = "I hear you! Let me think about that..."
-
-            response = self.aura.process_response(mock_response, context)
-            return response.content
-
-        # Direct fallback
         return "Hey! I got your message. What's up?"
 
     async def send_proactive(self, chat_id: str, message: str):
-        """Send a proactive message (for follow-ups, greetings, etc.)"""
+        """Send a proactive message (for follow-ups, greetings, etc.)
+
+        All proactive messages are sanitized before sending to prevent
+        prompt injection exfiltration from LLM-generated content.
+        """
+        clean_message, flagged = sanitize_outgoing(message, source="proactive_awareness")
+        if flagged:
+            logger.warning(
+                f"[{self.platform_name}] Proactive message to {chat_id} was flagged by sanitizer"
+            )
         outgoing = OutgoingMessage(
             chat_id=chat_id,
-            text=message
+            text=clean_message
         )
         return await self.send_message(outgoing)

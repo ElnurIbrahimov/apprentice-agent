@@ -55,14 +55,15 @@ async def main():
     print("=" * 50)
     print("")
 
-    # Import AURA
+    # Import ApprenticeAgent (wraps ALMA + unified memory)
     try:
-        from aura.engine import AURAEngine
-        print("Loading AURA engine...")
-        aura = AURAEngine()
-        print("AURA engine loaded")
+        from aura.agent import ApprenticeAgent
+        print("Loading ApprenticeAgent...")
+        agent = ApprenticeAgent(fast_init=True)
+        aura = agent  # MessageRouter uses the aura interface
+        print(f"ApprenticeAgent loaded with {len(agent.tools)} tools")
     except Exception as e:
-        logger.error(f"Error loading AURA: {e}")
+        logger.error(f"Error loading ApprenticeAgent: {e}")
         print("Running with minimal AURA...")
 
         class MinimalAura:

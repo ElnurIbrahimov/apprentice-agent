@@ -11,6 +11,7 @@ import { ProtoAGIPanel } from './components/ProtoAGIPanel';
 import { ReasoningTreePanel } from './components/ReasoningTreePanel';
 import { IntrospectionPanel } from './components/IntrospectionPanel';
 import { ToastContainer, useToastStore } from './components/Toast';
+import { ActivityTimeline } from './components/ActivityTimeline';
 import { useChatStore } from './store/chatStore';
 import { useSettingsStore, applyFontSize } from './store/settingsStore';
 import {
@@ -19,6 +20,7 @@ import {
   ChartBarIcon,
   WrenchScrewdriverIcon,
   CogIcon,
+  ClockIcon,
 } from '@heroicons/react/24/outline';
 import type { TabId } from './types';
 
@@ -27,6 +29,7 @@ const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: 
   { id: 'monitoring', label: 'Monitor', icon: ChartBarIcon },
   { id: 'tools', label: 'Tools', icon: WrenchScrewdriverIcon },
   { id: 'advanced', label: 'Advanced', icon: CogIcon },
+  { id: 'activity', label: 'Activity', icon: ClockIcon },
 ];
 
 function App() {
@@ -40,6 +43,26 @@ function App() {
   useEffect(() => {
     applyFontSize(settings.fontSize);
   }, [settings.fontSize]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === 'n') {
+        e.preventDefault();
+        document.dispatchEvent(new CustomEvent('aura:new-chat'));
+      }
+      if (e.ctrlKey && e.key === '/') {
+        e.preventDefault();
+        document.dispatchEvent(new CustomEvent('aura:toggle-settings'));
+      }
+      if (e.ctrlKey && e.key === 'k') {
+        e.preventDefault();
+        document.dispatchEvent(new CustomEvent('aura:focus-input'));
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Detect mobile viewport
   useEffect(() => {
@@ -89,6 +112,13 @@ function App() {
               <NeuroDreamPanel />
               <AMEMPanel />
             </div>
+          </div>
+        );
+
+      case 'activity':
+        return (
+          <div className="h-full overflow-hidden">
+            <ActivityTimeline />
           </div>
         );
 

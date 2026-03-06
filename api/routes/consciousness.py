@@ -32,7 +32,7 @@ class FocusRequest(BaseModel):
 async def get_conscious_state():
     """Get current conscious content — what AURA is attending to right now."""
     try:
-        from apprentice_agent.consciousness.global_workspace import get_global_workspace
+        from aura.consciousness.global_workspace import get_global_workspace
         gw = get_global_workspace()
         state = gw.get_conscious_state()
         return {
@@ -48,7 +48,7 @@ async def get_conscious_state():
 async def get_broadcast_history(limit: int = 20):
     """Get recent broadcast history — the stream of consciousness."""
     try:
-        from apprentice_agent.consciousness.global_workspace import get_global_workspace
+        from aura.consciousness.global_workspace import get_global_workspace
         gw = get_global_workspace()
         history = gw.get_broadcast_history(limit=limit)
         return {
@@ -65,7 +65,7 @@ async def get_broadcast_history(limit: int = 20):
 async def get_attention_schema():
     """Get attention schema (AST self-model) and codelet statistics."""
     try:
-        from apprentice_agent.consciousness.global_workspace import get_global_workspace
+        from aura.consciousness.global_workspace import get_global_workspace
         gw = get_global_workspace()
         return {
             "status": "ok",
@@ -81,7 +81,7 @@ async def get_attention_schema():
 async def inject_focus(req: FocusRequest):
     """Manually direct attention — injects content that wins next cycle (testing)."""
     try:
-        from apprentice_agent.consciousness.global_workspace import (
+        from aura.consciousness.global_workspace import (
             WorkspaceContent,
             get_global_workspace,
         )
@@ -111,7 +111,7 @@ async def inject_focus(req: FocusRequest):
 async def get_engine_stats():
     """Get Global Workspace engine statistics."""
     try:
-        from apprentice_agent.consciousness.global_workspace import get_global_workspace
+        from aura.consciousness.global_workspace import get_global_workspace
         gw = get_global_workspace()
         return {
             "status": "ok",

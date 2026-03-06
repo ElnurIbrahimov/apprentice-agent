@@ -14,8 +14,11 @@ TELEGRAM_CONFIG = {
     # Bot token from @BotFather
     "telegram_token": os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN_HERE"),
 
-    # Allowed user IDs (empty list = allow all)
-    # Get your ID by messaging @userinfobot on Telegram
+    # SECURITY: Allowed user IDs — REQUIRED for bot to respond.
+    # Empty list = deny ALL users (fail-closed). Bot will reject messages
+    # and log a warning until you add at least one user ID here.
+    # Get your ID by messaging @userinfobot on Telegram.
+    # Can also set via env var: TELEGRAM_ALLOWED_USERS=123456789,987654321
     "allowed_users": [
         # "123456789",  # Your Telegram user ID
     ],
@@ -43,7 +46,7 @@ WHATSAPP_CONFIG = {
     "websocket_url": "ws://localhost:3001",
 
     # WhatsApp session storage path
-    "session_path": str(Path("aura/data/messaging/whatsapp_session")),
+    "session_path": str(Path("data/messaging/whatsapp_session")),
 
     # Allowed phone numbers (empty = allow all)
     "allowed_numbers": [

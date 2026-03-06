@@ -363,7 +363,7 @@ class HeatmapResponse(BaseModel):
 async def get_focus_state(limit: int = 15):
     """Get current focus state showing what AURA is paying attention to."""
     tracker = get_tracker()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, functools.partial(tracker.get_focus_state, limit=min(limit, 30)))
 
 
@@ -371,7 +371,7 @@ async def get_focus_state(limit: int = 15):
 async def get_heatmap():
     """Get heatmap visualization data."""
     tracker = get_tracker()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, tracker.get_heatmap_data)
 
 
@@ -379,7 +379,7 @@ async def get_heatmap():
 async def get_context_stats():
     """Get context tracking statistics."""
     tracker = get_tracker()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, tracker.get_stats)
 
 
@@ -387,7 +387,7 @@ async def get_context_stats():
 async def track_message(message: str, is_user: bool = True, source: str = "chat"):
     """Track focus from a chat message."""
     tracker = get_tracker()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, functools.partial(tracker.track_message, message, is_user, source))
     return {"status": "tracked", "message_length": len(message)}
 
@@ -396,7 +396,7 @@ async def track_message(message: str, is_user: bool = True, source: str = "chat"
 async def track_topic(topic: str, weight: float = 0.5, source: str = "manual"):
     """Explicitly track a topic of focus."""
     tracker = get_tracker()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, functools.partial(tracker.track_topic, topic, weight, source))
     return {"status": "tracked", "topic": topic}
 
@@ -405,7 +405,7 @@ async def track_topic(topic: str, weight: float = 0.5, source: str = "manual"):
 async def track_memory_access(topics: List[str], source: str = "memory"):
     """Track focus when memories are accessed."""
     tracker = get_tracker()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, functools.partial(tracker.track_memory_access, topics, source))
     return {"status": "tracked", "topics_count": len(topics)}
 
@@ -414,7 +414,7 @@ async def track_memory_access(topics: List[str], source: str = "memory"):
 async def track_emotion(emotion: str, intensity: float = 0.5, source: str = "alma"):
     """Track emotional focus."""
     tracker = get_tracker()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, functools.partial(tracker.track_emotion, emotion, intensity, source))
     return {"status": "tracked", "emotion": emotion}
 
@@ -423,7 +423,7 @@ async def track_emotion(emotion: str, intensity: float = 0.5, source: str = "alm
 async def clear_context():
     """Clear all context tracking."""
     tracker = get_tracker()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, tracker.clear)
     return {"status": "cleared"}
 

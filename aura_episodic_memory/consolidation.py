@@ -87,6 +87,7 @@ class MemoryConsolidator:
         self.llm_func = llm_func
 
         self._consolidation_history: List[ConsolidationResult] = []
+        self._MAX_HISTORY = 100  # Prevent unbounded growth
 
     def run_full_consolidation(self) -> List[ConsolidationResult]:
         """
@@ -111,6 +112,9 @@ class MemoryConsolidator:
         results.append(self.garbage_collect())
 
         self._consolidation_history.extend(results)
+        # Keep only the most recent entries to prevent unbounded growth
+        if len(self._consolidation_history) > self._MAX_HISTORY:
+            self._consolidation_history = self._consolidation_history[-self._MAX_HISTORY:]
 
         return results
 
@@ -135,6 +139,7 @@ class MemoryConsolidator:
         affected = 0
         decay_factor = math.pow(1 - self.config.decay_rate, days_elapsed)
 
+        episodes_to_update: List[Episode] = []
         for result in results:
             episode = result.episode
 
@@ -149,11 +154,15 @@ class MemoryConsolidator:
                 old_importance * decay_factor
             )
 
-            # Update if changed significantly
+            # Collect episodes that changed significantly
             if abs(new_importance - old_importance) > 0.01:
                 episode.importance = new_importance
-                self.memory_store.store_episode(episode)
-                affected += 1
+                episodes_to_update.append(episode)
+
+        # Batch-write all changed episodes instead of one-by-one
+        if episodes_to_update:
+            self.memory_store.store_episodes_batch(episodes_to_update)
+            affected = len(episodes_to_update)
 
         duration = (datetime.now() - start_time).total_seconds()
 

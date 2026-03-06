@@ -22,6 +22,7 @@ import threading
 import argparse
 from pathlib import Path
 from datetime import datetime
+from typing import Optional
 
 # PID lock — prevent double-launch
 PID_FILE = Path.home() / ".aura_daemon.pid"
@@ -57,6 +58,8 @@ class AuraDaemon:
     def __init__(self):
         self._running = False
         self._agent = None
+        self._agent_ready = threading.Event()
+        self._load_agent_thread: Optional[threading.Thread] = None
         self._last_screen_hash = None
         self._last_activity = time.time()
         self._event_bus = EventBus()
@@ -75,7 +78,8 @@ class AuraDaemon:
         logger.info("AURA daemon starting...")
 
         # Load agent (lazy — don't block startup)
-        threading.Thread(target=self._load_agent, daemon=True).start()
+        self._load_agent_thread = threading.Thread(target=self._load_agent, daemon=True)
+        self._load_agent_thread.start()
 
         # Start IPC server (CLI connects here)
         self._ipc.start()
@@ -203,6 +207,8 @@ class AuraDaemon:
             self._event_bus.emit("daemon:agent_ready", {})
         except Exception as e:
             logger.error(f"Agent load failed: {e}")
+        finally:
+            self._agent_ready.set()
 
     def record_activity(self):
         """Call this when user interacts — resets idle timer."""

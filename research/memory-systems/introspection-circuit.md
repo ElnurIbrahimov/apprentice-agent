@@ -32,5 +32,5 @@ result = quick_confidence_check("What is the capital of France?")
 ```
 
 ## Files
-- `apprentice_agent/tools/introspection_circuit.py` - Core engine
-- `apprentice_agent/tools/introspection_tool.py` - Tool wrapper
+- `aura/tools/introspection_circuit.py` - Core engine
+- `aura/tools/introspection_tool.py` - Tool wrapper

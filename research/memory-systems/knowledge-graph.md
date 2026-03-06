@@ -29,6 +29,6 @@ Graph-based memory storing entities (nodes) and relationships (edges). Enables s
 - Exposed via MCP tools in `aura_knowledge_graph/mcp_tools.py`
 
 ## Files
-- `apprentice_agent/tools/knowledge_graph.py` - Core KG tool
-- `apprentice_agent/tools/kg_extractor.py` - Auto-extraction from text
+- `aura/tools/knowledge_graph.py` - Core KG tool
+- `aura/tools/kg_extractor.py` - Auto-extraction from text
 - `aura_knowledge_graph/` - Extended KG module with MCP integration

@@ -33,4 +33,4 @@ GuardianConfig(
 - Runs checks at each phase transition in the cognitive loop
 
 ## File Location
-- `apprentice_agent/tools/metacog_guardian.py`
+- `aura/tools/metacog_guardian.py`

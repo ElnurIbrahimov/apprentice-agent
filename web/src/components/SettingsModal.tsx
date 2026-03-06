@@ -25,8 +25,6 @@ interface TraitDescription {
 
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const { settings, updateSettings, resetSettings } = useSettingsStore();
-  const [localSettings, setLocalSettings] = useState<Settings>(settings);
-  const [saved, setSaved] = useState(false);
 
   // Personality state
   const [personality, setPersonality] = useState<PersonalityTraits>({
@@ -101,22 +99,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     }
   };
 
-  const handleSave = () => {
-    updateSettings(localSettings);
-    setSaved(true);
-    toast.success('Settings saved', 'Your preferences have been updated');
-    setTimeout(() => setSaved(false), 2000);
-  };
-
   const handleReset = () => {
     resetSettings();
-    setLocalSettings({
-      theme: 'dark',
-      fontSize: 'medium',
-      showThinking: true,
-      autoScroll: true,
-      soundEnabled: false,
-    });
     toast.info('Settings reset', 'All settings restored to defaults');
   };
 
@@ -153,12 +137,12 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               <div className="flex items-center justify-between">
                 <label className="text-sm text-chat-text-secondary">Theme</label>
                 <select
-                  value={localSettings.theme}
-                  onChange={(e) => setLocalSettings({ ...localSettings, theme: e.target.value as Settings['theme'] })}
+                  value={settings.theme}
+                  onChange={(e) => updateSettings({ theme: e.target.value as Settings['theme'] })}
                   className="bg-chat-bg border border-chat-border rounded-lg px-3 py-1.5 text-sm text-chat-text focus:outline-none focus:ring-2 focus:ring-purple-500"
                 >
                   <option value="dark">Dark</option>
-                  <option value="light">Light (Coming Soon)</option>
+                  <option value="light" disabled>Light (Coming Soon)</option>
                   <option value="system">System</option>
                 </select>
               </div>
@@ -167,8 +151,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               <div className="flex items-center justify-between">
                 <label className="text-sm text-chat-text-secondary">Font Size</label>
                 <select
-                  value={localSettings.fontSize}
-                  onChange={(e) => setLocalSettings({ ...localSettings, fontSize: e.target.value as Settings['fontSize'] })}
+                  value={settings.fontSize}
+                  onChange={(e) => updateSettings({ fontSize: e.target.value as Settings['fontSize'] })}
                   className="bg-chat-bg border border-chat-border rounded-lg px-3 py-1.5 text-sm text-chat-text focus:outline-none focus:ring-2 focus:ring-purple-500"
                 >
                   <option value="small">Small</option>
@@ -190,14 +174,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   <p className="text-xs text-chat-text-secondary/70">Display AURA's thought process</p>
                 </div>
                 <button
-                  onClick={() => setLocalSettings({ ...localSettings, showThinking: !localSettings.showThinking })}
+                  onClick={() => updateSettings({ showThinking: !settings.showThinking })}
                   className={`relative w-11 h-6 rounded-full transition-colors ${
-                    localSettings.showThinking ? 'bg-purple-600' : 'bg-chat-border'
+                    settings.showThinking ? 'bg-purple-600' : 'bg-chat-border'
                   }`}
                 >
                   <span
                     className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${
-                      localSettings.showThinking ? 'translate-x-5' : ''
+                      settings.showThinking ? 'translate-x-5' : ''
                     }`}
                   />
                 </button>
@@ -210,14 +194,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   <p className="text-xs text-chat-text-secondary/70">Scroll to new messages</p>
                 </div>
                 <button
-                  onClick={() => setLocalSettings({ ...localSettings, autoScroll: !localSettings.autoScroll })}
+                  onClick={() => updateSettings({ autoScroll: !settings.autoScroll })}
                   className={`relative w-11 h-6 rounded-full transition-colors ${
-                    localSettings.autoScroll ? 'bg-purple-600' : 'bg-chat-border'
+                    settings.autoScroll ? 'bg-purple-600' : 'bg-chat-border'
                   }`}
                 >
                   <span
                     className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${
-                      localSettings.autoScroll ? 'translate-x-5' : ''
+                      settings.autoScroll ? 'translate-x-5' : ''
                     }`}
                   />
                 </button>
@@ -230,14 +214,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   <p className="text-xs text-chat-text-secondary/70">Play sounds for notifications</p>
                 </div>
                 <button
-                  onClick={() => setLocalSettings({ ...localSettings, soundEnabled: !localSettings.soundEnabled })}
+                  onClick={() => updateSettings({ soundEnabled: !settings.soundEnabled })}
                   className={`relative w-11 h-6 rounded-full transition-colors ${
-                    localSettings.soundEnabled ? 'bg-purple-600' : 'bg-chat-border'
+                    settings.soundEnabled ? 'bg-purple-600' : 'bg-chat-border'
                   }`}
                 >
                   <span
                     className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${
-                      localSettings.soundEnabled ? 'translate-x-5' : ''
+                      settings.soundEnabled ? 'translate-x-5' : ''
                     }`}
                   />
                 </button>
@@ -335,17 +319,12 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           >
             Reset to Defaults
           </button>
-          <div className="flex items-center gap-2">
-            {saved && (
-              <span className="text-sm text-green-500">Saved!</span>
-            )}
-            <button
-              onClick={handleSave}
-              className="px-4 py-2 text-sm bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
-            >
-              Save Changes
-            </button>
-          </div>
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
+          >
+            Close
+          </button>
         </div>
       </div>
     </div>

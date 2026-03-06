@@ -1,7 +1,50 @@
+import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { Message } from '../types';
 import { UserCircleIcon, SparklesIcon, BoltIcon } from '@heroicons/react/24/solid';
+import { ClipboardDocumentIcon, CheckIcon } from '@heroicons/react/24/outline';
 import { AttachmentList } from './AttachmentPreview';
+
+function CodeBlock({ language, children }: { language: string; children: string }) {
+  const [codeCopied, setCodeCopied] = useState(false);
+  const codeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => { if (codeTimeoutRef.current) clearTimeout(codeTimeoutRef.current); };
+  }, []);
+
+  const handleCodeCopy = () => {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(children).catch((e) => console.warn('[Copy] Failed:', e));
+    }
+    if (codeTimeoutRef.current) clearTimeout(codeTimeoutRef.current);
+    setCodeCopied(true);
+    codeTimeoutRef.current = setTimeout(() => setCodeCopied(false), 2000);
+  };
+
+  return (
+    <div className="relative">
+      <div className="absolute top-0 right-0 flex items-center gap-1 z-10">
+        <button
+          onClick={handleCodeCopy}
+          aria-label="Copy code"
+          className="px-2 py-1 text-xs text-gray-400 bg-gray-700 hover:bg-gray-600 hover:text-gray-200 transition-colors rounded-bl flex items-center gap-1"
+        >
+          {codeCopied ? (
+            <><CheckIcon className="w-3 h-3 text-green-400" /><span className="text-green-400">Copied</span></>
+          ) : (
+            <><ClipboardDocumentIcon className="w-3 h-3" /><span>{language}</span></>
+          )}
+        </button>
+      </div>
+      <pre className="bg-gray-900 p-4 rounded-lg overflow-x-auto pt-8">
+        <code className={`language-${language}`}>
+          {children}
+        </code>
+      </pre>
+    </div>
+  );
+}
 
 interface MessageBubbleProps {
   message: Message;
@@ -21,6 +64,23 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   const isUser = message.role === 'user';
   const isStreaming = message.isStreaming;
   const isProactive = !!message.proactive;
+  const [copied, setCopied] = useState(false);
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+    };
+  }, []);
+
+  const handleCopy = () => {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(message.content).catch((e) => console.warn('[Copy] Failed:', e));
+    }
+    if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+    setCopied(true);
+    copyTimeoutRef.current = setTimeout(() => setCopied(false), 1500);
+  };
 
   return (
     <div
@@ -56,7 +116,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         </div>
 
         {/* Content */}
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 group">
           {/* Role label with proactive badge */}
           <div className="flex items-center gap-2 mb-1">
             <span className="text-chat-text font-medium">
@@ -99,16 +159,9 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                     }
 
                     return (
-                      <div className="relative">
-                        <div className="absolute top-0 right-0 px-2 py-1 text-xs text-gray-400 bg-gray-700 rounded-bl">
-                          {match[1]}
-                        </div>
-                        <pre className="bg-gray-900 p-4 rounded-lg overflow-x-auto">
-                          <code className={className} {...props}>
-                            {children}
-                          </code>
-                        </pre>
-                      </div>
+                      <CodeBlock language={match[1]}>
+                        {String(children).replace(/\n$/, '')}
+                      </CodeBlock>
                     );
                   },
                   // Custom link rendering
@@ -136,9 +189,30 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             )}
           </div>
 
-          {/* Timestamp */}
-          <div className="mt-2 text-xs text-chat-text-secondary">
-            {new Date(message.timestamp).toLocaleTimeString()}
+          {/* Model badge for assistant messages */}
+          {!isUser && message.model_used && !isStreaming && (
+            <span className="text-xs text-chat-text-secondary/60 mt-1 inline-block">
+              {message.model_used}
+            </span>
+          )}
+
+          {/* Timestamp + copy */}
+          <div className="mt-2 flex items-center gap-2 text-xs text-chat-text-secondary">
+            <span>{new Date(message.timestamp).toLocaleTimeString()}</span>
+            {!isStreaming && (
+              <button
+                onClick={handleCopy}
+                aria-label="Copy message"
+                className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:text-chat-text"
+                title="Copy message"
+              >
+                {copied ? (
+                  <CheckIcon className="w-3.5 h-3.5 text-green-400" />
+                ) : (
+                  <ClipboardDocumentIcon className="w-3.5 h-3.5" />
+                )}
+              </button>
+            )}
           </div>
         </div>
       </div>

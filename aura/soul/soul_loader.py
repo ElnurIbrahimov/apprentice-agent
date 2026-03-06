@@ -6,6 +6,15 @@ and behavioral guidelines that make AURA unique.
 
 Soul files are markdown for easy editing and version control.
 Different souls can be swapped for different contexts.
+
+ARCHITECTURE NOTE — Identity layer hierarchy:
+  - THIS FILE (aura/soul/soul_loader.py): Soul = static character definition loaded
+    from markdown. Read-only at runtime. Sets base name, personality, values, voice.
+  - aura/identity.py: Runtime mutable identity. Detects name/personality changes in
+    conversation; sanitizes and stores updates in memory. Wraps the soul with live state.
+  - aura/multi_user/identity_core.py: Per-user identity with 3-layer architecture
+    (Constitutional → Deep/L1 → Adaptive/L2 → Expressive/L3). Inherits from the
+    shared soul but personalizes per user session.
 """
 
 import re
@@ -15,6 +24,22 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 
 logger = logging.getLogger(__name__)
+
+
+def _strip_quotes(text: str) -> str:
+    """Strip matching outer quote pairs (straight or curly)."""
+    if len(text) < 2:
+        return text
+    _QUOTE_PAIRS = {
+        '"': '"',
+        "'": "'",
+        "\u2018": "\u2019",  # ' … '
+        "\u201c": "\u201d",  # " … "
+    }
+    close = _QUOTE_PAIRS.get(text[0])
+    if close is not None and text[-1] == close:
+        return text[1:-1]
+    return text
 
 
 @dataclass
@@ -32,6 +57,14 @@ class SoulConfig:
     greeting: str = "Hello!"
     farewell: str = "Goodbye!"
     raw_content: str = ""
+
+    def get(self, key, default=None):
+        """Dict-like access to soul config attributes."""
+        return getattr(self, key, default)
+
+    def __getitem__(self, key):
+        """Dict-like bracket access to soul config attributes."""
+        return getattr(self, key)
 
     def get_system_prompt_addition(self) -> str:
         """Generate text to add to system prompts."""
@@ -158,9 +191,10 @@ class SoulLoader:
         """
         config = SoulConfig(raw_content=content)
 
-        # Extract sections
+        # Use re.DOTALL so (.*?) captures multi-line section bodies.
+        # Section boundaries are safe: (?=\n#|\Z) stops at the next heading.
         for section, pattern in self.SECTION_PATTERNS.items():
-            match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
+            match = re.search(pattern, content, re.IGNORECASE | re.DOTALL)
             if match:
                 section_content = match.group(1).strip()
 
@@ -193,11 +227,11 @@ class SoulLoader:
         # Extract greeting/farewell if present
         greeting_match = re.search(r"Greeting:\s*(.+?)(?:\n|$)", content, re.IGNORECASE)
         if greeting_match:
-            config.greeting = greeting_match.group(1).strip().strip('"')
+            config.greeting = _strip_quotes(greeting_match.group(1).strip())
 
         farewell_match = re.search(r"Farewell:\s*(.+?)(?:\n|$)", content, re.IGNORECASE)
         if farewell_match:
-            config.farewell = farewell_match.group(1).strip().strip('"')
+            config.farewell = _strip_quotes(farewell_match.group(1).strip())
 
         self.current_soul = config
         logger.info(f"Loaded soul: {config.name} v{config.version}")

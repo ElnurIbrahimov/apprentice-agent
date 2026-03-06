@@ -7,7 +7,7 @@ SynapseForge allows AURA to create new tools at runtime by generating Python cod
 1. Agent identifies need for a tool that doesn't exist
 2. SynapseForge generates tool code using LLM
 3. Code is security-validated (AST analysis, blocked imports/patterns)
-4. Tool is saved to `apprentice_agent/tools/synthesized/`
+4. Tool is saved to `aura/tools/synthesized/`
 5. Tool is dynamically imported and registered
 
 ## Security Validation
@@ -18,7 +18,7 @@ All generated code goes through `validate_custom_tool_code()`:
 
 ## Generated Tool Structure
 ```python
-# apprentice_agent/tools/synthesized/my_tool.py
+# aura/tools/synthesized/my_tool.py
 """Auto-generated tool description."""
 
 def execute(action: str, **kwargs) -> dict:
@@ -37,5 +37,5 @@ def execute(action: str, **kwargs) -> dict:
 - Limited to safe pure-Python operations
 
 ## File Location
-- `apprentice_agent/tools/synapseforge.py`
-- Generated tools: `apprentice_agent/tools/synthesized/`
+- `aura/tools/synapseforge.py`
+- Generated tools: `aura/tools/synthesized/`

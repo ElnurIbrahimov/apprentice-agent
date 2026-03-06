@@ -9,7 +9,7 @@
 - Design data model
 
 ### 2. Implementation Phase
-- Create tool file: `apprentice_agent/tools/<name>.py`
+- Create tool file: `aura/tools/<name>.py`
 - Follow pattern from `skills/patterns/tool-creation-pattern.md`
 - Implement core methods
 - Add `execute()` dispatcher
@@ -26,14 +26,14 @@
 ### 5. Verification Phase
 ```bash
 # Syntax check
-python -m py_compile apprentice_agent/tools/<name>.py
+python -m py_compile aura/tools/<name>.py
 
 # Import check
-python -c "from apprentice_agent.tools import MyTool"
+python -c "from aura.tools import MyTool"
 
 # Functional test
 python -c "
-from apprentice_agent.tools.<name> import MyTool
+from aura.tools.<name> import MyTool
 t = MyTool()
 print(t.execute('test_action'))
 "

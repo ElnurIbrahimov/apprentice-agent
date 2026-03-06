@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/state-machine", tags=["state-machine"])
 async def get_state_machine_state():
     """Get current phase, goal, iteration, and elapsed time."""
     try:
-        from apprentice_agent.state_machine import get_agent_state_machine
+        from aura.state_machine import get_agent_state_machine
         sm = get_agent_state_machine()
         return {"success": True, **sm.get_state()}
     except Exception as e:
@@ -23,7 +23,7 @@ async def get_state_machine_state():
 async def get_state_machine_timings():
     """Get per-phase timing statistics."""
     try:
-        from apprentice_agent.state_machine import get_agent_state_machine
+        from aura.state_machine import get_agent_state_machine
         sm = get_agent_state_machine()
         return {"success": True, "timings": sm.get_timings()}
     except Exception as e:
@@ -34,7 +34,7 @@ async def get_state_machine_timings():
 async def get_state_machine_transitions(limit: int = Query(default=20, ge=1, le=200)):
     """Get recent phase transition history."""
     try:
-        from apprentice_agent.state_machine import get_agent_state_machine
+        from aura.state_machine import get_agent_state_machine
         sm = get_agent_state_machine()
         return {"success": True, "transitions": sm.get_recent_transitions(limit)}
     except Exception as e:
@@ -45,7 +45,7 @@ async def get_state_machine_transitions(limit: int = Query(default=20, ge=1, le=
 async def reset_state_machine_stats():
     """Reset timing statistics and transition history."""
     try:
-        from apprentice_agent.state_machine import get_agent_state_machine
+        from aura.state_machine import get_agent_state_machine
         sm = get_agent_state_machine()
         sm.reset_stats()
         return {"success": True, "message": "State machine stats reset"}

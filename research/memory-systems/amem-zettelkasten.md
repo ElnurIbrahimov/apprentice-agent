@@ -36,6 +36,6 @@ class MemoryNote:
 - Queries search both and merge results
 
 ## Files
-- `apprentice_agent/tools/amem.py` - Core A-MEM system
-- `apprentice_agent/tools/amem_tool.py` - Tool wrapper
-- `apprentice_agent/tools/hybrid_amem.py` - KG + A-MEM hybrid
+- `aura/tools/amem.py` - Core A-MEM system
+- `aura/tools/amem_tool.py` - Tool wrapper
+- `aura/tools/hybrid_amem.py` - KG + A-MEM hybrid

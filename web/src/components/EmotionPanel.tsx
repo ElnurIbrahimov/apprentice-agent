@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { usePolling } from '../hooks/usePolling';
 import { ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline';
 
@@ -71,6 +71,8 @@ export function EmotionPanel() {
   const [almaState, setAlmaState] = useState<ALMAState | null>(null);
   const [isExpanded, setIsExpanded] = useState(true);
   const [activeSection, setActiveSection] = useState<'emotions' | 'neuro' | 'personality'>('emotions');
+  const [fetchError, setFetchError] = useState(false);
+  const failCount = useRef(0);
 
   // Fetch ALMA state periodically (10s - emotional state doesn't change that fast)
   const fetchState = useCallback(async () => {
@@ -79,14 +81,33 @@ export function EmotionPanel() {
       if (response.ok) {
         const data = await response.json();
         setAlmaState(data);
+        setFetchError(false);
+        failCount.current = 0;
+      } else {
+        failCount.current++;
+        if (failCount.current >= 3) setFetchError(true);
       }
     } catch {
-      // Ignore - emotion panel is cosmetic
+      failCount.current++;
+      if (failCount.current >= 3) setFetchError(true);
     }
   }, []);
   usePolling(fetchState, 30000);
 
   if (!almaState) {
+    if (fetchError) {
+      return (
+        <div className="p-4 text-center space-y-2">
+          <p className="text-chat-text-secondary text-sm">Emotion system unavailable</p>
+          <button
+            onClick={() => { setFetchError(false); failCount.current = 0; }}
+            className="text-xs text-purple-400 hover:text-purple-300 underline"
+          >
+            Retry
+          </button>
+        </div>
+      );
+    }
     return (
       <div className="p-4 bg-chat-assistant/50 rounded-xl animate-pulse">
         <div className="h-4 bg-chat-border/30 rounded w-24 mb-2"></div>

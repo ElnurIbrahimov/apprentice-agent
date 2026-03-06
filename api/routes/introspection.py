@@ -279,8 +279,8 @@ async def reset_stats():
 
 def _get_or_create_tool(agent_service):
     """Get or create the introspection tool."""
-    from apprentice_agent.tools.introspection_tool import IntrospectionTool
-    from apprentice_agent.tools.introspection_circuit import IntrospectionConfig
+    from aura.tools.introspection_tool import IntrospectionTool
+    from aura.tools.introspection_circuit import IntrospectionConfig
 
     # Check if tool exists
     if hasattr(agent_service, '_introspection_tool'):
@@ -295,7 +295,7 @@ def _get_or_create_tool(agent_service):
     if hasattr(agent_service.agent, 'search'):
         search_func = agent_service.agent.search
     elif hasattr(agent_service.agent, 'tools'):
-        for tool in agent_service.agent.tools:
+        for tool in agent_service.agent.tools.values():
             if hasattr(tool, 'search'):
                 search_func = tool.search
                 break
@@ -305,7 +305,7 @@ def _get_or_create_tool(agent_service):
     if hasattr(agent_service.agent, 'fluxmind'):
         fluxmind = agent_service.agent.fluxmind
     elif hasattr(agent_service.agent, 'tools'):
-        for tool in agent_service.agent.tools:
+        for tool in agent_service.agent.tools.values():
             if 'fluxmind' in tool.__class__.__name__.lower():
                 fluxmind = tool
                 break
@@ -315,7 +315,7 @@ def _get_or_create_tool(agent_service):
     if hasattr(agent_service.agent, 'guardian'):
         guardian = agent_service.agent.guardian
     elif hasattr(agent_service.agent, 'tools'):
-        for tool in agent_service.agent.tools:
+        for tool in agent_service.agent.tools.values():
             if 'guardian' in tool.__class__.__name__.lower():
                 guardian = tool
                 break

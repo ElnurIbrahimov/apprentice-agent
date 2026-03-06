@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { usePolling } from '../hooks/usePolling';
 import type { AMEMStats, AMEMNote, AMEMSearchResult } from '../types';
 import {
   ArrowPathIcon,
@@ -128,9 +129,9 @@ export function AMEMPanel() {
   useEffect(() => {
     fetchStats();
     fetchNotes();
-    const interval = setInterval(fetchStats, 10000);
-    return () => clearInterval(interval);
   }, []);
+
+  usePolling(fetchStats, 10000);
 
   return (
     <div className="bg-chat-sidebar rounded-lg p-4">

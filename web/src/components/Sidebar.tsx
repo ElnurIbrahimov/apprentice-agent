@@ -38,6 +38,13 @@ export function Sidebar({ onClose }: SidebarProps) {
     isLoading,
   } = useChatStore();
 
+  // Keyboard shortcut: Ctrl+/ toggle settings
+  useEffect(() => {
+    const handler = () => setShowSettings(prev => !prev);
+    document.addEventListener('aura:toggle-settings', handler);
+    return () => document.removeEventListener('aura:toggle-settings', handler);
+  }, []);
+
   // Poll status only (10s - lightweight, just /api/status)
   const fetchStatus = useCallback(async () => {
     try {
@@ -56,17 +63,11 @@ export function Sidebar({ onClose }: SidebarProps) {
   useEffect(() => {
     const fetchModels = async () => {
       try {
-        console.log('[Sidebar] Fetching models...');
         const response = await fetch('/api/models');
-        console.log('[Sidebar] Models response status:', response.status);
         if (response.ok) {
           const data = await response.json();
-          console.log('[Sidebar] Models data:', data);
           const allModels = [...(data.local_models || []), ...(data.cloud_models || [])];
-          console.log('[Sidebar] All models:', allModels);
           setAvailableModels(allModels);
-        } else {
-          console.error('[Sidebar] Models API returned:', response.status);
         }
       } catch (e) {
         console.error('[Sidebar] Failed to fetch models:', e);

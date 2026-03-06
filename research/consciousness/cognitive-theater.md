@@ -22,7 +22,7 @@ When AURA faces a decision question, it spawns multiple internal "perspectives" 
 - `is_decision_question()` - Detection function
 
 ## File Location
-- `apprentice_agent/tools/cognitive_theater.py`
+- `aura/tools/cognitive_theater.py`
 
 ## Use Cases
 - "Should I use Redis or PostgreSQL for caching?"

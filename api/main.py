@@ -1,4 +1,5 @@
 """FastAPI application entry point for AURA Web API."""
+# reload-trigger: 2026-03-01
 
 import os
 import sys
@@ -19,16 +20,23 @@ from api.middleware import APIKeyAuthMiddleware, RateLimitMiddleware
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from api.routes import chat, status, upload, features, multi_agent, reasoning_tree, introspection, proactive, memory, context, conversation_starters, thinking, idle_behaviors, consciousness, self_improvement, thinking_mode, state_machine, tools_new
-# Lazy-loaded agent_service (import removed - now lazy in routes)
-# from api.services.agent_service import agent_service
-
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+from api.routes import chat, status, upload, features, multi_agent, reasoning_tree, introspection, proactive, memory, context, conversation_starters, thinking, idle_behaviors, self_improvement, thinking_mode, state_machine, tools_new, activity
+try:
+    from api.routes import consciousness
+    _consciousness_available = True
+except Exception as _e:
+    logger.warning(f"[API] Consciousness module unavailable (degraded mode): {_e}")
+    consciousness = None
+    _consciousness_available = False
+# Lazy-loaded agent_service (import removed - now lazy in routes)
+# from api.services.agent_service import agent_service
 
 
 @asynccontextmanager
@@ -86,10 +94,11 @@ async def lifespan(app: FastAPI):
                 # Push to all connected WebSocket clients (instant delivery)
                 try:
                     from api.routes.chat import broadcast_proactive_message
-                    _proactive_loop.call_soon_threadsafe(
-                        _proactive_loop.create_task,
-                        broadcast_proactive_message(msg)
-                    )
+                    if not _proactive_loop.is_closed():
+                        _proactive_loop.call_soon_threadsafe(
+                            _proactive_loop.create_task,
+                            broadcast_proactive_message(msg)
+                        )
                 except Exception as e:
                     logger.debug(f"[Proactive] WebSocket push failed: {e}")
 
@@ -98,10 +107,20 @@ async def lifespan(app: FastAPI):
             # Start the daemon (creates event bus, decision loop)
             await daemon.start()
 
+            # Trigger first intrinsic motivation cycle on startup
+            try:
+                from aura.consciousness.intrinsic_motivation import get_intrinsic_motivation
+                loop = asyncio.get_running_loop()
+                im = get_intrinsic_motivation()
+                await loop.run_in_executor(None, im.run_motivation_cycle)
+                logger.info("[API] Intrinsic Motivation engine: first cycle complete")
+            except Exception as e:
+                logger.warning(f"[API] Motivation engine startup cycle failed: {e}")
+
             # Start SystemMonitor connected to daemon's event bus
             sys_monitor = SystemMonitor(
                 event_bus=daemon.event_bus,
-                poll_interval=30.0,  # Check system every 30s
+                poll_interval=60.0,  # Check system every 60s (was 30s)
             )
             await sys_monitor.start()
 
@@ -111,7 +130,7 @@ async def lifespan(app: FastAPI):
                 from aura.proactive.monitors.screen_monitor import ScreenMonitor
                 screen_monitor = ScreenMonitor(
                     event_bus=daemon.event_bus,
-                    poll_interval=3.0,
+                    poll_interval=10.0,  # Was 3.0, reduce CPU/thread pressure
                 )
                 await screen_monitor.start()
                 logger.info("[API] ScreenMonitor started")
@@ -156,7 +175,7 @@ async def lifespan(app: FastAPI):
             voice_svc = get_voice_presence()
             voice_svc.start()
             app.state.voice_presence = voice_svc
-            logger.info("[API] VoicePresenceService started (pyttsx3)")
+            logger.info("[API] VoicePresenceService started (kokoro)")
         except Exception as e:
             logger.warning(f"[API] VoicePresenceService failed to start: {e}")
             app.state.voice_presence = None
@@ -342,11 +361,19 @@ app.include_router(context.router)
 app.include_router(conversation_starters.router)
 app.include_router(thinking.router)
 app.include_router(idle_behaviors.router)
-app.include_router(consciousness.router)
+if _consciousness_available and consciousness is not None:
+    app.include_router(consciousness.router)
 app.include_router(self_improvement.router)
 app.include_router(thinking_mode.router)
 app.include_router(state_machine.router)
 app.include_router(tools_new.router)
+app.include_router(activity.router)
+
+@app.get("/api/health")
+async def health_check():
+    """Liveness probe — returns 200 when the API is up."""
+    return {"status": "ok"}
+
 
 # Serve static files in production (built React app)
 # NOTE: Only mount SPA routes when NOT in dev mode (Vite serves the frontend in dev)

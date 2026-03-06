@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from apprentice_agent.consciousness.strategy_bandit import (
+from aura.consciousness.strategy_bandit import (
     ArmState,
     BanditSelection,
     CATEGORY_STRATEGIES,

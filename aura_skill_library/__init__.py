@@ -42,12 +42,8 @@ from .skill_executor import SkillExecutor
 from .mcp_tools import SkillLibraryTools
 from .titans_integration import TitansSkillBridge
 
-# Check for optional dependencies
-try:
-    from sentence_transformers import SentenceTransformer
-    EMBEDDINGS_AVAILABLE = True
-except ImportError:
-    EMBEDDINGS_AVAILABLE = False
+# Lazy-check: don't import sentence_transformers at module load time
+EMBEDDINGS_AVAILABLE = True  # assume available; SkillStore will handle gracefully
 
 
 class SkillLibrary:

@@ -14,13 +14,23 @@ import numpy as np
 
 from .skill import Skill, SkillCategory, SkillMetadata
 
-# Check sentence-transformers availability
-try:
-    from sentence_transformers import SentenceTransformer
-    SENTENCE_TRANSFORMERS_AVAILABLE = True
-except ImportError:
-    SENTENCE_TRANSFORMERS_AVAILABLE = False
-    SentenceTransformer = None
+# Lazy-loaded to avoid ~5s startup penalty
+SENTENCE_TRANSFORMERS_AVAILABLE = True
+_ST_CLASS = None
+
+def _get_st():
+    global _ST_CLASS, SENTENCE_TRANSFORMERS_AVAILABLE
+    if _ST_CLASS is not None:
+        return _ST_CLASS
+    try:
+        from sentence_transformers import SentenceTransformer
+        _ST_CLASS = SentenceTransformer
+        return _ST_CLASS
+    except ImportError:
+        SENTENCE_TRANSFORMERS_AVAILABLE = False
+        return None
+
+SentenceTransformer = None  # placeholder
 
 logger = logging.getLogger(__name__)
 
@@ -63,9 +73,11 @@ class SkillStore:
     @property
     def embedder(self):
         """Lazy load embedding model."""
-        if self._embedder is None and SENTENCE_TRANSFORMERS_AVAILABLE:
-            logger.info(f"Loading embedding model: {self._embedding_model_name}")
-            self._embedder = SentenceTransformer(self._embedding_model_name, device='cpu')
+        if self._embedder is None:
+            ST = _get_st()
+            if ST is not None:
+                logger.info(f"Loading embedding model: {self._embedding_model_name}")
+                self._embedder = ST(self._embedding_model_name, device='cpu')
         return self._embedder
 
     def _init_storage(self):

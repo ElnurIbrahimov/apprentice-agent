@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from apprentice_agent.consciousness.world_model import (
+from aura.consciousness.world_model import (
     Belief,
     BeliefCategory,
     ChangeType,
@@ -720,7 +720,7 @@ class TestInsightEngagementRates:
 
     def test_mixed_feedback(self, wm):
         """Mixed engaged/dismissed insights compute correct rates."""
-        from apprentice_agent.consciousness.proactive_awareness import (
+        from aura.consciousness.proactive_awareness import (
             InsightType,
             ProactiveInsight,
         )
@@ -756,7 +756,7 @@ class TestInsightEngagementRates:
 
     def test_single_type(self, wm):
         """Single insight type with no feedback returns 0 engagement rate."""
-        from apprentice_agent.consciousness.proactive_awareness import (
+        from aura.consciousness.proactive_awareness import (
             InsightType,
             ProactiveInsight,
         )

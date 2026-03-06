@@ -21,7 +21,7 @@ except ImportError:
     print("Error: websockets not installed. Run: pip install websockets")
     sys.exit(1)
 
-from apprentice_agent import ApprenticeAgent
+from aura import ApprenticeAgent
 
 GATEWAY_URL = "ws://127.0.0.1:18789"
 RECONNECT_DELAY = 5  # seconds

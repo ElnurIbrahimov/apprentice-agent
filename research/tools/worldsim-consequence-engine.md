@@ -33,4 +33,4 @@ result = quick_check("rm -rf /tmp/test_dir")
 - `RiskLevel` - Enum for risk categorization
 
 ## File Location
-- `apprentice_agent/tools/worldsim.py`
+- `aura/tools/worldsim.py`

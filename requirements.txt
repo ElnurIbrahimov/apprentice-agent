@@ -1,71 +1,131 @@
-accelerate>=0.25.0
-arxiv>=2.0.0
+# ============================================================
+# AURA Requirements
+# ============================================================
+# Core deps are required. Optional deps are commented out with
+# install instructions. All imports in AURA use try/except so
+# missing optional deps degrade gracefully.
+# ============================================================
 
-# Input Validation & Security
-pydantic>=2.0.0
-tenacity>=8.2.0
-comtypes>=1.2.0
-diffusers>=0.25.0
-ddgs>=8.0.0
-gputil>=1.4.0
-gradio>=4.0.0
-mss>=9.0.0
-nvidia-ml-py3>=7.352.0
+# --- Core ---
 ollama>=0.4.0
-openai-whisper>=20231117
-pillow>=10.0.0
-imagehash>=4.3.0
-psutil>=5.9.0
-pycaw>=20230407
-pymupdf>=1.23.0
-pyperclip>=1.8.0
-python-dotenv>=1.0.0
-pyttsx3>=2.90
 requests>=2.31.0
-screen-brightness-control>=0.22.0
-sounddevice>=0.4.6
-torch>=2.0.0
-numpy>=1.24.0
-transformers>=4.36.0
-winotify>=1.1.0
-schedule>=1.2.0
+python-dotenv>=1.0.0
+psutil>=5.9.0
+pyyaml>=6.0
+pydantic>=2.0.0,<3.0.0
+tenacity>=8.2.0
 
-# Knowledge Graph Brain
-kuzu>=0.4.0
+# --- ML / AI ---
+torch>=2.0.0,<3.0.0
+numpy>=1.24.0,<3.0.0
+transformers>=4.40.0,<5.0.0
+accelerate>=0.25.0
 sentence-transformers>=2.2.0
 
-# A-MEM Agentic Memory (Zettelkasten-style)
-chromadb>=0.4.0  # Optional: for vector search, falls back to numpy if unavailable
-networkx>=3.0  # Already used by knowledge_graph.py
+# --- Memory ---
+chromadb>=1.0.0
+networkx>=3.0
 
-# Calendar RRULE Support (recurring events)
+# --- Tools ---
+arxiv>=2.0.0
+ddgs>=8.0.0
+pymupdf>=1.23.0
+pyperclip>=1.8.0
+pillow>=10.0.0
+imagehash>=4.3.0
+mss>=9.0.0
+
+# --- Calendar ---
 icalendar>=5.0.0
 recurring-ical-events>=3.0.0
 python-dateutil>=2.8.0
 
-# Episodic Time-Travel Memory
-qdrant-client>=1.7.0
-dateparser>=1.2.0
+# --- Web API ---
+fastapi>=0.109.0,<1.0.0
+uvicorn[standard]>=0.27.0,<1.0.0
 
-# Skill Library
-pyyaml>=6.0
-
-# Predictive Life Modeling
-mesa>=3.0.0
-# dowhy>=0.10.0  # Optional: for causal inference
-
-# Active Inference (Full Free Energy Minimization)
-inferactively-pymdp>=0.0.7  # Optional: for full Active Inference, falls back to heuristic if unavailable
-
-# Messaging (Telegram & WhatsApp)
+# --- Messaging ---
 python-telegram-bot>=20.0
 websockets>=12.0
 
-# Web API (FastAPI + React frontend)
-fastapi>=0.109.0
-uvicorn[standard]>=0.27.0
+# --- Security ---
+cryptography>=41.0.0
 
-# PersonaPlex (Tool #17) - Real-time full-duplex speech-to-speech
-# Install from: pip install moshi/. (from https://github.com/NVIDIA/personaplex)
-# Requires: libopus-dev (Linux), opus (macOS via brew), HF_TOKEN env var
-moshi @ git+https://github.com/NVIDIA/personaplex.git#subdirectory=moshi
+# ============================================================
+# Optional: Knowledge Graph Brain (requires Kuzu graph DB)
+# ============================================================
+kuzu>=0.4.0,<1.0.0
+
+# ============================================================
+# Optional: Episodic Memory (requires Qdrant vector DB)
+# ============================================================
+qdrant-client>=1.7.0
+dateparser>=1.2.0
+
+# ============================================================
+# Optional: Predictive Life Modeling
+# ============================================================
+mesa>=3.0.0
+# dowhy>=0.10.0  # Causal inference — large dependency tree
+
+# ============================================================
+# Optional: Active Inference
+# ============================================================
+# inferactively-pymdp>=0.0.7  # Falls back to heuristic if unavailable
+
+# ============================================================
+# Optional: Windows-specific (voice, notifications, display)
+# ============================================================
+comtypes>=1.2.0
+pyttsx3>=2.90
+pycaw>=20230407
+winotify>=1.1.0
+screen-brightness-control>=0.22.0
+sounddevice>=0.4.6
+
+# ============================================================
+# Optional: GPU monitoring
+# ============================================================
+# nvidia-ml-py3>=7.352.0  # Requires NVIDIA GPU
+# gputil>=1.4.0
+
+# ============================================================
+# Optional: Image generation / Gradio UI
+# ============================================================
+# diffusers>=0.25.0
+# gradio>=4.0.0
+
+# ============================================================
+# Optional: Voice transcription
+# ============================================================
+# openai-whisper>=20231117  # Large download (~1.5GB model)
+
+# ============================================================
+# Optional: Task scheduling
+# ============================================================
+schedule>=1.2.0
+
+# ============================================================
+# Optional: PersonaPlex voice (DISABLED - huggingface-hub conflict)
+# ============================================================
+# PersonaPlex is NOT installed by default due to hard dependency conflict:
+#
+# PROBLEM:
+#   • moshi (PersonaPlex) requires: huggingface-hub<1.0.0,>=0.24
+#   • transformers requires: huggingface-hub<1.0,>=0.34.0
+#   • sentence-transformers requires: huggingface-hub>=0.20.0
+#   • huggingface-hub 1.0 (Dec 2024) has breaking API changes
+#   • Current installed: huggingface-hub>=1.0 (needed by transformers)
+#   • Therefore: CANNOT downgrade huggingface-hub without breaking transformers
+#
+# STATUS: PersonaPlex disabled by default (PERSONAPLEX_ENABLED=false)
+#
+# FALLBACK VOICE OPTIONS:
+#   • VoiceTool: Whisper (STT) + pyttsx3 (TTS) with barge-in support
+#   • SesameTTS: High-quality TTS using Sesame CSM 1B model
+#
+# IF YOU NEED PersonaPlex:
+#   1. Create a separate Python environment for moshi with huggingface-hub<1.0
+#   2. Install: pip install moshi @ git+https://github.com/NVIDIA/personaplex.git@052206ac#subdirectory=moshi
+#   3. Set: export PERSONAPLEX_ENABLED=true
+#   4. Note: This breaks transformers/sentence-transformers in that environment

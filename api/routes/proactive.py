@@ -2,33 +2,49 @@
 
 import asyncio
 import logging
+import threading
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Query
 from pydantic import BaseModel
+
+from api.auth import require_api_key
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/proactive", tags=["proactive"])
+router = APIRouter(prefix="/api/proactive", tags=["proactive"], dependencies=[Depends(require_api_key)])
 
-# Global daemon instance (lazy loaded)
-_daemon = None
-_daemon_task = None
+# Per-session daemon instances
+_daemons: dict[str, object] = {}
+_daemon_lock = threading.Lock()
+
+_start_lock: asyncio.Lock | None = None
 
 
-async def _get_daemon():
-    """Get the global Gateway Daemon singleton (shared with main.py auto-start)."""
-    global _daemon
-    if _daemon is None:
-        try:
-            from apprentice_agent.proactive.gateway_daemon import get_gateway_daemon
-            _daemon = get_gateway_daemon()
-            logger.info("[Proactive API] Using shared Gateway Daemon singleton")
-        except ImportError as e:
-            logger.error(f"[Proactive API] Failed to import GatewayDaemon: {e}")
-            raise HTTPException(status_code=503, detail="Proactive system not available")
-    return _daemon
+def _get_start_lock() -> asyncio.Lock:
+    global _start_lock
+    if _start_lock is None:
+        _start_lock = asyncio.Lock()
+    return _start_lock
+
+
+def _get_daemon_for_session(session_id: str):
+    with _daemon_lock:
+        if session_id not in _daemons:
+            try:
+                from aura.proactive.gateway_daemon import get_gateway_daemon
+                _daemons[session_id] = get_gateway_daemon()
+                logger.info(f"[Proactive API] Using shared Gateway Daemon singleton for session={session_id}")
+            except ImportError as e:
+                logger.error(f"[Proactive API] Failed to import GatewayDaemon: {e}")
+                raise HTTPException(status_code=503, detail="Proactive system not available")
+        return _daemons[session_id]
+
+
+async def _get_daemon(session_id: str = "default"):
+    """Get the Gateway Daemon for the given session."""
+    return _get_daemon_for_session(session_id)
 
 
 # ============================================================================
@@ -75,10 +91,10 @@ class BeliefUpdateRequest(BaseModel):
 # ============================================================================
 
 @router.get("/status", response_model=DaemonStatusResponse)
-async def get_daemon_status():
+async def get_daemon_status(session_id: str = Query(default="default")):
     """Get Gateway Daemon status and statistics."""
     try:
-        daemon = await _get_daemon()
+        daemon = _get_daemon_for_session(session_id)
         stats = daemon.get_stats()
 
         beliefs = None
@@ -114,36 +130,35 @@ async def get_daemon_status():
 
 
 @router.post("/start")
-async def start_daemon(background_tasks: BackgroundTasks):
+async def start_daemon(background_tasks: BackgroundTasks, session_id: str = Query(default="default")):
     """Start the Gateway Daemon."""
-    global _daemon_task
+    daemon = _get_daemon_for_session(session_id)
 
-    daemon = await _get_daemon()
+    async with _get_start_lock():
+        if daemon.state.value == "running":
+            return {"status": "already_running", "message": "Daemon is already running"}
 
-    if daemon.state.value == "running":
-        return {"status": "already_running", "message": "Daemon is already running"}
+        try:
+            # Start daemon in background
+            async def run_daemon():
+                await daemon.start()
 
-    try:
-        # Start daemon in background
-        async def run_daemon():
-            await daemon.start()
+            asyncio.get_running_loop().create_task(run_daemon())
 
-        _daemon_task = asyncio.create_task(run_daemon())
-
-        return {
-            "status": "started",
-            "message": "Gateway Daemon started",
-            "state": daemon.state.value
-        }
-    except Exception as e:
-        logger.error(f"[Proactive API] Start error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+            return {
+                "status": "started",
+                "message": "Gateway Daemon started",
+                "state": daemon.state.value
+            }
+        except Exception as e:
+            logger.error(f"[Proactive API] Start error: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/stop")
-async def stop_daemon():
+async def stop_daemon(session_id: str = Query(default="default")):
     """Stop the Gateway Daemon."""
-    daemon = await _get_daemon()
+    daemon = _get_daemon_for_session(session_id)
 
     if daemon.state.value == "stopped":
         return {"status": "already_stopped", "message": "Daemon is already stopped"}
@@ -161,17 +176,17 @@ async def stop_daemon():
 
 
 @router.post("/pause")
-async def pause_daemon():
+async def pause_daemon(session_id: str = Query(default="default")):
     """Pause proactive actions (daemon still processes events)."""
-    daemon = await _get_daemon()
+    daemon = _get_daemon_for_session(session_id)
     daemon.pause()
     return {"status": "paused", "state": daemon.state.value}
 
 
 @router.post("/resume")
-async def resume_daemon():
+async def resume_daemon(session_id: str = Query(default="default")):
     """Resume proactive actions."""
-    daemon = await _get_daemon()
+    daemon = _get_daemon_for_session(session_id)
     daemon.resume()
     return {"status": "resumed", "state": daemon.state.value}
 
@@ -181,9 +196,9 @@ async def resume_daemon():
 # ============================================================================
 
 @router.post("/context")
-async def update_context(update: ContextUpdate):
+async def update_context(update: ContextUpdate, session_id: str = Query(default="default")):
     """Update user context for relevance filtering."""
-    daemon = await _get_daemon()
+    daemon = _get_daemon_for_session(session_id)
 
     daemon.update_context(
         app=update.app,
@@ -204,9 +219,9 @@ async def update_context(update: ContextUpdate):
 
 
 @router.get("/context")
-async def get_context():
+async def get_context(session_id: str = Query(default="default")):
     """Get current user context."""
-    daemon = await _get_daemon()
+    daemon = _get_daemon_for_session(session_id)
 
     return {
         "current_app": daemon.user_context.current_app,
@@ -220,9 +235,9 @@ async def get_context():
 
 
 @router.post("/beliefs")
-async def update_beliefs(update: BeliefUpdateRequest):
+async def update_beliefs(update: BeliefUpdateRequest, session_id: str = Query(default="default")):
     """Manually update beliefs (for testing)."""
-    daemon = await _get_daemon()
+    daemon = _get_daemon_for_session(session_id)
 
     observations = {}
     if update.user_activity is not None:
@@ -257,9 +272,9 @@ async def update_beliefs(update: BeliefUpdateRequest):
 # ============================================================================
 
 @router.get("/messages")
-async def get_pending_messages():
+async def get_pending_messages(session_id: str = Query(default="default")):
     """Get and clear pending proactive messages."""
-    daemon = await _get_daemon()
+    daemon = _get_daemon_for_session(session_id)
     messages = daemon.get_pending_messages()
 
     return {
@@ -279,9 +294,9 @@ async def get_pending_messages():
 
 
 @router.post("/decide")
-async def trigger_decision():
+async def trigger_decision(session_id: str = Query(default="default")):
     """Manually trigger a proactive decision (for testing)."""
-    daemon = await _get_daemon()
+    daemon = _get_daemon_for_session(session_id)
 
     decision = daemon.inference_engine.select_action()
 
@@ -305,12 +320,12 @@ class TestMessageRequest(BaseModel):
 
 
 @router.post("/test-message")
-async def create_test_message(request: TestMessageRequest):
+async def create_test_message(request: TestMessageRequest, session_id: str = Query(default="default")):
     """Create a test proactive message for demonstration."""
-    daemon = await _get_daemon()
+    daemon = _get_daemon_for_session(session_id)
 
     try:
-        from apprentice_agent.proactive import ProactiveMessage, ProactiveAction, EventPriority
+        from aura.proactive import ProactiveMessage, ProactiveAction, EventPriority
 
         # Default messages based on action
         default_messages = {
@@ -366,13 +381,14 @@ async def publish_event(
     source: str,
     event_type: str,
     priority: int = 3,
-    payload: Dict[str, Any] = None
+    payload: Dict[str, Any] = None,
+    session_id: str = Query(default="default")
 ):
     """Publish a test event to the daemon."""
-    daemon = await _get_daemon()
+    daemon = _get_daemon_for_session(session_id)
 
     try:
-        from apprentice_agent.proactive import Event, EventPriority
+        from aura.proactive import Event, EventPriority
 
         event = Event(
             source=source,
@@ -399,9 +415,9 @@ async def publish_event(
 # ============================================================================
 
 @router.post("/interaction")
-async def record_interaction():
+async def record_interaction(session_id: str = Query(default="default")):
     """Record that user interacted with AURA."""
-    daemon = await _get_daemon()
+    daemon = _get_daemon_for_session(session_id)
     daemon.record_interaction()
     return {
         "status": "recorded",
@@ -411,12 +427,12 @@ async def record_interaction():
 
 
 @router.post("/dismiss")
-async def dismiss_proactive_message():
+async def dismiss_proactive_message(session_id: str = Query(default="default")):
     """Record that user dismissed a proactive notification.
 
     Feeds back into active inference to discourage similar actions.
     """
-    daemon = await _get_daemon()
+    daemon = _get_daemon_for_session(session_id)
     daemon.record_user_response(engaged=False, response_type="dismissed")
     return {
         "status": "recorded",
@@ -425,9 +441,9 @@ async def dismiss_proactive_message():
 
 
 @router.post("/idle")
-async def record_idle():
+async def record_idle(session_id: str = Query(default="default")):
     """Record that user appears idle."""
-    daemon = await _get_daemon()
+    daemon = _get_daemon_for_session(session_id)
     daemon.record_idle()
     return {
         "status": "recorded",
@@ -447,7 +463,7 @@ async def get_screen_context():
     Returns what AURA can see: current app, window, recent text, errors.
     """
     try:
-        from apprentice_agent.tools.screenpipe import get_screenpipe_client
+        from aura.tools.screenpipe import get_screenpipe_client
         client = get_screenpipe_client()
 
         if not client.is_available():
@@ -480,7 +496,7 @@ async def get_workflow_state():
     Returns focus state, interruptibility, and recent app switches.
     """
     try:
-        from apprentice_agent.proactive.monitors.workflow_detector import get_workflow_detector
+        from aura.proactive.monitors.workflow_detector import get_workflow_detector
         wd = get_workflow_detector()
         return wd.get_focus_state()
     except ImportError:
@@ -490,14 +506,14 @@ async def get_workflow_state():
 
 
 @router.get("/suggestion")
-async def get_proactive_suggestion():
+async def get_proactive_suggestion(session_id: str = Query(default="default")):
     """Get a proactive suggestion based on current context (Phase 5C).
 
     Returns what AURA would suggest right now based on screen, memory, patterns.
     """
     try:
-        daemon = await _get_daemon()
-        from apprentice_agent.proactive.active_inference import ProactiveAction
+        daemon = _get_daemon_for_session(session_id)
+        from aura.proactive.active_inference import ProactiveAction
 
         suggestion = daemon._generate_message_content(ProactiveAction.SUGGEST)
         beliefs = daemon.inference_engine.get_beliefs()

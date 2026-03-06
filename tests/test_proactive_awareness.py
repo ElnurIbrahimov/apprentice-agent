@@ -9,13 +9,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from apprentice_agent.consciousness.world_model import (
+from aura.consciousness.world_model import (
     ChangeType,
     GoalHorizon,
     ProjectStatus,
     WorldModel,
 )
-from apprentice_agent.consciousness.proactive_awareness import (
+from aura.consciousness.proactive_awareness import (
     InsightType,
     ProactiveAwarenessEngine,
     ProactiveInsight,
@@ -590,7 +590,7 @@ class TestCheckPatterns:
         mock_prophet = MagicMock()
         mock_prophet.patterns = {}
         with patch(
-            "apprentice_agent.patterns.get_pattern_prophet",
+            "aura.patterns.get_pattern_prophet",
             return_value=mock_prophet,
         ):
             result = engine.check_patterns()
@@ -609,7 +609,7 @@ class TestCheckPatterns:
         mock_prophet.patterns = {"morning_coding": mock_pattern}
 
         with patch(
-            "apprentice_agent.patterns.get_pattern_prophet",
+            "aura.patterns.get_pattern_prophet",
             return_value=mock_prophet,
         ):
             result = engine.check_patterns()
@@ -632,7 +632,7 @@ class TestCheckPatterns:
         mock_prophet.patterns = {"weak_signal": mock_pattern}
 
         with patch(
-            "apprentice_agent.patterns.get_pattern_prophet",
+            "aura.patterns.get_pattern_prophet",
             return_value=mock_prophet,
         ):
             result = engine.check_patterns()
@@ -721,10 +721,10 @@ class TestCheckStressCorrelations:
         mock_tom.get_emotional_state.return_value = mock_emo
 
         with patch(
-            "apprentice_agent.emotion.alma_engine.get_emotional_state",
+            "aura.emotion.alma_engine.get_emotional_state",
             return_value=mock_alma_state,
         ), patch(
-            "apprentice_agent.proactive.theory_of_mind.get_theory_of_mind",
+            "aura.proactive.theory_of_mind.get_theory_of_mind",
             return_value=mock_tom,
         ):
             result = engine.check_stress_correlations()
@@ -758,10 +758,10 @@ class TestCheckStressCorrelations:
         mock_tom.get_emotional_state.return_value = mock_emo
 
         with patch(
-            "apprentice_agent.emotion.alma_engine.get_emotional_state",
+            "aura.emotion.alma_engine.get_emotional_state",
             return_value=mock_alma_state,
         ), patch(
-            "apprentice_agent.proactive.theory_of_mind.get_theory_of_mind",
+            "aura.proactive.theory_of_mind.get_theory_of_mind",
             return_value=mock_tom,
         ):
             result = engine.check_stress_correlations()

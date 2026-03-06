@@ -4,6 +4,8 @@ import { ArrowPathIcon, CpuChipIcon, CheckCircleIcon, QuestionMarkCircleIcon, Ex
 
 interface ProtoAGIStatus {
   enabled: boolean;
+  available?: boolean;
+  loading?: boolean;
   mode: string;
   cycle_count: number;
   facts: number;
@@ -23,17 +25,12 @@ export function ProtoAGIPanel() {
     setLoading(true);
     setError(null);
     try {
-      // Use absolute URL to bypass Vite proxy issues
-      const res = await fetch('http://127.0.0.1:8000/api/proto-agi');
-      console.log('[ProtoAGI] Fetch response:', res.status, res.ok);
+      const res = await fetch('/api/proto-agi');
       if (res.ok) {
         const data = await res.json();
-        console.log('[ProtoAGI] Data received:', data);
         setStatus(data);
       } else {
-        const errMsg = `Response not OK: ${res.status}`;
-        console.error('[ProtoAGI]', errMsg);
-        setError(errMsg);
+        setError(`Response not OK: ${res.status}`);
       }
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : 'Unknown error';
@@ -45,19 +42,53 @@ export function ProtoAGIPanel() {
 
   usePolling(fetchStatus, 15000);
 
-  if (!status?.enabled) {
+  if (!status) {
+    return (
+      <div className="bg-chat-sidebar rounded-lg p-4 animate-pulse">
+        <div className="h-4 bg-chat-border/30 rounded w-36 mb-2"></div>
+        <div className="h-6 bg-chat-border/30 rounded w-full"></div>
+      </div>
+    );
+  }
+
+  if (status.loading) {
     return (
       <div className="bg-chat-sidebar rounded-lg p-4">
         <h3 className="text-chat-text font-medium mb-2 flex items-center gap-2">
-          <CpuChipIcon className="w-5 h-5" />
-          Proto-AGI Truth Spine
+          <CpuChipIcon className="w-5 h-5" /> Proto-AGI Truth Spine
         </h3>
-        <div className="text-chat-text-secondary text-sm">
-          {loading ? 'Loading...' : error ? `Error: ${error}` : status ? `Disabled (enabled=${status.enabled})` : 'Proto-AGI not loaded'}
-        </div>
-        <div className="text-chat-text-secondary text-xs mt-1 opacity-50">
-          Debug: status={status ? JSON.stringify(status).substring(0, 50) : 'null'}
-        </div>
+        <p className="text-chat-text-secondary text-sm">Agent initializing...</p>
+      </div>
+    );
+  }
+
+  if (!status.enabled) {
+    return (
+      <div className="bg-chat-sidebar rounded-lg p-4">
+        <h3 className="text-chat-text font-medium mb-2 flex items-center gap-2">
+          <CpuChipIcon className="w-5 h-5" /> Proto-AGI Truth Spine
+        </h3>
+        {status.available ? (
+          <div>
+            <p className="text-chat-text-secondary text-xs mb-3">
+              Autonomous cognitive loop available but not running.
+            </p>
+            <button
+              onClick={async () => {
+                const res = await fetch('/api/proto-agi/start', { method: 'POST' });
+                const data = await res.json();
+                if (!data.success) setError(data.error || 'Failed to start');
+                else fetchStatus();
+              }}
+              className="text-xs px-3 py-1.5 bg-purple-600/20 hover:bg-purple-600/40 text-purple-400 rounded-lg transition-colors"
+            >
+              Start Cognitive Loop
+            </button>
+            {error && <p className="text-red-400 text-xs mt-2">{error}</p>}
+          </div>
+        ) : (
+          <p className="text-chat-text-secondary text-xs">Proto-AGI unavailable.</p>
+        )}
       </div>
     );
   }

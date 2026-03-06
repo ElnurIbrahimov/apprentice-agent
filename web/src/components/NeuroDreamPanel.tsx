@@ -53,14 +53,35 @@ export function NeuroDreamPanel() {
     setActionLoading(false);
   };
 
-  if (!status?.enabled) {
+  if (!status) {
+    return (
+      <div className="bg-chat-sidebar rounded-lg p-4 animate-pulse">
+        <div className="h-4 bg-chat-border/30 rounded w-28 mb-2"></div>
+        <div className="h-6 bg-chat-border/30 rounded w-full"></div>
+      </div>
+    );
+  }
+
+  if (status.loading) {
     return (
       <div className="bg-chat-sidebar rounded-lg p-4">
         <h3 className="text-chat-text font-medium mb-2 flex items-center gap-2">
-          <MoonIcon className="w-5 h-5" />
-          NeuroDream
+          <MoonIcon className="w-4 h-4" /> NeuroDream
         </h3>
-        <div className="text-chat-text-secondary text-sm">NeuroDream not loaded</div>
+        <p className="text-chat-text-secondary text-sm">
+          Agent initializing... check back in a moment.
+        </p>
+      </div>
+    );
+  }
+
+  if (!status.enabled) {
+    return (
+      <div className="bg-chat-sidebar rounded-lg p-4">
+        <h3 className="text-chat-text font-medium mb-2 flex items-center gap-2">
+          <MoonIcon className="w-4 h-4" /> NeuroDream
+        </h3>
+        <p className="text-chat-text-secondary text-sm">NeuroDream engine unavailable.</p>
       </div>
     );
   }

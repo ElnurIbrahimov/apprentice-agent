@@ -317,7 +317,7 @@ class ConfigRequest(BaseModel):
 async def get_pending_starter():
     """Get pending conversation starter if available."""
     manager = get_manager()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     starter = await loop.run_in_executor(None, manager.get_pending_starter)
 
     if starter:
@@ -336,7 +336,7 @@ async def check_pending():
 async def generate_starter(request: GenerateRequest):
     """Generate a conversation starter based on context."""
     manager = get_manager()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     # Try to get context from other systems if not provided
     focus_topics = request.focus_topics
@@ -355,7 +355,7 @@ async def generate_starter(request: GenerateRequest):
     # Auto-fetch emotion from ALMA if not provided
     if not emotion:
         try:
-            from apprentice_agent.emotion.alma_engine import alma_engine
+            from aura.emotion.alma_engine import alma_engine
             if alma_engine:
                 state = await loop.run_in_executor(None, alma_engine.get_emotional_state)
                 emotion = state.get("dominant_emotion")
@@ -383,7 +383,7 @@ async def generate_starter(request: GenerateRequest):
 async def dismiss_topic(topic: str):
     """Dismiss a topic (user not interested)."""
     manager = get_manager()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, functools.partial(manager.dismiss_topic, topic))
     return {"status": "dismissed", "topic": topic}
 
@@ -392,7 +392,7 @@ async def dismiss_topic(topic: str):
 async def get_stats():
     """Get conversation starter statistics."""
     manager = get_manager()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, manager.get_stats)
 
 
@@ -400,7 +400,7 @@ async def get_stats():
 async def update_config(request: ConfigRequest):
     """Update conversation starter configuration."""
     manager = get_manager()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(
         None,
         functools.partial(
@@ -423,7 +423,7 @@ async def check_and_generate_starter():
     generate a conversation starter.
     """
     manager = get_manager()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     # Get current context
     try:
@@ -436,7 +436,7 @@ async def check_and_generate_starter():
 
     # Get emotion
     try:
-        from apprentice_agent.emotion.alma_engine import alma_engine
+        from aura.emotion.alma_engine import alma_engine
         if alma_engine:
             emotion_state = await loop.run_in_executor(None, alma_engine.get_emotional_state)
             emotion = emotion_state.get("dominant_emotion")

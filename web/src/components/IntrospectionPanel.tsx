@@ -54,7 +54,7 @@ export function IntrospectionPanel() {
   // Fetch stats
   const fetchStats = useCallback(async () => {
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/introspection/stats');
+      const res = await fetch('/api/introspection/stats');
       if (res.ok) {
         const data = await res.json();
         if (data.success) {
@@ -80,7 +80,7 @@ export function IntrospectionPanel() {
     setResult(null);
 
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/introspection/analyze', {
+      const res = await fetch('/api/introspection/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: query.trim() }),
@@ -469,7 +469,7 @@ export function IntrospectionPanel() {
           </div>
 
           <div className="text-xs text-chat-text-secondary pt-2 border-t border-chat-border">
-            Changes take effect immediately for new queries.
+            Backend settings API not yet connected — sliders are display-only.
           </div>
         </div>
       )}

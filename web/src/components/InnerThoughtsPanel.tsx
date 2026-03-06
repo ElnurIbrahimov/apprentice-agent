@@ -93,6 +93,13 @@ export function InnerThoughtsPanel() {
       {/* Expanded content */}
       {isExpanded && (
         <div className="px-3 pb-3 space-y-2">
+          {/* Idle state */}
+          {!currentThought && (
+            <div className="text-chat-text-secondary/60 text-xs italic px-1">
+              Processing quietly... thoughts surface during active reasoning.
+            </div>
+          )}
+
           {/* Current thought highlight */}
           {currentThought && (
             <div className="bg-gradient-to-r from-purple-900/30 to-transparent rounded-lg p-2.5 border-l-2 border-purple-500">

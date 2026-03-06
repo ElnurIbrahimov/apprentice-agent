@@ -487,7 +487,7 @@ async def get_thinking_state(since: Optional[float] = None):
                Enables efficient polling — frontend can skip full fetch when nothing changed.
     """
     manager = get_manager()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     state = await loop.run_in_executor(None, manager.get_state)
 
     # If 'since' is provided, check if anything changed
@@ -505,7 +505,7 @@ async def get_thinking_state(since: Optional[float] = None):
 async def get_teaser():
     """Get a teaser preview of what AURA is thinking about."""
     manager = get_manager()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     teaser = await loop.run_in_executor(None, manager.get_teaser)
 
     if teaser:
@@ -517,7 +517,7 @@ async def get_teaser():
 async def generate_thought(force: bool = False):
     """Generate a new thought."""
     manager = get_manager()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     thought = await loop.run_in_executor(None, functools.partial(manager.generate_thought, force=force))
 
     if thought:
@@ -535,7 +535,7 @@ async def add_thought(request: AddThoughtRequest):
     except ValueError:
         thought_type = ThoughtType.WONDERING
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(
         None,
         functools.partial(
@@ -553,7 +553,7 @@ async def add_thought(request: AddThoughtRequest):
 async def resolve_thought(thought_id: str, resolution: str = "dismissed"):
     """Resolve a thought."""
     manager = get_manager()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, functools.partial(manager.resolve_thought, thought_id, resolution))
     return {"status": "resolved", "thought_id": thought_id}
 
@@ -562,7 +562,7 @@ async def resolve_thought(thought_id: str, resolution: str = "dismissed"):
 async def get_stats():
     """Get thinking statistics."""
     manager = get_manager()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, manager.get_stats)
 
 
@@ -570,7 +570,7 @@ async def get_stats():
 async def clear_thoughts():
     """Clear all thoughts."""
     manager = get_manager()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, manager.clear)
     return {"status": "cleared"}
 

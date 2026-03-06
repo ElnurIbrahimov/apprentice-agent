@@ -18,8 +18,8 @@ from unittest.mock import patch, MagicMock
 # Ensure the project root is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from apprentice_agent.consciousness.state_extractor import StateExtractor, EXTRACTION_PROMPT
-from apprentice_agent.consciousness.world_model import (
+from aura.consciousness.state_extractor import StateExtractor, EXTRACTION_PROMPT
+from aura.consciousness.world_model import (
     WorldModel,
     ProjectStatus,
     GoalHorizon,
@@ -117,14 +117,14 @@ class TestShouldExtract(unittest.TestCase):
         # Reset last extract time to allow extraction
         self.extractor._last_extract_time = 0.0
 
-    @patch("apprentice_agent.consciousness.state_extractor.time")
+    @patch("aura.consciousness.state_extractor.time")
     def test_trivial_message_skip(self, mock_time):
         """Messages with < 3 words are skipped."""
         mock_time.monotonic.return_value = 100.0
         messages = [{"role": "user", "content": "hi"}]
         self.assertFalse(self.extractor.should_extract(messages))
 
-    @patch("apprentice_agent.consciousness.state_extractor.time")
+    @patch("aura.consciousness.state_extractor.time")
     def test_normal_message_pass(self, mock_time):
         """Normal messages pass the filter."""
         mock_time.monotonic.return_value = 100.0
@@ -371,7 +371,7 @@ class TestProcessConversation(unittest.TestCase):
     def setUp(self):
         self.wm = _make_wm()
 
-    @patch("apprentice_agent.consciousness.state_extractor.get_state_extractor")
+    @patch("aura.consciousness.state_extractor.get_state_extractor")
     def test_full_pipeline_with_mock(self, mock_get_extractor):
         """Full pipeline applies extraction results to world model."""
         extraction_result = {
@@ -446,7 +446,7 @@ class TestProcessConversation(unittest.TestCase):
         counts = wm.process_conversation("conv1", [{"role": "user", "content": "test"}])
         self.assertEqual(sum(counts.values()), 0)
 
-    @patch("apprentice_agent.consciousness.state_extractor.get_state_extractor")
+    @patch("aura.consciousness.state_extractor.get_state_extractor")
     def test_empty_extraction_skips(self, mock_get_extractor):
         """Empty extraction result causes no changes."""
         mock_extractor = MagicMock()
@@ -458,7 +458,7 @@ class TestProcessConversation(unittest.TestCase):
         counts = self.wm.process_conversation("conv1", messages)
         self.assertEqual(sum(counts.values()), 0)
 
-    @patch("apprentice_agent.consciousness.state_extractor.get_state_extractor")
+    @patch("aura.consciousness.state_extractor.get_state_extractor")
     def test_extraction_failure_graceful(self, mock_get_extractor):
         """Extraction failure is handled gracefully."""
         mock_extractor = MagicMock()

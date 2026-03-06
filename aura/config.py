@@ -64,6 +64,10 @@ VERIFIED_LOCAL_MODELS = {
     "glm-ocr:latest",                 # OCR — local processing
 }
 
+_tags_cache: dict = {}
+_tags_cache_ts: float = 0.0
+
+
 def validate_model(model_name: str, ollama_host: str = None) -> bool:
     """
     Check if a model is available in Ollama.
@@ -74,13 +78,25 @@ def validate_model(model_name: str, ollama_host: str = None) -> bool:
     if model_name.endswith("-cloud") or model_name.endswith(":cloud"):
         return bool(os.getenv("OLLAMA_API_KEY"))
 
+    import time as _time
     host = ollama_host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
+
+    global _tags_cache, _tags_cache_ts
+    now = _time.time()
+    if now - _tags_cache_ts < 30.0 and _tags_cache:
+        available_models = _tags_cache.get(host)
+        if available_models is not None:
+            if model_name in available_models:
+                return True
+            base_name = model_name.split(":")[0]
+            return any(m.startswith(base_name) for m in available_models)
 
     try:
         response = _get_validation_session().get(f"{host}/api/tags", timeout=5)
         if response.status_code == 200:
             available = [m["name"] for m in response.json().get("models", [])]
-            # Check exact match or base name match
+            _tags_cache[host] = available
+            _tags_cache_ts = now
             if model_name in available:
                 return True
             base_name = model_name.split(":")[0]
@@ -126,33 +142,42 @@ class Config:
         "gemini-3-flash-preview:cloud",   # Primary: speed-optimized
         "nemotron-3-nano:30b-cloud",       # Fallback: efficient 30B
         "kimi-k2.5:cloud",                 # Fallback: general purpose
+        "qwen3:8b",                        # Local fallback: offline-capable
+        "qwen2:1.5b",                      # Local fallback: tiny/fast
     ]
     MODEL_REASON_CHAIN = [
         "qwen3.5:397b-cloud",              # Primary: deep planning
         "cogito-2.1:671b-cloud",           # Fallback: extended reasoning
         "deepseek-v3.2:cloud",             # Fallback: strong all-rounder
         "kimi-k2.5:cloud",                 # Fallback: general purpose
+        "deepseek-r1:8b",                  # Local fallback: reasoning-capable
+        "qwen3:8b",                        # Local fallback: offline-capable
     ]
     MODEL_CODE_CHAIN = [
         "qwen3-coder:480b-cloud",          # Primary: 480B code specialist
         "devstral-2:123b-cloud",           # Fallback: agentic code/SWE
         "qwen3-coder-next:cloud",          # Fallback: efficient code MoE
         "deepseek-v3.2:cloud",             # Fallback: strong at code
+        "qwen2.5-coder:7b",               # Local fallback: code-specialized
+        "deepseek-r1:8b",                  # Local fallback: offline code
     ]
     MODEL_VISION_CHAIN = [
         "qwen3-vl:235b-cloud",             # Primary: only dedicated VL model
         "kimi-k2.5:cloud",                 # Fallback: multimodal capable
         "gemini-3-flash-preview:cloud",    # Fallback: Gemini supports vision
+        "llava:latest",                    # Local fallback: vision-capable
     ]
     MODEL_THINK_CHAIN = [
         "kimi-k2-thinking:cloud",          # Primary: dedicated thinking mode
         "cogito-2.1:671b-cloud",           # Fallback: extended reasoning
         "qwen3.5:397b-cloud",              # Fallback: deep planner
+        "deepseek-r1:8b",                  # Local fallback: reasoning chain-of-thought
     ]
     MODEL_LONGCTX_CHAIN = [
         "minimax-m2.5:cloud",              # Primary: million-token context
         "kimi-k2.5:cloud",                 # Fallback: long context capable
         "qwen3.5:397b-cloud",              # Fallback: large context
+        "qwen3:8b",                        # Local fallback: best local context window
     ]
 
     # Primary defaults
@@ -320,7 +345,7 @@ class Config:
     # Strategy Bandit Configuration — Adaptive reasoning strategy selection
     STRATEGY_BANDIT_ENABLED: bool = os.getenv("STRATEGY_BANDIT_ENABLED", "true").lower() == "true"
     STRATEGY_BANDIT_EPSILON: float = float(os.getenv("STRATEGY_BANDIT_EPSILON", "0.1"))
-    STRATEGY_BANDIT_EVAL_ENABLED: bool = os.getenv("STRATEGY_BANDIT_EVAL_ENABLED", "false").lower() == "true"
+    STRATEGY_BANDIT_EVAL_ENABLED: bool = os.getenv("STRATEGY_BANDIT_EVAL_ENABLED", "true").lower() == "true"
 
     # Reasoning Template Library Configuration — Phase 3
     REASONING_TEMPLATES_ENABLED: bool = os.getenv("REASONING_TEMPLATES_ENABLED", "true").lower() == "true"
@@ -383,6 +408,15 @@ class Config:
             ),
             "cpu_offload": True  # Required for 8GB GPU
         }
+    }
+
+    # Vision model VRAM requirements (GB) — used by _can_fit_model() in vision.py
+    VISION_MODEL_VRAM: Dict[str, float] = {
+        "llava": 4.0,
+        "llava:13b": 8.0,
+        "llava:34b": 20.0,
+        "minicpm-v": 6.0,
+        "bakllava": 4.0,
     }
 
     # Florence-2 Vision (local HuggingFace model — for image preprocessing only)

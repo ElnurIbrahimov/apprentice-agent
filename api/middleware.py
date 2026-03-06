@@ -1,5 +1,6 @@
 """API middleware for authentication, rate limiting, and security."""
 
+import asyncio
 import time
 import logging
 import secrets
@@ -43,6 +44,12 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         if not self.enabled:
             return await call_next(request)
 
+        # Skip auth for WebSocket upgrades — browsers cannot send custom headers
+        # on new WebSocket(), so API key auth is handled inside the WS handler
+        # itself (see verify_api_key_ws in api/auth.py).
+        if request.headers.get("upgrade", "").lower() == "websocket":
+            return await call_next(request)
+
         # Skip auth for public paths
         if request.url.path in self.PUBLIC_PATHS:
             return await call_next(request)
@@ -51,13 +58,13 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         if request.url.path.startswith("/static") or request.url.path.startswith("/assets"):
             return await call_next(request)
 
-        # Check API key in header or query param
-        api_key = request.headers.get("X-API-Key") or request.query_params.get("api_key")
+        # Check API key in header only (query params are logged and leaked in referrers)
+        api_key = request.headers.get("X-API-Key")
 
         if not api_key:
             return JSONResponse(
                 status_code=401,
-                content={"detail": "Missing API key. Provide X-API-Key header or api_key query parameter."}
+                content={"detail": "Missing API key. Provide X-API-Key header."}
             )
 
         if not secrets.compare_digest(api_key, self.api_key):
@@ -84,6 +91,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._requests: Dict[str, list] = defaultdict(list)
         self._cleanup_interval = 300  # Clean old entries every 5 min
         self._last_cleanup = time.time()
+        self._lock = asyncio.Lock()
         if self.enabled:
             logger.info(f"[RateLimit] Enabled: {requests_per_minute} requests/minute per IP")
 
@@ -112,22 +120,24 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         client_ip = request.client.host if request.client else "unknown"
         now = time.time()
-        window_start = now - 60
 
-        # Count requests in the current window
-        self._requests[client_ip] = [
-            t for t in self._requests[client_ip] if t > window_start
-        ]
+        async with self._lock:
+            window_start = now - 60
 
-        if len(self._requests[client_ip]) >= self.requests_per_minute:
-            retry_after = int(60 - (now - self._requests[client_ip][0]))
-            return JSONResponse(
-                status_code=429,
-                content={"detail": f"Rate limit exceeded. Try again in {max(1, retry_after)}s."},
-                headers={"Retry-After": str(max(1, retry_after))}
-            )
+            # Count requests in the current window
+            self._requests[client_ip] = [
+                t for t in self._requests[client_ip] if t > window_start
+            ]
 
-        self._requests[client_ip].append(now)
-        self._cleanup_old_entries()
+            if len(self._requests[client_ip]) >= self.requests_per_minute:
+                retry_after = int(60 - (now - self._requests[client_ip][0]))
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": f"Rate limit exceeded. Try again in {max(1, retry_after)}s."},
+                    headers={"Retry-After": str(max(1, retry_after))}
+                )
+
+            self._requests[client_ip].append(now)
+            self._cleanup_old_entries()
 
         return await call_next(request)

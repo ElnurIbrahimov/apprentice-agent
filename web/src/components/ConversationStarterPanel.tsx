@@ -96,7 +96,9 @@ export function ConversationStarterPanel() {
         <div className="px-3 pb-3 space-y-3">
           {/* Description */}
           <div className="text-xs text-chat-text-secondary/70">
-            AURA can spontaneously start conversations based on context, time, and your focus.
+            {stats && stats.total_generated === 0
+              ? 'Auto-generates topics after ~60s of idle time.'
+              : 'AURA can spontaneously start conversations based on context, time, and your focus.'}
           </div>
 
           {/* Stats */}

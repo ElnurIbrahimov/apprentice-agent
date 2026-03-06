@@ -7,12 +7,12 @@ import sqlite3
 import tempfile
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from apprentice_agent.consciousness.prompt_evolution import (
+from aura.consciousness.prompt_evolution import (
     DEFAULT_REASONER_PROMPT,
     PromptEvolutionEngine,
 )
@@ -65,7 +65,7 @@ def _seed_reasoning_traces(db_path, count=25, reward=0.7):
             "INSERT INTO reasoning_traces "
             "(trace_id, problem, full_trace, composite_reward, created_at) "
             "VALUES (?, ?, ?, ?, ?)",
-            (f"trace_{i}", f"Problem {i}: solve x+{i}=10", "[]", reward, datetime.utcnow().isoformat()),
+            (f"trace_{i}", f"Problem {i}: solve x+{i}=10", "[]", reward, datetime.now(timezone.utc).isoformat()),
         )
     conn.commit()
     conn.close()
@@ -243,7 +243,7 @@ class TestMaybeEvolve:
             "INSERT INTO prompt_evolution_log "
             "(module, old_version, new_version, change_type, timestamp) "
             "VALUES ('reasoner', 1, 2, 'promote', ?)",
-            (datetime.utcnow().isoformat(),),
+            (datetime.now(timezone.utc).isoformat(),),
         )
         conn.commit()
         conn.close()
@@ -277,7 +277,7 @@ class TestCritique:
         mock_brain = MagicMock()
         mock_brain.think.return_value = "The prompt lacks specificity for math problems."
 
-        with patch("apprentice_agent.brain.OllamaBrain", return_value=mock_brain):
+        with patch("aura.brain.OllamaBrain", return_value=mock_brain):
             critique = engine._critique("reasoner")
 
         assert "specificity" in critique
@@ -291,7 +291,7 @@ class TestCritique:
         mock_brain = MagicMock()
         mock_brain.think.return_value = "Needs improvement."
 
-        with patch("apprentice_agent.brain.OllamaBrain", return_value=mock_brain):
+        with patch("aura.brain.OllamaBrain", return_value=mock_brain):
             engine._critique("reasoner")
 
         call_args = mock_brain.think.call_args[0][0]
@@ -317,7 +317,7 @@ class TestRevise:
         mock_brain = MagicMock()
         mock_brain.think.return_value = raw_response
 
-        with patch("apprentice_agent.brain.OllamaBrain", return_value=mock_brain):
+        with patch("aura.brain.OllamaBrain", return_value=mock_brain):
             candidates = engine._revise("reasoner", "Test critique")
 
         assert len(candidates) == 3
@@ -331,7 +331,7 @@ class TestRevise:
         mock_brain = MagicMock()
         mock_brain.think.return_value = "Just a single response with no delimiters"
 
-        with patch("apprentice_agent.brain.OllamaBrain", return_value=mock_brain):
+        with patch("aura.brain.OllamaBrain", return_value=mock_brain):
             candidates = engine._revise("reasoner", "Test critique")
 
         assert len(candidates) == 1
@@ -342,7 +342,7 @@ class TestRevise:
         mock_brain = MagicMock()
         mock_brain.think.return_value = "C1===CANDIDATE===C2===CANDIDATE===C3"
 
-        with patch("apprentice_agent.brain.OllamaBrain", return_value=mock_brain):
+        with patch("aura.brain.OllamaBrain", return_value=mock_brain):
             engine._revise("reasoner", "Test critique")
 
         call_args = mock_brain.think.call_args[0][0]
@@ -367,8 +367,8 @@ class TestEvaluateCandidates:
         mock_eval_result.score = 1.0  # Perfect score
         mock_judge.evaluate.return_value = mock_eval_result
 
-        with patch("apprentice_agent.brain.OllamaBrain", return_value=mock_brain), \
-             patch("apprentice_agent.consciousness.reward_signals.JudgeEvaluator", return_value=mock_judge):
+        with patch("aura.brain.OllamaBrain", return_value=mock_brain), \
+             patch("aura.consciousness.reward_signals.JudgeEvaluator", return_value=mock_judge):
             result = engine._evaluate_candidates("reasoner", ["Better prompt"])
 
         assert result == "Better prompt"
@@ -385,8 +385,8 @@ class TestEvaluateCandidates:
         mock_eval_result.score = 0.5  # Below baseline of 0.9
         mock_judge.evaluate.return_value = mock_eval_result
 
-        with patch("apprentice_agent.brain.OllamaBrain", return_value=mock_brain), \
-             patch("apprentice_agent.consciousness.reward_signals.JudgeEvaluator", return_value=mock_judge):
+        with patch("aura.brain.OllamaBrain", return_value=mock_brain), \
+             patch("aura.consciousness.reward_signals.JudgeEvaluator", return_value=mock_judge):
             result = engine._evaluate_candidates("reasoner", ["Worse prompt"])
 
         assert result is None
@@ -410,8 +410,8 @@ class TestEvaluateCandidates:
             return result
         mock_judge.evaluate.side_effect = side_effect
 
-        with patch("apprentice_agent.brain.OllamaBrain", return_value=mock_brain), \
-             patch("apprentice_agent.consciousness.reward_signals.JudgeEvaluator", return_value=mock_judge):
+        with patch("aura.brain.OllamaBrain", return_value=mock_brain), \
+             patch("aura.consciousness.reward_signals.JudgeEvaluator", return_value=mock_judge):
             result = engine._evaluate_candidates("reasoner", ["Regressing prompt"])
 
         # Should be rejected due to regression even if mean is high

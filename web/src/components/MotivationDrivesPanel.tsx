@@ -40,9 +40,7 @@ export function MotivationDrivesPanel() {
       const response = await fetch('/api/motivation/status');
       if (response.ok) {
         const data = await response.json();
-        if (data.active) {
-          setStatus(data);
-        }
+        setStatus(data);
       }
     } catch {
       // Silently ignore
@@ -52,7 +50,37 @@ export function MotivationDrivesPanel() {
   usePolling(fetchStatus, 15000); // 15 second polling
 
   if (!status) {
-    return null; // Don't render until we have data
+    return (
+      <div className="bg-chat-assistant/60 rounded-xl border border-chat-border/30 p-3 animate-pulse">
+        <div className="h-4 bg-chat-border/30 rounded w-24"></div>
+      </div>
+    );
+  }
+
+  if (!status.active) {
+    return (
+      <div className="bg-chat-assistant/60 rounded-xl border border-chat-border/30 overflow-hidden">
+        <div className="p-3">
+          <div className="flex items-center gap-3 mb-2">
+            <span className="text-lg">🧠</span>
+            <span className="text-chat-text font-medium text-sm">Motivation Drives</span>
+          </div>
+          <p className="text-chat-text-secondary text-xs italic mb-3">
+            Idle — activates during downtime and self-directed thinking.
+          </p>
+          <div className="space-y-1.5 opacity-40">
+            {Object.entries(DRIVE_CONFIG).map(([key, config]) => (
+              <div key={key} className="flex items-center gap-2">
+                <span className="text-xs text-chat-text-secondary w-20 capitalize">{config.label}</span>
+                <div className="flex-1 bg-chat-bg rounded-full h-1.5">
+                  <div className="h-full w-0 rounded-full bg-purple-500" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
   }
 
   const dominant = status.dominant_drive;

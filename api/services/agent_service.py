@@ -351,6 +351,18 @@ class AgentService:
                 self._agent = ApprenticeAgent(fast_init=fast_init)
                 logger.info("[AgentService] Agent initialized successfully")
 
+                # Pre-warm UnifiedMemory backends in background
+                def _prewarm_memory():
+                    try:
+                        from aura.memory.unified_memory import get_unified_memory
+                        mem = get_unified_memory()
+                        if hasattr(mem, '_init_backends'):
+                            mem._init_backends()
+                    except Exception as e:
+                        pass  # Pre-warm is best-effort
+
+                threading.Thread(target=_prewarm_memory, daemon=True, name="memory-prewarm").start()
+
                 # Start Real Inner Thoughts Engine
                 try:
                     from api.services.inner_thoughts_engine import get_inner_thoughts_engine
@@ -597,7 +609,7 @@ Keep it concise, readable, and well-formatted with markdown."""
 
 Provide key findings and cite sources."""
                         synthesized = self.agent.brain.think(synthesis_prompt)
-                        response = f"## Deep Research: {topic}**\n\n{synthesized}\n\n---\n*{result.get('summary', '')}*"
+                        response = f"## Deep Research: {topic}\n\n{synthesized}\n\n---\n*{result.get('summary', '')}*"
                     else:
                         response = f"Research failed: {result.get('error', 'Unknown error')}"
 
@@ -777,8 +789,11 @@ Content:
 
 Provide a well-structured, informative summary with key findings and cite sources."""
 
-                        synthesized = brain.think(synthesis_prompt)
-                        yield {"type": "chunk", "content": synthesized}
+                        if hasattr(brain, 'think_stream'):
+                            for chunk in brain.think_stream(synthesis_prompt):
+                                yield {"type": "chunk", "content": chunk}
+                        else:
+                            yield {"type": "chunk", "content": brain.think(synthesis_prompt)}
                         yield {"type": "chunk", "content": f"\n\n---\n*{result.get('summary', '')}*"}
                     else:
                         yield {"type": "chunk", "content": f"Research failed: {result.get('error', 'Unknown error')}"}
@@ -935,10 +950,79 @@ Keep it concise, readable, and well-formatted with markdown."""
 
             enriched_message = message + screen_hint if screen_hint else message
 
+            # ===== PARLIAMENT ROUTING (non-tool conversational queries) =====
+            # Parliament handles SIMPLE (direct think) and STANDARD (think + mirror review) tiers.
+            # Skip for action modes (search/agent/swarm/etc) — those need the full OPEAR loop.
+            if (not detected_action
+                    and hasattr(agent, 'parliament')
+                    and agent.parliament is not None):
+                try:
+                    from aura.parliament import QueryTier
+                    tier = agent.parliament.classify(enriched_message)
+                    if tier in (QueryTier.SIMPLE, QueryTier.STANDARD, QueryTier.COMPLEX):
+                        logger.info(f"[AgentService] Parliament routing (streaming): {tier.value}")
+                        had_content = False
+                        for chunk in agent.parliament.handle_stream(
+                            enriched_message,
+                            context_addon=screen_hint or ""
+                        ):
+                            if chunk:
+                                had_content = True
+                                yield {"type": "chunk", "content": chunk}
+                        if had_content:
+                            yield {"type": "done", "mood": self._get_mood(),
+                                   "model_used": brain.get_last_model_used()}
+                            return
+                except Exception as e:
+                    logger.warning(f"[AgentService] Parliament routing failed, falling back: {e}")
+
             # ===== STANDARD STREAMING =====
             if hasattr(brain, 'think_stream'):
+                full_response = ""
+                yield {"type": "tool_status", "tool_name": "brain", "tool_action": "thinking"}
                 for chunk in brain.think_stream(enriched_message):
+                    full_response += chunk
                     yield {"type": "chunk", "content": chunk}
+                yield {"type": "tool_status", "tool_name": "", "tool_action": ""}  # clear status
+
+                # Memory writes after streaming completes (non-blocking daemon threads)
+                _clean_msg = message.split("\n[Screen context:")[0].strip()
+                if hasattr(agent, 'memory_retriever') and agent.memory_retriever is not None:
+                    try:
+                        import threading
+                        threading.Thread(
+                            target=agent.memory_retriever.store_interaction,
+                            args=(_clean_msg, full_response[:500]),
+                            daemon=True
+                        ).start()
+                    except Exception:
+                        pass
+                # NOTE: This A-MEM write is NOT redundant with agent.chat_stream()'s
+                # UnifiedMemory.store(). This code path calls brain.think_stream() directly,
+                # bypassing agent.chat_stream() entirely, so the agent's own post-processing
+                # (including UnifiedMemory.store → amem.add) never runs. This is the sole
+                # A-MEM write for the direct-brain streaming path.
+                if hasattr(agent, 'tools') and 'amem' in agent.tools and len(full_response) > 50:
+                    try:
+                        amem_tool = agent.tools['amem']
+                        mem_content = f"[Conversation] User: {_clean_msg[:200]}\nAURA: {full_response[:300]}"
+                        import threading
+                        threading.Thread(
+                            target=amem_tool.amem.add,
+                            kwargs={
+                                "content": mem_content,
+                                "category": "episodic",
+                                "source": "conversation",
+                                "importance": 0.5,
+                                "auto_extract": True,
+                                "auto_link": True,
+                                "auto_evolve": False,
+                            },
+                            daemon=True
+                        ).start()
+                    except Exception:
+                        pass
+
                 yield {"type": "done", "mood": self._get_mood(), "model_used": brain.get_last_model_used()}
             else:
                 # Fallback to non-streaming

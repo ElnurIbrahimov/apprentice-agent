@@ -18,12 +18,12 @@ User Input -> Observe -> Plan -> Act -> Evaluate -> Remember -> Response
 7. **RESPONDING** - Format and return response to user
 
 ## Key Files
-- `apprentice_agent/agent.py` - Main agent class, tool dispatch, cognitive loop
-- `apprentice_agent/brain.py` - Ollama LLM integration, prompt engineering, tool selection
-- `apprentice_agent/config.py` - Configuration management
-- `apprentice_agent/identity.py` - Agent personality and identity
-- `apprentice_agent/state_machine.py` - Phase transitions with validation
-- `apprentice_agent/thinking_mode.py` - System 1 (fast) vs System 2 (deep) thinking
+- `aura/agent.py` - Main agent class, tool dispatch, cognitive loop
+- `aura/brain.py` - Ollama LLM integration, prompt engineering, tool selection
+- `aura/config.py` - Configuration management
+- `aura/identity.py` - Agent personality and identity
+- `aura/state_machine.py` - Phase transitions with validation
+- `aura/thinking_mode.py` - System 1 (fast) vs System 2 (deep) thinking
 
 ## Tool Pattern
 Every tool follows this pattern:

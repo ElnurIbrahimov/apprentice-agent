@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-AURA (Autonomous User-Responsive Agent) currently possesses a sophisticated single-user Theory of Mind system implemented in `apprentice_agent/proactive/theory_of_mind.py`. This system tracks a single user's emotional state (valence, arousal, engagement, frustration), communication style (verbosity, formality, technical depth, emoji usage), topic knowledge levels, time-of-day interaction patterns, and anticipated needs. It integrates into the Global Workspace Theory engine as the `theory_of_mind` codelet, feeds observations to the Active Inference engine, and injects user model context into system prompts. However, all of this state is stored as a single undifferentiated blob -- there is no concept of "which user" is interacting, meaning all users blend into one model, corrupting the accuracy of every subsystem that depends on it.
+AURA (Autonomous User-Responsive Agent) currently possesses a sophisticated single-user Theory of Mind system implemented in `aura/proactive/theory_of_mind.py`. This system tracks a single user's emotional state (valence, arousal, engagement, frustration), communication style (verbosity, formality, technical depth, emoji usage), topic knowledge levels, time-of-day interaction patterns, and anticipated needs. It integrates into the Global Workspace Theory engine as the `theory_of_mind` codelet, feeds observations to the Active Inference engine, and injects user model context into system prompts. However, all of this state is stored as a single undifferentiated blob -- there is no concept of "which user" is interacting, meaning all users blend into one model, corrupting the accuracy of every subsystem that depends on it.
 
 Multi-User Consciousness is the fourth and most architecturally consequential advanced capability design for AURA. It addresses four interrelated challenges: (1) maintaining distinct mental models for each user who interacts with AURA, preserving per-user knowledge state, emotional profile, communication preferences, relationship history, and trust calibration; (2) developing AURA's own persistent identity -- a layered self-model that remains consistent across all user interactions while adapting its expressive style per user; (3) enabling cross-user learning where AURA generalizes insights from interactions with many users without leaking any user's private information to another; and (4) orchestrating concurrent multi-user sessions with proper context isolation, authentication, and integration with all existing AURA subsystems (GWT, ALMA, CognitiveTheater, episodic memory, knowledge graph, NeuroDream, intrinsic motivation, and MirrorMind).
 
@@ -156,7 +156,7 @@ LIDA implements Global Workspace Theory with codelets as mini-agents competing f
 ### 1.16 ALMA Emotional Model
 
 **Gebhard (2005). "ALMA: A Layered Model of Affect."**
-Referenced in: `apprentice_agent/emotion/alma_engine.py`
+Referenced in: `aura/emotion/alma_engine.py`
 
 The ALMA model implements three-layer affect (emotions, mood, personality) in PAD space. AURA already implements this with 22 OCC emotions mapped to PAD coordinates, neuromodulators (dopamine, serotonin, norepinephrine, oxytocin), and exponential emotion decay.
 
@@ -202,7 +202,7 @@ Addresses how dialogue systems can dynamically infer user traits and preferences
 
 ## 2. Existing AURA Infrastructure Analysis
 
-### 2.1 Current Theory of Mind (`apprentice_agent/proactive/theory_of_mind.py`)
+### 2.1 Current Theory of Mind (`aura/proactive/theory_of_mind.py`)
 
 The existing TheoryOfMind class is a well-structured single-user mental model with four components:
 
@@ -223,7 +223,7 @@ The existing TheoryOfMind class is a well-structured single-user mental model wi
 
 **Key Limitation**: Implemented as a singleton via `get_theory_of_mind()` with no user parameterization. All interactions from all sources update the same `_emotional_state`, `_comm_style`, and `_topic_knowledge` dictionaries.
 
-### 2.2 Identity System (`apprentice_agent/identity.py` + `identity.json`)
+### 2.2 Identity System (`aura/identity.py` + `identity.json`)
 
 Current identity is a flat JSON file with four fields:
 
@@ -240,13 +240,13 @@ The `get_identity_prompt()` function generates a static system prompt that defin
 
 **Key Limitation**: Any user can rename AURA or change its personality. There is no layered identity -- the personality is a single mutable string. The `user_preferences` dict is unused.
 
-### 2.3 Soul System (`apprentice_agent/soul/soul_loader.py`)
+### 2.3 Soul System (`aura/soul/soul_loader.py`)
 
 The SoulLoader parses markdown soul files (SOUL_PERSONAL.md, SOUL_ENTERPRISE.md) into a SoulConfig dataclass with: personality_traits, values, behaviors, boundaries, voice_style, quirks, greeting, farewell. Different souls can be swapped for different contexts.
 
 **Key Opportunity**: The soul system already implements a two-tier identity concept (personal vs. enterprise). The IdentityCore extends this to a four-tier system with Constitutional, Deep, Adaptive, and Expressive layers.
 
-### 2.4 ALMA Emotional Engine (`apprentice_agent/emotion/alma_engine.py`)
+### 2.4 ALMA Emotional Engine (`aura/emotion/alma_engine.py`)
 
 Three-layer emotional system:
 - **Layer 1 (Emotions)**: Rapid, triggered by events, exponential decay (half-life ~15s). 22 OCC emotions in PAD space.
@@ -257,7 +257,7 @@ Neuromodulators: dopamine, serotonin, norepinephrine, oxytocin (all 0.0-1.0).
 
 **Key Consideration**: In multi-user mode, AURA's mood and personality (Layers 2-3) are its OWN emotional state, while Layer 1 emotions are triggered per-interaction and thus per-user. The IdentityCore owns ALMA's mood and personality; UserMindModel stores how each user tends to influence AURA's emotions (emotional resonance history).
 
-### 2.5 Global Workspace Theory (`apprentice_agent/consciousness/global_workspace.py`)
+### 2.5 Global Workspace Theory (`aura/consciousness/global_workspace.py`)
 
 8 registered codelets competing for conscious broadcast every ~300ms:
 
@@ -284,13 +284,13 @@ Neuromodulators: dopamine, serotonin, norepinephrine, oxytocin (all 0.0-1.0).
 
 **Key Extension**: Add `user_id` field to Episode and TemporalContext. The `session_id` field already exists and can be linked to user sessions. Episodic queries must be filterable by user_id to prevent cross-user memory leakage.
 
-### 2.8 Multi-Agent Orchestrator (`apprentice_agent/multi_agent/orchestrator.py`)
+### 2.8 Multi-Agent Orchestrator (`aura/multi_agent/orchestrator.py`)
 
 4 specialist agents (Research, Coder, Analyst, Creative) coordinated by IntentRouter. The orchestrator maintains conversation history and routes queries to appropriate specialists.
 
 **Key Integration**: The orchestrator's `context` parameter in `chat()` should include the active user_id, enabling specialists to access the correct user model when generating responses.
 
-### 2.9 Brain / Conversation System (`apprentice_agent/brain.py`)
+### 2.9 Brain / Conversation System (`aura/brain.py`)
 
 OllamaBrain manages conversation history with multi-conversation support (directories under `conversations/`). Each conversation has its own history file. The system supports model routing (simple/reasoning/code/vision tasks).
 
@@ -309,7 +309,7 @@ Each user gets a dedicated UserMindModel that extends the current TheoryOfMind w
 ```python
 """
 Per-User Theory of Mind model.
-File: apprentice_agent/multi_user/user_mind_model.py
+File: aura/multi_user/user_mind_model.py
 """
 
 import json
@@ -405,7 +405,7 @@ class UserMindModel:
         self._data_dir.mkdir(parents=True, exist_ok=True)
 
         # === Core ToM components (migrated from TheoryOfMind) ===
-        from apprentice_agent.proactive.theory_of_mind import (
+        from aura.proactive.theory_of_mind import (
             TopicKnowledge, EmotionalState, CommunicationStyle, NeedPrediction
         )
         self.topic_knowledge: Dict[str, TopicKnowledge] = {}
@@ -441,7 +441,7 @@ class UserMindModel:
         if role != "user" or not message.strip():
             return
 
-        from apprentice_agent.proactive.theory_of_mind import (
+        from aura.proactive.theory_of_mind import (
             _analyze_sentiment, _analyze_style
         )
         now = datetime.now()
@@ -521,7 +521,7 @@ class UserMindModel:
 
     def _update_topics(self, message: str) -> None:
         """Update topic knowledge from message content."""
-        from apprentice_agent.proactive.theory_of_mind import (
+        from aura.proactive.theory_of_mind import (
             _TECHNICAL_WORDS, TopicKnowledge
         )
         words = message.lower().split()
@@ -577,7 +577,7 @@ class UserMindModel:
     def _update_emotional_resonance(self) -> None:
         """Track how this user affects AURA's emotional state."""
         try:
-            from apprentice_agent.emotion.alma_engine import alma_engine
+            from aura.emotion.alma_engine import alma_engine
             state = alma_engine.get_emotional_state()
             pad = state.get("pad", {})
             alpha = 0.1
@@ -621,7 +621,7 @@ class UserMindModel:
 
     def _update_predictions(self, message: str, now: datetime) -> None:
         """Update need predictions."""
-        from apprentice_agent.proactive.theory_of_mind import NeedPrediction
+        from aura.proactive.theory_of_mind import NeedPrediction
         self.need_predictions.clear()
         msg_lower = message.lower()
         if any(w in msg_lower for w in ["error", "bug", "crash", "exception"]):
@@ -711,7 +711,7 @@ class UserMindModel:
             return
         try:
             data = json.loads(state_file.read_text(encoding="utf-8"))
-            from apprentice_agent.proactive.theory_of_mind import (
+            from aura.proactive.theory_of_mind import (
                 EmotionalState, CommunicationStyle, TopicKnowledge
             )
             emo = data.get("emotional_state", {})
@@ -775,7 +775,7 @@ AURA's identity is organized into four layers of decreasing stability and increa
 ```python
 """
 IdentityCore - AURA's persistent, layered self-model.
-File: apprentice_agent/multi_user/identity_core.py
+File: aura/multi_user/identity_core.py
 """
 
 import json
@@ -1089,7 +1089,7 @@ Cross-user learning follows a three-stage pipeline: **Extract -> Scrub -> Genera
 ```python
 """
 KnowledgeAbstractor - Cross-user learning with privacy.
-File: apprentice_agent/multi_user/knowledge_abstractor.py
+File: aura/multi_user/knowledge_abstractor.py
 """
 
 import json
@@ -1327,7 +1327,7 @@ The MultiUserManager is the central coordinator that manages user identification
 ```python
 """
 MultiUserManager - Session orchestration for multi-user AURA.
-File: apprentice_agent/multi_user/manager.py
+File: aura/multi_user/manager.py
 """
 
 import json
@@ -2020,7 +2020,7 @@ Defense-in-depth:
 ### File Structure
 
 ```
-apprentice_agent/
+aura/
   multi_user/
     __init__.py
     manager.py              # MultiUserManager
@@ -2094,7 +2094,7 @@ apprentice_agent/
 
 22. Franklin et al. (2007/2013). "LIDA: A Systems-level Architecture for Cognition, Emotion, and Learning." https://www.semanticscholar.org/paper/LIDA-A-Systems-level-Architecture-for-Cognition-Franklin-Madl/440adc841d1fa8bc8e3d3441fb4154f04349745b
 
-23. Gebhard (2005). "ALMA: A Layered Model of Affect." Referenced in AURA codebase: `apprentice_agent/emotion/alma_engine.py`
+23. Gebhard (2005). "ALMA: A Layered Model of Affect." Referenced in AURA codebase: `aura/emotion/alma_engine.py`
 
 24. Springer Nature (2024). "Generative AI model privacy: a survey." https://link.springer.com/article/10.1007/s10462-024-11024-6
 

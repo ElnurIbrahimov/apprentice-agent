@@ -21,4 +21,4 @@ Before AURA sends a response, MirrorMind reviews it for quality, accuracy, compl
 - `CritiqueResult` - Evaluation outcome with scores
 
 ## File Location
-- `apprentice_agent/tools/mirrormind.py`
+- `aura/tools/mirrormind.py`

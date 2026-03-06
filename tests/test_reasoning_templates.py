@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch, PropertyMock
 
 import pytest
 
-from apprentice_agent.consciousness.reasoning_templates import (
+from aura.consciousness.reasoning_templates import (
     ReasoningTemplate,
     ReasoningTemplateLibrary,
     ReasoningTrace,
@@ -398,7 +398,7 @@ class TestTemplateAbstraction:
             "applicable_categories": ["code"],
         })
 
-        with patch.dict("sys.modules", {"apprentice_agent.brain": MagicMock(Brain=MagicMock(return_value=mock_brain))}):
+        with patch.dict("sys.modules", {"aura.brain": MagicMock(Brain=MagicMock(return_value=mock_brain))}):
             library._run_abstraction_batch()
 
         # Brain should have been called for both categories (code + math)

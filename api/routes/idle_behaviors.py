@@ -211,7 +211,7 @@ class IdleStateManager:
     def _get_emotion_context(self) -> Optional[str]:
         """Get current emotional state from ALMA."""
         try:
-            from apprentice_agent.emotion.alma_engine import alma_engine
+            from aura.emotion.alma_engine import alma_engine
             if alma_engine and alma_engine.current_state:
                 return alma_engine.current_state.get("dominant_emotion")
         except Exception:
@@ -228,7 +228,7 @@ class IdleStateManager:
 
         # === Idle Presence Engine (Phase 6D - highest priority genuine activity) ===
         try:
-            from apprentice_agent.consciousness.idle_presence import get_idle_presence_engine
+            from aura.consciousness.idle_presence import get_idle_presence_engine
             ipe = get_idle_presence_engine()
             activity_status = ipe.get_current_activity_status()
             if activity_status:
@@ -238,7 +238,7 @@ class IdleStateManager:
 
         # === ALMA emotional state (always available) ===
         try:
-            from apprentice_agent.emotion.alma_engine import alma_engine
+            from aura.emotion.alma_engine import alma_engine
             if alma_engine:
                 state = alma_engine.get_emotional_state()
                 if state:
@@ -270,7 +270,7 @@ class IdleStateManager:
 
         # === Gateway Daemon stats (always running) ===
         try:
-            from apprentice_agent.proactive.gateway_daemon import get_gateway_daemon
+            from aura.proactive.gateway_daemon import get_gateway_daemon
             daemon = get_gateway_daemon()
             stats = daemon.get_stats()
             events = stats.get("events_processed", 0)
@@ -330,7 +330,7 @@ class IdleStateManager:
 
         # === Event bus stats (via daemon) ===
         try:
-            from apprentice_agent.proactive.gateway_daemon import get_gateway_daemon
+            from aura.proactive.gateway_daemon import get_gateway_daemon
             daemon_ref = get_gateway_daemon()
             bus_stats = daemon_ref.event_bus.get_stats()
             published = bus_stats.get("events_published", 0)
@@ -341,7 +341,7 @@ class IdleStateManager:
 
         # === Calendar context ===
         try:
-            from apprentice_agent.proactive.monitors.calendar_monitor import get_calendar_monitor
+            from aura.proactive.monitors.calendar_monitor import get_calendar_monitor
             cm = get_calendar_monitor()
             next_evt = cm.get_next_event()
             if next_evt:
@@ -354,7 +354,7 @@ class IdleStateManager:
 
         # === Weather context ===
         try:
-            from apprentice_agent.emotion.alma_engine import alma_engine
+            from aura.emotion.alma_engine import alma_engine
             weather = alma_engine._get_weather_context()
             if weather:
                 temp = weather.get("temperature_c", "?")
@@ -415,7 +415,7 @@ class IdleStateManager:
 
         # Calendar context: boost ANTICIPATING when meeting is near
         try:
-            from apprentice_agent.proactive.monitors.calendar_monitor import get_calendar_monitor
+            from aura.proactive.monitors.calendar_monitor import get_calendar_monitor
             cm = get_calendar_monitor()
             next_evt = cm.get_next_event()
             if next_evt:
@@ -546,7 +546,7 @@ class IdleStateManager:
                 micro = micro_emotion_map.get(behavior_type)
                 if micro:
                     try:
-                        from apprentice_agent.emotion.alma_engine import alma_engine
+                        from aura.emotion.alma_engine import alma_engine
                         alma_engine.trigger_emotion(
                             micro[0], intensity=micro[1],
                             trigger=f"idle_{behavior_type.value}_micro"
@@ -577,7 +577,7 @@ class IdleStateManager:
 
             # === Phase 6D: Add genuine cognitive load data ===
             try:
-                from apprentice_agent.consciousness.idle_presence import get_idle_presence_engine
+                from aura.consciousness.idle_presence import get_idle_presence_engine
                 ipe = get_idle_presence_engine()
                 load = ipe.compute_cognitive_load()
                 state["cognitive_load"] = load.to_dict()
@@ -616,7 +616,7 @@ class IdleStateManager:
 
             # === Phase 6D: Drive from real cognitive load ===
             try:
-                from apprentice_agent.consciousness.idle_presence import get_idle_presence_engine
+                from aura.consciousness.idle_presence import get_idle_presence_engine
                 ipe = get_idle_presence_engine()
                 params["breath_rate_modifier"] = ipe.get_breath_rate_from_load()
                 params["glow_intensity"] = ipe.get_glow_from_load()
@@ -698,7 +698,7 @@ def init_idle_presence() -> None:
     Call this after all systems are initialized (e.g., from agent_service startup).
     """
     try:
-        from apprentice_agent.consciousness.idle_presence import get_idle_presence_engine
+        from aura.consciousness.idle_presence import get_idle_presence_engine
         ipe = get_idle_presence_engine()
         ipe.register_neurodream_callbacks()
         ipe.start_background_tasks()
@@ -749,7 +749,7 @@ class AnimationParamsResponse(BaseModel):
 async def get_idle_state():
     """Get current idle state with behavior info."""
     manager = get_manager()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, manager.get_state)
 
 
@@ -757,7 +757,7 @@ async def get_idle_state():
 async def get_animation_params():
     """Get animation parameters for the avatar."""
     manager = get_manager()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, manager.get_animation_params)
 
 
@@ -765,7 +765,7 @@ async def get_animation_params():
 async def record_activity():
     """Record that user activity occurred (resets idle state)."""
     manager = get_manager()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, manager.record_activity)
     return {"status": "recorded"}
 
@@ -774,7 +774,7 @@ async def record_activity():
 async def generate_behavior(force: bool = False):
     """Generate a new idle behavior."""
     manager = get_manager()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     behavior = await loop.run_in_executor(None, functools.partial(manager.generate_behavior, force=force))
 
     if behavior:
@@ -786,7 +786,7 @@ async def generate_behavior(force: bool = False):
 async def get_stats():
     """Get idle behavior statistics."""
     manager = get_manager()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, manager.get_stats)
 
 

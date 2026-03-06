@@ -377,18 +377,6 @@ class ResponseHumanizer:
         modifications = []
         result = text
 
-        # Apply modulation from ALMA emotional context
-        if context and "modulation" in context and context["modulation"]:
-            mod = context["modulation"]
-            # Low verbosity → trim for brevity
-            if mod.get("verbosity", 0.5) < 0.3:
-                result = self._trim_for_brevity(result)
-                if result != text:
-                    modifications.append("brevity_trim")
-            # High enthusiasm → boost personality slightly
-            if mod.get("enthusiasm", 0.5) > 0.7:
-                self.personality_level = min(1.0, self.personality_level + 0.1)
-
         # Apply transformations
         before = result
         result = self._apply_contractions(result)
@@ -427,14 +415,6 @@ class ResponseHumanizer:
             tone_applied=tone,
             modifications=modifications
         )
-
-    def _trim_for_brevity(self, text: str) -> str:
-        """Trim response for brevity, keeping ~60% of sentences."""
-        sentences = re.split(r'(?<=[.!?])\s+', text)
-        if len(sentences) <= 2:
-            return text
-        keep_count = max(2, int(len(sentences) * 0.6))
-        return " ".join(sentences[:keep_count])
 
     def quick_humanize(self, text: str, query: str = "") -> str:
         """Quick humanization, returns just the text."""

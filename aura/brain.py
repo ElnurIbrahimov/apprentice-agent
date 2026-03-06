@@ -9,6 +9,7 @@ import time
 import shutil
 import concurrent.futures
 import atexit
+import uuid
 from enum import Enum
 from pathlib import Path
 from typing import Optional, Callable, Any
@@ -54,7 +55,6 @@ def _run_world_model_extraction(conversation_id, messages):
 
     # ADV-02 Phase 3: Quick proactive awareness analysis after extraction
     try:
-        from aura.config import Config
         if getattr(Config, "PROACTIVE_AWARENESS_QUICK_AFTER_CHAT", True):
             from aura.consciousness.proactive_awareness import get_proactive_awareness_engine
             engine = get_proactive_awareness_engine()
@@ -208,7 +208,7 @@ class OllamaBrain:
             logger.debug(f"[BRAIN] Warning: OLLAMA_API_KEY not set, cloud models unavailable")
 
         self.model = Config.MODEL_NAME
-        self._max_history: int = getattr(Config, 'MAX_HISTORY_LENGTH', self._max_history)
+        self._max_history: int = getattr(Config, 'MAX_HISTORY_LENGTH', self.MAX_HISTORY_LENGTH)
         self.conversation_history: list[dict] = []
         self._history_lock = threading.Lock()
         self._last_model_used: str = self.model  # Track for metacognition
@@ -466,7 +466,6 @@ class OllamaBrain:
 
     def _generate_conversation_id(self) -> str:
         """Generate a unique conversation ID."""
-        import uuid
         return f"conv_{int(time.time())}_{uuid.uuid4().hex[:8]}"
 
     def _auto_title(self, messages: list) -> str:
@@ -839,7 +838,6 @@ class OllamaBrain:
         Returns:
             Generated response string
         """
-        from .config import Config
         fast_model = Config.MODEL_FAST
         try:
             client, actual_model = self._get_client_for_model(fast_model)
@@ -870,7 +868,8 @@ class OllamaBrain:
         Returns:
             The summary text, or empty string if nothing to compact
         """
-        history = self.conversation_history
+        with self._history_lock:
+            history = list(self.conversation_history)
         if len(history) < 6:
             return ""
 
@@ -900,9 +899,11 @@ class OllamaBrain:
             return ""
 
         # Replace history: summary as system message + recent messages
-        self.conversation_history = [
+        new_history = [
             {"role": "system", "content": f"[Conversation summary] {summary}"}
         ] + recent_messages
+        with self._history_lock:
+            self.conversation_history = new_history
         self._save_history()
 
         logger.info(f"[BRAIN] Compacted {len(old_messages)} messages into summary, kept {len(recent_messages)} recent")
@@ -976,7 +977,6 @@ class OllamaBrain:
 
             # === USER MODEL INJECTION (Phase 6C / ADV-04: Theory of Mind) ===
             try:
-                from aura.config import Config
                 if Config.MULTI_USER_ENABLED:
                     from aura.multi_user import get_multi_user_manager
                     manager = get_multi_user_manager()
@@ -1041,6 +1041,83 @@ class OllamaBrain:
     def _build_budget_instruction(budget: int) -> str:
         return f"\n\n[Response budget: ~{budget} tokens. Be appropriately concise.]"
 
+    def _build_full_system_prompt(
+        self,
+        prompt: str,
+        system_prompt: Optional[str],
+        tone_modifier: Optional[str],
+    ) -> str:
+        """Build the complete system prompt for a think/think_stream call.
+
+        Shared by think() and think_stream() to avoid duplicate logic:
+        identity → caller system_prompt → subsystem context (TTL-cached) →
+        emotional tone → ALMA modulation → budget instruction.
+        """
+        identity_prompt = get_identity_prompt()
+        full = f"{identity_prompt}\n\n{system_prompt}" if system_prompt else identity_prompt
+
+        # === SUBSYSTEM CONTEXT INJECTION (cached, TTL=12s) ===
+        # Side-effect calls (observe/record) still run every time; only context
+        # retrieval is cached to avoid 8+ module round-trips on rapid messages.
+        try:
+            if Config.MULTI_USER_ENABLED:
+                from aura.multi_user import get_multi_user_manager
+                manager = get_multi_user_manager()
+                user_model = manager.get_active_user_model()
+                if user_model:
+                    user_model.observe_message(prompt, role="user")
+            else:
+                from aura.proactive.theory_of_mind import get_theory_of_mind
+                tom = get_theory_of_mind()
+                tom.observe_message(prompt, role="user")
+        except Exception:
+            pass
+        try:
+            from aura.consciousness.intrinsic_motivation import get_intrinsic_motivation
+            get_intrinsic_motivation().record_interaction()  # Satisfies social drive
+        except Exception:
+            pass
+        sys_additions = self._get_cached_system_additions()
+        if sys_additions:
+            full = f"{full}\n\n{sys_additions}"
+
+        # Apply emotional tone modifier - auto-generate from ALMA if not provided
+        if tone_modifier:
+            full = f"{full}\n\n{tone_modifier}"
+        elif self._alma_enabled and self._auto_emotional_tone:
+            try:
+                alma_tone = get_emotional_tone_modifier()
+                if alma_tone:
+                    full = f"{full}\n\n{alma_tone}"
+            except Exception as e:
+                logger.debug(f"[BRAIN] ALMA tone generation failed: {e}")
+
+        # ALMA response modulation: verbosity, formality, exploration hints
+        if self._alma_enabled:
+            try:
+                from aura.emotion.alma_engine import get_response_modulation
+                mod = get_response_modulation()
+                mod_parts = []
+                if mod.get("verbosity", 0.5) < 0.35:
+                    mod_parts.append("Keep response concise.")
+                elif mod.get("verbosity", 0.5) > 0.80:
+                    mod_parts.append("Feel free to elaborate.")
+                if mod.get("formality", 0.4) > 0.6:
+                    mod_parts.append("Use a formal tone.")
+                elif mod.get("formality", 0.4) < 0.25:
+                    mod_parts.append("Use a casual, conversational tone.")
+                if mod.get("enthusiasm", 0.5) > 0.7:
+                    mod_parts.append("Try creative or novel approaches.")
+                elif mod.get("enthusiasm", 0.5) < 0.3:
+                    mod_parts.append("Prefer proven, reliable approaches.")
+                if mod_parts:
+                    full = f"{full}\n\n[Style guidance: {' '.join(mod_parts)}]"
+            except Exception:
+                pass
+
+        budget = self._classify_budget(prompt)
+        return f"{full}{self._build_budget_instruction(budget)}"
+
     def think(
         self,
         prompt: str,
@@ -1072,72 +1149,7 @@ class OllamaBrain:
         model = self._select_model(prompt, task_type)
         self._last_model_used = model
 
-        # Prepend identity to system prompt
-        identity_prompt = get_identity_prompt()
-        if system_prompt:
-            full_system_prompt = f"{identity_prompt}\n\n{system_prompt}"
-        else:
-            full_system_prompt = identity_prompt
-
-        # === SUBSYSTEM CONTEXT INJECTION (cached, TTL=12s) ===
-        # Side-effect calls (observe/record) still run every time; only context
-        # retrieval is cached to avoid 8+ module round-trips on rapid messages.
-        try:
-            from aura.config import Config
-            if Config.MULTI_USER_ENABLED:
-                from aura.multi_user import get_multi_user_manager
-                manager = get_multi_user_manager()
-                user_model = manager.get_active_user_model()
-                if user_model:
-                    user_model.observe_message(prompt, role="user")
-            else:
-                from aura.proactive.theory_of_mind import get_theory_of_mind
-                tom = get_theory_of_mind()
-                tom.observe_message(prompt, role="user")
-        except Exception:
-            pass
-        try:
-            from aura.consciousness.intrinsic_motivation import get_intrinsic_motivation
-            get_intrinsic_motivation().record_interaction()  # Satisfies social drive
-        except Exception:
-            pass
-        sys_additions = self._get_cached_system_additions()
-        if sys_additions:
-            full_system_prompt = f"{full_system_prompt}\n\n{sys_additions}"
-
-        # Apply emotional tone modifier - auto-generate from ALMA if not provided
-        if tone_modifier:
-            full_system_prompt = f"{full_system_prompt}\n\n{tone_modifier}"
-        elif self._alma_enabled and self._auto_emotional_tone:
-            try:
-                alma_tone = get_emotional_tone_modifier()
-                if alma_tone:
-                    full_system_prompt = f"{full_system_prompt}\n\n{alma_tone}"
-            except Exception as e:
-                logger.debug(f"[BRAIN] ALMA tone generation failed: {e}")
-
-        # ALMA response modulation: verbosity, formality, exploration hints
-        if self._alma_enabled:
-            try:
-                from aura.emotion.alma_engine import get_response_modulation
-                mod = get_response_modulation()
-                mod_parts = []
-                if mod.get("verbosity", 0.5) < 0.35:
-                    mod_parts.append("Keep response concise.")
-                elif mod.get("verbosity", 0.5) > 0.80:
-                    mod_parts.append("Feel free to elaborate.")
-                if mod.get("formality", 0.4) > 0.6:
-                    mod_parts.append("Use a formal tone.")
-                elif mod.get("formality", 0.4) < 0.25:
-                    mod_parts.append("Use a casual, conversational tone.")
-                if mod.get("enthusiasm", 0.5) > 0.7:
-                    mod_parts.append("Try creative or novel approaches.")
-                elif mod.get("enthusiasm", 0.5) < 0.3:
-                    mod_parts.append("Prefer proven, reliable approaches.")
-                if mod_parts:
-                    full_system_prompt = f"{full_system_prompt}\n\n[Style guidance: {' '.join(mod_parts)}]"
-            except Exception:
-                pass
+        full_system_prompt = self._build_full_system_prompt(prompt, system_prompt, tone_modifier)
 
         # Auto-compact if conversation history is getting long
         if use_history and len(self.conversation_history) > 40:
@@ -1148,14 +1160,12 @@ class OllamaBrain:
             except Exception:
                 pass
 
-        budget = self._classify_budget(prompt)
-        full_system_prompt = f"{full_system_prompt}{self._build_budget_instruction(budget)}"
-
         messages = []
         if full_system_prompt:
             messages.append({"role": "system", "content": full_system_prompt})
         if use_history:
-            messages.extend(self.conversation_history[-self._max_history:])
+            with self._history_lock:
+                messages.extend(self.conversation_history[-self._max_history:])
         messages.append({"role": "user", "content": prompt})
 
         # Neuromodulator: Serotonin modulates patience (timeout)
@@ -1291,6 +1301,9 @@ class OllamaBrain:
             with self._history_lock:
                 self.conversation_history.append({"role": "user", "content": prompt})
                 self.conversation_history.append({"role": "assistant", "content": assistant_message})
+                # Enforce history limit (mirrors think_stream behaviour)
+                if len(self.conversation_history) > self._max_history:
+                    self.conversation_history = self.conversation_history[-self._max_history:]
                 recent = list(self.conversation_history[-6:])
                 _history_snapshot = list(self.conversation_history)
                 _qc = self._query_count
@@ -1353,72 +1366,7 @@ class OllamaBrain:
         model = self._select_model(prompt, task_type)
         self._last_model_used = model
 
-        # Prepend identity to system prompt
-        identity_prompt = get_identity_prompt()
-        if system_prompt:
-            full_system_prompt = f"{identity_prompt}\n\n{system_prompt}"
-        else:
-            full_system_prompt = identity_prompt
-
-        # === SUBSYSTEM CONTEXT INJECTION (cached, TTL=12s) ===
-        # Side-effect calls (observe/record) still run every time; only context
-        # retrieval is cached to avoid 8+ module round-trips on rapid messages.
-        try:
-            from aura.config import Config
-            if Config.MULTI_USER_ENABLED:
-                from aura.multi_user import get_multi_user_manager
-                manager = get_multi_user_manager()
-                user_model = manager.get_active_user_model()
-                if user_model:
-                    user_model.observe_message(prompt, role="user")
-            else:
-                from aura.proactive.theory_of_mind import get_theory_of_mind
-                tom = get_theory_of_mind()
-                tom.observe_message(prompt, role="user")
-        except Exception:
-            pass
-        try:
-            from aura.consciousness.intrinsic_motivation import get_intrinsic_motivation
-            get_intrinsic_motivation().record_interaction()  # Satisfies social drive
-        except Exception:
-            pass
-        sys_additions = self._get_cached_system_additions()
-        if sys_additions:
-            full_system_prompt = f"{full_system_prompt}\n\n{sys_additions}"
-
-        # Apply emotional tone modifier - auto-generate from ALMA if not provided
-        if tone_modifier:
-            full_system_prompt = f"{full_system_prompt}\n\n{tone_modifier}"
-        elif self._alma_enabled and self._auto_emotional_tone:
-            try:
-                alma_tone = get_emotional_tone_modifier()
-                if alma_tone:
-                    full_system_prompt = f"{full_system_prompt}\n\n{alma_tone}"
-            except Exception as e:
-                logger.debug(f"[BRAIN] ALMA tone generation failed: {e}")
-
-        # ALMA response modulation: verbosity, formality, exploration hints
-        if self._alma_enabled:
-            try:
-                from aura.emotion.alma_engine import get_response_modulation
-                mod = get_response_modulation()
-                mod_parts = []
-                if mod.get("verbosity", 0.5) < 0.35:
-                    mod_parts.append("Keep response concise.")
-                elif mod.get("verbosity", 0.5) > 0.80:
-                    mod_parts.append("Feel free to elaborate.")
-                if mod.get("formality", 0.4) > 0.6:
-                    mod_parts.append("Use a formal tone.")
-                elif mod.get("formality", 0.4) < 0.25:
-                    mod_parts.append("Use a casual, conversational tone.")
-                if mod.get("enthusiasm", 0.5) > 0.7:
-                    mod_parts.append("Try creative or novel approaches.")
-                elif mod.get("enthusiasm", 0.5) < 0.3:
-                    mod_parts.append("Prefer proven, reliable approaches.")
-                if mod_parts:
-                    full_system_prompt = f"{full_system_prompt}\n\n[Style guidance: {' '.join(mod_parts)}]"
-            except Exception:
-                pass
+        full_system_prompt = self._build_full_system_prompt(prompt, system_prompt, tone_modifier)
 
         # Auto-compact if conversation history is getting long
         if use_history and len(self.conversation_history) > 40:
@@ -1429,14 +1377,12 @@ class OllamaBrain:
             except Exception:
                 pass
 
-        budget = self._classify_budget(prompt)
-        full_system_prompt = f"{full_system_prompt}{self._build_budget_instruction(budget)}"
-
         messages = []
         if full_system_prompt:
             messages.append({"role": "system", "content": full_system_prompt})
         if use_history:
-            messages.extend(self.conversation_history[-self._max_history:])
+            with self._history_lock:
+                messages.extend(self.conversation_history[-self._max_history:])
         messages.append({"role": "user", "content": prompt})
 
         logger.debug(f"[BRAIN] Streaming call to {model}")
@@ -1472,7 +1418,6 @@ class OllamaBrain:
         _models_to_try = [actual_model] + [
             m for m in self._get_fallback_chain(actual_model) if m != actual_model
         ]
-        _succeeded = False
 
         for _try_model in _models_to_try:
             try:
@@ -1491,7 +1436,6 @@ class OllamaBrain:
                         _stream_out_tok = chunk.get("eval_count", 0) or 0
                 actual_model = _try_actual
                 self._last_model_used = actual_model
-                _succeeded = True
                 break
             except Exception as e:
                 if _try_model == _models_to_try[-1]:
@@ -1529,14 +1473,14 @@ class OllamaBrain:
         # === SELF-IMPROVEMENT: Record interaction outcome ===
         try:
             from aura.consciousness.self_improvement import get_self_improvement_engine
-            _SHARED_EXECUTOR.submit(
+            _BG_EXECUTOR.submit(
                 get_self_improvement_engine().record_chat_outcome,
                 prompt, full_response, actual_model
             )
         except Exception:
             pass
 
-        self._trigger_world_model_extraction(list(recent), _SHARED_EXECUTOR)
+        self._trigger_world_model_extraction(list(recent), _BG_EXECUTOR)
 
     def _trigger_world_model_extraction(self, recent: list, executor=None) -> None:
         """Submit background world model extraction (deduplicates logic from think/think_stream)."""

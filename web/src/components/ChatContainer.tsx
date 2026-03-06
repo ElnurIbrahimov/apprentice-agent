@@ -1,10 +1,10 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { useChatStore } from '../store/chatStore';
+import { useSettingsStore } from '../store/settingsStore';
 import { MessageBubble } from './MessageBubble';
 import { MessageInput } from './MessageInput';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useProactiveMessages } from '../hooks/useProactiveMessages';
-// import { useConversationStarters } from '../hooks/useConversationStarters';
 import type { FileAttachment } from '../types';
 import {
   SparklesIcon,
@@ -12,6 +12,8 @@ import {
   MagnifyingGlassIcon,
   CalculatorIcon,
   CpuChipIcon,
+  ChevronDownIcon,
+  XMarkIcon,
 } from '@heroicons/react/24/outline';
 
 // Quick action button configurations with icons
@@ -35,14 +37,14 @@ const QUICK_ACTIONS = [
 ];
 
 export function ChatContainer() {
-  const { messages, isLoading, error, connectionStatus } = useChatStore();
-  const { sendMessage, stopGeneration } = useWebSocket();
+  const { messages, isLoading, error, setError, connectionStatus, toolStatus, isSwitchingConversation } = useChatStore();
+  const { sendMessage, stopGeneration, connect: reconnect } = useWebSocket();
+  const { settings } = useSettingsStore();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
 
   useProactiveMessages(connectionStatus === 'connected');
-  // useConversationStarters(connectionStatus === 'connected');
 
   // Check if user is near the bottom of scroll area
   const checkIfNearBottom = useCallback(() => {
@@ -60,20 +62,27 @@ export function ChatContainer() {
     setIsUserScrolledUp(!isNearBottom);
   }, [checkIfNearBottom]);
 
-  // Smart auto-scroll: only scroll if user is already at bottom
+  // Smart auto-scroll: only scroll if user is already at bottom and autoScroll is enabled
   useEffect(() => {
-    if (!isUserScrolledUp) {
+    if (settings.autoScroll && !isUserScrolledUp) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages, isUserScrolledUp]);
+  }, [messages, isUserScrolledUp, settings.autoScroll]);
 
-  // Auto-scroll to bottom when user sends a new message
+  // Auto-scroll to bottom when user sends a new message (always, regardless of autoScroll setting)
   useEffect(() => {
     if (isLoading) {
       setIsUserScrolledUp(false);
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [isLoading]);
+
+  // Auto-dismiss error after 10 seconds
+  useEffect(() => {
+    if (!error) return;
+    const timer = setTimeout(() => setError(null), 10000);
+    return () => clearTimeout(timer);
+  }, [error, setError]);
 
   const handleSend = (message: string, attachments?: FileAttachment[], actionMode?: string | null) => {
     // Pass actionMode for auto-model selection (null = use user's selected model)
@@ -99,7 +108,10 @@ export function ChatContainer() {
           ) : (
             <span className="flex items-center justify-center gap-2">
               <span className="w-2 h-2 bg-white rounded-full" />
-              Disconnected. Attempting to reconnect...
+              Disconnected.
+              <button onClick={reconnect} className="underline hover:no-underline font-medium ml-1">
+                Reconnect now
+              </button>
             </span>
           )}
         </div>
@@ -107,8 +119,11 @@ export function ChatContainer() {
 
       {/* Error banner */}
       {error && (
-        <div className="px-4 py-2 bg-red-900/80 text-red-200 text-center text-sm backdrop-blur-sm animate-slide-up-fade">
-          {error}
+        <div className="px-4 py-2 bg-red-900/80 text-red-200 text-sm backdrop-blur-sm animate-slide-up-fade flex items-center gap-2">
+          <span className="flex-1 text-center">{error}</span>
+          <button onClick={() => setError(null)} aria-label="Dismiss error" className="ml-auto flex-shrink-0">
+            <XMarkIcon className="w-4 h-4" />
+          </button>
         </div>
       )}
 
@@ -116,8 +131,14 @@ export function ChatContainer() {
       <div
         ref={scrollContainerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto">
-        {messages.length === 0 ? (
+        className="flex-1 overflow-y-auto relative">
+        {isSwitchingConversation && messages.length === 0 ? (
+          <div className="animate-pulse space-y-4 p-4">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="h-16 bg-chat-border/20 rounded-lg" />
+            ))}
+          </div>
+        ) : messages.length === 0 ? (
           // Empty state with enhanced styling
           <div className="flex flex-col items-center justify-center h-full text-chat-text-secondary relative">
             {/* Radial purple glow behind welcome area */}
@@ -179,7 +200,29 @@ export function ChatContainer() {
             <div ref={messagesEndRef} />
           </div>
         )}
+        {isUserScrolledUp && messages.length > 0 && (
+          <button
+            onClick={() => {
+              setIsUserScrolledUp(false);
+              messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+            }}
+            className="absolute bottom-24 right-6 z-10 p-2 bg-purple-600 hover:bg-purple-500 text-white rounded-full shadow-lg transition-all"
+            aria-label="Scroll to bottom"
+          >
+            <ChevronDownIcon className="w-5 h-5" />
+          </button>
+        )}
       </div>
+
+      {/* Tool status indicator */}
+      {toolStatus && (
+        <div className="px-4 pb-1 flex items-center gap-2 text-xs text-chat-text-secondary">
+          <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-ping inline-block" />
+          {toolStatus.action === 'thinking'
+            ? 'AURA is thinking...'
+            : `Using ${toolStatus.name}...`}
+        </div>
+      )}
 
       {/* Input area */}
       <MessageInput

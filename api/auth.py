@@ -40,7 +40,7 @@ async def require_api_key(x_api_key: str = Header(default="")) -> str:
             )
         return ""
 
-    if not x_api_key or not secrets.compare_digest(x_api_key, configured):
+    if not secrets.compare_digest(x_api_key or "", configured):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing API key",
@@ -66,4 +66,4 @@ def verify_api_key_ws(key: str) -> bool:
     configured = _get_configured_key()
     if configured is None:
         return not _auth_is_required()  # Block if auth required, allow in dev mode
-    return bool(key) and secrets.compare_digest(key, configured)
+    return secrets.compare_digest(key or "", configured)

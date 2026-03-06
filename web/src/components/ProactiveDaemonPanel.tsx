@@ -1,6 +1,5 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { usePolling } from '../hooks/usePolling';
-import { useChatStore } from '../store/chatStore';
 import {
   PlayIcon,
   PauseIcon,
@@ -31,6 +30,7 @@ interface DaemonStatus {
 }
 
 interface ProactiveMessage {
+  id?: string;
   action: string;
   content: string;
   priority: string;
@@ -60,6 +60,7 @@ export function ProactiveDaemonPanel() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const seenIds = useRef<Set<string>>(new Set());
 
   // Fetch daemon status
   const fetchStatus = useCallback(async () => {
@@ -76,9 +77,9 @@ export function ProactiveDaemonPanel() {
     }
   }, []);
 
-  const addChatMessage = useChatStore((state) => state.addMessage);
-
-  // Fetch pending messages and inject into chat
+  // Fetch pending messages for the panel history view only.
+  // Chat injection is handled by the WebSocket hook (proactive type messages)
+  // to avoid duplicates.
   const fetchMessages = useCallback(async () => {
     if (!status?.running) return;
     try {
@@ -86,26 +87,21 @@ export function ProactiveDaemonPanel() {
       if (response.ok) {
         const data = await response.json();
         if (data.messages?.length > 0) {
-          // Add to sidebar panel
-          setMessages(prev => [...prev, ...data.messages].slice(-10));
-          // Inject each message into the main chat with proactive styling
-          for (const msg of data.messages) {
-            addChatMessage({
-              role: 'assistant',
-              content: msg.content,
-              proactive: {
-                action: msg.action,
-                trigger: 'daemon',
-                confidence: msg.metadata?.confidence,
-              },
-            });
+          const newMsgs = data.messages.filter((m: ProactiveMessage) => {
+            const id = m.id || `${m.timestamp}-${(m.content || '').slice(0, 20)}`;
+            if (seenIds.current.has(id)) return false;
+            seenIds.current.add(id);
+            return true;
+          });
+          if (newMsgs.length > 0) {
+            setMessages(prev => [...prev, ...newMsgs].slice(-10));
           }
         }
       }
     } catch (e) {
       console.error('Messages fetch error:', e);
     }
-  }, [status?.running, addChatMessage]);
+  }, [status?.running]);
 
   // Poll for status and messages (15s - daemon status doesn't change rapidly)
   const fetchAll = useCallback(async () => {
@@ -196,16 +192,7 @@ export function ProactiveDaemonPanel() {
           timestamp: new Date().toISOString(),
           metadata: { test: true },
         }].slice(-10));
-        // Inject into chat immediately with proactive styling
-        addChatMessage({
-          role: 'assistant',
-          content: data.content,
-          proactive: {
-            action: data.action,
-            trigger: 'test',
-            confidence: 0.85,
-          },
-        });
+        // Test messages appear in the panel only; WS delivers them to chat
       }
     } finally {
       setLoading(false);

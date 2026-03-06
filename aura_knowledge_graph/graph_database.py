@@ -6,6 +6,13 @@ Key features:
 - Cypher query support
 - Automatic schema initialization
 - Importance decay (like Titans forgetting curve)
+
+ARCHITECTURE NOTE — Dual KG design:
+  - THIS FILE (aura_knowledge_graph/graph_database.py): Kuzu-backed persistent graph
+    exposed as an MCP server (see aura_knowledge_graph/server.py). Intended for
+    large-scale persistent storage and external clients via the MCP protocol.
+  - aura/tools/knowledge_graph.py: In-process NetworkX graph used as a runtime tool
+    by ApprenticeAgent. These are independent backends — not the same data store.
 """
 
 import hashlib
@@ -86,8 +93,20 @@ class AURAKnowledgeGraph:
 
         # Kuzu 0.4+ expects a database path (will create directory structure)
         # For newer versions, we pass the path directly
-        self.db = kuzu.Database(str(self.db_path))
-        self.conn = kuzu.Connection(self.db)
+        try:
+            self.db = kuzu.Database(str(self.db_path))
+        except Exception as e:
+            raise RuntimeError(
+                f"AURAKnowledgeGraph init failed: {e}. "
+                f"Delete DB dir '{self.db_path}' to reset."
+            ) from e
+        try:
+            self.conn = kuzu.Connection(self.db)
+        except Exception as e:
+            raise RuntimeError(
+                f"AURAKnowledgeGraph connection failed: {e}. "
+                f"Delete DB dir '{self.db_path}' to reset."
+            ) from e
 
         self._init_schema()
         self._migrate_temporal_schema()
@@ -178,6 +197,20 @@ class AURAKnowledgeGraph:
 
     def _migrate_existing_edges(self):
         """Set default temporal values on pre-existing edges."""
+        # Guard: check if migration has already been done by counting edges
+        # that already have is_active set. If any exist, skip the full scan.
+        try:
+            check_result = self.conn.execute(
+                "MATCH ()-[r:RELATES_TO]->() WHERE r.is_active IS NOT NULL RETURN COUNT(r) LIMIT 1"
+            )
+            if check_result.has_next():
+                already_migrated = check_result.get_next()[0]
+                if already_migrated > 0:
+                    logger.debug(f"[KG] Edge migration already done ({already_migrated} edges have is_active set), skipping")
+                    return
+        except Exception as e:
+            logger.debug(f"[KG] Migration guard check failed (proceeding with migration): {e}")
+
         try:
             self.conn.execute("""
                 MATCH ()-[r:RELATES_TO]->()

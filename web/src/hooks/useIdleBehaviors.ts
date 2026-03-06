@@ -68,7 +68,7 @@ export function useIdleBehaviors(enabled: boolean = true) {
       } catch (e) {
         // Silently ignore
       }
-    }, 1000); // Only record after 1 second of no activity
+    }, 30000); // Only record after 30 seconds of no activity
   }, [enabled]);
 
   // Track user activity

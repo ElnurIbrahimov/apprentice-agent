@@ -1,10 +1,9 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useChatStore } from '../store/chatStore';
+import { useSettingsStore } from '../store/settingsStore';
 import type { WebSocketMessage, FileAttachment } from '../types';
 
-// Connect directly to backend — CORS does not apply to WebSocket in Starlette 0.52+
-// (CORSMiddleware passes websocket scope through unchanged, and auth middleware also bypasses ws)
-const WS_URL = 'ws://127.0.0.1:8000/api/chat/stream';
+const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/chat/stream`;
 
 const INITIAL_RECONNECT_DELAY = 1000;
 const MAX_RECONNECT_DELAY = 30000;
@@ -19,15 +18,19 @@ export function useWebSocket() {
   const currentMessageId = useRef<string | null>(null);
   const isManualDisconnect = useRef(false);
   const mountedRef = useRef(true);
+  const responseTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const seenProactiveIds = useRef<Set<string>>(new Set());
 
   const {
     addMessage,
     appendToMessage,
     setMessageStreaming,
+    setMessageModelUsed,
     setConnectionStatus,
     setMood,
     setIsLoading,
     setError,
+    setToolStatus,
   } = useChatStore();
 
   // Calculate exponential backoff delay
@@ -41,6 +44,14 @@ export function useWebSocket() {
     if (heartbeatInterval.current) {
       clearInterval(heartbeatInterval.current);
       heartbeatInterval.current = null;
+    }
+  }, []);
+
+  // Clear response timeout
+  const clearResponseTimeout = useCallback(() => {
+    if (responseTimeout.current) {
+      clearTimeout(responseTimeout.current);
+      responseTimeout.current = null;
     }
   }, []);
 
@@ -76,17 +87,31 @@ export function useWebSocket() {
         break;
 
       case 'done':
+        clearResponseTimeout();
         if (currentMessageId.current) {
           setMessageStreaming(currentMessageId.current, false);
+          if (data.model_used) {
+            setMessageModelUsed(currentMessageId.current, data.model_used);
+          }
         }
         if (data.mood) {
           setMood(data.mood);
         }
+        if (data.audio_url && useSettingsStore.getState().settings.soundEnabled) {
+          try {
+            const audio = new Audio(data.audio_url);
+            audio.play().catch((e) => console.warn('[TTS] Audio play failed:', e));
+          } catch (e) {
+            console.warn('[TTS] Failed to create Audio:', e);
+          }
+        }
         currentMessageId.current = null;
         setIsLoading(false);
+        setToolStatus(null);
         break;
 
       case 'error':
+        clearResponseTimeout();
         console.error('[WebSocket] Server error:', data.error);
         setError(data.error || 'Unknown error');
         if (currentMessageId.current) {
@@ -95,19 +120,36 @@ export function useWebSocket() {
         }
         currentMessageId.current = null;
         setIsLoading(false);
+        setToolStatus(null);
         break;
 
       case 'stopped':
+        clearResponseTimeout();
         if (currentMessageId.current) {
           setMessageStreaming(currentMessageId.current, false);
           appendToMessage(currentMessageId.current, '\n\n*[Generation stopped]*');
         }
         currentMessageId.current = null;
         setIsLoading(false);
+        setToolStatus(null);
+        break;
+
+      case 'tool_status':
+        useChatStore.getState().setToolStatus(
+          data.tool_name
+            ? { name: data.tool_name, action: data.tool_action || 'working' }
+            : null
+        );
         break;
 
       case 'proactive': {
         // Real-time push from Gateway Daemon (instant, no polling delay)
+        const proactiveId = data.id
+          ? String(data.id)
+          : `${data.action}:${(data.content || '').slice(0, 40)}`;
+        if (seenProactiveIds.current.has(proactiveId)) break;
+        seenProactiveIds.current.add(proactiveId);
+
         const actionLabels: Record<string, string> = {
           notify: 'noticed something',
           suggest: 'has a suggestion',
@@ -131,7 +173,7 @@ export function useWebSocket() {
         break;
       }
     }
-  }, [addMessage, appendToMessage, setMessageStreaming, setMood, setIsLoading, setError]);
+  }, [addMessage, appendToMessage, setMessageStreaming, setMessageModelUsed, setMood, setIsLoading, setError, clearResponseTimeout]);
 
   // Connect function
   const connect = useCallback(() => {
@@ -190,6 +232,8 @@ export function useWebSocket() {
           return;
         }
 
+        clearResponseTimeout();
+        setIsLoading(false);  // Clear stuck loading state on disconnect
         setConnectionStatus('disconnected');
         wsRef.current = null;
         stopHeartbeat();
@@ -235,6 +279,13 @@ export function useWebSocket() {
     setError(null);
     currentMessageId.current = null;
 
+    clearResponseTimeout();
+    responseTimeout.current = setTimeout(() => {
+      setIsLoading(false);
+      setError('Response timed out. AURA may be busy — please try again.');
+      currentMessageId.current = null;
+    }, 90000);
+
     const selectedModel = modelOverride !== undefined
       ? modelOverride
       : (actionMode ? null : useChatStore.getState().selectedModel);
@@ -265,7 +316,7 @@ export function useWebSocket() {
 
     wsRef.current.send(JSON.stringify(payload));
     return true;
-  }, [addMessage, setIsLoading, setError]);
+  }, [addMessage, setIsLoading, setError, clearResponseTimeout]);
 
   // Disconnect
   const disconnect = useCallback(() => {
@@ -315,6 +366,7 @@ export function useWebSocket() {
       mountedRef.current = false;
       isManualDisconnect.current = true;
       clearTimeout(timeoutId);
+      clearResponseTimeout();
       stopHeartbeat();
 
       if (reconnectTimeout.current) {
@@ -327,7 +379,7 @@ export function useWebSocket() {
         ws.close();
       }
     };
-  }, [connect, stopHeartbeat]);
+  }, [connect, stopHeartbeat, clearResponseTimeout]);
 
   return {
     sendMessage,

@@ -1,4 +1,35 @@
-"""Emotional engine for AURA - mood and emotional state management."""
-from .emotional_engine import EmotionalEngine, Mood, EmotionalState
+"""
+AURA Emotion Module - ALMA-based Emotional Intelligence System
 
-__all__ = ["EmotionalEngine", "Mood", "EmotionalState"]
+This module provides AURA with genuine emotional depth through:
+- PAD (Pleasure-Arousal-Dominance) emotional space
+- Three-layer affect model (Emotion/Mood/Personality)
+- Neuromodulator-inspired response modulation
+- OCC appraisal-based emotion generation
+"""
+
+from .alma_engine import (
+    ALMAEngine,
+    PADState,
+    EmotionState,
+    MoodState,
+    PersonalityProfile,
+    alma_engine,
+    get_emotional_state,
+    trigger_emotion,
+    get_response_modulation,
+    update_from_interaction,
+)
+
+__all__ = [
+    "ALMAEngine",
+    "PADState",
+    "EmotionState",
+    "MoodState",
+    "PersonalityProfile",
+    "alma_engine",
+    "get_emotional_state",
+    "trigger_emotion",
+    "get_response_modulation",
+    "update_from_interaction",
+]

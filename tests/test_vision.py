@@ -6,8 +6,8 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch, call
 
-from apprentice_agent.tools.vision import VisionTool
-from apprentice_agent.config import Config
+from aura.tools.vision import VisionTool
+from aura.config import Config
 
 
 # ---------------------------------------------------------------------------
@@ -66,7 +66,7 @@ def mock_client():
 class TestVisionToolInit:
     def test_default_init_no_args(self):
         """VisionTool() with no args uses Config model and creates local client."""
-        with patch('apprentice_agent.tools.vision.ollama.Client') as mock_cls:
+        with patch('aura.tools.vision.ollama.Client') as mock_cls:
             tool = VisionTool()
             assert tool.model == Config.get_model("vision")
             assert tool._brain is None
@@ -75,7 +75,7 @@ class TestVisionToolInit:
 
     def test_init_with_explicit_model(self):
         """VisionTool(model='minicpm-v') uses specified model."""
-        with patch('apprentice_agent.tools.vision.ollama.Client'):
+        with patch('aura.tools.vision.ollama.Client'):
             tool = VisionTool(model="minicpm-v")
             assert tool.model == "minicpm-v"
 
@@ -99,7 +99,7 @@ class TestVisionToolInit:
 class TestGetClient:
     def test_local_client_without_brain(self, mock_client):
         """Without brain, returns local client and unchanged model."""
-        with patch('apprentice_agent.tools.vision.ollama.Client', return_value=mock_client):
+        with patch('aura.tools.vision.ollama.Client', return_value=mock_client):
             tool = VisionTool()
         client, model = tool._get_client("llava")
         assert client is mock_client
@@ -409,7 +409,7 @@ class TestExecuteDispatcher:
 
 class TestExtractPath:
     def setup_method(self):
-        with patch('apprentice_agent.tools.vision.ollama.Client'):
+        with patch('aura.tools.vision.ollama.Client'):
             self.tool = VisionTool()
 
     def test_quoted_path(self):

@@ -252,7 +252,7 @@ async def viz_stream(websocket: WebSocket):
 Based on reading the codebase, here is the complete mapping from AURA subsystems to visual elements:
 
 #### CognitiveTheater (Multi-Perspective Reasoning)
-**Source:** `apprentice_agent/tools/cognitive_theater.py`
+**Source:** `aura/tools/cognitive_theater.py`
 **Data structures:** `Deliberation` dataclass with `perspectives: Dict[str, str]` (advocate, critic, analyst, integrator) and `synthesis`, `confidence`
 
 | Element | Visual Representation |
@@ -268,7 +268,7 @@ Based on reading the codebase, here is the complete mapping from AURA subsystems
 **Layout:** Four nodes arranged in a square around a central synthesis point. Edges light up sequentially as each perspective generates. Text snippets flow along edges as particle-text sprites.
 
 #### MCTS Tree Search
-**Source:** `apprentice_agent/tools/mcts_reasoning.py`
+**Source:** `aura/tools/mcts_reasoning.py`
 **Data structures:** `MCTSNode` with `thought: Thought`, `children: List[MCTSNode]`, `visits`, `value`, `avg_value`, `state: NodeState`, `depth`. Callbacks: `on_node_created`, `on_node_evaluated`, `on_iteration_complete`.
 
 | Element | Visual Representation |
@@ -287,7 +287,7 @@ Based on reading the codebase, here is the complete mapping from AURA subsystems
 **Layout:** Top-down tree layout. The `depth` field maps to Y-axis. Branching spreads on X/Z axes. The `branching_factor` (default 5) keeps the tree manageable.
 
 #### Knowledge Graph
-**Source:** `apprentice_agent/tools/knowledge_graph.py`
+**Source:** `aura/tools/knowledge_graph.py`
 **Data structures:** NetworkX graph. `Node` dataclass with `id`, `type`, `label`, `confidence`, `access_count`, `valid_from`, `valid_to`. 16 node types (concept, entity, person, project, tool, event, emotion, skill, etc.). 16 edge types (relates_to, causes, solves, etc.).
 
 | Element | Visual Representation |
@@ -320,7 +320,7 @@ Based on reading the codebase, here is the complete mapping from AURA subsystems
 **Layout:** Timeline arrangement with importance on Y-axis. A cylindrical "memory corridor" the camera can fly through.
 
 #### Emotional Neuromodulators (ALMA Engine)
-**Source:** `apprentice_agent/emotion/alma_engine.py`
+**Source:** `aura/emotion/alma_engine.py`
 **Data structures:** `PADState` (Pleasure, Arousal, Dominance each -1 to +1). Neuromodulators: dopamine, serotonin, norepinephrine, oxytocin (each 0.0 to 1.0). 24 emotion types, 8 mood types.
 
 | Element | Visual Representation |
@@ -337,7 +337,7 @@ Based on reading the codebase, here is the complete mapping from AURA subsystems
 **Layout:** A translucent "brain" volume with neuromodulator streams flowing through it. The PAD position could be visualized as a floating indicator within this volume.
 
 #### Truth Spine Verification
-**Source:** `apprentice_agent/truth_spine.py`
+**Source:** `aura/truth_spine.py`
 **Data structures:** `Artifact` (types: FILE, STDOUT, JSON, NONE) with `content_hash`, `is_valid`. `MemoryTier` (FACT, BELIEF, SPECULATION). `VerificationCheck` subclasses (FileExistsCheck, HashMatchCheck, etc.). Contract: ACTION -> ARTIFACT -> VERIFICATION -> MEMORY_TIER.
 
 | Element | Visual Representation |
@@ -354,7 +354,7 @@ Based on reading the codebase, here is the complete mapping from AURA subsystems
 **Layout:** A horizontal chain (like a DNA backbone) running along the bottom of the scene. Each verification step is a vertebra.
 
 #### Multi-Agent Orchestrator
-**Source:** `apprentice_agent/multi_agent/orchestrator.py`
+**Source:** `aura/multi_agent/orchestrator.py`
 **Data structures:** Specialists: ResearchAgent, CoderAgent, AnalystAgent, CreativeAgent. `CollaborationMode`: SINGLE, SEQUENTIAL, PARALLEL, DEBATE. `AgentMessage` with sender, recipient, context.
 
 | Element | Visual Representation |
@@ -373,7 +373,7 @@ Based on reading the codebase, here is the complete mapping from AURA subsystems
 **Layout:** Brain-hemisphere layout with four distinct regions around a central orchestrator point.
 
 #### Global Workspace (Consciousness)
-**Source:** `apprentice_agent/consciousness/global_workspace.py`
+**Source:** `aura/consciousness/global_workspace.py`
 **Data structures:** `WorkspaceContent` with `source_module`, `content_type`, `summary`, `activation`, `salience`, `effective_activation`. `ConsciousState` with `broadcast_content`, `secondary_content`, `attention_focus`, `attention_intensity`. 8 codelets competing for broadcast. Cycle: ~300ms.
 
 | Element | Visual Representation |
@@ -390,7 +390,7 @@ Based on reading the codebase, here is the complete mapping from AURA subsystems
 **Layout:** A ring of 8 codelet nodes surrounding a central broadcast node. This is the "core" of the brain visualization.
 
 #### Inner Monologue
-**Source:** `apprentice_agent/consciousness/inner_thoughts_engine.py`, `api/routes/thinking.py`
+**Source:** `aura/consciousness/inner_thoughts_engine.py`, `api/routes/thinking.py`
 
 | Element | Visual Representation |
 |---------|----------------------|
@@ -1578,7 +1578,7 @@ The visualization hooks must **never slow down AURA's reasoning**. All event emi
 Each hook is a 1-3 line addition. The `viz_emit` helper function ensures safe import and graceful degradation.
 
 ```python
-# apprentice_agent/viz_hooks.py  (new file, <30 lines)
+# aura/viz_hooks.py  (new file, <30 lines)
 """Visualization event emission hooks. Zero overhead when no frontend connected."""
 
 import logging
@@ -1613,7 +1613,7 @@ viz_emit("emotion.neuro_read", {
 The MCTS already has callbacks (`on_node_created`, `on_node_evaluated`, `on_iteration_complete`). Wire them to viz_emit:
 
 ```python
-from apprentice_agent.viz_hooks import viz_emit
+from aura.viz_hooks import viz_emit
 
 mcts.on_node_created = lambda node: viz_emit("mcts.node_created", {
     "node_id": node.id,
@@ -1633,7 +1633,7 @@ mcts.on_node_evaluated = lambda node, reward: viz_emit("mcts.node_evaluated", {
 
 #### cognitive_theater.py
 ```python
-from apprentice_agent.viz_hooks import viz_emit
+from aura.viz_hooks import viz_emit
 
 # After each perspective is parsed:
 viz_emit("theater.perspective_generated", {
@@ -1651,7 +1651,7 @@ viz_emit("theater.synthesis", {
 
 #### alma_engine.py (emotional state changes)
 ```python
-from apprentice_agent.viz_hooks import viz_emit
+from aura.viz_hooks import viz_emit
 
 # After PAD state update:
 viz_emit("emotion.update", {
@@ -1664,7 +1664,7 @@ viz_emit("emotion.update", {
 
 #### truth_spine.py
 ```python
-from apprentice_agent.viz_hooks import viz_emit
+from aura.viz_hooks import viz_emit
 
 viz_emit("truth.check_result", {
     "chain_id": chain_id,
@@ -1682,7 +1682,7 @@ viz_emit("truth.tier_assigned", {
 
 #### knowledge_graph.py
 ```python
-from apprentice_agent.viz_hooks import viz_emit
+from aura.viz_hooks import viz_emit
 
 viz_emit("kg.node_activated", {
     "node_id": node.id,
@@ -1700,7 +1700,7 @@ viz_emit("kg.path_found", {
 
 #### global_workspace.py
 ```python
-from apprentice_agent.viz_hooks import viz_emit
+from aura.viz_hooks import viz_emit
 
 viz_emit("consciousness.broadcast", {
     "winner": winner.to_dict() if winner else None,
@@ -1718,7 +1718,7 @@ viz_emit("consciousness.broadcast", {
 async def get_kg_snapshot():
     """Return full knowledge graph for initial 3D layout."""
     try:
-        from apprentice_agent.tools import get_knowledge_graph
+        from aura.tools import get_knowledge_graph
         kg = get_knowledge_graph()
         graph = kg.graph
 

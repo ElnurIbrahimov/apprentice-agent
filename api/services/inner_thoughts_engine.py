@@ -109,7 +109,7 @@ class InnerThoughtsEngine:
 
         # Current mood from ALMA
         try:
-            from apprentice_agent.emotion.alma_engine import alma_engine
+            from aura.emotion.alma_engine import alma_engine
             state = alma_engine.get_emotional_state()
             if state:
                 mood = state.get("dominant_emotion", "neutral")
@@ -155,7 +155,7 @@ class InnerThoughtsEngine:
         # Phase 6D: Add idle presence context when idle
         if idle_secs > 30:
             try:
-                from apprentice_agent.consciousness.idle_presence import get_idle_presence_engine
+                from aura.consciousness.idle_presence import get_idle_presence_engine
                 ipe = get_idle_presence_engine()
                 load = ipe.compute_cognitive_load()
                 parts.append(f"Cognitive load: {load.total_load:.0%}")
@@ -169,7 +169,7 @@ class InnerThoughtsEngine:
 
         # ADV-02 Phase 3: Proactive awareness context
         try:
-            from apprentice_agent.consciousness.proactive_awareness import get_proactive_awareness_engine
+            from aura.consciousness.proactive_awareness import get_proactive_awareness_engine
             engine = get_proactive_awareness_engine()
             awareness = engine.get_awareness_context()
             if awareness:
@@ -314,7 +314,7 @@ class InnerThoughtsEngine:
 
                     # Phase 6D: Record in idle presence engine for activity tracking
                     try:
-                        from apprentice_agent.consciousness.idle_presence import get_idle_presence_engine, IdleActivity
+                        from aura.consciousness.idle_presence import get_idle_presence_engine, IdleActivity
                         ipe = get_idle_presence_engine()
                         ipe._record_activity(
                             IdleActivity.INNER_THOUGHT,
@@ -339,7 +339,7 @@ class InnerThoughtsEngine:
                     # Low dopamine = slower, less generative = longer intervals
                     base_interval = random.uniform(*self._interval_range)
                     try:
-                        from apprentice_agent.brain import _get_neuromodulator_levels, _neuro_scale
+                        from aura.brain import _get_neuromodulator_levels, _neuro_scale
                         neuro = _get_neuromodulator_levels()
                         # Invert: high dopamine -> lower interval (faster thoughts)
                         # We scale the interval inversely: dopamine 1.0 -> 0.7x interval, 0.0 -> 1.4x

@@ -1,24 +1,4 @@
 {
-  "skill_2b599ae2c15a": {
-    "name": "Python Code Reviewer",
-    "description": "Reviews Python code for best practices, style, and potential bugs",
-    "category": "coding",
-    "path": "categories\\coding\\python-code-reviewer.skill.md",
-    "trigger_patterns": [
-      "review this python code",
-      "check my python",
-      "code review"
-    ],
-    "embedding": [],
-    "success_rate": 1.0,
-    "total_uses": 1,
-    "tags": [
-      "python",
-      "review",
-      "quality"
-    ],
-    "updated_at": "2026-02-02T15:02:58.566767"
-  },
   "skill_8596adbc044d": {
     "name": "Python Code Reviewer",
     "description": "Reviews Python code for best practices, style, and potential bugs",

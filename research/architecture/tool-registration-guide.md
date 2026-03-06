@@ -3,7 +3,7 @@
 ## How to Add a New Tool to AURA
 
 ### Step 1: Create the Tool File
-Location: `apprentice_agent/tools/<tool_name>.py`
+Location: `aura/tools/<tool_name>.py`
 
 ```python
 """Tool description."""
@@ -84,8 +84,8 @@ def _my_tool_sync() -> dict:
 
 ### Step 6: Verify
 ```bash
-python -m py_compile apprentice_agent/tools/my_new_tool.py
-python -c "from apprentice_agent.tools import MyNewTool; t = MyNewTool(); print(t.execute('some'))"
+python -m py_compile aura/tools/my_new_tool.py
+python -c "from aura.tools import MyNewTool; t = MyNewTool(); print(t.execute('some'))"
 ```
 
 ## Common Patterns

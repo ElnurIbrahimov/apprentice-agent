@@ -25,10 +25,10 @@ The ALMA (Adaptive Limbic Modulation Architecture) engine sits on top of EvoEmo:
 - Neuromodulator simulation (dopamine, serotonin, norepinephrine, oxytocin)
 - Emotional memory formation
 - Mood-dependent parameter tuning
-- Located in `apprentice_agent/emotion/`
+- Located in `aura/emotion/`
 
 ## File Locations
-- `apprentice_agent/tools/evoemo.py` - Core emotion detection
-- `apprentice_agent/tools/evoemo_prompts.py` - Tone modifiers and style builders
-- `apprentice_agent/emotion/alma_engine.py` - ALMA emotional engine
-- `apprentice_agent/emotion/integration.py` - Bridge between EvoEmo and ALMA
+- `aura/tools/evoemo.py` - Core emotion detection
+- `aura/tools/evoemo_prompts.py` - Tone modifiers and style builders
+- `aura/emotion/alma_engine.py` - ALMA emotional engine
+- `aura/emotion/integration.py` - Bridge between EvoEmo and ALMA

@@ -38,13 +38,13 @@ AURA (Autonomous User-Responsive Agent) aims to feel genuinely "alive" rather th
 
 | Component | Status | Location |
 |-----------|--------|----------|
-| MCTS Reasoning Tree | ✅ Complete | `apprentice_agent/tools/mcts_reasoning.py` |
-| Introspection Circuit | ✅ Complete | `apprentice_agent/tools/introspection_circuit.py` |
-| A-MEM Zettelkasten Memory | ✅ Complete | `apprentice_agent/memory/amem.py` |
-| Knowledge Graph | ✅ Complete | `apprentice_agent/memory/knowledge_graph.py` |
-| RAG System | ✅ Complete | `apprentice_agent/memory/rag.py` |
-| Pattern Prophet | ✅ Complete | `apprentice_agent/patterns/pattern_prophet.py` |
-| Heartbeat Monitor | ✅ Complete | `apprentice_agent/proactive/heartbeat.py` |
+| MCTS Reasoning Tree | ✅ Complete | `aura/tools/mcts_reasoning.py` |
+| Introspection Circuit | ✅ Complete | `aura/tools/introspection_circuit.py` |
+| A-MEM Zettelkasten Memory | ✅ Complete | `aura/memory/amem.py` |
+| Knowledge Graph | ✅ Complete | `aura/memory/knowledge_graph.py` |
+| RAG System | ✅ Complete | `aura/memory/rag.py` |
+| Pattern Prophet | ✅ Complete | `aura/patterns/pattern_prophet.py` |
+| Heartbeat Monitor | ✅ Complete | `aura/proactive/heartbeat.py` |
 
 ### 1.3 Components to Build
 
@@ -1413,7 +1413,7 @@ class NaturalSpeechPatterns:
 
 **Files to Create**:
 ```
-apprentice_agent/
+aura/
 ├── emotions/
 │   ├── __init__.py
 │   ├── alma_engine.py       # Main ALMA implementation
@@ -1450,7 +1450,7 @@ web/src/components/
 
 **Files to Create**:
 ```
-apprentice_agent/
+aura/
 ├── proactive/
 │   ├── __init__.py
 │   ├── gateway_daemon.py     # Main daemon
@@ -1474,7 +1474,7 @@ apprentice_agent/
 
 **Files to Create**:
 ```
-apprentice_agent/
+aura/
 ├── consciousness/
 │   ├── __init__.py
 │   ├── global_workspace.py   # GWT implementation
@@ -1489,7 +1489,7 @@ apprentice_agent/
 
 **Files to Create**:
 ```
-apprentice_agent/
+aura/
 ├── screen/
 │   ├── __init__.py
 │   ├── screenpipe_client.py  # Screenpipe integration
@@ -1522,7 +1522,7 @@ apprentice_agent/
 ### 9.1 Proposed Directory Structure
 
 ```
-apprentice_agent/
+aura/
 ├── __init__.py
 ├── agent.py                    # Main agent (existing)
 ├── config.py                   # Configuration

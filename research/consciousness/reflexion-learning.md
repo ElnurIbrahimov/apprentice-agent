@@ -32,4 +32,4 @@ class Reflection:
 - `ReflexionResult` - Outcome of a reflexion cycle
 
 ## File Location
-- `apprentice_agent/tools/reflexion.py`
+- `aura/tools/reflexion.py`

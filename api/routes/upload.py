@@ -1,11 +1,14 @@
 """File upload endpoint for AURA Web API."""
 
 import os
+import re
 import uuid
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+
+from api.auth import require_api_key
 
 from api.models.schemas import UploadResponse, FileAttachment, AttachmentType
 
@@ -14,13 +17,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/upload", tags=["upload"])
 
 # Configuration
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+MAX_FILE_SIZE = 10 * 1024 * 1024    # 10MB for images/code/documents
+MAX_ARCHIVE_SIZE = 50 * 1024 * 1024  # 50MB for zip archives
 UPLOAD_DIR = Path(__file__).parent.parent / "data" / "uploads"
 
 # Supported file types
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
 DOCUMENT_EXTENSIONS = {".pdf", ".txt", ".md", ".json"}
 CODE_EXTENSIONS = {".py", ".js", ".ts", ".tsx", ".jsx", ".html", ".css", ".java", ".c", ".cpp", ".h", ".go", ".rs", ".rb", ".php", ".sh", ".yaml", ".yml", ".toml", ".xml", ".sql"}
+ARCHIVE_EXTENSIONS = {".zip"}
 
 # MIME type mapping
 MIME_TYPES = {
@@ -55,17 +60,21 @@ MIME_TYPES = {
     ".toml": "text/toml",
     ".xml": "text/xml",
     ".sql": "text/x-sql",
+    ".zip": "application/zip",
 }
 
-ALL_EXTENSIONS = IMAGE_EXTENSIONS | DOCUMENT_EXTENSIONS | CODE_EXTENSIONS
+ALL_EXTENSIONS = IMAGE_EXTENSIONS | DOCUMENT_EXTENSIONS | CODE_EXTENSIONS | ARCHIVE_EXTENSIONS
 
 
 def get_attachment_type(ext: str) -> AttachmentType:
     """Determine attachment type from file extension."""
-    if ext.lower() in IMAGE_EXTENSIONS:
+    ext = ext.lower()
+    if ext in IMAGE_EXTENSIONS:
         return AttachmentType.IMAGE
-    elif ext.lower() in DOCUMENT_EXTENSIONS:
+    elif ext in DOCUMENT_EXTENSIONS:
         return AttachmentType.DOCUMENT
+    elif ext in ARCHIVE_EXTENSIONS:
+        return AttachmentType.ARCHIVE
     else:
         return AttachmentType.CODE
 
@@ -75,7 +84,7 @@ def ensure_upload_dir():
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
-@router.post("", response_model=UploadResponse)
+@router.post("", response_model=UploadResponse, dependencies=[Depends(require_api_key)])
 async def upload_file(file: UploadFile = File(...)) -> UploadResponse:
     """Upload a file for chat context.
 
@@ -109,11 +118,12 @@ async def upload_file(file: UploadFile = File(...)) -> UploadResponse:
         # Read file content
         content = await file.read()
 
-        # Validate file size
-        if len(content) > MAX_FILE_SIZE:
+        # Validate file size (archives get a higher limit)
+        size_limit = MAX_ARCHIVE_SIZE if ext in ARCHIVE_EXTENSIONS else MAX_FILE_SIZE
+        if len(content) > size_limit:
             return UploadResponse(
                 success=False,
-                error=f"File too large. Maximum size: {MAX_FILE_SIZE // (1024*1024)}MB"
+                error=f"File too large. Maximum size: {size_limit // (1024*1024)}MB"
             )
 
         # Generate unique filename
@@ -156,7 +166,7 @@ async def upload_file(file: UploadFile = File(...)) -> UploadResponse:
         )
 
 
-@router.delete("/{file_id}")
+@router.delete("/{file_id}", dependencies=[Depends(require_api_key)])
 async def delete_file(file_id: str):
     """Delete an uploaded file.
 
@@ -166,6 +176,10 @@ async def delete_file(file_id: str):
     Returns:
         Success status
     """
+    # Validate file_id is a valid UUID format
+    if not re.match(r'^[0-9a-f-]{36}$', file_id):
+        raise HTTPException(status_code=400, detail="Invalid file_id format. Must be a valid UUID.")
+
     try:
         # Find file with matching ID prefix
         for file_path in UPLOAD_DIR.glob(f"{file_id}.*"):

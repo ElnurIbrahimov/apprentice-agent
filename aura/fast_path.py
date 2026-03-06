@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .memory import MarkdownStore
+    from .markdown_store import MarkdownStore
     from .emotion import EmotionalEngine
 
 logger = logging.getLogger(__name__)
@@ -41,6 +41,7 @@ class FastPathHandler:
         """
         self.memory = memory_store
         self.emotions = emotional_engine
+        self._agent = None
 
     def try_fast_path(self, user_input: str) -> Optional[str]:
         """
@@ -60,9 +61,10 @@ class FastPathHandler:
 
         # Known command words (only these trigger command handling)
         known_commands = {
-            "status", "state", "mood", "feeling", "how are you",
+            "status", "state",
             "memory", "memories", "remember", "what do you remember",
-            "help", "commands", "?"
+            "help", "commands", "?",
+            "dream", "consolidate", "dream-memory",
         }
 
         # 1. Slash commands (explicit /commands)
@@ -112,6 +114,12 @@ class FastPathHandler:
             # Redirect to memory handler
             fact = cmd[9:].strip()
             return self._handle_memory(f"remember: {fact}")
+        elif cmd in ('dream', 'consolidate', 'dream-memory'):
+            if hasattr(self, '_agent') and hasattr(self._agent, 'run_dream_consolidation'):
+                result = self._agent.run_dream_consolidation()
+                n = result.get('insights_generated', 0)
+                return f"Memory consolidation complete. {n} new insight{'s' if n != 1 else ''} generated."
+            return "Dream consolidation is unavailable right now."
         else:
             return f"Unknown command: /{cmd}. Try /help"
 
@@ -129,12 +137,10 @@ class FastPathHandler:
         if self.memory:
             try:
                 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
-                self.memory.add_entry(
-                    "learned_facts",
-                    "User-Specific",
-                    f"[{timestamp}] {fact}",
-                    importance=0.8
-                )
+                if hasattr(self.memory, 'add_entry'):
+                    self.memory.add_entry("learned_facts", "User-Specific", f"[{timestamp}] {fact}", importance=0.8)
+                elif hasattr(self.memory, 'store'):
+                    self.memory.store(f"[{timestamp}] {fact}", {"type": "user_fact", "importance": 0.8})
                 stored = True
             except Exception as e:
                 logger.warning(f"Memory storage error: {e}")
@@ -159,8 +165,8 @@ class FastPathHandler:
                 mood = state.mood.value.capitalize()
                 energy_val = getattr(state, 'energy', 0.5)
                 energy = f"{int(energy_val * 100)}%"
-            except (AttributeError, TypeError, ValueError) as e:
-                logger.debug(f"Could not get status details: {e}")
+            except (AttributeError, TypeError, KeyError) as e:
+                logger.debug(f"[FastPath] Status mood error: {e}")
 
         return f"""**AURA Status**
 Mood: {mood}
@@ -177,8 +183,8 @@ Ready to chat!"""
                 mood = state.mood.value
                 reason = getattr(state, 'mood_reason', None) or "Just being me"
                 return f"Feeling **{mood}**. {reason}"
-            except (AttributeError, TypeError) as e:
-                logger.debug(f"Could not get mood details: {e}")
+            except (AttributeError, TypeError, KeyError) as e:
+                logger.debug(f"[FastPath] Mood error: {e}")
         return "Feeling good and ready to help!"
 
     def _get_memory_summary(self) -> str:
@@ -193,7 +199,7 @@ System: Active
 
 I remember our conversations!"""
             except (AttributeError, TypeError, KeyError) as e:
-                logger.debug(f"Could not get memory stats: {e}")
+                logger.debug(f"[FastPath] Memory summary error: {e}")
         return "Memory system is active!"
 
     def _get_help(self) -> str:

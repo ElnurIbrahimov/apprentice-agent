@@ -29,4 +29,4 @@ Gives AURA an internal thought stream — observable thoughts that run in parall
 - `monologue.connect_evoemo(evoemo)` - Link to emotional system
 
 ## File Location
-- `apprentice_agent/tools/inner_monologue.py`
+- `aura/tools/inner_monologue.py`

@@ -37,5 +37,5 @@ result = mcts_reason("What is the best approach to implement caching?")
 - Decision-making under uncertainty
 
 ## Files
-- `apprentice_agent/tools/mcts_reasoning.py` - Core MCTS engine
-- `apprentice_agent/tools/reasoning_tree_tool.py` - Tool wrapper with `deep_reason()`
+- `aura/tools/mcts_reasoning.py` - Core MCTS engine
+- `aura/tools/reasoning_tree_tool.py` - Tool wrapper with `deep_reason()`

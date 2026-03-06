@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from apprentice_agent.tools.neurodream import (
+from aura.tools.neurodream import (
     NeuroDreamEngine,
     SleepPhase,
     DreamTrigger,

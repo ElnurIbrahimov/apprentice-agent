@@ -5,8 +5,11 @@ Uses Qdrant in embedded mode for zero-server, local-first operation.
 Stores episodes as vectors with rich payload metadata for hybrid search.
 """
 
+import hashlib
 import json
 import logging
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Callable
@@ -21,7 +24,7 @@ try:
     from qdrant_client import QdrantClient
     from qdrant_client.models import (
         Distance, VectorParams, PointStruct,
-        Filter, FieldCondition, MatchValue, Range,
+        Filter, FieldCondition, MatchValue, MatchAny, Range,
         FilterSelector, PayloadSchemaType
     )
     QDRANT_AVAILABLE = True
@@ -29,15 +32,14 @@ except ImportError:
     QDRANT_AVAILABLE = False
     QdrantClient = None
 
-# Check sentence-transformers availability
-try:
-    from sentence_transformers import SentenceTransformer
-    SENTENCE_TRANSFORMERS_AVAILABLE = True
-except ImportError:
-    SENTENCE_TRANSFORMERS_AVAILABLE = False
-    SentenceTransformer = None
+# sentence-transformers is lazy-loaded via aura.tools._shared_models.get_sentence_transformer()
 
 logger = logging.getLogger(__name__)
+
+
+def _episode_id_to_point_id(episode_id: str) -> int:
+    """Convert an episode string ID to a stable 60-bit uint64 for Qdrant."""
+    return int(hashlib.md5(episode_id.encode()).hexdigest()[:15], 16)
 
 
 class EmbeddingModel:
@@ -50,22 +52,17 @@ class EmbeddingModel:
         Args:
             model_name: HuggingFace model name for embeddings
         """
-        if not SENTENCE_TRANSFORMERS_AVAILABLE:
-            raise ImportError(
-                "sentence-transformers is required. Install with: "
-                "pip install sentence-transformers"
-            )
-
         self.model_name = model_name
         self._model = None
         self._dimension = None
 
     @property
-    def model(self) -> "SentenceTransformer":
-        """Lazy load model."""
+    def model(self):
+        """Lazy load model via shared singleton."""
         if self._model is None:
+            from aura.tools._shared_models import get_sentence_transformer
             logger.info(f"Loading embedding model: {self.model_name}")
-            self._model = SentenceTransformer(self.model_name)
+            self._model = get_sentence_transformer()
             self._dimension = self._model.get_sentence_embedding_dimension()
             logger.info(f"Model loaded. Dimension: {self._dimension}")
         return self._model
@@ -79,12 +76,12 @@ class EmbeddingModel:
 
     def embed(self, text: str) -> List[float]:
         """Generate embedding for text."""
-        embedding = self.model.encode(text, convert_to_numpy=True)
+        embedding = self.model.encode(text, convert_to_numpy=True, show_progress_bar=False)
         return embedding.tolist()
 
     def embed_batch(self, texts: List[str]) -> List[List[float]]:
         """Generate embeddings for multiple texts."""
-        embeddings = self.model.encode(texts, convert_to_numpy=True)
+        embeddings = self.model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
         return [e.tolist() for e in embeddings]
 
 
@@ -124,8 +121,27 @@ class EpisodicMemoryStore:
         self.db_path = Path(db_path)
         self.db_path.mkdir(parents=True, exist_ok=True)
 
+        # Availability flag — set False on lock/access error so search() can skip
+        self._available = True
+        self._retry_after: float = 0.0
+        self.client = None
+
+        # Thread safety: Qdrant embedded mode (SQLite-backed) is not
+        # safe for concurrent thread access. RLock allows reentrant calls
+        # so a locked method can invoke another locked method.
+        self._lock = threading.RLock()
+
         # Initialize Qdrant in embedded mode
-        self.client = QdrantClient(path=str(self.db_path))
+        try:
+            self.client = QdrantClient(path=str(self.db_path))
+        except Exception as e:
+            err_str = str(e).lower()
+            if "lock" in err_str or "already accessed" in err_str or "locked" in err_str:
+                logger.warning(f"[EpisodicMemory] Qdrant init failed due to lock/access conflict — store disabled: {e}")
+            else:
+                logger.warning(f"[EpisodicMemory] Qdrant init failed — store disabled: {e}")
+            self._available = False
+            self._retry_after = time.monotonic() + 300.0
 
         # Initialize embedding model
         if custom_embedder:
@@ -136,8 +152,13 @@ class EpisodicMemoryStore:
             self._embed = self._embedder.embed
             self._embedding_dim = self._embedder.dimension
 
-        # Ensure collection exists
-        self._ensure_collection()
+        # Ensure collection exists (only if client initialized successfully)
+        if self._available:
+            self._ensure_collection()
+
+        # Auto-consolidation timer (fires every 24h)
+        self._consolidation_timer: Optional[threading.Timer] = None
+        self._schedule_consolidation()
 
         # Statistics
         self._stats = {
@@ -146,7 +167,28 @@ class EpisodicMemoryStore:
             "total_searches": 0
         }
 
-        logger.info(f"EpisodicMemoryStore initialized at {db_path}")
+        if self._available:
+            logger.info(f"EpisodicMemoryStore initialized at {db_path}")
+        else:
+            logger.warning(f"EpisodicMemoryStore at {db_path} is unavailable (lock conflict or init error)")
+
+    def _check_availability(self) -> bool:
+        """Attempt reconnect after cooldown if previously unavailable."""
+        if self._available:
+            return True
+        if time.monotonic() < self._retry_after:
+            return False
+        # Cooldown elapsed — try to reconnect
+        try:
+            self.client = QdrantClient(path=str(self.db_path))
+            self._available = True
+            self._ensure_collection()
+            logger.info("[EpisodicMemory] Qdrant reconnected successfully")
+            return True
+        except Exception as e:
+            logger.debug(f"[EpisodicMemory] Reconnect failed: {e}")
+            self._retry_after = time.monotonic() + 300.0
+            return False
 
     def _ensure_collection(self):
         """Create collection if it doesn't exist."""
@@ -173,6 +215,8 @@ class EpisodicMemoryStore:
         Returns:
             Episode ID
         """
+        if not self._check_availability():
+            return episode.id
         # Generate embedding if not present
         if episode.embedding is None:
             embed_text = self._create_embed_text(episode)
@@ -183,7 +227,7 @@ class EpisodicMemoryStore:
 
         # Create point
         point = PointStruct(
-            id=hash(episode.id) & 0x7FFFFFFFFFFFFFFF,  # Qdrant needs positive int
+            id=_episode_id_to_point_id(episode.id),  # Qdrant needs positive int
             vector=episode.embedding,
             payload={
                 **payload,
@@ -192,13 +236,15 @@ class EpisodicMemoryStore:
             }
         )
 
-        # Upsert point
-        self.client.upsert(
-            collection_name=self.COLLECTION_NAME,
-            points=[point]
-        )
+        with self._lock:
+            # Upsert point
+            self.client.upsert(
+                collection_name=self.COLLECTION_NAME,
+                points=[point]
+            )
 
-        self._stats["total_stored"] += 1
+            self._stats["total_stored"] += 1
+
         logger.debug(f"Stored episode: {episode.id}")
 
         return episode.id
@@ -213,6 +259,8 @@ class EpisodicMemoryStore:
         Returns:
             List of episode IDs
         """
+        if not self._check_availability():
+            return [e.id for e in episodes]
         if not episodes:
             return []
 
@@ -235,7 +283,7 @@ class EpisodicMemoryStore:
         for episode in episodes:
             payload = episode.to_dict()
             points.append(PointStruct(
-                id=hash(episode.id) & 0x7FFFFFFFFFFFFFFF,
+                id=_episode_id_to_point_id(episode.id),
                 vector=episode.embedding,
                 payload={
                     **payload,
@@ -244,13 +292,15 @@ class EpisodicMemoryStore:
                 }
             ))
 
-        # Upsert batch
-        self.client.upsert(
-            collection_name=self.COLLECTION_NAME,
-            points=points
-        )
+        with self._lock:
+            # Upsert batch
+            self.client.upsert(
+                collection_name=self.COLLECTION_NAME,
+                points=points
+            )
 
-        self._stats["total_stored"] += len(episodes)
+            self._stats["total_stored"] += len(episodes)
+
         return [e.id for e in episodes]
 
     def _create_embed_text(self, episode: Episode) -> str:
@@ -278,46 +328,50 @@ class EpisodicMemoryStore:
         Returns:
             Episode or None if not found
         """
-        # Search by payload filter
-        results = self.client.scroll(
-            collection_name=self.COLLECTION_NAME,
-            scroll_filter=Filter(
-                must=[
-                    FieldCondition(
-                        key="_episode_id",
-                        match=MatchValue(value=episode_id)
-                    )
-                ]
-            ),
-            limit=1,
-            with_vectors=True
-        )
-
-        points, _ = results
-        if not points:
+        if not self._available:
             return None
+        with self._lock:
+            # Search by payload filter
+            results = self.client.scroll(
+                collection_name=self.COLLECTION_NAME,
+                scroll_filter=Filter(
+                    must=[
+                        FieldCondition(
+                            key="_episode_id",
+                            match=MatchValue(value=episode_id)
+                        )
+                    ]
+                ),
+                limit=1,
+                with_vectors=True
+            )
 
-        point = points[0]
-        self._stats["total_retrieved"] += 1
+            points, _ = results
+            if not points:
+                return None
 
-        episode = Episode.from_dict(point.payload, embedding=point.vector)
-        episode.mark_accessed()
+            point = points[0]
+            self._stats["total_retrieved"] += 1
 
-        # Update access metadata in DB
-        self._update_episode_access(episode)
+            episode = Episode.from_dict(point.payload, embedding=point.vector)
+            episode.mark_accessed()
 
-        return episode
+            # Update access metadata in DB
+            self._update_episode_access(episode)
+
+            return episode
 
     def _update_episode_access(self, episode: Episode):
         """Update episode access metadata in database."""
-        self.client.set_payload(
-            collection_name=self.COLLECTION_NAME,
-            payload={
-                "access_count": episode.access_count,
-                "last_accessed": episode.last_accessed.isoformat() if episode.last_accessed else None
-            },
-            points=[hash(episode.id) & 0x7FFFFFFFFFFFFFFF]
-        )
+        with self._lock:
+            self.client.set_payload(
+                collection_name=self.COLLECTION_NAME,
+                payload={
+                    "access_count": episode.access_count,
+                    "last_accessed": episode.last_accessed.isoformat() if episode.last_accessed else None
+                },
+                points=[_episode_id_to_point_id(episode.id)]
+            )
 
     def search(
         self,
@@ -334,35 +388,42 @@ class EpisodicMemoryStore:
         Returns:
             List of search results sorted by score
         """
-        self._stats["total_searches"] += 1
+        # Guard: skip search if store is unavailable (lock conflict or init error)
+        if not self._check_availability():
+            return []
 
         # Build filter conditions
         filter_conditions = self._build_filter(query)
 
-        # Perform search
+        # Embed query text outside the lock (CPU-heavy, no Qdrant access)
+        query_embedding = None
         if query.query_text:
-            # Vector similarity search
             query_embedding = self._embed(query.query_text)
 
-            # Use query_points API (qdrant-client 1.7+)
-            query_result = self.client.query_points(
-                collection_name=self.COLLECTION_NAME,
-                query=query_embedding,
-                query_filter=Filter(must=filter_conditions) if filter_conditions else None,
-                limit=query.limit * 2,  # Get extra for re-scoring
-                with_vectors=True
-            )
-            results = query_result.points
-        else:
-            # Scroll with filter only
-            results, _ = self.client.scroll(
-                collection_name=self.COLLECTION_NAME,
-                scroll_filter=Filter(must=filter_conditions) if filter_conditions else None,
-                limit=query.limit * 2,
-                with_vectors=True
-            )
+        with self._lock:
+            self._stats["total_searches"] += 1
 
-        # Convert to episodes and score
+            # Perform search
+            if query_embedding is not None:
+                # Vector similarity search
+                query_result = self.client.query_points(
+                    collection_name=self.COLLECTION_NAME,
+                    query=query_embedding,
+                    query_filter=Filter(must=filter_conditions) if filter_conditions else None,
+                    limit=query.limit * 2,  # Get extra for re-scoring
+                    with_vectors=True
+                )
+                results = query_result.points
+            else:
+                # Scroll with filter only
+                results, _ = self.client.scroll(
+                    collection_name=self.COLLECTION_NAME,
+                    scroll_filter=Filter(must=filter_conditions) if filter_conditions else None,
+                    limit=query.limit * 2,
+                    with_vectors=True
+                )
+
+        # Convert to episodes and score (no Qdrant access needed)
         search_results = []
         for point in results:
             episode = Episode.from_dict(
@@ -416,14 +477,14 @@ class EpisodicMemoryStore:
                 match=MatchValue(value=query.day_of_week)
             ))
 
-        # Type filter
+        # Type filter — use MatchAny so that multiple types are OR-combined,
+        # not AND-combined (a single episode can only have one type).
         if query.episode_types:
             type_values = [t.value for t in query.episode_types]
-            for type_val in type_values:
-                conditions.append(FieldCondition(
-                    key="episode_type",
-                    match=MatchValue(value=type_val)
-                ))
+            conditions.append(FieldCondition(
+                key="episode_type",
+                match=MatchAny(any=type_values)
+            ))
 
         # Emotional valence filter
         if query.emotional_valence:
@@ -506,6 +567,8 @@ class EpisodicMemoryStore:
         Returns:
             List of episodes sorted by timestamp
         """
+        if not self._check_availability():
+            return []
         conditions = [
             FieldCondition(
                 key="_timestamp_unix",
@@ -517,17 +580,17 @@ class EpisodicMemoryStore:
         ]
 
         if episode_types:
-            for etype in episode_types:
-                conditions.append(FieldCondition(
-                    key="episode_type",
-                    match=MatchValue(value=etype.value)
-                ))
+            conditions.append(FieldCondition(
+                key="episode_type",
+                match=MatchAny(any=[etype.value for etype in episode_types])
+            ))
 
-        results, _ = self.client.scroll(
-            collection_name=self.COLLECTION_NAME,
-            scroll_filter=Filter(must=conditions),
-            limit=limit
-        )
+        with self._lock:
+            results, _ = self.client.scroll(
+                collection_name=self.COLLECTION_NAME,
+                scroll_filter=Filter(must=conditions),
+                limit=limit
+            )
 
         episodes = [Episode.from_dict(p.payload) for p in results]
         episodes.sort(key=lambda e: e.temporal_context.timestamp)
@@ -544,38 +607,63 @@ class EpisodicMemoryStore:
         Returns:
             True if deleted, False if not found
         """
-        point_id = hash(episode_id) & 0x7FFFFFFFFFFFFFFF
-
-        try:
-            self.client.delete(
-                collection_name=self.COLLECTION_NAME,
-                points_selector=FilterSelector(
-                    filter=Filter(
-                        must=[FieldCondition(
-                            key="_episode_id",
-                            match=MatchValue(value=episode_id)
-                        )]
+        if not self._check_availability():
+            return False
+        with self._lock:
+            try:
+                self.client.delete(
+                    collection_name=self.COLLECTION_NAME,
+                    points_selector=FilterSelector(
+                        filter=Filter(
+                            must=[FieldCondition(
+                                key="_episode_id",
+                                match=MatchValue(value=episode_id)
+                            )]
+                        )
                     )
                 )
-            )
-            return True
-        except Exception as e:
-            logger.error(f"Failed to delete episode {episode_id}: {e}")
-            return False
+                return True
+            except Exception as e:
+                logger.error(f"Failed to delete episode {episode_id}: {e}")
+                return False
 
     def get_statistics(self) -> Dict[str, Any]:
         """Get memory store statistics."""
-        collection_info = self.client.get_collection(self.COLLECTION_NAME)
+        if not self._check_availability():
+            return {"total_episodes": 0, "available": False, **self._stats}
+        with self._lock:
+            collection_info = self.client.get_collection(self.COLLECTION_NAME)
 
-        return {
-            "total_episodes": collection_info.points_count,
-            "vector_dimension": self._embedding_dim,
-            "collection_name": self.COLLECTION_NAME,
-            **self._stats
-        }
+            return {
+                "total_episodes": collection_info.points_count,
+                "vector_dimension": self._embedding_dim,
+                "collection_name": self.COLLECTION_NAME,
+                **self._stats
+            }
+
+    def _schedule_consolidation(self) -> None:
+        """Schedule the next consolidation run in 24 hours."""
+        self._consolidation_timer = threading.Timer(86400, self._run_scheduled_consolidation)
+        self._consolidation_timer.daemon = True
+        self._consolidation_timer.start()
+
+    def _run_scheduled_consolidation(self) -> None:
+        """Run consolidation and reschedule."""
+        try:
+            from aura_episodic_memory.consolidation import MemoryConsolidator
+            consolidator = MemoryConsolidator(self)
+            consolidator.consolidate()
+        except Exception as e:
+            logger.warning(f"[EpisodicMemory] Scheduled consolidation failed: {e}")
+        finally:
+            self._schedule_consolidation()
 
     def close(self):
         """Close the database connection."""
-        if self.client:
-            self.client.close()
-            logger.info("EpisodicMemoryStore closed")
+        if self._consolidation_timer is not None:
+            self._consolidation_timer.cancel()
+            self._consolidation_timer = None
+        with self._lock:
+            if self.client:
+                self.client.close()
+                logger.info("EpisodicMemoryStore closed")

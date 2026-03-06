@@ -1655,9 +1655,9 @@ When a project's priority signal diverges significantly from its stated priority
 | Component | Description | Files |
 |-----------|-------------|-------|
 | SQLite schema | Create `world_model.db` with all tables | `data/world_model.db` |
-| `WorldModel.__init__` | DB initialization, loading, snapshot management | `apprentice_agent/consciousness/world_model.py` |
+| `WorldModel.__init__` | DB initialization, loading, snapshot management | `aura/consciousness/world_model.py` |
 | `WorldModel.get_context_summary` | Generate LLM-injectable summary from state | Same |
-| `brain.py` integration | Inject world state summary into system prompt | `apprentice_agent/brain.py` |
+| `brain.py` integration | Inject world state summary into system prompt | `aura/brain.py` |
 | Manual state population | CLI or API to seed initial world state | API route |
 
 **Why first**: The context summary alone makes AURA significantly more aware. Even without automatic extraction, having project/goal/belief data in the system prompt transforms response quality.
@@ -1666,7 +1666,7 @@ When a project's priority signal diverges significantly from its stated priority
 
 | Component | Description | Files |
 |-----------|-------------|-------|
-| `StateExtractor` | LLM-powered conversation analysis | `apprentice_agent/consciousness/state_extractor.py` |
+| `StateExtractor` | LLM-powered conversation analysis | `aura/consciousness/state_extractor.py` |
 | `WorldModel.process_conversation` | Full update pipeline | `world_model.py` |
 | `chat.py` integration | Call `process_conversation` after every turn | `api/routes/chat.py` |
 | Contradiction detection | Semantic comparison against existing beliefs | `world_model.py` |
@@ -1678,11 +1678,11 @@ When a project's priority signal diverges significantly from its stated priority
 
 | Component | Description | Files |
 |-----------|-------------|-------|
-| `ProactiveAwarenessEngine` | Core analysis engine | `apprentice_agent/consciousness/proactive_awareness.py` |
+| `ProactiveAwarenessEngine` | Core analysis engine | `aura/consciousness/proactive_awareness.py` |
 | Staleness detection | Project/goal/relationship staleness | Same |
 | Contradiction alerts | Surface unresolved contradictions | Same |
 | Deadline awareness | Approaching milestone/goal deadlines | Same |
-| Gateway Daemon integration | Deliver insights via proactive system | `apprentice_agent/proactive/gateway_daemon.py` |
+| Gateway Daemon integration | Deliver insights via proactive system | `aura/proactive/gateway_daemon.py` |
 
 **Why third**: This is the *visible payoff* -- where the user sees AURA proactively identifying things they haven't asked about.
 

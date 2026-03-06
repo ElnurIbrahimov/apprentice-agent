@@ -22,7 +22,7 @@ Inspired by how human brains consolidate memories during sleep. NeuroDream runs 
 - Triggered by `MetacognitiveGuardian` based on cognitive load
 
 ## File Location
-- `apprentice_agent/tools/neurodream.py`
+- `aura/tools/neurodream.py`
 
 ## Data Classes
 - `SleepSession` - A complete sleep cycle

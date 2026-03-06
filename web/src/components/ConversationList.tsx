@@ -11,6 +11,7 @@ import {
   ChevronDownIcon,
   ChevronUpIcon,
   BookmarkIcon,
+  MagnifyingGlassIcon,
 } from '@heroicons/react/24/outline';
 
 const API_BASE = '/api/chat';
@@ -48,10 +49,22 @@ export function ConversationList() {
     setCurrentConversationId,
     clearMessages,
     addMessage,
+    setIsSwitchingConversation,
   } = useChatStore();
 
   const [collapsed, setCollapsed] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [msgSearchResults, setMsgSearchResults] = useState<Array<{
+    conversation_id: string;
+    conversation_title: string;
+    role: string;
+    snippet: string;
+    timestamp: number;
+  }>>([]);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
+  const confirmDeleteTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [contextMenuId, setContextMenuId] = useState<string | null>(null);
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
@@ -75,10 +88,11 @@ export function ConversationList() {
     } catch (e) {
       console.error('[ConversationList] Fetch error:', e);
     }
-  }, [setConversations, setCurrentConversationId, currentConversationId]);
+  }, [setConversations, setCurrentConversationId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load messages for a conversation from the switch endpoint
   const loadConversationMessages = useCallback(async (id: string) => {
+    setIsSwitchingConversation(true);
     try {
       const res = await fetch(`${API_BASE}/conversations/${id}/switch`, { method: 'POST' });
       if (res.ok) {
@@ -96,13 +110,48 @@ export function ConversationList() {
       }
     } catch (e) {
       console.error('[ConversationList] Load messages error:', e);
+    } finally {
+      setIsSwitchingConversation(false);
     }
-  }, [setCurrentConversationId, clearMessages, addMessage]);
+  }, [setCurrentConversationId, clearMessages, addMessage, setIsSwitchingConversation]);
 
   // Fetch on mount
   useEffect(() => {
     fetchConversations();
   }, [fetchConversations]);
+
+  // Keyboard shortcut: Ctrl+N new chat
+  useEffect(() => {
+    const handler = () => handleNewChat();
+    document.addEventListener('aura:new-chat', handler);
+    return () => document.removeEventListener('aura:new-chat', handler);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Message-level search with 300ms debounce
+  useEffect(() => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    if (searchQuery.length >= 2) {
+      searchDebounceRef.current = setTimeout(async () => {
+        try {
+          const res = await fetch(`${API_BASE}/conversations/search?q=${encodeURIComponent(searchQuery)}`);
+          if (res.ok) {
+            const data = await res.json();
+            setMsgSearchResults(data.results || []);
+          }
+        } catch {
+          setMsgSearchResults([]);
+        }
+      }, 300);
+    } else {
+      setMsgSearchResults([]);
+    }
+    return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current); };
+  }, [searchQuery]);
+
+  // Clear delete-confirm timeout on unmount to prevent setState on unmounted component
+  useEffect(() => {
+    return () => { if (confirmDeleteTimeout.current) clearTimeout(confirmDeleteTimeout.current); };
+  }, []);
 
   // Load messages for the active conversation on initial mount
   const initialLoadDone = useRef(false);
@@ -159,7 +208,22 @@ export function ConversationList() {
     await fetchConversations();
   };
 
-  // Delete conversation
+  // Delete conversation with inline confirmation
+  const handleDeleteClick = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    if (confirmingDeleteId === id) {
+      // Already confirming — execute delete
+      if (confirmDeleteTimeout.current) clearTimeout(confirmDeleteTimeout.current);
+      setConfirmingDeleteId(null);
+      handleDelete(id);
+    } else {
+      // First click — enter confirm state, auto-cancel after 3s
+      if (confirmDeleteTimeout.current) clearTimeout(confirmDeleteTimeout.current);
+      setConfirmingDeleteId(id);
+      confirmDeleteTimeout.current = setTimeout(() => setConfirmingDeleteId(null), 3000);
+    }
+  };
+
   const handleDelete = async (id: string) => {
     try {
       const res = await fetch(`${API_BASE}/conversations/${id}`, { method: 'DELETE' });
@@ -238,7 +302,12 @@ export function ConversationList() {
     setContextMenuPos({ x: e.clientX, y: e.clientY });
   };
 
-  const grouped = groupByDate(conversations);
+  const filtered = searchQuery.trim()
+    ? conversations.filter(c =>
+        c.title.toLowerCase().includes(searchQuery.toLowerCase().trim())
+      )
+    : conversations;
+  const grouped = groupByDate(filtered);
   const groupOrder = ['Today', 'Yesterday', 'Previous 7 Days', 'Older'];
 
   return (
@@ -246,24 +315,45 @@ export function ConversationList() {
       {/* New Chat button */}
       <button
         onClick={handleNewChat}
+        aria-label="New conversation"
         className="w-full flex items-center gap-2 px-3 py-2.5 mb-2 text-sm font-medium text-chat-text bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 rounded-lg transition-all duration-200 group"
       >
         <PlusIcon className="w-4 h-4 text-purple-400 group-hover:scale-110 transition-transform" />
         <span>New Chat</span>
       </button>
 
+      {/* Conversation search */}
+      <div className="relative mb-2">
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search..."
+          className="w-full px-3 py-1.5 pl-8 text-xs bg-chat-input border border-chat-border/50 rounded-lg text-chat-text placeholder-chat-text-secondary/50 outline-none focus:border-purple-500/50 transition-colors"
+        />
+        <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-chat-text-secondary/50 pointer-events-none" />
+        {searchQuery && (
+          <button
+            onClick={() => setSearchQuery('')}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-chat-text-secondary/50 hover:text-chat-text"
+          >
+            <XMarkIcon className="w-3 h-3" />
+          </button>
+        )}
+      </div>
+
       {/* Collapse toggle */}
       <button
         onClick={() => setCollapsed(!collapsed)}
         className="w-full flex items-center justify-between px-2 py-1.5 text-xs text-chat-text-secondary hover:text-chat-text transition-colors"
       >
-        <span className="uppercase tracking-wider font-medium">Conversations ({conversations.length})</span>
+        <span className="uppercase tracking-wider font-medium">Conversations ({filtered.length})</span>
         {collapsed ? <ChevronDownIcon className="w-3.5 h-3.5" /> : <ChevronUpIcon className="w-3.5 h-3.5" />}
       </button>
 
       {/* Conversation list */}
       {!collapsed && (
-        <div className="max-h-[200px] overflow-y-auto space-y-0.5 pr-1 scrollbar-thin scrollbar-thumb-chat-border scrollbar-track-transparent">
+        <div className="max-h-[280px] overflow-y-auto space-y-0.5 pr-1 scrollbar-thin scrollbar-thumb-chat-border scrollbar-track-transparent">
           {groupOrder.map((group) => {
             const items = grouped[group];
             if (!items || items.length === 0) return null;
@@ -344,11 +434,15 @@ export function ConversationList() {
                           <BookmarkIcon className="w-3 h-3" />
                         </button>
                         <button
-                          onClick={(e) => { e.stopPropagation(); handleDelete(conv.id); }}
-                          className="p-1 text-chat-text-secondary/50 hover:text-red-400 rounded transition-colors"
-                          title="Delete"
+                          onClick={(e) => handleDeleteClick(e, conv.id)}
+                          className={`p-1 rounded transition-colors text-xs ${
+                            confirmingDeleteId === conv.id
+                              ? 'text-red-400 bg-red-500/20 px-1.5 font-medium'
+                              : 'text-chat-text-secondary/50 hover:text-red-400'
+                          }`}
+                          title={confirmingDeleteId === conv.id ? 'Click again to confirm' : 'Delete'}
                         >
-                          <TrashIcon className="w-3 h-3" />
+                          {confirmingDeleteId === conv.id ? 'Sure?' : <TrashIcon className="w-3 h-3" />}
                         </button>
                       </div>
                     )}
@@ -357,6 +451,29 @@ export function ConversationList() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Message search results */}
+      {msgSearchResults.length > 0 && (
+        <div className="mt-2">
+          <div className="px-2 py-1 text-[10px] text-chat-text-secondary/60 uppercase tracking-wider font-medium">
+            Messages ({msgSearchResults.length})
+          </div>
+          <div className="space-y-0.5 max-h-[150px] overflow-y-auto pr-1">
+            {msgSearchResults.map((result, idx) => (
+              <div
+                key={idx}
+                onClick={() => handleSwitch(result.conversation_id)}
+                className="px-2.5 py-2 rounded-lg cursor-pointer hover:bg-chat-assistant/30 transition-all"
+              >
+                <div className="text-[10px] text-purple-400/70 truncate mb-0.5">{result.conversation_title}</div>
+                <div className="text-xs text-chat-text-secondary/70 line-clamp-2 italic">
+                  {result.snippet}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -388,6 +505,7 @@ export function ConversationList() {
           <button
             onClick={() => contextMenuId && handleDelete(contextMenuId)}
             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-red-600/20 transition-colors"
+            aria-label="Delete conversation"
           >
             <TrashIcon className="w-4 h-4" />
             Delete

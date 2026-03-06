@@ -1,8 +1,7 @@
 import { useState, useCallback } from 'react';
 import type { FileAttachment, AttachmentType } from '../types';
+import { useChatStore } from '../store/chatStore';
 
-// Always use port 8000 for the API (backend runs on 8000, frontend on 5173)
-const API_URL = `http://${window.location.hostname}:8000`;
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 // Supported file extensions
@@ -13,6 +12,8 @@ const CODE_EXTENSIONS = new Set([
   '.java', '.c', '.cpp', '.h', '.go', '.rs', '.rb',
   '.php', '.sh', '.yaml', '.yml', '.toml', '.xml', '.sql'
 ]);
+const ARCHIVE_EXTENSIONS = new Set(['.zip']);
+const MAX_ARCHIVE_SIZE = 50 * 1024 * 1024; // 50MB
 
 function getFileExtension(filename: string): string {
   const lastDot = filename.lastIndexOf('.');
@@ -24,6 +25,7 @@ function getAttachmentType(filename: string): AttachmentType | null {
   if (IMAGE_EXTENSIONS.has(ext)) return 'image';
   if (DOCUMENT_EXTENSIONS.has(ext)) return 'document';
   if (CODE_EXTENSIONS.has(ext)) return 'code';
+  if (ARCHIVE_EXTENSIONS.has(ext)) return 'archive';
   return null;
 }
 
@@ -69,13 +71,15 @@ export function useFileUpload(): UseFileUploadReturn {
   const uploadFile = useCallback(async (file: File): Promise<FileAttachment | null> => {
     // Validate file type
     if (!isSupported(file.name)) {
-      console.warn(`Unsupported file type: ${file.name}`);
+      const ext = getFileExtension(file.name) || file.name.split('.').pop() || 'unknown';
+      useChatStore.getState().setError(`Unsupported file type: .${ext}`);
       return null;
     }
 
-    // Validate file size
-    if (file.size > MAX_FILE_SIZE) {
-      console.warn(`File too large: ${file.name} (${formatFileSize(file.size)})`);
+    // Validate file size (archives get a higher limit)
+    const sizeLimit = ARCHIVE_EXTENSIONS.has(getFileExtension(file.name)) ? MAX_ARCHIVE_SIZE : MAX_FILE_SIZE;
+    if (file.size > sizeLimit) {
+      useChatStore.getState().setError(`File too large: ${file.name} (${formatFileSize(file.size)})`);
       return null;
     }
 
@@ -103,7 +107,7 @@ export function useFileUpload(): UseFileUploadReturn {
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await fetch(`${API_URL}/api/upload`, {
+      const response = await fetch(`/api/upload`, {
         method: 'POST',
         body: formData,
       });

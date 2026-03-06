@@ -1,4 +1,4 @@
-import { XMarkIcon, DocumentIcon, CodeBracketIcon, PhotoIcon } from '@heroicons/react/24/solid';
+import { XMarkIcon, DocumentIcon, CodeBracketIcon, PhotoIcon, ArchiveBoxIcon } from '@heroicons/react/24/solid';
 import type { FileAttachment } from '../types';
 
 interface AttachmentPreviewProps {
@@ -19,6 +19,8 @@ function getFileIcon(type: string) {
       return PhotoIcon;
     case 'code':
       return CodeBracketIcon;
+    case 'archive':
+      return ArchiveBoxIcon;
     default:
       return DocumentIcon;
   }

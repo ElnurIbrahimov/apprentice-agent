@@ -8,9 +8,9 @@ import threading
 from pathlib import Path
 from typing import Optional, List
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Depends
 from fastapi.responses import JSONResponse
-from api.auth import verify_api_key_ws
+from api.auth import verify_api_key_ws, require_api_key
 
 from api.models.schemas import (
     ChatRequest, ChatResponse, RunRequest, RunResponse,
@@ -101,12 +101,18 @@ async def process_attachments(attachments: List[dict], loop) -> str:
             filename = attachment.get("filename", "unknown")
             file_type = attachment.get("type")
 
-            if not file_path or not os.path.exists(file_path):
-                logger.warning(f"[Attachments] File not found: {file_path}")
+            if not file_path:
                 continue
 
-            file_path_resolved = Path(file_path).resolve()
-            if not (str(file_path_resolved).startswith(str(UPLOAD_DIR_RESOLVED) + os.sep) or str(file_path_resolved) == str(UPLOAD_DIR_RESOLVED)):
+            try:
+                file_path_resolved = Path(file_path).resolve(strict=True)
+            except OSError:
+                logger.warning(f"[Attachments] File not found or inaccessible: {file_path}")
+                continue
+
+            try:
+                file_path_resolved.relative_to(UPLOAD_DIR_RESOLVED)
+            except ValueError:
                 logger.warning(f"[Attachments] Path traversal blocked: {file_path}")
                 continue
 
@@ -130,6 +136,17 @@ async def process_attachments(attachments: List[dict], loop) -> str:
                     logger.error(f"[Attachments] Vision error for {filename}: {e}")
                     context_parts.append(f"[Image: {filename}] (Vision analysis unavailable)")
 
+            elif file_type == "archive":
+                # Extract and analyze zip project
+                try:
+                    from api.services.zip_analyzer import analyze_zip
+                    zip_context = await loop.run_in_executor(None, lambda: analyze_zip(file_path))
+                    context_parts.append(zip_context)
+                    logger.info(f"[Attachments] Analyzed zip: {filename} ({len(zip_context)} chars)")
+                except Exception as e:
+                    logger.error(f"[Attachments] Zip analysis error for {filename}: {e}")
+                    context_parts.append(f"[Archive: {filename}] (Could not analyze: {str(e)})")
+
             else:
                 # Read text/code files
                 try:
@@ -141,8 +158,17 @@ async def process_attachments(attachments: List[dict], loop) -> str:
                     if len(content) > max_chars:
                         content = content[:max_chars] + f"\n\n... (truncated - showing first {max_chars} of {len(content)} characters)"
 
-                    file_type_label = "Code" if file_type == "code" else "Document"
-                    context_parts.append(f"[{file_type_label}: {filename}]\n```\n{content}\n```")
+                    ext = os.path.splitext(filename)[1].lower()
+                    if file_type == "code":
+                        lang = {'.py': 'python', '.js': 'javascript', '.ts': 'typescript',
+                                '.tsx': 'tsx', '.jsx': 'jsx', '.html': 'html', '.css': 'css',
+                                '.sh': 'bash', '.yaml': 'yaml', '.yml': 'yaml',
+                                '.json': 'json', '.sql': 'sql', '.go': 'go',
+                                '.rs': 'rust', '.java': 'java', '.cpp': 'cpp', '.c': 'c'}.get(ext, '')
+                        context_parts.append(f"[Code: {filename}]\n```{lang}\n{content}\n```")
+                    else:
+                        # Documents (.md, .txt, .pdf, etc.) — plain content block, not runnable code
+                        context_parts.append(f"[Document: {filename}]\n--- BEGIN DOCUMENT CONTENT (read only, do not execute) ---\n{content}\n--- END DOCUMENT CONTENT ---")
                     logger.info(f"[Attachments] Read file: {filename} ({len(content)} chars)")
 
                 except Exception as e:
@@ -176,7 +202,7 @@ def cleanup_attachment_files(attachments: List[dict]):
             logger.warning(f"[Attachments] Failed to cleanup {file_path}: {e}")
 
 
-@router.post("", response_model=ChatResponse)
+@router.post("", response_model=ChatResponse, dependencies=[Depends(require_api_key)])
 async def chat(request: ChatRequest) -> ChatResponse:
     """Non-streaming chat endpoint.
 
@@ -189,10 +215,16 @@ async def chat(request: ChatRequest) -> ChatResponse:
     try:
         # Run in thread pool to avoid blocking
         loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(
-            None,
-            lambda: _get_agent_service().chat(request.message, speak=request.speak, model_override=request.model)
-        )
+        try:
+            result = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: _get_agent_service().chat(request.message, speak=request.speak, model_override=request.model)
+                ),
+                timeout=120.0
+            )
+        except asyncio.TimeoutError:
+            raise HTTPException(status_code=504, detail="Request timed out after 120 seconds")
 
         # === Track assistant response and emotion in ContextHeatmap ===
         try:
@@ -220,7 +252,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/run", response_model=RunResponse)
+@router.post("/run", response_model=RunResponse, dependencies=[Depends(require_api_key)])
 async def run(request: RunRequest) -> RunResponse:
     """Run agent with a goal (full agent loop).
 
@@ -287,6 +319,39 @@ async def clear_history() -> ClearHistoryResponse:
 # =========================================================================
 # Multi-Conversation Endpoints
 # =========================================================================
+
+@router.get("/conversations/search")
+async def search_messages(q: str, limit: int = 20):
+    """Full-text search across message content."""
+    if not q or len(q) < 2:
+        return {"results": [], "query": q}
+    try:
+        svc = _get_agent_service()
+        if not svc.is_ready:
+            return {"results": [], "query": q}
+        results = []
+        for conv in (svc.list_conversations() or []):
+            msgs = svc._agent.brain.get_conversation_messages(conv['id']) if svc._agent else []
+            for msg in (msgs or []):
+                content = msg.get('content', '')
+                if q.lower() in content.lower():
+                    idx = content.lower().find(q.lower())
+                    s = max(0, idx - 60)
+                    e = min(len(content), idx + len(q) + 60)
+                    snippet = ('...' if s > 0 else '') + content[s:e] + ('...' if e < len(content) else '')
+                    results.append({
+                        "conversation_id": conv['id'],
+                        "conversation_title": conv.get('title', 'Untitled'),
+                        "role": msg.get('role', 'unknown'),
+                        "snippet": snippet,
+                        "timestamp": msg.get('timestamp', 0),
+                    })
+        results.sort(key=lambda r: r.get('timestamp', 0), reverse=True)
+        return {"results": results[:limit], "query": q}
+    except Exception as e:
+        logger.error(f"[SearchMessages] {e}")
+        return {"results": [], "query": q, "error": str(e)}
+
 
 @router.get("/conversations", response_model=list[ConversationSummary])
 async def list_conversations():
@@ -456,7 +521,7 @@ async def websocket_chat(websocket: WebSocket):
             action_mode = msg.get("action_mode")  # Optional action mode for auto-model selection
             conversation_id = msg.get("conversation_id")  # Optional conversation context
             attachments = msg.get("attachments", [])  # Optional attachments
-            print(f"[WebSocket] Received message: '{message[:50]}...' model={model_override} action_mode={action_mode} conv={conversation_id} attachments={len(attachments)}")
+            logger.debug(f"[WebSocket] Received message: '{message[:50]}...' model={model_override} action_mode={action_mode} conv={conversation_id} attachments={len(attachments)}")
 
             # Auto-switch conversation if needed
             if conversation_id:
@@ -494,7 +559,7 @@ async def websocket_chat(websocket: WebSocket):
             except Exception:
                 pass
             if attachments:
-                print(f"[WebSocket] Attachment details: {attachments}")
+                logger.debug(f"[WebSocket] Attachment details: {attachments}")
             logger.info(f"[WebSocket] Received: {message[:50]}..." + (f" (model: {model_override})" if model_override else "") + (f" ({len(attachments)} attachments)" if attachments else ""))
 
             try:
@@ -502,10 +567,10 @@ async def websocket_chat(websocket: WebSocket):
 
                 # Process attachments and prepend context to message
                 if attachments:
-                    print(f"[WebSocket] Processing {len(attachments)} attachments...")
+                    logger.debug(f"[WebSocket] Processing {len(attachments)} attachments...")
                     attachment_context = await process_attachments(attachments, loop)
-                    print(f"[WebSocket] Got attachment context: {len(attachment_context)} chars")
-                    print(f"[WebSocket] Context preview: {attachment_context[:300]}...")
+                    logger.debug(f"[WebSocket] Got attachment context: {len(attachment_context)} chars")
+                    logger.debug(f"[WebSocket] Context preview: {attachment_context[:300]}...")
                     logger.info(f"[WebSocket] Attachment context ({len(attachment_context)} chars): {attachment_context[:500]}...")
                     if attachment_context:
                         # Add marker to indicate this is a file review (helps agent skip CognitiveTheater)
@@ -562,8 +627,8 @@ async def websocket_chat(websocket: WebSocket):
                 stream_thread.start()
 
                 # Send chunks as they arrive (truly async, no busy-wait)
-                # Max 5 minutes for any single response, then timeout
-                stream_deadline = asyncio.get_running_loop().time() + 300
+                # Max 90 seconds for any single response, then timeout
+                stream_deadline = asyncio.get_running_loop().time() + 90
                 while True:
                     if stop_generation.is_set():
                         logger.info("[WebSocket] Breaking loop due to stop request")
@@ -573,11 +638,11 @@ async def websocket_chat(websocket: WebSocket):
                         remaining = max(0.1, stream_deadline - asyncio.get_running_loop().time())
                         item = await asyncio.wait_for(chunk_queue.get(), timeout=remaining)
                     except asyncio.TimeoutError:
-                        logger.warning("[WebSocket] Stream timed out after 5 minutes")
+                        logger.warning("[WebSocket] Stream timed out after 90 seconds")
                         stop_generation.set()
                         await websocket.send_json({
                             "type": "error",
-                            "error": "Response timed out after 5 minutes"
+                            "error": "Response timed out after 90 seconds. Try again."
                         })
                         break
 
@@ -639,6 +704,12 @@ async def websocket_chat(websocket: WebSocket):
                         await websocket.send_json({
                             "type": "error",
                             "error": item.get("error", "Unknown error")
+                        })
+                    elif item.get("type") == "tool_status":
+                        await websocket.send_json({
+                            "type": "tool_status",
+                            "tool_name": item.get("tool_name", ""),
+                            "tool_action": item.get("tool_action", "")
                         })
 
             except Exception as e:

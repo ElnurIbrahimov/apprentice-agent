@@ -8,6 +8,7 @@ interface ChatState {
   updateMessage: (id: string, content: string) => void;
   appendToMessage: (id: string, chunk: string) => void;
   setMessageStreaming: (id: string, isStreaming: boolean) => void;
+  setMessageModelUsed: (id: string, model: string) => void;
   clearMessages: () => void;
 
   // Connection
@@ -42,6 +43,14 @@ interface ChatState {
   // Error handling
   error: string | null;
   setError: (error: string | null) => void;
+
+  // Tool status
+  toolStatus: { name: string; action: string } | null;
+  setToolStatus: (s: { name: string; action: string } | null) => void;
+
+  // Conversation switching
+  isSwitchingConversation: boolean;
+  setIsSwitchingConversation: (val: boolean) => void;
 }
 
 const generateId = () => `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -87,6 +96,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
   },
 
+  setMessageModelUsed: (id, model) => {
+    set((state) => ({
+      messages: state.messages.map((msg) =>
+        msg.id === id ? { ...msg, model_used: model } : msg
+      ),
+    }));
+  },
+
   clearMessages: () => set({ messages: [] }),
 
   // Connection
@@ -121,4 +138,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // Error handling
   error: null,
   setError: (error) => set({ error }),
+
+  // Tool status
+  toolStatus: null,
+  setToolStatus: (s) => set({ toolStatus: s }),
+
+  // Conversation switching
+  isSwitchingConversation: false,
+  setIsSwitchingConversation: (val) => set({ isSwitchingConversation: val }),
 }));

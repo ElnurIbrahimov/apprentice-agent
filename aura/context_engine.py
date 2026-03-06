@@ -14,6 +14,11 @@ from dataclasses import dataclass, field
 from typing import Optional, List
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
+try:
+    import httpx as _httpx
+except ImportError:
+    _httpx = None
+
 logger = logging.getLogger(__name__)
 
 CONTEXT_BUDGET = 3000   # max tokens to inject
@@ -116,6 +121,11 @@ class AlwaysOnContextEngine:
         if getattr(self.agent, 'episodic_bridge', None):
             futures["episodic"] = self._executor.submit(self._get_episodic_context, message)
 
+        if len(file_paths) > 3:
+            logger.warning(
+                f"[ACE] {len(file_paths)} files attached — reading first 3 only. "
+                f"Skipped: {[str(p) for p in file_paths[3:]]}"
+            )
         for i, fp in enumerate(file_paths[:3]):
             futures[f"file_{i}"] = self._executor.submit(self._read_file, fp)
 
@@ -228,9 +238,10 @@ class AlwaysOnContextEngine:
         return None
 
     def _fetch_url(self, url: str) -> Optional[ContextBlock]:
+        if _httpx is None:
+            return None
         try:
-            import httpx
-            resp = httpx.get(url, timeout=3.0, follow_redirects=True)
+            resp = _httpx.get(url, timeout=3.0, follow_redirects=True)
             text = re.sub(r'<[^>]+>', ' ', resp.text)
             text = re.sub(r'\s+', ' ', text).strip()[:600]
             return ContextBlock(f"URL:{url[:40]}", text, priority=50)

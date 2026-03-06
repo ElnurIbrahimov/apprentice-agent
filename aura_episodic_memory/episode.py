@@ -6,6 +6,7 @@ autobiographical memories with temporal context.
 """
 
 import hashlib
+import math
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -119,11 +120,7 @@ class Episode:
     def __post_init__(self):
         """Generate ID if not provided."""
         if self.id is None:
-            # Generate deterministic ID from content hash + timestamp
-            content_hash = hashlib.md5(
-                f"{self.content}{self.temporal_context.timestamp.isoformat()}".encode()
-            ).hexdigest()[:8]
-            self.id = f"ep_{content_hash}_{uuid.uuid4().hex[:4]}"
+            self.id = f"ep_{uuid.uuid4().hex}"
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for storage."""
@@ -183,7 +180,6 @@ class Episode:
         Returns:
             Score from 0.0 to 1.0
         """
-        import math
         age_hours = self.get_age_hours()
         decay_rate = math.log(2) / half_life_hours
         return math.exp(-decay_rate * age_hours)

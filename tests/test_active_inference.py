@@ -5,7 +5,7 @@ import numpy as np
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
-from apprentice_agent.proactive.active_inference import (
+from aura.proactive.active_inference import (
     ActiveInferenceEngine,
     SimplifiedActiveInference,
     BeliefState,

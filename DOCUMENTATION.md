@@ -41,7 +41,7 @@ apprentice-agent/
 │       ├── fluxmind_core.py  # Core model implementation
 │       └── fluxmind_tool.py  # Aura integration wrapper
 ├── generated_images/         # [Phase C] Stable Diffusion outputs
-└── apprentice_agent/
+└── aura/
     ├── __init__.py
     ├── agent.py              # Main agent loop
     ├── brain.py              # LLM interface (Ollama)
@@ -193,7 +193,7 @@ Progress: Found relevant search results for the query.
 
 ### Metacognition Logger
 
-**Location:** `apprentice_agent/metacognition.py`
+**Location:** `aura/metacognition.py`
 
 Logs every action's outcome for later analysis.
 
@@ -242,7 +242,7 @@ Logs every action's outcome for later analysis.
 
 ### Dream Mode
 
-**Location:** `apprentice_agent/dream.py`
+**Location:** `aura/dream.py`
 
 Memory consolidation system that analyzes logs and generates insights.
 
@@ -311,7 +311,7 @@ class TaskType(Enum):
 
 **Usage:**
 ```python
-from apprentice_agent.brain import OllamaBrain, TaskType
+from aura.brain import OllamaBrain, TaskType
 
 brain = OllamaBrain()
 
@@ -397,7 +397,7 @@ Phase C adds voice interaction and image generation capabilities.
 
 ### Voice Interface
 
-**Location:** `apprentice_agent/tools/voice.py`
+**Location:** `aura/tools/voice.py`
 
 **Classes:**
 - `VoiceTool` - Core voice functionality
@@ -415,7 +415,7 @@ Phase C adds voice interaction and image generation capabilities.
 
 **Usage:**
 ```python
-from apprentice_agent.tools import VoiceTool
+from aura.tools import VoiceTool
 
 voice = VoiceTool(whisper_model="base")
 
@@ -446,7 +446,7 @@ python main.py --voice
 
 ### Image Generation
 
-**Location:** `apprentice_agent/tools/image_gen.py`
+**Location:** `aura/tools/image_gen.py`
 
 **Class:** `ImageGenerationTool`
 
@@ -460,7 +460,7 @@ python main.py --voice
 
 **Usage:**
 ```python
-from apprentice_agent.tools import ImageGenerationTool
+from aura.tools import ImageGenerationTool
 
 # Initialize (downloads ~4GB model on first use)
 tool = ImageGenerationTool()
@@ -484,7 +484,7 @@ print(result["image_path"])  # generated_images/20260116_123456_a_cat_sitting.pn
 
 **Quick function:**
 ```python
-from apprentice_agent.tools import generate_image
+from aura.tools import generate_image
 
 result = generate_image("a futuristic city at sunset")
 ```
@@ -527,10 +527,10 @@ python gui.py
 ### Python API
 
 ```python
-from apprentice_agent import ApprenticeAgent
-from apprentice_agent.metacognition import MetacognitionLogger
-from apprentice_agent.dream import DreamMode
-from apprentice_agent.tools import VoiceTool, ImageGenerationTool
+from aura import ApprenticeAgent
+from aura.metacognition import MetacognitionLogger
+from aura.dream import DreamMode
+from aura.tools import VoiceTool, ImageGenerationTool
 
 # Run agent
 agent = ApprenticeAgent()
@@ -655,7 +655,7 @@ https://raw.githubusercontent.com/ElnurIbrahimov/aura-plugins/main/registry.json
 
 #### Usage
 ```python
-from apprentice_agent.tools import MarketplaceTool
+from aura.tools import MarketplaceTool
 
 mp = MarketplaceTool()
 
@@ -745,7 +745,7 @@ result = mp.rate("bmi_calculator", 5)
 
 #### Usage
 ```python
-from apprentice_agent.tools import ToolBuilderTool
+from aura.tools import ToolBuilderTool
 
 builder = ToolBuilderTool()
 

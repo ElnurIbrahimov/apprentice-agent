@@ -4,8 +4,10 @@ import asyncio
 import logging
 from typing import Optional, List, Dict, Any
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Response, Depends
 from pydantic import BaseModel
+
+from api.auth import require_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -385,6 +387,7 @@ def _get_guardian_sync() -> dict:
 
 class NeuroDreamResponse(BaseModel):
     enabled: bool = False
+    loading: bool = False
     is_sleeping: bool = False
     current_phase: Optional[str] = None
     total_sessions: int = 0
@@ -407,7 +410,10 @@ async def get_neurodream_status():
 
 
 def _get_neurodream_sync() -> dict:
-    agent = _get_agent_service().agent
+    svc = _get_agent_service()
+    if not svc.is_ready:
+        return {"enabled": False, "loading": True}
+    agent = svc.agent
     if hasattr(agent, 'neurodream') and agent.neurodream:
         nd = agent.neurodream
         status = nd.get_status() if hasattr(nd, 'get_status') else {}
@@ -427,6 +433,7 @@ def _get_neurodream_sync() -> dict:
             }
         return {
             "enabled": True,
+            "loading": False,
             "is_sleeping": status.get("is_sleeping", False),
             "current_phase": status.get("current_phase"),
             "total_sessions": status.get("total_sessions", 0),
@@ -435,7 +442,7 @@ def _get_neurodream_sync() -> dict:
             "insights": insights[-5:] if insights else [],
             "learned_context": learned_ctx,
         }
-    return {"enabled": False}
+    return {"enabled": False, "loading": False}
 
 
 def _trigger_sleep_sync() -> dict:
@@ -601,7 +608,7 @@ class SynthesizeRequest(BaseModel):
     emotion: Optional[str] = None
 
 
-@router.post("/voice/synthesize")
+@router.post("/voice/synthesize", dependencies=[Depends(require_api_key)])
 async def synthesize_speech(req: SynthesizeRequest):
     """Synthesize speech and return WAV bytes."""
     from aura.services.voice_presence import get_voice_presence
@@ -629,23 +636,126 @@ async def toggle_voice(req: VoiceToggleRequest):
 
 
 # ============================================================================
-# TOOLS LIST
+# TOOLS LIST  (Tier 4: categories + search support)
 # ============================================================================
+
+# Tool category mapping — drives search/filter in the frontend
+_TOOL_CATEGORIES: dict = {
+    # Core
+    "filesystem": "Core", "web_search": "Core", "brave_search": "Core",
+    "tavily": "Core", "firecrawl": "Core", "code_executor": "Core",
+    # Memory
+    "clipboard_memory": "Memory", "obsidian": "Memory", "amem": "Memory",
+    "hybrid_amem": "Memory", "knowledge_graph": "Memory", "clipboard_history": "Memory",
+    "clipboard": "Memory",
+    # Communication
+    "slack": "Communication", "discord": "Communication", "email": "Communication",
+    "notifications": "Communication",
+    # Productivity
+    "task_manager": "Productivity", "calendar": "Productivity",
+    "task_scheduler": "Productivity", "document_generator": "Productivity",
+    "spaced_repetition": "Productivity",
+    # Smart Home
+    "home_assistant": "Smart Home",
+    # Media
+    "local_image_gen": "Media", "voice_synth": "Media", "image_gen": "Media",
+    "audio_transcriber": "Media", "voice": "Media",
+    # Development
+    "git": "Development", "github": "Development", "log_analyst": "Development",
+    "api_tester": "Development", "database": "Development", "shell_executor": "Development",
+    "regex_builder": "Development", "tool_builder": "Development",
+    # AI / Research
+    "research": "AI", "arxiv_search": "AI", "mcts_reasoning": "AI",
+    "reasoning_tree": "AI", "introspection": "AI", "worldsim": "AI",
+    "synapseforge": "AI", "reflexion": "AI", "mirrormind": "AI",
+    "cognitive_theater": "AI",
+    # Monitoring
+    "ambient_audio": "Monitoring", "meeting_intel": "Monitoring",
+    "screen_reader": "Monitoring", "screenshot": "Monitoring", "browser": "Monitoring",
+    # System
+    "windows_control": "System", "system_control": "System",
+    "vision": "System", "pdf_reader": "System",
+    # Analytics
+    "predictive_tasks": "Analytics", "life_logger": "Analytics",
+}
+
 
 @router.get("/tools")
 async def get_available_tools():
-    """Get list of available tools."""
+    """Get list of available tools with categories for frontend filtering."""
     try:
         agent = _get_agent_service().agent
         tools = []
         for name, tool in agent.tools.items():
             tools.append({
                 "name": name,
-                "description": tool.__doc__[:100] if tool.__doc__ else "No description"
+                "description": (getattr(tool, 'description', None) or tool.__doc__ or "No description")[:120],
+                "category": _TOOL_CATEGORIES.get(name, "Other"),
             })
-        return {"tools": tools, "count": len(tools)}
+        # Sort: by category then name
+        tools.sort(key=lambda t: (t["category"], t["name"]))
+        categories = sorted(set(t["category"] for t in tools))
+        return {"tools": tools, "count": len(tools), "categories": categories}
     except Exception as e:
-        return {"tools": [], "count": 0, "error": str(e)}
+        return {"tools": [], "count": 0, "categories": [], "error": str(e)}
+
+
+# ============================================================================
+# TOKEN COST DASHBOARD  (Tier 4)
+# ============================================================================
+
+@router.get("/costs/summary")
+async def get_costs_summary():
+    """Get current session token usage and estimated API cost."""
+    try:
+        brain = _get_agent_service().agent.brain
+        stats = brain.get_session_stats()
+        return {"success": True, **stats}
+    except Exception as e:
+        return {
+            "success": False, "error": str(e),
+            "input_tokens": 0, "output_tokens": 0,
+            "total_tokens": 0, "cost_usd": 0.0, "queries": 0,
+        }
+
+
+# ============================================================================
+# PLUGIN HOT-RELOAD  (Tier 4)
+# ============================================================================
+
+@router.post("/plugins/reload", dependencies=[Depends(require_api_key)])
+async def reload_plugins():
+    """Reload custom tools from registry without restarting AURA."""
+    try:
+        agent = _get_agent_service().agent
+        before = len(agent.tools)
+        agent._load_custom_tools()
+        after = len(agent.tools)
+        return {
+            "success": True,
+            "tools_before": before,
+            "tools_after": after,
+            "new_tools": after - before,
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/plugins")
+async def list_plugins():
+    """List custom plugins from the tools registry."""
+    import json
+    from pathlib import Path
+    registry_path = Path(__file__).parent.parent.parent / "data" / "custom_tools.json"
+    if not registry_path.exists():
+        return {"success": True, "plugins": [], "count": 0}
+    try:
+        with open(registry_path) as f:
+            registry = json.load(f)
+        plugins = registry.get("tools", [])
+        return {"success": True, "plugins": plugins, "count": len(plugins)}
+    except Exception as e:
+        return {"success": False, "error": str(e), "plugins": []}
 
 
 # ============================================================================
@@ -716,7 +826,7 @@ async def get_rag_files():
         return {"files": [], "error": str(e)}
 
 
-@router.post("/rag/index")
+@router.post("/rag/index", dependencies=[Depends(require_api_key)])
 async def index_documents(request: RAGIndexRequest):
     """Index a file or directory."""
     try:
@@ -735,13 +845,18 @@ def _index_documents_sync(path: str, recursive: bool) -> dict:
     if "local_rag" not in agent.tools:
         return {"success": False, "error": "RAG not available"}
 
+    # Restrict indexing to safe directories (home + data/)
+    path_obj = Path(path).resolve()
+    safe_roots = [Path.home().resolve(), Path("data").resolve()]
+    if not any(str(path_obj).startswith(str(root)) for root in safe_roots):
+        return {"success": False, "error": "Path must be within home directory or data/"}
+
     rag_tool = agent.tools["local_rag"]
-    path_obj = Path(path)
 
     if path_obj.is_dir():
-        return rag_tool.rag.index_directory(path, recursive=recursive)
+        return rag_tool.rag.index_directory(str(path_obj), recursive=recursive)
     else:
-        return rag_tool.rag.index_file(path)
+        return rag_tool.rag.index_file(str(path_obj))
 
 
 @router.post("/rag/search")
@@ -860,6 +975,7 @@ def _get_amem_stats_sync() -> dict:
 @router.get("/amem/notes")
 async def get_amem_notes(limit: int = 20, category: Optional[str] = None):
     """Get recent A-MEM notes."""
+    limit = min(limit, 500)  # Cap to prevent OOM
     try:
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
@@ -1143,6 +1259,8 @@ def _consolidate_amem_sync() -> dict:
 
 class ProtoAGIResponse(BaseModel):
     enabled: bool = False
+    available: bool = False
+    loading: bool = False
     mode: str = "idle"
     cycle_count: int = 0
     facts: int = 0
@@ -1166,16 +1284,22 @@ async def get_proto_agi_status():
 
 
 def _get_proto_agi_sync() -> dict:
-    agent = _get_agent_service().agent
+    svc = _get_agent_service()
+    if not svc.is_ready:
+        return {"enabled": False, "available": False, "loading": True}
+    agent = svc.agent
     if hasattr(agent, 'proto_agi') and agent.proto_agi:
         agi = agent.proto_agi
         try:
+            is_running = agi.is_running if hasattr(agi, 'is_running') else getattr(agi, '_is_running', False)
             status = agi.get_status() if hasattr(agi, 'get_status') else {}
             memory = status.get('memory', {})
             verifier = status.get('verifier', {})
 
             return {
-                "enabled": True,
+                "enabled": is_running,
+                "available": True,
+                "loading": False,
                 "mode": status.get('mode', 'idle'),
                 "cycle_count": status.get('cycle_count', 0),
                 "facts": memory.get('facts', 0),
@@ -1187,11 +1311,11 @@ def _get_proto_agi_sync() -> dict:
             }
         except Exception as e:
             logger.error(f"[Proto-AGI] Status error: {e}")
-            return {"enabled": True, "mode": "error"}
-    return {"enabled": False}
+            return {"enabled": False, "available": True, "loading": False, "mode": "error"}
+    return {"enabled": False, "available": False, "loading": False}
 
 
-@router.post("/proto-agi/mode")
+@router.post("/proto-agi/mode", dependencies=[Depends(require_api_key)])
 async def set_proto_agi_mode(mode: str):
     """Set Proto-AGI operation mode (idle, assist, operate)."""
     try:
@@ -1204,28 +1328,35 @@ async def set_proto_agi_mode(mode: str):
         return {"success": False, "error": str(e)}
 
 
-@router.post("/proto-agi/start")
+@router.post("/proto-agi/start", dependencies=[Depends(require_api_key)])
 async def start_proto_agi_loop(cycle_interval: float = 60.0):
     """Start the Proto-AGI autonomous cognitive loop."""
     try:
         agent = _get_agent_service().agent
+        # Check agent wrapper method first, then fall back to proto_agi.start() directly
         if hasattr(agent, 'start_proto_agi'):
             agent.start_proto_agi(cycle_interval)
-            return {"success": True, "message": f"Proto-AGI loop started (interval: {cycle_interval}s)"}
-        return {"success": False, "error": "Proto-AGI start method not available"}
+        elif hasattr(agent, 'proto_agi') and agent.proto_agi:
+            agent.proto_agi.start(cycle_interval)
+        else:
+            return {"success": False, "error": "Proto-AGI not available"}
+        return {"success": True, "message": f"Proto-AGI loop started (interval: {cycle_interval}s)"}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 
-@router.post("/proto-agi/stop")
+@router.post("/proto-agi/stop", dependencies=[Depends(require_api_key)])
 async def stop_proto_agi_loop():
     """Stop the Proto-AGI autonomous cognitive loop."""
     try:
         agent = _get_agent_service().agent
         if hasattr(agent, 'stop_proto_agi'):
             agent.stop_proto_agi()
-            return {"success": True, "message": "Proto-AGI loop stopped"}
-        return {"success": False, "error": "Proto-AGI stop method not available"}
+        elif hasattr(agent, 'proto_agi') and agent.proto_agi:
+            agent.proto_agi.stop()
+        else:
+            return {"success": False, "error": "Proto-AGI not available"}
+        return {"success": True, "message": "Proto-AGI loop stopped"}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -1382,7 +1513,7 @@ async def get_evaluation():
         return {"error": str(e)}
 
 
-@router.post("/metacognition/cycle")
+@router.post("/metacognition/cycle", dependencies=[Depends(require_api_key)])
 async def run_metacognitive_cycle():
     """Trigger a full metacognitive cycle: assess -> plan -> improve -> evaluate."""
     try:
@@ -1463,7 +1594,7 @@ async def get_topic_knowledge():
         return {"error": str(e)}
 
 
-@router.post("/theory-of-mind/observe")
+@router.post("/theory-of-mind/observe", dependencies=[Depends(require_api_key)])
 async def observe_message(request: dict):
     """Manually feed a message for Theory of Mind to observe."""
     try:

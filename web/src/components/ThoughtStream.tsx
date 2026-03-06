@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { useChatStore } from '../store/chatStore';
 import { usePolling } from '../hooks/usePolling';
 import type { Thought } from '../types';
 import { ArrowPathIcon } from '@heroicons/react/24/outline';
@@ -29,6 +30,7 @@ export function ThoughtStream() {
   const [thoughts, setThoughts] = useState<Thought[]>([]);
   const [loading, setLoading] = useState(false);
   const [thoughtCount, setThoughtCount] = useState(0);
+  const { isLoading: chatLoading } = useChatStore();
 
   const fetchThoughts = useCallback(async () => {
     setLoading(true);
@@ -83,12 +85,12 @@ export function ThoughtStream() {
       <div className="space-y-2 max-h-64 overflow-y-auto">
         {thoughts.length === 0 ? (
           <div className="text-chat-text-secondary text-sm italic">
-            Waiting for AURA to think...
+            {chatLoading ? 'Waiting for AURA to think...' : 'Send a message to see thoughts'}
           </div>
         ) : (
           thoughts.map((thought, i) => (
             <div
-              key={i}
+              key={`${thought.type}-${thought.timestamp || i}-${i}`}
               className={`text-sm p-2 bg-chat-assistant rounded border-l-2 ${
                 THOUGHT_COLORS[thought.type] || 'border-gray-500'
               }`}

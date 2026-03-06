@@ -8,7 +8,11 @@ import { useEffect, useRef, useCallback } from 'react';
  */
 
 // Global counter to stagger initial fetches across components
-let mountOrder = 0;
+// Use a closure to make increments safe across hot-reloads
+const _getStagger = (() => {
+  let _order = 0;
+  return () => _order++ * 500;
+})();
 
 export function usePolling(
   callback: () => void | Promise<void>,
@@ -18,7 +22,7 @@ export function usePolling(
   const enabled = options?.enabled ?? true;
   const savedCallback = useRef(callback);
   const inFlight = useRef(false);
-  const staggerDelay = useRef(mountOrder++ * 500); // 500ms gap between components
+  const staggerDelay = useRef(_getStagger()); // 500ms gap between components
 
   useEffect(() => {
     savedCallback.current = callback;

@@ -23,8 +23,8 @@ import threading
 from typing import Generator
 from pathlib import Path
 
-from apprentice_agent import ApprenticeAgent
-from apprentice_agent.metacognition import MetacognitionLogger
+from aura import ApprenticeAgent
+from aura.metacognition import MetacognitionLogger
 
 
 # ============================================================================
@@ -58,7 +58,7 @@ class TTSEngine:
         """Initialize TTS - try Sesame first, always init pyttsx3 as backup."""
         # Try Sesame CSM first (human-quality)
         try:
-            from apprentice_agent.tools.sesame_tts import SesameTTS
+            from aura.tools.sesame_tts import SesameTTS
             self.sesame = SesameTTS()
             self.using_sesame = True
             print("TTS: Sesame CSM 1B available (human-quality voice)")
@@ -379,7 +379,7 @@ class AuraGUI:
                     return {"available": True, "version": "0.75.1"}
 
             # Try to load FluxMind lazily
-            from apprentice_agent.tools import FluxMindTool, FLUXMIND_AVAILABLE
+            from aura.tools import FluxMindTool, FLUXMIND_AVAILABLE
 
             if FLUXMIND_AVAILABLE and "fluxmind" not in agent.tools:
                 # Try multiple possible paths
@@ -694,7 +694,7 @@ class AuraGUI:
     def get_clawdbot_status_html(self) -> str:
         """Get Clawdbot status HTML."""
         try:
-            from apprentice_agent.tools.clawdbot import clawdbot
+            from aura.tools.clawdbot import clawdbot
             status = clawdbot.get_status()
 
             if status.get("running"):
@@ -720,7 +720,7 @@ class AuraGUI:
     def start_clawdbot_gateway(self) -> str:
         """Start Clawdbot gateway."""
         try:
-            from apprentice_agent.tools.clawdbot import clawdbot
+            from aura.tools.clawdbot import clawdbot
             result = clawdbot.start_gateway()
             if result.get("success"):
                 return self.get_clawdbot_status_html()
@@ -735,7 +735,7 @@ class AuraGUI:
             return "Please enter recipient and message"
 
         try:
-            from apprentice_agent.tools.clawdbot import clawdbot
+            from aura.tools.clawdbot import clawdbot
             result = clawdbot.send_message(to, message, channel)
 
             if result.get("success"):
@@ -748,7 +748,7 @@ class AuraGUI:
     def get_clawdbot_channels(self) -> str:
         """Get list of connected channels."""
         try:
-            from apprentice_agent.tools.clawdbot import clawdbot
+            from aura.tools.clawdbot import clawdbot
             result = clawdbot.list_channels()
 
             if result.get("success"):

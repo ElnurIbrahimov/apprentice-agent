@@ -7,6 +7,7 @@ API endpoints for MCTS-based deep reasoning.
 
 import logging
 import asyncio
+import uuid
 from typing import Optional, List
 from datetime import datetime
 
@@ -79,7 +80,7 @@ async def think_deeply(request: ReasoningRequest, background_tasks: BackgroundTa
     if not agent_service.agent:
         raise HTTPException(status_code=503, detail="Agent not initialized")
 
-    session_id = f"mcts_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    session_id = f"mcts_{uuid.uuid4()}"
 
     try:
         # Get or create the reasoning tree tool
@@ -95,8 +96,11 @@ async def think_deeply(request: ReasoningRequest, background_tasks: BackgroundTa
             max_depth=request.max_depth,
         )
 
-        # Store result
+        # Store result (evict oldest if over capacity)
         _session_results[session_id] = result
+        if len(_session_results) > 100:
+            oldest_key = next(iter(_session_results))
+            del _session_results[oldest_key]
 
         return ReasoningResponse(
             success=result.get("success", False),
@@ -129,7 +133,7 @@ async def explore_options(request: ExploreRequest):
     if not agent_service.agent:
         raise HTTPException(status_code=503, detail="Agent not initialized")
 
-    session_id = f"explore_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    session_id = f"explore_{uuid.uuid4()}"
 
     try:
         tool = _get_or_create_tool(agent_service)
@@ -140,7 +144,11 @@ async def explore_options(request: ExploreRequest):
             context=request.context,
         )
 
+        # Store result (evict oldest if over capacity)
         _session_results[session_id] = result
+        if len(_session_results) > 100:
+            oldest_key = next(iter(_session_results))
+            del _session_results[oldest_key]
 
         return ReasoningResponse(
             success=result.get("success", False),
@@ -287,7 +295,7 @@ async def list_sessions():
 
 def _get_or_create_tool(agent_service):
     """Get or create the reasoning tree tool."""
-    from apprentice_agent.tools.reasoning_tree_tool import ReasoningTreeTool
+    from aura.tools.reasoning_tree_tool import ReasoningTreeTool
 
     # Check if tool exists in agent
     if hasattr(agent_service, '_reasoning_tree_tool'):

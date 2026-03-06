@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import MagicMock, patch, mock_open
 
 # Reset the singleton before each test module run
-import apprentice_agent.services.voice_presence as vp_module
+import aura.services.voice_presence as vp_module
 
 
 class TestVoicePresenceService(unittest.TestCase):

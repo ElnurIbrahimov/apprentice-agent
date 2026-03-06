@@ -24,6 +24,7 @@ export function useProactiveMessages(enabled: boolean = true) {
   const { addMessage, connectionStatus } = useChatStore();
   const lastCheckRef = useRef<number>(0);
   const isPollingRef = useRef<boolean>(false);
+  const seenIds = useRef<Set<string>>(new Set());
 
   const fetchAndAddMessages = useCallback(async () => {
     // Prevent concurrent fetches
@@ -38,6 +39,11 @@ export function useProactiveMessages(enabled: boolean = true) {
 
       if (data.messages && data.messages.length > 0) {
         for (const msg of data.messages) {
+          // Deduplicate by timestamp + action fingerprint
+          const msgId = `${msg.timestamp}:${msg.action}:${msg.content.slice(0, 40)}`;
+          if (seenIds.current.has(msgId)) continue;
+          seenIds.current.add(msgId);
+
           // Create a chat message from the proactive message
           const actionLabels: Record<string, string> = {
             notify: 'noticed something',

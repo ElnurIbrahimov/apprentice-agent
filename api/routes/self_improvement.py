@@ -9,10 +9,12 @@ quality reports, tunable parameters, and manual cycle triggers.
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 
-router = APIRouter(prefix="/api/self-improvement", tags=["self-improvement"])
+from api.auth import require_api_key
+
+router = APIRouter(prefix="/api/self-improvement", tags=["self-improvement"], dependencies=[Depends(require_api_key)])
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +29,7 @@ class TuneParamRequest(BaseModel):
 async def get_status():
     """Get self-improvement engine state, recent outcomes, and cycle info."""
     try:
-        from apprentice_agent.consciousness.self_improvement import (
+        from aura.consciousness.self_improvement import (
             get_self_improvement_engine,
         )
         engine = get_self_improvement_engine()
@@ -44,7 +46,7 @@ async def get_status():
 async def get_report():
     """Get quality evaluation report with domain trends and strategy effectiveness."""
     try:
-        from apprentice_agent.consciousness.self_improvement import (
+        from aura.consciousness.self_improvement import (
             get_self_improvement_engine,
         )
         engine = get_self_improvement_engine()
@@ -61,7 +63,7 @@ async def get_report():
 async def get_params():
     """Get current tunable parameters registry with values."""
     try:
-        from apprentice_agent.consciousness.self_improvement import (
+        from aura.consciousness.self_improvement import (
             get_self_improvement_engine,
         )
         engine = get_self_improvement_engine()
@@ -78,7 +80,7 @@ async def get_params():
 async def trigger_cycle():
     """Manually trigger an improvement cycle."""
     try:
-        from apprentice_agent.consciousness.self_improvement import (
+        from aura.consciousness.self_improvement import (
             get_self_improvement_engine,
         )
         engine = get_self_improvement_engine()
@@ -105,7 +107,7 @@ async def trigger_cycle():
 async def tune_param(req: TuneParamRequest):
     """Manually adjust a tunable parameter."""
     try:
-        from apprentice_agent.consciousness.self_improvement import (
+        from aura.consciousness.self_improvement import (
             get_self_improvement_engine,
         )
         engine = get_self_improvement_engine()

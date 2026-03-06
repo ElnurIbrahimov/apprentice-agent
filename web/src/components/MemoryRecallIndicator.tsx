@@ -150,7 +150,7 @@ export function MemoryRecallIndicator() {
             </div>
           ) : (
             <div className="text-xs text-chat-text-secondary/70 px-2">
-              {status?.recent_count ? 'Memory system ready' : 'No recent recalls'}
+              {status?.recent_count ? 'Memory system ready' : 'Ready — recall events appear during conversation.'}
             </div>
           )}
 

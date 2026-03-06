@@ -150,37 +150,18 @@ async def health_check() -> HealthResponse:
 
 
 @router.get("/init", response_model=InitStatus)
-async def get_init_status(request: Request) -> InitStatus:
-    """Get agent initialization status.
-
-    Returns:
-        Current init state (ready, progress, error)
-    """
-    init_state = getattr(request.app.state, 'init_state', {"ready": False, "progress": "unknown"})
-    return InitStatus(
-        ready=init_state.get("ready", False),
-        progress=init_state.get("progress", "unknown"),
-        error=init_state.get("error")
-    )
-
-
-@router.get("/mood", response_model=MoodState)
-async def get_mood() -> MoodState:
-    """Get ALMA emotional state directly (fast, no agent init required).
-
-    Returns:
-        Current mood state from ALMA
-    """
-    # For now, return test data to verify serialization works
-    # TODO: Integrate ALMA properly once import issues are resolved
-    return MoodState(
-        emotion="curious",
-        confidence=75,
-        valence=0.4,
-        arousal=0.5,
-        dominance=0.2,
-        emoji="🤔"
-    )
+async def get_init_status(request: Request):
+    """Get agent initialization status."""
+    try:
+        from api.services.agent_service import agent_service
+        if agent_service.is_ready:
+            return {"ready": True, "progress": "complete"}
+        elif getattr(agent_service, '_initializing', False):
+            return {"ready": False, "progress": "initializing"}
+        else:
+            return {"ready": False, "progress": "not_started"}
+    except Exception as e:
+        return {"ready": False, "progress": f"error: {str(e)[:100]}"}
 
 
 @router.get("/status", response_model=StatusResponse)
@@ -208,7 +189,7 @@ async def get_status() -> StatusResponse:
                 last_model_used=None
             )
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         status = await asyncio.wait_for(
             loop.run_in_executor(None, svc.get_status),
             timeout=10.0
@@ -251,20 +232,24 @@ async def trigger_mood(emotion: str, intensity: float = 0.7) -> MoodState:
     Returns:
         Updated mood state
     """
-    # TODO: Integrate ALMA properly
-    emoji_map = {
-        'joy': '😊', 'happiness': '😊', 'excited': '🤩',
-        'sadness': '😢', 'anger': '😠', 'fear': '😨',
-        'surprise': '😲', 'curious': '🤔', 'neutral': '😐',
-    }
-    return MoodState(
-        emotion=emotion,
-        confidence=int(intensity * 100),
-        valence=0.5 if emotion in ['joy', 'happiness', 'excited', 'curious'] else -0.3,
-        arousal=intensity * 0.8,
-        dominance=0.2,
-        emoji=emoji_map.get(emotion, '🤖')
-    )
+    try:
+        from aura.emotion.alma_engine import alma_engine, trigger_emotion
+        trigger_emotion(emotion, intensity=intensity)
+        # Return updated state
+        state = alma_engine.get_emotional_state()
+        pad = state.get("pad", {})
+        return MoodState(
+            emotion=state.get("dominant_emotion", "neutral"),
+            confidence=int(state.get("intensity", 0.5) * 100),
+            valence=pad.get("pleasure", 0.0),
+            arousal=pad.get("arousal", 0.0),
+            dominance=pad.get("dominance", 0.0),
+        )
+    except ImportError:
+        raise HTTPException(status_code=503, detail="ALMA engine not available")
+    except Exception as e:
+        logger.warning(f"[API] Mood trigger failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to trigger emotion")
 
 
 @router.get("/alma/state")
@@ -276,7 +261,7 @@ async def get_alma_state():
     """
     try:
         # Import ALMA lazily
-        from apprentice_agent.emotion.alma_engine import alma_engine
+        from aura.emotion.alma_engine import alma_engine
 
         if alma_engine:
             state = alma_engine.get_emotional_state()
@@ -357,7 +342,7 @@ async def get_consideration_state():
     # (frontend gets one chance to see it)
     if state["decided_against"]:
         # Keep it for this response, clear after
-        asyncio.get_event_loop().call_later(0.1, _consideration_state.clear_decided_against)
+        asyncio.get_running_loop().call_later(0.1, _consideration_state.clear_decided_against)
 
     return state
 
@@ -401,7 +386,7 @@ async def get_personality():
         Personality traits with descriptions
     """
     try:
-        from apprentice_agent.emotion.alma_engine import alma_engine
+        from aura.emotion.alma_engine import alma_engine
 
         if alma_engine:
             personality = alma_engine.personality.to_dict()
@@ -471,7 +456,7 @@ async def update_personality(update: PersonalityUpdate):
         Updated personality and the effect on baseline mood
     """
     try:
-        from apprentice_agent.emotion.alma_engine import alma_engine, PersonalityProfile
+        from aura.emotion.alma_engine import alma_engine, PersonalityProfile
 
         if alma_engine:
             # Get current values
@@ -522,7 +507,7 @@ async def update_personality(update: PersonalityUpdate):
 async def reset_personality():
     """Reset AURA's personality to default values."""
     try:
-        from apprentice_agent.emotion.alma_engine import alma_engine, PersonalityProfile
+        from aura.emotion.alma_engine import alma_engine, PersonalityProfile
 
         if alma_engine:
             alma_engine.personality = PersonalityProfile.aura_default()
@@ -558,7 +543,7 @@ async def get_models() -> ModelsResponse:
                 local_models=[], cloud_models=[], current_model="initializing..."
             )
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         models = await asyncio.wait_for(
             loop.run_in_executor(None, svc.get_available_models),
             timeout=10.0

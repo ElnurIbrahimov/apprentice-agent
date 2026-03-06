@@ -196,10 +196,7 @@ export function ContextHeatmap() {
             <div className="text-center py-4">
               <div className="text-2xl mb-2">🎯</div>
               <div className="text-xs text-chat-text-secondary">
-                No active focus yet
-              </div>
-              <div className="text-[10px] text-chat-text-secondary/50 mt-1">
-                Start chatting to see what AURA is focused on
+                Start chatting — this map shows AURA's attention focus.
               </div>
             </div>
           )}

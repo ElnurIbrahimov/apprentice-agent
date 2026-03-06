@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { usePolling } from '../hooks/usePolling';
 import type { AuraStatus } from '../types';
 import { ArrowPathIcon, SparklesIcon } from '@heroicons/react/24/outline';
@@ -19,6 +19,13 @@ export function AuraPanel() {
   const [loading, setLoading] = useState(false);
   const [rememberText, setRememberText] = useState('');
   const [rememberResult, setRememberResult] = useState('');
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
 
   const fetchStatus = async () => {
     setLoading(true);
@@ -54,10 +61,20 @@ export function AuraPanel() {
     } catch (e) {
       setRememberResult('✗ Error storing memory');
     }
-    setTimeout(() => setRememberResult(''), 3000);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setRememberResult(''), 3000);
   };
 
-  if (!status?.enabled) {
+  if (!status) {
+    return (
+      <div className="bg-chat-sidebar rounded-lg p-4">
+        <h3 className="text-chat-text font-medium mb-2">🤖 AURA ALIVE</h3>
+        <div className="text-chat-text-secondary text-sm">{loading ? 'Loading...' : 'AURA not loaded'}</div>
+      </div>
+    );
+  }
+
+  if (!status.enabled) {
     return (
       <div className="bg-chat-sidebar rounded-lg p-4">
         <h3 className="text-chat-text font-medium mb-2">🤖 AURA ALIVE</h3>

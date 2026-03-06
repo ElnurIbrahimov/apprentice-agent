@@ -2,10 +2,14 @@
 
 import asyncio
 import logging
+import re
+import threading
 from typing import Optional, List, Dict, Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
+
+from api.auth import require_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +19,7 @@ def _get_agent_service():
     from api.services.agent_service import agent_service
     return agent_service
 
-router = APIRouter(prefix="/api/multi-agent", tags=["multi-agent"])
+router = APIRouter(prefix="/api/multi-agent", tags=["multi-agent"], dependencies=[Depends(require_api_key)])
 
 
 # ============================================================================
@@ -62,38 +66,57 @@ class MultiAgentStatusResponse(BaseModel):
 
 
 # ============================================================================
-# Orchestrator Singleton
+# Per-Session Orchestrator
 # ============================================================================
 
-_orchestrator = None
+_orchestrators: dict[str, object] = {}
+_orch_lock = threading.Lock()
 
 
-def get_orchestrator():
-    """Get or create the multi-agent orchestrator."""
-    global _orchestrator
+_SESSION_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{1,64}$')
 
-    if _orchestrator is None:
-        try:
-            from apprentice_agent.multi_agent import MultiAgentOrchestrator
 
-            agent = _get_agent_service().agent
+def get_orchestrator(session_id: str):
+    """Get or create the multi-agent orchestrator for a session."""
+    # Validate session_id format
+    if not _SESSION_ID_PATTERN.match(session_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid session_id format. Must match ^[a-zA-Z0-9_-]{1,64}$"
+        )
 
-            # Create LLM function wrapper
-            def llm_func(system_prompt: str, user_message: str) -> str:
-                return agent.brain.think(user_message, system_prompt=system_prompt)
+    with _orch_lock:
+        if session_id not in _orchestrators:
+            # Enforce session cap before creating new orchestrator
+            if len(_orchestrators) >= 100:
+                raise HTTPException(
+                    status_code=429,
+                    detail="Too many active sessions. Please clear an existing session first."
+                )
 
-            # Initialize orchestrator with agent's tools
-            _orchestrator = MultiAgentOrchestrator(
-                tool_registry=agent.tools,
-                llm_func=llm_func
-            )
-            logger.info("[MultiAgent] Orchestrator initialized")
+            try:
+                from aura.multi_agent import MultiAgentOrchestrator
 
-        except Exception as e:
-            logger.error(f"[MultiAgent] Failed to initialize orchestrator: {e}")
-            raise
+                agent = _get_agent_service().agent
 
-    return _orchestrator
+                # Create LLM function wrapper
+                def llm_func(system_prompt: str, user_message: str) -> str:
+                    return agent.brain.think(user_message, system_prompt=system_prompt)
+
+                # Initialize orchestrator with agent's tools
+                _orchestrators[session_id] = MultiAgentOrchestrator(
+                    tool_registry=agent.tools,
+                    llm_func=llm_func
+                )
+                logger.info(f"[MultiAgent] Orchestrator initialized for session={session_id}")
+
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"[MultiAgent] Failed to initialize orchestrator: {e}")
+                raise
+
+        return _orchestrators[session_id]
 
 
 # ============================================================================
@@ -101,10 +124,10 @@ def get_orchestrator():
 # ============================================================================
 
 @router.get("/status", response_model=MultiAgentStatusResponse)
-async def get_multi_agent_status():
+async def get_multi_agent_status(session_id: str = Query(default="default")):
     """Get multi-agent system status."""
     try:
-        orchestrator = get_orchestrator()
+        orchestrator = get_orchestrator(session_id)
         status = orchestrator.get_status()
 
         specialist_details = {}
@@ -133,10 +156,10 @@ async def get_multi_agent_status():
 
 
 @router.get("/agents")
-async def list_agents():
+async def list_agents(session_id: str = Query(default="default")):
     """List available specialist agents."""
     try:
-        orchestrator = get_orchestrator()
+        orchestrator = get_orchestrator(session_id)
         status = orchestrator.get_status()
 
         agents = []
@@ -154,13 +177,13 @@ async def list_agents():
 
 
 @router.post("/chat", response_model=MultiAgentChatResponse)
-async def multi_agent_chat(request: MultiAgentChatRequest):
+async def multi_agent_chat(request: MultiAgentChatRequest, session_id: str = Query(default="default")):
     """Chat with the multi-agent system."""
     try:
-        orchestrator = get_orchestrator()
+        orchestrator = get_orchestrator(session_id)
 
         # Execute in thread pool to avoid blocking
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None,
             lambda: _execute_chat(orchestrator, request.message, request.context)
@@ -197,12 +220,12 @@ def _execute_chat(orchestrator, message: str, context: Optional[Dict] = None) ->
 
 
 @router.post("/route", response_model=RoutePreviewResponse)
-async def preview_routing(request: RoutePreviewRequest):
+async def preview_routing(request: RoutePreviewRequest, session_id: str = Query(default="default")):
     """Preview routing decision without executing."""
     try:
-        orchestrator = get_orchestrator()
+        orchestrator = get_orchestrator(session_id)
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None,
             lambda: orchestrator.route_preview(request.query)
@@ -216,21 +239,22 @@ async def preview_routing(request: RoutePreviewRequest):
 
 
 @router.post("/clear")
-async def clear_history():
+async def clear_history(session_id: str = Query(default="default")):
     """Clear multi-agent conversation history."""
     try:
-        orchestrator = get_orchestrator()
-        orchestrator.clear_history()
-        return {"success": True, "message": "History cleared"}
+        with _orch_lock:
+            if session_id in _orchestrators:
+                del _orchestrators[session_id]
+        return {"status": "cleared", "session_id": session_id}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 
 @router.get("/history")
-async def get_history():
+async def get_history(session_id: str = Query(default="default")):
     """Get recent conversation history."""
     try:
-        orchestrator = get_orchestrator()
+        orchestrator = get_orchestrator(session_id)
 
         history = []
         for turn in orchestrator.history[-10:]:  # Last 10 turns

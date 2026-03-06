@@ -55,7 +55,7 @@ class WhatsAppBot(BasePlatform):
             )
 
         self.ws_url = config.get("websocket_url", "ws://localhost:3001")
-        self.session_path = config.get("session_path", "aura/data/messaging/whatsapp_session")
+        self.session_path = config.get("session_path", "data/messaging/whatsapp_session")
         self.allowed_numbers = config.get("allowed_numbers", [])
 
         self.websocket = None
@@ -75,7 +75,7 @@ class WhatsAppBot(BasePlatform):
 
     def _load_state(self):
         """Load saved state"""
-        state_file = Path("aura/data/messaging/whatsapp_state.json")
+        state_file = Path("data/messaging/whatsapp_state.json")
         if state_file.exists():
             try:
                 with open(state_file, encoding="utf-8") as f:
@@ -86,7 +86,7 @@ class WhatsAppBot(BasePlatform):
 
     def _save_state(self):
         """Save state"""
-        state_file = Path("aura/data/messaging/whatsapp_state.json")
+        state_file = Path("data/messaging/whatsapp_state.json")
         state_file.parent.mkdir(parents=True, exist_ok=True)
 
         try:
@@ -284,18 +284,12 @@ class WhatsAppBot(BasePlatform):
     async def _process_with_aura(self, text: str, user_id: str) -> str:
         """Process message through AURA engine"""
 
-        # Try fast path first
+        # Try fast path first (if available on the engine/agent)
         try:
-            from aura.fast_path import FastPathHandler
-
-            fast_handler = FastPathHandler(
-                memory_store=self.aura.memory if hasattr(self.aura, 'memory') else None,
-                emotional_engine=self.aura.emotion if hasattr(self.aura, 'emotion') else None
-            )
-
-            fast_response = fast_handler.try_fast_path(text)
-            if fast_response:
-                return fast_response
+            if hasattr(self.aura, 'fast_path_handler') and self.aura.fast_path_handler:
+                fast_response = self.aura.fast_path_handler.try_fast_path(text)
+                if fast_response:
+                    return fast_response
 
         except Exception as e:
             logger.error(f"Fast path error: {e}")

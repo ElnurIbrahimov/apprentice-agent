@@ -74,7 +74,7 @@ class TelegramBot(BasePlatform):
 
     def _load_state(self):
         """Load saved state (active chats, etc.)"""
-        state_file = Path("aura/data/messaging/telegram_state.json")
+        state_file = Path("data/messaging/telegram_state.json")
         if state_file.exists():
             try:
                 with open(state_file, encoding="utf-8") as f:
@@ -85,7 +85,7 @@ class TelegramBot(BasePlatform):
 
     def _save_state(self):
         """Save state for persistence"""
-        state_file = Path("aura/data/messaging/telegram_state.json")
+        state_file = Path("data/messaging/telegram_state.json")
         state_file.parent.mkdir(parents=True, exist_ok=True)
 
         try:
@@ -193,9 +193,18 @@ class TelegramBot(BasePlatform):
             logger.warning(f"Could not send typing indicator: {e}")
 
     def _is_user_allowed(self, user_id: int) -> bool:
-        """Check if user is allowed to use the bot"""
+        """Check if user is allowed to use the bot.
+
+        SECURITY: Returns False if no whitelist configured (fail-closed).
+        Add your Telegram user ID to TELEGRAM_ALLOWED_USERS in config.
+        Get your user ID from @userinfobot on Telegram.
+        """
         if not self.allowed_users:
-            return True  # Allow all if no whitelist
+            logger.warning(
+                f"[TelegramBot] Rejected user {user_id} — no allowed_users configured. "
+                "Set TELEGRAM_ALLOWED_USERS in config to enable bot access."
+            )
+            return False
         return str(user_id) in self.allowed_users
 
     def _is_admin(self, user_id: int) -> bool:
@@ -269,21 +278,15 @@ I'm here whenever you need me."""
         if not self._is_user_allowed(update.effective_user.id):
             return
 
-        # Get status from AURA
+        # Get status from agent
         try:
-            if hasattr(self.aura, 'get_status'):
-                status_data = self.aura.get_status()
-                status = f"""AURA Status
+            tool_count = len(self.aura.tools) if hasattr(self.aura, 'tools') else 0
+            identity_name = self.aura.identity.get('name', 'AURA') if hasattr(self.aura, 'identity') else 'AURA'
+            status = f"""AURA Status
 
-Version: {status_data.get('version', 'Unknown')}
-Soul: {status_data.get('soul', 'Unknown')}
-Mood: {status_data.get('mood', {}).get('mood', 'neutral')}
-Patterns: {status_data.get('patterns', {}).get('total_patterns', 0)}
-Turns: {status_data.get('turns', 0)}
-
-I'm here and ready to help!"""
-            else:
-                status = "Online and ready!"
+Name: {identity_name}
+Tools: {tool_count} loaded
+Status: Online and ready!"""
         except Exception as e:
             logger.error(f"Error getting status: {e}")
             status = "Online and ready!"
@@ -296,27 +299,13 @@ I'm here and ready to help!"""
         if not self._is_user_allowed(update.effective_user.id):
             return
 
-        # Get mood from AURA emotional engine
+        # Get mood from EvoEmo tool if available
         try:
-            if hasattr(self.aura, 'emotion'):
-                mood = self.aura.emotion.state.mood.value
-                energy = self.aura.emotion.state.energy
-                warmth = self.aura.emotion.state.warmth
-
-                mood_emojis = {
-                    "excited": "!!", "happy": ":)", "content": ":)",
-                    "neutral": ":|", "thoughtful": "...", "tired": ":/",
-                    "concerned": ":(", "frustrated": ":("
-                }
-                emoji = mood_emojis.get(mood, ":)")
-
-                response = f"""Current Mood {emoji}
-
-Feeling: {mood}
-Energy: {energy:.0%}
-Warmth: {warmth:.0%}
-
-{self.aura.emotion.state.mood_reason or 'Just vibing'}"""
+            evoemo = self.aura.tools.get("evoemo") if hasattr(self.aura, 'tools') else None
+            if evoemo and hasattr(evoemo, 'get_state'):
+                state = evoemo.get_state()
+                mood = state.get("dominant_emotion", "neutral")
+                response = f"Current Mood: {mood}\n\nReady to chat!"
             else:
                 response = "Feeling good and ready to chat!"
         except Exception as e:
@@ -331,36 +320,14 @@ Warmth: {warmth:.0%}
         if not self._is_user_allowed(update.effective_user.id):
             return
 
-        # Get memory summary from AURA
+        # Get memory summary from agent's MemorySystem
         try:
-            if hasattr(self.aura, 'memory'):
-                # Get recent facts
-                facts = self.aura.memory.get_recent("learned_facts", limit=5)
-                profile = self.aura.memory.read_section("user_profile", "Basic Info")
-
-                memory_text = "What I Remember\n\n"
-
-                if profile:
-                    memory_text += "About You:\n"
-                    # Extract just the content, not timestamps
-                    for line in profile.split("\n")[:3]:
-                        if line.strip():
-                            # Remove timestamp formatting
-                            clean = line.split("**]** ")[-1] if "**]**" in line else line
-                            clean = clean.split("`")[0].strip()
-                            if clean and not clean.startswith("-"):
-                                memory_text += f"  - {clean}\n"
-                            elif clean:
-                                memory_text += f"  {clean}\n"
-
-                if facts:
-                    memory_text += "\nRecent Facts:\n"
-                    for fact in facts[:3]:
-                        clean = fact.split("`")[0].strip()
-                        memory_text += f"  - {clean[:60]}...\n" if len(clean) > 60 else f"  - {clean}\n"
-
-                if not profile and not facts:
-                    memory_text = "I'm still getting to know you! Keep chatting and I'll remember important things."
+            if hasattr(self.aura, 'memory') and self.aura.memory:
+                mem = self.aura.memory
+                # MemorySystem stores conversations in ChromaDB
+                stats = mem.get_stats() if hasattr(mem, 'get_stats') else {}
+                count = stats.get('total_entries', 0) if stats else 0
+                memory_text = f"Memory system active!\n\nStored entries: {count}\n\nKeep chatting and I'll remember important things."
             else:
                 memory_text = "Memory system active. I remember our conversations!"
         except Exception as e:
@@ -418,43 +385,16 @@ Warmth: {warmth:.0%}
                     cleared_items = []
 
                     try:
-                        # Clear AURA memory if available
+                        # Clear agent's MemorySystem if available
                         if hasattr(self.aura, 'memory') and self.aura.memory:
-                            # Clear markdown store sections
-                            if hasattr(self.aura.memory, 'clear_section'):
-                                self.aura.memory.clear_section("user_profile")
-                                self.aura.memory.clear_section("conversations")
-                                self.aura.memory.clear_section("learned_facts")
-                                cleared_items.append("User profile")
-                                cleared_items.append("Conversations")
-                                cleared_items.append("Learned facts")
-                            elif hasattr(self.aura.memory, 'store') and hasattr(self.aura.memory.store, 'clear_section'):
-                                self.aura.memory.store.clear_section("user_profile")
-                                self.aura.memory.store.clear_section("conversations")
-                                self.aura.memory.store.clear_section("learned_facts")
-                                cleared_items.append("User profile")
-                                cleared_items.append("Conversations")
-                                cleared_items.append("Learned facts")
+                            if hasattr(self.aura.memory, 'clear'):
+                                self.aura.memory.clear()
+                                cleared_items.append("Conversation memory")
 
-                        # Clear emotional history
-                        if hasattr(self.aura, 'emotion') and self.aura.emotion:
-                            if hasattr(self.aura.emotion, 'clear_history'):
-                                self.aura.emotion.clear_history()
-                                cleared_items.append("Emotional history")
-                            elif hasattr(self.aura.emotion, 'interaction_history'):
-                                self.aura.emotion.interaction_history.clear()
-                                cleared_items.append("Interaction history")
-
-                        # Clear conversation history from engine
-                        if hasattr(self.aura, 'conversation_history'):
-                            self.aura.conversation_history.clear()
-                            cleared_items.append("Conversation history")
-
-                        # Clear patterns
-                        if hasattr(self.aura, 'patterns') and self.aura.patterns:
-                            if hasattr(self.aura.patterns, 'clear'):
-                                self.aura.patterns.clear()
-                                cleared_items.append("Patterns")
+                        # Clear agent state history
+                        if hasattr(self.aura, 'state') and hasattr(self.aura.state, '_history'):
+                            self.aura.state._history.clear()
+                            cleared_items.append("State history")
 
                         # Remove pending forget request
                         del self._pending_forget[user_id]
@@ -543,132 +483,59 @@ Warmth: {warmth:.0%}
 
     async def _process_with_aura(self, text: str, user_id: str) -> str:
         """
-        Process message through AURA engine.
+        Process message through ApprenticeAgent.
 
-        Uses AURA's generate_response() which:
-        - Handles fast-path (only explicit commands)
-        - Retrieves memories
-        - Calls LLM with full context
-        - Stores interaction
+        Uses agent.chat() which handles:
+        - Fast-path for simple queries
+        - Memory retrieval and storage
+        - Emotion analysis
+        - LLM generation with full context
+        - Humanization post-processing
         """
-
         try:
-            # Set up progress callback for long-running tasks
-            if hasattr(self.aura, 'set_progress_callback'):
-                def sync_progress_callback(message: str):
-                    """Sync wrapper to send progress messages."""
-                    import asyncio
-                    try:
-                        # Create task to send message
-                        loop = asyncio.get_event_loop()
-                        if loop.is_running():
-                            asyncio.create_task(self.bot.send_message(chat_id=user_id, text=message))
-                    except Exception as e:
-                        logger.warning(f"Progress callback failed: {e}")
-
-                self.aura.set_progress_callback(sync_progress_callback)
-
-            # Use the new generate_response method that does everything
-            if hasattr(self.aura, 'generate_response'):
-                response = self.aura.generate_response(
-                    user_message=text,
-                    chat_id=user_id
-                )
-                return response
-
-            # Fallback to old process_input if generate_response not available
-            if hasattr(self.aura, 'process_input'):
-                context = self.aura.process_input(text)
-
-                # Use fast-path from context if available
-                if hasattr(self.aura, 'fast_path'):
-                    fast_response = self.aura.fast_path.try_fast_path(text)
-                    if fast_response:
-                        return fast_response
-
-                # Otherwise use LLM directly
-                if hasattr(self.aura, 'llm'):
-                    memories = []
-                    if hasattr(self.aura, 'memory_retriever'):
-                        memories = self.aura.memory_retriever.get_relevant_memories(text)
-
-                    response = self.aura.llm.generate(
-                        user_message=text,
-                        memories=memories,
-                        emotional_context={"mood": context.get("mood", "warm")}
-                    )
+            if hasattr(self.aura, 'chat'):
+                response = self.aura.chat(text)
+                if response:
                     return response
-
         except Exception as e:
             logger.error(f"AURA processing error: {e}")
 
-        # Ultimate fallback - should rarely happen
         return "Hey, I'm here! What's on your mind?"
 
     # ============ PROACTIVE MESSAGING ============
 
     async def _connect_proactive_system(self):
-        """Connect AURA proactive system to Telegram."""
+        """Connect GatewayDaemon proactive system to Telegram if available."""
         try:
-            if hasattr(self.aura, 'proactive') and self.aura.proactive:
-                # Create async send function for proactive messages
-                async def send_proactive_message(chat_id: str, text: str):
-                    try:
-                        await self.bot.send_message(chat_id=chat_id, text=text)
-                        logger.info(f"Sent proactive message to {chat_id}")
-                        return True
-                    except Exception as e:
-                        logger.error(f"Proactive send failed: {e}")
-                        return False
-
-                # Store callback on self for later use
-                self._proactive_send = send_proactive_message
-
-                # Register all active chats with proactive system
-                for chat_id, info in self.active_chats.items():
-                    try:
-                        # If proactive has register_chat method
-                        if hasattr(self.aura.proactive, 'register_chat'):
-                            self.aura.proactive.register_chat(
-                                chat_id=chat_id,
-                                user_name=info.get("first_name", "there")
-                            )
-                    except (AttributeError, TypeError) as e:
-                        logger.debug(f"Could not register chat {chat_id}: {e}")
-
+            daemon = getattr(self.aura, 'gateway_daemon', None)
+            if daemon:
                 # Start proactive polling loop
                 self._proactive_task = asyncio.create_task(self._proactive_polling_loop())
-
                 logger.info("Proactive system connected to Telegram!")
+            else:
+                self._proactive_task = None
+                logger.info("No proactive system available — skipping")
         except Exception as e:
+            self._proactive_task = None
             logger.warning(f"Could not connect proactive system: {e}")
 
     async def _proactive_polling_loop(self):
-        """Poll heartbeat queue and send proactive messages to active chats."""
+        """Poll GatewayDaemon for proactive messages and send to active chats."""
         logger.info("Proactive polling loop started")
 
         while self.is_running:
             try:
-                # Check if AURA has proactive system with notifications
-                if hasattr(self.aura, 'proactive') and self.aura.proactive:
-                    # Get pending notifications from HeartbeatMonitor
-                    pending = self.aura.proactive.get_pending_notifications()
+                daemon = getattr(self.aura, 'gateway_daemon', None)
+                if daemon and hasattr(daemon, 'get_pending_notifications'):
+                    pending = daemon.get_pending_notifications()
 
                     for notification in pending:
-                        message = notification.message
-                        category = notification.category
-
-                        # Send to all active chats
+                        message = getattr(notification, 'content', str(notification))
                         for chat_id, chat_info in self.active_chats.items():
                             try:
-                                # Personalize if possible
                                 user_name = chat_info.get("first_name", "there")
                                 personalized = message.replace("{name}", user_name)
-
                                 await self.send_proactive(chat_id, personalized)
-                                logger.info(f"✉️ Proactive [{category}] to {chat_id}: {message[:50]}...")
-
-                                # Rate limit between chats
                                 await asyncio.sleep(0.2)
                             except Exception as e:
                                 logger.warning(f"Could not send proactive to {chat_id}: {e}")

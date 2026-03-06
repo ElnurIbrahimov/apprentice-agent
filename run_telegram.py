@@ -243,7 +243,7 @@ async def main():
 
     # Load ApprenticeAgent with Proto-AGI
     try:
-        from apprentice_agent.agent import ApprenticeAgent
+        from aura.agent import ApprenticeAgent
         print("Loading ApprenticeAgent + Proto-AGI (this may take a moment)...")
         agent = ApprenticeAgent(fast_init=False)
         print(f"ApprenticeAgent loaded with {len(agent.tools)} tools")

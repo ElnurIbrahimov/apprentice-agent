@@ -106,6 +106,7 @@ class AttachmentType(str, Enum):
     IMAGE = "image"
     DOCUMENT = "document"
     CODE = "code"
+    ARCHIVE = "archive"
 
 
 class FileAttachment(BaseModel):

@@ -10,12 +10,24 @@ Three tiers:
 
 import logging
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional, Any
 
 logger = logging.getLogger(__name__)
+
+try:
+    from aura.tools.cognitive_theater import is_decision_question as _is_decision_question
+except ImportError:
+    _is_decision_question = None
+
+_CONCISE_SYSTEM_HINT = (
+    "Reply conversationally and concisely. "
+    "Do NOT use structured analysis formats, multi-perspective breakdowns, "
+    "Pro/Con sections, or Confidence ratings unless explicitly asked."
+)
 
 
 class QueryTier(Enum):
@@ -62,8 +74,7 @@ class ParliamentConductor:
 
         # Fallback heuristics
         try:
-            from aura.tools.cognitive_theater import is_decision_question
-            if is_decision_question(query):
+            if _is_decision_question and _is_decision_question(query):
                 return QueryTier.COMPLEX
         except Exception:
             pass
@@ -74,12 +85,11 @@ class ParliamentConductor:
 
     def handle(self, query: str, context_addon: str = "") -> str:
         """Main entry point. Returns response text."""
-        import time
         t0 = time.time()
         tier = self.classify(query)
 
         if tier == QueryTier.SIMPLE:
-            response = self._standard_response(query, context_addon)
+            response = self._simple_response(query, context_addon)
         elif tier == QueryTier.STANDARD:
             response = self._standard_response(query, context_addon)
             self._async_mirrormind_score(query, response)
@@ -89,6 +99,11 @@ class ParliamentConductor:
         latency = (time.time() - t0) * 1000
         logger.debug(f"[PARLIAMENT] {tier.value} tier, {latency:.0f}ms")
         return response
+
+    def _simple_response(self, query: str, context_addon: str) -> str:
+        concise_hint = _CONCISE_SYSTEM_HINT
+        system = f"{context_addon}\n\n{concise_hint}" if context_addon else concise_hint
+        return self.agent.brain.think(query, system_prompt=system)
 
     def _standard_response(self, query: str, context_addon: str) -> str:
         return self.agent.brain.think(query, system_prompt=context_addon or None)
@@ -134,7 +149,7 @@ class ParliamentConductor:
             except Exception as e:
                 logger.debug(f"[PARLIAMENT] Synthesis failed: {e}")
 
-        return proposer
+        return proposer or self.agent.brain.think(query, system_prompt=context_addon or None)
 
     def _get_theater_perspectives(self, query: str) -> Optional[str]:
         try:
@@ -154,7 +169,37 @@ class ParliamentConductor:
         """Only synthesize if Theater produced substantive content."""
         if not critic_output:
             return False
-        return len(str(critic_output)) > 100
+        text = critic_output.strip() if isinstance(critic_output, str) else str(critic_output).strip()
+        return len(text) > 80 and any(c.isalpha() for c in text)
+
+    def handle_stream(self, query: str, context_addon: str = ""):
+        """Streaming entry point — yields text chunks as they arrive.
+
+        SIMPLE and STANDARD tiers stream directly via brain.think_stream().
+        COMPLEX tier falls back to the blocking _parliament_response() and
+        yields the complete result as one chunk (parallel synthesis can't stream).
+        """
+        tier = self.classify(query)
+
+        if tier in (QueryTier.SIMPLE, QueryTier.STANDARD):
+            if tier == QueryTier.SIMPLE:
+                stream_system = f"{context_addon}\n\n{_CONCISE_SYSTEM_HINT}" if context_addon else _CONCISE_SYSTEM_HINT
+            else:
+                stream_system = context_addon or None
+            full_response = ""
+            for chunk in self.agent.brain.think_stream(
+                query,
+                system_prompt=stream_system,
+            ):
+                full_response += chunk
+                yield chunk
+            if tier == QueryTier.STANDARD:
+                self._async_mirrormind_score(query, full_response)
+        else:
+            # COMPLEX: parallel deliberation — can't stream mid-flight, yield whole response
+            response = self._parliament_response(query, context_addon)
+            if response:
+                yield response
 
     def _async_mirrormind_score(self, query: str, response: str):
         """Fire MirrorMind scoring in background — never blocks response."""

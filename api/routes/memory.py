@@ -3,17 +3,20 @@
 import asyncio
 import functools
 import logging
+import threading
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from collections import deque
 from threading import Lock
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
+
+from api.auth import require_api_key
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/memory", tags=["memory"])
+router = APIRouter(prefix="/api/memory", tags=["memory"], dependencies=[Depends(require_api_key)])
 
 # ============================================================================
 # Memory Recall Tracking System
@@ -129,13 +132,21 @@ class MemoryRecallTracker:
             self._last_recall_time = None
 
 
-# Global tracker instance
-_tracker = MemoryRecallTracker()
+# Per-session tracker instances
+_trackers: dict[str, MemoryRecallTracker] = {}
+_tracker_lock = threading.Lock()
+
+
+def _get_tracker(session_id: str) -> MemoryRecallTracker:
+    with _tracker_lock:
+        if session_id not in _trackers:
+            _trackers[session_id] = MemoryRecallTracker()
+        return _trackers[session_id]
 
 
 def get_tracker() -> MemoryRecallTracker:
-    """Get the global memory recall tracker."""
-    return _tracker
+    """Get the default memory recall tracker (backward compat)."""
+    return _get_tracker("default")
 
 
 # ============================================================================
@@ -177,15 +188,15 @@ class RecallStatsResponse(BaseModel):
 # ============================================================================
 
 @router.get("/recalls/status", response_model=RecallStatusResponse)
-async def get_recall_status():
+async def get_recall_status(session_id: str = Query(default="default")):
     """
     Get current memory recall status for UI indicator.
 
     Returns whether memories were recalled recently and recent events.
     Designed for polling by the frontend to show visual indicators.
     """
-    tracker = get_tracker()
-    loop = asyncio.get_event_loop()
+    tracker = _get_tracker(session_id)
+    loop = asyncio.get_running_loop()
     recent = await loop.run_in_executor(
         None, functools.partial(tracker.get_recent_recalls, limit=5, since_seconds=30)
     )
@@ -200,7 +211,11 @@ async def get_recall_status():
 
 
 @router.get("/recalls/recent")
-async def get_recent_recalls(limit: int = 10, since_seconds: Optional[float] = None):
+async def get_recent_recalls(
+    limit: int = 10,
+    since_seconds: Optional[float] = None,
+    session_id: str = Query(default="default")
+):
     """
     Get recent memory recall events.
 
@@ -208,8 +223,8 @@ async def get_recent_recalls(limit: int = 10, since_seconds: Optional[float] = N
         limit: Maximum events to return (default 10)
         since_seconds: Only return events from the last N seconds
     """
-    tracker = get_tracker()
-    loop = asyncio.get_event_loop()
+    tracker = _get_tracker(session_id)
+    loop = asyncio.get_running_loop()
     events = await loop.run_in_executor(
         None, functools.partial(tracker.get_recent_recalls, limit=min(limit, 50), since_seconds=since_seconds)
     )
@@ -221,10 +236,10 @@ async def get_recent_recalls(limit: int = 10, since_seconds: Optional[float] = N
 
 
 @router.get("/recalls/stats", response_model=RecallStatsResponse)
-async def get_recall_stats():
+async def get_recall_stats(session_id: str = Query(default="default")):
     """Get memory recall statistics."""
-    tracker = get_tracker()
-    loop = asyncio.get_event_loop()
+    tracker = _get_tracker(session_id)
+    loop = asyncio.get_running_loop()
     stats = await loop.run_in_executor(None, tracker.get_stats)
 
     return RecallStatsResponse(**stats)
@@ -235,8 +250,9 @@ async def record_recall(
     source: str,
     count: int,
     query: str,
-    memories: List[str] = [],
-    metadata: Dict[str, Any] = {}
+    memories: Optional[List[str]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    session_id: str = Query(default="default")
 ):
     """
     Record a memory recall event (called internally by agent).
@@ -244,8 +260,12 @@ async def record_recall(
     This endpoint is used by the agent to notify the tracker when
     memories are retrieved during response generation.
     """
-    tracker = get_tracker()
-    loop = asyncio.get_event_loop()
+    if memories is None:
+        memories = []
+    if metadata is None:
+        metadata = {}
+    tracker = _get_tracker(session_id)
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(
         None, functools.partial(tracker.record_recall, source, count, query, memories, metadata)
     )
@@ -258,10 +278,10 @@ async def record_recall(
 
 
 @router.post("/recalls/clear")
-async def clear_recalls():
+async def clear_recalls(session_id: str = Query(default="default")):
     """Clear memory recall history."""
-    tracker = get_tracker()
-    loop = asyncio.get_event_loop()
+    tracker = _get_tracker(session_id)
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, tracker.clear)
 
     return {"status": "cleared"}

@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/thinking-mode", tags=["thinking-mode"])
 async def get_thinking_mode_state():
     """Get current thinking mode, cognitive load, and effective decision info."""
     try:
-        from apprentice_agent.thinking_mode import get_thinking_mode_manager
+        from aura.thinking_mode import get_thinking_mode_manager
         tmm = get_thinking_mode_manager()
         return {"success": True, **tmm.get_state()}
     except Exception as e:
@@ -26,7 +26,7 @@ async def set_thinking_mode(body: dict):
     Body: {"mode": "auto" | "system1" | "system2"}
     """
     try:
-        from apprentice_agent.thinking_mode import get_thinking_mode_manager, ThinkingMode
+        from aura.thinking_mode import get_thinking_mode_manager, ThinkingMode
         tmm = get_thinking_mode_manager()
 
         mode_str = body.get("mode", "auto").lower()
@@ -51,7 +51,7 @@ async def set_thinking_mode(body: dict):
 async def reset_cognitive_load():
     """Reset the cognitive load tracker."""
     try:
-        from apprentice_agent.thinking_mode import get_thinking_mode_manager
+        from aura.thinking_mode import get_thinking_mode_manager
         tmm = get_thinking_mode_manager()
         tmm.cognitive_load.reset()
         return {"success": True, "message": "Cognitive load tracker reset"}

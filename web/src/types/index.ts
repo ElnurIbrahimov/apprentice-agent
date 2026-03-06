@@ -12,7 +12,7 @@ export interface MoodState {
 }
 
 // File attachment types
-export type AttachmentType = 'image' | 'document' | 'code';
+export type AttachmentType = 'image' | 'document' | 'code' | 'archive';
 
 export interface FileAttachment {
   id: string;
@@ -32,6 +32,7 @@ export interface Message {
   content: string;
   timestamp: number;
   isStreaming?: boolean;
+  model_used?: string | null;
   attachments?: FileAttachment[];
   proactive?: {
     action: string;       // e.g., 'notify', 'suggest', 'remind', 'ask'
@@ -67,16 +68,21 @@ export interface StatusResponse {
 }
 
 export interface WebSocketMessage {
-  type: 'chat' | 'chunk' | 'done' | 'error' | 'ping' | 'pong' | 'stopped' | 'proactive';
+  type: 'chat' | 'chunk' | 'done' | 'error' | 'ping' | 'pong' | 'stopped' | 'proactive' | 'tool_status';
   content?: string;
   message?: string;
   response?: string;
   mood?: MoodState;
+  model_used?: string | null;
+  audio_url?: string | null;
+  id?: string | number;
   error?: string;
   action?: string;
   priority?: string;
   timestamp?: string;
   metadata?: Record<string, unknown>;
+  tool_name?: string;
+  tool_action?: string;
 }
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
@@ -163,6 +169,7 @@ export interface GuardianStatus {
 // NeuroDream
 export interface NeuroDreamStatus {
   enabled: boolean;
+  loading?: boolean;
   is_sleeping: boolean;
   current_phase?: string;
   total_sessions: number;
@@ -198,6 +205,15 @@ export interface VoiceStatus {
 export interface Tool {
   name: string;
   description: string;
+  category: string;
+}
+
+export interface SessionCosts {
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  cost_usd: number;
+  queries: number;
 }
 
 // Metacognition
@@ -208,8 +224,19 @@ export interface MetacognitionStats {
   tool_usage: Record<string, number>;
 }
 
+// Activity Timeline
+export interface ActivityEvent {
+  id: number;
+  timestamp: number;
+  category: 'tool' | 'memory' | 'emotion' | 'proactive' | 'strategy' | 'system';
+  event_type: string;
+  summary: string;
+  payload?: Record<string, unknown> | null;
+  duration_ms?: number | null;
+}
+
 // Tab types
-export type TabId = 'chat' | 'monitoring' | 'tools' | 'advanced';
+export type TabId = 'chat' | 'monitoring' | 'tools' | 'advanced' | 'activity';
 
 // A-MEM (Agentic Memory)
 export interface AMEMNote {
