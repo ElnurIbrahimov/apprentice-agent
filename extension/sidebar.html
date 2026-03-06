@@ -1,0 +1,998 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>AURA</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#060612;--s1:#0e0c1e;--s2:#161428;--s3:#1e1c32;
+  --b1:rgba(255,255,255,.08);--b2:rgba(255,255,255,.15);
+  --p:#7c3aed;--p2:#6d28d9;--pl:#a78bfa;--pl2:#e0d6ff;
+  --pg:rgba(124,58,237,.13);
+  --tx:#f0eff8;--mu:#7a7a9d;--di:#3a3a5e;
+  --gr:#10b981;--rd:#ef4444;
+  --ub:#3b1580;--ub2:#5b21b6;
+  --cb:#03030d;
+  --glass:rgba(8,6,20,.72);
+}
+html,body{height:100%;width:100%;background:var(--bg);color:var(--tx);
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+  font-size:13px;line-height:1.6;overflow:hidden;position:relative}
+body::before{
+  content:'';position:fixed;top:0;left:0;width:100%;height:100%;
+  background:
+    radial-gradient(ellipse at 15% 15%, rgba(60,8,120,.65) 0%, transparent 50%),
+    radial-gradient(ellipse at 88% 82%, rgba(28,4,65,.5) 0%, transparent 52%),
+    radial-gradient(ellipse at 55% 50%, rgba(14,6,36,.4) 0%, transparent 65%);
+  pointer-events:none;z-index:0;
+}
+body::after{
+  content:'';position:fixed;top:0;left:0;width:100%;height:100%;
+  opacity:.025;pointer-events:none;z-index:9999;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ── Shell ── */
+#shell{display:flex;height:100%;position:relative;z-index:1}
+#main{flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden;background:transparent}
+
+/* ── Panels ── */
+.panel{display:none;flex:1;flex-direction:column;overflow:hidden;height:100%;background:transparent}
+.panel.active{display:flex}
+
+/* ── Header ── */
+#hdr{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 14px;height:46px;flex-shrink:0;
+  background:var(--glass);border-bottom:1px solid var(--b1);
+  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  gap:8px;position:relative;z-index:10;
+}
+#logo{font-size:13px;font-weight:700;letter-spacing:.14em;color:rgba(224,214,255,.92);display:flex;align-items:center;gap:8px}
+#logo-pulse{width:7px;height:7px;border-radius:50%;background:radial-gradient(circle,#e0d6ff,#7c3aed);
+  box-shadow:0 0 0 2px rgba(124,58,237,.22),0 0 12px rgba(167,139,250,.55);
+  animation:pulse 2.5s ease-in-out infinite;flex-shrink:0}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+#hdr-r{display:flex;align-items:center;gap:6px}
+#mood{font-size:14px;cursor:default}
+#mpill{
+  display:flex;align-items:center;gap:5px;
+  background:var(--s2);border:1px solid var(--b1);border-radius:20px;
+  padding:3px 10px 3px 7px;cursor:default;max-width:145px;overflow:hidden;
+}
+#mdot{width:6px;height:6px;border-radius:50%;background:var(--rd);flex-shrink:0;transition:all .3s}
+#mdot.on{background:var(--gr);box-shadow:0 0 5px var(--gr)}
+#mname{font-size:10.5px;color:var(--mu);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ihbtn{width:28px;height:28px;border-radius:7px;background:transparent;border:none;
+  color:var(--mu);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .13s}
+.ihbtn:hover{background:var(--s2);color:var(--tx)}
+.ihbtn svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+/* ═══════════════════════════════════════
+   CHAT PANEL
+═══════════════════════════════════════ */
+
+/* Context bar */
+#ctx{display:none;align-items:flex-start;gap:8px;padding:8px 14px;flex-shrink:0;
+  background:#13082c;border-bottom:1px solid #3a1d60}
+#ctx.on{display:flex}
+#ctx-icon{color:var(--pl);font-size:13px;padding-top:1px;flex-shrink:0}
+#ctx-body{flex:1;min-width:0}
+#ctx-lbl{font-size:10px;color:var(--pl);font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:1px}
+#ctx-txt{font-size:11.5px;color:var(--pl2);line-height:1.4;overflow:hidden;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+#ctx-x{background:none;border:none;color:var(--di);cursor:pointer;font-size:13px;padding:0;transition:color .13s}
+#ctx-x:hover{color:var(--tx)}
+
+/* Messages */
+#msgs{flex:1;overflow-y:auto;padding:16px 14px 8px;display:flex;flex-direction:column;gap:2px;
+  scrollbar-width:thin;scrollbar-color:var(--b1) transparent}
+#msgs::-webkit-scrollbar{width:3px}
+#msgs::-webkit-scrollbar-thumb{background:var(--b1);border-radius:2px}
+
+/* Empty state */
+#empty{display:flex;flex-direction:column;align-items:center;gap:18px;padding:24px 14px 16px}
+#eav{width:52px;height:52px;border-radius:50%;
+  background:linear-gradient(135deg,#3b1580,#7c3aed,#a78bfa);
+  display:flex;align-items:center;justify-content:center;
+  font-size:21px;font-weight:900;color:#fff;
+  box-shadow:0 0 32px rgba(124,58,237,.35)}
+#etitle{font-size:16px;font-weight:700;color:var(--tx);text-align:center}
+#esub{font-size:12px;color:var(--mu);text-align:center;line-height:1.5;margin-top:-12px}
+#chips{width:100%;display:flex;flex-direction:column;gap:5px}
+.chip{
+  background:var(--s1);border:1px solid var(--b1);border-radius:10px;
+  padding:9px 12px;cursor:pointer;display:flex;align-items:center;gap:9px;
+  font-size:12px;color:var(--mu);transition:all .13s;text-align:left;
+}
+.chip:hover{border-color:var(--p);color:var(--tx);background:var(--pg)}
+.chip svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;
+  stroke-linecap:round;stroke-linejoin:round;flex-shrink:0;color:var(--pl)}
+
+/* Message rows */
+.mrow{display:flex;gap:8px;animation:up .16s ease-out;margin-bottom:1px}
+@keyframes up{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.mrow.user{flex-direction:row-reverse;padding-left:24px}
+.mrow.ai{padding-right:12px}
+.av{width:26px;height:26px;border-radius:50%;flex-shrink:0;align-self:flex-start;margin-top:2px;
+  display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800}
+.av.ai-av{background:linear-gradient(135deg,#4c1d95,#a78bfa);color:#fff;box-shadow:0 0 10px rgba(124,58,237,.3)}
+.av.u-av{background:var(--s2);color:var(--mu);border:1px solid var(--b1)}
+.mwrap{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.bubble{padding:9px 12px;border-radius:14px;font-size:13px;line-height:1.65;word-break:break-word}
+.bubble.user{background:linear-gradient(135deg,var(--ub),var(--ub2));color:#ede9fe;
+  border-bottom-right-radius:3px;box-shadow:0 2px 10px rgba(91,33,182,.22)}
+.bubble.ai{background:var(--s1);border:1px solid var(--b1);color:var(--tx);border-bottom-left-radius:3px}
+.ts{font-size:10px;color:var(--di);padding:0 1px}
+.mrow.user .ts{text-align:right}
+
+/* Reactions */
+.rxbar{display:flex;gap:1px;margin-top:1px;opacity:0;transition:opacity .13s}
+.mrow:hover .rxbar{opacity:1}
+.rx{background:none;border:none;color:var(--di);font-size:11px;cursor:pointer;
+  padding:3px 7px;border-radius:5px;transition:all .12s;display:flex;align-items:center;gap:3px;
+  font-family:inherit}
+.rx:hover{background:var(--s2);color:var(--mu)}
+.rx.ok{color:var(--gr)}
+.rx svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+/* Typing dots */
+.dots{display:flex;gap:4px;padding:3px 0;align-items:center}
+.dots span{width:5px;height:5px;border-radius:50%;background:var(--pl);opacity:.35;
+  animation:db 1.1s ease-in-out infinite}
+.dots span:nth-child(2){animation-delay:.18s}.dots span:nth-child(3){animation-delay:.36s}
+@keyframes db{0%,60%,100%{transform:translateY(0);opacity:.3}30%{transform:translateY(-4px);opacity:1}}
+
+/* Markdown */
+.bubble.ai h1,.bubble.ai h2,.bubble.ai h3{font-weight:700;margin:9px 0 3px}
+.bubble.ai h1{font-size:15px}.bubble.ai h2{font-size:14px}.bubble.ai h3{font-size:13px;color:var(--pl)}
+.bubble.ai strong{color:var(--pl2);font-weight:700}
+.bubble.ai em{color:#a5f3fc;font-style:italic}
+.bubble.ai code{background:var(--cb);border:1px solid var(--b1);border-radius:4px;
+  padding:1px 5px;font-family:'Cascadia Code','Fira Code','Consolas',monospace;font-size:11.5px;color:#f9a8d4}
+.bubble.ai pre{background:var(--cb);border:1px solid var(--b1);border-radius:8px;margin:8px 0;overflow:hidden}
+.bubble.ai .chdr{display:flex;align-items:center;justify-content:space-between;
+  padding:4px 10px;background:#07070d;border-bottom:1px solid var(--b1);font-size:10px;color:var(--di);letter-spacing:.04em}
+.bubble.ai .ccopy{background:none;border:1px solid var(--b1);border-radius:4px;
+  padding:2px 7px;font-size:10px;color:var(--mu);cursor:pointer;transition:all .13s;font-family:inherit}
+.bubble.ai .ccopy:hover{color:var(--tx);border-color:var(--p)}
+.bubble.ai pre code{display:block;padding:9px 11px;overflow-x:auto;font-size:11.5px;
+  line-height:1.55;color:#e2e8f0;background:none;border:none;border-radius:0;white-space:pre}
+.bubble.ai ul,.bubble.ai ol{padding-left:17px;margin:3px 0}
+.bubble.ai li{margin:2px 0}
+.bubble.ai p{margin:2px 0}.bubble.ai p:first-child{margin-top:0}.bubble.ai p:last-child{margin-bottom:0}
+.bubble.ai hr{border:none;border-top:1px solid var(--b1);margin:7px 0}
+.bubble.ai a{color:var(--pl);text-decoration:none}.bubble.ai a:hover{text-decoration:underline}
+.bubble.ai blockquote{border-left:3px solid var(--p);padding-left:10px;color:var(--mu);margin:5px 0;font-style:italic}
+
+/* Input area */
+#inp-area{padding:10px 12px 12px;background:var(--glass);border-top:1px solid var(--b1);
+  flex-shrink:0;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
+#inp-box{background:var(--bg);border:1px solid var(--b1);border-radius:12px;overflow:hidden;transition:border-color .18s}
+#inp-box:focus-within{border-color:var(--p)}
+#inp-top{display:flex;align-items:flex-end;gap:6px;padding:9px 9px 9px 13px}
+#inp{flex:1;resize:none;background:transparent;border:none;outline:none;
+  color:var(--tx);font-family:inherit;font-size:13px;line-height:1.5;max-height:140px}
+#inp::placeholder{color:var(--di)}
+#send{width:30px;height:30px;border-radius:8px;background:var(--p);border:none;
+  color:#fff;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;
+  transition:background .13s}
+#send:hover{background:var(--p2)}
+#send:disabled{background:var(--b1);cursor:not-allowed;opacity:.5}
+#send svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+#modes{display:flex;align-items:center;gap:5px;padding:0 11px 8px;flex-wrap:wrap}
+.mpill{background:none;border:1px solid var(--b1);border-radius:20px;color:var(--mu);
+  font-size:11px;padding:3px 10px;cursor:pointer;font-family:inherit;transition:all .13s;
+  display:flex;align-items:center;gap:4px;white-space:nowrap}
+.mpill:hover{border-color:var(--b2);color:var(--tx)}
+.mpill.on{border-color:var(--p);color:var(--pl);background:var(--pg)}
+.mpill svg{width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+/* ── Inline model picker ── */
+.mdl-pill{display:inline-flex;align-items:center;gap:5px;
+  background:rgba(124,58,237,.1);border:1px solid rgba(124,58,237,.22);
+  border-radius:20px;padding:4px 9px 4px 7px;
+  cursor:pointer;font-size:11px;color:rgba(185,170,235,.9);
+  transition:all .15s;position:relative;user-select:none;
+  font-family:inherit;white-space:nowrap;flex-shrink:0;line-height:1.2}
+.mdl-pill:hover{border-color:rgba(124,58,237,.55);color:var(--pl);background:rgba(124,58,237,.18)}
+.mdl-pill-dot{width:5px;height:5px;border-radius:50%;background:rgba(124,58,237,.4);flex-shrink:0;transition:all .15s}
+.mdl-pill-dot.set{background:var(--p);box-shadow:0 0 6px rgba(124,58,237,.7)}
+.mdl-pill-name{max-width:130px;overflow:hidden;text-overflow:ellipsis;font-weight:500;letter-spacing:.01em}
+.mdl-pill svg{opacity:.55;transition:opacity .15s}
+.mdl-pill:hover svg{opacity:.9}
+/* Fixed-position dropdown — escapes panel overflow:hidden */
+.mdl-drop{position:fixed;
+  background:rgba(10,8,24,.97);border:1px solid rgba(124,58,237,.28);border-radius:12px;
+  box-shadow:0 16px 48px rgba(0,0,0,.75),0 0 0 1px rgba(255,255,255,.04);
+  backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  z-index:99999;min-width:220px;max-width:280px;
+  max-height:340px;overflow-y:auto;display:none;padding:5px;
+  scrollbar-width:thin;scrollbar-color:rgba(124,58,237,.3) transparent}
+.mdl-drop::-webkit-scrollbar{width:4px}
+.mdl-drop::-webkit-scrollbar-thumb{background:rgba(124,58,237,.3);border-radius:2px}
+.mdl-drop.open{display:block;animation:mdlDropIn .13s ease}
+@keyframes mdlDropIn{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:translateY(0)}}
+@keyframes mdlDropUp{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+.mdl-drop.up{animation:mdlDropUp .13s ease}
+.mdl-drop-sec{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  color:rgba(124,58,237,.65);padding:8px 10px 4px;
+  border-top:1px solid rgba(255,255,255,.05);margin-top:3px}
+.mdl-drop-sec:first-child{border-top:none;margin-top:0}
+.mdl-drop-item{display:block;padding:7px 32px 7px 10px;border-radius:8px;
+  cursor:pointer;font-size:12px;color:rgba(220,210,255,.85);
+  transition:background .1s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  position:relative;line-height:1.35}
+.mdl-drop-item:hover{background:rgba(124,58,237,.18);color:#fff}
+.mdl-drop-item.on{color:var(--pl);font-weight:600}
+.mdl-drop-item.on::after{content:'✓';position:absolute;right:10px;top:50%;
+  transform:translateY(-50%);color:var(--p);font-size:12px}
+
+/* ═══════════════════════════════════════
+   SEARCH PANEL
+═══════════════════════════════════════ */
+#panel-search{gap:0}
+#search-hdr{padding:16px 14px 12px;flex-shrink:0}
+#search-hdr h2{font-size:18px;font-weight:700;margin-bottom:12px}
+#search-box{display:flex;gap:6px;align-items:center;
+  background:var(--bg);border:1px solid var(--b1);border-radius:12px;
+  padding:8px 8px 8px 13px;transition:border-color .18s}
+#search-box:focus-within{border-color:var(--p)}
+#search-inp{flex:1;background:transparent;border:none;outline:none;color:var(--tx);
+  font-family:inherit;font-size:13px}
+#search-inp::placeholder{color:var(--di)}
+#search-btn{width:30px;height:30px;border-radius:8px;background:var(--p);border:none;
+  color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .13s}
+#search-btn:hover{background:var(--p2)}
+#search-btn svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+#search-results{flex:1;overflow-y:auto;padding:0 14px 14px;scrollbar-width:thin;scrollbar-color:var(--b1) transparent}
+.src-section{margin-bottom:14px}
+.src-label{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mu);margin-bottom:8px}
+.src-cards{display:flex;flex-direction:column;gap:5px}
+.src-card{background:var(--s1);border:1px solid var(--b1);border-radius:8px;padding:8px 11px;
+  cursor:pointer;transition:border-color .13s;text-decoration:none;display:block}
+.src-card:hover{border-color:var(--p)}
+.src-card-n{font-size:10px;color:var(--p);font-weight:600;margin-bottom:2px}
+.src-card-t{font-size:12px;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.src-card-u{font-size:10px;color:var(--di);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}
+.ans-section{background:var(--s1);border:1px solid var(--b1);border-radius:10px;padding:12px 13px}
+.ans-section p{margin:3px 0;font-size:13px;line-height:1.65}
+.ans-section strong{color:var(--pl2)}
+.ans-section a{color:var(--pl);text-decoration:none;font-size:11px;vertical-align:super;font-weight:600}
+#search-loading{display:none;flex-direction:column;align-items:center;gap:12px;padding:40px 14px;color:var(--mu);font-size:12px}
+#search-loading.on{display:flex}
+#search-loading .dots{justify-content:center}
+#search-empty{display:flex;flex-direction:column;align-items:center;gap:12px;padding:40px 14px;color:var(--mu)}
+#search-empty svg{width:36px;height:36px;stroke:var(--di);fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+#search-empty p{font-size:12px;text-align:center;line-height:1.5}
+
+/* ═══════════════════════════════════════
+   TRANSLATE PANEL
+═══════════════════════════════════════ */
+#panel-translate{gap:0}
+.tool-hdr{padding:16px 14px 0;flex-shrink:0}
+.tool-hdr h2{font-size:18px;font-weight:700;margin-bottom:14px}
+#tr-langs{display:flex;align-items:center;gap:6px;padding:0 14px 12px;flex-shrink:0}
+.lang-sel{flex:1;background:var(--s2);border:1px solid var(--b1);border-radius:8px;
+  color:var(--tx);font-family:inherit;font-size:12px;padding:6px 10px;outline:none;
+  cursor:pointer;appearance:none;-webkit-appearance:none}
+#tr-arrow{color:var(--mu);flex-shrink:0;font-size:14px}
+#tr-body{flex:1;display:flex;flex-direction:column;gap:0;overflow:hidden}
+#tr-input-wrap{flex:1;display:flex;flex-direction:column;border-bottom:1px solid var(--b1)}
+#tr-inp{flex:1;background:var(--bg);border:none;outline:none;resize:none;
+  color:var(--tx);font-family:inherit;font-size:13px;line-height:1.6;padding:12px 14px}
+#tr-inp::placeholder{color:var(--di)}
+#tr-btn-row{padding:8px 14px;display:flex;justify-content:flex-end;background:var(--bg)}
+#tr-btn{background:var(--p);border:none;border-radius:8px;color:#fff;font-size:12px;
+  font-weight:600;font-family:inherit;padding:7px 18px;cursor:pointer;transition:background .13s}
+#tr-btn:hover{background:var(--p2)}
+#tr-out-wrap{flex:1;overflow-y:auto;background:var(--s1)}
+#tr-out{padding:12px 14px;font-size:13px;color:var(--tx);line-height:1.65;min-height:60px;
+  color:var(--mu);font-style:italic}
+#tr-out.has-text{color:var(--tx);font-style:normal}
+
+/* ═══════════════════════════════════════
+   WRITE PANEL
+═══════════════════════════════════════ */
+#panel-write{gap:0}
+#write-tabs{display:flex;gap:0;padding:12px 14px 0;flex-shrink:0;border-bottom:1px solid var(--b1)}
+.wtab{background:none;border:none;color:var(--mu);font-size:13px;font-family:inherit;
+  padding:8px 14px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .13s}
+.wtab:hover{color:var(--tx)}
+.wtab.on{color:var(--pl);border-bottom-color:var(--p);font-weight:600}
+#write-types{display:flex;gap:5px;padding:10px 14px;flex-shrink:0;flex-wrap:wrap}
+.wtype{background:var(--s2);border:1px solid var(--b1);border-radius:20px;color:var(--mu);
+  font-size:11px;padding:3px 11px;cursor:pointer;font-family:inherit;transition:all .13s}
+.wtype:hover{color:var(--tx)}.wtype.on{border-color:var(--p);color:var(--pl);background:var(--pg)}
+#write-opts{display:flex;gap:6px;padding:0 14px 10px;flex-shrink:0}
+.wopt{background:var(--s2);border:1px solid var(--b1);border-radius:7px;color:var(--mu);
+  font-size:11px;padding:4px 9px;cursor:pointer;font-family:inherit;font-weight:600;transition:all .13s}
+.wopt.on{border-color:var(--p);color:var(--pl)}
+#write-inp-wrap{flex:1;display:flex;flex-direction:column;margin:0 14px;
+  background:var(--bg);border:1px solid var(--b1);border-radius:10px;overflow:hidden;transition:border-color .18s}
+#write-inp-wrap:focus-within{border-color:var(--p)}
+#write-inp{flex:1;background:transparent;border:none;outline:none;resize:none;
+  color:var(--tx);font-family:inherit;font-size:13px;line-height:1.6;padding:12px 13px}
+#write-inp::placeholder{color:var(--di)}
+#write-foot{padding:10px 14px 12px;display:flex;justify-content:space-between;align-items:center;flex-shrink:0}
+#write-foot-l{display:flex;gap:5px}
+#write-submit{background:var(--p);border:none;border-radius:8px;color:#fff;font-size:12px;
+  font-weight:600;font-family:inherit;padding:8px 20px;cursor:pointer;transition:background .13s}
+#write-submit:hover{background:var(--p2)}
+#write-result{display:none;flex:1;overflow-y:auto;margin:0 14px 12px;
+  background:var(--s1);border:1px solid var(--b1);border-radius:10px;padding:12px 13px;
+  font-size:13px;line-height:1.65;color:var(--tx)}
+#write-result.on{display:block}
+
+/* ═══════════════════════════════════════
+   TOOLS PANEL
+═══════════════════════════════════════ */
+#panel-tools{gap:0;overflow-y:auto}
+#tools-content{padding:16px 14px;display:flex;flex-direction:column;gap:18px}
+.tool-cat{}
+.tool-cat-lbl{font-size:10px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mu);margin-bottom:8px}
+.tool-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.tool-card{
+  background:var(--s1);border:1px solid var(--b1);border-radius:10px;
+  padding:12px;cursor:pointer;transition:all .13s;text-align:left;
+  display:flex;flex-direction:column;gap:6px;
+}
+.tool-card:hover{border-color:var(--p);background:var(--pg)}
+.tool-card svg{width:20px;height:20px;fill:none;stroke:var(--pl);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.tool-card-name{font-size:12px;font-weight:600;color:var(--tx)}
+.tool-card-desc{font-size:10.5px;color:var(--mu);line-height:1.4}
+
+/* ═══════════════════════════════════════
+   RIGHT ICON RAIL
+═══════════════════════════════════════ */
+#rail{
+  width:44px;flex-shrink:0;
+  background:var(--glass);border-left:1px solid var(--b1);
+  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  display:flex;flex-direction:column;align-items:center;
+  padding:10px 0;gap:2px;overflow-y:auto;scrollbar-width:none;
+  position:relative;z-index:10;
+}
+#rail::-webkit-scrollbar{display:none;}
+.rbtn{
+  width:34px;height:34px;border-radius:8px;background:transparent;border:none;
+  color:var(--mu);cursor:pointer;display:flex;align-items:center;justify-content:center;
+  transition:all .15s;position:relative;flex-shrink:0;
+}
+.rbtn:hover{background:var(--s2);color:var(--pl)}
+.rbtn.on{background:var(--pg);color:var(--pl)}
+.rbtn svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.rbtn[data-tip]:hover::after{
+  content:attr(data-tip);
+  position:absolute;right:42px;top:50%;transform:translateY(-50%);
+  background:var(--s3);border:1px solid var(--b2);color:var(--tx);
+  font-size:11px;padding:4px 9px;border-radius:6px;white-space:nowrap;z-index:999;pointer-events:none;
+}
+.rsep{width:20px;height:1px;background:var(--b1);margin:3px 0}
+.rsp{flex:1}
+
+/* ═══════════════════════════════════════
+   ASK PANEL
+═══════════════════════════════════════ */
+#panel-ask{gap:0}
+#ask-sel-box{margin:12px 14px 0;background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:10px 12px;flex-shrink:0}
+#ask-sel-lbl{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--pl);margin-bottom:4px}
+#ask-sel-txt{font-size:12px;color:var(--tx);line-height:1.5;max-height:80px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical}
+#ask-src{font-size:10px;color:var(--mu);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#ask-actions{display:flex;flex-wrap:wrap;gap:6px;padding:12px 14px;flex-shrink:0}
+.ask-btn{background:var(--s2);border:1px solid var(--b1);border-radius:20px;color:var(--mu);font-size:12px;padding:5px 13px;cursor:pointer;font-family:inherit;transition:all .13s}
+.ask-btn:hover{border-color:var(--p);color:var(--pl);background:var(--pg)}
+#ask-inp-row{display:flex;gap:6px;padding:0 14px 14px;flex-shrink:0;margin-top:auto}
+#ask-inp{flex:1;background:var(--bg);border:1px solid var(--b1);border-radius:8px;color:var(--tx);font-family:inherit;font-size:13px;padding:7px 11px;outline:none;transition:border-color .18s}
+#ask-inp:focus{border-color:var(--p)}
+#ask-inp::placeholder{color:var(--di)}
+#ask-send{background:var(--p);border:none;border-radius:8px;color:#fff;font-size:12px;font-weight:600;font-family:inherit;padding:7px 14px;cursor:pointer;transition:background .13s;white-space:nowrap}
+#ask-send:hover{background:var(--p2)}
+
+/* ═══════════════════════════════════════
+   WISEBASE PANEL
+═══════════════════════════════════════ */
+#panel-wisebase{gap:0}
+#wb-hdr{padding:16px 14px 12px;flex-shrink:0}
+#wb-hdr h2{font-size:18px;font-weight:700;margin-bottom:12px}
+#wb-search-row{display:flex;gap:6px}
+#wb-inp{flex:1;background:var(--bg);border:1px solid var(--b1);border-radius:8px;color:var(--tx);font-family:inherit;font-size:13px;padding:7px 11px;outline:none;transition:border-color .18s}
+#wb-inp:focus{border-color:var(--p)}
+#wb-inp::placeholder{color:var(--di)}
+#wb-sbtn,#wb-all{background:var(--p);border:none;border-radius:8px;color:#fff;font-size:12px;font-weight:600;font-family:inherit;padding:7px 12px;cursor:pointer;transition:background .13s;white-space:nowrap}
+#wb-sbtn:hover{background:var(--p2)}
+#wb-all{background:var(--s2);color:var(--mu);border:1px solid var(--b1)}
+#wb-all:hover{background:var(--s3);color:var(--tx)}
+#wb-list{flex:1;overflow-y:auto;padding:0 14px 14px;display:flex;flex-direction:column;gap:7px;scrollbar-width:thin;scrollbar-color:var(--b1) transparent}
+.wb-card{background:var(--s1);border:1px solid var(--b1);border-radius:10px;padding:10px 12px;cursor:pointer;transition:border-color .13s;position:relative}
+.wb-card:hover{border-color:var(--p)}
+.wb-card-title{font-size:12px;font-weight:600;color:var(--tx);margin-bottom:3px;padding-right:24px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wb-card-snippet{font-size:11.5px;color:var(--mu);line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;margin-bottom:4px}
+.wb-card-date{font-size:10px;color:var(--di)}
+.wb-card-del{position:absolute;top:8px;right:8px;background:none;border:none;color:var(--di);cursor:pointer;font-size:14px;padding:2px 5px;border-radius:4px;transition:all .12s;font-family:inherit}
+.wb-card-del:hover{background:var(--rd);color:#fff}
+#wb-empty{text-align:center;color:var(--mu);font-size:12px;padding:40px 14px}
+
+/* ═══════════════════════════════════════
+   GRAMMAR PANEL
+═══════════════════════════════════════ */
+#panel-grammar{gap:0}
+#gr-modes{display:flex;gap:5px;padding:12px 14px 0;flex-shrink:0}
+.gr-mode{background:var(--s2);border:1px solid var(--b1);border-radius:20px;color:var(--mu);font-size:11px;padding:4px 12px;cursor:pointer;font-family:inherit;transition:all .13s}
+.gr-mode:hover{color:var(--tx)}
+.gr-mode.on{border-color:var(--p);color:var(--pl);background:var(--pg)}
+#gr-inp{flex:1;margin:10px 14px 0;background:var(--bg);border:1px solid var(--b1);border-radius:10px;color:var(--tx);font-family:inherit;font-size:13px;line-height:1.6;padding:12px 13px;outline:none;resize:none;transition:border-color .18s}
+#gr-inp:focus{border-color:var(--p)}
+#gr-inp::placeholder{color:var(--di)}
+#gr-btn{margin:10px 14px 0;background:var(--p);border:none;border-radius:8px;color:#fff;font-size:12px;font-weight:600;font-family:inherit;padding:9px 20px;cursor:pointer;transition:background .13s;align-self:flex-start;flex-shrink:0}
+#gr-btn:hover{background:var(--p2)}
+#gr-result{flex:1;overflow-y:auto;margin:10px 14px 14px;background:var(--s1);border:1px solid var(--b1);border-radius:10px;padding:12px 13px;font-size:13px;line-height:1.65;display:none;scrollbar-width:thin;scrollbar-color:var(--b1) transparent}
+#gr-result.on{display:block}
+.gr-del{color:var(--rd);text-decoration:line-through}
+.gr-ins{color:var(--gr)}
+.gr-changes{border-top:1px solid var(--b1);padding-top:10px;margin-top:10px}
+.gr-change-lbl{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mu);margin-bottom:6px}
+.gr-change{font-size:12px;margin:3px 0;color:var(--tx)}
+
+/* ═══════════════════════════════════════
+   CHATPDF PANEL
+═══════════════════════════════════════ */
+#panel-pdf{gap:0}
+#pdf-auto{margin:12px 14px 0;padding:10px 12px;background:linear-gradient(135deg,#1a0533,#2d0d5e);border:1px solid var(--p);border-radius:10px;display:none;flex-shrink:0}
+#pdf-auto.on{display:block}
+#pdf-auto-lbl{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--pl);margin-bottom:4px}
+#pdf-auto-title{font-size:12px;color:var(--pl2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:6px}
+#pdf-auto-btn{background:var(--p);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:600;font-family:inherit;padding:6px 14px;cursor:pointer;transition:background .13s}
+#pdf-auto-btn:hover{background:var(--p2)}
+#pdf-upload-row{padding:12px 14px 0;flex-shrink:0;display:flex;gap:8px;align-items:center}
+#pdf-upload-btn{background:var(--s2);border:1px solid var(--b1);border-radius:8px;color:var(--mu);font-size:12px;font-family:inherit;padding:8px 16px;cursor:pointer;transition:all .13s}
+#pdf-upload-btn:hover{border-color:var(--p);color:var(--tx)}
+#pdf-status{padding:6px 14px;font-size:11.5px;color:var(--mu);flex-shrink:0;min-height:20px}
+#pdf-msgs{flex:1;overflow-y:auto;padding:0 14px 8px;display:flex;flex-direction:column;gap:6px;scrollbar-width:thin;scrollbar-color:var(--b1) transparent}
+.pdf-q{background:linear-gradient(135deg,var(--ub),var(--ub2));color:#ede9fe;padding:8px 11px;border-radius:10px;border-bottom-right-radius:3px;font-size:13px;align-self:flex-end;max-width:85%}
+.pdf-a{background:var(--s1);border:1px solid var(--b1);color:var(--tx);padding:8px 11px;border-radius:10px;border-bottom-left-radius:3px;font-size:13px}
+#pdf-inp-area{padding:10px 12px 12px;background:var(--s1);border-top:1px solid var(--b1);flex-shrink:0;display:flex;gap:6px}
+#pdf-inp{flex:1;resize:none;background:var(--bg);border:1px solid var(--b1);border-radius:8px;color:var(--tx);font-family:inherit;font-size:13px;line-height:1.5;padding:8px 11px;outline:none;max-height:80px;transition:border-color .18s}
+#pdf-inp:focus{border-color:var(--p)}
+#pdf-send{background:var(--p);border:none;border-radius:8px;color:#fff;font-size:12px;font-weight:600;font-family:inherit;padding:8px 14px;cursor:pointer;transition:background .13s;align-self:flex-end}
+#pdf-send:hover{background:var(--p2)}
+
+/* ═══════════════════════════════════════
+   REC NOTE PANEL
+═══════════════════════════════════════ */
+#panel-rec{gap:0}
+#rec-controls{display:flex;align-items:center;gap:10px;padding:16px 14px 0;flex-shrink:0}
+#rec-btn{background:var(--rd);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;font-family:inherit;padding:8px 18px;cursor:pointer;transition:background .13s}
+#rec-btn.recording{background:#b91c1c;animation:recpulse 1s ease-in-out infinite}
+@keyframes recpulse{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.4)}50%{box-shadow:0 0 0 6px rgba(239,68,68,0)}}
+#rec-timer{font-size:14px;font-weight:600;color:var(--tx);font-variant-numeric:tabular-nums}
+#rec-status{font-size:11.5px;color:var(--mu)}
+#rec-transcript{flex:1;overflow-y:auto;margin:10px 14px 0;padding:10px 13px;background:var(--bg);border:1px solid var(--b1);border-radius:10px;font-size:13px;color:var(--tx);line-height:1.65;scrollbar-width:thin;scrollbar-color:var(--b1) transparent;white-space:pre-wrap}
+#rec-foot{padding:8px 14px;display:flex;gap:6px;flex-shrink:0}
+#rec-summarize,#rec-save-wb{background:var(--s2);border:1px solid var(--b1);border-radius:8px;color:var(--mu);font-size:12px;font-family:inherit;padding:7px 14px;cursor:pointer;transition:all .13s}
+#rec-summarize:hover,#rec-save-wb:hover{border-color:var(--p);color:var(--pl)}
+#rec-notes{flex:1;overflow-y:auto;margin:0 14px 14px;padding:10px 13px;background:var(--s1);border:1px solid var(--b1);border-radius:10px;font-size:13px;line-height:1.65;display:none;scrollbar-width:thin;scrollbar-color:var(--b1) transparent}
+#rec-notes.on{display:block}
+#rec-ff-note{margin:12px 14px;padding:12px;background:var(--s2);border:1px solid var(--b1);border-radius:10px;font-size:12px;color:var(--mu);line-height:1.5;display:none}
+#rec-ff-note p{margin-bottom:8px}
+#rec-whisper-btn{background:var(--p);border:none;border-radius:7px;color:#fff;font-size:12px;font-family:inherit;padding:7px 16px;cursor:pointer;transition:background .13s}
+#rec-whisper-btn:hover{background:var(--p2)}
+
+/* ═══════════════════════════════════════
+   OCR PANEL
+═══════════════════════════════════════ */
+#panel-ocr{gap:0}
+#ocr-capture{margin:16px 14px 0;background:var(--p);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;font-family:inherit;padding:10px 20px;cursor:pointer;transition:background .13s;display:flex;align-items:center;gap:7px;align-self:flex-start;flex-shrink:0}
+#ocr-capture:hover{background:var(--p2)}
+#ocr-result{flex:1;overflow-y:auto;margin:10px 14px 0;padding:10px 13px;background:var(--bg);border:1px solid var(--b1);border-radius:10px;font-size:13px;color:var(--tx);line-height:1.65;min-height:80px;scrollbar-width:thin;scrollbar-color:var(--b1) transparent;white-space:pre-wrap}
+#ocr-actions{padding:8px 14px 14px;display:flex;gap:6px;flex-shrink:0}
+#ocr-to-chat,#ocr-translate,#ocr-copy{background:var(--s2);border:1px solid var(--b1);border-radius:8px;color:var(--mu);font-size:12px;font-family:inherit;padding:7px 12px;cursor:pointer;transition:all .13s}
+#ocr-to-chat:hover,#ocr-translate:hover,#ocr-copy:hover{border-color:var(--p);color:var(--pl)}
+
+/* ═══════════════════════════════════════
+   IMAGE GENERATOR PANEL
+═══════════════════════════════════════ */
+#panel-image{gap:0;overflow-y:auto}
+#img-prompt,#img-neg{margin:8px 14px 0;background:var(--bg);border:1px solid var(--b1);border-radius:10px;color:var(--tx);font-family:inherit;font-size:13px;line-height:1.5;padding:10px 13px;outline:none;resize:none;transition:border-color .18s;min-height:60px;width:calc(100% - 28px)}
+#img-prompt:focus,#img-neg:focus{border-color:var(--p)}
+#img-prompt::placeholder,#img-neg::placeholder{color:var(--di)}
+#img-neg{min-height:40px;font-size:12px}
+#img-styles{display:flex;gap:5px;padding:10px 14px 0;flex-wrap:wrap;flex-shrink:0}
+.img-style{background:var(--s2);border:1px solid var(--b1);border-radius:20px;color:var(--mu);font-size:11px;padding:4px 11px;cursor:pointer;font-family:inherit;transition:all .13s}
+.img-style:hover{color:var(--tx)}
+.img-style.on{border-color:var(--p);color:var(--pl);background:var(--pg)}
+#img-gen{margin:10px 14px 0;background:var(--p);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;font-family:inherit;padding:10px 20px;cursor:pointer;transition:background .13s;align-self:flex-start}
+#img-gen:hover{background:var(--p2)}
+#img-status{padding:6px 14px;font-size:11.5px;color:var(--mu);flex-shrink:0;min-height:20px}
+#img-out{display:block;margin:0 14px 6px;border-radius:10px;max-width:calc(100% - 28px);border:1px solid var(--b1)}
+#img-acts{padding:0 14px 12px;display:flex;gap:6px}
+#img-dl{background:var(--s2);border:1px solid var(--b1);border-radius:8px;color:var(--mu);font-size:12px;font-family:inherit;padding:7px 14px;cursor:pointer;transition:all .13s}
+#img-dl:hover{border-color:var(--p);color:var(--pl)}
+#img-comfy-note{margin:10px 14px;padding:12px;background:var(--s2);border:1px solid var(--b1);border-radius:10px;font-size:12px;color:var(--mu);line-height:1.5}
+#img-comfy-note a{color:var(--pl)}
+
+/* ═══════════════════════════════════════
+   BROWSER AGENT PANEL
+═══════════════════════════════════════ */
+#panel-agent{gap:0}
+#agent-task{margin:12px 14px 0;background:var(--bg);border:1px solid var(--b1);border-radius:10px;color:var(--tx);font-family:inherit;font-size:13px;line-height:1.5;padding:10px 13px;outline:none;resize:none;min-height:80px;transition:border-color .18s;width:calc(100% - 28px);flex-shrink:0}
+#agent-task:focus{border-color:var(--p)}
+#agent-task::placeholder{color:var(--di)}
+#agent-controls{display:flex;gap:6px;padding:8px 14px 0;flex-shrink:0}
+#agent-start{background:var(--gr);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;font-family:inherit;padding:8px 18px;cursor:pointer;transition:background .13s}
+#agent-start:hover{background:#059669}
+#agent-stop{background:var(--rd);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;font-family:inherit;padding:8px 18px;cursor:pointer;transition:background .13s}
+#agent-stop:hover{background:#b91c1c}
+#agent-step-count{padding:4px 14px;font-size:11px;color:var(--mu);flex-shrink:0}
+#agent-log{flex:1;overflow-y:auto;margin:4px 14px 14px;padding:10px 13px;background:var(--bg);border:1px solid var(--b1);border-radius:10px;font-size:12px;color:var(--tx);line-height:1.7;scrollbar-width:thin;scrollbar-color:var(--b1) transparent}
+.agent-step{padding:3px 0;border-bottom:1px solid var(--b1);color:var(--mu)}
+.agent-step:last-child{border-bottom:none;color:var(--tx)}
+</style>
+</head>
+<body>
+<div id="shell">
+
+<!-- MAIN -->
+<div id="main">
+
+  <!-- Header -->
+  <div id="hdr">
+    <div id="logo"><div id="logo-pulse"></div><svg width="14" height="14" viewBox="0 0 26 26" fill="none" style="flex-shrink:0;opacity:.8"><path d="M13 3.5L23.5 21.5H2.5L13 3.5Z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/><line x1="8" y1="16.5" x2="18" y2="16.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>AURA</div>
+    <div id="hdr-r">
+      <div id="mood"></div>
+      <div id="mpill"><div id="mdot"></div><div id="mname">connecting…</div></div>
+      <button class="ihbtn" id="btn-new" title="New conversation">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- CHAT PANEL -->
+  <div class="panel active" id="panel-chat">
+    <!-- Context bar -->
+    <div id="ctx">
+      <div id="ctx-icon">
+        <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6M9 13h4"/></svg>
+      </div>
+      <div id="ctx-body">
+        <div id="ctx-lbl">Context</div>
+        <div id="ctx-txt"></div>
+      </div>
+      <button id="ctx-x">✕</button>
+    </div>
+
+    <!-- Messages -->
+    <div id="msgs">
+      <div id="empty">
+        <div id="eav"><svg width="26" height="26" viewBox="0 0 26 26" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M13 3.5L23.5 21.5H2.5L13 3.5Z" stroke="white" stroke-width="2" stroke-linejoin="round"/><line x1="8" y1="16.5" x2="18" y2="16.5" stroke="white" stroke-width="2" stroke-linecap="round"/></svg></div>
+        <div id="etitle">What can I help with?</div>
+        <div id="esub">Your private, self-hosted AI — always on.</div>
+        <div id="chips">
+          <div class="chip" data-q="What are you capable of doing for me?">
+            <svg viewBox="0 0 24 24"><path d="M12 2l3 7h7l-6 4 2 7-6-4-6 4 2-7-6-4h7z"/></svg>
+            What can you do?
+          </div>
+          <div class="chip" data-q="Summarize the current page for me.">
+            <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            Summarize this page
+          </div>
+          <div class="chip" data-q="Search the web and tell me the biggest AI news today.">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            Latest AI news
+          </div>
+          <div class="chip" data-q="Help me think through an idea I have.">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+            Think through an idea
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Input -->
+    <div id="inp-area">
+      <div id="inp-box">
+        <div id="inp-top">
+          <textarea id="inp" rows="1" placeholder="Ask AURA anything…"></textarea>
+          <button id="send">
+            <svg viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+          </button>
+        </div>
+        <div id="modes">
+          <span id="mdl-chat"></span>
+          <button class="mpill" id="m-think">
+            <svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+            Thinking
+          </button>
+          <button class="mpill" id="m-research">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            Deep Research
+          </button>
+          <button class="mpill" id="m-page">
+            <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            This page
+          </button>
+        </div>
+      </div>
+    </div>
+  </div><!-- /panel-chat -->
+
+  <!-- SEARCH PANEL -->
+  <div class="panel" id="panel-search">
+    <div id="search-hdr">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><h2 style="margin:0">Search</h2><span id="mdl-search"></span></div>
+      <div id="search-box">
+        <svg width="14" height="14" fill="none" stroke="var(--mu)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="search-inp" type="text" placeholder="Ask anything about the web…"/>
+        <button id="search-btn">
+          <svg viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+        </button>
+      </div>
+    </div>
+    <div id="search-results">
+      <div id="search-empty">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <p>Ask anything — AURA searches the web and shows sources with answers.</p>
+      </div>
+      <div id="search-loading">
+        <div class="dots"><span></span><span></span><span></span></div>
+        Searching the web…
+      </div>
+    </div>
+  </div>
+
+  <!-- TRANSLATE PANEL -->
+  <div class="panel" id="panel-translate">
+    <div class="tool-hdr" style="display:flex;align-items:center;justify-content:space-between;padding-bottom:12px"><h2 style="margin:0">Translate</h2><span id="mdl-translate"></span></div>
+    <div id="tr-langs">
+      <select class="lang-sel" id="tr-from">
+        <option value="auto">Auto detect</option>
+        <option value="English">English</option>
+        <option value="Azerbaijani">Azerbaijani</option>
+        <option value="Russian">Russian</option>
+        <option value="Spanish">Spanish</option>
+        <option value="French">French</option>
+        <option value="German">German</option>
+        <option value="Chinese">Chinese</option>
+        <option value="Japanese">Japanese</option>
+        <option value="Arabic">Arabic</option>
+        <option value="Turkish">Turkish</option>
+      </select>
+      <span id="tr-arrow">→</span>
+      <select class="lang-sel" id="tr-to">
+        <option value="English">English</option>
+        <option value="Azerbaijani">Azerbaijani</option>
+        <option value="Russian">Russian</option>
+        <option value="Spanish">Spanish</option>
+        <option value="French">French</option>
+        <option value="German">German</option>
+        <option value="Chinese">Chinese</option>
+        <option value="Japanese">Japanese</option>
+        <option value="Arabic">Arabic</option>
+        <option value="Turkish">Turkish</option>
+      </select>
+    </div>
+    <div id="tr-body">
+      <div id="tr-input-wrap">
+        <textarea id="tr-inp" placeholder="Type or paste text to translate…"></textarea>
+        <div id="tr-btn-row"><button id="tr-btn">Translate</button></div>
+      </div>
+      <div id="tr-out-wrap">
+        <div id="tr-out">Translation will appear here.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- WRITE PANEL -->
+  <div class="panel" id="panel-write">
+    <div id="write-tabs" style="display:flex;align-items:center;justify-content:space-between">
+      <div style="display:flex">
+        <button class="wtab on" data-tab="write">Write</button>
+        <button class="wtab" data-tab="improve">Improve</button>
+      </div>
+      <span id="mdl-write" style="margin-right:14px"></span>
+    </div>
+    <div id="write-types">
+      <button class="wtype on" data-type="Essay">Essay</button>
+      <button class="wtype" data-type="Paragraph">Paragraph</button>
+      <button class="wtype" data-type="Email">Email</button>
+      <button class="wtype" data-type="Bullet points">Bullets</button>
+      <button class="wtype" data-type="Summary">Summary</button>
+    </div>
+    <div id="write-opts">
+      <button class="wopt on" data-opt="tone" data-val="Formal">Formal</button>
+      <button class="wopt" data-opt="tone" data-val="Casual">Casual</button>
+      <button class="wopt on" data-opt="len" data-val="Medium">Medium</button>
+      <button class="wopt" data-opt="len" data-val="Short">Short</button>
+      <button class="wopt" data-opt="len" data-val="Long">Long</button>
+    </div>
+    <div id="write-inp-wrap">
+      <textarea id="write-inp" placeholder="Enter your topic or paste text to improve…"></textarea>
+    </div>
+    <div id="write-foot">
+      <div id="write-foot-l"></div>
+      <button id="write-submit">Generate →</button>
+    </div>
+    <div id="write-result"></div>
+  </div>
+
+  <!-- MODELS PANEL -->
+  <div class="panel" id="panel-models">
+    <div style="padding:14px 14px 8px;flex-shrink:0;border-bottom:1px solid var(--b1)">
+      <div style="font-size:15px;font-weight:700;color:var(--pl2);margin-bottom:2px">Model Routing</div>
+      <div style="font-size:11px;color:var(--mu)">Choose which AI runs each job. Cloud models need Ollama Pro.</div>
+    </div>
+    <div id="mdl-body" style="flex:1;overflow-y:auto;padding:10px 14px;display:flex;flex-direction:column;gap:10px">
+      <div id="mdl-loading" style="color:var(--mu);font-size:12px;padding:20px 0;text-align:center">Loading models…</div>
+    </div>
+    <div style="padding:10px 14px;border-top:1px solid var(--b1);display:flex;gap:8px;flex-shrink:0">
+      <button id="mdl-save" style="flex:1;height:34px;background:var(--p);border:none;border-radius:8px;color:#fff;font-size:12px;font-weight:600;cursor:pointer">Apply Changes</button>
+      <button id="mdl-reload" style="width:34px;height:34px;background:var(--s2);border:1px solid var(--b1);border-radius:8px;color:var(--mu);cursor:pointer;display:flex;align-items:center;justify-content:center">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- TOOLS PANEL -->
+  <div class="panel" id="panel-tools">
+    <div id="tools-content">
+      <div id="tools-title" style="font-size:18px;font-weight:700;">Tools</div>
+
+      <div class="tool-cat">
+        <div class="tool-cat-lbl">Reading</div>
+        <div class="tool-grid">
+          <button class="tool-card" data-action="summarize-page">
+            <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            <div class="tool-card-name">Page Summary</div>
+            <div class="tool-card-desc">Summarize any webpage instantly</div>
+          </button>
+          <button class="tool-card" data-action="key-points">
+            <svg viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+            <div class="tool-card-name">Key Points</div>
+            <div class="tool-card-desc">Extract the most important ideas</div>
+          </button>
+          <button class="tool-card" data-action="explain-page">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+            <div class="tool-card-name">Explain Page</div>
+            <div class="tool-card-desc">Simplify complex content</div>
+          </button>
+          <button class="tool-card" data-action="questions">
+            <svg viewBox="0 0 24 24"><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3M12 17h.01"/></svg>
+            <div class="tool-card-name">Generate Q&A</div>
+            <div class="tool-card-desc">Create questions from content</div>
+          </button>
+        </div>
+      </div>
+
+      <div class="tool-cat">
+        <div class="tool-cat-lbl">Research</div>
+        <div class="tool-grid">
+          <button class="tool-card" data-action="deep-research">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <div class="tool-card-name">Deep Research</div>
+            <div class="tool-card-desc">Multi-step web research</div>
+          </button>
+          <button class="tool-card" data-action="fact-check">
+            <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <div class="tool-card-name">Fact Check</div>
+            <div class="tool-card-desc">Verify claims with sources</div>
+          </button>
+        </div>
+      </div>
+
+      <div class="tool-cat">
+        <div class="tool-cat-lbl">Writing</div>
+        <div class="tool-grid">
+          <button class="tool-card" data-action="write-essay">
+            <svg viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            <div class="tool-card-name">AI Writer</div>
+            <div class="tool-card-desc">Essays, emails, paragraphs</div>
+          </button>
+          <button class="tool-card" data-action="improve-writing">
+            <svg viewBox="0 0 24 24"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+            <div class="tool-card-name">Improve Text</div>
+            <div class="tool-card-desc">Rewrite and enhance writing</div>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ASK PANEL -->
+  <div class="panel" id="panel-ask">
+    <div class="tool-hdr" style="display:flex;align-items:center;justify-content:space-between;padding-bottom:12px"><h2 style="margin:0">Ask AURA</h2><span id="mdl-ask"></span></div>
+    <div id="ask-sel-box">
+      <div id="ask-sel-lbl">Selected text</div>
+      <div id="ask-sel-txt">Select text on any page, then click a button below.</div>
+      <div id="ask-src"></div>
+    </div>
+    <div id="ask-actions">
+      <button class="ask-btn" data-prompt="Explain this clearly: ">Explain</button>
+      <button class="ask-btn" data-prompt="Define the key terms in: ">Define</button>
+      <button class="ask-btn" data-prompt="Summarize briefly: ">Summarize</button>
+      <button class="ask-btn" data-prompt="Translate this to English: ">Translate</button>
+      <button class="ask-btn" data-prompt="Search the web for more about: ">Search web</button>
+    </div>
+    <div id="ask-inp-row">
+      <input id="ask-inp" type="text" placeholder="Or type your own question…"/>
+      <button id="ask-send">Ask</button>
+    </div>
+  </div><!-- /panel-ask -->
+
+  <!-- WISEBASE PANEL -->
+  <div class="panel" id="panel-wisebase">
+    <div id="wb-hdr">
+      <h2>Wisebase</h2>
+      <div id="wb-search-row">
+        <input id="wb-inp" type="text" placeholder="Search saved clips…"/>
+        <button id="wb-sbtn">Search</button>
+        <button id="wb-all">All</button>
+      </div>
+    </div>
+    <div id="wb-list"><div id="wb-empty">No saved clips yet.</div></div>
+  </div><!-- /panel-wisebase -->
+
+  <!-- GRAMMAR PANEL -->
+  <div class="panel" id="panel-grammar">
+    <div class="tool-hdr" style="display:flex;align-items:center;justify-content:space-between;padding-bottom:12px"><h2 style="margin:0">Grammar</h2><span id="mdl-grammar"></span></div>
+    <div id="gr-modes">
+      <button class="gr-mode on" data-mode="grammar">Grammar</button>
+      <button class="gr-mode" data-mode="style">+ Style</button>
+      <button class="gr-mode" data-mode="rewrite">Rewrite</button>
+    </div>
+    <textarea id="gr-inp" placeholder="Paste text to check…"></textarea>
+    <button id="gr-btn">Check →</button>
+    <div id="gr-result"></div>
+  </div><!-- /panel-grammar -->
+
+  <!-- CHATPDF PANEL -->
+  <div class="panel" id="panel-pdf">
+    <div class="tool-hdr" style="display:flex;align-items:center;justify-content:space-between;padding-bottom:12px"><h2 style="margin:0">Chat with PDF</h2><span id="mdl-pdf"></span></div>
+    <div id="pdf-auto">
+      <div id="pdf-auto-lbl">PDF detected on this tab</div>
+      <div id="pdf-auto-title"></div>
+      <button id="pdf-auto-btn">Load this PDF</button>
+    </div>
+    <div id="pdf-upload-row">
+      <button id="pdf-upload-btn">Upload PDF</button>
+      <input type="file" id="pdf-file" accept=".pdf" style="display:none"/>
+    </div>
+    <div id="pdf-status"></div>
+    <div id="pdf-msgs"></div>
+    <div id="pdf-inp-area" style="display:none">
+      <textarea id="pdf-inp" placeholder="Ask about the PDF…" rows="2"></textarea>
+      <button id="pdf-send">Ask</button>
+    </div>
+  </div><!-- /panel-pdf -->
+
+  <!-- REC NOTE PANEL -->
+  <div class="panel" id="panel-rec">
+    <div class="tool-hdr" style="display:flex;align-items:center;justify-content:space-between;padding-bottom:12px"><h2 style="margin:0">Voice Notes</h2><span id="mdl-voice"></span></div>
+    <div id="rec-controls">
+      <button id="rec-btn">● Record</button>
+      <span id="rec-timer">0:00</span>
+      <span id="rec-status">Ready</span>
+    </div>
+    <div id="rec-transcript"></div>
+    <div id="rec-foot" style="display:none">
+      <button id="rec-summarize">Summarize as Notes</button>
+      <button id="rec-save-wb">Save transcript</button>
+    </div>
+    <div id="rec-notes"></div>
+    <div id="rec-ff-note">
+      <p>Firefox: Web Speech API not supported. Upload audio for Whisper transcription.</p>
+      <input type="file" id="rec-audio-file" accept="audio/*" style="display:block;width:100%;margin-bottom:8px"/>
+      <button id="rec-whisper-btn">Transcribe with Whisper</button>
+    </div>
+  </div><!-- /panel-rec -->
+
+  <!-- OCR PANEL -->
+  <div class="panel" id="panel-ocr">
+    <div class="tool-hdr"><h2>OCR</h2></div>
+    <button id="ocr-capture">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 012-2h2"/><path d="M17 3h2a2 2 0 012 2v2"/><path d="M21 17v2a2 2 0 01-2 2h-2"/><path d="M7 21H5a2 2 0 01-2-2v-2"/><rect x="7" y="7" width="10" height="10"/></svg>
+      Select Region on Page
+    </button>
+    <div id="ocr-result">OCR text will appear here after you select a region.</div>
+    <div id="ocr-actions" style="display:none">
+      <button id="ocr-to-chat">Send to Chat</button>
+      <button id="ocr-translate">Translate</button>
+      <button id="ocr-copy">Copy</button>
+    </div>
+  </div><!-- /panel-ocr -->
+
+  <!-- IMAGE GENERATOR PANEL -->
+  <div class="panel" id="panel-image">
+    <div class="tool-hdr"><h2>Image Generator</h2></div>
+    <textarea id="img-prompt" placeholder="Describe the image…"></textarea>
+    <textarea id="img-neg" placeholder="Negative prompt (optional)…"></textarea>
+    <div id="img-styles">
+      <button class="img-style on" data-style="">Default</button>
+      <button class="img-style" data-style="photorealistic, 8k">Photo</button>
+      <button class="img-style" data-style="anime style, illustration">Anime</button>
+      <button class="img-style" data-style="abstract art, vibrant">Abstract</button>
+    </div>
+    <button id="img-gen">Generate</button>
+    <div id="img-status"></div>
+    <img id="img-out" style="display:none" alt="Generated image"/>
+    <div id="img-acts" style="display:none">
+      <button id="img-dl">Download</button>
+    </div>
+    <div id="img-comfy-note" style="display:none">
+      <p>ComfyUI not running. <a href="https://github.com/comfyanonymous/ComfyUI" target="_blank" rel="noopener">Install ComfyUI</a> and run on port 8188.</p>
+    </div>
+  </div><!-- /panel-image -->
+
+  <!-- BROWSER AGENT PANEL -->
+  <div class="panel" id="panel-agent">
+    <div class="tool-hdr"><h2>Browser Agent</h2></div>
+    <textarea id="agent-task" placeholder="Describe what to do on this page…"></textarea>
+    <div id="agent-controls">
+      <button id="agent-start">Start Agent</button>
+      <button id="agent-stop" style="display:none">Stop</button>
+    </div>
+    <div id="agent-step-count"></div>
+    <div id="agent-log"></div>
+  </div><!-- /panel-agent -->
+
+</div><!-- /main -->
+
+<!-- RIGHT RAIL -->
+<div id="rail">
+  <button class="rbtn on" data-panel="chat" data-tip="Chat">
+    <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+  </button>
+  <button class="rbtn" data-panel="ask" data-tip="Ask">
+    <svg viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+  </button>
+  <div class="rsep"></div>
+  <button class="rbtn" data-panel="search" data-tip="Search">
+    <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+  </button>
+  <button class="rbtn" data-panel="wisebase" data-tip="Wisebase">
+    <svg viewBox="0 0 24 24"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg>
+  </button>
+  <div class="rsep"></div>
+  <button class="rbtn" data-panel="translate" data-tip="Translate">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+  </button>
+  <button class="rbtn" data-panel="grammar" data-tip="Grammar">
+    <svg viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+  </button>
+  <button class="rbtn" data-panel="write" data-tip="Write">
+    <svg viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+  </button>
+  <div class="rsep"></div>
+  <button class="rbtn" data-panel="rec" data-tip="Voice Notes">
+    <svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+  </button>
+  <button class="rbtn" data-panel="ocr" data-tip="OCR">
+    <svg viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 012-2h2"/><path d="M17 3h2a2 2 0 012 2v2"/><path d="M21 17v2a2 2 0 01-2 2h-2"/><path d="M7 21H5a2 2 0 01-2-2v-2"/><rect x="7" y="7" width="10" height="10"/></svg>
+  </button>
+  <button class="rbtn" data-panel="pdf" data-tip="Chat PDF">
+    <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+  </button>
+  <div class="rsep"></div>
+  <button class="rbtn" data-panel="image" data-tip="Image Gen">
+    <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+  </button>
+  <button class="rbtn" data-panel="agent" data-tip="Browser Agent">
+    <svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16"/></svg>
+  </button>
+  <button class="rbtn" data-panel="models" data-tip="Model Routing">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+  </button>
+  <button class="rbtn" data-panel="tools" data-tip="Tools">
+    <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+  </button>
+  <div class="rsp"></div>
+  <button class="rbtn" id="rail-clear" data-tip="Clear chat">
+    <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6M10 11v6M14 11v6"/></svg>
+  </button>
+</div>
+
+</div><!-- /shell -->
+<script src="sidebar.js"></script>
+</body>
+</html>
