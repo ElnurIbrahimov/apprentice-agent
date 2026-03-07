@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
-import type { Message } from '../types';
+import type { Message, Citation } from '../types';
+import { ModelCompare } from './ModelCompare';
 import { UserCircleIcon, SparklesIcon, BoltIcon } from '@heroicons/react/24/solid';
 import { ClipboardDocumentIcon, CheckIcon } from '@heroicons/react/24/outline';
 import { AttachmentList } from './AttachmentPreview';
+import { ToolTrace } from './ToolTrace';
 
 function CodeBlock({ language, children }: { language: string; children: string }) {
   const [codeCopied, setCodeCopied] = useState(false);
@@ -42,6 +44,42 @@ function CodeBlock({ language, children }: { language: string; children: string 
           {children}
         </code>
       </pre>
+    </div>
+  );
+}
+
+function CitationList({ citations }: { citations: Citation[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? citations : citations.slice(0, 3);
+  const hasMore = citations.length > 3;
+
+  return (
+    <div className="mt-3 border-t border-gray-700/50 pt-2 text-xs">
+      <div className="text-gray-500 mb-1.5 font-medium">Sources</div>
+      <ol className="space-y-1">
+        {visible.map((c) => (
+          <li key={c.id} className="flex items-start gap-1.5">
+            <span className="flex-shrink-0 text-gray-500">[{c.id}]</span>
+            <a
+              href={c.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-chat-accent hover:underline hover:text-chat-accent-hover truncate block"
+              title={c.snippet || c.title}
+            >
+              {c.title || c.url}
+            </a>
+          </li>
+        ))}
+      </ol>
+      {hasMore && (
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="mt-1 text-gray-500 hover:text-gray-300 transition-colors"
+        >
+          {expanded ? 'Show fewer' : `Show ${citations.length - 3} more source${citations.length - 3 !== 1 ? 's' : ''}...`}
+        </button>
+      )}
     </div>
   );
 }
@@ -135,6 +173,11 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             <AttachmentList attachments={message.attachments} compact />
           )}
 
+          {/* Tool trace (above content) */}
+          {!isUser && message.toolTrace && message.toolTrace.length > 0 && (
+            <ToolTrace traces={message.toolTrace} isStreaming={isStreaming} />
+          )}
+
           {/* Message content */}
           <div className="prose prose-invert max-w-none text-chat-text">
             {isUser ? (
@@ -188,6 +231,20 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               <span className="typing-cursor inline-block w-2 h-4 bg-chat-accent ml-1" />
             )}
           </div>
+
+          {/* Citations */}
+          {!isUser && message.citations && message.citations.length > 0 && !isStreaming && (
+            <CitationList citations={message.citations} />
+          )}
+
+          {/* Model comparison results */}
+          {!isUser && message.compareResults && message.compareResults.length > 0 && (
+            <ModelCompare
+              results={message.compareResults}
+              query={message.content}
+              onUseResponse={(response) => navigator.clipboard.writeText(response)}
+            />
+          )}
 
           {/* Model badge for assistant messages */}
           {!isUser && message.model_used && !isStreaming && (

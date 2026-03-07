@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Message, MoodState, StatusResponse, ConnectionStatus, Conversation } from '../types';
+import type { Message, MoodState, StatusResponse, ConnectionStatus, Conversation, Citation, ToolTrace } from '../types';
 
 interface ChatState {
   // Messages
@@ -9,6 +9,8 @@ interface ChatState {
   appendToMessage: (id: string, chunk: string) => void;
   setMessageStreaming: (id: string, isStreaming: boolean) => void;
   setMessageModelUsed: (id: string, model: string) => void;
+  setCitationsForMessage: (id: string, citations: Citation[]) => void;
+  appendToolTrace: (id: string, trace: ToolTrace) => void;
   clearMessages: () => void;
 
   // Connection
@@ -100,6 +102,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((state) => ({
       messages: state.messages.map((msg) =>
         msg.id === id ? { ...msg, model_used: model } : msg
+      ),
+    }));
+  },
+
+  setCitationsForMessage: (id, citations) => {
+    set((state) => ({
+      messages: state.messages.map((msg) =>
+        msg.id === id ? { ...msg, citations } : msg
+      ),
+    }));
+  },
+
+  appendToolTrace: (id, trace) => {
+    set((state) => ({
+      messages: state.messages.map((msg) =>
+        msg.id === id ? { ...msg, toolTrace: [...(msg.toolTrace || []), trace] } : msg
       ),
     }));
   },

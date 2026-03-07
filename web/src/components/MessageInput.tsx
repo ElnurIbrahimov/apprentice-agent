@@ -1,12 +1,12 @@
 import { useState, useRef, useEffect, KeyboardEvent, FormEvent, DragEvent, ClipboardEvent } from 'react';
 import { PaperAirplaneIcon, PaperClipIcon, MicrophoneIcon } from '@heroicons/react/24/solid';
-import { MagnifyingGlassIcon, BookOpenIcon, CpuChipIcon, BeakerIcon, UserGroupIcon } from '@heroicons/react/24/outline';
+import { MagnifyingGlassIcon, BookOpenIcon, CpuChipIcon, BeakerIcon, UserGroupIcon, ScaleIcon } from '@heroicons/react/24/outline';
 import { AttachmentList } from './AttachmentPreview';
 import { useFileUpload, isSupported } from '../hooks/useFileUpload';
 import type { FileAttachment } from '../types';
 
 // Action modes for quick actions
-type ActionMode = 'none' | 'search' | 'research' | 'deep_research' | 'swarm' | 'agent';
+type ActionMode = 'none' | 'search' | 'research' | 'deep_research' | 'swarm' | 'agent' | 'compare';
 
 interface MessageInputProps {
   onSend: (message: string, attachments?: FileAttachment[], actionMode?: string | null) => void;
@@ -323,6 +323,25 @@ export function MessageInput({
             Swarm
           </button>
 
+          <button
+            type="button"
+            onClick={() => setActionMode(actionMode === 'compare' ? 'none' : 'compare')}
+            disabled={disabled || isLoading}
+            className={`
+              flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
+              transition-all duration-200 border
+              ${actionMode === 'compare'
+                ? 'bg-orange-500/20 border-orange-500/50 text-orange-400 shadow-[0_0_10px_rgba(249,115,22,0.3)]'
+                : 'bg-chat-assistant/60 border-chat-border/30 text-chat-text-secondary hover:text-orange-400 hover:border-orange-500/30 hover:bg-orange-500/10'
+              }
+              ${(disabled || isLoading) ? 'opacity-50 cursor-not-allowed' : ''}
+            `}
+            title="Compare answers from multiple models"
+          >
+            <ScaleIcon className="w-3.5 h-3.5" />
+            Compare
+          </button>
+
           {actionMode !== 'none' && (
             <span className="text-xs text-chat-text-secondary ml-2 animate-fade-in">
               {actionMode === 'search' && 'Quick web search'}
@@ -330,6 +349,7 @@ export function MessageInput({
               {actionMode === 'deep_research' && 'Multi-source deep research (20+ pages)'}
               {actionMode === 'swarm' && 'Multiple agents working in parallel'}
               {actionMode === 'agent' && 'Autonomous task execution'}
+              {actionMode === 'compare' && 'Compare 3 models side by side'}
             </span>
           )}
         </div>
@@ -347,6 +367,7 @@ export function MessageInput({
             ${actionMode === 'agent' ? 'border-purple-500/40' : ''}
             ${actionMode === 'deep_research' ? 'border-amber-500/40' : ''}
             ${actionMode === 'swarm' ? 'border-cyan-500/40' : ''}
+            ${actionMode === 'compare' ? 'border-orange-500/40' : ''}
           `}
         >
           {/* Attachment button */}

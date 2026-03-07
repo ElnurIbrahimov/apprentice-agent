@@ -26,6 +26,29 @@ export interface FileAttachment {
   path?: string;  // Server path (after upload)
 }
 
+export interface Citation {
+  id: number;
+  title: string;
+  url: string;
+  snippet?: string;
+  score?: number;
+}
+
+export interface ToolTrace {
+  event: 'start' | 'done' | 'error';
+  tool: string;
+  detail?: string;
+  elapsed_ms?: number;
+  timestamp: number;
+}
+
+export interface ModelResult {
+  model: string;
+  response: string;
+  time_ms: number;
+  error?: string | null;
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -34,6 +57,9 @@ export interface Message {
   isStreaming?: boolean;
   model_used?: string | null;
   attachments?: FileAttachment[];
+  citations?: Citation[];
+  toolTrace?: ToolTrace[];
+  compareResults?: ModelResult[];
   proactive?: {
     action: string;       // e.g., 'notify', 'suggest', 'remind', 'ask'
     trigger?: string;     // What triggered this message
@@ -68,7 +94,7 @@ export interface StatusResponse {
 }
 
 export interface WebSocketMessage {
-  type: 'chat' | 'chunk' | 'done' | 'error' | 'ping' | 'pong' | 'stopped' | 'proactive' | 'tool_status';
+  type: 'chat' | 'chunk' | 'done' | 'error' | 'ping' | 'pong' | 'stopped' | 'proactive' | 'tool_status' | 'citations' | 'tool_trace';
   content?: string;
   message?: string;
   response?: string;
@@ -83,6 +109,11 @@ export interface WebSocketMessage {
   metadata?: Record<string, unknown>;
   tool_name?: string;
   tool_action?: string;
+  citations?: Citation[];
+  event?: 'start' | 'done' | 'error';
+  tool?: string;
+  detail?: string;
+  elapsed_ms?: number;
 }
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';

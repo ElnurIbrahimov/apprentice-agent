@@ -5,7 +5,7 @@ import { MessageBubble } from './MessageBubble';
 import { MessageInput } from './MessageInput';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useProactiveMessages } from '../hooks/useProactiveMessages';
-import type { FileAttachment } from '../types';
+import type { FileAttachment, ModelResult } from '../types';
 import {
   SparklesIcon,
   ChatBubbleLeftRightIcon,
@@ -84,7 +84,42 @@ export function ChatContainer() {
     return () => clearTimeout(timer);
   }, [error, setError]);
 
-  const handleSend = (message: string, attachments?: FileAttachment[], actionMode?: string | null) => {
+  const handleSend = async (message: string, attachments?: FileAttachment[], actionMode?: string | null) => {
+    if (actionMode === 'compare') {
+      // Route through REST /api/compare instead of WebSocket
+      const store = useChatStore.getState();
+      store.addMessage({ role: 'user', content: message });
+      const assistantId = store.addMessage({ role: 'assistant', content: 'Comparing models...', isStreaming: true });
+      store.setIsLoading(true);
+
+      try {
+        const res = await fetch('/api/compare', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message }),
+        });
+        const data = await res.json();
+        const results: ModelResult[] = data.results ?? [];
+        useChatStore.setState((state) => ({
+          messages: state.messages.map((m) =>
+            m.id === assistantId
+              ? { ...m, content: '', compareResults: results, isStreaming: false }
+              : m
+          ),
+          isLoading: false,
+        }));
+      } catch {
+        useChatStore.setState((state) => ({
+          messages: state.messages.map((m) =>
+            m.id === assistantId
+              ? { ...m, content: 'Compare failed. Please try again.', isStreaming: false }
+              : m
+          ),
+          isLoading: false,
+        }));
+      }
+      return;
+    }
     // Pass actionMode for auto-model selection (null = use user's selected model)
     sendMessage(message, attachments, undefined, actionMode);
   };

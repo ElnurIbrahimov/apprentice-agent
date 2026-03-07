@@ -26,6 +26,8 @@ export function useWebSocket() {
     appendToMessage,
     setMessageStreaming,
     setMessageModelUsed,
+    setCitationsForMessage,
+    appendToolTrace,
     setConnectionStatus,
     setMood,
     setIsLoading,
@@ -142,6 +144,24 @@ export function useWebSocket() {
         );
         break;
 
+      case 'citations':
+        if (currentMessageId.current && data.citations) {
+          setCitationsForMessage(currentMessageId.current, data.citations);
+        }
+        break;
+
+      case 'tool_trace':
+        if (currentMessageId.current && data.event && data.tool) {
+          appendToolTrace(currentMessageId.current, {
+            event: data.event,
+            tool: data.tool,
+            detail: data.detail,
+            elapsed_ms: data.elapsed_ms,
+            timestamp: Date.now(),
+          });
+        }
+        break;
+
       case 'proactive': {
         // Real-time push from Gateway Daemon (instant, no polling delay)
         const proactiveId = data.id
@@ -173,7 +193,7 @@ export function useWebSocket() {
         break;
       }
     }
-  }, [addMessage, appendToMessage, setMessageStreaming, setMessageModelUsed, setMood, setIsLoading, setError, clearResponseTimeout]);
+  }, [addMessage, appendToMessage, setMessageStreaming, setMessageModelUsed, setCitationsForMessage, appendToolTrace, setMood, setIsLoading, setError, clearResponseTimeout]);
 
   // Connect function
   const connect = useCallback(() => {
