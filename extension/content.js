@@ -7,6 +7,23 @@
 // Firefox compatibility shim (file-level so all code below can use ext.*)
 const ext = typeof browser !== 'undefined' ? browser : chrome;
 
+// Wraps sendMessage to gracefully handle "Extension context invalidated" (happens
+// when the extension is reloaded while this content script is still running on a tab).
+// On invalidation, removes orphaned AURA UI elements from the page.
+function safeSend(msg, cb) {
+  try {
+    if (cb) ext.runtime.sendMessage(msg, cb);
+    else ext.runtime.sendMessage(msg);
+  } catch (e) {
+    if (e?.message?.includes('Extension context invalidated') ||
+        e?.message?.includes('context invalidated')) {
+      document.getElementById('aura-dock-host')?.remove();
+      document.getElementById('aura-host')?.remove();
+      window.__auraToolbarMounted = false;
+    }
+  }
+}
+
 (function () {
   // Guard: if already mounted in this window, do nothing (handles duplicate injection)
   if (window.__auraToolbarMounted) return;
@@ -277,18 +294,18 @@ const ext = typeof browser !== 'undefined' ? browser : chrome;
     const title = document.title;
 
     if (action === 'dock-chat') {
-      ext.runtime.sendMessage({ type: 'OPEN_PANEL', panel: 'chat' });
+      safeSend({ type: 'OPEN_PANEL', panel: 'chat' });
     } else if (action === 'dock-search') {
-      ext.runtime.sendMessage({ type: 'OPEN_PANEL', panel: 'search' });
+      safeSend({ type: 'OPEN_PANEL', panel: 'search' });
     } else if (action === 'dock-translate') {
-      ext.runtime.sendMessage({ type: 'OPEN_PANEL', panel: 'translate' });
+      safeSend({ type: 'OPEN_PANEL', panel: 'translate' });
     } else if (action === 'dock-thispage') {
       const pageText = document.body?.innerText?.slice(0, 25000) || '';
-      ext.runtime.sendMessage({ type: 'OPEN_WITH_TEXT', action: 'ask', text: pageText, url, title });
+      safeSend({ type: 'OPEN_WITH_TEXT', action: 'ask', text: pageText, url, title });
     } else if (action === 'dock-save') {
       const selText = getSelectionText();
       const textToSave = selText || `${title}\n${url}`;
-      ext.runtime.sendMessage(
+      safeSend(
         { type: 'SAVE_KNOWLEDGE', text: textToSave, url, title },
         (response) => {
           if (response && response.ok) showToast('Saved to AURA memory ✓');
@@ -373,7 +390,7 @@ const ext = typeof browser !== 'undefined' ? browser : chrome;
     const title = document.title;
 
     if (action === 'save') {
-      ext.runtime.sendMessage(
+      safeSend(
         { type: 'SAVE_KNOWLEDGE', text, url, title },
         (response) => {
           if (response && response.ok) showToast('Saved to AURA memory ✓');
@@ -381,7 +398,7 @@ const ext = typeof browser !== 'undefined' ? browser : chrome;
         }
       );
     } else {
-      ext.runtime.sendMessage({ type: 'OPEN_WITH_TEXT', action, text, url, title });
+      safeSend({ type: 'OPEN_WITH_TEXT', action, text, url, title });
     }
     hideToolbar();
   });
