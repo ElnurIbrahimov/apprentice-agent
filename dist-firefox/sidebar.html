@@ -135,6 +135,55 @@ body::after{
 #msgs::-webkit-scrollbar{width:3px}
 #msgs::-webkit-scrollbar-thumb{background:var(--b1);border-radius:2px}
 
+/* Chat home screen */
+/* When home is shown, msgs collapses; when hidden, msgs takes over */
+#chat-home{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  flex:1;padding:32px 16px;text-align:center;
+  animation:homeIn .35s cubic-bezier(.22,1,.36,1);
+}
+/* JS adds .at-home to #panel-chat; msgs collapses when home is shown */
+#panel-chat.at-home #msgs{flex:0;overflow:hidden;padding-top:0;padding-bottom:0;min-height:0}
+#panel-chat:not(.at-home) #chat-home{display:none!important}
+@keyframes homeIn{
+  from{opacity:0;transform:translateY(16px)}
+  to{opacity:1;transform:translateY(0)}
+}
+#home-avatar{
+  width:52px;height:52px;border-radius:50%;
+  background:linear-gradient(135deg,var(--p),var(--ub2));
+  display:flex;align-items:center;justify-content:center;
+  font-size:22px;font-weight:700;color:#fff;
+  margin:0 auto 16px;
+  box-shadow:0 0 0 4px rgba(124,58,237,.15),0 4px 20px rgba(124,58,237,.3);
+}
+#home-title{font-size:22px;font-weight:700;color:var(--fg,var(--tx));margin:0 0 6px}
+#home-sub{font-size:13px;color:var(--mu);margin:0 0 24px}
+#home-chips{
+  display:grid;grid-template-columns:1fr 1fr;gap:8px;
+  width:100%;max-width:280px;
+}
+.home-chip{
+  display:flex;align-items:center;gap:7px;
+  padding:10px 12px;
+  background:var(--b1);
+  border:1px solid var(--b2);
+  border-radius:10px;
+  color:var(--tx);
+  font-size:12px;font-weight:500;
+  cursor:pointer;
+  transition:all .15s ease;
+  text-align:left;
+  font-family:inherit;
+}
+.home-chip:hover{
+  background:var(--b2);border-color:var(--p);
+  transform:translateY(-1px);
+  box-shadow:0 3px 10px rgba(124,58,237,.15);
+}
+.home-chip svg{width:14px;height:14px;flex-shrink:0;color:var(--p);
+  fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
 /* Empty state */
 #empty{display:flex;flex-direction:column;align-items:center;gap:18px;padding:24px 14px 16px}
 #eav{width:52px;height:52px;border-radius:50%;
@@ -210,28 +259,30 @@ body::after{
 .bubble.ai a{color:var(--pl);text-decoration:none}.bubble.ai a:hover{text-decoration:underline}
 .bubble.ai blockquote{border-left:3px solid var(--p);padding-left:10px;color:var(--mu);margin:5px 0;font-style:italic}
 
-/* Input area */
-#inp-area{padding:10px 12px 12px;background:var(--glass);border-top:1px solid var(--b1);
-  flex-shrink:0;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
-#inp-box{background:var(--bg);border:1px solid var(--b1);border-radius:12px;overflow:hidden;transition:border-color .18s}
-#inp-box:focus-within{border-color:var(--p)}
-#inp-top{display:flex;align-items:flex-end;gap:6px;padding:9px 9px 9px 13px}
+/* Input bar (unified Sider-style) */
+#inp-bar{
+  background:var(--b1);border:1px solid var(--b2);border-radius:14px;
+  margin:0 10px 10px;overflow:hidden;flex-shrink:0;
+  transition:border-color .15s,box-shadow .15s}
+#inp-bar:focus-within{border-color:var(--p);box-shadow:0 0 0 3px rgba(124,58,237,.1)}
+#inp-meta{display:flex;align-items:center;justify-content:space-between;padding:6px 10px 0;gap:6px}
+#inp-toggles{display:flex;gap:4px}
+.inp-tog{display:flex;align-items:center;gap:4px;padding:3px 8px;border-radius:6px;
+  font-size:11px;font-weight:500;color:var(--mu);background:transparent;
+  border:1px solid transparent;cursor:pointer;transition:all .15s;font-family:inherit;white-space:nowrap}
+.inp-tog:hover{background:var(--b2);color:var(--fg)}
+.inp-tog.on{background:rgba(124,58,237,.12);border-color:rgba(124,58,237,.25);color:var(--p)}
+.inp-tog svg{flex-shrink:0}
+#inp-row{display:flex;align-items:flex-end;gap:6px;padding:6px 8px 8px}
 #inp{flex:1;resize:none;background:transparent;border:none;outline:none;
-  color:var(--tx);font-family:inherit;font-size:13px;line-height:1.5;max-height:140px}
+  color:var(--tx);font-family:inherit;font-size:13px;line-height:1.5;max-height:160px;overflow-y:auto}
 #inp::placeholder{color:var(--di)}
-#send{width:30px;height:30px;border-radius:8px;background:var(--p);border:none;
+#send{width:32px;height:32px;border-radius:8px;background:var(--p);border:none;
   color:#fff;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;
-  transition:background .13s}
-#send:hover{background:var(--p2)}
-#send:disabled{background:var(--b1);cursor:not-allowed;opacity:.5}
-#send svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-#modes{display:flex;align-items:center;gap:5px;padding:0 11px 8px;flex-wrap:wrap}
-.mpill{background:none;border:1px solid var(--b1);border-radius:20px;color:var(--mu);
-  font-size:11px;padding:3px 10px;cursor:pointer;font-family:inherit;transition:all .13s;
-  display:flex;align-items:center;gap:4px;white-space:nowrap}
-.mpill:hover{border-color:var(--b2);color:var(--tx)}
-.mpill.on{border-color:var(--p);color:var(--pl);background:var(--pg)}
-.mpill svg{width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  transition:all .15s}
+#send:hover{background:var(--ub2);transform:scale(1.05)}
+#send:active{transform:scale(.93)}
+#send:disabled{background:var(--b2);color:var(--mu);transform:none;cursor:not-allowed}
 
 /* ── Inline model picker ── */
 .mdl-pill{display:inline-flex;align-items:center;gap:5px;
@@ -767,8 +818,8 @@ body::after{
   .rbtn{width:28px;height:28px}
   .tool-hdr,.tool-hdr--flex{padding-left:10px;padding-right:10px}
   #msgs{padding-left:10px;padding-right:10px}
-  #inp-area{padding-left:8px;padding-right:8px}
-  #inp-top{padding:8px}
+  #inp-bar{margin-left:6px;margin-right:6px}
+  #inp-row{padding:5px 6px 7px}
   .bubble{padding:7px 10px}
   #yt-results,#res-result,#math-result{padding-left:10px;padding-right:10px}
   #search-hdr,#search-results{padding-left:10px;padding-right:10px}
@@ -916,42 +967,24 @@ textarea,input[type="text"]{max-width:100%}
   border-radius:5px;padding:1px 5px;color:#f0abfc;
 }
 
-/* Input area */
-#inp-area{
-  padding:10px 12px 12px;
-  background:rgba(6,6,18,.85);
-  border-top:1px solid rgba(255,255,255,.06);
-  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
-}
-#inp-box{
+/* Input bar — dark theme overrides */
+#inp-bar{
   background:var(--s1);
-  border:1px solid rgba(255,255,255,.1);
-  border-radius:13px;
-  transition:border-color .2s,box-shadow .2s;
+  border-color:rgba(255,255,255,.1);
 }
-#inp-box:focus-within{
+#inp-bar:focus-within{
   border-color:rgba(124,58,237,.6);
   box-shadow:0 0 0 3px rgba(124,58,237,.1),0 4px 20px rgba(0,0,0,.3);
 }
-#inp-top{padding:9px 8px 8px 12px;gap:6px;align-items:flex-end}
 #inp::placeholder{color:rgba(90,86,130,.8)}
 #send{
-  width:32px;height:32px;border-radius:9px;
   background:linear-gradient(135deg,var(--p),var(--ub2));
   box-shadow:0 2px 10px rgba(124,58,237,.4);
-  transition:opacity .15s,transform .1s,box-shadow .15s;
 }
-#send:hover{opacity:.9;box-shadow:0 4px 16px rgba(124,58,237,.55)}
-#send:active{transform:scale(.93)}
-#send:disabled{background:var(--s3);box-shadow:none;opacity:.45;cursor:not-allowed}
-#modes{padding:0 10px 9px;gap:5px}
-.mpill{
-  border-radius:var(--r-pill);padding:3px 10px;font-size:10.5px;gap:4px;
-  transition:all .15s;
-}
-.mpill:hover{border-color:rgba(124,58,237,.4);color:var(--pl);background:rgba(124,58,237,.08)}
-.mpill.on{border-color:rgba(124,58,237,.5);color:var(--pl);background:rgba(124,58,237,.15)}
-.mpill svg{width:10px;height:10px}
+#send:hover{opacity:.9;box-shadow:0 4px 16px rgba(124,58,237,.55);transform:scale(1.05)}
+#send:disabled{background:var(--s3);box-shadow:none;opacity:.45}
+.inp-tog:hover{background:rgba(255,255,255,.07);color:var(--pl)}
+.inp-tog.on{background:rgba(124,58,237,.15);border-color:rgba(124,58,237,.5);color:var(--pl)}
 
 /* Model dropdown */
 .mdl-drop.open{animation:dropIn .16s cubic-bezier(.22,.68,0,1.2)}
@@ -1375,6 +1408,121 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
   #msgs{padding-left:10px;padding-right:10px}
   .bubble{padding:7px 10px}
 }
+
+/* ═══════════════════════════════════════
+   RAIL LABELS + MORE TOGGLE  (Sider polish)
+═══════════════════════════════════════ */
+
+/* Rail wider to accommodate labels */
+#rail{width:58px}
+
+/* Rail buttons: icon + label stacked */
+.rbtn{
+  width:50px;height:auto;border-radius:9px;
+  display:flex;flex-direction:column;align-items:center;
+  gap:3px;padding:7px 4px;
+}
+.rbtn svg{width:16px;height:16px;flex-shrink:0}
+
+/* Text label under icon */
+.rail-lbl{
+  font-size:9px;font-weight:500;
+  color:var(--mu);letter-spacing:0.01em;
+  line-height:1;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;
+  max-width:52px;text-align:center;
+  transition:color .15s;
+}
+.rbtn:hover .rail-lbl{color:var(--tx)}
+.rbtn.on .rail-lbl{color:var(--pl)}
+
+/* Active left-bar indicator — adjusted for new height */
+.rbtn.on::before{
+  content:'';position:absolute;left:0;top:50%;transform:translateY(-50%);
+  width:2.5px;height:22px;border-radius:0 2px 2px 0;
+  background:linear-gradient(to bottom,var(--pl),var(--p));
+  box-shadow:0 0 8px rgba(124,58,237,.6);
+}
+
+/* Separator */
+.rsep{width:20px;height:1px;background:rgba(255,255,255,.07);margin:2px 0;flex-shrink:0}
+
+/* More toggle active state */
+#rail-more.on .rail-lbl{color:var(--pl)}
+
+/* Extra buttons — collapsed by default, expand as column */
+.rail-extra{
+  overflow:hidden;
+  max-height:0;
+  opacity:0;
+  transition:max-height .25s ease,opacity .2s ease;
+  display:flex;flex-direction:column;align-items:center;width:100%;
+}
+.rail-extra.open{
+  max-height:600px;
+  opacity:1;
+}
+
+/* ═══════════════════════════════════════
+   TYPOGRAPHY POLISH
+═══════════════════════════════════════ */
+
+/* Consistent panel h2 */
+.panel h2{
+  font-size:17px;font-weight:700;
+  letter-spacing:-0.3px;color:var(--fg,var(--tx));margin:0;
+}
+
+/* Section labels */
+.sect-lbl{
+  font-size:10px;font-weight:600;letter-spacing:0.06em;
+  text-transform:uppercase;color:var(--mu);margin-bottom:6px;
+}
+
+/* Body text in results */
+.panel p,.panel .result-text{
+  font-size:13px;line-height:1.6;color:var(--fg,var(--tx));
+}
+
+/* Meta / secondary text */
+.panel .meta{
+  font-size:11px;color:var(--mu);line-height:1.4;
+}
+
+/* Monospace / code */
+.panel code,.panel pre{
+  font-family:'JetBrains Mono','Fira Code','Cascadia Code',monospace;
+  font-size:12px;
+}
+
+/* ═══════════════════════════════════════
+   PAGE SUMMARIZE BAR
+═══════════════════════════════════════ */
+#page-sum-bar{
+  display:flex;align-items:center;justify-content:space-between;
+  gap:8px;margin:0 10px 6px;padding:7px 10px;
+  background:rgba(124,58,237,.07);
+  border:1px solid rgba(124,58,237,.15);
+  border-radius:10px;font-size:11px;flex-shrink:0;
+}
+#page-sum-title{
+  color:var(--mu);flex:1;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap;
+}
+#page-sum-btn{
+  font-size:11px;font-weight:600;color:var(--p);
+  background:transparent;border:none;cursor:pointer;
+  padding:2px 6px;border-radius:5px;font-family:inherit;
+  transition:background .13s;
+}
+#page-sum-btn:hover{background:rgba(124,58,237,.1)}
+
+/* Narrow fallback for wider rail */
+@media (max-width:340px){
+  #rail{width:48px}
+  .rbtn{width:42px}
+  .rail-lbl{max-width:40px;font-size:8px}
+}
 </style>
 </head>
 <body>
@@ -1396,7 +1544,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
   </div>
 
   <!-- CHAT PANEL -->
-  <div class="panel active" id="panel-chat">
+  <div class="panel active at-home" id="panel-chat">
     <!-- Context bar -->
     <div id="ctx">
       <div id="ctx-icon">
@@ -1409,9 +1557,42 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
       <button id="ctx-x">✕</button>
     </div>
 
+    <!-- Welcome / home screen (shown when chat is empty) -->
+    <div id="chat-home">
+      <div id="home-greeting">
+        <div id="home-avatar">A</div>
+        <h1 id="home-title">Hi, I'm AURA</h1>
+        <p id="home-sub">How can I assist you today?</p>
+      </div>
+      <div id="home-chips">
+        <button class="home-chip" data-action="summarize">
+          <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          Summarize page
+        </button>
+        <button class="home-chip" data-action="research">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          Deep Research
+        </button>
+        <button class="home-chip" data-action="explain">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          Explain selection
+        </button>
+        <button class="home-chip" data-action="write">
+          <svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          Write something
+        </button>
+      </div>
+    </div>
+
+    <!-- Page summarize bar (shown when page is loaded) -->
+    <div id="page-sum-bar" style="display:none">
+      <span id="page-sum-title"></span>
+      <button id="page-sum-btn">Summarize</button>
+    </div>
+
     <!-- Messages -->
     <div id="msgs">
-      <div id="empty">
+      <div id="empty" style="display:none">
         <div id="eav"><svg width="26" height="26" viewBox="0 0 26 26" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M13 3.5L23.5 21.5H2.5L13 3.5Z" stroke="white" stroke-width="2" stroke-linejoin="round"/><line x1="8" y1="16.5" x2="18" y2="16.5" stroke="white" stroke-width="2" stroke-linecap="round"/></svg></div>
         <div id="etitle">What can I help with?</div>
         <div id="esub">Your private, self-hosted AI — always on.</div>
@@ -1437,29 +1618,33 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
     </div>
 
     <!-- Input -->
-    <div id="inp-area">
-      <div id="inp-box">
-        <div id="inp-top">
-          <textarea id="inp" rows="1" placeholder="Ask AURA anything…"></textarea>
-          <button id="send" aria-label="Send message">
-            <svg viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+    <div id="inp-bar">
+      <!-- Top row: mode toggles + model -->
+      <div id="inp-meta">
+        <div id="inp-toggles">
+          <button id="m-think" class="inp-tog" title="Extended thinking">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><circle cx="12" cy="17" r=".5" fill="currentColor"/></svg>
+            Think
+          </button>
+          <button id="m-research" class="inp-tog" title="Deep research mode">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            Research
+          </button>
+          <button id="m-page" class="inp-tog" title="Include page context">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            Page
           </button>
         </div>
-        <div id="modes">
-          <span id="mdl-chat"></span>
-          <button class="mpill" id="m-think">
-            <svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
-            Thinking
-          </button>
-          <button class="mpill" id="m-research">
-            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            Deep Research
-          </button>
-          <button class="mpill" id="m-page">
-            <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            This page
-          </button>
-        </div>
+        <span id="mdl-chat"></span>
+      </div>
+      <!-- Main input row -->
+      <div id="inp-row">
+        <textarea id="inp" placeholder="Ask anything…" rows="1"></textarea>
+        <button id="send" aria-label="Send message">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+          </svg>
+        </button>
       </div>
     </div>
   </div><!-- /panel-chat -->
@@ -1969,73 +2154,105 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 
 <!-- RIGHT RAIL -->
 <div id="rail">
+  <!-- Always visible: top 8 panels -->
   <button class="rbtn on" data-panel="chat" data-tip="Chat">
     <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+    <span class="rail-lbl">Chat</span>
   </button>
   <button class="rbtn" data-panel="ask" data-tip="Ask">
     <svg viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+    <span class="rail-lbl">Ask</span>
   </button>
   <div class="rsep"></div>
   <button class="rbtn" data-panel="search" data-tip="Search">
     <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    <span class="rail-lbl">Search</span>
   </button>
   <button class="rbtn" data-panel="wisebase" data-tip="Wisebase">
     <svg viewBox="0 0 24 24"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg>
+    <span class="rail-lbl">Wisebase</span>
   </button>
   <div class="rsep"></div>
   <button class="rbtn" data-panel="translate" data-tip="Translate">
     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
-  </button>
-  <button class="rbtn" data-panel="grammar" data-tip="Grammar">
-    <svg viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+    <span class="rail-lbl">Translate</span>
   </button>
   <button class="rbtn" data-panel="write" data-tip="Write">
     <svg viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+    <span class="rail-lbl">Write</span>
   </button>
-  <div class="rsep"></div>
   <button class="rbtn" data-panel="rec" data-tip="Voice Notes">
     <svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-  </button>
-  <button class="rbtn" data-panel="ocr" data-tip="OCR">
-    <svg viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 012-2h2"/><path d="M17 3h2a2 2 0 012 2v2"/><path d="M21 17v2a2 2 0 01-2 2h-2"/><path d="M7 21H5a2 2 0 01-2-2v-2"/><rect x="7" y="7" width="10" height="10"/></svg>
-  </button>
-  <button class="rbtn" data-panel="pdf" data-tip="Chat PDF">
-    <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-  </button>
-  <button class="rbtn" data-panel="summary" data-tip="Summary">
-    <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>
+    <span class="rail-lbl">Voice</span>
   </button>
   <div class="rsep"></div>
-  <button class="rbtn" data-panel="image" data-tip="Image Gen">
-    <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+
+  <!-- More toggle button -->
+  <button class="rbtn" id="rail-more" title="More tools">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+    <span class="rail-lbl">More</span>
   </button>
-  <button class="rbtn" data-panel="agent" data-tip="Browser Agent">
-    <svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16"/></svg>
-  </button>
-  <button class="rbtn" data-panel="youtube" data-tip="YouTube">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2" ry="2"/><polygon points="10 9 15 12 10 15 10 9" fill="currentColor" stroke="none"/></svg>
-  </button>
-  <button class="rbtn" data-panel="compare" data-tip="Compare">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/><line x1="8" y1="10" x2="16" y2="10" opacity=".5"/><line x1="8" y1="14" x2="13" y2="14" opacity=".5"/></svg>
-  </button>
-  <button class="rbtn" data-panel="research" data-tip="Research">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
-  </button>
-  <button class="rbtn" data-panel="math" data-tip="Math">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="16" y2="6"/><line x1="12" y1="4" x2="12" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="18" x2="16" y2="18"/><line x1="8" y1="15" x2="16" y2="21"/></svg>
-  </button>
-  <button class="rbtn" data-panel="artifacts" data-tip="Artifacts">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-  </button>
-  <button class="rbtn" data-panel="models" data-tip="Model Routing">
-    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
-  </button>
-  <button class="rbtn" data-panel="tools" data-tip="Tools">
-    <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-  </button>
+
+  <!-- Extra buttons — hidden until More is toggled -->
+  <div class="rail-extra">
+    <button class="rbtn" data-panel="grammar" data-tip="Grammar">
+      <svg viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+      <span class="rail-lbl">Grammar</span>
+    </button>
+    <button class="rbtn" data-panel="ocr" data-tip="OCR">
+      <svg viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 012-2h2"/><path d="M17 3h2a2 2 0 012 2v2"/><path d="M21 17v2a2 2 0 01-2 2h-2"/><path d="M7 21H5a2 2 0 01-2-2v-2"/><rect x="7" y="7" width="10" height="10"/></svg>
+      <span class="rail-lbl">OCR</span>
+    </button>
+    <button class="rbtn" data-panel="pdf" data-tip="Chat PDF">
+      <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      <span class="rail-lbl">PDF</span>
+    </button>
+    <button class="rbtn" data-panel="summary" data-tip="Summary">
+      <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>
+      <span class="rail-lbl">Summary</span>
+    </button>
+    <button class="rbtn" data-panel="youtube" data-tip="YouTube">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2" ry="2"/><polygon points="10 9 15 12 10 15 10 9" fill="currentColor" stroke="none"/></svg>
+      <span class="rail-lbl">YouTube</span>
+    </button>
+    <button class="rbtn" data-panel="research" data-tip="Research">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+      <span class="rail-lbl">Research</span>
+    </button>
+    <button class="rbtn" data-panel="math" data-tip="Math">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="16" y2="6"/><line x1="12" y1="4" x2="12" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="18" x2="16" y2="18"/><line x1="8" y1="15" x2="16" y2="21"/></svg>
+      <span class="rail-lbl">Math</span>
+    </button>
+    <button class="rbtn" data-panel="image" data-tip="Image Gen">
+      <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+      <span class="rail-lbl">Image</span>
+    </button>
+    <button class="rbtn" data-panel="artifacts" data-tip="Artifacts">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+      <span class="rail-lbl">Artifacts</span>
+    </button>
+    <button class="rbtn" data-panel="compare" data-tip="Compare">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/><line x1="8" y1="10" x2="16" y2="10" opacity=".5"/><line x1="8" y1="14" x2="13" y2="14" opacity=".5"/></svg>
+      <span class="rail-lbl">Compare</span>
+    </button>
+    <button class="rbtn" data-panel="agent" data-tip="Browser Agent">
+      <svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16"/></svg>
+      <span class="rail-lbl">Agent</span>
+    </button>
+    <button class="rbtn" data-panel="models" data-tip="Model Routing">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+      <span class="rail-lbl">Models</span>
+    </button>
+    <button class="rbtn" data-panel="tools" data-tip="Tools">
+      <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      <span class="rail-lbl">Tools</span>
+    </button>
+  </div>
+
   <div class="rsp"></div>
   <button class="rbtn" id="rail-clear" aria-label="Clear chat" data-tip="Clear chat">
     <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6M10 11v6M14 11v6"/></svg>
+    <span class="rail-lbl">Clear</span>
   </button>
 </div>
 

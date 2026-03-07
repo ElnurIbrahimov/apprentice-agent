@@ -317,7 +317,7 @@ function switchPanel(name) {
   document.querySelectorAll('.rbtn[data-panel]').forEach(b => {
     b.classList.toggle('on', b.dataset.panel === name);
   });
-  if (name === 'chat') inp.focus();
+  if (name === 'chat') { inp.focus(); updateHomeState(); }
   else if (name === 'search') searchInp.focus();
   else if (name === 'translate') trInp.focus();
   else if (name === 'write') writeInp.focus();
@@ -340,6 +340,12 @@ document.querySelectorAll('.rbtn[data-panel]').forEach(btn => {
 
 $('rail-clear').addEventListener('click', clearAll);
 
+// ── Rail More toggle ────────────────────────────────────────────────────────
+$('rail-more')?.addEventListener('click', () => {
+  const open = $('rail-more').classList.toggle('open');
+  document.querySelectorAll('.rail-extra').forEach(el => el.classList.toggle('open', open));
+});
+
 // ── Context bar ────────────────────────────────────────────────────────────
 
 function showCtx(text, label) {
@@ -351,6 +357,7 @@ function showCtx(text, label) {
 function clearCtx() {
   pendingCtx = null;
   ctxEl.classList.remove('on');
+  hidePageSumBar();
 }
 
 $('ctx-x').addEventListener('click', clearCtx);
@@ -359,6 +366,17 @@ $('ctx-x').addEventListener('click', clearCtx);
 
 function hideEmpty() { if (empty) empty.style.display = 'none'; }
 function scrollBot()  { msgs.scrollTop = msgs.scrollHeight; }
+
+function updateHomeState() {
+  const panel = $('panel-chat');
+  if (!panel) return;
+  const hasMessages = msgs.querySelector('.mrow');
+  if (hasMessages) {
+    panel.classList.remove('at-home');
+  } else {
+    panel.classList.add('at-home');
+  }
+}
 
 function ts() {
   const n = new Date();
@@ -386,6 +404,7 @@ function addUserMsg(text) {
     </div>
     <div class="av u-av">E</div>`;
   msgs.appendChild(row);
+  updateHomeState();
   scrollBot();
 }
 
@@ -538,12 +557,27 @@ $('m-page').addEventListener('click', function() {
 
 // ── Page loading ───────────────────────────────────────────────────────────
 
+function showPageSumBar(title) {
+  const psBar = $('page-sum-bar');
+  const psTitle = $('page-sum-title');
+  if (psBar && psTitle && title) {
+    psTitle.textContent = title;
+    psBar.style.display = 'flex';
+  }
+}
+
+function hidePageSumBar() {
+  const psBar = $('page-sum-bar');
+  if (psBar) psBar.style.display = 'none';
+}
+
 function loadPage() {
   return new Promise(resolve => {
     ext.runtime.sendMessage({ type: 'GET_PAGE_CONTENT' }, resp => {
       if (resp?.ok && resp.text) {
         pendingCtx = { text: resp.text, title: resp.title, url: resp.url, action: 'ask' };
         showCtx(resp.text, resp.title || 'Current page');
+        showPageSumBar(resp.title || resp.url || 'Current page');
         if (activePanel === 'chat') sysmsg(`Page loaded: "${(resp.title || 'page').slice(0,40)}"`);
       } else {
         // Fallback: at least get URL + title from tab API
@@ -573,6 +607,12 @@ document.querySelectorAll('.chip').forEach(c =>
   c.addEventListener('click', () => { sendMessage(c.dataset.q).catch(() => {}); })
 );
 
+// ── Page summarize bar ──────────────────────────────────────────────────────
+$('page-sum-btn')?.addEventListener('click', () => {
+  sendMessage('Summarize this page for me').catch(() => {});
+  hidePageSumBar();
+});
+
 // ── Input handlers ─────────────────────────────────────────────────────────
 
 sendBtn.addEventListener('click', () => { sendMessage().catch(() => {}); });
@@ -601,8 +641,9 @@ function clearAll() {
 
   while (msgs.firstChild) msgs.removeChild(msgs.firstChild);
   msgs.appendChild(empty);
-  empty.style.display = '';
+  empty.style.display = 'none';
   conversationId = null;
+  updateHomeState();
   clearCtx();
   thinkingMode = false;
   deepResearch = false;
@@ -1864,6 +1905,24 @@ function initModelPills() {
 }
 
 initModelPills();
+
+// ── Home chip handlers ──────────────────────────────────────────────────────
+document.querySelectorAll('.home-chip').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const action = btn.dataset.action;
+    if (action === 'summarize') {
+      sendMessage('Summarize this page for me').catch(() => {});
+    } else if (action === 'research') {
+      switchPanel('research');
+    } else if (action === 'explain') {
+      switchPanel('chat');
+      inp.focus();
+      inp.placeholder = 'Paste text to explain\u2026';
+    } else if (action === 'write') {
+      switchPanel('write');
+    }
+  });
+});
 
 // Single delegated click-outside listener for all pill dropdowns (replaces 13 per-pill listeners)
 document.addEventListener('click', () => {
