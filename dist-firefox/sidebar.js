@@ -301,9 +301,19 @@ function setOnline(on) {
 
 function switchPanel(name) {
   activePanel = name;
-  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  // Remove active from all panels — CSS animation will re-trigger on next .active add
+  document.querySelectorAll('.panel').forEach(p => {
+    if (p.classList.contains('active')) {
+      p.classList.remove('active');
+      // Force reflow so animation replays when re-added
+      void p.offsetWidth; // eslint-disable-line no-void
+    }
+  });
   const panel = $('panel-' + name);
-  if (panel) panel.classList.add('active');
+  if (panel) {
+    // Tiny delay lets the remove propagate before adding active
+    requestAnimationFrame(() => panel.classList.add('active'));
+  }
   document.querySelectorAll('.rbtn[data-panel]').forEach(b => {
     b.classList.toggle('on', b.dataset.panel === name);
   });
@@ -618,6 +628,8 @@ async function doSearch(q) {
   // Reset results area
   [...searchResults.querySelectorAll('.src-section,.ans-section,.ans-label')].forEach(el => el.remove());
   searchEmpty.style.display = 'none';
+  const searchErrP = searchEmpty.querySelector('p');
+  if (searchErrP) searchErrP.textContent = 'No results found.';
   searchLoading.classList.add('on');
   searchBtn.disabled = true;
 
@@ -678,15 +690,15 @@ async function doSearch(q) {
   } catch (err) {
     searchLoading.classList.remove('on');
     searchEmpty.style.display = '';
-    const searchErrP = searchEmpty.querySelector('p');
-    if (searchErrP) searchErrP.textContent = 'Search error: ' + err.message;
+    const errP = searchEmpty.querySelector('p');
+    if (errP) errP.textContent = 'Search error: ' + err.message;
   } finally {
     searchBtn.disabled = false;
   }
 }
 
 searchBtn.addEventListener('click', () => doSearch(searchInp.value));
-searchInp.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(searchInp.value); });
+searchInp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); doSearch(searchInp.value); } });
 
 // ══════════════════════════════════════════════════════════════════════════
 // TRANSLATE PANEL
@@ -695,7 +707,7 @@ searchInp.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(sea
 trBtn.addEventListener('click', () => {
   const text = trInp.value.trim();
   if (!text) return;
-  if (!wsReady || !ws) { trOut.textContent = 'AURA is offline.'; trOut.classList.add('has-text'); return; }
+  if (!wsReady || !ws || ws.readyState !== WebSocket.OPEN) { trOut.textContent = 'AURA is offline.'; trOut.classList.add('has-text'); return; }
   if (activeStream) return;
 
   const from = trFrom.value === 'auto' ? 'the detected language' : trFrom.value;
@@ -710,7 +722,8 @@ trBtn.addEventListener('click', () => {
     el: trOut,
     rawText: '',
     submitBtn: trBtn,
-    onFirstChunk: () => { trOut.textContent = ''; }
+    onFirstChunk: () => { trOut.textContent = ''; },
+    onDone: () => { trOut.classList.add('has-text'); },
   };
 
   ws.send(JSON.stringify({
@@ -746,10 +759,14 @@ initToggleGroup('.wtype', d => { writeType = d.type; });
 initToggleGroup('.wopt[data-opt="tone"]', d => { writeTone = d.val; });
 initToggleGroup('.wopt[data-opt="len"]', d => { writeLen = d.val; });
 
+writeInp.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); writeSubmit.click(); }
+});
+
 writeSubmit.addEventListener('click', () => {
   const text = writeInp.value.trim();
   if (!text) return;
-  if (!wsReady || !ws) { alert('AURA is offline.'); return; }
+  if (!wsReady || !ws || ws.readyState !== WebSocket.OPEN) { alert('AURA is offline.'); return; }
   if (activeStream) return;
 
   writeResult.innerHTML = '<div class="dots"><span></span><span></span><span></span></div>';
@@ -1035,7 +1052,7 @@ initToggleGroup('.gr-mode', d => { grMode = d.mode; });
 $('gr-btn').addEventListener('click', () => {
   const text = $('gr-inp').value.trim();
   if (!text) return;
-  if (!wsReady || !ws) { alert('AURA is offline.'); return; }
+  if (!wsReady || !ws || ws.readyState !== WebSocket.OPEN) { alert('AURA is offline.'); return; }
   if (activeStream) return;
 
   const result = $('gr-result');
@@ -1169,7 +1186,7 @@ async function loadPdfUrl(url) {
 function sendPdfQuestion() {
   const q = $('pdf-inp').value.trim();
   if (!q || !pdfCtx) return;
-  if (!wsReady || !ws) { alert('AURA is offline.'); return; }
+  if (!wsReady || !ws || ws.readyState !== WebSocket.OPEN) { alert('AURA is offline.'); return; }
   if (activeStream) return;
 
   // Show question bubble
@@ -1254,6 +1271,7 @@ function startRec() {
     $('rec-status').textContent = 'Error: ' + e.error;
     clearInterval(recTimerInterval);
     recTimerInterval = null;
+    recRecognition = null;
     $('rec-btn').textContent = '● Record';
     $('rec-btn').classList.remove('recording');
   };
@@ -1274,6 +1292,7 @@ function startRec() {
 function stopRec() {
   if (recRecognition) { recRecognition.stop(); recRecognition = null; }
   clearInterval(recTimerInterval);
+  recTimerInterval = null;
   $('rec-btn').textContent = '● Record';
   $('rec-btn').classList.remove('recording');
   $('rec-status').textContent = 'Stopped';
@@ -1287,7 +1306,7 @@ $('rec-btn').addEventListener('click', () => {
 
 $('rec-summarize').addEventListener('click', () => {
   if (!fullTranscript.trim()) return;
-  if (!wsReady || !ws) { alert('AURA is offline.'); return; }
+  if (!wsReady || !ws || ws.readyState !== WebSocket.OPEN) { alert('AURA is offline.'); return; }
   if (activeStream) return;
 
   const notes = $('rec-notes');
@@ -1555,73 +1574,70 @@ function logAgent(text) {
 }
 
 async function runAgentLoop(task, history) {
-  $('agent-step-count').textContent = `Step ${agentStep} of 15`;
+  // Iterative loop — avoids call-stack overflow for 15 recursive async steps
+  while (agentRunning && agentStep < 15) {
+    agentStep++;
+    $('agent-step-count').textContent = `Step ${agentStep} of 15`;
 
-  if (!agentRunning || agentStep >= 15) {
-    logAgent(agentStep >= 15 ? '⚠ Max steps (15) reached.' : '■ Stopped.');
-    $('agent-start').style.display = '';
-    $('agent-stop').style.display = 'none';
-    agentRunning = false;
-    return;
-  }
+    const dom = await msgBg({ type: 'AGENT_DOM' });
+    if (!dom?.ok) {
+      logAgent('⚠ Could not read page DOM.');
+      break;
+    }
 
-  agentStep++;
+    const domStr = dom.dom
+      .map(e => `[${e.index}] ${e.type} "${e.text}" → ${e.selector}`)
+      .join('\n');
 
-  const dom = await msgBg({ type: 'AGENT_DOM' });
-  if (!dom?.ok) {
-    logAgent('⚠ Could not read page DOM.');
-    agentRunning = false;
-    $('agent-start').style.display = '';
-    $('agent-stop').style.display = 'none';
-    return;
-  }
+    const prompt =
+      `Task: "${task}"\nURL: ${dom.url}\nTitle: ${dom.title}\n` +
+      `History: ${JSON.stringify(history.slice(-5))}\n\n` +
+      `Interactive elements on page:\n${domStr.slice(0, 3000)}\n\n` +
+      `Respond ONLY with valid JSON (no markdown, no explanation):\n` +
+      `{"action":"click"|"type"|"scroll"|"navigate"|"done","selector":"","text":"","url":"","amount":300,"description":""}`;
 
-  const domStr = dom.dom
-    .map(e => `[${e.index}] ${e.type} "${e.text}" → ${e.selector}`)
-    .join('\n');
+    try {
+      const action = await fetch(`${HTTP}/api/agent/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, model: getModel('agent') }),
+      }).then(r => r.json());
 
-  const prompt =
-    `Task: "${task}"\nURL: ${dom.url}\nTitle: ${dom.title}\n` +
-    `History: ${JSON.stringify(history.slice(-5))}\n\n` +
-    `Interactive elements on page:\n${domStr.slice(0, 3000)}\n\n` +
-    `Respond ONLY with valid JSON (no markdown, no explanation):\n` +
-    `{"action":"click"|"type"|"scroll"|"navigate"|"done","selector":"","text":"","url":"","amount":300,"description":""}`;
+      logAgent(`Step ${agentStep}: [${action.action}] ${action.description || ''}`);
 
-  try {
-    const action = await fetch(`${HTTP}/api/agent/action`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, model: getModel('agent') }),
-    }).then(r => r.json());
+      if (action.action === 'done') {
+        logAgent('✓ Task complete.');
+        agentRunning = false;
+        break;
+      }
 
-    logAgent(`Step ${agentStep}: [${action.action}] ${action.description || ''}`);
+      if (action.action === 'navigate') {
+        await msgBg({ type: 'AGENT_NAV', url: action.url });
+        await sleep(2500);
+      } else {
+        const result = await msgBg({ type: 'AGENT_EXEC', action });
+        if (!result?.ok) logAgent(`  ⚠ ${result?.error || 'Action failed'}`);
+        await sleep(600);
+      }
 
-    if (action.action === 'done') {
-      logAgent('✓ Task complete.');
+      history.push({ step: agentStep, ...action });
+
+    } catch (err) {
+      logAgent('⚠ Error: ' + err.message);
       agentRunning = false;
-      $('agent-start').style.display = '';
-      $('agent-stop').style.display = 'none';
-      return;
+      break;
     }
-
-    if (action.action === 'navigate') {
-      await msgBg({ type: 'AGENT_NAV', url: action.url });
-      await sleep(2500);
-    } else {
-      const result = await msgBg({ type: 'AGENT_EXEC', action });
-      if (!result?.ok) logAgent(`  ⚠ ${result?.error || 'Action failed'}`);
-      await sleep(600);
-    }
-
-    history.push({ step: agentStep, ...action });
-    await runAgentLoop(task, history);
-
-  } catch (err) {
-    logAgent('⚠ Error: ' + err.message);
-    agentRunning = false;
-    $('agent-start').style.display = '';
-    $('agent-stop').style.display = 'none';
   }
+
+  // Loop exited — show terminal state
+  if (agentStep >= 15 && agentRunning) {
+    logAgent('⚠ Max steps (15) reached.');
+  } else if (!agentRunning) {
+    // already logged above
+  }
+  agentRunning = false;
+  $('agent-start').style.display = '';
+  $('agent-stop').style.display = 'none';
 }
 
 $('agent-start').addEventListener('click', () => {
@@ -1863,6 +1879,8 @@ async function loadModelPanel() {
     const d = await r.json();
     mdlCloudList = (d.cloud || []).map(m => m.name);
     mdlLocalList = (d.local || []).map(m => m.name);
+    // Reset compare so it rebuilds chips with fresh model list on next open
+    compareInitialized = false;
     renderModelPanel();
   } catch {
     body.innerHTML = '<div style="color:var(--rd);font-size:12px;padding:24px 0;text-align:center">Backend offline — start the server first.</div>';
@@ -2006,7 +2024,7 @@ async function loadYoutubeSummary(url) {
     $('yt-res-title').textContent = data.title || 'Untitled';
     $('yt-res-channel').textContent = data.channel ? '▶ ' + data.channel : '';
     $('yt-res-duration').textContent = data.duration ? '⏱ ' + data.duration : '';
-    $('yt-res-summary').textContent = data.summary || 'No summary available.';
+    $('yt-res-summary').innerHTML = data.summary ? md(data.summary) : 'No summary available.';
     const ul = $('yt-res-points');
     ul.innerHTML = '';
     (Array.isArray(data.key_points) ? data.key_points : []).forEach(pt => {
@@ -2261,6 +2279,10 @@ $('art-go').addEventListener('click', async () => {
     bottomEl.classList.add('on');
   } catch (err) { statusEl.textContent='⚠ '+(err.message||'Request failed'); }
   finally { goBtn.disabled=false; }
+});
+
+$('art-inp').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $('art-go').click(); }
 });
 
 $('art-copy-code').addEventListener('click', function() {
