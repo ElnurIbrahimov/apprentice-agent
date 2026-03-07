@@ -423,12 +423,23 @@ $('m-page').addEventListener('click', function() {
 function loadPage() {
   return new Promise(resolve => {
     ext.runtime.sendMessage({ type: 'GET_PAGE_CONTENT' }, resp => {
-      if (resp?.ok) {
+      if (resp?.ok && resp.text) {
         pendingCtx = { text: resp.text, title: resp.title, url: resp.url, action: 'ask' };
         showCtx(resp.text, resp.title || 'Current page');
         if (activePanel === 'chat') sysmsg(`Page loaded: "${(resp.title || 'page').slice(0,40)}"`);
       } else {
-        if (activePanel === 'chat') sysmsg('Could not read page content.');
+        // Fallback: at least get URL + title from tab API
+        ext.runtime.sendMessage({ type: 'GET_CURRENT_TAB' }, tab => {
+          if (tab?.ok && tab.url && !tab.url.startsWith('chrome://')) {
+            pendingCtx = { text: `Page: ${tab.title}\nURL: ${tab.url}`, title: tab.title, url: tab.url, action: 'ask' };
+            showCtx(tab.url, tab.title || tab.url);
+            if (activePanel === 'chat') sysmsg(`Tab context loaded: "${(tab.title || tab.url).slice(0,40)}"`);
+          } else {
+            if (activePanel === 'chat') sysmsg('Could not read page — try on a regular website (not a browser or extension page).');
+          }
+          resolve(tab);
+        });
+        return;
       }
       resolve(resp);
     });
