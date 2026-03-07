@@ -407,6 +407,84 @@ class UnifiedMemory:
             logger.debug(f"[UnifiedMemory] KG Brain query error: {e}")
         return results
 
+    def store_gated(
+        self,
+        content: str,
+        source: str = "conversation",
+        importance: float = 0.5,
+        tags: Optional[List[str]] = None,
+        emotional_pad: Optional[Dict[str, float]] = None,
+        episode_type: str = "conversation",
+        user_id: str = "default_user",
+        emotional_salience: float = 0.0,
+        explicit_save: bool = False,
+        confidence: float = 1.0,
+    ) -> Dict[str, Any]:
+        """
+        Gated write — runs the MemoryWriteGate before fan-out.
+
+        Returns extended dict: {"amem": id, "episodic": id, "decision": kind, "score": float}
+        """
+        from aura.memory.write_gate import (
+            MemoryWriteGate, MemoryCandidate, MemoryDecisionKind, get_write_gate
+        )
+        from aura.reliability.telemetry import emit, TelemetryKind
+
+        # Retrieve nearby memories for gate scoring
+        try:
+            nearby_results = self.query(content, k=5, sources=["amem", "episodic"])
+            nearby = [
+                {"content": r.content, "score": r.relevance,
+                 "source_id": r.source_id, "source": r.source}
+                for r in nearby_results
+            ]
+        except Exception:
+            nearby = []
+
+        candidate = MemoryCandidate(
+            content=content,
+            source=source,
+            user_id=user_id,
+            importance=importance,
+            emotional_salience=emotional_salience,
+            tags=tags or [],
+            explicit_save=explicit_save,
+            confidence=confidence,
+        )
+
+        gate = get_write_gate()
+        decision = gate.evaluate(candidate, nearby=nearby)
+
+        # Telemetry
+        try:
+            emit(
+                TelemetryKind.MEMORY_DECISION,
+                user_id=user_id,
+                success=(decision.kind != MemoryDecisionKind.DISCARD),
+                memory_writes=(0 if decision.kind == MemoryDecisionKind.DISCARD else 1),
+                confidence=decision.score,
+                extra=decision.as_log_dict(),
+            )
+        except Exception:
+            pass
+
+        if decision.kind == MemoryDecisionKind.DISCARD:
+            return {"decision": decision.kind.value, "score": round(decision.score, 3)}
+
+        # Proceed with actual write
+        ids = self.store(
+            content=content,
+            source=source,
+            importance=importance,
+            tags=tags,
+            emotional_pad=emotional_pad,
+            episode_type=episode_type,
+        )
+        ids["decision"] = decision.kind.value
+        ids["score"]    = round(decision.score, 3)
+        ids["lifecycle"] = decision.lifecycle_state.value
+        return ids
+
     def store(
         self,
         content: str,

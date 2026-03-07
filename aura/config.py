@@ -422,3 +422,41 @@ class Config:
     # Florence-2 Vision (local HuggingFace model — for image preprocessing only)
     FLORENCE2_MODEL: str = "microsoft/Florence-2-base"
     FLORENCE2_ENABLED: bool = os.getenv("FLORENCE2_ENABLED", "true").lower() == "true"
+
+    # ============================================================
+    # RELIABILITY UPGRADE — Phase 1-4 (2026-03)
+    # ============================================================
+
+    # Memory Write Gate
+    ENABLE_MEMORY_WRITE_GATE: bool = os.getenv("ENABLE_MEMORY_WRITE_GATE", "true").lower() == "true"
+    MEMORY_WRITE_THRESHOLD: float = float(os.getenv("MEMORY_WRITE_THRESHOLD", "0.35"))
+    MEMORY_MERGE_THRESHOLD: float = float(os.getenv("MEMORY_MERGE_THRESHOLD", "0.88"))
+    MEMORY_SUPERSEDE_THRESHOLD: float = float(os.getenv("MEMORY_SUPERSEDE_THRESHOLD", "0.80"))
+
+    # Loop Guard
+    ENABLE_LOOP_GUARD: bool = os.getenv("ENABLE_LOOP_GUARD", "true").lower() == "true"
+    LOOP_GUARD_MAX_REPETITIONS: int = int(os.getenv("LOOP_GUARD_MAX_REPETITIONS", "3"))
+    LOOP_GUARD_NOVELTY_THRESHOLD: float = float(os.getenv("LOOP_GUARD_NOVELTY_THRESHOLD", "0.25"))
+    LOOP_GUARD_WINDOW_SIZE: int = int(os.getenv("LOOP_GUARD_WINDOW_SIZE", "20"))
+    LOOP_GUARD_BUDGET: int = int(os.getenv("LOOP_GUARD_BUDGET", "40"))
+
+    # Browser Agent
+    ENABLE_BROWSER_POSTCONDITIONS: bool = os.getenv("ENABLE_BROWSER_POSTCONDITIONS", "true").lower() == "true"
+    BROWSER_MAX_RETRIES: int = int(os.getenv("BROWSER_MAX_RETRIES", "3"))
+    BROWSER_ABORT_ON_DOMAIN_DRIFT: bool = os.getenv("BROWSER_ABORT_ON_DOMAIN_DRIFT", "true").lower() == "true"
+
+    # Outcome-aware routing
+    ENABLE_OUTCOME_AWARE_ROUTING: bool = os.getenv("ENABLE_OUTCOME_AWARE_ROUTING", "true").lower() == "true"
+
+    # Tool contracts
+    ENABLE_TOOL_CONTRACTS: bool = os.getenv("ENABLE_TOOL_CONTRACTS", "true").lower() == "true"
+
+    # Knowledge graph contradictions
+    ENABLE_KG_CONTRADICTIONS: bool = os.getenv("ENABLE_KG_CONTRADICTIONS", "true").lower() == "true"
+
+    # Dream consolidation
+    DREAM_CLUSTER_BATCH_SIZE: int = int(os.getenv("DREAM_CLUSTER_BATCH_SIZE", "20"))
+    DREAM_PRUNE_STALENESS_DAYS: int = int(os.getenv("DREAM_PRUNE_STALENESS_DAYS", "30"))
+    DREAM_MIN_CLUSTER_SIZE: int = int(os.getenv("DREAM_MIN_CLUSTER_SIZE", "3"))
+    DREAM_ENABLE_ROUTINE_EXTRACTION: bool = os.getenv("DREAM_ENABLE_ROUTINE_EXTRACTION", "true").lower() == "true"
+    DREAM_ENABLE_GRAPH_DENSIFICATION: bool = os.getenv("DREAM_ENABLE_GRAPH_DENSIFICATION", "false").lower() == "true"

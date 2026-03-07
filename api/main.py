@@ -29,6 +29,13 @@ logger = logging.getLogger(__name__)
 
 from api.routes import chat, status, upload, features, multi_agent, reasoning_tree, introspection, proactive, memory, context, conversation_starters, thinking, idle_behaviors, self_improvement, thinking_mode, state_machine, tools_new, activity, multi_model, knowledge, search, pdf, transcribe, ocr, image_gen, agent_action, models as models_route, summarize, youtube, math as math_route, research
 try:
+    from api.routes import reliability as reliability_route
+    _reliability_available = True
+except Exception as _re:
+    logger.warning(f"[API] Reliability routes unavailable: {_re}")
+    reliability_route = None
+    _reliability_available = False
+try:
     from api.routes import consciousness
     _consciousness_available = True
 except Exception as _e:
@@ -381,6 +388,8 @@ app.include_router(summarize.router)
 app.include_router(youtube.router)
 app.include_router(math_route.router)
 app.include_router(research.router)
+if _reliability_available and reliability_route:
+    app.include_router(reliability_route.router)
 
 @app.get("/api/health")
 async def health_check():
