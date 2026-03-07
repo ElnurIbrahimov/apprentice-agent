@@ -54,7 +54,7 @@ let mathMode = 'solve';
 
 // Artifacts panel state
 let artCode = '';
-let artLang = 'html';
+// Note: artLang state removed — art-go reads $('art-lang').value directly
 
 // ── DOM ────────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -85,6 +85,35 @@ const trOut  = $('tr-out');
 const writeInp    = $('write-inp');
 const writeSubmit = $('write-submit');
 const writeResult = $('write-result');
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+/**
+ * initToggleGroup — shared toggle-group handler.
+ * Finds all buttons matching `selector`, wires click so only one is `.on`
+ * at a time, then calls onChange(button.dataset).
+ */
+function initToggleGroup(selector, onChange) {
+  document.querySelectorAll(selector).forEach(btn => {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll(selector).forEach(b => b.classList.remove('on'));
+      this.classList.add('on');
+      onChange(this.dataset);
+    });
+  });
+}
+
+/**
+ * apiFetch — fetch wrapper that throws on non-2xx with detail message.
+ */
+async function apiFetch(url, opts = {}) {
+  const r = await fetch(url, opts);
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    throw new Error(d.detail || `HTTP ${r.status}`);
+  }
+  return r.json();
+}
 
 // ── Markdown ───────────────────────────────────────────────────────────────
 
@@ -151,15 +180,51 @@ window.cpCode = function(id) {
 
 // ── WebSocket ──────────────────────────────────────────────────────────────
 
+// Exponential backoff for reconnects: 1s → 2s → 4s … 30s max
+let _wsRetryDelay = 1000;
+
+// Throttle md() rendering to at most once per animation frame during streaming
+let _mdRafId = null;
+function scheduleMdRender(stream) {
+  if (_mdRafId !== null) return;
+  _mdRafId = requestAnimationFrame(() => {
+    _mdRafId = null;
+    if (!stream || !stream.el || !activeStream) return;
+    stream.el.innerHTML = md(stream.rawText);
+    if (stream.type === 'chat') msgs.scrollTop = msgs.scrollHeight;
+  });
+}
+
 function connectWS() {
   if (ws && ws.readyState <= 1) return;
   ws = new WebSocket(WS);
-  ws.onopen  = () => { wsReady = true; setOnline(true); };
-  ws.onclose = () => { wsReady = false; setOnline(false); setTimeout(connectWS, 5000); };
-  ws.onerror = () => { wsReady = false; setOnline(false); };
+  ws.onopen  = () => { wsReady = true; setOnline(true); _wsRetryDelay = 1000; };
+  ws.onclose = () => {
+    wsReady = false;
+    setOnline(false);
+    // If a stream was in-flight when WS dropped, unblock the UI
+    if (activeStream) {
+      if (activeStream === true) {
+        // pre-await sentinel: just unlock sendBtn
+        activeStream = null;
+        sendBtn.disabled = false;
+      } else {
+        const s = activeStream;
+        activeStream = null;
+        if (s.submitBtn) s.submitBtn.disabled = false;
+        if (s.el && s.type === 'chat') {
+          s.el.querySelector('.dots')?.remove();
+          s.el.innerHTML += '<em style="color:#f87171"> ⚠ Connection lost</em>';
+        }
+      }
+    }
+    setTimeout(connectWS, _wsRetryDelay);
+    _wsRetryDelay = Math.min(_wsRetryDelay * 2, 30000);
+  };
+  ws.onerror = () => { wsReady = false; setOnline(false); /* onclose fires after onerror; reconnect is handled there */ };
   ws.onmessage = (ev) => {
     let d; try { d = JSON.parse(ev.data); } catch { return; }
-    if (!activeStream) return;
+    if (!activeStream || activeStream === true) return; // null or pre-await sentinel
 
     const { type, el } = activeStream;
 
@@ -173,20 +238,24 @@ function connectWS() {
 
       if (type === 'chat') {
         el.querySelector('.dots')?.remove();
-        el.innerHTML = md(activeStream.rawText);
-        msgs.scrollTop = msgs.scrollHeight;
+        // Throttle md() via rAF — avoid re-parsing on every incoming chunk
+        scheduleMdRender(activeStream);
       } else if (type === 'translate') {
         el.textContent = activeStream.rawText;
         el.classList.add('has-text');
       } else {
-        // search or write — render markdown
-        el.innerHTML = md(activeStream.rawText);
+        // search or write — throttle markdown render via rAF
+        scheduleMdRender(activeStream);
       }
     } else if (d.type === 'done') {
-      if (type === 'chat' && activeStream.rawText) el.innerHTML = md(activeStream.rawText);
+      // Cancel any pending rAF and do a final authoritative render
+      if (_mdRafId !== null) { cancelAnimationFrame(_mdRafId); _mdRafId = null; }
+      if (activeStream.rawText) el.innerHTML = md(activeStream.rawText);
+      if (type === 'chat') msgs.scrollTop = msgs.scrollHeight;
       finalizeStream();
     } else if (d.type === 'error') {
       const errMsg = d.content || d.error || 'Error';
+      if (_mdRafId !== null) { cancelAnimationFrame(_mdRafId); _mdRafId = null; }
       if (activeStream.onFirstChunk) { activeStream.onFirstChunk(); activeStream.onFirstChunk = null; }
       if (type === 'chat') {
         el.innerHTML = `<em style="color:#f87171">⚠ ${esc(errMsg)}</em>`;
@@ -200,7 +269,7 @@ function connectWS() {
 }
 
 function finalizeStream() {
-  if (!activeStream) return;
+  if (!activeStream || activeStream === true) return;
   const stream = activeStream; // capture before nulling
   if (stream.submitBtn) stream.submitBtn.disabled = false;
   activeStream = null;
@@ -242,14 +311,17 @@ function switchPanel(name) {
   else if (name === 'search') searchInp.focus();
   else if (name === 'translate') trInp.focus();
   else if (name === 'write') writeInp.focus();
-  else if (name === 'wisebase') loadWisebase();
+  else if (name === 'grammar') setTimeout(() => $('gr-inp')?.focus(), 0);
+  else if (name === 'ask') setTimeout(() => $('ask-inp')?.focus(), 0);
+  else if (name === 'wisebase') { loadWisebase(); setTimeout(() => $('wb-inp')?.focus(), 0); }
   else if (name === 'models') loadModelPanel();
-  else if (name === 'summary') { /* panel is ready; user clicks Summarize to trigger */ }
-  else if (name === 'youtube') { if (ytAutoUrl) $('yt-url-inp').value = ytAutoUrl; }
+  else if (name === 'summary') { /* user clicks Summarize to trigger */ }
+  else if (name === 'youtube') { if (ytAutoUrl) $('yt-url-inp').value = ytAutoUrl; setTimeout(() => $('yt-url-inp')?.focus(), 0); }
   else if (name === 'compare') initComparePanel();
-  else if (name === 'research') { /* ready */ }
-  else if (name === 'math') { /* ready */ }
-  else if (name === 'artifacts') { /* ready */ }
+  else if (name === 'research') setTimeout(() => $('res-inp')?.focus(), 0);
+  else if (name === 'math') setTimeout(() => $('math-inp')?.focus(), 0);
+  else if (name === 'artifacts') setTimeout(() => $('art-inp')?.focus(), 0);
+  else if (name === 'agent') setTimeout(() => $('agent-task')?.focus(), 0);
 }
 
 document.querySelectorAll('.rbtn[data-panel]').forEach(btn => {
@@ -283,8 +355,18 @@ function ts() {
   return n.getHours().toString().padStart(2,'0') + ':' + n.getMinutes().toString().padStart(2,'0');
 }
 
+// Trim chat DOM to prevent unbounded growth during long sessions (keep last 150 message rows)
+function trimMsgsDOM() {
+  const rows = msgs.querySelectorAll('.mrow');
+  if (rows.length > 150) {
+    const toRemove = rows.length - 150;
+    for (let i = 0; i < toRemove; i++) rows[i].remove();
+  }
+}
+
 function addUserMsg(text) {
   hideEmpty();
+  trimMsgsDOM();
   const row = document.createElement('div');
   row.className = 'mrow user';
   row.innerHTML = `
@@ -360,11 +442,29 @@ function sysmsg(text) {
 // Page-context keywords — if any match, inject full page text automatically
 const PAGE_KEYWORDS = /\b(this page|this site|this article|this post|this video|current page|what('s| is) (this|the) (page|site|article)|summarize this|explain this|what does this (say|mean)|translate this|tldr|tl;dr)\b/i;
 
+// Page content cache — 30s TTL, keyed by URL — avoids re-fetching on every message
+const _pageCache = new Map();
+const _PAGE_CACHE_TTL = 30000;
+async function getPageContentCached() {
+  const now = Date.now();
+  for (const [key, val] of _pageCache) {
+    if (now - val.ts < _PAGE_CACHE_TTL) return val.resp;
+    _pageCache.delete(key);
+  }
+  const resp = await new Promise(r => ext.runtime.sendMessage({ type: 'GET_PAGE_CONTENT' }, r));
+  if (resp?.ok && resp.url) _pageCache.set(resp.url, { resp, ts: now });
+  return resp;
+}
+
 async function sendMessage(override, modelKey) {
   const text = (override !== undefined ? override : inp.value).trim();
   if (!text) return;
   if (!wsReady) { sysmsg('AURA is offline — start the backend server.'); return; }
   if (activeStream) return;
+
+  // Lock immediately before any await to prevent race conditions
+  sendBtn.disabled = true;
+  activeStream = true; // temporary sentinel so concurrent calls bail out
 
   let full = text;
 
@@ -372,8 +472,8 @@ async function sendMessage(override, modelKey) {
   if (!pendingCtx) {
     const wantsFullPage = PAGE_KEYWORDS.test(text);
     if (wantsFullPage) {
-      // Full page text for page-specific questions
-      const pageResp = await new Promise(r => ext.runtime.sendMessage({ type: 'GET_PAGE_CONTENT' }, r));
+      // Full page text for page-specific questions (cached 30s to avoid re-fetch per message)
+      const pageResp = await getPageContentCached();
       if (pageResp?.ok && pageResp.text) {
         pendingCtx = { text: pageResp.text.slice(0, 20000), title: pageResp.title, url: pageResp.url, action: 'ask' };
         showCtx(pageResp.text, pageResp.title || 'Current page');
@@ -387,6 +487,15 @@ async function sendMessage(override, modelKey) {
     }
   }
 
+  // After awaits: re-check WS is still live
+  if (!wsReady || ws.readyState !== WebSocket.OPEN) {
+    sendBtn.disabled = false;
+    activeStream = null;
+    sysmsg('AURA disconnected — reconnecting…');
+    connectWS();
+    return;
+  }
+
   if (pendingCtx) {
     full = `[Context: ${pendingCtx.title || pendingCtx.url || 'selection'}]\n${pendingCtx.text}\n\n---\n${text}`;
     clearCtx();
@@ -396,7 +505,6 @@ async function sendMessage(override, modelKey) {
 
   addUserMsg(text);
   if (override === undefined) { inp.value = ''; autoH(); }
-  sendBtn.disabled = true;
   const bubble = addAIMsg();
   activeStream = { type: 'chat', el: bubble, rawText: '', submitBtn: sendBtn };
   ws.send(JSON.stringify({ type: 'chat', message: full, conversation_id: conversationId, model: getModel(modelKey || 'chat') }));
@@ -430,14 +538,17 @@ function loadPage() {
       } else {
         // Fallback: at least get URL + title from tab API
         ext.runtime.sendMessage({ type: 'GET_CURRENT_TAB' }, tab => {
-          if (tab?.ok && tab.url && !tab.url.startsWith('chrome://')) {
-            pendingCtx = { text: `Page: ${tab.title}\nURL: ${tab.url}`, title: tab.title, url: tab.url, action: 'ask' };
+          const blocked = !tab?.ok || !tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('about:');
+          if (!blocked) {
+            pendingCtx = { text: `Page: ${tab.title}
+URL: ${tab.url}`, title: tab.title, url: tab.url, action: 'ask' };
             showCtx(tab.url, tab.title || tab.url);
             if (activePanel === 'chat') sysmsg(`Tab context loaded: "${(tab.title || tab.url).slice(0,40)}"`);
+            resolve(tab);
           } else {
             if (activePanel === 'chat') sysmsg('Could not read page — try on a regular website (not a browser or extension page).');
+            resolve({ ok: false });
           }
-          resolve(tab);
         });
         return;
       }
@@ -449,14 +560,14 @@ function loadPage() {
 // ── Suggestion chips ───────────────────────────────────────────────────────
 
 document.querySelectorAll('.chip').forEach(c =>
-  c.addEventListener('click', () => sendMessage(c.dataset.q))
+  c.addEventListener('click', () => { sendMessage(c.dataset.q).catch(() => {}); })
 );
 
 // ── Input handlers ─────────────────────────────────────────────────────────
 
-sendBtn.addEventListener('click', () => sendMessage());
+sendBtn.addEventListener('click', () => { sendMessage().catch(() => {}); });
 inp.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage().catch(() => {}); }
 });
 inp.addEventListener('input', autoH);
 
@@ -468,6 +579,16 @@ function autoH() {
 // ── Clear ──────────────────────────────────────────────────────────────────
 
 function clearAll() {
+  // Abort any active stream cleanly before clearing
+  if (activeStream && activeStream !== true) {
+    if (activeStream.submitBtn) activeStream.submitBtn.disabled = false;
+    activeStream = null;
+  } else if (activeStream === true) {
+    // sentinel value from sendMessage pre-await lock
+    activeStream = null;
+    sendBtn.disabled = false;
+  }
+
   while (msgs.firstChild) msgs.removeChild(msgs.firstChild);
   msgs.appendChild(empty);
   empty.style.display = '';
@@ -477,6 +598,11 @@ function clearAll() {
   deepResearch = false;
   $('m-think').classList.remove('on');
   $('m-research').classList.remove('on');
+
+  // Tell the backend to start a fresh conversation
+  if (wsReady && ws && ws.readyState === WebSocket.OPEN) {
+    fetch(`${HTTP}/api/chat/clear`, { method: 'POST' }).catch(() => {});
+  }
 }
 
 $('btn-new').addEventListener('click', clearAll);
@@ -499,6 +625,10 @@ async function doSearch(q) {
     const searchModel = getModel('search');
     const searchUrl = `${HTTP}/api/search?q=${encodeURIComponent(q)}&limit=5` + (searchModel ? `&model=${encodeURIComponent(searchModel)}` : '');
     const res = await fetch(searchUrl);
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.detail || `Server error ${res.status}`);
+    }
     const data = await res.json();
 
     searchLoading.classList.remove('on');
@@ -520,6 +650,7 @@ async function doSearch(q) {
         card.rel = 'noopener';
         card.innerHTML = `<div class="src-card-n">${i + 1}</div>` +
           `<div class="src-card-t">${esc(src.title)}</div>` +
+          (src.snippet ? `<div class="src-card-s">${esc(src.snippet)}</div>` : '') +
           `<div class="src-card-u">${esc(src.url)}</div>`;
         srcCards.appendChild(card);
       });
@@ -547,7 +678,8 @@ async function doSearch(q) {
   } catch (err) {
     searchLoading.classList.remove('on');
     searchEmpty.style.display = '';
-    searchEmpty.querySelector('p').textContent = 'Search error: ' + err.message;
+    const searchErrP = searchEmpty.querySelector('p');
+    if (searchErrP) searchErrP.textContent = 'Search error: ' + err.message;
   } finally {
     searchBtn.disabled = false;
   }
@@ -563,7 +695,7 @@ searchInp.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(sea
 trBtn.addEventListener('click', () => {
   const text = trInp.value.trim();
   if (!text) return;
-  if (!wsReady) { trOut.textContent = 'AURA is offline.'; trOut.classList.add('has-text'); return; }
+  if (!wsReady || !ws) { trOut.textContent = 'AURA is offline.'; trOut.classList.add('has-text'); return; }
   if (activeStream) return;
 
   const from = trFrom.value === 'auto' ? 'the detected language' : trFrom.value;
@@ -589,54 +721,35 @@ trBtn.addEventListener('click', () => {
   }));
 });
 
+trInp.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); trBtn.click(); }
+});
+
 // ══════════════════════════════════════════════════════════════════════════
 // WRITE PANEL
 // ══════════════════════════════════════════════════════════════════════════
 
 // Tab switching
-document.querySelectorAll('.wtab').forEach(btn => {
-  btn.addEventListener('click', function() {
-    document.querySelectorAll('.wtab').forEach(b => b.classList.remove('on'));
-    this.classList.add('on');
-    writeTab = this.dataset.tab;
-    writeInp.placeholder = writeTab === 'improve'
-      ? 'Paste text to improve…'
-      : 'Enter your topic or prompt…';
-    writeResult.classList.remove('on');
-    writeResult.innerHTML = '';
-  });
+initToggleGroup('.wtab', d => {
+  writeTab = d.tab;
+  writeInp.placeholder = writeTab === 'improve'
+    ? 'Paste text to improve…'
+    : 'Enter your topic or prompt…';
+  writeResult.classList.remove('on');
+  writeResult.innerHTML = '';
 });
 
 // Content type selection
-document.querySelectorAll('.wtype').forEach(btn => {
-  btn.addEventListener('click', function() {
-    document.querySelectorAll('.wtype').forEach(b => b.classList.remove('on'));
-    this.classList.add('on');
-    writeType = this.dataset.type;
-  });
-});
+initToggleGroup('.wtype', d => { writeType = d.type; });
 
 // Tone / length option groups
-document.querySelectorAll('.wopt[data-opt="tone"]').forEach(btn => {
-  btn.addEventListener('click', function() {
-    document.querySelectorAll('.wopt[data-opt="tone"]').forEach(b => b.classList.remove('on'));
-    this.classList.add('on');
-    writeTone = this.dataset.val;
-  });
-});
-
-document.querySelectorAll('.wopt[data-opt="len"]').forEach(btn => {
-  btn.addEventListener('click', function() {
-    document.querySelectorAll('.wopt[data-opt="len"]').forEach(b => b.classList.remove('on'));
-    this.classList.add('on');
-    writeLen = this.dataset.val;
-  });
-});
+initToggleGroup('.wopt[data-opt="tone"]', d => { writeTone = d.val; });
+initToggleGroup('.wopt[data-opt="len"]', d => { writeLen = d.val; });
 
 writeSubmit.addEventListener('click', () => {
   const text = writeInp.value.trim();
   if (!text) return;
-  if (!wsReady) { alert('AURA is offline.'); return; }
+  if (!wsReady || !ws) { alert('AURA is offline.'); return; }
   if (activeStream) return;
 
   writeResult.innerHTML = '<div class="dots"><span></span><span></span><span></span></div>';
@@ -655,7 +768,27 @@ writeSubmit.addEventListener('click', () => {
     el: writeResult,
     rawText: '',
     submitBtn: writeSubmit,
-    onFirstChunk: () => { writeResult.innerHTML = ''; }
+    onFirstChunk: () => { writeResult.innerHTML = ''; },
+    onDone: (rawText) => {
+      // Add copy button after streaming completes
+      const existingCopy = writeResult.querySelector('.write-copy-btn');
+      if (existingCopy) existingCopy.remove();
+      if (rawText) {
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'write-copy-btn';
+        copyBtn.textContent = 'Copy';
+        copyBtn.style.cssText = 'margin-top:10px;background:var(--s2);border:1px solid var(--b1);border-radius:8px;color:var(--mu);font-size:11px;font-family:inherit;padding:5px 14px;cursor:pointer;transition:all .13s;display:block';
+        copyBtn.addEventListener('click', function() {
+          navigator.clipboard.writeText(rawText).then(() => {
+            this.textContent = 'Copied!';
+            this.style.color = 'var(--gr)';
+            this.style.borderColor = 'var(--gr)';
+            setTimeout(() => { this.textContent = 'Copy'; this.style.color = ''; this.style.borderColor = ''; }, 1500);
+          });
+        });
+        writeResult.appendChild(copyBtn);
+      }
+    }
   };
 
   ws.send(JSON.stringify({ type: 'chat', message: prompt, model: getModel('write'), conversation_id: null }));
@@ -674,25 +807,25 @@ function handleToolAction(action) {
     case 'summarize-page':
       switchPanel('chat');
       loadPage().then(resp => {
-        if (resp?.ok) sendMessage('Please summarize this page concisely.');
+        if (resp?.ok) sendMessage('Please summarize this page concisely.').catch(() => {});
       });
       break;
     case 'key-points':
       switchPanel('chat');
       loadPage().then(resp => {
-        if (resp?.ok) sendMessage('Extract the 5 most important key points from this page.');
+        if (resp?.ok) sendMessage('Extract the 5 most important key points from this page.').catch(() => {});
       });
       break;
     case 'explain-page':
       switchPanel('chat');
       loadPage().then(resp => {
-        if (resp?.ok) sendMessage('Explain this page content in simple terms for a general audience.');
+        if (resp?.ok) sendMessage('Explain this page content in simple terms for a general audience.').catch(() => {});
       });
       break;
     case 'questions':
       switchPanel('chat');
       loadPage().then(resp => {
-        if (resp?.ok) sendMessage('Generate 5 insightful questions based on this page content.');
+        if (resp?.ok) sendMessage('Generate 5 insightful questions based on this page content.').catch(() => {});
       });
       break;
     case 'deep-research':
@@ -787,7 +920,7 @@ document.querySelectorAll('.ask-btn').forEach(btn => {
     const msg = btn.dataset.prompt + pendingCtx.text;
     showCtx(pendingCtx.text, pendingCtx.title || pendingCtx.url || 'Selection');
     switchPanel('chat');
-    sendMessage(msg, 'ask');
+    sendMessage(msg, 'ask').catch(() => {});
   });
 });
 
@@ -797,7 +930,7 @@ $('ask-send').addEventListener('click', () => {
   const msg = pendingCtx?.text ? q + '\n\n[Context]\n' + pendingCtx.text : q;
   showCtx(pendingCtx?.text || q, pendingCtx?.title || 'Question');
   switchPanel('chat');
-  sendMessage(msg, 'ask');
+  sendMessage(msg, 'ask').catch(() => {});
 });
 
 $('ask-inp').addEventListener('keydown', e => {
@@ -817,6 +950,7 @@ async function loadWisebase(query = '') {
       ? `${HTTP}/api/knowledge/search?q=${encodeURIComponent(query)}&limit=20`
       : `${HTTP}/api/knowledge/list?limit=20`;
     const res = await fetch(url);
+    if (!res.ok) throw new Error(`Server error ${res.status}`);
     const data = await res.json();
 
     const items = query
@@ -864,7 +998,8 @@ function renderWbCards(items) {
       e.stopPropagation();
       if (!confirm('Delete this clip?')) return;
       try {
-        await fetch(`${HTTP}/api/knowledge/${encodeURIComponent(item.episode_id)}`, { method: 'DELETE' });
+        const delR = await fetch(`${HTTP}/api/knowledge/${encodeURIComponent(item.episode_id)}`, { method: 'DELETE' });
+        if (!delR.ok) throw new Error(`Server error ${delR.status}`);
         card.remove();
       } catch (err) {
         alert('Delete failed: ' + err.message);
@@ -878,6 +1013,16 @@ function renderWbCards(items) {
 $('wb-sbtn').addEventListener('click', () => loadWisebase($('wb-inp').value.trim()));
 $('wb-all').addEventListener('click', () => { $('wb-inp').value = ''; loadWisebase(); });
 $('wb-inp').addEventListener('keydown', e => { if (e.key === 'Enter') $('wb-sbtn').click(); });
+// Debounce live-search while typing (300ms) to avoid spamming API on each keystroke
+let _wbDebounce = null;
+$('wb-inp').addEventListener('input', () => {
+  clearTimeout(_wbDebounce);
+  _wbDebounce = setTimeout(() => {
+    const q = $('wb-inp').value.trim();
+    if (q.length >= 2) loadWisebase(q);
+    else if (q.length === 0) loadWisebase();
+  }, 300);
+});
 
 // ══════════════════════════════════════════════════════════════════════════
 // GRAMMAR PANEL (Step 5)
@@ -885,18 +1030,12 @@ $('wb-inp').addEventListener('keydown', e => { if (e.key === 'Enter') $('wb-sbtn
 
 let grMode = 'grammar';
 
-document.querySelectorAll('.gr-mode').forEach(btn => {
-  btn.addEventListener('click', function() {
-    document.querySelectorAll('.gr-mode').forEach(b => b.classList.remove('on'));
-    this.classList.add('on');
-    grMode = this.dataset.mode;
-  });
-});
+initToggleGroup('.gr-mode', d => { grMode = d.mode; });
 
 $('gr-btn').addEventListener('click', () => {
   const text = $('gr-inp').value.trim();
   if (!text) return;
-  if (!wsReady) { alert('AURA is offline.'); return; }
+  if (!wsReady || !ws) { alert('AURA is offline.'); return; }
   if (activeStream) return;
 
   const result = $('gr-result');
@@ -923,6 +1062,10 @@ $('gr-btn').addEventListener('click', () => {
   ws.send(JSON.stringify({ type: 'chat', message: prompts[grMode], model: getModel('grammar'), conversation_id: null }));
 });
 
+$('gr-inp').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $('gr-btn').click(); }
+});
+
 function renderGrammarResult(el, original, rawText) {
   const fullText = rawText || el.textContent;
   const sep = fullText.indexOf('---CHANGES---');
@@ -933,7 +1076,7 @@ function renderGrammarResult(el, original, rawText) {
   }
 
   const corrected = fullText.slice(0, sep).trim();
-  const changesRaw = fullText.slice(sep + 14).trim();
+  const changesRaw = fullText.slice(sep + 13).trim();
 
   // Word-diff the original vs corrected
   const diffHtml = renderWordDiff(original.trim(), corrected);
@@ -994,9 +1137,7 @@ async function uploadPdf(file) {
   const form = new FormData();
   form.append('file', file);
   try {
-    const res = await fetch(`${HTTP}/api/pdf/extract`, { method: 'POST', body: form });
-    const data = await res.json();
-    if (data.detail) throw new Error(data.detail);
+    const data = await apiFetch(`${HTTP}/api/pdf/extract`, { method: 'POST', body: form });
     pdfCtx = { text: data.text, page_count: data.page_count, word_count: data.word_count };
     status.textContent = `✓ ${data.filename || file.name} — ${data.page_count} pages, ${data.word_count} words`;
     $('pdf-inp-area').style.display = '';
@@ -1012,13 +1153,11 @@ async function loadPdfUrl(url) {
   $('pdf-auto').classList.remove('on');
 
   try {
-    const res = await fetch(`${HTTP}/api/pdf/extract-url`, {
+    const data = await apiFetch(`${HTTP}/api/pdf/extract-url`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url }),
     });
-    const data = await res.json();
-    if (data.detail) throw new Error(typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail));
     pdfCtx = { text: data.text, page_count: data.page_count, word_count: data.word_count };
     status.textContent = `✓ PDF loaded — ${data.page_count} pages, ${data.word_count} words`;
     $('pdf-inp-area').style.display = '';
@@ -1030,7 +1169,7 @@ async function loadPdfUrl(url) {
 function sendPdfQuestion() {
   const q = $('pdf-inp').value.trim();
   if (!q || !pdfCtx) return;
-  if (!wsReady) { alert('AURA is offline.'); return; }
+  if (!wsReady || !ws) { alert('AURA is offline.'); return; }
   if (activeStream) return;
 
   // Show question bubble
@@ -1048,6 +1187,7 @@ function sendPdfQuestion() {
   $('pdf-msgs').appendChild(aDiv);
   $('pdf-msgs').scrollTop = $('pdf-msgs').scrollHeight;
 
+  $('pdf-send').disabled = true;
   const contextPrefix = `[PDF Context — ${pdfCtx.page_count} pages]\n${pdfCtx.text.slice(0, 35000)}\n\n---\nQuestion: `;
   activeStream = {
     type: 'write',
@@ -1110,7 +1250,13 @@ function startRec() {
     $('rec-transcript').scrollTop = $('rec-transcript').scrollHeight;
   };
 
-  recRecognition.onerror = (e) => { $('rec-status').textContent = 'Error: ' + e.error; };
+  recRecognition.onerror = (e) => {
+    $('rec-status').textContent = 'Error: ' + e.error;
+    clearInterval(recTimerInterval);
+    recTimerInterval = null;
+    $('rec-btn').textContent = '● Record';
+    $('rec-btn').classList.remove('recording');
+  };
   recRecognition.start();
 
   $('rec-btn').textContent = '■ Stop';
@@ -1141,7 +1287,7 @@ $('rec-btn').addEventListener('click', () => {
 
 $('rec-summarize').addEventListener('click', () => {
   if (!fullTranscript.trim()) return;
-  if (!wsReady) { alert('AURA is offline.'); return; }
+  if (!wsReady || !ws) { alert('AURA is offline.'); return; }
   if (activeStream) return;
 
   const notes = $('rec-notes');
@@ -1152,9 +1298,10 @@ $('rec-summarize').addEventListener('click', () => {
     type: 'write',
     el: notes,
     rawText: '',
-    submitBtn: null,
+    submitBtn: $('rec-summarize'),
     onFirstChunk: () => { notes.innerHTML = ''; },
   };
+  $('rec-summarize').disabled = true;
 
   ws.send(JSON.stringify({
     type: 'chat',
@@ -1167,7 +1314,7 @@ $('rec-summarize').addEventListener('click', () => {
 $('rec-save-wb').addEventListener('click', async () => {
   if (!fullTranscript.trim()) return;
   try {
-    await fetch(`${HTTP}/api/knowledge/save`, {
+    const saveR = await fetch(`${HTTP}/api/knowledge/save`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1176,6 +1323,10 @@ $('rec-save-wb').addEventListener('click', async () => {
         source_type: 'voice_note',
       }),
     });
+    if (!saveR.ok) {
+      const d = await saveR.json().catch(() => ({}));
+      throw new Error(d.detail || `Server error ${saveR.status}`);
+    }
     $('rec-status').textContent = '✓ Saved to Wisebase';
   } catch (err) {
     $('rec-status').textContent = '⚠ Save failed: ' + err.message;
@@ -1190,9 +1341,7 @@ $('rec-whisper-btn').addEventListener('click', async () => {
   const form = new FormData();
   form.append('file', file);
   try {
-    const res = await fetch(`${HTTP}/api/transcribe`, { method: 'POST', body: form });
-    const data = await res.json();
-    if (data.detail) throw new Error(data.detail);
+    const data = await apiFetch(`${HTTP}/api/transcribe`, { method: 'POST', body: form });
     fullTranscript = data.text || '';
     $('rec-transcript').textContent = fullTranscript;
     $('rec-status').textContent = '✓ Transcribed';
@@ -1247,13 +1396,7 @@ const sumWc      = $('sum-wc');
 const sumRt      = $('sum-rt');
 
 // Format toggle buttons
-document.querySelectorAll('.sum-fmt').forEach(btn => {
-  btn.addEventListener('click', function() {
-    document.querySelectorAll('.sum-fmt').forEach(b => b.classList.remove('on'));
-    this.classList.add('on');
-    summaryFormat = this.dataset.fmt;
-  });
-});
+initToggleGroup('.sum-fmt', d => { summaryFormat = d.fmt; });
 
 async function summarizeCurrentPage() {
   sumGo.disabled = true;
@@ -1289,7 +1432,7 @@ async function summarizeCurrentPage() {
   sumStatus.textContent = 'Summarizing: ' + title.slice(0, 55) + (title.length > 55 ? '\u2026' : '');
 
   try {
-    const res = await fetch(`${HTTP}/api/summarize/page`, {
+    const data = await apiFetch(`${HTTP}/api/summarize/page`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1300,16 +1443,6 @@ async function summarizeCurrentPage() {
         model: getModel('summary'),
       }),
     });
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      sumStatus.textContent = 'Error: ' + (err.detail || res.statusText);
-      sumGo.disabled = false;
-      sumEmpty.style.display = '';
-      return;
-    }
-
-    const data = await res.json();
     summaryText = data.summary || '';
 
     sumResult.innerHTML = md(summaryText);
@@ -1353,13 +1486,7 @@ $('sum-copy').addEventListener('click', function() {
 // IMAGE GENERATOR PANEL (Step 9)
 // ══════════════════════════════════════════════════════════════════════════
 
-document.querySelectorAll('.img-style').forEach(btn => {
-  btn.addEventListener('click', function() {
-    document.querySelectorAll('.img-style').forEach(b => b.classList.remove('on'));
-    this.classList.add('on');
-    imgStyle = this.dataset.style;
-  });
-});
+initToggleGroup('.img-style', d => { imgStyle = d.style; });
 
 $('img-gen').addEventListener('click', async () => {
   const prompt = $('img-prompt').value.trim();
@@ -1379,13 +1506,12 @@ $('img-gen').addEventListener('click', async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt: fullPrompt, negative_prompt: neg, steps: 20 }),
     });
-    const data = await res.json();
-
     if (res.status === 503) {
       $('img-status').textContent = '';
       $('img-comfy-note').style.display = '';
       return;
     }
+    const data = await res.json();
 
     if (data.image_b64) {
       const img = $('img-out');
@@ -1534,6 +1660,7 @@ const FEATURE_DEFS = [
   { key: 'youtube',   label: 'YouTube',        icon: '▶️',  desc: 'Summarize YouTube videos' },
   { key: 'research',  label: 'Deep Research',  icon: '🔬', desc: 'Multi-source web research' },
   { key: 'math',      label: 'Math Solver',    icon: '➗', desc: 'Step-by-step math solving' },
+  { key: 'artifacts', label: 'Artifacts',      icon: '⌨️', desc: 'Generate runnable code/HTML/SVG' },
 ];
 
 // Loaded from chrome.storage.local, applied to every request
@@ -1558,6 +1685,7 @@ const PILL_SLOTS = {
   write: 'mdl-write', grammar: 'mdl-grammar', ask: 'mdl-ask',
   pdf: 'mdl-pdf', voice: 'mdl-voice', summary: 'mdl-summary',
   youtube: 'mdl-youtube', research: 'mdl-research', math: 'mdl-math',
+  agent: 'mdl-agent', artifacts: 'mdl-artifacts',
 };
 
 function buildPill(featureKey) {
@@ -1574,8 +1702,7 @@ function buildPill(featureKey) {
   name.className = 'mdl-pill-name';
 
   const arrow = document.createElement('span');
-  arrow.className = 'mdl-pill';
-  arrow.style.cssText = 'background:none;border:none;padding:0;margin-left:1px';
+  arrow.style.cssText = 'display:inline-flex;align-items:center;margin-left:1px;opacity:.55';
   arrow.innerHTML = `<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>`;
 
   btn.appendChild(dot);
@@ -1705,7 +1832,7 @@ function buildPill(featureKey) {
     }
   });
 
-  document.addEventListener('click', () => drop.classList.remove('open'));
+  // Click-outside handled by single delegated listener added after initModelPills()
 
   btn.dataset.pill = featureKey;
   btn._refresh = refresh;
@@ -1721,6 +1848,11 @@ function initModelPills() {
 }
 
 initModelPills();
+
+// Single delegated click-outside listener for all pill dropdowns (replaces 13 per-pill listeners)
+document.addEventListener('click', () => {
+  document.querySelectorAll('.mdl-drop.open').forEach(d => d.classList.remove('open'));
+});
 
 async function loadModelPanel() {
   const body = $('mdl-body');
@@ -1939,7 +2071,10 @@ function initComparePanel() {
       mdlCloudList = (d.cloud||[]).map(m=>m.name);
       mdlLocalList = (d.local||[]).map(m=>m.name);
       buildChips(mdlCloudList, mdlLocalList);
-    }).catch(()=>{ chipsEl.innerHTML='<span style="font-size:11px;color:var(--mu)">No models — is Ollama running?</span>'; });
+    }).catch(()=>{
+      chipsEl.innerHTML='<span style="font-size:11px;color:var(--mu)">No models — is Ollama running?</span>';
+      compareInitialized = true; // prevent repeated fetch on every panel switch after error
+    });
   });
 }
 
@@ -1969,9 +2104,7 @@ async function runCompare() {
     resultsEl.appendChild(sk);
   });
   try {
-    const res = await fetch(`${HTTP}/api/compare`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:prompt,models})});
-    if (!res.ok) throw new Error(`Server error ${res.status}`);
-    const data = await res.json();
+    const data = await apiFetch(`${HTTP}/api/compare`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:prompt,models})});
     resultsEl.innerHTML = '';
     (data.results||[]).forEach(r => {
       const isCloud = r.model.includes(':cloud');
@@ -1983,7 +2116,7 @@ async function runCompare() {
       if (!r.error) {
         const foot = document.createElement('div'); foot.className='cmp-card-footer';
         const btn2 = document.createElement('button'); btn2.className='cmp-send-btn'; btn2.textContent='Send to Chat';
-        btn2.addEventListener('click',()=>{ const i=$('inp'); if(i){i.value=`[${displayName}]: ${(r.response||'').slice(0,500)}`; switchPanel('chat'); i.focus();} });
+        btn2.addEventListener('click',()=>{ pendingCtx={text:r.response||'',title:displayName,url:'',action:'ask'}; showCtx(r.response||'',displayName); switchPanel('chat'); });
         foot.appendChild(btn2); card.appendChild(foot);
       }
       resultsEl.appendChild(card);
@@ -1997,12 +2130,7 @@ async function runCompare() {
 // DEEP RESEARCH PANEL
 // ══════════════════════════════════════════════════════════════════════════
 
-document.querySelectorAll('.res-d').forEach(btn => {
-  btn.addEventListener('click', function() {
-    document.querySelectorAll('.res-d').forEach(b=>b.classList.remove('on'));
-    this.classList.add('on'); resDepth = this.dataset.depth;
-  });
-});
+initToggleGroup('.res-d', d => { resDepth = d.depth; });
 
 $('res-go').addEventListener('click', async () => {
   const query = $('res-inp').value.trim();
@@ -2051,12 +2179,7 @@ $('res-go').addEventListener('click', async () => {
 // MATH SOLVER PANEL
 // ══════════════════════════════════════════════════════════════════════════
 
-document.querySelectorAll('.math-m').forEach(btn => {
-  btn.addEventListener('click', function() {
-    document.querySelectorAll('.math-m').forEach(b=>b.classList.remove('on'));
-    this.classList.add('on'); mathMode = this.dataset.mode;
-  });
-});
+initToggleGroup('.math-m', d => { mathMode = d.mode; });
 
 $('math-go').addEventListener('click', async () => {
   const problem = $('math-inp').value.trim();
@@ -2092,21 +2215,20 @@ $('math-inp').addEventListener('keydown', e => {
   if (e.key==='Enter' && (e.ctrlKey||e.metaKey)) { e.preventDefault(); $('math-go').click(); }
 });
 
+$('res-inp').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $('res-go').click(); }
+});
+
 // ══════════════════════════════════════════════════════════════════════════
 // ARTIFACTS PANEL
 // ══════════════════════════════════════════════════════════════════════════
 
-document.querySelectorAll('.art-tab').forEach(btn => {
-  btn.addEventListener('click', function() {
-    document.querySelectorAll('.art-tab').forEach(b=>b.classList.remove('on'));
-    this.classList.add('on');
-    const tab = this.dataset.tab;
-    $('art-preview').classList.toggle('on', tab==='preview');
-    $('art-code').classList.toggle('on', tab==='code');
-  });
+initToggleGroup('.art-tab', d => {
+  $('art-preview').classList.toggle('on', d.tab === 'preview');
+  $('art-code').classList.toggle('on', d.tab === 'code');
 });
 
-$('art-lang').addEventListener('change', function() { artLang = this.value; });
+// artLang state removed — art-go reads $('art-lang').value directly (no shadow variable needed)
 
 $('art-go').addEventListener('click', async () => {
   const prompt = $('art-inp').value.trim();
@@ -2123,13 +2245,13 @@ $('art-go').addEventListener('click', async () => {
   try {
     const resp = await fetch(`${HTTP}/api/chat`, {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({message: fullPrompt, stream: false}),
+      body: JSON.stringify({message: fullPrompt, stream: false, model: getModel('artifacts') || undefined}),
     });
     if (!resp.ok) { const d=await resp.json().catch(()=>({})); statusEl.textContent='⚠ '+(d.detail||resp.statusText); return; }
     const data = await resp.json();
     let code = (data.response||data.message||'').trim();
-    // Strip markdown code fences
-    code = code.replace(/^```[\w]*\n?/,'').replace(/\n?```$/,'').trim();
+    // Strip markdown code fences (handles language names with hyphens/dots, e.g. ```html-css, ```html)
+    code = code.replace(/^```[\w\-\.]*\r?\n?/,'').replace(/\r?\n?```[\w\-\.]*\s*$/,'').trim();
     artCode = code;
     codeEl.textContent = code;
     if (lang==='svg') { preview.srcdoc=`<html><body style="margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#fff">${code}</body></html>`; }

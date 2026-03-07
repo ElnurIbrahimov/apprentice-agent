@@ -8,7 +8,7 @@ import base64
 import logging
 from typing import Optional
 
-import requests as req
+import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -70,7 +70,9 @@ async def generate_image(body: ImageGenRequest):
     """Generate an image using ComfyUI. Returns base64 PNG."""
     # Check ComfyUI is running
     try:
-        req.get(f"{COMFY}/system_stats", timeout=2).raise_for_status()
+        async with httpx.AsyncClient(timeout=2) as c:
+            r = await c.get(f"{COMFY}/system_stats")
+            r.raise_for_status()
     except Exception:
         raise HTTPException(
             503,
@@ -87,24 +89,27 @@ async def generate_image(body: ImageGenRequest):
     )
 
     try:
-        r = req.post(f"{COMFY}/prompt", json={"prompt": workflow})
-        pid = r.json()["prompt_id"]
+        async with httpx.AsyncClient(timeout=10) as c:
+            r = await c.post(f"{COMFY}/prompt", json={"prompt": workflow})
+            pid = r.json()["prompt_id"]
     except Exception as e:
         raise HTTPException(500, f"Failed to queue prompt: {e}")
 
-    # Poll for completion (max 120s)
-    for _ in range(120):
-        await asyncio.sleep(1)
-        try:
-            hist = req.get(f"{COMFY}/history/{pid}").json()
-            if pid in hist:
-                outputs = hist[pid].get("outputs", {})
-                if outputs:
-                    fname = list(outputs.values())[0]["images"][0]["filename"]
-                    img_bytes = req.get(f"{COMFY}/view?filename={fname}").content
-                    b64 = base64.b64encode(img_bytes).decode()
-                    return {"image_b64": b64}
-        except Exception:
-            pass
+    # Poll for completion (max 120s) — async so event loop is not blocked
+    async with httpx.AsyncClient(timeout=10) as c:
+        for _ in range(120):
+            await asyncio.sleep(1)
+            try:
+                hist_r = await c.get(f"{COMFY}/history/{pid}")
+                hist = hist_r.json()
+                if pid in hist:
+                    outputs = hist[pid].get("outputs", {})
+                    if outputs:
+                        fname = list(outputs.values())[0]["images"][0]["filename"]
+                        img_r = await c.get(f"{COMFY}/view?filename={fname}")
+                        b64 = base64.b64encode(img_r.content).decode()
+                        return {"image_b64": b64}
+            except Exception:
+                pass
 
     raise HTTPException(504, "Image generation timed out after 120s")

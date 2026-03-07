@@ -8,12 +8,15 @@
 const ext = typeof browser !== 'undefined' ? browser : chrome;
 
 (function () {
+  // Guard: if already mounted in this window, do nothing (handles duplicate injection)
+  if (window.__auraToolbarMounted) return;
+  window.__auraToolbarMounted = true;
+
   // Remove stale elements from any previous injection (handles extension reload)
   const _prevDock = document.getElementById('aura-dock-host');
   if (_prevDock) _prevDock.remove();
   const _prevHost = document.getElementById('aura-host');
   if (_prevHost) _prevHost.remove();
-  window.__auraToolbarMounted = true;
 
   // ── Shadow DOM Host ────────────────────────────────────────────────────────────
 
@@ -298,8 +301,14 @@ const ext = typeof browser !== 'undefined' ? browser : chrome;
   function showToast(message, durationMs = 2000) {
     toast.textContent = message;
     toast.classList.add('visible');
-    toast.style.top = (parseInt(toolbar.style.top || '0') + 40) + 'px';
-    toast.style.left = toolbar.style.left;
+    // Position toast: near toolbar if visible, otherwise top-center
+    if (toolbar.classList.contains('visible') && toolbar.style.top) {
+      toast.style.top = (parseInt(toolbar.style.top) + 40) + 'px';
+      toast.style.left = toolbar.style.left;
+    } else {
+      toast.style.top = '20px';
+      toast.style.left = Math.round(window.innerWidth / 2 - 100) + 'px';
+    }
     setTimeout(() => toast.classList.remove('visible'), durationMs);
   }
 
@@ -396,19 +405,22 @@ const ext = typeof browser !== 'undefined' ? browser : chrome;
 
   function serializeDOM() {
     const els = [];
-    document.querySelectorAll('a,button,input,textarea,select,[role="button"],[onclick]')
-      .forEach((el, i) => {
-        const r = el.getBoundingClientRect();
-        if (r.width === 0 || r.height === 0) return;
-        els.push({
-          index: i,
-          type: el.tagName.toLowerCase(),
-          text: (el.innerText || el.value || el.placeholder || el.title || '').slice(0, 80).trim(),
-          selector: bestSelector(el),
-          href: el.href || '',
-        });
+    // Stop collecting once we have 80 visible interactive elements — avoids iterating thousands of nodes
+    const nodes = document.querySelectorAll('a,button,input,textarea,select,[role="button"],[onclick]');
+    let idx = 0;
+    for (const el of nodes) {
+      if (els.length >= 80) break;
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) continue;
+      els.push({
+        index: idx++,
+        type: el.tagName.toLowerCase(),
+        text: (el.innerText || el.value || el.placeholder || el.title || '').slice(0, 80).trim(),
+        selector: bestSelector(el),
+        href: el.href || '',
       });
-    return els.slice(0, 80);
+    }
+    return els;
   }
 
   function execAction(action) {
@@ -487,24 +499,29 @@ const ext = typeof browser !== 'undefined' ? browser : chrome;
       drawRect(startX, startY, e.clientX - startX, e.clientY - startY);
     });
 
+    // onEsc must be declared before mouseup so we can remove it from both paths
+    function onEsc(e) {
+      if (e.key === 'Escape') {
+        if (document.body.contains(overlay)) document.body.removeChild(overlay);
+        document.removeEventListener('keydown', onEsc);
+        sendResponse({ ok: false });
+      }
+    }
+
     overlay.addEventListener('mouseup', (e) => {
       dragging = false;
       const x = Math.min(startX, e.clientX);
       const y = Math.min(startY, e.clientY);
       const w = Math.abs(e.clientX - startX);
       const h = Math.abs(e.clientY - startY);
-      document.body.removeChild(overlay);
+      // Clean up Esc listener on mouseup path too, or it leaks and may double-fire
+      document.removeEventListener('keydown', onEsc);
+      if (document.body.contains(overlay)) document.body.removeChild(overlay);
       if (w < 5 || h < 5) { sendResponse({ ok: false }); return; }
       sendResponse({ ok: true, x, y, w, h, dpr });
     });
 
-    document.addEventListener('keydown', function onEsc(e) {
-      if (e.key === 'Escape') {
-        document.body.removeChild(overlay);
-        document.removeEventListener('keydown', onEsc);
-        sendResponse({ ok: false });
-      }
-    });
+    document.addEventListener('keydown', onEsc);
   }
 
   // ── Message Listener ───────────────────────────────────────────────────────

@@ -234,6 +234,10 @@ ext.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ image_b64: b64 }),
               });
+              if (!resp.ok) {
+                ext.runtime.sendMessage({ type: 'OCR_RESULT', error: `OCR server error ${resp.status}` });
+                return;
+              }
               const d = await resp.json();
               ext.runtime.sendMessage({
                 type: 'OCR_RESULT',
@@ -250,26 +254,19 @@ ext.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     // Browser Agent relay handlers
-    case 'AGENT_DOM': {
-      ext.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
-        if (!tab) { sendResponse({ ok: false, error: 'No active tab' }); return; }
-        ext.tabs.sendMessage(tab.id, { type: 'GET_DOM' }, r => sendResponse(r));
-      });
-      return true;
-    }
-
-    case 'AGENT_EXEC': {
-      ext.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
-        if (!tab) { sendResponse({ ok: false, error: 'No active tab' }); return; }
-        ext.tabs.sendMessage(tab.id, { type: 'EXEC_ACTION', action: msg.action }, r => sendResponse(r));
-      });
-      return true;
-    }
-
+    // relayToTab — shared helper: query active tab, relay message, call sendResponse
+    case 'AGENT_DOM':
+    case 'AGENT_EXEC':
     case 'AGENT_NAV': {
       ext.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
         if (!tab) { sendResponse({ ok: false, error: 'No active tab' }); return; }
-        ext.tabs.update(tab.id, { url: msg.url }, () => sendResponse({ ok: true }));
+        if (msg.type === 'AGENT_DOM') {
+          ext.tabs.sendMessage(tab.id, { type: 'GET_DOM' }, r => sendResponse(r));
+        } else if (msg.type === 'AGENT_EXEC') {
+          ext.tabs.sendMessage(tab.id, { type: 'EXEC_ACTION', action: msg.action }, r => sendResponse(r));
+        } else { // AGENT_NAV
+          ext.tabs.update(tab.id, { url: msg.url }, () => sendResponse({ ok: true }));
+        }
       });
       return true;
     }

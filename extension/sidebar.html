@@ -256,6 +256,7 @@ body::after{
 .src-card:hover{border-color:var(--p)}
 .src-card-n{font-size:10px;color:var(--p);font-weight:600;margin-bottom:2px}
 .src-card-t{font-size:12px;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.src-card-s{font-size:11px;color:var(--mu);line-height:1.4;margin-top:3px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .src-card-u{font-size:10px;color:var(--di);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}
 .ans-section{background:var(--s1);border:1px solid var(--b1);border-radius:10px;padding:12px 13px}
 .ans-section p{margin:3px 0;font-size:13px;line-height:1.65}
@@ -288,6 +289,7 @@ body::after{
 #tr-btn{background:var(--p);border:none;border-radius:8px;color:#fff;font-size:12px;
   font-weight:600;font-family:inherit;padding:7px 18px;cursor:pointer;transition:background .13s}
 #tr-btn:hover{background:var(--p2)}
+#tr-btn:disabled{background:var(--b1);cursor:not-allowed;opacity:.55}
 #tr-out-wrap{flex:1;overflow-y:auto;background:var(--s1)}
 #tr-out{padding:12px 14px;font-size:13px;color:var(--tx);line-height:1.65;min-height:60px;
   color:var(--mu);font-style:italic}
@@ -321,6 +323,7 @@ body::after{
 #write-submit{background:var(--p);border:none;border-radius:8px;color:#fff;font-size:12px;
   font-weight:600;font-family:inherit;padding:8px 20px;cursor:pointer;transition:background .13s}
 #write-submit:hover{background:var(--p2)}
+#write-submit:disabled{background:var(--b1);cursor:not-allowed;opacity:.55}
 #write-result{display:none;flex:1;overflow-y:auto;margin:0 14px 12px;
   background:var(--s1);border:1px solid var(--b1);border-radius:10px;padding:12px 13px;
   font-size:13px;line-height:1.65;color:var(--tx)}
@@ -428,6 +431,7 @@ body::after{
 #gr-inp::placeholder{color:var(--di)}
 #gr-btn{margin:10px 14px 0;background:var(--p);border:none;border-radius:8px;color:#fff;font-size:12px;font-weight:600;font-family:inherit;padding:9px 20px;cursor:pointer;transition:background .13s;align-self:flex-start;flex-shrink:0}
 #gr-btn:hover{background:var(--p2)}
+#gr-btn:disabled{background:var(--b1);cursor:not-allowed;opacity:.55}
 #gr-result{flex:1;overflow-y:auto;margin:10px 14px 14px;background:var(--s1);border:1px solid var(--b1);border-radius:10px;padding:12px 13px;font-size:13px;line-height:1.65;display:none;scrollbar-width:thin;scrollbar-color:var(--b1) transparent}
 #gr-result.on{display:block}
 .gr-del{color:var(--rd);text-decoration:line-through}
@@ -473,6 +477,7 @@ body::after{
 #rec-foot{padding:8px 14px;display:flex;gap:6px;flex-shrink:0}
 #rec-summarize,#rec-save-wb{background:var(--s2);border:1px solid var(--b1);border-radius:8px;color:var(--mu);font-size:12px;font-family:inherit;padding:7px 14px;cursor:pointer;transition:all .13s}
 #rec-summarize:hover,#rec-save-wb:hover{border-color:var(--p);color:var(--pl)}
+#rec-summarize:disabled{opacity:.45;cursor:not-allowed}
 #rec-notes{flex:1;overflow-y:auto;margin:0 14px 14px;padding:10px 13px;background:var(--s1);border:1px solid var(--b1);border-radius:10px;font-size:13px;line-height:1.65;display:none;scrollbar-width:thin;scrollbar-color:var(--b1) transparent}
 #rec-notes.on{display:block}
 #rec-ff-note{margin:12px 14px;padding:12px;background:var(--s2);border:1px solid var(--b1);border-radius:10px;font-size:12px;color:var(--mu);line-height:1.5;display:none}
@@ -574,11 +579,19 @@ body::after{
 ═══════════════════════════════════════ */
 #panel-youtube{gap:0}
 #yt-input-box:focus-within{border-color:var(--p)}
-#yt-summarize-btn:hover{background:var(--p2)!important}
-#yt-auto-btn:hover{background:var(--p2)!important}
+#yt-url-inp{outline:none}
+#yt-url-inp::placeholder{color:var(--di)}
+#yt-summarize-btn:hover{background:var(--p2)}
+#yt-summarize-btn:disabled{background:var(--b1);cursor:not-allowed;opacity:.55}
+#yt-auto-btn:hover{background:var(--p2)}
+#yt-auto-btn:disabled{background:var(--b1);cursor:not-allowed;opacity:.55}
 #yt-snippet-toggle:hover{color:var(--tx)}
-.yt-kp{display:flex;align-items:flex-start;gap:8px;background:var(--s1);border:1px solid var(--b1);border-radius:8px;padding:8px 11px;font-size:12.5px;color:var(--tx);line-height:1.5}
+.yt-kp{display:flex;align-items:flex-start;gap:8px;background:var(--s1);border:1px solid var(--b1);border-radius:8px;padding:8px 11px;font-size:12.5px;color:var(--tx);line-height:1.5;animation:up .18s ease-out}
 .yt-kp::before{content:'';width:5px;height:5px;border-radius:50%;background:var(--pl);flex-shrink:0;margin-top:5px}
+#yt-results{scrollbar-width:thin;scrollbar-color:var(--b1) transparent}
+#yt-results::-webkit-scrollbar{width:3px}
+#yt-results::-webkit-scrollbar-thumb{background:var(--b1);border-radius:2px}
+#yt-info-card{animation:up .18s ease-out}
 #yt-status .dots{display:inline-flex;gap:3px}
 #yt-status .dots span{width:4px;height:4px;border-radius:50%;background:var(--pl);opacity:.35;animation:db 1.1s ease-in-out infinite}
 #yt-status .dots span:nth-child(2){animation-delay:.18s}
@@ -607,7 +620,12 @@ body::after{
 .cmp-skeleton-bar{height:9px;border-radius:5px;background:var(--s3)}
 .cmp-skeleton-body{padding:10px;display:flex;flex-direction:column;gap:7px}
 #cmp-inp:focus{border-color:var(--p)}
+#cmp-inp{outline:none}
+#cmp-run:hover{background:var(--p2)}
 #cmp-run:disabled{opacity:.45;cursor:default}
+#cmp-all:hover,#cmp-clear:hover{border-color:var(--p);color:var(--tx)}
+#cmp-results{scrollbar-width:thin;scrollbar-color:var(--b1) transparent}
+#cmp-results.on{display:grid}
 
 /* ═══════════════════════════════════════
    RESEARCH PANEL
@@ -617,14 +635,21 @@ body::after{
 #res-inp:focus{border-color:var(--p)}
 #res-depth{display:flex;gap:5px;padding:8px 14px 0;flex-shrink:0}
 .res-d{background:var(--s2);border:1px solid var(--b1);border-radius:20px;color:var(--mu);font-size:11px;padding:4px 12px;cursor:pointer;font-family:inherit;transition:all .13s}
+.res-d:hover{color:var(--tx)}
 .res-d.on{border-color:var(--p);color:var(--pl);background:var(--pg)}
 #res-go{margin:8px 14px 0;background:var(--p);border:none;border-radius:10px;color:#fff;font-size:13px;font-weight:600;font-family:inherit;padding:11px;cursor:pointer;transition:background .13s;width:calc(100% - 28px);flex-shrink:0;display:flex;align-items:center;justify-content:center;gap:8px}
 #res-go:hover{background:var(--p2)}
 #res-go:disabled{background:var(--b1);cursor:not-allowed;opacity:.55}
 #res-status{padding:6px 14px;font-size:11.5px;color:var(--mu);flex-shrink:0;min-height:22px}
-#res-result{flex:1;overflow-y:auto;margin:0 14px 0;background:var(--s1);border:1px solid var(--b1);border-radius:10px;padding:12px 13px;font-size:12.5px;color:var(--tx);line-height:1.7;display:none;scrollbar-width:thin;scrollbar-color:var(--b1) transparent}
-#res-sources{padding:8px 14px 14px;display:none;flex-direction:column;gap:4px;flex-shrink:0;max-height:160px;overflow-y:auto}
-.res-src{background:var(--s2);border:1px solid var(--b1);border-radius:8px;padding:7px 10px}
+#res-result{flex:1;overflow-y:auto;margin:0 14px 14px;background:var(--s1);border:1px solid var(--b1);border-radius:10px;padding:12px 13px;font-size:12.5px;color:var(--tx);line-height:1.7;display:none;scrollbar-width:thin;scrollbar-color:var(--b1) transparent}
+#res-result::-webkit-scrollbar{width:3px}
+#res-result::-webkit-scrollbar-thumb{background:var(--b1);border-radius:2px}
+#res-result.on{display:block;animation:up .18s ease-out}
+#res-sources{padding:8px 14px 14px;display:none;flex-direction:column;gap:4px;flex-shrink:0;max-height:160px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--b1) transparent}
+#res-sources::-webkit-scrollbar{width:3px}
+#res-sources::-webkit-scrollbar-thumb{background:var(--b1);border-radius:2px}
+#res-sources.on{display:flex}
+.res-src{background:var(--s2);border:1px solid var(--b1);border-radius:8px;padding:7px 10px;animation:up .18s ease-out}
 .res-src a{color:var(--pl);font-size:11.5px;text-decoration:none;font-weight:600;display:block;margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .res-src a:hover{color:var(--pl2)}
 .res-src-snip{font-size:11px;color:var(--mu);line-height:1.45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -642,10 +667,16 @@ body::after{
 #math-go:hover{background:var(--p2)}
 #math-go:disabled{background:var(--b1);cursor:not-allowed;opacity:.55}
 #math-status{padding:6px 14px;font-size:11.5px;color:var(--mu);flex-shrink:0;min-height:22px}
-#math-result{flex:1;overflow-y:auto;padding:0 14px 14px;display:none;flex-direction:column;gap:8px}
-#math-solution{background:var(--s1);border:1px solid var(--b1);border-radius:10px;padding:12px 13px;font-size:14px;font-weight:600;color:var(--pl2)}
+#math-result{flex:1;overflow-y:auto;padding:0 14px 14px;display:none;flex-direction:column;gap:8px;scrollbar-width:thin;scrollbar-color:var(--b1) transparent}
+#math-result::-webkit-scrollbar{width:3px}
+#math-result::-webkit-scrollbar-thumb{background:var(--b1);border-radius:2px}
+#math-result.on{display:flex}
+#math-solution{background:var(--s1);border:1px solid var(--b1);border-radius:10px;padding:12px 13px;font-size:14px;font-weight:600;color:var(--pl2);animation:up .18s ease-out}
 #math-latex{background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:10px 13px;font-family:monospace;font-size:13px;color:var(--pl);overflow-x:auto;white-space:pre-wrap;display:none}
+#math-latex.on{display:block}
 #math-steps{background:var(--s1);border:1px solid var(--b1);border-radius:10px;padding:12px 13px;display:none}
+#math-steps.on{display:block}
+.math-m:hover{color:var(--tx)}
 .math-step{font-size:12.5px;color:var(--tx);padding:4px 0;border-bottom:1px solid var(--b1);line-height:1.6}
 .math-step:last-child{border-bottom:none}
 .math-step-num{font-weight:700;color:var(--pl);margin-right:6px}
@@ -660,13 +691,15 @@ body::after{
 #art-controls{display:flex;gap:6px;padding-top:8px;align-items:center}
 #art-go{background:var(--p);border:none;border-radius:8px;color:#fff;font-size:12.5px;font-weight:600;font-family:inherit;padding:8px 16px;cursor:pointer;transition:background .13s}
 #art-go:hover{background:var(--p2)}
-#art-lang{background:var(--s2);border:1px solid var(--b1);border-radius:8px;color:var(--tx);font-family:inherit;font-size:11.5px;padding:6px 10px;cursor:pointer;outline:none}
+#art-go:disabled{background:var(--b1);cursor:not-allowed;opacity:.55}
+#art-lang{background:var(--s2);border:1px solid var(--b1);border-radius:8px;color:var(--tx);font-family:inherit;font-size:11.5px;padding:6px 10px;cursor:pointer;outline:none;transition:border-color .13s}
+#art-lang:focus{border-color:var(--p)}
 #art-status{padding:4px 14px;font-size:11px;color:var(--mu);flex-shrink:0;min-height:18px}
 #art-body{flex:1;display:flex;flex-direction:column;overflow:hidden}
 #art-tabs{display:flex;gap:0;border-bottom:1px solid var(--b1);flex-shrink:0;padding:0 14px}
 .art-tab{background:none;border:none;border-bottom:2px solid transparent;color:var(--mu);font-family:inherit;font-size:12px;padding:7px 10px;cursor:pointer;transition:all .13s;margin-bottom:-1px}
 .art-tab.on{border-bottom-color:var(--p);color:var(--pl)}
-#art-preview{flex:1;border:none;background:#fff;display:none}
+#art-preview{flex:1;border:none;background:#fff;display:none;min-height:200px}
 #art-preview.on{display:block}
 #art-code{flex:1;overflow-y:auto;margin:0;padding:10px 14px;font-family:monospace;font-size:12px;color:var(--tx);background:var(--s1);white-space:pre-wrap;display:none;scrollbar-width:thin;scrollbar-color:var(--b1) transparent}
 #art-code.on{display:block}
@@ -674,6 +707,47 @@ body::after{
 #art-bottom.on{display:flex}
 #art-copy-code,#art-send-chat{background:var(--s2);border:1px solid var(--b1);border-radius:8px;color:var(--mu);font-size:12px;font-family:inherit;padding:6px 13px;cursor:pointer;transition:all .13s}
 #art-copy-code:hover,#art-send-chat:hover{border-color:var(--p);color:var(--pl)}
+
+/* ═══════════════════════════════════════
+   POLISH ADDITIONS
+═══════════════════════════════════════ */
+
+/* tool-hdr flex variant — for panels with model pill on right */
+.tool-hdr--flex{display:flex;align-items:center;justify-content:space-between;padding-bottom:12px}
+.tool-hdr--flex h2{margin:0}
+
+/* Narrow/mobile — prevent horizontal overflow */
+@media (max-width:320px){
+  #rail{width:36px}
+  .rbtn{width:28px;height:28px}
+  .tool-hdr,.tool-hdr--flex{padding-left:10px;padding-right:10px}
+  #msgs{padding-left:10px;padding-right:10px}
+  #inp-area{padding-left:8px;padding-right:8px}
+  #inp-top{padding:8px}
+  .bubble{padding:7px 10px}
+  #yt-results,#res-result,#math-result{padding-left:10px;padding-right:10px}
+}
+
+/* Ensure nothing in panels causes horizontal overflow at narrow widths */
+.panel{max-width:100%}
+textarea,input[type="text"]{max-width:100%}
+
+/* YouTube results inner label — matches .src-label / .tool-cat-lbl pattern */
+.yt-sec-lbl{font-size:10px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mu);margin-bottom:6px}
+/* YouTube auto-detect card */
+#yt-auto{display:none;margin:0 14px 12px;padding:10px 12px;background:linear-gradient(135deg,#1a0533,#2d0d5e);border:1px solid var(--p);border-radius:10px;flex-shrink:0}
+#yt-auto.on{display:block}
+#yt-auto-lbl{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--pl);margin-bottom:4px}
+#yt-auto-title{font-size:12px;color:var(--pl2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:6px}
+/* YouTube result summary card */
+#yt-res-summary{font-size:13px;color:var(--tx);line-height:1.65;background:var(--s1);border:1px solid var(--b1);border-radius:10px;padding:11px 13px;animation:up .18s ease-out}
+/* YouTube snippet */
+#yt-res-snippet{font-size:12px;color:var(--mu);line-height:1.6;background:var(--s1);border:1px solid var(--b1);border-radius:8px;padding:10px 12px;font-style:italic}
+/* Research result placeholder text color */
+#res-inp::placeholder{color:var(--di)}
+#math-inp::placeholder{color:var(--di)}
+/* Compare inline buttons */
+#cmp-all,#cmp-clear{transition:all .13s}
 </style>
 </head>
 <body>
@@ -1034,7 +1108,7 @@ body::after{
 
   <!-- OCR PANEL -->
   <div class="panel" id="panel-ocr">
-    <div class="tool-hdr"><h2>OCR</h2></div>
+    <div class="tool-hdr" style="display:flex;align-items:center;justify-content:space-between;padding-bottom:12px"><h2 style="margin:0">OCR</h2><span id="mdl-ocr"></span></div>
     <button id="ocr-capture">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 012-2h2"/><path d="M17 3h2a2 2 0 012 2v2"/><path d="M21 17v2a2 2 0 01-2 2h-2"/><path d="M7 21H5a2 2 0 01-2-2v-2"/><rect x="7" y="7" width="10" height="10"/></svg>
       Select Region on Page
@@ -1080,7 +1154,7 @@ body::after{
 
   <!-- IMAGE GENERATOR PANEL -->
   <div class="panel" id="panel-image">
-    <div class="tool-hdr"><h2>Image Generator</h2></div>
+    <div class="tool-hdr" style="display:flex;align-items:center;justify-content:space-between;padding-bottom:12px"><h2 style="margin:0">Image Generator</h2><span id="mdl-image"></span></div>
     <textarea id="img-prompt" placeholder="Describe the image…"></textarea>
     <textarea id="img-neg" placeholder="Negative prompt (optional)…"></textarea>
     <div id="img-styles">
@@ -1102,7 +1176,7 @@ body::after{
 
   <!-- BROWSER AGENT PANEL -->
   <div class="panel" id="panel-agent">
-    <div class="tool-hdr"><h2>Browser Agent</h2></div>
+    <div class="tool-hdr" style="display:flex;align-items:center;justify-content:space-between;padding-bottom:12px"><h2 style="margin:0">Browser Agent</h2><span id="mdl-agent"></span></div>
     <textarea id="agent-task" placeholder="Describe what to do on this page…"></textarea>
     <div id="agent-controls">
       <button id="agent-start">Start Agent</button>
@@ -1114,17 +1188,17 @@ body::after{
 
   <!-- YOUTUBE PANEL -->
   <div class="panel" id="panel-youtube">
-    <div class="tool-hdr" style="padding:16px 14px 12px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;">
-      <h2 style="font-size:18px;font-weight:700;">YouTube Summary</h2>
+    <div class="tool-hdr tool-hdr--flex">
+      <h2>YouTube Summary</h2>
       <span id="mdl-youtube"></span>
     </div>
-    <div id="yt-auto" style="display:none;margin:0 14px 12px;padding:10px 12px;background:linear-gradient(135deg,#1a0533,#2d0d5e);border:1px solid var(--p);border-radius:10px;flex-shrink:0;">
-      <div style="font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--pl);margin-bottom:4px;">YouTube detected</div>
-      <div id="yt-auto-title" style="font-size:12px;color:var(--pl2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:6px;"></div>
+    <div id="yt-auto">
+      <div id="yt-auto-lbl">YouTube detected</div>
+      <div id="yt-auto-title"></div>
       <button id="yt-auto-btn" style="background:var(--p);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:600;font-family:inherit;padding:6px 14px;cursor:pointer;transition:background .13s;">Summarize this video</button>
     </div>
     <div style="padding:0 14px 10px;flex-shrink:0;">
-      <div style="display:flex;gap:6px;align-items:center;background:var(--bg);border:1px solid var(--b1);border-radius:12px;padding:8px 8px 8px 13px;transition:border-color .18s;" id="yt-input-box">
+      <div id="yt-input-box" style="display:flex;gap:6px;align-items:center;background:var(--bg);border:1px solid var(--b1);border-radius:12px;padding:8px 8px 8px 13px;transition:border-color .18s;">
         <input id="yt-url-inp" type="text" placeholder="Paste YouTube URL…" style="flex:1;background:transparent;border:none;outline:none;color:var(--tx);font-family:inherit;font-size:13px;"/>
         <button id="yt-summarize-btn" style="background:var(--p);border:none;border-radius:8px;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;width:30px;height:30px;transition:background .13s;flex-shrink:0;">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
@@ -1132,7 +1206,7 @@ body::after{
       </div>
     </div>
     <div id="yt-status" style="padding:0 14px 6px;font-size:11.5px;color:var(--mu);flex-shrink:0;min-height:18px;display:flex;align-items:center;gap:8px;"></div>
-    <div id="yt-results" style="flex:1;overflow-y:auto;padding:0 14px 16px;scrollbar-width:thin;scrollbar-color:var(--b1) transparent;display:none;">
+    <div id="yt-results" style="flex:1;overflow-y:auto;padding:0 14px 16px;display:none;">
       <div id="yt-info-card" style="background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:12px 13px;margin-bottom:10px;">
         <div id="yt-res-title" style="font-size:14px;font-weight:700;color:var(--tx);margin-bottom:4px;line-height:1.35;"></div>
         <div style="display:flex;gap:12px;flex-wrap:wrap;">
@@ -1141,11 +1215,11 @@ body::after{
         </div>
       </div>
       <div style="margin-bottom:10px;">
-        <div style="font-size:10px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mu);margin-bottom:6px;">Summary</div>
-        <div id="yt-res-summary" style="font-size:13px;color:var(--tx);line-height:1.65;background:var(--s1);border:1px solid var(--b1);border-radius:10px;padding:11px 13px;"></div>
+        <div class="yt-sec-lbl">Summary</div>
+        <div id="yt-res-summary"></div>
       </div>
       <div style="margin-bottom:10px;">
-        <div style="font-size:10px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mu);margin-bottom:6px;">Key Points</div>
+        <div class="yt-sec-lbl">Key Points</div>
         <ul id="yt-res-points" style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:5px;"></ul>
       </div>
       <div>
@@ -1153,7 +1227,7 @@ body::after{
           <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="yt-snippet-chevron"><polyline points="9 18 15 12 9 6"/></svg>
           Transcript snippet
         </button>
-        <div id="yt-res-snippet" style="display:none;font-size:12px;color:var(--mu);line-height:1.6;background:var(--s1);border:1px solid var(--b1);border-radius:8px;padding:10px 12px;font-style:italic;"></div>
+        <div id="yt-res-snippet" style="display:none;"></div>
       </div>
     </div>
   </div><!-- /panel-youtube -->
@@ -1162,7 +1236,7 @@ body::after{
   <div class="panel" id="panel-compare">
     <div id="cmp-body" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:0;scrollbar-width:thin;scrollbar-color:var(--b1) transparent">
       <div id="cmp-top" style="padding:14px 14px 10px;border-bottom:1px solid var(--b1);flex-shrink:0">
-        <h2 style="font-size:14px;font-weight:700;color:var(--tx);margin-bottom:10px;display:flex;align-items:center;gap:7px">
+        <h2 style="font-size:18px;font-weight:700;color:var(--tx);margin-bottom:10px;display:flex;align-items:center;gap:7px">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--pl)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
           Compare Models
         </h2>
@@ -1189,8 +1263,8 @@ body::after{
 
   <!-- DEEP RESEARCH PANEL -->
   <div class="panel" id="panel-research">
-    <div class="tool-hdr" style="padding:16px 14px 12px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;">
-      <h2 style="font-size:18px;font-weight:700;">Deep Research</h2>
+    <div class="tool-hdr tool-hdr--flex">
+      <h2>Deep Research</h2>
       <span id="mdl-research"></span>
     </div>
     <textarea id="res-inp" placeholder="Research topic or question…"></textarea>
@@ -1210,8 +1284,8 @@ body::after{
 
   <!-- MATH SOLVER PANEL -->
   <div class="panel" id="panel-math">
-    <div class="tool-hdr" style="padding:16px 14px 12px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;">
-      <h2 style="font-size:18px;font-weight:700;">Math Solver</h2>
+    <div class="tool-hdr tool-hdr--flex">
+      <h2>Math Solver</h2>
       <span id="mdl-math"></span>
     </div>
     <textarea id="math-inp" placeholder="Enter a math problem, equation, or concept…"></textarea>
@@ -1232,9 +1306,12 @@ body::after{
   <!-- ARTIFACTS PANEL -->
   <div class="panel" id="panel-artifacts">
     <div id="art-top">
-      <div style="font-size:13px;font-weight:700;color:var(--tx);margin-bottom:8px;display:flex;align-items:center;gap:6px;">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--pl)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-        Artifacts
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <h2 style="font-size:18px;font-weight:700;color:var(--tx);margin:0;display:flex;align-items:center;gap:6px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--pl)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+          Artifacts
+        </h2>
+        <span id="mdl-artifacts"></span>
       </div>
       <textarea id="art-inp" placeholder="Describe what to build (e.g. a bar chart, a CSS card, a snake game…)"></textarea>
       <div id="art-controls">
