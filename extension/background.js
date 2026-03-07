@@ -48,15 +48,26 @@ ext.contextMenus.onClicked.addListener((info, tab) => {
   }
 });
 
-// ── PDF Tab Detection ─────────────────────────────────────────────────────────
+// ── PDF + YouTube Tab Detection ───────────────────────────────────────────────
 
 ext.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.status === 'complete' && /\.pdf($|\?)/i.test(tab.url || '')) {
+  if (changeInfo.status !== 'complete') return;
+  const url = tab.url || '';
+
+  if (/\.pdf($|\?)/i.test(url)) {
     ext.runtime.sendMessage({
       type: 'PDF_TAB_DETECTED',
-      url: tab.url,
-      title: tab.title || tab.url,
-    });
+      url,
+      title: tab.title || url,
+    }).catch(() => {});
+  }
+
+  if (url.includes('youtube.com/watch')) {
+    ext.runtime.sendMessage({
+      type: 'YT_TAB_DETECTED',
+      url,
+      title: tab.title || url,
+    }).catch(() => {});
   }
 });
 

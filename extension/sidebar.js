@@ -34,6 +34,28 @@ let imgStyle = '';          // selected image style suffix
 let agentRunning = false;
 let agentStep = 0;
 
+// Summary panel state
+let summaryFormat = 'bullets';
+let summaryText = '';
+
+// YouTube panel state
+let ytAutoUrl = '';
+
+// Compare panel state
+let compareSelectedModels = new Set();
+let compareInitialized = false;
+const COMPARE_DEFAULT_MODELS = ['gemini-3-flash-preview:cloud','qwen3.5:397b-cloud','kimi-k2-thinking:cloud'];
+
+// Research panel state
+let resDepth = 'standard';
+
+// Math panel state
+let mathMode = 'solve';
+
+// Artifacts panel state
+let artCode = '';
+let artLang = 'html';
+
 // ── DOM ────────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 
@@ -222,6 +244,12 @@ function switchPanel(name) {
   else if (name === 'write') writeInp.focus();
   else if (name === 'wisebase') loadWisebase();
   else if (name === 'models') loadModelPanel();
+  else if (name === 'summary') { /* panel is ready; user clicks Summarize to trigger */ }
+  else if (name === 'youtube') { if (ytAutoUrl) $('yt-url-inp').value = ytAutoUrl; }
+  else if (name === 'compare') initComparePanel();
+  else if (name === 'research') { /* ready */ }
+  else if (name === 'math') { /* ready */ }
+  else if (name === 'artifacts') { /* ready */ }
 }
 
 document.querySelectorAll('.rbtn[data-panel]').forEach(btn => {
@@ -676,6 +704,13 @@ ext.runtime.onMessage.addListener(msg => {
     if (selTxt) selTxt.textContent = msg.text.slice(0, 300) + (msg.text.length > 300 ? '…' : '');
     if (selSrc) selSrc.textContent = msg.title || msg.url || '';
     switchPanel('ask');
+  }
+  if (msg.type === 'YT_TAB_DETECTED') {
+    ytAutoUrl = msg.url;
+    const banner = $('yt-auto');
+    const titleEl = $('yt-auto-title');
+    if (banner && titleEl) { titleEl.textContent = msg.title || msg.url; banner.style.display = 'block'; }
+    if (activePanel === 'youtube' && $('yt-url-inp')) $('yt-url-inp').value = msg.url;
   }
   if (msg.type === 'PDF_TAB_DETECTED') {
     const autoDiv = $('pdf-auto');
@@ -1165,6 +1200,122 @@ $('ocr-copy').addEventListener('click', () => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════
+// PAGE SUMMARY PANEL
+// ══════════════════════════════════════════════════════════════════════════
+
+const sumGo      = $('sum-go');
+const sumStatus  = $('sum-status');
+const sumResult  = $('sum-result');
+const sumBadges  = $('sum-badges');
+const sumActions = $('sum-actions');
+const sumEmpty   = $('sum-empty');
+const sumWc      = $('sum-wc');
+const sumRt      = $('sum-rt');
+
+// Format toggle buttons
+document.querySelectorAll('.sum-fmt').forEach(btn => {
+  btn.addEventListener('click', function() {
+    document.querySelectorAll('.sum-fmt').forEach(b => b.classList.remove('on'));
+    this.classList.add('on');
+    summaryFormat = this.dataset.fmt;
+  });
+});
+
+async function summarizeCurrentPage() {
+  sumGo.disabled = true;
+  sumStatus.textContent = 'Reading page\u2026';
+  sumResult.classList.remove('on');
+  sumBadges.classList.remove('on');
+  sumActions.classList.remove('on');
+  sumEmpty.style.display = 'none';
+  summaryText = '';
+
+  let pageData;
+  try {
+    pageData = await new Promise((resolve) => {
+      ext.runtime.sendMessage({ type: 'GET_PAGE_CONTENT' }, (resp) => {
+        resolve(resp);
+      });
+    });
+  } catch (e) {
+    sumStatus.textContent = 'Could not read page.';
+    sumGo.disabled = false;
+    sumEmpty.style.display = '';
+    return;
+  }
+
+  if (!pageData?.ok || !pageData.text) {
+    sumStatus.textContent = pageData?.error || 'Could not read page content.';
+    sumGo.disabled = false;
+    sumEmpty.style.display = '';
+    return;
+  }
+
+  const title = pageData.title || 'Untitled Page';
+  sumStatus.textContent = 'Summarizing: ' + title.slice(0, 55) + (title.length > 55 ? '\u2026' : '');
+
+  try {
+    const res = await fetch(`${HTTP}/api/summarize/page`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: pageData.text,
+        url: pageData.url || '',
+        title: title,
+        format: summaryFormat,
+        model: getModel('summary'),
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      sumStatus.textContent = 'Error: ' + (err.detail || res.statusText);
+      sumGo.disabled = false;
+      sumEmpty.style.display = '';
+      return;
+    }
+
+    const data = await res.json();
+    summaryText = data.summary || '';
+
+    sumResult.innerHTML = md(summaryText);
+    sumResult.classList.add('on');
+
+    const wordCount = data.word_count || 0;
+    sumWc.textContent = wordCount.toLocaleString() + ' words on page';
+    sumRt.textContent = data.reading_time_saved || '';
+    sumBadges.classList.add('on');
+
+    sumActions.classList.add('on');
+    sumStatus.textContent = '';
+
+  } catch (e) {
+    sumStatus.textContent = 'Request failed: ' + e.message;
+    sumEmpty.style.display = '';
+  } finally {
+    sumGo.disabled = false;
+  }
+}
+
+sumGo.addEventListener('click', summarizeCurrentPage);
+
+$('sum-to-chat').addEventListener('click', () => {
+  if (!summaryText) return;
+  pendingCtx = { text: summaryText, title: 'Page Summary', url: '', action: 'ask' };
+  showCtx(summaryText, 'Page Summary');
+  switchPanel('chat');
+});
+
+$('sum-copy').addEventListener('click', function() {
+  if (!summaryText) return;
+  navigator.clipboard.writeText(summaryText).then(() => {
+    const orig = this.textContent;
+    this.textContent = 'Copied!';
+    setTimeout(() => { this.textContent = orig; }, 1500);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
 // IMAGE GENERATOR PANEL (Step 9)
 // ══════════════════════════════════════════════════════════════════════════
 
@@ -1345,6 +1496,10 @@ const FEATURE_DEFS = [
   { key: 'pdf',     label: 'PDF Chat',       icon: '📄', desc: 'Chat with PDF content' },
   { key: 'voice',   label: 'Voice Notes',    icon: '🎤', desc: 'Transcript summarization' },
   { key: 'agent',   label: 'Browser Agent',  icon: '🤖', desc: 'Page action planning' },
+  { key: 'summary',   label: 'Page Summary',   icon: '📄', desc: 'One-click page summarization' },
+  { key: 'youtube',   label: 'YouTube',        icon: '▶️',  desc: 'Summarize YouTube videos' },
+  { key: 'research',  label: 'Deep Research',  icon: '🔬', desc: 'Multi-source web research' },
+  { key: 'math',      label: 'Math Solver',    icon: '➗', desc: 'Step-by-step math solving' },
 ];
 
 // Loaded from chrome.storage.local, applied to every request
@@ -1367,7 +1522,8 @@ function getModel(feature) {
 const PILL_SLOTS = {
   chat: 'mdl-chat', search: 'mdl-search', translate: 'mdl-translate',
   write: 'mdl-write', grammar: 'mdl-grammar', ask: 'mdl-ask',
-  pdf: 'mdl-pdf', voice: 'mdl-voice',
+  pdf: 'mdl-pdf', voice: 'mdl-voice', summary: 'mdl-summary',
+  youtube: 'mdl-youtube', research: 'mdl-research', math: 'mdl-math',
 };
 
 function buildPill(featureKey) {
@@ -1654,3 +1810,311 @@ $('mdl-save').addEventListener('click', () => {
 });
 
 $('mdl-reload').addEventListener('click', loadModelPanel);
+
+// ══════════════════════════════════════════════════════════════════════════
+// YOUTUBE PANEL
+// ══════════════════════════════════════════════════════════════════════════
+
+async function loadYoutubeSummary(url) {
+  url = (url || $('yt-url-inp').value || '').trim();
+  if (!url) return;
+  const statusEl = $('yt-status');
+  const resultsEl = $('yt-results');
+  const btn = $('yt-summarize-btn');
+  const autoBtn = $('yt-auto-btn');
+  resultsEl.style.display = 'none';
+  statusEl.innerHTML = '<div class="dots"><span></span><span></span><span></span></div> Fetching transcript…';
+  btn.disabled = true;
+  if (autoBtn) autoBtn.disabled = true;
+  try {
+    const resp = await fetch(`${HTTP}/api/youtube/summarize`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({url}), signal: AbortSignal.timeout(90000),
+    });
+    if (!resp.ok) {
+      let e = `Error ${resp.status}`;
+      try { const d = await resp.json(); e = d.detail || e; } catch {}
+      statusEl.textContent = '⚠ ' + e; return;
+    }
+    const data = await resp.json();
+    $('yt-res-title').textContent = data.title || 'Untitled';
+    $('yt-res-channel').textContent = data.channel ? '▶ ' + data.channel : '';
+    $('yt-res-duration').textContent = data.duration ? '⏱ ' + data.duration : '';
+    $('yt-res-summary').textContent = data.summary || 'No summary available.';
+    const ul = $('yt-res-points');
+    ul.innerHTML = '';
+    (Array.isArray(data.key_points) ? data.key_points : []).forEach(pt => {
+      const li = document.createElement('li'); li.className = 'yt-kp'; li.textContent = pt; ul.appendChild(li);
+    });
+    $('yt-res-snippet').textContent = data.transcript_snippet || '';
+    $('yt-res-snippet').style.display = 'none';
+    const ch = $('yt-snippet-chevron'); if (ch) ch.style.transform = '';
+    statusEl.textContent = '';
+    resultsEl.style.display = 'block';
+  } catch (err) {
+    statusEl.textContent = '⚠ ' + (err.name === 'TimeoutError' ? 'Request timed out.' : err.message || 'Unknown error');
+  } finally {
+    btn.disabled = false;
+    if (autoBtn) autoBtn.disabled = false;
+  }
+}
+
+$('yt-summarize-btn').addEventListener('click', () => loadYoutubeSummary($('yt-url-inp').value));
+$('yt-url-inp').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); loadYoutubeSummary($('yt-url-inp').value); } });
+$('yt-auto-btn').addEventListener('click', () => { if (ytAutoUrl) { $('yt-url-inp').value = ytAutoUrl; loadYoutubeSummary(ytAutoUrl); } });
+$('yt-snippet-toggle').addEventListener('click', () => {
+  const s = $('yt-res-snippet'), ch = $('yt-snippet-chevron');
+  const open = s.style.display !== 'none';
+  s.style.display = open ? 'none' : 'block';
+  if (ch) ch.style.transform = open ? '' : 'rotate(90deg)';
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// COMPARE PANEL
+// ══════════════════════════════════════════════════════════════════════════
+
+function initComparePanel() {
+  if (compareInitialized) return;
+  const chipsEl = $('cmp-chips');
+  if (!chipsEl) return;
+  function buildChips(cloudList, localList) {
+    chipsEl.innerHTML = '';
+    function addChip(m, isCloud) {
+      const chip = document.createElement('button');
+      chip.className = 'cmp-chip'; chip.dataset.model = m; chip.title = m;
+      chip.innerHTML = `<span style="flex-shrink:0">${isCloud ? '☁' : '🖥'}</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(m.replace(/:cloud$/,''))}</span>`;
+      if (COMPARE_DEFAULT_MODELS.includes(m)) { compareSelectedModels.add(m); chip.classList.add('on'); }
+      chip.addEventListener('click', () => {
+        if (compareSelectedModels.has(m)) { compareSelectedModels.delete(m); chip.classList.remove('on'); }
+        else { compareSelectedModels.add(m); chip.classList.add('on'); }
+      });
+      chipsEl.appendChild(chip);
+    }
+    cloudList.forEach(m => addChip(m, true));
+    localList.forEach(m => addChip(m, false));
+    compareInitialized = true;
+  }
+  if (mdlCloudList.length || mdlLocalList.length) { buildChips(mdlCloudList, mdlLocalList); return; }
+  fetch('http://localhost:11434/api/tags').then(r=>r.json()).then(d=>{
+    const all = (d.models||[]).map(m=>m.name);
+    mdlCloudList = all.filter(n=>n.includes(':cloud'));
+    mdlLocalList = all.filter(n=>!n.includes(':cloud'));
+    buildChips(mdlCloudList, mdlLocalList);
+  }).catch(()=>{
+    fetch(`${HTTP}/api/models/available`).then(r=>r.json()).then(d=>{
+      mdlCloudList = (d.cloud||[]).map(m=>m.name);
+      mdlLocalList = (d.local||[]).map(m=>m.name);
+      buildChips(mdlCloudList, mdlLocalList);
+    }).catch(()=>{ chipsEl.innerHTML='<span style="font-size:11px;color:var(--mu)">No models — is Ollama running?</span>'; });
+  });
+}
+
+$('cmp-all') && $('cmp-all').addEventListener('click', () => {
+  $('cmp-chips').querySelectorAll('.cmp-chip').forEach(c => { compareSelectedModels.add(c.dataset.model); c.classList.add('on'); });
+});
+$('cmp-clear') && $('cmp-clear').addEventListener('click', () => {
+  compareSelectedModels.clear();
+  $('cmp-chips').querySelectorAll('.cmp-chip').forEach(c => c.classList.remove('on'));
+});
+$('cmp-inp') && $('cmp-inp').addEventListener('keydown', e => { if (e.key==='Enter'&&!e.shiftKey){e.preventDefault();runCompare();} });
+$('cmp-run') && $('cmp-run').addEventListener('click', runCompare);
+
+async function runCompare() {
+  const inp = $('cmp-inp'), resultsEl = $('cmp-results'), emptyEl = $('cmp-empty'), runBtn = $('cmp-run');
+  if (!inp||!resultsEl) return;
+  const prompt = inp.value.trim();
+  if (!prompt) { inp.style.borderColor='var(--rd)'; setTimeout(()=>{inp.style.borderColor='';},800); return; }
+  if (!compareSelectedModels.size) return;
+  runBtn.disabled = true;
+  if (emptyEl) emptyEl.style.display = 'none';
+  const models = [...compareSelectedModels];
+  resultsEl.style.display = 'grid'; resultsEl.innerHTML = '';
+  models.forEach(m => {
+    const sk = document.createElement('div'); sk.className='cmp-skeleton'; sk.dataset.skelModel=m;
+    sk.innerHTML=`<div class="cmp-skeleton-hdr"><div class="cmp-skeleton-bar" style="width:55%"></div><div class="cmp-skeleton-bar" style="width:18%;margin-left:auto"></div></div><div class="cmp-skeleton-body"><div class="cmp-skeleton-bar" style="width:92%"></div><div class="cmp-skeleton-bar" style="width:78%"></div><div class="cmp-skeleton-bar" style="width:64%"></div></div>`;
+    resultsEl.appendChild(sk);
+  });
+  try {
+    const res = await fetch(`${HTTP}/api/compare`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:prompt,models})});
+    if (!res.ok) throw new Error(`Server error ${res.status}`);
+    const data = await res.json();
+    resultsEl.innerHTML = '';
+    (data.results||[]).forEach(r => {
+      const isCloud = r.model.includes(':cloud');
+      const isFastest = r.model===data.fastest && !r.error;
+      const displayName = r.model.replace(/:cloud$/,'');
+      const card = document.createElement('div'); card.className='cmp-card';
+      const timeLabel = r.elapsed_ms>=1000 ? (r.elapsed_ms/1000).toFixed(1)+'s' : r.elapsed_ms+'ms';
+      card.innerHTML=`<div class="cmp-card-hdr"><div class="cmp-model-badge"><span>${isCloud?'☁':'🖥'}</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(displayName)}</span></div><span class="cmp-time-badge${isFastest?' fastest':''}">${isFastest?'⚡ ':''}${timeLabel}</span></div><div class="cmp-card-body${r.error?' error':''}">${r.error?esc('Error: '+r.error):md(r.response||'')}</div>`;
+      if (!r.error) {
+        const foot = document.createElement('div'); foot.className='cmp-card-footer';
+        const btn2 = document.createElement('button'); btn2.className='cmp-send-btn'; btn2.textContent='Send to Chat';
+        btn2.addEventListener('click',()=>{ const i=$('inp'); if(i){i.value=`[${displayName}]: ${(r.response||'').slice(0,500)}`; switchPanel('chat'); i.focus();} });
+        foot.appendChild(btn2); card.appendChild(foot);
+      }
+      resultsEl.appendChild(card);
+    });
+  } catch (err) {
+    resultsEl.innerHTML=`<div style="grid-column:1/-1;color:var(--rd);font-size:12px;padding:12px 0">Failed: ${esc(String(err))}</div>`;
+  } finally { runBtn.disabled=false; }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// DEEP RESEARCH PANEL
+// ══════════════════════════════════════════════════════════════════════════
+
+document.querySelectorAll('.res-d').forEach(btn => {
+  btn.addEventListener('click', function() {
+    document.querySelectorAll('.res-d').forEach(b=>b.classList.remove('on'));
+    this.classList.add('on'); resDepth = this.dataset.depth;
+  });
+});
+
+$('res-go').addEventListener('click', async () => {
+  const query = $('res-inp').value.trim();
+  if (!query) return;
+  const statusEl = $('res-status'), resultEl = $('res-result'), sourcesEl = $('res-sources'), goBtn = $('res-go');
+  goBtn.disabled = true; resultEl.style.display='none'; sourcesEl.style.display='none';
+  statusEl.textContent = 'Searching the web…';
+  try {
+    const resp = await fetch(`${HTTP}/api/research`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({query, depth: resDepth, model: getModel('research')}),
+    });
+    if (!resp.ok) { const d=await resp.json().catch(()=>({})); statusEl.textContent='⚠ '+(d.detail||resp.statusText); return; }
+    const reader = resp.body.getReader(); const dec = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const {done, value} = await reader.read(); if (done) break;
+      buf += dec.decode(value, {stream:true});
+      const lines = buf.split('\n'); buf = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const ev = JSON.parse(line);
+          if (ev.status && ev.status !== 'done') { statusEl.textContent = ev.message || ev.status; }
+          if (ev.status === 'done') {
+            statusEl.textContent = `Done — ${ev.sources?.length||0} sources`;
+            resultEl.innerHTML = md(ev.report||''); resultEl.style.display='block';
+            if (ev.sources?.length) {
+              sourcesEl.innerHTML = '<div style="font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mu);margin-bottom:6px;">Sources</div>';
+              sourcesEl.style.display = 'flex';
+              ev.sources.slice(0,6).forEach(s => {
+                const d2 = document.createElement('div'); d2.className='res-src';
+                d2.innerHTML=`<a href="${esc(s.url)}" target="_blank" rel="noopener">[${s.index}] ${esc(s.title||s.domain)}</a><div class="res-src-snip">${esc(s.snippet||'')}</div>`;
+                sourcesEl.appendChild(d2);
+              });
+            }
+          }
+        } catch {}
+      }
+    }
+  } catch (err) { statusEl.textContent = '⚠ ' + (err.message||'Request failed'); }
+  finally { goBtn.disabled=false; }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// MATH SOLVER PANEL
+// ══════════════════════════════════════════════════════════════════════════
+
+document.querySelectorAll('.math-m').forEach(btn => {
+  btn.addEventListener('click', function() {
+    document.querySelectorAll('.math-m').forEach(b=>b.classList.remove('on'));
+    this.classList.add('on'); mathMode = this.dataset.mode;
+  });
+});
+
+$('math-go').addEventListener('click', async () => {
+  const problem = $('math-inp').value.trim();
+  if (!problem) return;
+  const statusEl=$('math-status'), resultEl=$('math-result'), goBtn=$('math-go');
+  goBtn.disabled=true; resultEl.style.display='none'; statusEl.textContent='Solving…';
+  try {
+    const resp = await fetch(`${HTTP}/api/math/solve`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({problem, mode: mathMode, model: getModel('math')}),
+    });
+    if (!resp.ok) { const d=await resp.json().catch(()=>({})); statusEl.textContent='⚠ '+(d.detail||resp.statusText); return; }
+    const data = await resp.json();
+    statusEl.textContent = '';
+    const solEl=$('math-solution'), latEl=$('math-latex'), stepsEl=$('math-steps');
+    solEl.textContent = data.solution || 'No solution returned.';
+    if (data.latex) { latEl.textContent = data.latex; latEl.style.display='block'; } else { latEl.style.display='none'; }
+    stepsEl.innerHTML = '';
+    if (data.steps?.length) {
+      stepsEl.style.display='block';
+      data.steps.forEach((s,i) => {
+        const d2=document.createElement('div'); d2.className='math-step';
+        d2.innerHTML=`<span class="math-step-num">${i+1}.</span>${esc(s)}`;
+        stepsEl.appendChild(d2);
+      });
+    } else { stepsEl.style.display='none'; }
+    resultEl.style.display='flex';
+  } catch (err) { statusEl.textContent='⚠ '+(err.message||'Request failed'); }
+  finally { goBtn.disabled=false; }
+});
+
+$('math-inp').addEventListener('keydown', e => {
+  if (e.key==='Enter' && (e.ctrlKey||e.metaKey)) { e.preventDefault(); $('math-go').click(); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// ARTIFACTS PANEL
+// ══════════════════════════════════════════════════════════════════════════
+
+document.querySelectorAll('.art-tab').forEach(btn => {
+  btn.addEventListener('click', function() {
+    document.querySelectorAll('.art-tab').forEach(b=>b.classList.remove('on'));
+    this.classList.add('on');
+    const tab = this.dataset.tab;
+    $('art-preview').classList.toggle('on', tab==='preview');
+    $('art-code').classList.toggle('on', tab==='code');
+  });
+});
+
+$('art-lang').addEventListener('change', function() { artLang = this.value; });
+
+$('art-go').addEventListener('click', async () => {
+  const prompt = $('art-inp').value.trim();
+  if (!prompt) return;
+  const statusEl=$('art-status'), goBtn=$('art-go'), preview=$('art-preview'), codeEl=$('art-code'), bottomEl=$('art-bottom');
+  goBtn.disabled=true; statusEl.textContent='Generating…';
+  preview.srcdoc=''; codeEl.textContent=''; artCode='';
+  bottomEl.classList.remove('on');
+  const lang = $('art-lang').value;
+  const systemNote = lang==='svg' ? 'Respond with only the SVG code, no explanation.' :
+                     lang==='markdown' ? 'Respond with only Markdown, no explanation.' :
+                     'Respond with only a complete HTML file including CSS and JS. No explanation, no markdown fences.';
+  const fullPrompt = `${systemNote}\n\nTask: ${prompt}`;
+  try {
+    const resp = await fetch(`${HTTP}/api/chat`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({message: fullPrompt, stream: false}),
+    });
+    if (!resp.ok) { const d=await resp.json().catch(()=>({})); statusEl.textContent='⚠ '+(d.detail||resp.statusText); return; }
+    const data = await resp.json();
+    let code = (data.response||data.message||'').trim();
+    // Strip markdown code fences
+    code = code.replace(/^```[\w]*\n?/,'').replace(/\n?```$/,'').trim();
+    artCode = code;
+    codeEl.textContent = code;
+    if (lang==='svg') { preview.srcdoc=`<html><body style="margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#fff">${code}</body></html>`; }
+    else if (lang==='markdown') { preview.srcdoc=`<html><head><style>body{font-family:system-ui,sans-serif;padding:16px;line-height:1.6;max-width:700px;margin:0 auto}</style></head><body>${md(code)}</body></html>`; }
+    else { preview.srcdoc=code; }
+    statusEl.textContent='';
+    bottomEl.classList.add('on');
+  } catch (err) { statusEl.textContent='⚠ '+(err.message||'Request failed'); }
+  finally { goBtn.disabled=false; }
+});
+
+$('art-copy-code').addEventListener('click', function() {
+  if (!artCode) return;
+  navigator.clipboard.writeText(artCode).then(()=>{ const o=this.textContent; this.textContent='Copied!'; setTimeout(()=>{this.textContent=o;},1500); });
+});
+
+$('art-send-chat').addEventListener('click', () => {
+  if (!artCode) return;
+  pendingCtx = { text: artCode, title: 'Artifact', url: '', action: 'ask' };
+  showCtx(artCode.slice(0,80)+'…', 'Artifact');
+  switchPanel('chat');
+});
