@@ -357,13 +357,36 @@ function sysmsg(text) {
 
 // ── Send (chat) ────────────────────────────────────────────────────────────
 
-function sendMessage(override, modelKey) {
+// Page-context keywords — if any match, inject full page text automatically
+const PAGE_KEYWORDS = /\b(this page|this site|this article|this post|this video|current page|what('s| is) (this|the) (page|site|article)|summarize this|explain this|what does this (say|mean)|translate this|tldr|tl;dr)\b/i;
+
+async function sendMessage(override, modelKey) {
   const text = (override !== undefined ? override : inp.value).trim();
   if (!text) return;
   if (!wsReady) { sysmsg('AURA is offline — start the backend server.'); return; }
   if (activeStream) return;
 
   let full = text;
+
+  // ── Auto page context (like Sider) ────────────────────────────────────────
+  if (!pendingCtx) {
+    const wantsFullPage = PAGE_KEYWORDS.test(text);
+    if (wantsFullPage) {
+      // Full page text for page-specific questions
+      const pageResp = await new Promise(r => ext.runtime.sendMessage({ type: 'GET_PAGE_CONTENT' }, r));
+      if (pageResp?.ok && pageResp.text) {
+        pendingCtx = { text: pageResp.text.slice(0, 20000), title: pageResp.title, url: pageResp.url, action: 'ask' };
+        showCtx(pageResp.text, pageResp.title || 'Current page');
+      }
+    } else {
+      // Always inject URL + title so the model knows what page you're on
+      const tabResp = await new Promise(r => ext.runtime.sendMessage({ type: 'GET_CURRENT_TAB' }, r));
+      if (tabResp?.ok && tabResp.url && !tabResp.url.startsWith('chrome://') && !tabResp.url.startsWith('about:')) {
+        full = `[Current page: ${tabResp.title || tabResp.url} — ${tabResp.url}]\n\n${text}`;
+      }
+    }
+  }
+
   if (pendingCtx) {
     full = `[Context: ${pendingCtx.title || pendingCtx.url || 'selection'}]\n${pendingCtx.text}\n\n---\n${text}`;
     clearCtx();

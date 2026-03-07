@@ -119,6 +119,14 @@ ext.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     // Sidebar asks background to extract page content from active tab
+    case 'GET_CURRENT_TAB': {
+      ext.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const t = tabs[0];
+        sendResponse(t ? { ok: true, url: t.url || '', title: t.title || '' } : { ok: false });
+      });
+      return true;
+    }
+
     case 'GET_PAGE_CONTENT': {
       ext.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         const activeTab = tabs[0];
