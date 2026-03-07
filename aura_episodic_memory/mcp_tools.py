@@ -80,12 +80,18 @@ def create_episodic_tools(
             tools_used=tools_used or []
         )
 
-        episode_id = memory_store.store_episode(episode)
+        try:
+            episode_id = memory_store.store_episode(episode)
+        except Exception as e:
+            logger.error(f"[EpisodicMemory] Failed to store episode: {e}")
+            return {"success": False, "error": f"Storage failed: {e}"}
 
+        preview = title or content[:50]
+        suffix = "..." if not title and len(content) > 50 else ""
         return {
             "success": True,
             "episode_id": episode_id,
-            "message": f"Stored episode: {title or content[:50]}..."
+            "message": f"Stored episode: {preview}{suffix}"
         }
 
     tools.append(MCPTool(
@@ -179,16 +185,17 @@ def create_episodic_tools(
         memories = []
         for result in results:
             ep = result.episode
+            ts = ep.temporal_context.timestamp if ep.temporal_context else None
             memories.append({
                 "id": ep.id,
                 "title": ep.title,
                 "content": ep.content[:500],
                 "type": ep.episode_type.value,
-                "timestamp": ep.temporal_context.timestamp.isoformat(),
+                "timestamp": ts.isoformat() if ts else "",
                 "importance": ep.importance,
                 "score": result.score,
                 "entities": ep.entities_involved[:5],
-                "recency": parser.get_recency_description(ep.temporal_context.timestamp)
+                "recency": parser.get_recency_description(ts) if ts else "unknown"
             })
 
         return {
@@ -573,8 +580,8 @@ class QuickEpisodicMemory:
                         "timestamp": ep.temporal_context.timestamp.isoformat() if ep.temporal_context else "",
                         "importance": ep.importance,
                     })
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug(f"[QuickEpisodicMemory] Search error (best-effort): {_e}")
             finally:
                 done.set()
 

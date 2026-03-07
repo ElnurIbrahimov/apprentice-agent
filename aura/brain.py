@@ -266,6 +266,9 @@ class OllamaBrain:
         if self._alma_enabled:
             logger.info(f"[BRAIN] ALMA emotional system enabled {get_mood_emoji()}")
 
+        # Screenshot path tracking (set by agent, read by brain for combined screenshot+vision tasks)
+        self._last_screenshot_path: Optional[str] = None
+
         # Episodic memory auto-recall (lazy-init, best-effort)
         self._episodic_memory = None
         try:
@@ -379,8 +382,10 @@ class OllamaBrain:
                 indent=2,
                 ensure_ascii=False,
             )
-        path = self._history_file
-        _BG_EXECUTOR.submit(lambda: path.write_text(data_str, encoding="utf-8"))
+            # Capture path inside the lock so a concurrent conversation switch
+            # cannot cause us to write to the wrong file in the background.
+            path = self._history_file
+        _BG_EXECUTOR.submit(lambda p=path, d=data_str: p.write_text(d, encoding="utf-8"))
         self._update_conversation_index_entry()
 
     def _save_history_snapshot(self, history: list, query_count: int, total_query_count: int) -> None:
@@ -765,6 +770,7 @@ class OllamaBrain:
         memory_content = f"Conversation: {title}\n\n{conversation_text}"
 
         # Try to save to A-MEM
+        primary_error: Optional[str] = None
         try:
             from aura.tools.amem import get_amem
             amem = get_amem()
@@ -783,6 +789,7 @@ class OllamaBrain:
                 "title": title,
             }
         except Exception as e:
+            primary_error = str(e)
             logger.error(f"[BRAIN] Failed to save conversation to memory: {e}")
 
         # Fallback: try hybrid memory
@@ -805,7 +812,7 @@ class OllamaBrain:
             }
         except Exception as e2:
             logger.error(f"[BRAIN] Hybrid memory fallback also failed: {e2}")
-            return {"success": False, "error": f"Memory save failed: {e}; {e2}"}
+            return {"success": False, "error": f"Memory save failed: {primary_error}; {e2}"}
 
     def clear_history(self):
         """Clear conversation history to free memory."""

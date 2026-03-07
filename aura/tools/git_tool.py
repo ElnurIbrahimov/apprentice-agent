@@ -46,6 +46,14 @@ class GitTool:
                 "error": "Git is not installed or not in PATH"
             }
 
+        # SECURITY: Validate all args are plain strings, not shell metacharacters.
+        # Since we use a list form of subprocess.run (no shell=True), individual
+        # args are passed directly to the OS and are not shell-interpreted.
+        # Still, reject anything that isn't a non-empty string to be safe.
+        for arg in args:
+            if not isinstance(arg, str):
+                return {"success": False, "error": f"Invalid git argument type: {type(arg)}"}
+
         # Resolve the path
         repo_path = Path(cwd).resolve()
         if not repo_path.exists():
@@ -268,10 +276,13 @@ class GitTool:
         if result.get("success"):
             parts = result.get("output", "0\t0").split()
             if len(parts) >= 2:
-                return {
-                    "behind": int(parts[0]),
-                    "ahead": int(parts[1])
-                }
+                try:
+                    return {
+                        "behind": int(parts[0]),
+                        "ahead": int(parts[1])
+                    }
+                except (ValueError, IndexError):
+                    pass
         return {"behind": 0, "ahead": 0}
 
     def log(self, repo_path: str = ".", count: int = 5) -> dict:
@@ -607,6 +618,11 @@ class GitTool:
                 "success": False,
                 "error": "Repository URL is required"
             }
+
+        # SECURITY: validate URL is http/https/ssh/git — reject file:// and exotic schemes
+        import re as _re
+        if not _re.match(r'^(https?://|git@|git://|ssh://)', url):
+            return {"success": False, "error": f"Unsupported URL scheme in: {url}"}
 
         args = ["clone", url]
         if destination:

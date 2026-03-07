@@ -52,12 +52,17 @@ class FileSystemTool:
             if not file_path.is_file():
                 return {"success": False, "error": f"Not a file: {path}"}
 
-            content = file_path.read_text(encoding="utf-8")
+            try:
+                content = file_path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                # File is binary or uses a different encoding — return base64 preview
+                raw = file_path.read_bytes()
+                content = f"[binary file, {len(raw)} bytes — first 64 bytes: {raw[:64].hex()}]"
             return {
                 "success": True,
                 "content": content,
                 "path": str(file_path),
-                "size": len(content)
+                "size": file_path.stat().st_size
             }
         except PermissionError:
             return {"success": False, "error": "Permission denied"}
@@ -101,10 +106,14 @@ class FileSystemTool:
 
             items = []
             for item in dir_path.iterdir():
+                try:
+                    size = item.stat().st_size if item.is_file() else None
+                except OSError:
+                    size = None  # Broken symlink or permission error
                 items.append({
                     "name": item.name,
                     "type": "directory" if item.is_dir() else "file",
-                    "size": item.stat().st_size if item.is_file() else None
+                    "size": size
                 })
 
             return {
@@ -362,7 +371,9 @@ class FileSystemTool:
             bak = Path(backup_path)
             if not bak.exists():
                 return {"success": False, "error": f"Backup not found: {backup_path}"}
-            original = Path(str(bak)[:-4])  # Remove .bak
+            if bak.suffix != ".bak":
+                return {"success": False, "error": f"Not a .bak file: {backup_path}"}
+            original = bak.with_suffix("")  # Removes the .bak extension correctly
             shutil.copy2(str(bak), str(original))
             bak.unlink()
             return {"success": True, "restored": str(original)}

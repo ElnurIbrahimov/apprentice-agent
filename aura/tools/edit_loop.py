@@ -74,9 +74,14 @@ class EditLoop:
         if test_cmd:
             logger.info(f"[EditLoop] Running tests: {test_cmd}")
             try:
+                import shlex
+                # Split into a list so shell=True is not needed, which prevents
+                # shell injection if test_cmd contains shell metacharacters.
+                # On Windows shlex.split handles typical command strings correctly.
+                cmd_args = shlex.split(test_cmd)
                 proc = subprocess.run(
-                    test_cmd,
-                    shell=True,
+                    cmd_args,
+                    shell=False,
                     capture_output=True,
                     text=True,
                     timeout=120,

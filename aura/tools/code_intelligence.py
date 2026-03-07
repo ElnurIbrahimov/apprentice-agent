@@ -55,6 +55,11 @@ class CodeIntelligenceTool:
         self._graph = None                       # networkx DiGraph
         self._indexed_root: Optional[str] = None
 
+        self._py_lang = None
+        self._js_lang = None
+        self._py_parser = None
+        self._js_parser = None
+
         if TREE_SITTER_AVAILABLE:
             try:
                 self._py_lang = Language(tspython.language())
@@ -64,6 +69,9 @@ class CodeIntelligenceTool:
             except Exception as e:
                 logger.warning(f"[CodeIntel] tree-sitter init failed: {e}")
                 self._py_lang = None
+                self._js_lang = None
+                self._py_parser = None
+                self._js_parser = None
 
     def index_project(self, root_path: str, languages: List[str] = None) -> dict:
         """Parse all source files → extract symbols → build dependency graph.
@@ -169,7 +177,7 @@ class CodeIntelligenceTool:
 
     def _extract_symbols(self, fpath: Path) -> List[Dict]:
         """Extract function/class definitions from a file using tree-sitter."""
-        if not TREE_SITTER_AVAILABLE or not hasattr(self, '_py_lang') or not self._py_lang:
+        if not TREE_SITTER_AVAILABLE or not self._py_lang:
             return []
 
         ext = fpath.suffix
@@ -179,6 +187,9 @@ class CodeIntelligenceTool:
         elif lang == "javascript":
             parser = self._js_parser
         else:
+            return []
+
+        if parser is None:
             return []
 
         text = fpath.read_text(encoding="utf-8", errors="ignore").encode()
@@ -226,6 +237,7 @@ class CodeIntelligenceTool:
         if not self._symbols:
             return ""
 
+        max_tokens = max(1, max_tokens)
         max_chars = max_tokens * 4
 
         # Group symbols by file

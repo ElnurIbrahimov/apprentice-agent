@@ -83,14 +83,18 @@ def update_project_notes(path: str, note: str) -> bool:
         section = "## Notes from AURA"
 
         if section in content:
-            # Insert note after the section header
+            # Insert note on a new line immediately after the section header line.
+            # Find end of the header line (the \n after the header text).
             idx = content.index(section) + len(section)
-            # Skip any existing comment line
-            rest = content[idx:]
-            insert_text = f"\n- {note}"
-            content = content[:idx] + insert_text + rest
+            # Consume the rest of the header line up to and including its newline
+            end_of_header_line = content.find("\n", idx)
+            if end_of_header_line == -1:
+                end_of_header_line = len(content)
+            insert_pos = end_of_header_line + 1  # Position right after the newline
+            insert_text = f"- {note}\n"
+            content = content[:insert_pos] + insert_text + content[insert_pos:]
         else:
-            content += f"\n\n{section}\n- {note}"
+            content += f"\n\n{section}\n- {note}\n"
 
         aura_md.write_text(content, encoding="utf-8")
         return True

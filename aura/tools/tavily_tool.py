@@ -48,11 +48,17 @@ class TavilyTool:
         if not self._api_key:
             return {"error": "TAVILY_API_KEY not set"}
 
+        if not query or not query.strip():
+            return {"error": "Query must not be empty"}
+
+        if search_depth not in ("basic", "advanced"):
+            search_depth = "basic"
+
         payload = {
             "api_key": self._api_key,
             "query": query.strip(),
             "search_depth": search_depth,
-            "max_results": min(max_results, 20),
+            "max_results": min(max(1, max_results), 20),
             "include_answer": include_answer,
             "include_raw_content": include_raw_content,
             "topic": topic,
@@ -88,9 +94,16 @@ class TavilyTool:
         if not self._api_key:
             return {"error": "TAVILY_API_KEY not set"}
 
+        if not urls:
+            return {"error": "At least one URL is required"}
+
+        valid_urls = [u for u in urls if isinstance(u, str) and u.startswith(("http://", "https://"))]
+        if not valid_urls:
+            return {"error": "No valid http/https URLs provided"}
+
         payload = {
             "api_key": self._api_key,
-            "urls": urls[:5],  # API limit
+            "urls": valid_urls[:5],  # API limit
         }
 
         try:

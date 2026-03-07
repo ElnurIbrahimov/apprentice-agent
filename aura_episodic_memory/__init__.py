@@ -164,6 +164,7 @@ __all__ = [
     "create_episodic_tools",
     "register_episodic_tools_with_agent",
     "MCPTool",
+    "QuickEpisodicMemory",
 ]
 
 __version__ = "1.0.0"

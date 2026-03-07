@@ -1697,24 +1697,27 @@ Guidelines:
         Returns:
             Response dict if identity was updated, None otherwise
         """
-        # Check for name change
-        new_name = detect_name_change(goal)
-        if new_name:
-            self.identity = update_name(new_name)
-            response = f"Got it! I'll remember that. You can call me {new_name} from now on."
-            logger.debug(f"\n[IDENTITY] Name updated to: {new_name}")
-            return self._make_response(goal, response, fast_path=True, metadata={"identity_update": True})
+        try:
+            # Check for name change
+            new_name = detect_name_change(goal)
+            if new_name:
+                self.identity = update_name(new_name)
+                response = f"Got it! I'll remember that. You can call me {new_name} from now on."
+                logger.debug(f"\n[IDENTITY] Name updated to: {new_name}")
+                return self._make_response(goal, response, fast_path=True, metadata={"identity_update": True})
 
-        # Check for personality change
-        new_personality = detect_personality_change(goal)
-        if new_personality:
-            # Append to existing personality or replace
-            current = self.identity.get("personality", "")
-            updated = f"{current}, {new_personality}" if current else new_personality
-            self.identity = update_personality(updated)
-            response = f"I'll try to be more {new_personality}. Thanks for the feedback!"
-            logger.debug(f"\n[IDENTITY] Personality updated to: {updated}")
-            return self._make_response(goal, response, fast_path=True, metadata={"identity_update": True})
+            # Check for personality change
+            new_personality = detect_personality_change(goal)
+            if new_personality:
+                # Append to existing personality or replace
+                current = self.identity.get("personality", "") if self.identity else ""
+                updated = f"{current}, {new_personality}" if current else new_personality
+                self.identity = update_personality(updated)
+                response = f"I'll try to be more {new_personality}. Thanks for the feedback!"
+                logger.debug(f"\n[IDENTITY] Personality updated to: {updated}")
+                return self._make_response(goal, response, fast_path=True, metadata={"identity_update": True})
+        except Exception as e:
+            logger.warning(f"[IDENTITY] Check failed (non-fatal): {e}")
 
         return None
 
@@ -2424,7 +2427,7 @@ Guidelines:
             "evaluation": self.state.evaluation,
             "timestamp": datetime.now().isoformat()
         }
-        self.state.history.append(episode)
+        self.state.add_to_history(episode)
 
         # Store significant learnings in long-term memory
         if self.state.evaluation:

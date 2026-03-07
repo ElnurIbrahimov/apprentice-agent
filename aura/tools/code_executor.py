@@ -277,20 +277,31 @@ except Exception as e:
             f.write(wrapper_code)
             temp_path = f.name
 
+        proc = None
         try:
             # Run in subprocess with timeout
-            result = subprocess.run(
+            proc = subprocess.Popen(
                 [sys.executable, temp_path],
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=self.timeout,
                 cwd=tempfile.gettempdir(),  # Run in temp directory
             )
+            try:
+                stdout_data, stderr_data = proc.communicate(timeout=self.timeout)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.communicate()  # Drain pipes to avoid zombie
+                return {
+                    "success": False,
+                    "error": f"Code execution timed out after {self.timeout} seconds",
+                    "code": code
+                }
 
-            stdout = result.stdout[:self.max_output_length] if result.stdout else ""
-            stderr = result.stderr[:self.max_output_length] if result.stderr else ""
+            stdout = stdout_data[:self.max_output_length] if stdout_data else ""
+            stderr = stderr_data[:self.max_output_length] if stderr_data else ""
 
-            if result.returncode == 0:
+            if proc.returncode == 0:
                 return {
                     "success": True,
                     "output": stdout.strip(),
@@ -305,12 +316,6 @@ except Exception as e:
                     "code": code
                 }
 
-        except subprocess.TimeoutExpired:
-            return {
-                "success": False,
-                "error": f"Code execution timed out after {self.timeout} seconds",
-                "code": code
-            }
         finally:
             # Clean up temp file
             try:
@@ -340,6 +345,11 @@ except Exception as e:
 
     def run_math(self, expression: str) -> dict:
         import ast as _ast
+        import math as _math
+
+        if not expression or not expression.strip():
+            return {"success": False, "output": "", "error": "Empty expression"}
+
         # Validate the expression is a pure math expression
         try:
             tree = _ast.parse(expression.strip(), mode='eval')
@@ -353,19 +363,31 @@ except Exception as e:
             _ast.FloorDiv, _ast.BitAnd, _ast.BitOr, _ast.BitXor,
             _ast.LShift, _ast.RShift, _ast.Invert, _ast.Not, _ast.UAdd, _ast.USub,
             _ast.Compare, _ast.Eq, _ast.NotEq, _ast.Lt, _ast.LtE, _ast.Gt, _ast.GtE,
+            _ast.Name,  # needed for function names and 'math' prefix
+            _ast.Attribute,  # needed for math.sqrt etc.
+            _ast.Call,
         )
+        MATH_FUNCS = {"abs", "round", "min", "max", "sum", "pow", "int", "float"}
         for node in _ast.walk(tree):
             if not isinstance(node, ALLOWED_NODES):
-                if isinstance(node, _ast.Call):
-                    if isinstance(node.func, _ast.Name):
-                        MATH_FUNCS = {"abs", "round", "min", "max", "sum", "pow", "int", "float"}
-                        if node.func.id not in MATH_FUNCS:
-                            return {"success": False, "output": "", "error": f"Function '{node.func.id}' not allowed in math expressions"}
-                    elif isinstance(node.func, _ast.Attribute):
-                        if not (isinstance(node.func.value, _ast.Name) and node.func.value.id == "math"):
-                            return {"success": False, "output": "", "error": "Only math.* functions allowed"}
-                else:
-                    return {"success": False, "output": "", "error": f"Expression contains disallowed construct: {type(node).__name__}"}
+                return {"success": False, "output": "", "error": f"Expression contains disallowed construct: {type(node).__name__}"}
+            if isinstance(node, _ast.Call):
+                if isinstance(node.func, _ast.Name):
+                    if node.func.id not in MATH_FUNCS:
+                        return {"success": False, "output": "", "error": f"Function '{node.func.id}' not allowed in math expressions"}
+                elif isinstance(node.func, _ast.Attribute):
+                    if not (isinstance(node.func.value, _ast.Name) and node.func.value.id == "math"):
+                        return {"success": False, "output": "", "error": "Only math.* functions allowed"}
 
-        code = f"import math\nprint({expression})"
-        return self.execute(code)
+        # Evaluate directly in-process with a restricted namespace — avoids spawning a
+        # subprocess just for math and bypasses the blocked-'math'-import safety check.
+        safe_globals = {"__builtins__": {}, "math": _math}
+        safe_locals = {f: getattr(__builtins__, f, None) or getattr(_math, f, None)
+                       for f in MATH_FUNCS}
+        try:
+            result = eval(compile(tree, "<math>", "eval"), safe_globals, safe_locals)  # noqa: S307
+            return {"success": True, "output": str(result), "errors": None, "code": expression}
+        except ZeroDivisionError:
+            return {"success": False, "output": "", "error": "Division by zero"}
+        except Exception as e:
+            return {"success": False, "output": "", "error": str(e)}
