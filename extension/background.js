@@ -128,23 +128,42 @@ ext.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     case 'GET_PAGE_CONTENT': {
-      ext.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      ext.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
         const activeTab = tabs[0];
-        if (!activeTab) {
-          sendResponse({ ok: false, error: 'No active tab' });
-          return;
+        if (!activeTab) { sendResponse({ ok: false, error: 'No active tab' }); return; }
+
+        const tabId = activeTab.id;
+        const url = activeTab.url || '';
+
+        // Block protected pages Chrome won't let extensions touch
+        if (!url || url.startsWith('chrome://') || url.startsWith('chrome-extension://') ||
+            url.startsWith('about:') || url.startsWith('edge://')) {
+          sendResponse({ ok: false, error: 'Protected page' }); return;
         }
-        ext.tabs.sendMessage(
-          activeTab.id,
-          { type: 'EXTRACT_PAGE' },
-          (response) => {
-            if (ext.runtime.lastError) {
-              sendResponse({ ok: false, error: ext.runtime.lastError.message });
-            } else {
-              sendResponse({ ok: true, ...response });
-            }
+
+        // Try content script first
+        ext.tabs.sendMessage(tabId, { type: 'EXTRACT_PAGE' }, (response) => {
+          if (!ext.runtime.lastError && response) {
+            sendResponse({ ok: true, ...response }); return;
           }
-        );
+
+          // Content script not running in this tab (was opened before extension loaded).
+          // Inject it on-the-fly using scripting API then extract.
+          ext.scripting.executeScript({
+            target: { tabId },
+            func: () => ({
+              text: (document.body?.innerText || '').slice(0, 50000),
+              url: location.href,
+              title: document.title,
+            }),
+          }).then(results => {
+            const r = results?.[0]?.result;
+            if (r?.text) sendResponse({ ok: true, ...r });
+            else sendResponse({ ok: false, error: 'Could not extract page text' });
+          }).catch(err => {
+            sendResponse({ ok: false, error: err.message });
+          });
+        });
       });
       return true;
     }
