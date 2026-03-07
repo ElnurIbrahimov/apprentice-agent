@@ -197,6 +197,22 @@ class AuraDaemon:
         except Exception as e:
             logger.error(f"Dream failed: {e}")
 
+        # Run DreamConsolidator pipeline (cluster → summarize → prune → report)
+        try:
+            from aura.dream import get_dream_consolidator
+            consolidator = get_dream_consolidator()
+            # Get default user_id from agent if available
+            user_id = "default_user"
+            try:
+                if self._agent and hasattr(self._agent, "user_id"):
+                    user_id = self._agent.user_id or user_id
+            except Exception:
+                pass
+            consolidator.run_cycle_background(user_id=user_id)
+            logger.info("DreamConsolidator cycle started in background (user=%s)", user_id)
+        except Exception as e:
+            logger.error(f"DreamConsolidator failed: {e}")
+
     def _load_agent(self):
         """Load ApprenticeAgent in background — doesn't block daemon start."""
         try:

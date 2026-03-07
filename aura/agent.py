@@ -5490,8 +5490,9 @@ Try these commands:
             except Exception as e:
                 logger.debug(f"[TemplateLib] Trace/usage recording error: {e}")
 
-        # ===== Fix 2D: Unified memory write — single coordinated store =====
-        # Replaces independent episodic bridge call with UnifiedMemory.store()
+        # ===== Fix 2D: Unified memory write — gated store (write gate + dedup) =====
+        # Uses store_gated() which runs MemoryWriteGate before fan-out.
+        # Falls back to store() if gate unavailable.
         if not is_simple and len(response) > 20:
             try:
                 from aura.memory.unified_memory import get_unified_memory as _get_umem
@@ -5513,8 +5514,9 @@ Try these commands:
                 _content_ref = _mem_content
                 _pad_ref = _pad
                 import threading
+                _store_fn = getattr(_umem_ref, "store_gated", _umem_ref.store)
                 threading.Thread(
-                    target=_umem_ref.store,
+                    target=_store_fn,
                     kwargs={"content": _content_ref, "source": "conversation",
                             "importance": 0.5, "emotional_pad": _pad_ref},
                     daemon=True
@@ -5806,7 +5808,8 @@ Try these commands:
             except Exception:
                 pass
 
-        # ===== Fix 2D: Unified memory write (stream path) — replaces episodic + A-MEM + daily notes =====
+        # ===== Fix 2D: Unified memory write (stream path) — gated store =====
+        # Uses store_gated() which runs MemoryWriteGate before fan-out.
         if not is_simple and len(full_response) > 20:
             try:
                 from aura.memory.unified_memory import get_unified_memory as _get_umem_s
@@ -5826,8 +5829,9 @@ Try these commands:
                     pass
                 _umem_s = _get_umem_s()
                 import threading
+                _store_fn_s = getattr(_umem_s, "store_gated", _umem_s.store)
                 threading.Thread(
-                    target=_umem_s.store,
+                    target=_store_fn_s,
                     kwargs={"content": _mem_content, "source": "conversation",
                             "importance": 0.5, "emotional_pad": _pad},
                     daemon=True

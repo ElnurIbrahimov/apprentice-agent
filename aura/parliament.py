@@ -86,6 +86,22 @@ class ParliamentConductor:
     def handle(self, query: str, context_addon: str = "") -> str:
         """Main entry point. Returns response text."""
         t0 = time.time()
+
+        # Loop guard: detect repeated / low-novelty reasoning cycles
+        try:
+            from aura.reliability.loop_guard import get_guard
+            _session_id = getattr(self.agent, '_session_id', 'parliament-default')
+            _guard = get_guard(_session_id)
+            _guard_result = _guard.record(f"parliament:{query[:80]}", context=query)
+            if _guard_result.triggered:
+                logger.warning(
+                    "[PARLIAMENT] Loop guard triggered: %s (tier=%s)",
+                    _guard_result.reason, _guard_result.actions_taken
+                )
+                return _guard_result.fallback_message
+        except Exception:
+            pass
+
         tier = self.classify(query)
 
         if tier == QueryTier.SIMPLE:
@@ -179,6 +195,21 @@ class ParliamentConductor:
         COMPLEX tier falls back to the blocking _parliament_response() and
         yields the complete result as one chunk (parallel synthesis can't stream).
         """
+        # Loop guard check (same guard as handle(), shared per session)
+        try:
+            from aura.reliability.loop_guard import get_guard
+            _session_id = getattr(self.agent, '_session_id', 'parliament-default')
+            _guard = get_guard(_session_id)
+            _guard_result = _guard.record(f"parliament:{query[:80]}", context=query)
+            if _guard_result.triggered:
+                logger.warning(
+                    "[PARLIAMENT] Loop guard triggered (stream): %s", _guard_result.reason
+                )
+                yield _guard_result.fallback_message
+                return
+        except Exception:
+            pass
+
         tier = self.classify(query)
 
         if tier in (QueryTier.SIMPLE, QueryTier.STANDARD):

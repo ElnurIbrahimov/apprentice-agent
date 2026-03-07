@@ -308,7 +308,34 @@ class KnowledgeGraphTool:
             # Persist
             self._append_node(node)
 
+            # Contradiction detection: run in background so add_node stays fast
+            if getattr(__import__("aura.config", fromlist=["Config"]).Config,
+                       "ENABLE_KG_CONTRADICTIONS", True):
+                import threading as _threading
+                _threading.Thread(
+                    target=self._check_contradictions_bg,
+                    args=(node_id,),
+                    daemon=True,
+                    name=f"kg-contradict-{node_id[:8]}",
+                ).start()
+
             return node
+
+    def _check_contradictions_bg(self, node_id: str) -> None:
+        """Run contradiction detection for a newly added node (background thread)."""
+        try:
+            from aura.memory.kg_contradiction import KGContradictionDetector
+            detector = KGContradictionDetector(self)
+            records = detector.check_for_contradictions(node_id)
+            if records:
+                import logging as _logging
+                _logging.getLogger(__name__).info(
+                    "[KG] %d contradiction(s) detected for new node %s",
+                    len(records), node_id,
+                )
+        except Exception as e:
+            import logging as _logging
+            _logging.getLogger(__name__).debug("[KG] Contradiction check error: %s", e)
 
     def get_node(self, node_id: str) -> Optional[Node]:
         """Retrieve node by ID."""

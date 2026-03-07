@@ -1188,8 +1188,9 @@ class OllamaBrain:
             except Exception as e:
                 logger.debug(f"[BRAIN] ALMA message processing failed: {e}")
 
-        # Select model based on task type
+        # Select model based on task type, then apply outcome-aware routing overlay
         model = self._select_model(prompt, task_type)
+        model = self._routing_stats_override(model, task_type)
         self._last_model_used = model
 
         full_system_prompt = self._build_full_system_prompt(prompt, system_prompt, tone_modifier)
@@ -1215,6 +1216,7 @@ class OllamaBrain:
         # High serotonin = more patience = longer timeout; low = impatient = shorter
         neuro = _get_neuromodulator_levels()
         adjusted_timeout = int(_neuro_scale(LLM_TIMEOUT, neuro["serotonin"], sensitivity=0.3))
+        _llm_start_ts = time.time()  # Track LLM latency for routing stats
         logger.debug(f"[BRAIN] Calling {model} with timeout={adjusted_timeout}s (serotonin={neuro['serotonin']:.2f})")
 
         # Get appropriate client (local or cloud) - may return fallback model
@@ -1322,9 +1324,20 @@ class OllamaBrain:
 
         if response is None:
             logger.warning(f"[BRAIN] All models in chain failed, returning error message")
+            # Record failure to routing stats
+            _BG_EXECUTOR.submit(
+                self._record_routing_outcome, actual_model, task_type, False,
+                (time.time() - _llm_start_ts) * 1000
+            )
             return "I'm having trouble processing that right now. Please try again."
 
         assistant_message = response["message"]["content"]
+
+        # Record routing success to stats store (background, non-blocking)
+        _BG_EXECUTOR.submit(
+            self._record_routing_outcome, actual_model, task_type, True,
+            (time.time() - _llm_start_ts) * 1000
+        )
 
         # ===== Phase 4 Fix 4D: Track tokens and cost =====
         _in_tok = response.get("prompt_eval_count", 0) or 0
@@ -1405,8 +1418,9 @@ class OllamaBrain:
             except Exception as e:
                 logger.debug(f"[BRAIN] ALMA message processing failed: {e}")
 
-        # Select model based on task type
+        # Select model based on task type, then apply outcome-aware routing overlay
         model = self._select_model(prompt, task_type)
+        model = self._routing_stats_override(model, task_type)
         self._last_model_used = model
 
         full_system_prompt = self._build_full_system_prompt(prompt, system_prompt, tone_modifier)
@@ -1647,6 +1661,57 @@ class OllamaBrain:
             return (False, domain, confidence, "high_dopamine")
 
         return (False, domain, confidence, "default_fast")
+
+    # ------------------------------------------------------------------
+    # Outcome-aware routing helpers
+    # ------------------------------------------------------------------
+
+    def _routing_stats_override(self, model: str, task_type: Optional[TaskType] = None) -> str:
+        """Apply outcome-aware routing stats overlay to heuristic model selection.
+
+        Only activates when ENABLE_OUTCOME_AWARE_ROUTING=True and RoutingStats
+        has ≥MIN_SAMPLES data for the selected chain + microtask category.
+        Falls back to heuristic model unchanged when data is insufficient.
+        """
+        if not getattr(Config, "ENABLE_OUTCOME_AWARE_ROUTING", True):
+            return model
+        try:
+            from aura.reliability.routing_stats import get_routing_stats, MicrotaskCategory
+            _CAT_MAP = {
+                TaskType.CODE:      MicrotaskCategory.CODE_EDIT,
+                TaskType.VISION:    MicrotaskCategory.LONG_DOC_EXTRACTION,
+                TaskType.REASONING: MicrotaskCategory.TOOL_SELECTION,
+                TaskType.SIMPLE:    MicrotaskCategory.GENERAL,
+            }
+            category = _CAT_MAP.get(task_type, MicrotaskCategory.GENERAL)
+            chain = self._get_fallback_chain(model) or [model]
+            stats_model = get_routing_stats().select_model_for_task(category, chain)
+            if stats_model and stats_model != model:
+                logger.info(
+                    "[BRAIN] RoutingStats override: %s → %s (cat=%s)",
+                    model, stats_model, category,
+                )
+                return stats_model
+        except Exception:
+            pass
+        return model
+
+    def _record_routing_outcome(
+        self, model: str, task_type: Optional[TaskType], success: bool, latency_ms: float
+    ) -> None:
+        """Record routing outcome to RoutingStatsStore (called in background)."""
+        try:
+            from aura.reliability.routing_stats import get_routing_stats, MicrotaskCategory
+            _CAT_MAP = {
+                TaskType.CODE:      MicrotaskCategory.CODE_EDIT,
+                TaskType.VISION:    MicrotaskCategory.LONG_DOC_EXTRACTION,
+                TaskType.REASONING: MicrotaskCategory.TOOL_SELECTION,
+                TaskType.SIMPLE:    MicrotaskCategory.GENERAL,
+            }
+            category = _CAT_MAP.get(task_type, MicrotaskCategory.GENERAL)
+            get_routing_stats().record(category, model, success=success, latency_ms=latency_ms)
+        except Exception:
+            pass
 
     def _select_model(self, prompt: str, task_type: Optional[TaskType] = None) -> str:
         """Select the appropriate model based on task type and complexity.
