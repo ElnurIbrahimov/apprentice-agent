@@ -6,23 +6,24 @@ ComfyUI must be running: cd ComfyUI && python main.py --port 8188
 import asyncio
 import base64
 import logging
+import os
 from typing import Optional
 
 import httpx
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/image", tags=["image"])
 
-COMFY = "http://localhost:8188"
+COMFY = os.getenv("COMFY_BASE_URL", "http://localhost:8188")
 
 
 class ImageGenRequest(BaseModel):
-    prompt: str
-    negative_prompt: Optional[str] = ""
-    steps: Optional[int] = 20
+    prompt: str = Field(..., max_length=1000)
+    negative_prompt: Optional[str] = Field("", max_length=500)
+    steps: Optional[int] = Field(20, ge=1, le=150)
 
 
 def build_sdxl_workflow(prompt: str, negative_prompt: str, steps: int) -> dict:

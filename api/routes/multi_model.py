@@ -2,17 +2,18 @@
 
 import asyncio
 import logging
+import os
 import time
 from typing import List, Optional
 
 import httpx
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/compare", tags=["compare"])
 
-OLLAMA_BASE = "http://localhost:11434"
+OLLAMA_BASE = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
 DEFAULT_COMPARE_MODELS = [
     "gemini-3-flash-preview:cloud",
@@ -22,7 +23,7 @@ DEFAULT_COMPARE_MODELS = [
 
 
 class CompareRequest(BaseModel):
-    message: str
+    message: str = Field(..., max_length=8000)
     models: Optional[List[str]] = None  # Ollama model names; defaults to top 3 cloud
 
 

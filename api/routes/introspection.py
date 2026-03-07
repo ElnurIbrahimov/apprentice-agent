@@ -5,6 +5,7 @@ Introspection API Routes
 API endpoints for the Introspection Circuit - AURA's uncertainty detection system.
 """
 
+import asyncio
 import logging
 from typing import Optional
 from datetime import datetime
@@ -62,13 +63,15 @@ async def analyze_query(request: AnalyzeRequest):
 
     try:
         tool = _get_or_create_tool(agent_service)
-
-        result = tool.analyze_query(
-            query=request.query,
-            response=request.response,
-            context=request.context,
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: tool.analyze_query(
+                query=request.query,
+                response=request.response,
+                context=request.context,
+            )
         )
-
         return result
 
     except Exception as e:
@@ -90,12 +93,14 @@ async def pre_check(request: PreCheckRequest):
 
     try:
         tool = _get_or_create_tool(agent_service)
-
-        result = tool.pre_check(
-            query=request.query,
-            context=request.context,
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: tool.pre_check(
+                query=request.query,
+                context=request.context,
+            )
         )
-
         return result
 
     except Exception as e:
@@ -117,13 +122,15 @@ async def wrap_response(request: WrapRequest):
 
     try:
         tool = _get_or_create_tool(agent_service)
-
-        result = tool.wrap_response(
-            response=request.response,
-            query=request.query,
-            context=request.context,
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: tool.wrap_response(
+                response=request.response,
+                query=request.query,
+                context=request.context,
+            )
         )
-
         return result
 
     except Exception as e:

@@ -117,6 +117,8 @@ async def solve_math(body: dict):
     problem = body.get("problem", "").strip()
     if not problem:
         raise HTTPException(400, "problem is required")
+    if len(problem) > 4000:
+        raise HTTPException(400, "problem exceeds maximum length of 4000 characters")
 
     mode = body.get("mode", "solve")
     if mode not in ("solve", "explain", "graph_data"):
@@ -132,6 +134,7 @@ async def solve_math(body: dict):
                 f"{OLLAMA_BASE}/api/generate",
                 json={"model": model, "prompt": prompt, "stream": False},
             )
+        r.raise_for_status()
         response_text = r.json().get("response", "")
     except Exception as e:
         logger.error("[MathSolver] LLM call failed: %s", e)

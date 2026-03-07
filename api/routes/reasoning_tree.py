@@ -86,14 +86,17 @@ async def think_deeply(request: ReasoningRequest, background_tasks: BackgroundTa
         # Get or create the reasoning tree tool
         tool = _get_or_create_tool(agent_service)
 
-        # Run reasoning (this can take time)
+        # Run reasoning in thread pool — this can take many seconds and must not block the event loop
         logger.info(f"Starting deep reasoning session {session_id}")
-
-        result = tool.think_deeply(
-            problem=request.problem,
-            context=request.context,
-            max_iterations=request.max_iterations,
-            max_depth=request.max_depth,
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: tool.think_deeply(
+                problem=request.problem,
+                context=request.context,
+                max_iterations=request.max_iterations,
+                max_depth=request.max_depth,
+            )
         )
 
         # Store result (evict oldest if over capacity)
@@ -138,10 +141,14 @@ async def explore_options(request: ExploreRequest):
     try:
         tool = _get_or_create_tool(agent_service)
 
-        result = tool.explore_options(
-            question=request.question,
-            num_options=request.num_options,
-            context=request.context,
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: tool.explore_options(
+                question=request.question,
+                num_options=request.num_options,
+                context=request.context,
+            )
         )
 
         # Store result (evict oldest if over capacity)

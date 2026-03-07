@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +34,9 @@ def _get_store():
 # ── Models ────────────────────────────────────────────────────────────────────
 
 class SaveRequest(BaseModel):
-    text: str
-    url: Optional[str] = ""
-    title: Optional[str] = ""
+    text: str = Field(..., max_length=50_000)
+    url: Optional[str] = Field("", max_length=2048)
+    title: Optional[str] = Field("", max_length=500)
     tags: Optional[List[str]] = []
     importance: Optional[float] = 0.7
     source_type: Optional[str] = "selection"

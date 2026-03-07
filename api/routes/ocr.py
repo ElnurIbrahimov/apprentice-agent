@@ -28,6 +28,9 @@ async def ocr_image(body: dict):
     image_b64 = body.get("image_b64", "")
     if not image_b64:
         raise HTTPException(400, "image_b64 is required")
+    # 20 MB base64 ≈ 15 MB decoded image — sufficient for high-res OCR
+    if len(image_b64) > 20 * 1024 * 1024:
+        raise HTTPException(400, "image_b64 exceeds maximum size of 20 MB")
 
     try:
         import base64

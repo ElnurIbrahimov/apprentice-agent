@@ -7,7 +7,7 @@ import threading
 from typing import Optional, List, Dict, Any
 
 from fastapi import APIRouter, HTTPException, Depends, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from api.auth import require_api_key
 
@@ -27,7 +27,7 @@ router = APIRouter(prefix="/api/multi-agent", tags=["multi-agent"], dependencies
 # ============================================================================
 
 class MultiAgentChatRequest(BaseModel):
-    message: str
+    message: str = Field(..., max_length=32_000)
     context: Optional[Dict[str, Any]] = None
 
 

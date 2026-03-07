@@ -29,6 +29,8 @@ async def agent_action(body: dict):
     prompt = body.get("prompt", "")
     if not prompt:
         raise HTTPException(400, "prompt is required")
+    if len(prompt) > 32_000:
+        raise HTTPException(400, "prompt exceeds maximum length of 32000 characters")
 
     # Use model from request body, then env var, then default
     model = body.get("model") or os.getenv("AURA_AGENT_MODEL", "gemini-3-flash-preview:cloud")
@@ -39,6 +41,7 @@ async def agent_action(body: dict):
                 f"{OLLAMA_BASE}/api/generate",
                 json={"model": model, "prompt": prompt, "stream": False},
             )
+        r.raise_for_status()
         response_text = r.json().get("response", "")
     except Exception as e:
         logger.error("[AgentAction] LLM call failed: %s", e)

@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api/search", tags=["search"])
 
 
 @router.get("")
-async def web_search(q: str = Query(...), limit: int = Query(5, ge=1, le=10), model: str = Query(None)):
+async def web_search(q: str = Query(..., max_length=500), limit: int = Query(5, ge=1, le=10), model: str = Query(None)):
     """Search the web via Tavily and return answer + source cards."""
     try:
         from tavily import TavilyClient
@@ -26,7 +26,7 @@ async def web_search(q: str = Query(...), limit: int = Query(5, ge=1, le=10), mo
 
     client = TavilyClient(api_key=api_key)
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         resp = await loop.run_in_executor(
             None, lambda: client.search(q, search_depth="basic", max_results=limit, include_answer=True)
         )

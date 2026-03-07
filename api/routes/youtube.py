@@ -12,7 +12,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/youtube", tags=["youtube"])
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
+import os as _os
+OLLAMA_URL = _os.getenv("OLLAMA_BASE_URL", "http://localhost:11434") + "/api/generate"
 SUMMARY_MODEL = "gemini-3-flash-preview:cloud"
 TRANSCRIPT_CHAR_LIMIT = 12000
 
@@ -153,7 +154,7 @@ KEY POINTS:
         data = r.json()
         raw = data.get("response", "").strip()
     except httpx.ConnectError:
-        raise HTTPException(503, "Ollama is not running at localhost:11434. Start it with: ollama serve")
+        raise HTTPException(503, "Ollama is not running. Start it with: ollama serve")
     except Exception as e:
         raise HTTPException(500, f"LLM summarization failed: {e}")
 
@@ -204,10 +205,9 @@ async def summarize_youtube(body: dict):
 
     logger.info("[YouTube] Summarizing video_id=%s", video_id)
 
-    # Fetch transcript (sync call in thread pool via asyncio default executor is not needed;
-    # youtube-transcript-api is sync so we use run_in_executor)
+    # Fetch transcript (sync call — use run_in_executor to avoid blocking the event loop)
     import asyncio
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     try:
         transcript_text, snippet = await loop.run_in_executor(

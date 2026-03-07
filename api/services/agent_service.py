@@ -1391,7 +1391,7 @@ Keep it concise, readable, and well-formatted with markdown."""
 
             # Get locally installed models from Ollama — keep only true local chat models
             try:
-                ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+                ollama_host = os.getenv("OLLAMA_BASE_URL", os.getenv("OLLAMA_HOST", "http://localhost:11434"))
                 response = requests.get(f"{ollama_host}/api/tags", timeout=3)
                 if response.status_code == 200:
                     all_ollama = [m["name"] for m in response.json().get("models", [])]

@@ -381,7 +381,7 @@ async def publish_event(
     source: str,
     event_type: str,
     priority: int = 3,
-    payload: Dict[str, Any] = None,
+    payload: Optional[Dict[str, Any]] = None,
     session_id: str = Query(default="default")
 ):
     """Publish a test event to the daemon."""

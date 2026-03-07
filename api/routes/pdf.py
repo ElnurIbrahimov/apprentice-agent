@@ -3,6 +3,7 @@ PDF text extraction via pdfplumber.
 Supports file upload and URL extraction.
 """
 
+import asyncio
 import io
 import logging
 from fastapi import APIRouter, File, UploadFile, HTTPException
@@ -21,9 +22,14 @@ async def extract_upload(file: UploadFile = File(...)):
         raise HTTPException(503, "pdfplumber not installed. Run: pip install pdfplumber")
 
     data = await file.read()
+
+    def _extract(raw: bytes):
+        with pdfplumber.open(io.BytesIO(raw)) as pdf:
+            return [p.extract_text() or "" for p in pdf.pages]
+
     try:
-        with pdfplumber.open(io.BytesIO(data)) as pdf:
-            pages = [p.extract_text() or "" for p in pdf.pages]
+        loop = asyncio.get_running_loop()
+        pages = await loop.run_in_executor(None, _extract, data)
     except Exception as e:
         raise HTTPException(500, f"PDF extraction failed: {e}")
 
@@ -58,9 +64,13 @@ async def extract_url(body: dict):
     except Exception as e:
         raise HTTPException(500, f"Failed to fetch PDF: {e}")
 
+    def _extract_bytes(raw: bytes):
+        with pdfplumber.open(io.BytesIO(raw)) as pdf:
+            return [p.extract_text() or "" for p in pdf.pages]
+
     try:
-        with pdfplumber.open(io.BytesIO(r.content)) as pdf:
-            pages = [p.extract_text() or "" for p in pdf.pages]
+        loop = asyncio.get_running_loop()
+        pages = await loop.run_in_executor(None, _extract_bytes, r.content)
     except Exception as e:
         raise HTTPException(500, f"PDF extraction failed: {e}")
 

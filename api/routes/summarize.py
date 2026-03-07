@@ -7,22 +7,23 @@ import math
 import logging
 import httpx
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/summarize", tags=["summarize"])
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
+OLLAMA_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434") + "/api/generate"
 DEFAULT_MODEL = os.getenv("AURA_AGENT_MODEL", "gemini-3-flash-preview:cloud")
 MAX_TEXT_CHARS = 50000
 
 
 class SummarizeRequest(BaseModel):
-    text: str
-    url: str = ""
-    title: str = ""
+    # 500 KB of raw text is more than enough; prevents memory exhaustion
+    text: str = Field(..., max_length=500_000)
+    url: str = Field("", max_length=2048)
+    title: str = Field("", max_length=500)
     format: str = "bullets"   # "bullets" | "paragraph" | "tldr"
     model: Optional[str] = None
 

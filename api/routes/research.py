@@ -13,7 +13,7 @@ from typing import Optional
 import httpx
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ DEPTH_CONFIG = {
 
 
 class ResearchRequest(BaseModel):
-    query: str
+    query: str = Field(..., max_length=1000)
     depth: str = "standard"
     model: Optional[str] = None
 
@@ -65,7 +65,7 @@ def _format_sources(sources: list[dict]) -> str:
 
 async def _run_search(client: "TavilyClient", query: str, max_results: int) -> list[dict]:
     """Run a single Tavily search in a thread (TavilyClient is sync)."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     def _search():
         return client.search(
             query,

@@ -1,9 +1,10 @@
 """Model configuration API — list available models, get/set per-role routing."""
 
+import asyncio
 import os
 import logging
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -29,12 +30,13 @@ ROLE_LABELS = {
 }
 
 
-def _ollama_models() -> list[dict]:
-    """Fetch model list from Ollama."""
+async def _ollama_models_async() -> list[dict]:
+    """Fetch model list from Ollama (async, non-blocking)."""
     try:
-        import requests
-        host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-        r = requests.get(f"{host}/api/tags", timeout=5)
+        import httpx
+        host = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        async with httpx.AsyncClient(timeout=5) as c:
+            r = await c.get(f"{host}/api/tags")
         if r.status_code == 200:
             raw = r.json().get("models", [])
             return [
@@ -53,7 +55,7 @@ def _ollama_models() -> list[dict]:
 @router.get("/available")
 async def list_available_models():
     """Return all models available in Ollama, split into cloud and local."""
-    models = _ollama_models()
+    models = await _ollama_models_async()
     cloud = [m for m in models if m["is_cloud"]]
     local = [m for m in models if not m["is_cloud"]]
     return {"cloud": cloud, "local": local, "total": len(models)}
@@ -81,8 +83,8 @@ async def get_model_config():
 
 
 class ModelPatch(BaseModel):
-    role: str
-    model: str
+    role: str = Field(..., max_length=64)
+    model: str = Field(..., max_length=200)
 
 
 @router.patch("/config")

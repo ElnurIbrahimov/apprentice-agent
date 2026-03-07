@@ -5,7 +5,7 @@ import logging
 from typing import Optional, List
 
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from api.auth import require_api_key
 
@@ -530,10 +530,27 @@ def _tasks_overdue_sync() -> dict:
 
 class APITestRequest(BaseModel):
     method: str = "GET"
-    url: str
+    url: str = Field(..., max_length=2048)
     headers: Optional[dict] = None
-    body: Optional[str] = None
-    timeout: int = 30
+    body: Optional[str] = Field(None, max_length=1_000_000)
+    timeout: int = Field(30, ge=1, le=120)
+
+    @field_validator("url")
+    @classmethod
+    def validate_url_scheme(cls, v: str) -> str:
+        """Reject non-HTTP(S) schemes to prevent SSRF via file://, ftp://, etc."""
+        lower = v.strip().lower()
+        if not (lower.startswith("http://") or lower.startswith("https://")):
+            raise ValueError("Only http:// and https:// URLs are allowed")
+        return v
+
+    @field_validator("method")
+    @classmethod
+    def validate_method(cls, v: str) -> str:
+        allowed = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
+        if v.upper() not in allowed:
+            raise ValueError(f"method must be one of {sorted(allowed)}")
+        return v.upper()
 
 
 @router.post("/api-tester/run")
