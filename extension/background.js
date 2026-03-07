@@ -135,9 +135,10 @@ ext.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const tabId = activeTab.id;
         const url = activeTab.url || '';
 
-        // Block protected pages Chrome won't let extensions touch
+        // Block protected pages extensions cannot touch
         if (!url || url.startsWith('chrome://') || url.startsWith('chrome-extension://') ||
-            url.startsWith('about:') || url.startsWith('edge://')) {
+            url.startsWith('about:') || url.startsWith('edge://') ||
+            url.startsWith('moz-extension://')) {
           sendResponse({ ok: false, error: 'Protected page' }); return;
         }
 
@@ -149,6 +150,12 @@ ext.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
           // Content script not running in this tab (was opened before extension loaded).
           // Inject it on-the-fly using scripting API then extract.
+          // Guard with a 10-second timeout so sendResponse is always called.
+          let responded = false;
+          const extractTimer = setTimeout(() => {
+            if (!responded) { responded = true; sendResponse({ ok: false, error: 'Extraction timed out' }); }
+          }, 10000);
+
           ext.scripting.executeScript({
             target: { tabId },
             func: () => ({
@@ -157,10 +164,16 @@ ext.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               title: document.title,
             }),
           }).then(results => {
+            clearTimeout(extractTimer);
+            if (responded) return;
+            responded = true;
             const r = results?.[0]?.result;
             if (r?.text) sendResponse({ ok: true, ...r });
             else sendResponse({ ok: false, error: 'Could not extract page text' });
           }).catch(err => {
+            clearTimeout(extractTimer);
+            if (responded) return;
+            responded = true;
             sendResponse({ ok: false, error: err.message });
           });
         });

@@ -455,6 +455,14 @@ function safeSend(msg, cb) {
       el.dispatchEvent(new Event('change', { bubbles: true }));
       return { ok: true };
     }
+    if (action.action === 'selectOption') {
+      if (el.tagName.toLowerCase() !== 'select') return { ok: false, error: 'Element is not a <select>' };
+      const opt = [...el.options].find(o => o.value === action.value || o.text === action.value);
+      if (!opt) return { ok: false, error: 'Option not found: ' + action.value };
+      el.value = opt.value;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return { ok: true };
+    }
     return { ok: false, error: 'Unknown action: ' + action.action };
   }
 
