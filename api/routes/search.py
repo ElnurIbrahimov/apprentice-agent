@@ -3,6 +3,7 @@ Real web search with sources via Tavily API.
 """
 
 import os
+import asyncio
 import logging
 from fastapi import APIRouter, Query, HTTPException
 
@@ -25,7 +26,10 @@ async def web_search(q: str = Query(...), limit: int = Query(5, ge=1, le=10), mo
 
     client = TavilyClient(api_key=api_key)
     try:
-        resp = client.search(q, search_depth="basic", max_results=limit, include_answer=True)
+        loop = asyncio.get_event_loop()
+        resp = await loop.run_in_executor(
+            None, lambda: client.search(q, search_depth="basic", max_results=limit, include_answer=True)
+        )
     except Exception as e:
         logger.error("[Search] Tavily search failed: %s", e)
         raise HTTPException(500, f"Search failed: {e}")

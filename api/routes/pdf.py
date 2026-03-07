@@ -48,6 +48,8 @@ async def extract_url(body: dict):
     url = body.get("url", "")
     if not url:
         raise HTTPException(400, "url is required")
+    if not url.startswith(("http://", "https://")):
+        raise HTTPException(400, "Only http:// and https:// URLs are allowed")
 
     try:
         async with httpx.AsyncClient(timeout=30) as c:
