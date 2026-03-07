@@ -64,3 +64,16 @@ node_modules/
 # OS
 .DS_Store
 Thumbs.db
+
+# Runtime data
+aura_data/
+
+# Sandbox / legacy scripts
+sandbox/
+scripts/legacy_tests/
+
+# Community skills cache (downloaded externally)
+skills/community/
+
+# Build backup files
+extension/sidebar.js.bak
