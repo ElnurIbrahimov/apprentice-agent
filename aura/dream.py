@@ -26,16 +26,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .brain import OllamaBrain
-from .memory import MemorySystem
-from .metacognition import MetacognitionLogger
-
 logger = logging.getLogger(__name__)
 
 class DreamMode:
     """Consolidates memories and extracts insights from agent experiences."""
 
     def __init__(self):
+        from .brain import OllamaBrain
+        from .memory import MemorySystem
+        from .metacognition import MetacognitionLogger
         self.metacog = MetacognitionLogger()
         self.memory = MemorySystem(collection_name="dream_insights")
         self.brain = OllamaBrain()
@@ -600,7 +599,7 @@ class DreamConsolidator:
             self._do_routines = True
             self._do_densify  = False
 
-        self._brain: Optional[OllamaBrain] = None
+        self._brain: Optional[Any] = None
         self._running   = False
         self._lock      = threading.Lock()
         self._last_seen_ids: set = set()   # Track already-summarized memory IDs
@@ -921,8 +920,9 @@ class DreamConsolidator:
     # Helpers
     # ------------------------------------------------------------------
 
-    def _get_brain(self) -> OllamaBrain:
+    def _get_brain(self):
         if self._brain is None:
+            from .brain import OllamaBrain
             self._brain = OllamaBrain(warmup=False)
         return self._brain
 

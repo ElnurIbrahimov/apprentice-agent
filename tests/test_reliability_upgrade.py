@@ -263,7 +263,12 @@ class TestBrowserExecutor(unittest.TestCase):
         self.assertFalse(r.postcondition_passed)
 
     def test_domain_drift_aborts(self):
-        page = _FakePage(url="https://evil.com/redirect")
+        # Simulate redirect: goto() is called but page ends up at evil.com
+        class RedirectToEvil(_FakePage):
+            def goto(self, url, **kwargs):
+                pass  # URL stays evil.com — simulates unexpected redirect
+
+        page = RedirectToEvil(url="https://evil.com/redirect")
         ex   = self._executor(page, allowed_domain="example.com")
         a    = self._action("navigate", url="https://example.com/go")
         r    = ex.execute(a)
@@ -494,6 +499,7 @@ class TestDreamConsolidator(unittest.TestCase):
         consolidator._summarize_cluster = lambda cl, uid: None  # skip LLM
         consolidator._contradiction_report = lambda: []
         consolidator._write_summary_memory = lambda s, uid: None
+        consolidator._prune_stale = lambda mems, uid: []
         report = consolidator.run_cycle(user_id="test_user")
         self.assertIsNotNone(report)
         self.assertEqual(report.cycle.memories_processed, 5)
@@ -506,6 +512,7 @@ class TestDreamConsolidator(unittest.TestCase):
         consolidator._fetch_memories = lambda uid: self._make_memories(2)
         consolidator._write_summary_memory = lambda s, uid: None
         consolidator._contradiction_report = lambda: []
+        consolidator._prune_stale = lambda mems, uid: []
 
         summarize_calls = [0]
         def fake_summarize(cluster, uid):
@@ -541,6 +548,7 @@ class TestDreamConsolidator(unittest.TestCase):
         consolidator._summarize_cluster = lambda cl, uid: None
         consolidator._contradiction_report = lambda: []
         consolidator._write_summary_memory = lambda s, uid: None
+        consolidator._prune_stale = lambda mems, uid: []
         report = consolidator.run_cycle(user_id="test_user")
         # 20 memories but batch_size=3 means at most 3 clusters processed
         self.assertLessEqual(report.cycle.summaries_written, 3)
@@ -557,6 +565,7 @@ class TestDreamConsolidator(unittest.TestCase):
 
         consolidator._fetch_memories = fake_fetch
         consolidator._contradiction_report = lambda: []
+        consolidator._prune_stale = lambda mems, uid: []
         consolidator.run_cycle(user_id="user_A")
         consolidator.run_cycle(user_id="user_B")
         self.assertIn("user_A", seen_users)
