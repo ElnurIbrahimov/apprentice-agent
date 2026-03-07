@@ -703,6 +703,28 @@ class GitTool:
 
         return response
 
+    def auto_commit(self, message: str, paths: list = None, repo_path: str = ".") -> dict:
+        """Stage specified paths (or all) and commit. Returns commit hash."""
+        if paths:
+            for p in paths:
+                add_result = self._run_git(["add", p], repo_path)
+                if not add_result.get("success"):
+                    return add_result
+        else:
+            add_result = self._run_git(["add", "-A"], repo_path)
+            if not add_result.get("success"):
+                return add_result
+
+        commit_result = self.commit(repo_path, message)
+        if not commit_result.get("success"):
+            return commit_result
+
+        return {
+            "success": True,
+            "hash": commit_result.get("hash"),
+            "message": message,
+        }
+
     def execute(self, action: str, **kwargs) -> dict:
         """Execute a git action from natural language.
 

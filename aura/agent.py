@@ -4991,6 +4991,17 @@ Try these commands:
             except Exception:
                 pass
 
+        # Handle /init-project command
+        if message.strip().lower().startswith("/init-project"):
+            parts = message.strip().split(None, 1)
+            target_path = parts[1].strip() if len(parts) > 1 else "."
+            try:
+                from aura.tools.project_context import init_project
+                result = init_project(target_path)
+                return result
+            except Exception as e:
+                return f"Failed to initialize project: {e}"
+
         # Check for FluxMind commands FIRST, before LLM
         fluxmind_result = self._handle_fluxmind_command(message)
         if fluxmind_result:
@@ -5554,6 +5565,19 @@ Try these commands:
             track_context_from_message(message, is_user=True)
         except Exception:
             pass
+
+        # Handle /init-project command in streaming path
+        if message.strip().lower().startswith("/init-project"):
+            parts = message.strip().split(None, 1)
+            target_path = parts[1].strip() if len(parts) > 1 else "."
+            try:
+                from aura.tools.project_context import init_project
+                result = init_project(target_path)
+                yield result
+                return
+            except Exception as e:
+                yield f"Failed to initialize project: {e}"
+                return
 
         # ===== FAST PATH - yield entire response as single chunk =====
         if self.use_fastpath and hasattr(self, 'fast_path_handler') and self.fast_path_handler:

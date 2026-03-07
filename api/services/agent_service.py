@@ -774,8 +774,12 @@ Provide key findings and cite sources."""
 
                     logger.info(f"[AgentService] Deep research on: {topic}")
                     yield {"type": "chunk", "content": f"## Deep Research: {topic}\n\n"}
+                    yield {"type": "tool_trace", "event": "start", "tool": "deep_research", "detail": f'Researching "{topic[:50]}"', "timestamp": __import__("time").time()}
 
+                    _dr_start = __import__("time").time()
                     result = deep_tool.research(topic, depth="deep")
+                    _dr_elapsed = int((__import__("time").time() - _dr_start) * 1000)
+                    yield {"type": "tool_trace", "event": "done", "tool": "deep_research", "detail": f'{result.get("urls_found", 0)} sources, {result.get("pages_read", 0)} pages', "elapsed_ms": _dr_elapsed, "timestamp": __import__("time").time()}
 
                     if result.get("success"):
                         synthesis_prompt = f"""Based on this deep research, provide a comprehensive summary:
@@ -787,7 +791,7 @@ Pages Read: {result.get('pages_read', 0)}
 Content:
 {result.get('content', '')[:8000]}
 
-Provide a well-structured, informative summary with key findings and cite sources."""
+Provide a well-structured, informative summary with key findings and cite sources using [1], [2] etc."""
 
                         if hasattr(brain, 'think_stream'):
                             for chunk in brain.think_stream(synthesis_prompt):
@@ -795,6 +799,18 @@ Provide a well-structured, informative summary with key findings and cite source
                         else:
                             yield {"type": "chunk", "content": brain.think(synthesis_prompt)}
                         yield {"type": "chunk", "content": f"\n\n---\n*{result.get('summary', '')}*"}
+
+                        # Yield citations from deep research sources
+                        raw_sources = result.get("sources", [])
+                        if raw_sources:
+                            citations = []
+                            for i, s in enumerate(raw_sources[:15], 1):
+                                if isinstance(s, dict):
+                                    citations.append({"id": i, "title": s.get("title", s.get("url", "")), "url": s.get("url", ""), "snippet": s.get("snippet", "")})
+                                elif isinstance(s, str):
+                                    citations.append({"id": i, "title": s, "url": s, "snippet": ""})
+                            if citations:
+                                yield {"type": "citations", "citations": citations}
                     else:
                         yield {"type": "chunk", "content": f"Research failed: {result.get('error', 'Unknown error')}"}
 
@@ -823,6 +839,7 @@ Provide a well-structured, informative summary with key findings and cite source
                     needs_search = any(kw in msg_lower for kw in needs_search_keywords)
 
                     search_context = ""
+                    _swarm_citations = []
                     if needs_search:
                         yield {"type": "chunk", "content": "Gathering real-time data...\n\n"}
                         try:
@@ -841,12 +858,16 @@ Provide a well-structured, informative summary with key findings and cite source
                                     results_text.append(f"{i}. **{r.get('title', 'No title')}**\n   {r.get('snippet', '')}\n   Source: {r.get('url', '')}")
                                 search_context = f"\n\n**Search Results for '{topic}':**\n\n" + "\n\n".join(results_text) + "\n\n---\n\n"
                                 yield {"type": "chunk", "content": f"Found {len(search_results['results'])} sources.\n\n"}
+
+                                for i, r in enumerate(search_results["results"][:15], 1):
+                                    if r.get("url"):
+                                        _swarm_citations.append({"id": i, "title": r.get("title", r.get("url", "")), "url": r["url"], "snippet": r.get("snippet", "")[:200]})
                         except Exception as e:
                             logger.error(f"[AgentService] Swarm search error: {e}")
 
                     agent_prompt = message
                     if search_context:
-                        agent_prompt = f"Based on the following real-time search results, analyze: {message}\n{search_context}\nUse the search results to provide informed analysis."
+                        agent_prompt = f"Based on the following real-time search results, analyze: {message}\n{search_context}\nUse the search results to provide informed analysis. Cite sources as [1], [2], etc."
 
                     agents_config = {
                         "Research": "You are a Research Agent. Analyze the provided data and extract key facts, findings, and evidence. Cite sources when available.",
@@ -913,6 +934,8 @@ Keep it concise, readable, and well-formatted with markdown."""
                             synthesis = brain.think(synthesis_prompt)
                             yield {"type": "chunk", "content": synthesis}
 
+                    if _swarm_citations:
+                        yield {"type": "citations", "citations": _swarm_citations}
                     yield {"type": "done", "mood": self._get_mood(), "model_used": effective_model or "swarm"}
                     return
                 except Exception as e:
@@ -1022,6 +1045,15 @@ Keep it concise, readable, and well-formatted with markdown."""
                         ).start()
                     except Exception:
                         pass
+
+                # Auto-store exchange in episodic memory (best-effort, daemon thread)
+                _clean_msg_ep = message.split("\n[Screen context:")[0].strip()
+                if hasattr(brain, '_episodic_memory') and brain._episodic_memory and len(full_response) > 30:
+                    brain._episodic_memory.quick_store(
+                        content=f"Q: {_clean_msg_ep[:300]}\nA: {full_response[:500]}",
+                        title=_clean_msg_ep[:60],
+                        importance=0.6,
+                    )
 
                 yield {"type": "done", "mood": self._get_mood(), "model_used": brain.get_last_model_used()}
             else:

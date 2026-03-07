@@ -266,6 +266,17 @@ class OllamaBrain:
         if self._alma_enabled:
             logger.info(f"[BRAIN] ALMA emotional system enabled {get_mood_emoji()}")
 
+        # Episodic memory auto-recall (lazy-init, best-effort)
+        self._episodic_memory = None
+        try:
+            from aura_episodic_memory.memory_store import EpisodicMemoryStore
+            from aura_episodic_memory.mcp_tools import QuickEpisodicMemory
+            _store = EpisodicMemoryStore()
+            self._episodic_memory = QuickEpisodicMemory(_store)
+            logger.info("[BRAIN] Episodic memory auto-recall enabled")
+        except Exception as _e:
+            logger.debug(f"[BRAIN] Episodic memory not available: {_e}")
+
         if warmup:
             self._warmup_models()
 
@@ -1081,6 +1092,16 @@ class OllamaBrain:
         if sys_additions:
             full = f"{full}\n\n{sys_additions}"
 
+        # === AURA.md PROJECT CONTEXT INJECTION ===
+        try:
+            from aura.tools.project_context import load_project_context
+            import os
+            project_ctx = load_project_context(os.getcwd())
+            if project_ctx:
+                full = f"{full}\n\n## Active Project Context\n{project_ctx}"
+        except Exception:
+            pass
+
         # Apply emotional tone modifier - auto-generate from ALMA if not provided
         if tone_modifier:
             full = f"{full}\n\n{tone_modifier}"
@@ -1112,6 +1133,21 @@ class OllamaBrain:
                     mod_parts.append("Prefer proven, reliable approaches.")
                 if mod_parts:
                     full = f"{full}\n\n[Style guidance: {' '.join(mod_parts)}]"
+            except Exception:
+                pass
+
+        # === EPISODIC MEMORY AUTO-RECALL ===
+        # Surface relevant past context for non-trivial queries (best-effort, never blocks)
+        if len(prompt) > 25:
+            try:
+                if hasattr(self, '_episodic_memory') and self._episodic_memory:
+                    memories = self._episodic_memory.quick_recall(prompt, limit=3)
+                    if memories:
+                        memory_ctx = "\n\n## Relevant Past Context\n"
+                        for m in memories:
+                            ts = m.get("timestamp", "")[:10] if m.get("timestamp") else ""
+                            memory_ctx += f"- [{ts}] {m.get('title', '')}: {m.get('summary', '')}\n"
+                        full = f"{full}{memory_ctx}"
             except Exception:
                 pass
 

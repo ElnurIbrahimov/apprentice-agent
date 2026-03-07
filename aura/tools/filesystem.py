@@ -295,6 +295,80 @@ class FileSystemTool:
             return {"success": False, "error": error, "blocked_by": "sandbox_policy"}
         return {"success": True, "path": resolved}
 
+    def apply_search_replace(self, path: str, search: str, replace: str) -> dict:
+        """Apply SEARCH/REPLACE edit with fuzzy fallback. Returns diff string."""
+        import difflib
+        import shutil
+
+        try:
+            file_path, error = self._resolve_path(path)
+            if error:
+                return {"success": False, "error": error}
+            if not file_path.exists():
+                return {"success": False, "error": f"File not found: {path}"}
+
+            original = file_path.read_text(encoding="utf-8")
+
+            # Exact match first
+            if search in original:
+                updated = original.replace(search, replace, 1)
+            else:
+                # Fuzzy match using difflib SequenceMatcher
+                lines = original.split("\n")
+                search_lines = search.split("\n")
+                best_ratio = 0.0
+                best_start = -1
+
+                for i in range(len(lines) - len(search_lines) + 1):
+                    chunk = "\n".join(lines[i:i + len(search_lines)])
+                    ratio = difflib.SequenceMatcher(None, chunk, search).ratio()
+                    if ratio > best_ratio:
+                        best_ratio = ratio
+                        best_start = i
+
+                if best_ratio < 0.85:
+                    return {"success": False, "error": f"Search text not found (best fuzzy match: {best_ratio:.0%}). Provide more exact text."}
+
+                # Apply fuzzy replacement
+                lines[best_start:best_start + len(search_lines)] = replace.split("\n")
+                updated = "\n".join(lines)
+
+            # Write backup
+            backup_path = str(file_path) + ".bak"
+            shutil.copy2(str(file_path), backup_path)
+
+            # Apply edit
+            file_path.write_text(updated, encoding="utf-8")
+
+            # Generate unified diff
+            diff = "".join(difflib.unified_diff(
+                original.splitlines(keepends=True),
+                updated.splitlines(keepends=True),
+                fromfile=f"a/{file_path.name}",
+                tofile=f"b/{file_path.name}",
+            ))
+
+            return {"success": True, "diff": diff, "backup_path": backup_path, "path": str(file_path)}
+
+        except PermissionError:
+            return {"success": False, "error": "Permission denied"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def rollback_edit(self, backup_path: str) -> dict:
+        """Restore file from .bak backup."""
+        import shutil
+        try:
+            bak = Path(backup_path)
+            if not bak.exists():
+                return {"success": False, "error": f"Backup not found: {backup_path}"}
+            original = Path(str(bak)[:-4])  # Remove .bak
+            shutil.copy2(str(bak), str(original))
+            bak.unlink()
+            return {"success": True, "restored": str(original)}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     def execute(self, action: str, **kwargs) -> dict:
         """Execute a filesystem action by name."""
         actions = {
@@ -304,7 +378,9 @@ class FileSystemTool:
             "search": self.search_files,
             "info": self.file_info,
             "mkdir": self.create_directory,
-            "delete": self.delete
+            "delete": self.delete,
+            "edit": self.apply_search_replace,
+            "rollback": self.rollback_edit,
         }
         if action not in actions:
             return {"success": False, "error": f"Unknown action: {action}"}

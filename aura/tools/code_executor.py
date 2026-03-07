@@ -47,12 +47,105 @@ class CodeExecutorTool:
         self.timeout = timeout
         self.max_output_length = max_output_length
 
+    def _execute_monty(self, code: str) -> Optional[dict]:
+        """Tier 1: Monty safe sandbox for pure computation (no IO, instant).
+
+        Returns dict if Monty is available and code is suitable, None otherwise.
+        """
+        try:
+            from monty import evaluate  # type: ignore
+            result = evaluate(code)
+            return {
+                "success": True,
+                "output": str(result),
+                "errors": "",
+                "sandbox": "monty",
+                "code": code,
+            }
+        except ImportError:
+            return None  # Monty not installed — fall through to next tier
+        except Exception as e:
+            return {
+                "success": False,
+                "output": "",
+                "error": str(e),
+                "sandbox": "monty",
+                "code": code,
+            }
+
+    def _is_pure_computation(self, code: str) -> bool:
+        """Heuristic: code is safe for Monty if it has no imports and no IO calls."""
+        try:
+            tree = ast.parse(code)
+        except SyntaxError:
+            return False
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                return False
+            if isinstance(node, ast.Call):
+                name = self._get_call_name(node)
+                if name in {"print", "input", "open", "exec", "eval"}:
+                    return False
+        return True
+
+    def _execute_e2b(self, code: str) -> Optional[dict]:
+        """Tier 2: E2B cloud VM sandbox — real Python + packages, isolated.
+
+        Returns dict if E2B_API_KEY is set, None otherwise (fall through to subprocess).
+        """
+        try:
+            from e2b_code_interpreter import Sandbox  # type: ignore
+        except ImportError:
+            return None  # e2b not installed
+
+        api_key = os.environ.get("E2B_API_KEY", "")
+        if not api_key:
+            return None  # No key — skip this tier
+
+        try:
+            with Sandbox(api_key=api_key) as sbx:
+                execution = sbx.run_code(code)
+                output = "\n".join(str(r) for r in execution.results) if execution.results else ""
+                error_msg = execution.error.value if execution.error else ""
+                return {
+                    "success": not bool(execution.error),
+                    "output": output,
+                    "errors": error_msg,
+                    "sandbox": "e2b",
+                    "code": code,
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "output": "",
+                "error": str(e),
+                "sandbox": "e2b",
+                "code": code,
+            }
+
     def execute(self, code: str) -> dict:
-        """Execute Python code safely and return results."""
+        """Execute Python code safely using a three-tier sandbox.
+
+        Tier 1: Monty (pure computation, instant, no IO)
+        Tier 2: E2B cloud VM (real Python + packages, requires E2B_API_KEY)
+        Tier 3: Subprocess sandbox (AST-checked, offline fallback)
+        """
         # Unescape literal \n, \t from LLM output to actual newlines/tabs
         code = self._unescape_code(code)
 
-        # Check for potentially dangerous operations
+        # Tier 1: Monty for pure computation
+        if self._is_pure_computation(code):
+            monty_result = self._execute_monty(code)
+            if monty_result is not None:
+                return monty_result
+
+        # Tier 2: E2B cloud VM for general code
+        e2b_result = self._execute_e2b(code)
+        if e2b_result is not None:
+            return e2b_result
+
+        # Tier 3: Subprocess sandbox (offline fallback)
+        # Check for potentially dangerous operations before subprocess
         safety_check = self._safety_check(code)
         if not safety_check["safe"]:
             return {

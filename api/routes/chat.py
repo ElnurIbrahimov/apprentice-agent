@@ -711,6 +711,13 @@ async def websocket_chat(websocket: WebSocket):
                             "tool_name": item.get("tool_name", ""),
                             "tool_action": item.get("tool_action", "")
                         })
+                    elif item.get("type") == "citations":
+                        await websocket.send_json({
+                            "type": "citations",
+                            "citations": item.get("citations", [])
+                        })
+                    elif item.get("type") == "tool_trace":
+                        await websocket.send_json(item)
 
             except Exception as e:
                 logger.error(f"[WebSocket] Processing error: {e}")

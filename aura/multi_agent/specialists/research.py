@@ -101,6 +101,7 @@ Format tool calls as: [TOOL: tool_name] search query"""
 
             # Execute searches
             search_results = []
+            citations = []
             for call in tool_calls[:self.max_tool_calls]:
                 tool_name = call["tool"]
                 action = call["action"]
@@ -125,6 +126,31 @@ Format tool calls as: [TOOL: tool_name] search query"""
                     })
                     sources.append(tool_name)
 
+                    # Collect citations from tool results
+                    if "citations" in result:
+                        # Tavily-style: already extracted citations
+                        for c in result["citations"]:
+                            c["id"] = len(citations) + 1
+                            citations.append(c)
+                    elif "results" in result and isinstance(result["results"], list):
+                        # Web search style: extract from results list
+                        for item in result["results"]:
+                            if item.get("url"):
+                                citations.append({
+                                    "id": len(citations) + 1,
+                                    "title": item.get("title", item.get("url", "")),
+                                    "url": item["url"],
+                                    "snippet": item.get("snippet", item.get("content", ""))[:200],
+                                    "score": item.get("score", 0),
+                                })
+
+            # Build sources section for synthesis prompt
+            sources_text = ""
+            if citations:
+                sources_text = "\n\nSources:\n"
+                for c in citations[:10]:
+                    sources_text += f"[{c['id']}] {c['title']} — {c['url']}\n"
+
             # Synthesize findings
             if search_results:
                 synthesis_prompt = system_prompt + "\n\nSearch Results:\n"
@@ -133,7 +159,8 @@ Format tool calls as: [TOOL: tool_name] search query"""
                     result_text = str(sr['result'])[:1000]  # Truncate long results
                     synthesis_prompt += f"Results: {result_text}\n"
 
-                synthesis_prompt += "\n\nBased on these search results, provide a comprehensive answer to the user's question. Cite your sources."
+                synthesis_prompt += sources_text
+                synthesis_prompt += "\n\nBased on these search results, provide a comprehensive answer. Use [1], [2] etc inline to cite sources by number when referencing information."
 
                 final_response = llm_func(synthesis_prompt, message.content)
             else:
@@ -150,7 +177,7 @@ Format tool calls as: [TOOL: tool_name] search query"""
                 agent=self.name,
                 tools_used=tools_used,
                 confidence=0.85 if search_results else 0.6,
-                artifacts={"search_results": search_results, "sources": sources},
+                artifacts={"search_results": search_results, "sources": sources, "citations": citations},
                 execution_time=time.time() - start_time
             )
 

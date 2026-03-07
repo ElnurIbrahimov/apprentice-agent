@@ -5,76 +5,75 @@ import logging
 import time
 from typing import List, Optional
 
+import httpx
 from fastapi import APIRouter
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/compare", tags=["compare"])
 
+OLLAMA_BASE = "http://localhost:11434"
+
+DEFAULT_COMPARE_MODELS = [
+    "gemini-3-flash-preview:cloud",
+    "qwen3.5:397b-cloud",
+    "kimi-k2-thinking:cloud",
+]
+
 
 class CompareRequest(BaseModel):
     message: str
-    models: Optional[List[str]] = None  # Model IDs to compare; defaults to 3 representative models
+    models: Optional[List[str]] = None  # Ollama model names; defaults to top 3 cloud
 
 
 class ModelResult(BaseModel):
     model: str
     response: str
-    time_ms: int
+    elapsed_ms: int
     error: Optional[str] = None
 
 
 class CompareResponse(BaseModel):
     results: List[ModelResult]
+    fastest: str
     query: str
 
 
-DEFAULT_COMPARE_MODELS = [
-    "gemini-3-flash-preview:cloud",
-    "qwen3.5:397b-cloud",
-    "cogito-2.1:671b-cloud",
-]
+async def _query_model(client: httpx.AsyncClient, model: str, prompt: str) -> ModelResult:
+    """POST to Ollama /api/generate for one model, non-streaming."""
+    start = time.monotonic()
+    try:
+        r = await client.post(
+            f"{OLLAMA_BASE}/api/generate",
+            json={"model": model, "prompt": prompt, "stream": False},
+            timeout=60.0,
+        )
+        r.raise_for_status()
+        data = r.json()
+        response_text = data.get("response", "")
+        elapsed = int((time.monotonic() - start) * 1000)
+        return ModelResult(model=model, response=response_text, elapsed_ms=elapsed)
+    except Exception as exc:
+        elapsed = int((time.monotonic() - start) * 1000)
+        logger.error("[Compare] Model %s failed: %s", model, exc)
+        return ModelResult(model=model, response="", elapsed_ms=elapsed, error=str(exc))
 
 
 @router.post("", response_model=CompareResponse)
 async def compare_models(request: CompareRequest):
-    """Run a query on 2-3 models in parallel and return side-by-side responses."""
-    from api.services.agent_service import agent_service
+    """Run a prompt on multiple Ollama models in parallel and return side-by-side results."""
+    models = request.models if request.models else DEFAULT_COMPARE_MODELS
+    # Cap at 6 to avoid hammering the bridge
+    models = models[:6]
 
-    models = request.models or DEFAULT_COMPARE_MODELS
-    # Limit to 4 models max to avoid excessive API calls
-    models = models[:4]
+    async with httpx.AsyncClient() as client:
+        tasks = [_query_model(client, m, request.message) for m in models]
+        results: List[ModelResult] = await asyncio.gather(*tasks)
 
-    loop = asyncio.get_running_loop()
+    # Sort by elapsed_ms (fastest first); errors sort last
+    results.sort(key=lambda r: (r.error is not None, r.elapsed_ms))
 
-    async def run_model(model_id: str) -> ModelResult:
-        start = time.time()
-        try:
-            def _think():
-                agent = agent_service.agent
-                brain = agent.brain
-                # Temporarily use a per-call approach with the brain
-                with agent_service._agent_lock:
-                    brain.set_model_override(model_id)
-                response = brain.think(request.message, use_history=False)
-                return response
+    # Pick fastest successful result; fall back to first entry
+    fastest = next((r.model for r in results if not r.error), results[0].model)
 
-            response = await loop.run_in_executor(None, _think)
-            elapsed = int((time.time() - start) * 1000)
-            return ModelResult(model=model_id, response=response, time_ms=elapsed)
-        except Exception as e:
-            elapsed = int((time.time() - start) * 1000)
-            logger.error(f"[Compare] Model {model_id} failed: {e}")
-            return ModelResult(model=model_id, response="", time_ms=elapsed, error=str(e))
-
-    # Run all models in parallel
-    tasks = [run_model(m) for m in models]
-    results = await asyncio.gather(*tasks, return_exceptions=False)
-
-    # Restore to auto mode
-    try:
-        agent_service.agent.brain.set_model_override(None)
-    except Exception:
-        pass
-
-    return CompareResponse(results=list(results), query=request.message)
+    return CompareResponse(results=results, fastest=fastest, query=request.message)

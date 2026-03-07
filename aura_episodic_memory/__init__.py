@@ -71,8 +71,17 @@ from .memory_store import (
     EpisodicMemoryStore,
     EmbeddingModel,
     QDRANT_AVAILABLE,
-    SENTENCE_TRANSFORMERS_AVAILABLE
 )
+
+# Compatibility shim — was removed from memory_store but still referenced in tests
+try:
+    from .memory_store import SENTENCE_TRANSFORMERS_AVAILABLE  # type: ignore
+except ImportError:
+    try:
+        import sentence_transformers  # noqa: F401
+        SENTENCE_TRANSFORMERS_AVAILABLE = True
+    except ImportError:
+        SENTENCE_TRANSFORMERS_AVAILABLE = False
 
 from .temporal_parser import (
     TemporalParser,
@@ -107,7 +116,8 @@ from .consolidation import (
 from .mcp_tools import (
     create_episodic_tools,
     register_episodic_tools_with_agent,
-    MCPTool
+    MCPTool,
+    QuickEpisodicMemory,
 )
 
 __all__ = [

@@ -535,6 +535,83 @@ def create_episodic_tools(
     return tools
 
 
+class QuickEpisodicMemory:
+    """Lightweight wrapper for fast episodic memory access in brain.py.
+
+    Provides quick_recall (with LRU cache) and quick_store (best-effort)
+    suitable for injection into every LLM call without adding latency.
+    """
+
+    def __init__(self, memory_store: EpisodicMemoryStore):
+        self._store = memory_store
+        self._cache: dict = {}  # Simple LRU-like dict
+        self._cache_max = 100
+
+    def quick_recall(self, query: str, limit: int = 3) -> list:
+        """Search memories with 500ms timeout and LRU cache on query embeddings."""
+        import threading
+
+        cache_key = f"{query[:80]}:{limit}"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        result = []
+        done = threading.Event()
+
+        def _search():
+            nonlocal result
+            try:
+                search_query = EpisodeQuery(query_text=query, limit=limit, min_score=0.3)
+                hits = self._store.search(search_query)
+                result = []
+                for hit in hits:
+                    ep = hit.episode
+                    result.append({
+                        "id": ep.id,
+                        "title": ep.title or ep.content[:50],
+                        "summary": ep.content[:200],
+                        "timestamp": ep.temporal_context.timestamp.isoformat() if ep.temporal_context else "",
+                        "importance": ep.importance,
+                    })
+            except Exception:
+                pass
+            finally:
+                done.set()
+
+        t = threading.Thread(target=_search, daemon=True)
+        t.start()
+        done.wait(timeout=0.5)  # 500ms hard timeout
+
+        # Cache result (evict oldest if too large)
+        if len(self._cache) >= self._cache_max:
+            oldest_key = next(iter(self._cache))
+            del self._cache[oldest_key]
+        self._cache[cache_key] = result
+
+        return result
+
+    def quick_store(self, content: str, title: str = "", importance: float = 0.5) -> None:
+        """Store an episode in a background thread (best-effort, never blocks)."""
+        import threading
+
+        def _store():
+            try:
+                from datetime import datetime
+                episode = Episode(
+                    content=content,
+                    title=title or content[:60],
+                    episode_type=EpisodeType.CONVERSATION,
+                    temporal_context=TemporalContext(timestamp=datetime.now()),
+                    importance=importance,
+                    emotional_valence=EmotionalValence.NEUTRAL,
+                )
+                self._store.store_episode(episode)
+            except Exception:
+                pass
+
+        threading.Thread(target=_store, daemon=True).start()
+
+
 def register_episodic_tools_with_agent(
     agent,
     memory_store: EpisodicMemoryStore,

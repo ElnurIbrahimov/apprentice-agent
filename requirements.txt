@@ -106,6 +106,19 @@ sounddevice>=0.4.6
 schedule>=1.2.0
 
 # ============================================================
+# Optional: Monty safe sandbox (pure-computation code execution)
+# pip install pydantic-monty
+# ============================================================
+# pydantic-monty>=0.1.0
+
+# ============================================================
+# Optional: E2B cloud code sandbox (real Python + packages, VM-isolated)
+# pip install e2b-code-interpreter
+# Requires E2B_API_KEY env var
+# ============================================================
+# e2b-code-interpreter>=0.0.1
+
+# ============================================================
 # Optional: PersonaPlex voice (DISABLED - huggingface-hub conflict)
 # ============================================================
 # PersonaPlex is NOT installed by default due to hard dependency conflict:

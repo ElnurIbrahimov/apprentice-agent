@@ -22,6 +22,19 @@ class TavilyTool:
     def __init__(self, api_key: Optional[str] = None):
         self._api_key = api_key or os.getenv("TAVILY_API_KEY", "")
 
+    def _extract_citations(self, results: list) -> list:
+        """Extract structured citation objects from Tavily search results."""
+        citations = []
+        for i, item in enumerate(results, 1):
+            citations.append({
+                "id": i,
+                "title": item.get("title", ""),
+                "url": item.get("url", ""),
+                "snippet": item.get("content", "")[:200],
+                "score": item.get("score", 0),
+            })
+        return citations
+
     def search(
         self,
         query: str,
@@ -67,6 +80,7 @@ class TavilyTool:
             "answer": data.get("answer", ""),
             "results": results,
             "total": len(results),
+            "citations": self._extract_citations(results),
         }
 
     def extract(self, urls: List[str]) -> Dict:
