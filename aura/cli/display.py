@@ -10,7 +10,12 @@ console = Console(highlight=False)
 
 
 def show_banner():
-    console.print("\n[bold cyan]AURA[/bold cyan]  Autonomous Universal Reasoning Agent\n")
+    from .banner import get_banner, get_welcome_line
+    from aura import __version__
+    width = console.size.width
+    console.print(get_banner(width))
+    console.print(get_welcome_line(__version__))
+    console.print()
 
 
 def show_thinking(label: str = "Working..."):
