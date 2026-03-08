@@ -166,11 +166,13 @@ def run_chat_mode(agent, speak: bool = False):
     from aura.cli.display import (
         console, show_banner, show_thinking, show_response,
         show_error, show_info, show_status_bar, show_help,
+        show_welcome_info,
     )
     from aura.cli.input import create_session, get_input
     from aura.cli.model_picker import pick_model, update_model_roles_from_config
 
     show_banner()
+    show_welcome_info(agent)
 
     # Detect project type for status bar
     _project_type = ""
@@ -309,11 +311,11 @@ def run_chat_mode(agent, speak: bool = False):
         result = result_holder["result"]
         response_text = result.get("response", "")
 
-        show_response(response_text)
+        _current_model = agent.brain._model_override or "auto"
+        show_response(response_text, model=_current_model)
 
         # Update status bar after response
         _msg_count = len(agent.brain.conversation_history) if hasattr(agent.brain, 'conversation_history') else 0
-        _current_model = agent.brain._model_override or "auto"
         show_status_bar(
             model=_current_model, project_type=_project_type,
             session_title=_session_title, message_count=_msg_count,
@@ -359,20 +361,18 @@ def handle_command(agent, command: str, speak: bool = False):
         else:
             print("Usage: /speak <text to speak>")
     elif cmd == "/model":
-        from aura.config import Config
         if not arg:
-            # Show current model + all available
-            models = Config.get_all_models()
-            override = agent.brain._model_override
-            print("\n  Model Configuration:")
-            print(f"    Override:  {override or '(auto)'}")
-            print(f"    fast:      {models.get('fast', 'N/A')}")
-            print(f"    reason:    {models.get('reason', 'N/A')}")
-            print(f"    code:      {models.get('code', 'N/A')}")
-            print(f"    vision:    {models.get('vision', 'N/A')}")
-            if models.get('reason_cloud'):
-                print(f"    cloud:     {models.get('reason_cloud', 'N/A')}")
-            print("\n  Usage: /model <name> | /model auto")
+            from aura.cli.display import console, show_info
+            from aura.cli.model_picker import pick_model
+            current = agent.brain._model_override or "auto"
+            choice = pick_model(console, current)
+            if choice is not None:
+                if choice == "auto":
+                    agent.brain.set_model_override(None)
+                    show_info("Model override cleared. Using auto-selection.")
+                else:
+                    agent.brain.set_model_override(choice)
+                    show_info(f"Model locked to: {choice}")
         elif arg.lower() == "auto":
             agent.brain.set_model_override(None)
             print("Model override cleared. Using auto-selection.")

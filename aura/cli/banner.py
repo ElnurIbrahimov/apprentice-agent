@@ -1,12 +1,32 @@
 """Banner and welcome line for AURA CLI.
 
-Uses Rich styled text instead of ASCII art for cross-platform compatibility.
+Uses block characters (█ ▀ ▄) for a bold banner with Rich gradient colors.
+Inspired by Gemini CLI's block-character approach.
 """
 
 from rich.text import Text
 
-# Gradient colors (cyan -> blue -> magenta)
-_GRADIENT = ["cyan", "deep_sky_blue1", "dodger_blue1", "blue1", "dark_violet", "magenta"]
+# Gradient colors per row (cyan -> blue -> magenta)
+_ROW_COLORS = [
+    "bold cyan",
+    "bold deep_sky_blue1",
+    "bold dodger_blue1",
+    "bold blue1",
+    "bold dark_violet",
+    "bold magenta",
+]
+
+# Block-character art for "AURA" — thick/bold style
+# ONLY uses: █ (full block), ▀ (upper half), ▄ (lower half), and space
+# Double-width strokes for maximum impact, 6 rows tall
+_BANNER_LINES = [
+    "  ▄████▄     ██    ██   ██████▄     ▄████▄  ",
+    " ██▀  ▀██    ██    ██   ██   ▀██   ██▀  ▀██ ",
+    " ██    ██    ██    ██   ██   ▄██   ██    ██ ",
+    " ████████    ██    ██   ██████▀    ████████ ",
+    " ██    ██    ▀██▄▄██▀   ██  ▀██   ██    ██ ",
+    " ▀▀    ▀▀      ▀▀▀▀     ▀▀   ▀▀   ▀▀    ▀▀ ",
+]
 
 
 def get_banner(width: int = 80) -> Text:
@@ -14,22 +34,24 @@ def get_banner(width: int = 80) -> Text:
     text = Text()
     text.append("\n")
 
-    if width >= 50:
-        # Spaced-out letters with gradient
-        letters = "A   U   R   A"
-        for i, ch in enumerate(letters):
-            if ch == " ":
-                text.append(" ")
-            else:
-                color = _GRADIENT[i % len(_GRADIENT)]
-                text.append(ch, style=f"bold {color}")
-        text.append("\n")
+    banner_width = len(_BANNER_LINES[0])
 
-        # Gradient underline
-        line_chars = "=" * min(len(letters), width - 4)
-        for i, ch in enumerate(line_chars):
-            color = _GRADIENT[i % len(_GRADIENT)]
-            text.append(ch, style=color)
+    if width >= banner_width + 4:
+        # Full block-character banner with per-row gradient
+        pad = " " * max(0, (width - banner_width) // 2 - 1)
+        for i, line in enumerate(_BANNER_LINES):
+            color = _ROW_COLORS[i % len(_ROW_COLORS)]
+            text.append(pad)
+            text.append(line, style=color)
+            text.append("\n")
+    elif width >= 20:
+        # Compact styled text for narrow terminals
+        pad = " " * max(0, (width - 10) // 2)
+        text.append(pad)
+        text.append("A", style="bold cyan")
+        text.append(" U", style="bold dodger_blue1")
+        text.append(" R", style="bold blue1")
+        text.append(" A", style="bold magenta")
         text.append("\n")
     else:
         text.append("AURA", style="bold cyan")

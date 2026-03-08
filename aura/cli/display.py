@@ -2,6 +2,8 @@
 
 from rich.console import Console
 from rich.markdown import Markdown
+from rich.padding import Padding
+from rich.panel import Panel
 from rich.spinner import Spinner
 from rich.live import Live
 from rich.text import Text
@@ -16,6 +18,42 @@ def show_banner():
     width = console.size.width
     console.print(get_banner(width))
     console.print(get_welcome_line(__version__))
+    console.print()
+
+
+def show_welcome_info(agent):
+    """Show a brief info line after the banner: model, session, tool count."""
+    model = "auto"
+    try:
+        model = agent.brain._model_override or "auto"
+    except Exception:
+        pass
+
+    tool_count = 0
+    try:
+        tool_count = len(agent.tools)
+    except Exception:
+        pass
+
+    session = "new"
+    try:
+        if hasattr(agent, 'memory') and hasattr(agent.memory, 'session_id'):
+            sid = agent.memory.session_id
+            if sid:
+                session = str(sid)[:8]
+    except Exception:
+        pass
+
+    info = Text()
+    info.append("  Model: ", style="dim")
+    info.append(model, style="dim bold")
+    info.append("  |  ", style="dim")
+    info.append("Session: ", style="dim")
+    info.append(session, style="dim bold")
+    info.append("  |  ", style="dim")
+    info.append("Tools: ", style="dim")
+    info.append(f"{tool_count} loaded", style="dim bold")
+    console.print(info)
     console.print()
 
 
@@ -51,25 +89,40 @@ def show_thinking(label: str = "Working..."):
 def show_tool_call(tool_name: str, description: str = ""):
     """Print a tool call in a compact styled format."""
     line = Text()
-    line.append("  ▸ ", style="cyan")
-    line.append(tool_name, style="bold cyan")
+    line.append("  ▸ ", style="dim yellow")
+    line.append(tool_name, style="bold yellow")
     if description:
-        line.append(f"  {description}", style="dim")
+        line.append(f"  {description}", style="dim yellow")
     console.print(line)
 
 
-def show_response(text: str):
-    """Render agent response as markdown with syntax highlighting."""
+def show_response(text: str, model: str = ""):
+    """Render agent response as markdown with a left-border panel."""
     console.print()
+
+    # Header: label + model name
     label = Text()
-    label.append("  ◆ ", style="bold cyan")
+    label.append(" ◆ ", style="bold cyan")
     label.append("AURA", style="bold cyan")
-    console.print(label)
+    if model:
+        label.append(f"  ({model})", style="dim")
+
+    # Render markdown content
     try:
         md = Markdown(text, code_theme="monokai")
-        console.print(md, padding=(0, 4))
     except Exception:
-        console.print(text, padding=(0, 4))
+        md = Text(text)
+
+    # Wrap in a borderless panel with a subtle left border
+    panel = Panel(
+        md,
+        title=label,
+        title_align="left",
+        border_style="dim cyan",
+        padding=(0, 2),
+        expand=True,
+    )
+    console.print(Padding(panel, (0, 2)))
     console.print()
 
 
@@ -98,27 +151,50 @@ def show_help():
         border_style="dim", padding=(0, 2),
         title="[bold]Commands & Shortcuts[/bold]",
     )
-    table.add_column("Key / Command", style="cyan", width=22)
+    table.add_column("Key / Command", style="cyan", width=24)
     table.add_column("Action", style="white")
 
-    table.add_row("Ctrl+M", "Switch model mid-session")
+    # --- Keyboard shortcuts ---
+    table.add_row("Alt+M", "Model picker (interactive)")
     table.add_row("Ctrl+C / Ctrl+D", "Exit")
+    table.add_row("?", "Show this help")
+
     table.add_row("", "")
-    table.add_row("/model [name]", "Show or set model")
-    table.add_row("/sessions", "List / switch sessions")
+
+    # --- Model & session ---
+    table.add_row("/model [name]", "Pick model interactively or set by name")
+    table.add_row("/sessions", "Manage sessions (list, switch, delete)")
     table.add_row("/compact", "Compress conversation history")
-    table.add_row("/clear", "Clear history")
+    table.add_row("/clear", "Clear conversation history")
+
     table.add_row("", "")
+
+    # --- Code & files ---
     table.add_row("/grep <pattern>", "Search code content")
-    table.add_row("/find def <name>", "Find definition")
-    table.add_row("/edit <file>", "View file with line numbers")
-    table.add_row("/project index", "Build semantic code index")
-    table.add_row("/project search <q>", "Semantic code search")
-    table.add_row("/shell <cmd>", "Run shell command")
-    table.add_row("/agent <name> <task>", "Route to specialist agent")
+    table.add_row("/search, /find <query>", "Search files and definitions")
+    table.add_row("/edit <file>", "Read file with line numbers")
+    table.add_row("/project [info|index|search]", "Project context, indexing, semantic search")
+
     table.add_row("", "")
-    table.add_row("/plan <task>", "Generate execution plan")
-    table.add_row("/browse <url>", "Open URL in browser")
+
+    # --- Execution ---
+    table.add_row("/shell, /bash, /run <cmd>", "Execute shell command")
+    table.add_row("/plan <task>", "Create and execute a plan")
+    table.add_row("/agent <name> <task>", "Run specialist agent")
+    table.add_row("/goal <objective>", "Run a goal")
+
+    table.add_row("", "")
+
+    # --- Utilities ---
+    table.add_row("/browse <url>", "Browse web pages")
+    table.add_row("/hook [list|add|remove]", "Manage event hooks")
+    table.add_row("/speak <text>", "Text-to-speech")
+    table.add_row("/recall <query>", "Search memories")
+
+    table.add_row("", "")
+
+    # --- Exit ---
+    table.add_row("/quit, /exit", "Exit AURA")
 
     console.print()
     console.print(table)

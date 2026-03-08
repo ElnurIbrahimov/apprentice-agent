@@ -34,6 +34,45 @@ SLASH_COMMANDS = [
     ("/goal", "Run a goal"),
 ]
 
+# Subcommand completions for commands that accept them
+SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
+    "/model": [
+        ("auto", "Auto-select best model"),
+        ("deepseek-r1:8b", "DeepSeek R1 8B (local)"),
+        ("qwen3:8b", "Qwen 3 8B (local)"),
+        ("qwen2.5-coder:7b", "Qwen 2.5 Coder 7B (local)"),
+        ("devstral-2:123b", "Devstral 2 123B (cloud)"),
+        ("cogito-2.1:671b", "Cogito 2.1 671B (cloud)"),
+        ("qwen3-coder:480b", "Qwen 3 Coder 480B (cloud)"),
+    ],
+    "/project": [
+        ("info", "Show project summary"),
+        ("init", "Initialize project config"),
+        ("context", "Show/set project context"),
+        ("index", "Index project files"),
+        ("search", "Search project index"),
+    ],
+    "/sessions": [
+        ("list", "List saved sessions"),
+        ("switch", "Switch to a session"),
+        ("new", "Start a new session"),
+    ],
+    "/agent": [
+        ("research", "Research specialist"),
+        ("coder", "Coding specialist"),
+        ("analyst", "Analysis specialist"),
+        ("creative", "Creative specialist"),
+        ("parallel", "Run parallel agents"),
+    ],
+    "/browse": [
+        ("search", "Web search query"),
+        ("text", "Extract page text"),
+        ("screenshot", "Take page screenshot"),
+        ("click", "Click an element"),
+        ("links", "List page links"),
+    ],
+}
+
 
 def create_session():
     """Create a prompt_toolkit session with styled prompt, history, completions, and keybindings."""
@@ -48,26 +87,54 @@ def create_session():
         from prompt_toolkit.completion import Completer, Completion
 
         class SlashCompleter(Completer):
-            """Show slash command completions when typing /."""
+            """Show slash command and subcommand completions when typing /."""
+
             def get_completions(self, document, complete_event):
                 text = document.text_before_cursor.lstrip()
-                if text.startswith("/"):
+                if not text.startswith("/"):
+                    return
+
+                parts = text.split(None, 1)  # split on first whitespace
+                base_cmd = parts[0].lower()
+
+                if len(parts) == 1 and " " not in text:
+                    # Still typing the command itself — match against SLASH_COMMANDS
                     prefix = text.lower()
                     for cmd, desc in SLASH_COMMANDS:
                         if cmd.startswith(prefix):
                             yield Completion(
                                 cmd,
                                 start_position=-len(text),
+                                display=cmd,
                                 display_meta=desc,
                             )
+                else:
+                    # Command is complete, offer subcommands
+                    sub_prefix = parts[1].lower() if len(parts) > 1 else ""
+                    subs = SUBCOMMANDS.get(base_cmd)
+                    if subs:
+                        for sub, desc in subs:
+                            if sub.startswith(sub_prefix):
+                                yield Completion(
+                                    sub,
+                                    start_position=-len(sub_prefix),
+                                    display=sub,
+                                    display_meta=desc,
+                                )
 
         _style = Style.from_dict({
             "prompt": "bold cyan",
             "placeholder": "#666666 italic",
+            # Completion dropdown — dark background, light text
+            "completion-menu": "bg:#1a1a2e #e0e0e0",
             "completion-menu.completion": "bg:#1a1a2e #e0e0e0",
-            "completion-menu.completion.current": "bg:#16213e #00d2ff bold",
-            "completion-menu.meta.completion": "bg:#1a1a2e #888888",
-            "completion-menu.meta.completion.current": "bg:#16213e #aaaaaa",
+            "completion-menu.completion.current": "bg:#0f3460 #00d2ff bold",
+            "completion-menu.meta.completion": "bg:#1a1a2e #777777",
+            "completion-menu.meta.completion.current": "bg:#0f3460 #bbbbbb",
+            # Scrollbar styling
+            "scrollbar.background": "bg:#1a1a2e",
+            "scrollbar.button": "bg:#333355",
+            "scrollbar.arrow": "bg:#333355 #aaaaaa",
         })
 
         kb = KeyBindings()
@@ -81,6 +148,7 @@ def create_session():
             auto_suggest=AutoSuggestFromHistory(),
             completer=SlashCompleter(),
             complete_while_typing=True,
+            complete_in_thread=True,
             style=_style,
             key_bindings=kb,
             placeholder=HTML('<style fg="#666666"><i>Type a message, / for commands...</i></style>'),
