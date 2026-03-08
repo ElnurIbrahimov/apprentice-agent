@@ -237,7 +237,7 @@ def run_chat_mode(agent, speak: bool = False):
             console.print("\n[dim]Goodbye.[/dim]\n")
             break
 
-        # Handle Ctrl+M model picker
+        # Handle Alt+M model picker
         if user_input == "__MODEL_PICK__":
             _current_model = agent.brain._model_override or "auto"
             choice = pick_model(console, _current_model)
@@ -250,6 +250,8 @@ def run_chat_mode(agent, speak: bool = False):
                     agent.brain.set_model_override(choice)
                     _current_model = choice
                     show_info(f"Model set to {choice}")
+            _msg_count = len(agent.brain.conversation_history) if hasattr(agent.brain, 'conversation_history') else 0
+            _current_model = agent.brain._model_override or "auto"
             show_status_bar(
                 model=_current_model, project_type=_project_type,
                 session_title=_session_title, message_count=_msg_count,

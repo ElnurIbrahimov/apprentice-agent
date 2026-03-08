@@ -30,6 +30,7 @@ SLASH_COMMANDS = [
     ("/browse", "Browse web pages"),
     ("/hook", "Manage hooks"),
     ("/speak", "Text-to-speech"),
+    ("/say", "Text-to-speech (alias)"),
     ("/recall", "Search memories"),
     ("/goal", "Run a goal"),
 ]

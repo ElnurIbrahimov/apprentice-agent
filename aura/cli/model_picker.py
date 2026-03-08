@@ -164,9 +164,6 @@ def pick_model(console: Console, current_model: str = "auto") -> "str | None":
         console.print(f"  [dim]Using: {choice}[/dim]")
         return choice
 
-    console.print(f"  [dim]Invalid choice: {choice}[/dim]")
-    return None
-
 
 def update_model_roles_from_config():
     """Refresh MODEL_ROLES from Config at runtime."""
