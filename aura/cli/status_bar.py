@@ -53,11 +53,11 @@ def build_status_bar(
         bar.append(f"{message_count} msgs", style="dim")
 
     # Keyboard hint
-    hint = "  Ctrl+M model"
+    hint = "  Alt+M model"
     remaining = width - bar.cell_len - len(hint) - 1
     if remaining > 0:
         bar.append(" " * remaining)
-        bar.append("Ctrl+M", style="dim bold")
+        bar.append("Alt+M", style="dim bold")
         bar.append(" model", style="dim")
 
     return bar

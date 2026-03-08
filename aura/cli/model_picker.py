@@ -1,10 +1,11 @@
 """Interactive model picker for AURA CLI — select model mid-session."""
 
+import os
 from rich.console import Console
 from rich.text import Text
 from rich.panel import Panel
 
-# Model roles with display info
+# Model roles with display info (updated from Config on startup)
 MODEL_ROLES = [
     ("fast", "gemini-3-flash-preview:cloud", "1M ctx"),
     ("reason", "kimi-k2.5:cloud", "256K ctx"),
@@ -13,6 +14,26 @@ MODEL_ROLES = [
     ("vision", "qwen3-vl:235b-cloud", "256K ctx"),
     ("longctx", "gemini-3-flash-preview:cloud", "1M ctx"),
 ]
+
+# Cache for all available models
+_all_models_cache = []
+
+
+def _fetch_all_models() -> list:
+    """Fetch all available models from Ollama."""
+    global _all_models_cache
+    if _all_models_cache:
+        return _all_models_cache
+    try:
+        import requests
+        host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        resp = requests.get(f"{host}/api/tags", timeout=5)
+        if resp.status_code == 200:
+            models = resp.json().get("models", [])
+            _all_models_cache = [m["name"] for m in models]
+    except Exception:
+        pass
+    return _all_models_cache
 
 
 def pick_model(console: Console, current_model: str = "auto") -> "str | None":
@@ -32,7 +53,7 @@ def pick_model(console: Console, current_model: str = "auto") -> "str | None":
         lines.append(f" {role:<8s}", style="dim yellow")
         lines.append(f" {ctx}", style="dim")
         if is_current:
-            lines.append(" ← current", style="green")
+            lines.append(" <-", style="green")
         lines.append("\n")
 
     lines.append("\n")
@@ -40,8 +61,12 @@ def pick_model(console: Console, current_model: str = "auto") -> "str | None":
     lines.append(" select  ", style="dim")
     lines.append("[a]", style="bold cyan")
     lines.append(" auto  ", style="dim")
+    lines.append("[l]", style="bold cyan")
+    lines.append(" list all  ", style="dim")
     lines.append("[Esc/q]", style="bold cyan")
     lines.append(" cancel", style="dim")
+    lines.append("\n  ", style="dim")
+    lines.append("Or type any model name directly", style="dim italic")
 
     header = Text()
     header.append("  Select model", style="bold white")
@@ -58,16 +83,61 @@ def pick_model(console: Console, current_model: str = "auto") -> "str | None":
     console.print(panel)
 
     try:
-        choice = input("  > ").strip().lower()
+        choice = input("  > ").strip()
     except (EOFError, KeyboardInterrupt):
         return None
 
-    if not choice or choice in ("q", "esc", "escape"):
+    choice_lower = choice.lower()
+
+    if not choice or choice_lower in ("q", "esc", "escape"):
         console.print("  [dim]Cancelled.[/dim]")
         return None
-    elif choice == "a" or choice == "auto":
+    elif choice_lower in ("a", "auto"):
         return "auto"
+    elif choice_lower == "l":
+        # Show all available models
+        all_models = _fetch_all_models()
+        if not all_models:
+            console.print("  [dim]Could not fetch models from Ollama.[/dim]")
+            return None
+
+        console.print(f"\n  [bold]All available models ({len(all_models)}):[/bold]\n")
+        for j, m in enumerate(all_models, 1):
+            marker = " [green]<-[/green]" if m == current_model else ""
+            is_cloud = ":cloud" in m or "-cloud" in m
+            tag = " [dim cyan](cloud)[/dim cyan]" if is_cloud else " [dim](local)[/dim]"
+            console.print(f"    [bold cyan]{j:>2}[/bold cyan]. {m}{tag}{marker}")
+
+        console.print()
+        try:
+            pick = input("  Pick # or name > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return None
+
+        if not pick:
+            return None
+
+        # Try number selection
+        try:
+            idx = int(pick) - 1
+            if 0 <= idx < len(all_models):
+                return all_models[idx]
+        except ValueError:
+            pass
+
+        # Try name match (exact or partial)
+        for m in all_models:
+            if pick == m or pick.lower() == m.lower():
+                return m
+        for m in all_models:
+            if pick.lower() in m.lower():
+                return m
+
+        # Accept as-is (user might know a model not in the list)
+        console.print(f"  [dim]Using: {pick}[/dim]")
+        return pick
     else:
+        # Try role number (1-6)
         try:
             idx = int(choice) - 1
             if 0 <= idx < len(MODEL_ROLES):
@@ -75,9 +145,24 @@ def pick_model(console: Console, current_model: str = "auto") -> "str | None":
                 return model
         except ValueError:
             pass
+
+        # Try partial match against roles
         for _, model, _ in MODEL_ROLES:
-            if choice in model:
+            if choice_lower in model.lower():
                 return model
+
+        # Try match against all available models
+        all_models = _fetch_all_models()
+        for m in all_models:
+            if choice == m or choice_lower == m.lower():
+                return m
+        for m in all_models:
+            if choice_lower in m.lower():
+                return m
+
+        # Accept any typed model name directly
+        console.print(f"  [dim]Using: {choice}[/dim]")
+        return choice
 
     console.print(f"  [dim]Invalid choice: {choice}[/dim]")
     return None

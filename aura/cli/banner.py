@@ -1,25 +1,27 @@
-"""ASCII art banners for AURA CLI — 3 responsive sizes."""
+"""ASCII art banners for AURA CLI — 3 responsive sizes.
+
+Uses only pure ASCII (no box-drawing chars) for Windows terminal compatibility.
+"""
 
 from rich.text import Text
 
-# Full banner for terminals >= 60 columns
+# Full banner for terminals >= 60 columns (pure ASCII — FIGlet standard)
 BANNER_FULL = r"""
-    ╔═══╗ ╔╗ ╔╗ ╔═══╗  ╔═══╗
-    ║╔═╗║ ║║ ║║ ║╔═╗║  ║╔═╗║
-    ║║ ║║ ║║ ║║ ║╔═╝╝  ║║ ║║
-    ║╔═╗║ ║║ ║║ ║║╔═╗  ║╔═╗║
-    ║║ ║║ ║╚═╝║ ║║║╚╗  ║║ ║║
-    ╚╝ ╚╝ ╚═══╝ ╚╝╚═╝  ╚╝ ╚╝"""
+     _    _   _ ____    _
+    / \  | | | |  _ \  / \
+   / _ \ | | | | |_) |/ _ \
+  / ___ \| |_| |  _ </ ___ \
+ /_/   \_\\___/|_| \_/_/   \_\
+"""
 
 # Compact banner for terminals 40-59 columns
 BANNER_COMPACT = r"""
-   ╔══╗╔╗╔╗╔══╗╔══╗
-   ║╔╗║║║║║║╔═╝║╔╗║
-   ║╔╗║║╚╝║║║╔╗║╔╗║
-   ╚╝╚╝╚══╝╚╝╚╝╚╝╚╝"""
+    /\  | | | |_) /\
+   /--\ |_| |  \/--\
+"""
 
 # Tiny banner for terminals < 40 columns
-BANNER_TINY = "[bold cyan]◆ AURA[/bold cyan]"
+BANNER_TINY = "[bold cyan]* AURA[/bold cyan]"
 
 # Gradient colors for the banner (cyan → blue → magenta)
 _GRADIENT = ["cyan", "deep_sky_blue1", "dodger_blue1", "blue1", "dark_violet", "magenta"]
@@ -54,7 +56,7 @@ def get_welcome_line(version: str = "4.3.0") -> Text:
     t.append("/", style="bold cyan")
     t.append(" commands", style="dim")
     t.append("  │  ", style="dim")
-    t.append("Ctrl+M", style="bold cyan")
+    t.append("Alt+M", style="bold cyan")
     t.append(" model", style="dim")
     t.append("  │  ", style="dim")
     t.append("?", style="bold cyan")
