@@ -159,27 +159,49 @@ def run_voice_mode(agent, enable_barge_in: bool = True):
 
 
 def run_chat_mode(agent, speak: bool = False):
-    """Interactive CLI — every input goes through the full agent loop with all tools."""
+    """Interactive CLI — full agent loop with status bar, model picker, streaming."""
     import io
     import sys
     import threading
-    from aura.cli.display import console, show_banner, show_thinking, show_response, show_error, show_info
+    from aura.cli.display import (
+        console, show_banner, show_thinking, show_response,
+        show_error, show_info, show_status_bar, show_help,
+    )
     from aura.cli.input import create_session, get_input
+    from aura.cli.model_picker import pick_model, update_model_roles_from_config
 
     show_banner()
+
+    # Detect project type for status bar
+    _project_type = ""
+    try:
+        from aura.tools.project_context import detect_and_load_context
+        ctx = detect_and_load_context(".")
+        _project_type = ctx.get("project_type", "") if isinstance(ctx, dict) else ""
+    except Exception:
+        pass
+
+    # Status bar state
+    _current_model = agent.brain._model_override or "auto"
+    _session_title = ""
+    _msg_count = len(agent.brain.conversation_history) if hasattr(agent.brain, 'conversation_history') else 0
+    show_status_bar(
+        model=_current_model, project_type=_project_type,
+        session_title=_session_title, message_count=_msg_count,
+    )
+
     if speak:
         show_info("Voice output enabled")
 
     # Register CLI permission callback for destructive actions
     def _cli_confirm(tool_name: str, action: str) -> bool:
         if tool_name == "code_edit_preview":
-            # action contains the diff
             print(f"\n  Proposed edit:\n")
             for line in action.split("\n")[:40]:
                 if line.startswith("+") and not line.startswith("+++"):
-                    print(f"  \033[32m{line}\033[0m")  # green
+                    print(f"  \033[32m{line}\033[0m")
                 elif line.startswith("-") and not line.startswith("---"):
-                    print(f"  \033[31m{line}\033[0m")  # red
+                    print(f"  \033[31m{line}\033[0m")
                 else:
                     print(f"  {line}")
             if action.count("\n") > 40:
@@ -201,6 +223,9 @@ def run_chat_mode(agent, speak: bool = False):
 
     agent.set_cli_confirm_callback(_cli_confirm)
 
+    # Initialize model picker roles from config
+    update_model_roles_from_config()
+
     session = create_session()
 
     while True:
@@ -209,6 +234,25 @@ def run_chat_mode(agent, speak: bool = False):
         if user_input is None:
             console.print("\n[dim]Goodbye.[/dim]\n")
             break
+
+        # Handle Ctrl+M model picker
+        if user_input == "__MODEL_PICK__":
+            _current_model = agent.brain._model_override or "auto"
+            choice = pick_model(console, _current_model)
+            if choice:
+                if choice == "auto":
+                    agent.brain.set_model_override(None)
+                    _current_model = "auto"
+                    show_info("Model set to auto-routing")
+                else:
+                    agent.brain.set_model_override(choice)
+                    _current_model = choice
+                    show_info(f"Model set to {choice}")
+            show_status_bar(
+                model=_current_model, project_type=_project_type,
+                session_title=_session_title, message_count=_msg_count,
+            )
+            continue
 
         if not user_input:
             continue
@@ -221,10 +265,21 @@ def run_chat_mode(agent, speak: bool = False):
                 s.connect(("127.0.0.1", 19733))
                 s.send((json.dumps({"type": "activity"}) + "\n").encode())
         except Exception:
-            pass  # Daemon not running — fine
+            pass
+
+        # Handle ? for help
+        if user_input.strip() == "?":
+            show_help()
+            continue
 
         if user_input.startswith("/"):
             handle_command(agent, user_input, speak=speak)
+            _msg_count = len(agent.brain.conversation_history) if hasattr(agent.brain, 'conversation_history') else 0
+            _current_model = agent.brain._model_override or "auto"
+            show_status_bar(
+                model=_current_model, project_type=_project_type,
+                session_title=_session_title, message_count=_msg_count,
+            )
             continue
 
         # Run agent in thread, capture its verbose stdout, show spinner while working
@@ -255,6 +310,14 @@ def run_chat_mode(agent, speak: bool = False):
         response_text = result.get("response", "")
 
         show_response(response_text)
+
+        # Update status bar after response
+        _msg_count = len(agent.brain.conversation_history) if hasattr(agent.brain, 'conversation_history') else 0
+        _current_model = agent.brain._model_override or "auto"
+        show_status_bar(
+            model=_current_model, project_type=_project_type,
+            session_title=_session_title, message_count=_msg_count,
+        )
 
         if speak and response_text:
             try:
