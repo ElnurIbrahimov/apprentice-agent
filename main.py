@@ -59,6 +59,13 @@ def main():
         action="store_true",
         help="Disable barge-in detection in voice mode (use blocking TTS)"
     )
+    parser.add_argument(
+        "--resume",
+        nargs="?",
+        const="pick",
+        default=None,
+        help="Resume a previous session ('last' for most recent, or pick from list)"
+    )
 
     args = parser.parse_args()
 
@@ -75,6 +82,36 @@ def main():
     agent = ApprenticeAgent()
     agent.max_iterations = args.max_iterations
     agent.use_fastpath = not args.no_fastpath
+
+    # Handle session resume
+    if args.resume:
+        conversations = agent.brain.list_conversations()
+        if not conversations:
+            print("No previous sessions found.")
+        elif args.resume == "last":
+            latest = conversations[0]  # Already sorted by updated_at desc
+            agent.brain.switch_conversation(latest["id"])
+            print(f"  Resumed: {latest.get('title', 'Untitled')} ({latest.get('message_count', 0)} messages)")
+        else:
+            # Show picker
+            print("\n  Recent sessions:\n")
+            for i, conv in enumerate(conversations[:10], 1):
+                active = " *" if conv.get("is_active") else ""
+                title = conv.get("title", "Untitled")[:50]
+                msgs = conv.get("message_count", 0)
+                print(f"    {i}. {title} ({msgs} msgs){active}")
+            print()
+            try:
+                choice = input("  Pick a session (number): ").strip()
+                idx = int(choice) - 1
+                if 0 <= idx < len(conversations[:10]):
+                    picked = conversations[idx]
+                    agent.brain.switch_conversation(picked["id"])
+                    print(f"  Resumed: {picked.get('title', 'Untitled')}")
+                else:
+                    print("  Invalid choice, starting new session.")
+            except (ValueError, EOFError, KeyboardInterrupt):
+                print("  Starting new session.")
 
     if args.voice:
         run_voice_mode(agent, enable_barge_in=not args.no_barge_in)
@@ -106,6 +143,25 @@ def run_chat_mode(agent, speak: bool = False):
     show_banner()
     if speak:
         show_info("Voice output enabled")
+
+    # Register CLI permission callback for destructive actions
+    def _cli_confirm(tool_name: str, action: str) -> bool:
+        print(f"\n  \u26a0 Permission required:")
+        print(f"    Tool: {tool_name}")
+        print(f"    Action: {action[:200]}")
+        try:
+            response = input("    Allow? (y/n/always): ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return False
+        if response == "always":
+            # Add a keyword pattern to auto-approve similar actions
+            for word in action.lower().split()[:3]:
+                if len(word) > 3:
+                    agent._approved_patterns.add(word)
+            return True
+        return response in ("y", "yes")
+
+    agent.set_cli_confirm_callback(_cli_confirm)
 
     session = create_session()
 
@@ -258,10 +314,57 @@ def handle_command(agent, command: str, speak: bool = False):
             print("Usage: /browse <url> | /browse search <query> | /browse text | /browse screenshot | /browse click <selector> | /browse links")
         else:
             _handle_browse_command(agent, arg)
+    elif cmd == "/grep":
+        _handle_grep_command(agent, arg)
+    elif cmd == "/search" or cmd == "/find":
+        _handle_search_command(agent, arg)
+    elif cmd == "/edit":
+        _handle_edit_command(agent, arg)
+    elif cmd == "/project":
+        _handle_project_command(agent, arg)
+    elif cmd == "/shell" or cmd == "/bash" or cmd == "/run":
+        _handle_shell_command(agent, arg)
     elif cmd == "/agent":
         _handle_agent_command(agent, arg)
     elif cmd == "/hook":
         _handle_hook_command(agent, arg)
+    elif cmd == "/sessions":
+        conversations = agent.brain.list_conversations()
+        if not conversations:
+            print("  No sessions found.")
+            return
+        parts_arg = arg.split(maxsplit=1) if arg else []
+        subcmd = parts_arg[0].lower() if parts_arg else "list"
+        if subcmd == "switch" and len(parts_arg) > 1:
+            target = parts_arg[1]
+            # Try matching by index number
+            try:
+                idx = int(target) - 1
+                if 0 <= idx < len(conversations):
+                    conv = conversations[idx]
+                    agent.brain.switch_conversation(conv["id"])
+                    print(f"  Switched to: {conv.get('title', 'Untitled')}")
+                    return
+            except ValueError:
+                pass
+            # Try matching by ID
+            for conv in conversations:
+                if conv["id"] == target:
+                    agent.brain.switch_conversation(conv["id"])
+                    print(f"  Switched to: {conv.get('title', 'Untitled')}")
+                    return
+            print(f"  Session not found: {target}")
+        elif subcmd == "new":
+            agent.brain.new_conversation(parts_arg[1] if len(parts_arg) > 1 else None)
+            print("  Started new session.")
+        else:
+            print("\n  Sessions:\n")
+            for i, conv in enumerate(conversations[:15], 1):
+                active = " *" if conv.get("is_active") else ""
+                title = conv.get("title", "Untitled")[:50]
+                msgs = conv.get("message_count", 0)
+                print(f"    {i}. {title} ({msgs} msgs){active}")
+            print(f"\n  Usage: /sessions switch <number> | /sessions new [title]")
     else:
         print(f"Unknown command: {cmd}")
 
@@ -361,6 +464,236 @@ def _handle_browse_command(agent, arg: str):
             print(f"  Status: {result.get('status', 'N/A')}")
         else:
             print(f"  Error: {result.get('error', 'Navigation failed')}")
+
+
+def _handle_grep_command(agent, arg: str):
+    """Handle /grep <pattern> [path] — search code content."""
+    if not arg:
+        print("Usage: /grep <pattern> [path]")
+        print("  /grep 'def my_func'")
+        print("  /grep 'import os' ./src")
+        print("  /grep 'TODO' --type py")
+        return
+
+    tool = agent.tools.get("code_search")
+    if not tool:
+        from aura.tools.code_search import CodeSearchTool
+        tool = CodeSearchTool()
+        agent.tools["code_search"] = tool
+
+    parts = arg.split()
+    pattern = parts[0]
+    path = "."
+
+    # Parse flags
+    file_type = None
+    case_insensitive = False
+    context = 0
+    i = 1
+    while i < len(parts):
+        if parts[i] == "--type" and i + 1 < len(parts):
+            file_type = parts[i + 1]
+            i += 2
+        elif parts[i] == "-i":
+            case_insensitive = True
+            i += 1
+        elif parts[i] == "-C" and i + 1 < len(parts):
+            context = int(parts[i + 1])
+            i += 2
+        else:
+            path = parts[i]
+            i += 1
+
+    result = tool.grep(
+        pattern=pattern, path=path, file_type=file_type,
+        case_insensitive=case_insensitive, context_lines=context,
+    )
+
+    if not result.get("success"):
+        print(f"  Error: {result.get('error')}")
+        return
+
+    matches = result.get("matches", [])
+    total = result.get("total_matches", 0)
+    print(f"\n  {total} matches in {result.get('files_searched', 0)} files:\n")
+    for m in matches[:50]:
+        print(f"  {m['file']}:{m['line']}\t{m['text']}")
+        for ctx in m.get("before", []):
+            print(f"    {ctx}")
+        for ctx in m.get("after", []):
+            print(f"    {ctx}")
+    if total > 50:
+        print(f"\n  ... and {total - 50} more matches")
+
+
+def _handle_search_command(agent, arg: str):
+    """Handle /search and /find — file pattern search and definitions."""
+    if not arg:
+        print("Usage: /search <glob-pattern>  or  /find def <name>")
+        print("  /search '*.py'")
+        print("  /find def MyClass")
+        print("  /search structure")
+        return
+
+    tool = agent.tools.get("code_search")
+    if not tool:
+        from aura.tools.code_search import CodeSearchTool
+        tool = CodeSearchTool()
+        agent.tools["code_search"] = tool
+
+    parts = arg.split(maxsplit=1)
+    subcmd = parts[0].lower()
+
+    if subcmd == "def" or subcmd == "definition":
+        name = parts[1] if len(parts) > 1 else ""
+        if not name:
+            print("Usage: /find def <name>")
+            return
+        result = tool.find_definition(name=name)
+        if result.get("success"):
+            defs = result.get("definitions", [])
+            print(f"\n  Found {len(defs)} definition(s) of '{name}':\n")
+            for d in defs:
+                print(f"  {d['file']}:{d['line']} ({d['kind']})")
+                print(f"    {d['text']}")
+        else:
+            print(f"  Error: {result.get('error')}")
+
+    elif subcmd == "ref" or subcmd == "references":
+        name = parts[1] if len(parts) > 1 else ""
+        if not name:
+            print("Usage: /find ref <name>")
+            return
+        result = tool.find_references(name=name)
+        if result.get("success"):
+            refs = result.get("references", [])
+            print(f"\n  Found {len(refs)} reference(s) to '{name}':\n")
+            for r in refs[:30]:
+                print(f"  {r['file']}:{r['line']}\t{r['text']}")
+        else:
+            print(f"  Error: {result.get('error')}")
+
+    elif subcmd == "structure" or subcmd == "tree":
+        path = parts[1] if len(parts) > 1 else "."
+        result = tool.project_structure(path=path)
+        if result.get("success"):
+            print(f"\n{result['tree']}")
+            s = result.get("stats", {})
+            print(f"\n  {s.get('files', 0)} files, {s.get('dirs', 0)} dirs")
+        else:
+            print(f"  Error: {result.get('error')}")
+
+    else:
+        # Treat as glob pattern
+        result = tool.glob(pattern=arg)
+        if result.get("success"):
+            files = result.get("files", [])
+            print(f"\n  Found {result.get('total', 0)} files:\n")
+            for f in files[:50]:
+                size = f.get("size", 0)
+                size_str = f"{size // 1024}KB" if size > 1024 else f"{size}B"
+                print(f"  {f['path']}  ({size_str})")
+            if result.get("truncated"):
+                print(f"\n  ... truncated ({result['total']} total)")
+        else:
+            print(f"  Error: {result.get('error')}")
+
+
+def _handle_edit_command(agent, arg: str):
+    """Handle /edit <path> — read file with line numbers for editing context."""
+    if not arg:
+        print("Usage: /edit <file-path> [line-offset]")
+        print("  /edit src/main.py")
+        print("  /edit src/main.py 100")
+        return
+
+    tool = agent.tools.get("code_edit")
+    if not tool:
+        from aura.tools.code_edit import CodeEditTool
+        tool = CodeEditTool()
+        agent.tools["code_edit"] = tool
+
+    parts = arg.split()
+    path = parts[0]
+    offset = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+    limit = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 100
+
+    result = tool.read_file(path=path, offset=offset, limit=limit)
+    if result.get("success"):
+        print(f"\n  {result['showing']}  ({result['path']})\n")
+        print(result["content"])
+    else:
+        print(f"  Error: {result.get('error')}")
+
+
+def _handle_project_command(agent, arg: str):
+    """Handle /project — detect project type, init AURA.md, show context."""
+    tool = agent.tools.get("code_search")
+    if not tool:
+        from aura.tools.code_search import CodeSearchTool
+        tool = CodeSearchTool()
+        agent.tools["code_search"] = tool
+
+    parts = arg.split(maxsplit=1) if arg else ["info"]
+    subcmd = parts[0].lower()
+
+    if subcmd == "init":
+        from aura.tools.project_context import init_project
+        path = parts[1] if len(parts) > 1 else "."
+        print(init_project(path))
+
+    elif subcmd == "detect" or subcmd == "info":
+        path = parts[1] if len(parts) > 1 else "."
+        result = tool.detect_project_type(path=path)
+        if result.get("success"):
+            print(f"\n  Project Type:     {result.get('project_type', 'unknown')}")
+            print(f"  Language:         {result.get('language', 'N/A')}")
+            print(f"  Stack:            {', '.join(result.get('stack', [])) or 'N/A'}")
+            print(f"  Frameworks:       {', '.join(result.get('frameworks', [])) or 'N/A'}")
+            print(f"  Package Manager:  {result.get('package_manager', 'N/A')}")
+            print(f"  Key Files:        {', '.join(result.get('key_files', [])) or 'N/A'}")
+        else:
+            print(f"  Error: {result.get('error')}")
+
+    elif subcmd == "context":
+        from aura.tools.project_context import load_project_context
+        path = parts[1] if len(parts) > 1 else None
+        ctx = load_project_context(path)
+        if ctx:
+            print(f"\n{ctx}")
+        else:
+            print("  No AURA.md found. Create one with: /project init")
+
+    else:
+        print("Usage: /project [info|detect|init|context] [path]")
+
+
+def _handle_shell_command(agent, arg: str):
+    """Handle /shell, /bash, /run — execute shell commands."""
+    if not arg:
+        print("Usage: /shell <command>")
+        print("  /shell git status")
+        print("  /run npm test")
+        print("  /bash ls -la")
+        return
+
+    tool = agent.tools.get("shell_executor")
+    if not tool:
+        from aura.tools.shell_executor import ShellExecutorTool
+        tool = ShellExecutorTool()
+        agent.tools["shell_executor"] = tool
+
+    # Stream output in real-time
+    def on_line(line):
+        print(f"  {line}")
+
+    result = tool.run_streaming(command=arg, on_output=on_line)
+
+    if not result.get("success"):
+        error = result.get("error", "")
+        if error:
+            print(f"\n  Error: {error}")
+    print(f"\n  [exit {result.get('exit_code', '?')}] ({result.get('elapsed', '?')}s)")
 
 
 def _handle_agent_command(agent, arg: str):
