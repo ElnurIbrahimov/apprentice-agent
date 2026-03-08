@@ -2578,13 +2578,15 @@ Guidelines:
         # Diff preview for code edits in interactive mode
         if tool_name == "code_edit" and self._cli_confirm_callback and "edit" in action.lower():
             try:
-                preview_result = self._parse_and_execute_tool_action(tool, tool_name, action + " --dry-run")
+                tool._dry_run_next = True
+                preview_result = self._parse_and_execute_tool_action(tool, tool_name, action)
+                tool._dry_run_next = False
                 if preview_result and preview_result.get("preview") and preview_result.get("diff"):
                     approved = self._cli_confirm_callback("code_edit_preview", preview_result["diff"])
                     if not approved:
                         return {"success": False, "error": "Edit declined after preview", "declined": True}
             except Exception:
-                pass  # If preview fails, fall through to normal execution
+                tool._dry_run_next = False  # Ensure cleanup on error
 
         # Parse the action into tool method and arguments WITH TIMEOUT
         try:

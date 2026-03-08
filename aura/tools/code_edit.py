@@ -128,13 +128,17 @@ class CodeEditTool:
         Args:
             path: File path
             old_string: Exact text to find and replace
+            dry_run: If True, return diff without writing (for preview)
             new_string: Replacement text
             replace_all: Replace all occurrences (default: first only)
 
         Returns:
-            {success, diff, path, backup_path}
+            {success, diff, path, backup_path} or {success, diff, path, preview} if dry_run
         """
         try:
+            # Check instance flag set by agent's preview system
+            dry_run = dry_run or getattr(self, '_dry_run_next', False)
+
             file_path = Path(path).resolve()
             safe, reason = _is_safe_path(file_path)
             if not safe:
