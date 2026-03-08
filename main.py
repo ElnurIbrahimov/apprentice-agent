@@ -66,6 +66,12 @@ def main():
         default=None,
         help="Resume a previous session ('last' for most recent, or pick from list)"
     )
+    parser.add_argument(
+        "-p", "--prompt",
+        type=str,
+        default=None,
+        help="Non-interactive: run prompt and exit (supports stdin piping)"
+    )
 
     args = parser.parse_args()
 
@@ -112,6 +118,23 @@ def main():
                     print("  Invalid choice, starting new session.")
             except (ValueError, EOFError, KeyboardInterrupt):
                 print("  Starting new session.")
+
+    # Non-interactive mode: run prompt, print response, exit
+    if args.prompt:
+        prompt = args.prompt
+        # Read stdin if piped
+        if not sys.stdin.isatty():
+            try:
+                stdin_text = sys.stdin.read()[:50000]
+                if stdin_text.strip():
+                    prompt = f"{stdin_text}\n\n{prompt}"
+            except Exception:
+                pass
+        result = agent.run(prompt)
+        response = result.get("response", "")
+        if response:
+            print(response)
+        sys.exit(0 if result.get("success", True) else 1)
 
     if args.voice:
         run_voice_mode(agent, enable_barge_in=not args.no_barge_in)
