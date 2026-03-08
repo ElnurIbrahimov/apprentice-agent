@@ -359,6 +359,7 @@ def handle_command(agent, command: str, speak: bool = False):
         else:
             print("Usage: /speak <text to speak>")
     elif cmd == "/model":
+        from aura.config import Config
         if not arg:
             # Show current model + all available
             models = Config.get_all_models()
