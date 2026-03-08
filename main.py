@@ -4,6 +4,9 @@
 import os
 os.environ["TQDM_DISABLE"] = "1"
 
+import warnings
+warnings.filterwarnings("ignore")
+
 import argparse
 import sys
 
