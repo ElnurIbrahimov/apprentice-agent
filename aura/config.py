@@ -7,7 +7,7 @@ import os
 import logging
 import threading
 from pathlib import Path
-from typing import List, Optional, Dict
+from typing import Dict, List
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -139,54 +139,58 @@ class Config:
 
     # Model chains (first available is used as fallback)
     MODEL_FAST_CHAIN = [
-        "gemini-3-flash-preview:cloud",   # Primary: speed-optimized
-        "nemotron-3-nano:30b-cloud",       # Fallback: efficient 30B
-        "kimi-k2.5:cloud",                 # Fallback: general purpose
+        "gemini-3-flash-preview:cloud",   # Primary: 1M ctx, fastest
+        "kimi-k2.5:cloud",                # Fallback: 256K, strong general
+        "nemotron-3-nano:30b-cloud",       # Fallback: 1M ctx, efficient
         "qwen3:8b",                        # Local fallback: offline-capable
         "qwen2:1.5b",                      # Local fallback: tiny/fast
     ]
     MODEL_REASON_CHAIN = [
-        "qwen3.5:397b-cloud",              # Primary: deep planning
+        "kimi-k2.5:cloud",                # Primary: 96% AIME, top agentic, 256K
+        "glm-5:cloud",                     # Fallback: 86% GPQA, strong agentic
+        "qwen3.5:397b-cloud",             # Fallback: hybrid thinking, 256K
         "cogito-2.1:671b-cloud",           # Fallback: extended reasoning
-        "deepseek-v3.2:cloud",             # Fallback: strong all-rounder
-        "kimi-k2.5:cloud",                 # Fallback: general purpose
+        "deepseek-v3.2:cloud",             # Fallback: strong all-rounder, 128K
         "deepseek-r1:8b",                  # Local fallback: reasoning-capable
         "qwen3:8b",                        # Local fallback: offline-capable
     ]
     MODEL_CODE_CHAIN = [
-        "qwen3-coder:480b-cloud",          # Primary: 480B code specialist
+        "minimax-m2.5:cloud",             # Primary: 80.2% SWE-Bench (highest), 196K
+        "qwen3-coder:480b-cloud",          # Fallback: 480B code specialist
         "devstral-2:123b-cloud",           # Fallback: agentic code/SWE
         "qwen3-coder-next:cloud",          # Fallback: efficient code MoE
-        "deepseek-v3.2:cloud",             # Fallback: strong at code
+        "deepseek-v3.2:cloud",             # Fallback: strong at code, 128K
         "qwen2.5-coder:7b",               # Local fallback: code-specialized
         "deepseek-r1:8b",                  # Local fallback: offline code
     ]
     MODEL_VISION_CHAIN = [
-        "qwen3-vl:235b-cloud",             # Primary: only dedicated VL model
-        "kimi-k2.5:cloud",                 # Fallback: multimodal capable
+        "qwen3-vl:235b-cloud",             # Primary: best open vision, 256K
+        "kimi-k2.5:cloud",                 # Fallback: native multimodal
         "gemini-3-flash-preview:cloud",    # Fallback: Gemini supports vision
         "llava:latest",                    # Local fallback: vision-capable
     ]
     MODEL_THINK_CHAIN = [
-        "kimi-k2-thinking:cloud",          # Primary: dedicated thinking mode
+        "kimi-k2-thinking:cloud",          # Primary: dedicated thinking mode, 256K
+        "qwen3.5:397b-cloud",             # Fallback: hybrid think/non-think, 256K
         "cogito-2.1:671b-cloud",           # Fallback: extended reasoning
-        "qwen3.5:397b-cloud",              # Fallback: deep planner
         "deepseek-r1:8b",                  # Local fallback: reasoning chain-of-thought
     ]
     MODEL_LONGCTX_CHAIN = [
-        "minimax-m2.5:cloud",              # Primary: million-token context
-        "kimi-k2.5:cloud",                 # Fallback: long context capable
-        "qwen3.5:397b-cloud",              # Fallback: large context
+        "gemini-3-flash-preview:cloud",    # Primary: 1M tokens
+        "nemotron-3-nano:30b-cloud",       # Fallback: 1M tokens
+        "minimax-m2.5:cloud",              # Fallback: 196K
+        "kimi-k2.5:cloud",                 # Fallback: 256K
+        "qwen3.5:397b-cloud",             # Fallback: 256K
         "qwen3:8b",                        # Local fallback: best local context window
     ]
 
     # Primary defaults
     MODEL_FAST: str = os.getenv("MODEL_FAST", "gemini-3-flash-preview:cloud")
-    MODEL_REASON: str = os.getenv("MODEL_REASON", "qwen3.5:397b-cloud")
-    MODEL_CODE: str = os.getenv("MODEL_CODE", "qwen3-coder:480b-cloud")
+    MODEL_REASON: str = os.getenv("MODEL_REASON", "kimi-k2.5:cloud")
+    MODEL_CODE: str = os.getenv("MODEL_CODE", "minimax-m2.5:cloud")
     MODEL_VISION: str = os.getenv("MODEL_VISION", "qwen3-vl:235b-cloud")
     MODEL_THINK: str = os.getenv("MODEL_THINK", "kimi-k2-thinking:cloud")
-    MODEL_LONGCTX: str = os.getenv("MODEL_LONGCTX", "minimax-m2.5:cloud")
+    MODEL_LONGCTX: str = os.getenv("MODEL_LONGCTX", "gemini-3-flash-preview:cloud")
 
     MODEL_NAME: str = MODEL_REASON  # Default model (backward compat)
 
@@ -372,6 +376,15 @@ class Config:
     MULTI_USER_DEFAULT_ID: str = os.getenv("AURA_DEFAULT_USER_ID", "default_user")
     MULTI_USER_SESSION_TIMEOUT: int = int(os.getenv("AURA_SESSION_TIMEOUT_MIN", "30"))
 
+    # Trust Calibration (ADV-04) — controls how fast users gain trust
+    TRUST_INCREMENT: float = float(os.getenv("TRUST_INCREMENT", "0.005"))
+    TRUST_DECREMENT_ADVERSARIAL: float = float(os.getenv("TRUST_DECREMENT_ADVERSARIAL", "0.1"))
+    TRUST_ACQUAINTANCE_MESSAGES: int = int(os.getenv("TRUST_ACQUAINTANCE_MESSAGES", "5"))
+    TRUST_FAMILIAR_MESSAGES: int = int(os.getenv("TRUST_FAMILIAR_MESSAGES", "30"))
+    TRUST_TRUSTED_MESSAGES: int = int(os.getenv("TRUST_TRUSTED_MESSAGES", "100"))
+    TRUST_FAMILIAR_SCORE: float = float(os.getenv("TRUST_FAMILIAR_SCORE", "0.6"))
+    TRUST_TRUSTED_SCORE: float = float(os.getenv("TRUST_TRUSTED_SCORE", "0.7"))
+
     # API Security Configuration
     API_AUTH_ENABLED: bool = os.getenv("AURA_API_AUTH_ENABLED", "false").lower() == "true"
     API_KEY: str = os.getenv("AURA_API_KEY", "")  # Set to enable API key auth
@@ -422,6 +435,30 @@ class Config:
     # Florence-2 Vision (local HuggingFace model — for image preprocessing only)
     FLORENCE2_MODEL: str = "microsoft/Florence-2-base"
     FLORENCE2_ENABLED: bool = os.getenv("FLORENCE2_ENABLED", "true").lower() == "true"
+
+    # ============================================================
+    # CENTRALIZED THRESHOLDS — referenced across subsystems
+    # ============================================================
+
+    # Salience Filter (aura.proactive.salience_filter)
+    SALIENCE_FILTER_THRESHOLD: float = float(os.getenv("SALIENCE_FILTER_THRESHOLD", "0.3"))
+    SALIENCE_LLM_TIMEOUT: float = float(os.getenv("SALIENCE_LLM_TIMEOUT", "5.0"))
+    SALIENCE_SEEN_EVENT_TTL: float = float(os.getenv("SALIENCE_SEEN_EVENT_TTL", "3600.0"))
+    SALIENCE_CLEANUP_INTERVAL: int = int(os.getenv("SALIENCE_CLEANUP_INTERVAL", "100"))
+    SALIENCE_CLEANUP_PERIOD: float = float(os.getenv("SALIENCE_CLEANUP_PERIOD", "300.0"))
+
+    # Theory of Mind (aura.proactive.theory_of_mind)
+    TOM_EMA_ALPHA: float = float(os.getenv("TOM_EMA_ALPHA", "0.4"))
+
+    # Proactive Awareness (aura.consciousness.proactive_awareness)
+    PROACTIVE_MIN_CONFIDENCE: float = float(os.getenv("PROACTIVE_MIN_CONFIDENCE", "0.4"))
+
+    # Conversation / Brain defaults (aura.brain)
+    HISTORY_LIMIT: int = int(os.getenv("HISTORY_LIMIT", "20"))
+    AUTO_RESET_INTERVAL: int = int(os.getenv("AUTO_RESET_INTERVAL", "15"))
+    BUDGET_SMALL: int = int(os.getenv("BUDGET_SMALL", "150"))
+    BUDGET_MEDIUM: int = int(os.getenv("BUDGET_MEDIUM", "400"))
+    BUDGET_LARGE: int = int(os.getenv("BUDGET_LARGE", "800"))
 
     # ============================================================
     # RELIABILITY UPGRADE — Phase 1-4 (2026-03)
