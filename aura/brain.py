@@ -11,7 +11,6 @@ import concurrent.futures
 import atexit
 import uuid
 from enum import Enum
-from pathlib import Path
 from typing import Optional, Callable, Any
 import ollama
 
@@ -183,10 +182,10 @@ class OllamaBrain:
     """Handles all interactions with Ollama API for reasoning and decision-making."""
 
     # Limit conversation history to prevent unbounded memory growth
-    MAX_HISTORY_LENGTH = 20  # Keep last 20 messages (10 exchanges)
+    MAX_HISTORY_LENGTH = Config.HISTORY_LIMIT  # Keep last N messages (N/2 exchanges)
 
     # Auto-reset context after this many queries to prevent slowdown
-    AUTO_RESET_INTERVAL = 15  # Reset every 15 queries
+    AUTO_RESET_INTERVAL = Config.AUTO_RESET_INTERVAL  # Reset every N queries
 
     # Ollama cloud configuration
     OLLAMA_CLOUD_HOST = "https://api.ollama.com"
@@ -208,7 +207,7 @@ class OllamaBrain:
             logger.debug(f"[BRAIN] Warning: OLLAMA_API_KEY not set, cloud models unavailable")
 
         self.model = Config.MODEL_NAME
-        self._max_history: int = getattr(Config, 'MAX_HISTORY_LENGTH', self.MAX_HISTORY_LENGTH)
+        self._max_history: int = Config.HISTORY_LIMIT
         self.conversation_history: list[dict] = []
         self._history_lock = threading.Lock()
         self._last_model_used: str = self.model  # Track for metacognition
@@ -543,6 +542,14 @@ class OllamaBrain:
         self._conversations_index_cache = []
         return []
 
+    def _invalidate_conversation_cache(self) -> None:
+        """Invalidate the in-memory conversations index cache.
+
+        Must be called by any method that mutates conversations (create, delete,
+        rename, switch) so the next _load_conversations_index() re-reads from disk.
+        """
+        self._conversations_index_cache = None
+
     def _save_conversations_index(self, index: list) -> None:
         """Save the conversations index."""
         try:
@@ -584,6 +591,7 @@ class OllamaBrain:
         # Save current conversation first
         self._save_history()
         self._update_conversation_index_entry()
+        self._invalidate_conversation_cache()
 
         effective_title = title or "New Chat"
         conv_id = self._create_conversation_dir(effective_title)
@@ -631,6 +639,7 @@ class OllamaBrain:
         # Save current conversation
         self._save_history()
         self._update_conversation_index_entry()
+        self._invalidate_conversation_cache()
 
         # Load new conversation
         self._current_conversation_id = conversation_id
@@ -658,6 +667,9 @@ class OllamaBrain:
         except OSError as e:
             logger.error(f"[BRAIN] Failed to delete conversation dir: {e}")
             return False
+
+        # Invalidate cache before re-reading index
+        self._invalidate_conversation_cache()
 
         # Remove from index
         index = self._load_conversations_index()
@@ -688,6 +700,7 @@ class OllamaBrain:
         Returns:
             True if renamed successfully
         """
+        self._invalidate_conversation_cache()
         index = self._load_conversations_index()
         for entry in index:
             if entry["id"] == conversation_id:
@@ -1049,11 +1062,12 @@ class OllamaBrain:
     @staticmethod
     def _classify_budget(query: str) -> int:
         q = query.lower().strip()
-        if len(q) < 30 or any(q.startswith(p) for p in ("hi", "hello", "thanks", "ok ", "yes", "no")):
-            return 150   # conversational
+        # Only classify truly minimal responses (yes/no/ok) as small
+        if q in ("yes", "no", "ok", "thanks", "thx", "bye", "k"):
+            return Config.BUDGET_SMALL   # one-word replies
         if any(kw in q for kw in ("explain", "analyze", "compare", "research", "write", "implement")):
-            return 800   # complex
-        return 400       # default
+            return Config.BUDGET_LARGE   # complex
+        return Config.BUDGET_MEDIUM       # default (greetings, questions, etc.)
 
     @staticmethod
     def _build_budget_instruction(budget: int) -> str:
@@ -1099,13 +1113,33 @@ class OllamaBrain:
         if sys_additions:
             full = f"{full}\n\n{sys_additions}"
 
-        # === AURA.md PROJECT CONTEXT INJECTION ===
+        # === PROJECT CONTEXT INJECTION (AURA.md + auto-detect fallback) ===
         try:
-            from aura.tools.project_context import load_project_context
-            import os
-            project_ctx = load_project_context(os.getcwd())
-            if project_ctx:
-                full = f"{full}\n\n## Active Project Context\n{project_ctx}"
+            import os as _os
+            _now = time.time()
+            _cwd = _os.getcwd()
+            # 60-second cache to avoid re-detecting every query
+            if (not hasattr(self, '_project_ctx_cache')
+                    or self._project_ctx_cache is None
+                    or _now - getattr(self, '_project_ctx_ts', 0) > 60
+                    or getattr(self, '_project_ctx_cwd', '') != _cwd):
+                from aura.tools.project_context import detect_and_load_context
+                self._project_ctx_cache = detect_and_load_context(_cwd)
+                self._project_ctx_ts = _now
+                self._project_ctx_cwd = _cwd
+
+            ctx = self._project_ctx_cache
+            if ctx and ctx.get("has_aura_md"):
+                full = f"{full}\n\n## Active Project Context\n{ctx['aura_md_content']}"
+            elif ctx and ctx.get("project_type") and ctx["project_type"] != "unknown":
+                parts = [f"**Type:** {ctx['project_type']}"]
+                if ctx.get("stack"):
+                    parts.append(f"**Stack:** {', '.join(ctx['stack'])}")
+                if ctx.get("frameworks"):
+                    parts.append(f"**Frameworks:** {', '.join(ctx['frameworks'])}")
+                if ctx.get("key_files"):
+                    parts.append(f"**Key Files:** {', '.join(ctx['key_files'][:10])}")
+                full = f"{full}\n\n## Auto-Detected Project Context\n" + "\n".join(parts)
         except Exception:
             pass
 
@@ -1195,8 +1229,8 @@ class OllamaBrain:
 
         full_system_prompt = self._build_full_system_prompt(prompt, system_prompt, tone_modifier)
 
-        # Auto-compact if conversation history is getting long
-        if use_history and len(self.conversation_history) > 40:
+        # Auto-compact: cloud models have 128K-256K context, compact at ~60% (~150 msgs)
+        if use_history and len(self.conversation_history) > 150:
             try:
                 summary = self.compact_history()
                 if summary:
@@ -1258,9 +1292,17 @@ class OllamaBrain:
         ach = neuro.get("acetylcholine", 0.5)
         adjusted_repeat_penalty = round(_neuro_scale(base_repeat_penalty, ach, sensitivity=0.15), 2)
 
+        # Budget-forced num_predict: hard cap based on query complexity
+        # The budget classification gives: conversational=BUDGET_SMALL, default=BUDGET_MEDIUM, complex=BUDGET_LARGE
+        # We use 2x multiplier for breathing room while still enforcing a ceiling
+        budget_tokens = self._classify_budget(prompt)
+        budget_num_predict = budget_tokens * 2
+        # Take the lower of neuromodulator-adjusted and budget-forced cap
+        effective_num_predict = min(adjusted_num_predict, budget_num_predict)
+
         llm_options = {
             "temperature": adjusted_temp,
-            "num_predict": adjusted_num_predict,
+            "num_predict": effective_num_predict,
             "top_p": adjusted_top_p,
             "repeat_penalty": adjusted_repeat_penalty,
         }
@@ -1425,8 +1467,8 @@ class OllamaBrain:
 
         full_system_prompt = self._build_full_system_prompt(prompt, system_prompt, tone_modifier)
 
-        # Auto-compact if conversation history is getting long
-        if use_history and len(self.conversation_history) > 40:
+        # Auto-compact: cloud models have 128K-256K context, compact at ~60% (~150 msgs)
+        if use_history and len(self.conversation_history) > 150:
             try:
                 summary = self.compact_history()
                 if summary:
@@ -1460,6 +1502,40 @@ class OllamaBrain:
         except Exception:
             pass
 
+        # Neuromodulator: Dopamine modulates temperature (creativity/exploration)
+        neuro = _get_neuromodulator_levels()
+        base_temp = 0.7
+        adjusted_temp = round(_neuro_scale(base_temp, neuro["dopamine"], sensitivity=0.25), 2)
+
+        # Neuromodulator: Serotonin modulates num_predict (response thoroughness)
+        base_num_predict = 1024
+        adjusted_num_predict = int(_neuro_scale(base_num_predict, neuro["serotonin"], sensitivity=0.3))
+
+        # Neuromodulator: Norepinephrine modulates top_p (focus vs exploration)
+        base_top_p = 0.9
+        adjusted_top_p = round(base_top_p - (neuro["norepinephrine"] - 0.5) * 0.15, 2)
+        adjusted_top_p = max(0.7, min(0.95, adjusted_top_p))
+
+        # Neuromodulator: Acetylcholine modulates repeat_penalty (attention precision)
+        base_repeat_penalty = 1.1
+        ach = neuro.get("acetylcholine", 0.5)
+        adjusted_repeat_penalty = round(_neuro_scale(base_repeat_penalty, ach, sensitivity=0.15), 2)
+
+        # Budget-forced num_predict: hard cap based on query complexity
+        # The budget classification gives: conversational=150, default=400, complex=800
+        # We use 2x multiplier for breathing room while still enforcing a ceiling
+        budget_tokens = self._classify_budget(prompt)
+        budget_num_predict = budget_tokens * 2
+        # Take the lower of neuromodulator-adjusted and budget-forced cap
+        effective_num_predict = min(adjusted_num_predict, budget_num_predict)
+
+        llm_options = {
+            "temperature": adjusted_temp,
+            "num_predict": effective_num_predict,
+            "top_p": adjusted_top_p,
+            "repeat_penalty": adjusted_repeat_penalty,
+        }
+
         full_response = ""
 
         # ===== Phase 4 Fix 4C: Compaction notice on streaming path =====
@@ -1481,7 +1557,7 @@ class OllamaBrain:
                 _try_client, _try_actual = self._get_client_for_model(_try_model)
                 if _try_model != _models_to_try[0]:
                     logger.info(f"[BRAIN] Stream fallback: {actual_model} → {_try_actual}")
-                stream = _try_client.chat(model=_try_actual, messages=messages, stream=True)
+                stream = _try_client.chat(model=_try_actual, messages=messages, stream=True, options=llm_options)
                 for chunk in stream:
                     if chunk and "message" in chunk and "content" in chunk["message"]:
                         content = chunk["message"]["content"]
