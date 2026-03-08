@@ -146,15 +146,27 @@ def run_chat_mode(agent, speak: bool = False):
 
     # Register CLI permission callback for destructive actions
     def _cli_confirm(tool_name: str, action: str) -> bool:
-        print(f"\n  \u26a0 Permission required:")
-        print(f"    Tool: {tool_name}")
-        print(f"    Action: {action[:200]}")
+        if tool_name == "code_edit_preview":
+            # action contains the diff
+            print(f"\n  Proposed edit:\n")
+            for line in action.split("\n")[:40]:
+                if line.startswith("+") and not line.startswith("+++"):
+                    print(f"  \033[32m{line}\033[0m")  # green
+                elif line.startswith("-") and not line.startswith("---"):
+                    print(f"  \033[31m{line}\033[0m")  # red
+                else:
+                    print(f"  {line}")
+            if action.count("\n") > 40:
+                print(f"  ... ({action.count(chr(10)) - 40} more lines)")
+        else:
+            print(f"\n  \u26a0 Permission required:")
+            print(f"    Tool: {tool_name}")
+            print(f"    Action: {action[:200]}")
         try:
             response = input("    Allow? (y/n/always): ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             return False
         if response == "always":
-            # Add a keyword pattern to auto-approve similar actions
             for word in action.lower().split()[:3]:
                 if len(word) > 3:
                     agent._approved_patterns.add(word)

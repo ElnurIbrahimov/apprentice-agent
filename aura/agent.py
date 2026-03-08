@@ -133,19 +133,18 @@ from .identity import load_identity, get_identity_prompt, detect_name_change, de
 from .memory import MemorySystem
 from .metacognition import MetacognitionLogger
 from .config import Config
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, build_adaptive_system_prompt, get_monologue, KnowledgeGraphTool, get_knowledge_graph, MetacognitiveGuardian, GuardianConfig, NeuroDreamEngine, SleepPhase, ReflexionEngine, code_syntax_evaluator, SynapseForge, WorldSim, RiskLevel, CalendarTool, SpacedRepetitionTool, TaskManagerTool, ClipboardHistoryTool, APITesterTool, DatabaseTool, AudioTranscriberTool, ResearchTool, BraveSearchTool, TavilyTool, FirecrawlTool, ClipboardMemoryTool, ObsidianTool, GitHubTool, LogAnalystTool, DocumentGeneratorTool, WindowsControlTool, HomeAssistantTool, TaskSchedulerTool, DiscordTool, SlackTool, LocalImageGenTool, AmbientAudioTool, PredictiveTaskTool, MeetingIntelTool, VoiceSynthTool, LifeLoggerTool
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, get_monologue, KnowledgeGraphTool, get_knowledge_graph, MetacognitiveGuardian, GuardianConfig, NeuroDreamEngine, SleepPhase, ReflexionEngine, SynapseForge, WorldSim, RiskLevel, CalendarTool, SpacedRepetitionTool, TaskManagerTool, ClipboardHistoryTool, APITesterTool, DatabaseTool, AudioTranscriberTool, ResearchTool, BraveSearchTool, TavilyTool, FirecrawlTool, ClipboardMemoryTool, ObsidianTool, GitHubTool, LogAnalystTool, DocumentGeneratorTool, WindowsControlTool, HomeAssistantTool, TaskSchedulerTool, DiscordTool, SlackTool, LocalImageGenTool, AmbientAudioTool, PredictiveTaskTool, MeetingIntelTool, VoiceSynthTool, LifeLoggerTool, CodeSearchTool, CodeEditTool
 from .tools.mirrormind import MirrorMind
 from .tools.cognitive_theater import CognitiveTheater, is_decision_question
 from .parliament import ParliamentConductor
 
 # IntrospectionCircuit — zero-LLM query triage via heuristic classification
 try:
-    from .tools.introspection_circuit import IntrospectionCircuit, QueryType
+    from .tools.introspection_circuit import IntrospectionCircuit
     INTROSPECTION_AVAILABLE = True
 except ImportError:
     INTROSPECTION_AVAILABLE = False
     IntrospectionCircuit = None
-    QueryType = None
 from .tools.crypto_price import CryptoPriceTool
 from .memory_retriever import MemoryRetriever
 try:
@@ -188,7 +187,6 @@ except ImportError:
 try:
     from aura.consciousness.strategy_bandit import (
         get_strategy_bandit,
-        BanditSelection,
         ReasoningStrategy,
     )
     STRATEGY_BANDIT_AVAILABLE = True
@@ -199,7 +197,6 @@ except ImportError:
 try:
     from aura.consciousness.reasoning_templates import (
         get_template_library,
-        TemplateMatch,
         build_trace_from_mcts,
         build_trace_from_reflexion,
     )
@@ -222,7 +219,6 @@ try:
         BridgeConfig,
         KGQueryEngine,
         QueryMode,
-        create_kg_tools,
         KUZU_AVAILABLE
     )
     KG_BRAIN_AVAILABLE = KUZU_AVAILABLE
@@ -247,7 +243,6 @@ try:
         TimelineEngine,
         MemoryConsolidator,
         ConsolidationConfig,
-        create_episodic_tools,
         QDRANT_AVAILABLE
     )
     EPISODIC_MEMORY_AVAILABLE = QDRANT_AVAILABLE
@@ -318,6 +313,22 @@ except ImportError:
 
 
 _TOOL_KEYWORDS = frozenset([
+    # --- Tool 0a: code_search (grep/glob/definitions) ---
+    'grep', 'search code', 'find in code', 'search in files', 'code search',
+    'find definition', 'find class', 'find function', 'find method',
+    'find references', 'where is', 'where does', 'which file',
+    'project structure', 'show structure', 'codebase', 'repo map',
+    'detect project', 'project type', 'what stack',
+    'glob', 'find files', 'search files', 'file pattern',
+
+    # --- Tool 0b: code_edit (surgical edits) ---
+    'edit file', 'edit code', 'modify file', 'change code', 'update code',
+    'replace in file', 'find and replace', 'search replace',
+    'refactor', 'rename', 'fix bug', 'fix error', 'patch',
+    'add import', 'add function', 'add class', 'add method',
+    'remove line', 'delete line', 'insert line',
+    'rollback edit', 'undo edit',
+
     # --- Tool 1: filesystem ---
     'list files', 'show files', 'what files', 'read file', 'write file',
     'open file', 'save file', 'delete file', 'create file', 'file contents',
@@ -525,6 +536,13 @@ class AgentState:
         self._history.append(item)
 
 
+# Actions that require user confirmation before execution
+DESTRUCTIVE_ACTIONS = frozenset({
+    "delete", "remove", "rm ", "rmdir", "drop", "shutdown",
+    "reboot", "kill", "format", "truncate",
+})
+
+
 class ApprenticeAgent:
     """An AI agent that learns and acts using observe/plan/act/evaluate/remember."""
 
@@ -549,6 +567,8 @@ class ApprenticeAgent:
 
         # Core lightweight tools (always load)
         self.tools = {
+            "code_search": CodeSearchTool(),
+            "code_edit": CodeEditTool(),
             "filesystem": FileSystemTool(),
             "web_search": WebSearchTool(),
             "brave_search": BraveSearchTool(),
@@ -1043,6 +1063,10 @@ class ApprenticeAgent:
         if hasattr(self, 'neurodream') and self.neurodream and self.proto_agi:
             self.neurodream.proto_agi = self.proto_agi
             logger.debug("[Phase3] NeuroDream wired to Truth Spine (proto_agi)")
+
+        # CLI permission confirmation callback (set by main.py for interactive mode)
+        self._cli_confirm_callback: Optional[Callable] = None
+        self._approved_patterns: set = set()
 
         # Initialize Knowledge Graph Brain - Structured Long-Term Memory
         # KG Brain is lightweight and can initialize even with fast_init
@@ -1614,8 +1638,8 @@ class ApprenticeAgent:
                 if len(words) <= 15:
                     return True
 
-        # Short simple queries (less than 15 words) with no tool triggers are conversational
-        if len(words) < 15:
+        # Very short queries (under 6 words) with no tool triggers are likely conversational
+        if len(words) <= 5:
             return True
 
         # Default: NOT simple (use agent loop to be safe)
@@ -1720,6 +1744,35 @@ Guidelines:
             logger.warning(f"[IDENTITY] Check failed (non-fatal): {e}")
 
         return None
+
+    # ========== CLI Permission System ==========
+
+    def set_cli_confirm_callback(self, callback: Callable):
+        """Register a callback for CLI permission prompts."""
+        self._cli_confirm_callback = callback
+
+    def _needs_confirmation(self, tool_name: str, action: str) -> bool:
+        """Check if a tool action requires user confirmation."""
+        action_lower = action.lower()
+
+        # Check if already approved for this session
+        for pattern in self._approved_patterns:
+            if pattern in action_lower:
+                return False
+
+        # Shell commands: check against destructive keywords
+        if tool_name == "shell_executor":
+            return any(kw in action_lower for kw in DESTRUCTIVE_ACTIONS)
+
+        # Code edit: only destructive file ops
+        if tool_name == "code_edit":
+            return any(kw in action_lower for kw in ("delete", "remove"))
+
+        # Filesystem: destructive ops
+        if tool_name == "filesystem":
+            return any(kw in action_lower for kw in ("delete", "remove", "rm "))
+
+        return False
 
     def run(self, goal: str, context: Optional[dict] = None, use_fastpath: Optional[bool] = None, timeout_seconds: int = AGENT_TIMEOUT) -> dict:
         """Run the agent loop to achieve a goal.
@@ -2513,6 +2566,26 @@ Guidelines:
 
         tool = self.tools[tool_name]
 
+        # CLI permission check for destructive actions
+        if self._cli_confirm_callback and self._needs_confirmation(tool_name, action):
+            try:
+                approved = self._cli_confirm_callback(tool_name, action)
+                if not approved:
+                    return {"success": False, "error": "User declined action", "declined": True}
+            except Exception as _perm_err:
+                logger.debug(f"[Permission] Callback error: {_perm_err}")
+
+        # Diff preview for code edits in interactive mode
+        if tool_name == "code_edit" and self._cli_confirm_callback and "edit" in action.lower():
+            try:
+                preview_result = self._parse_and_execute_tool_action(tool, tool_name, action + " --dry-run")
+                if preview_result and preview_result.get("preview") and preview_result.get("diff"):
+                    approved = self._cli_confirm_callback("code_edit_preview", preview_result["diff"])
+                    if not approved:
+                        return {"success": False, "error": "Edit declined after preview", "declined": True}
+            except Exception:
+                pass  # If preview fails, fall through to normal execution
+
         # Parse the action into tool method and arguments WITH TIMEOUT
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
@@ -2556,6 +2629,38 @@ Guidelines:
                 )
             except Exception:
                 pass
+
+            # ===== Auto-Verify: run tests after code edits =====
+            if tool_name == "code_edit" and result.get("success"):
+                try:
+                    from aura.tools.auto_verify import auto_verify, _find_project_root
+                    edit_path = result.get("path", action[:200])
+                    project_root = _find_project_root(edit_path)
+                    if project_root:
+                        verify = auto_verify(project_root, self.tools.get("shell_executor"))
+                        result["verification"] = verify
+                        if not verify.get("success") and not verify.get("skipped"):
+                            result["tests_failed"] = True
+                            result["test_output"] = verify.get("output", "")
+                            # Attempt auto-fix loop
+                            try:
+                                from aura.tools.edit_test_fix import EditTestFixLoop
+                                loop = EditTestFixLoop(
+                                    self.brain, self.tools.get("code_edit"),
+                                    self.tools.get("shell_executor")
+                                )
+                                fix_result = loop.run(
+                                    edit_path, result.get("diff", ""),
+                                    result["test_output"], project_root
+                                )
+                                result["self_correction"] = fix_result
+                                if fix_result.get("success"):
+                                    result["tests_failed"] = False
+                                    result["auto_fixed"] = True
+                            except Exception as _etf_err:
+                                logger.debug(f"[EditTestFix] Loop error: {_etf_err}")
+                except Exception as _av_err:
+                    logger.debug(f"[AutoVerify] Error: {_av_err}")
 
             # ===== Phase 3 Fix 3A: Truth Spine reverse bridge =====
             # Verify successful tool results and store in Truth Spine tiered memory
@@ -2635,7 +2740,52 @@ Guidelines:
         """Parse action string and execute on tool."""
         action_lower = action.lower()
 
-        if tool_name == "filesystem":
+        if tool_name == "code_search":
+            # Route to appropriate code search method
+            if "definition" in action_lower or "find class" in action_lower or "find function" in action_lower or "find method" in action_lower:
+                name = self._extract_symbol_name(action)
+                path = self._extract_path(action) or "."
+                return tool.find_definition(name=name, path=path)
+            elif "reference" in action_lower or "usage" in action_lower:
+                name = self._extract_symbol_name(action)
+                path = self._extract_path(action) or "."
+                return tool.find_references(name=name, path=path)
+            elif "structure" in action_lower or "tree" in action_lower or "repo map" in action_lower:
+                path = self._extract_path(action) or "."
+                return tool.project_structure(path=path)
+            elif "detect" in action_lower or "project type" in action_lower or "what stack" in action_lower:
+                path = self._extract_path(action) or "."
+                return tool.detect_project_type(path=path)
+            elif "glob" in action_lower or "find files" in action_lower or "file pattern" in action_lower:
+                pattern = self._extract_pattern(action) or "*"
+                path = self._extract_path(action) or "."
+                return tool.glob(pattern=pattern, path=path)
+            else:
+                # Default: grep content search
+                query = self._extract_query(action)
+                path = self._extract_path(action) or "."
+                return tool.grep(pattern=query, path=path)
+
+        elif tool_name == "code_edit":
+            if "read" in action_lower or "show" in action_lower or "view" in action_lower:
+                path = self._extract_path(action)
+                return tool.read_file(path=path) if path else {"success": False, "error": "No path specified"}
+            elif "create" in action_lower and "file" in action_lower:
+                path = self._extract_path(action)
+                content = self._extract_code(action) or ""
+                return tool.create_file(path=path, content=content) if path else {"success": False, "error": "No path specified"}
+            elif "rollback" in action_lower or "undo" in action_lower:
+                path = self._extract_path(action)
+                return tool.rollback(path=path) if path else {"success": False, "error": "No path specified"}
+            else:
+                # Default: surgical edit — brain should provide structured params
+                return tool.edit(
+                    path=action,
+                    old_string="",
+                    new_string="",
+                )
+
+        elif tool_name == "filesystem":
             if "read" in action_lower:
                 # Extract file path from action
                 path = self._extract_path(action)
@@ -3092,6 +3242,27 @@ Guidelines:
             return tool.execute(action)
 
         return {"success": False, "error": f"Cannot parse action for {tool_name}"}
+
+    def _extract_symbol_name(self, action: str) -> str:
+        """Extract a symbol name (class, function, variable) from action string."""
+        import re
+        # Look for quoted strings first
+        quoted = re.findall(r'["\']([^"\']+)["\']', action)
+        if quoted:
+            return quoted[0]
+        # Look for identifier after common keywords
+        keywords = r'(?:definition of|class|function|method|variable|find|references to|called)\s+'
+        m = re.search(keywords + r'(\w+)', action, re.I)
+        if m:
+            return m.group(1)
+        # Last word that looks like an identifier
+        words = re.findall(r'\b([A-Za-z_]\w*)\b', action)
+        # Filter out common noise words
+        noise = {'find', 'search', 'show', 'get', 'the', 'of', 'in', 'for', 'a', 'an',
+                 'definition', 'class', 'function', 'method', 'where', 'is', 'are',
+                 'references', 'code', 'project', 'file'}
+        clean = [w for w in words if w.lower() not in noise]
+        return clean[-1] if clean else (words[-1] if words else "")
 
     def _extract_path(self, action: str) -> Optional[str]:
         """Extract file path from action string."""
@@ -5211,6 +5382,16 @@ Try these commands:
         except Exception:
             pass
 
+        # Inject applicable skills from Skill Library
+        try:
+            if hasattr(self, 'skill_library') and self.skill_library:
+                _skill_context = self.skill_library.get_skill_context(message)
+                if _skill_context:
+                    context_parts.append(f"SKILL CONTEXT:\n{_skill_context}")
+                    logger.debug("[SkillLibrary] Injected skill context for: %s", message[:40])
+        except Exception as e:
+            logger.debug("[SkillLibrary] Skill lookup error: %s", e)
+
         if context_parts:
             system_prompt_addon = "\n\n".join(context_parts) + "\n\nUse this knowledge and memories when relevant to the conversation. Remember personal details about the user. Always address the user by their name if known."
 
@@ -5523,6 +5704,24 @@ Try these commands:
                 ).start()
             except Exception as e:
                 logger.debug(f"[UnifiedMemory] Conversation store error: {e}")
+
+        # Record interaction for skill learning (background, non-blocking)
+        try:
+            if hasattr(self, 'skill_library') and self.skill_library:
+                _sl_ref = self.skill_library
+                _sl_msg = message[:500]
+                _sl_resp = response[:500]
+                import threading
+                threading.Thread(
+                    target=lambda: _sl_ref.record_interaction(
+                        user_input=_sl_msg, output=_sl_resp,
+                        success=True, context={}
+                    ),
+                    daemon=True,
+                    name="skill-learner",
+                ).start()
+        except Exception as e:
+            logger.debug("[SkillLibrary] Record interaction error: %s", e)
 
         # End inner monologue session
         if hasattr(self, 'monologue') and self.monologue:
