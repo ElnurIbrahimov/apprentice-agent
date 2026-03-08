@@ -699,8 +699,45 @@ def _handle_project_command(agent, arg: str):
         else:
             print("  No AURA.md found. Create one with: /project init")
 
+    elif subcmd == "index":
+        path = parts[1] if len(parts) > 1 else "."
+        from aura.tools.codebase_index import CodebaseIndex
+        idx = CodebaseIndex(path)
+        def on_progress(current, total, fpath):
+            if current % 20 == 0 or current == total:
+                print(f"  [{current}/{total}] {fpath}")
+        print("  Indexing codebase...")
+        result = idx.index(progress_callback=on_progress)
+        print(f"\n  Done: {result['indexed']} files indexed, {result['total_chunks']} chunks, "
+              f"{result['skipped']} unchanged, {result['elapsed']}s")
+        idx.close()
+
+    elif subcmd == "search":
+        query = parts[1] if len(parts) > 1 else ""
+        if not query:
+            print("Usage: /project search <query>")
+            return
+        path = "."
+        from aura.tools.codebase_index import CodebaseIndex
+        idx = CodebaseIndex(path)
+        # Auto-index if empty
+        if idx.stats()["total_chunks"] == 0:
+            print("  No index found, indexing first...")
+            idx.index()
+        results = idx.search(query, top_k=10)
+        if results:
+            print(f"\n  Results for '{query}':\n")
+            for r in results:
+                score_pct = f"{r['score']:.0%}"
+                print(f"  [{score_pct}] {r['file_path']}:{r['line_start']} ({r['kind']}) {r['name']}")
+                snippet = (r.get('content') or '')[:100].replace('\n', ' ')
+                print(f"        {snippet}")
+        else:
+            print("  No results found.")
+        idx.close()
+
     else:
-        print("Usage: /project [info|detect|init|context] [path]")
+        print("Usage: /project [info|detect|init|context|index|search] [path|query]")
 
 
 def _handle_shell_command(agent, arg: str):

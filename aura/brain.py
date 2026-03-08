@@ -1143,6 +1143,27 @@ class OllamaBrain:
         except Exception:
             pass
 
+        # === SEMANTIC CODEBASE CONTEXT ===
+        try:
+            from aura.tools.codebase_index import CodebaseIndex
+            import os
+            _cwd = os.getcwd()
+            _idx_db = Path(_cwd) / ".aura" / "index.db"
+            if _idx_db.exists():
+                idx = CodebaseIndex(_cwd)
+                if idx.stats()["total_chunks"] > 0:
+                    relevant = idx.search(prompt, top_k=3)
+                    if relevant and relevant[0]["score"] > 0.3:
+                        ctx_parts = []
+                        for r in relevant:
+                            if r["score"] > 0.3:
+                                ctx_parts.append(f"**{r['file_path']}:{r['line_start']}** ({r['kind']} `{r['name']}`):\n```\n{r['content'][:300]}\n```")
+                        if ctx_parts:
+                            full = f"{full}\n\n## Relevant Code\n" + "\n\n".join(ctx_parts)
+                idx.close()
+        except Exception:
+            pass
+
         # Apply emotional tone modifier - auto-generate from ALMA if not provided
         if tone_modifier:
             full = f"{full}\n\n{tone_modifier}"
