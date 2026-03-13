@@ -15,10 +15,25 @@ def main():
         description="AURA - Autonomous Universal Reasoning Agent",
         prog="aura"
     )
+
+    # Subcommands
+    subparsers = parser.add_subparsers(dest="command")
+    subparsers.add_parser("init", help="Create AURA.md in current project")
+    subparsers.add_parser("doctor", help="Check Ollama, models, dependencies")
+    subparsers.add_parser("config", help="Show current configuration")
+    subparsers.add_parser("models", help="List available models with routing roles")
+    sub_commit = subparsers.add_parser("commit", help="Smart commit with AI-generated message")
+    sub_commit.add_argument("--all", "-a", action="store_true", help="Stage all changes")
+    subparsers.add_parser("cost", help="Show session cost breakdown")
+    subparsers.add_parser("mcp-serve", help="Run as MCP server (JSON-RPC over stdio)")
+    sub_ide = subparsers.add_parser("ide", help="IDE integration setup")
+    sub_ide.add_argument("action", nargs="?", default="setup", choices=["setup"], help="Action (default: setup)")
+
+    # Positional prompt for one-shot agentic mode
     parser.add_argument(
         "goal",
-        nargs="?",
-        help="The goal for the agent to achieve"
+        nargs="*",
+        help="One-shot agentic prompt (e.g., aura 'fix the login bug')"
     )
     parser.add_argument(
         "--chat",
@@ -28,8 +43,8 @@ def main():
     parser.add_argument(
         "--max-iterations",
         type=int,
-        default=10,
-        help="Maximum iterations for the agent loop (default: 10)"
+        default=50,
+        help="Maximum iterations for the agentic loop (default: 50)"
     )
     parser.add_argument(
         "--dream",
@@ -75,8 +90,68 @@ def main():
         default=None,
         help="Non-interactive: run prompt and exit (supports stdin piping)"
     )
+    parser.add_argument(
+        "--login",
+        type=str,
+        metavar="PROVIDER",
+        help="Authenticate with a provider (e.g., 'chatgpt')"
+    )
+    parser.add_argument(
+        "--logout",
+        type=str,
+        metavar="PROVIDER",
+        help="Remove authentication for a provider (e.g., 'chatgpt')"
+    )
+    # Agentic CLI flags
+    parser.add_argument(
+        "--tier",
+        type=str,
+        choices=["local", "balanced", "max"],
+        default="balanced",
+        help="Model routing tier (default: balanced)"
+    )
+    parser.add_argument(
+        "--budget",
+        type=float,
+        default=None,
+        help="Maximum session cost in USD (e.g., --budget 2.0)"
+    )
+    parser.add_argument(
+        "--trust",
+        action="store_true",
+        help="Trust mode: auto-approve all tool calls (no prompts)"
+    )
 
     args = parser.parse_args()
+
+    # Handle auth commands (no agent needed)
+    if args.login:
+        if args.login.lower() == "chatgpt":
+            from aura.auth.chatgpt_oauth import login
+            sys.exit(0 if login() else 1)
+        else:
+            print(f"Unknown provider: {args.login}. Available: chatgpt")
+            sys.exit(1)
+
+    if args.logout:
+        if args.logout.lower() == "chatgpt":
+            from aura.auth.chatgpt_oauth import logout
+            logout()
+            sys.exit(0)
+        else:
+            print(f"Unknown provider: {args.logout}. Available: chatgpt")
+            sys.exit(1)
+
+    # Handle MCP server (lightweight, no agent needed)
+    if args.command == "mcp-serve":
+        from aura.core.mcp_server import main as mcp_main
+        mcp_main()
+        sys.exit(0)
+
+    # Handle subcommands that don't need the full agent
+    if args.command:
+        from aura.core.commands import handle_subcommand
+        sys.exit(handle_subcommand(args.command, args))
 
     # Heavy imports deferred until after argparse (so --help is instant)
     from aura import ApprenticeAgent
@@ -88,39 +163,67 @@ def main():
         result = run_dream_mode(args.dream_date)
         sys.exit(0 if result.get("success") else 1)
 
-    agent = ApprenticeAgent()
+    try:
+        agent = ApprenticeAgent()
+    except Exception as e:
+        print(f"\n[AURA] Failed to initialize agent: {e}")
+        print("Check that Ollama is running (ollama serve) and your config is valid.")
+        sys.exit(1)
     agent.max_iterations = args.max_iterations
     agent.use_fastpath = not args.no_fastpath
 
-    # Handle session resume
+    # Handle session resume — try agentic sessions first, fall back to brain conversations
     if args.resume:
-        conversations = agent.brain.list_conversations()
-        if not conversations:
-            print("No previous sessions found.")
-        elif args.resume == "last":
-            latest = conversations[0]  # Already sorted by updated_at desc
-            agent.brain.switch_conversation(latest["id"])
-            print(f"  Resumed: {latest.get('title', 'Untitled')} ({latest.get('message_count', 0)} messages)")
-        else:
-            # Show picker
-            print("\n  Recent sessions:\n")
-            for i, conv in enumerate(conversations[:10], 1):
-                active = " *" if conv.get("is_active") else ""
-                title = conv.get("title", "Untitled")[:50]
-                msgs = conv.get("message_count", 0)
-                print(f"    {i}. {title} ({msgs} msgs){active}")
-            print()
-            try:
-                choice = input("  Pick a session (number): ").strip()
-                idx = int(choice) - 1
-                if 0 <= idx < len(conversations[:10]):
-                    picked = conversations[idx]
-                    agent.brain.switch_conversation(picked["id"])
-                    print(f"  Resumed: {picked.get('title', 'Untitled')}")
-                else:
-                    print("  Invalid choice, starting new session.")
-            except (ValueError, EOFError, KeyboardInterrupt):
-                print("  Starting new session.")
+        from aura.core.session import AgenticSession as _SessionCheck
+        _ses = _SessionCheck()
+        agentic_sessions = _ses.list_sessions()
+        brain_conversations = agent.brain.list_conversations()
+
+        if args.resume == "last":
+            if agentic_sessions:
+                latest = agentic_sessions[0]
+                agent._resume_session_id = latest["id"]
+                print(f"  Resuming: {latest.get('title', 'Untitled')} ({latest.get('message_count', 0)} messages)")
+            elif brain_conversations:
+                latest = brain_conversations[0]
+                agent.brain.switch_conversation(latest["id"])
+                print(f"  Resumed (legacy): {latest.get('title', 'Untitled')}")
+            else:
+                print("No previous sessions found.")
+        elif args.resume == "pick" or args.resume:
+            all_sessions = []
+            for s in agentic_sessions:
+                s["_source"] = "agentic"
+                all_sessions.append(s)
+            for c in brain_conversations:
+                c["_source"] = "brain"
+                all_sessions.append(c)
+            all_sessions.sort(key=lambda x: x.get("updated_at", 0), reverse=True)
+
+            if not all_sessions:
+                print("No previous sessions found.")
+            else:
+                print("\n  Recent sessions:\n")
+                for i, s in enumerate(all_sessions[:10], 1):
+                    title = s.get("title", "Untitled")[:50]
+                    msgs = s.get("message_count", 0)
+                    src = s.get("_source", "?")
+                    print(f"    {i}. {title} ({msgs} msgs) [{src}]")
+                print()
+                try:
+                    choice = input("  Pick a session (number): ").strip()
+                    idx = int(choice) - 1
+                    if 0 <= idx < len(all_sessions[:10]):
+                        picked = all_sessions[idx]
+                        if picked["_source"] == "agentic":
+                            agent._resume_session_id = picked["id"]
+                        else:
+                            agent.brain.switch_conversation(picked["id"])
+                        print(f"  Resuming: {picked.get('title', 'Untitled')}")
+                    else:
+                        print("  Invalid choice, starting new session.")
+                except (ValueError, EOFError, KeyboardInterrupt):
+                    print("  Starting new session.")
 
     # Non-interactive mode: run prompt, print response, exit
     if args.prompt:
@@ -142,13 +245,12 @@ def main():
     if args.voice:
         run_voice_mode(agent, enable_barge_in=not args.no_barge_in)
     elif args.goal:
-        from aura.cli.display import show_banner
-        show_banner()
-        result = agent.run(args.goal)
-        print_result(result, is_fastpath=result.get("fast_path", False))
+        # One-shot agentic mode: aura "fix the login bug"
+        prompt = " ".join(args.goal) if isinstance(args.goal, list) else args.goal
+        run_agentic_oneshot(agent, prompt, args)
     else:
         # Default: interactive chat mode (just type 'aura' to start)
-        run_chat_mode(agent, speak=args.speak)
+        run_chat_mode(agent, speak=args.speak, trust=args.trust)
 
 
 def run_voice_mode(agent, enable_barge_in: bool = True):
@@ -158,18 +260,86 @@ def run_voice_mode(agent, enable_barge_in: bool = True):
     conversation.start()
 
 
-def run_chat_mode(agent, speak: bool = False):
-    """Interactive CLI — full agent loop with status bar, model picker, streaming."""
-    import io
-    import sys
-    import threading
+def run_agentic_oneshot(agent, prompt: str, args):
+    """Run a one-shot agentic task using the structured tool-calling loop."""
+    from aura.cli.display import show_banner, console
+    from aura.core.agentic_loop import run_agentic
+    from aura.core.context import gather_context, get_aura_md_config
+    from aura.core.router import ModelRouter
+    from aura.core.permissions import PermissionManager
+
+    show_banner()
+
+    project_root = os.getcwd()
+
+    # Gather project context
+    context = gather_context(project_root)
+    aura_config = get_aura_md_config(project_root)
+
+    # Setup router
+    tier = aura_config.get("tier", args.tier)
+    budget = args.budget or aura_config.get("budget")
+    router = ModelRouter(tier=tier, budget_usd=budget)
+    model = aura_config.get("model") or router.select_agentic()
+
+    # Setup permissions
+    permissions = PermissionManager()
+    if aura_config:
+        permissions.apply_aura_md_overrides(aura_config)
+
+    # Permission confirm callback
+    def _confirm(tool_name, description):
+        console.print(f"\n  [yellow]Permission required:[/yellow]")
+        console.print(f"    [bold]{tool_name}[/bold]")
+        for line in description.split("\n"):
+            console.print(f"    {line}")
+        try:
+            resp = console.input("    [bold]Allow? [y/n/always]: [/bold]").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return False
+        if resp == "always":
+            return "always"
+        return resp in ("y", "yes")
+
+    permissions.set_confirm_callback(_confirm)
+    if args.trust:
+        permissions.set_trust_mode(True)
+
+    console.print(f"  [dim]Model: {model} | Tier: {tier}[/dim]")
+    console.print()
+
+    result = run_agentic(
+        brain=agent.brain,
+        prompt=prompt,
+        project_root=project_root,
+        permissions=permissions,
+        model_override=model,
+        max_iterations=args.max_iterations,
+        budget_usd=budget,
+        context=context,
+        trust_mode=args.trust,
+    )
+
+    # Show final stats
+    stats = agent.brain.get_session_stats()
+    console.print(f"\n  [dim]{result['iterations']} iterations, {result['tool_calls']} tool calls, ${stats['cost_usd']:.4f}[/dim]")
+
+    sys.exit(0 if result.get("success") else 1)
+
+
+def run_chat_mode(agent, speak: bool = False, trust: bool = False):
+    """Interactive CLI — agentic loop with status bar, model picker, tool calling."""
     from aura.cli.display import (
-        console, show_banner, show_thinking, show_response,
+        console, show_banner, show_response,
         show_error, show_info, show_status_bar, show_help,
-        show_welcome_info,
+        show_welcome_info, show_tool_call,
     )
     from aura.cli.input import create_session, get_input
     from aura.cli.model_picker import pick_model, update_model_roles_from_config
+    from aura.core.agentic_loop import AgenticLoop
+    from aura.core.session import AgenticSession
+    from aura.core.permissions import PermissionManager
+    from aura.core.context import gather_context, get_aura_md_config
 
     show_banner()
     show_welcome_info(agent)
@@ -183,10 +353,76 @@ def run_chat_mode(agent, speak: bool = False):
     except Exception:
         pass
 
+    # Gather project context for the agentic system prompt
+    project_root = os.getcwd()
+    project_context = ""
+    aura_config = {}
+    try:
+        project_context = gather_context(project_root)
+        aura_config = get_aura_md_config(project_root)
+    except Exception:
+        pass
+
+    # Build permission manager with CLI confirmation
+    permissions = PermissionManager()
+
+    def _cli_confirm(tool_name: str, description: str) -> bool:
+        console.print(f"\n  [yellow]Permission required:[/yellow] {tool_name}")
+        if description:
+            for line in description.split("\n")[:10]:
+                console.print(f"    {line}", highlight=False)
+        try:
+            response = input("    Allow? (y/n/always): ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return False
+        if response == "always":
+            permissions.set_trust_mode(True)
+            return True
+        return response in ("y", "yes")
+
+    permissions.set_confirm_callback(_cli_confirm)
+    if trust:
+        permissions.set_trust_mode(True)
+
+    # Apply AURA.md permission overrides if present
+    if aura_config:
+        permissions.apply_aura_md_overrides(aura_config)
+
+    # Create session persistence
+    session = AgenticSession()
+    session.new(project_root=project_root, model=agent.brain._model_override or "auto")
+    import atexit
+    atexit.register(session.save)
+
+    # Create persistent agentic loop (maintains conversation history)
+    model_override = agent.brain._model_override
+    agentic = AgenticLoop(
+        brain=agent.brain,
+        project_root=project_root,
+        permissions=permissions,
+        model_override=model_override or aura_config.get("model"),
+        max_iterations=aura_config.get("max_iterations", 25),
+        budget_usd=aura_config.get("budget"),
+        context=project_context,
+        session=session,
+    )
+    # Store on agent so /clear and /trust can access it
+    agent._agentic_loop = agentic
+    agent._agentic_permissions = permissions
+    agent._agentic_session = session
+
+    # Resume agentic session if requested
+    resume_id = getattr(agent, '_resume_session_id', None)
+    if resume_id:
+        if agentic.load_session(resume_id):
+            session.load(resume_id)  # Sync the session object too
+            show_info(f"Session restored ({len(agentic._conversation_history)} messages)")
+        delattr(agent, '_resume_session_id')
+
     # Status bar state
-    _current_model = agent.brain._model_override or "auto"
+    _current_model = model_override or "auto"
     _session_title = ""
-    _msg_count = len(agent.brain.conversation_history) if hasattr(agent.brain, 'conversation_history') else 0
+    _msg_count = 0
     show_status_bar(
         model=_current_model, project_type=_project_type,
         session_title=_session_title, message_count=_msg_count,
@@ -194,36 +430,6 @@ def run_chat_mode(agent, speak: bool = False):
 
     if speak:
         show_info("Voice output enabled")
-
-    # Register CLI permission callback for destructive actions
-    def _cli_confirm(tool_name: str, action: str) -> bool:
-        if tool_name == "code_edit_preview":
-            print(f"\n  Proposed edit:\n")
-            for line in action.split("\n")[:40]:
-                if line.startswith("+") and not line.startswith("+++"):
-                    print(f"  \033[32m{line}\033[0m")
-                elif line.startswith("-") and not line.startswith("---"):
-                    print(f"  \033[31m{line}\033[0m")
-                else:
-                    print(f"  {line}")
-            if action.count("\n") > 40:
-                print(f"  ... ({action.count(chr(10)) - 40} more lines)")
-        else:
-            print(f"\n  \u26a0 Permission required:")
-            print(f"    Tool: {tool_name}")
-            print(f"    Action: {action[:200]}")
-        try:
-            response = input("    Allow? (y/n/always): ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            return False
-        if response == "always":
-            for word in action.lower().split()[:3]:
-                if len(word) > 3:
-                    agent._approved_patterns.add(word)
-            return True
-        return response in ("y", "yes")
-
-    agent.set_cli_confirm_callback(_cli_confirm)
 
     # Initialize model picker roles from config
     update_model_roles_from_config()
@@ -245,13 +451,13 @@ def run_chat_mode(agent, speak: bool = False):
                 if choice == "auto":
                     agent.brain.set_model_override(None)
                     _current_model = "auto"
+                    agentic.model_override = None
                     show_info("Model set to auto-routing")
                 else:
                     agent.brain.set_model_override(choice)
                     _current_model = choice
+                    agentic.model_override = choice
                     show_info(f"Model set to {choice}")
-            _msg_count = len(agent.brain.conversation_history) if hasattr(agent.brain, 'conversation_history') else 0
-            _current_model = agent.brain._model_override or "auto"
             show_status_bar(
                 model=_current_model, project_type=_project_type,
                 session_title=_session_title, message_count=_msg_count,
@@ -263,11 +469,11 @@ def run_chat_mode(agent, speak: bool = False):
 
         # Signal activity to daemon (if running)
         try:
-            import socket, json
+            import socket, json as _json
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.settimeout(0.1)
                 s.connect(("127.0.0.1", 19733))
-                s.send((json.dumps({"type": "activity"}) + "\n").encode())
+                s.send((_json.dumps({"type": "activity"}) + "\n").encode())
         except Exception:
             pass
 
@@ -278,7 +484,6 @@ def run_chat_mode(agent, speak: bool = False):
 
         if user_input.startswith("/"):
             handle_command(agent, user_input, speak=speak)
-            _msg_count = len(agent.brain.conversation_history) if hasattr(agent.brain, 'conversation_history') else 0
             _current_model = agent.brain._model_override or "auto"
             show_status_bar(
                 model=_current_model, project_type=_project_type,
@@ -286,41 +491,50 @@ def run_chat_mode(agent, speak: bool = False):
             )
             continue
 
-        # Run agent in thread, capture its verbose stdout, show spinner while working
-        result_holder = {}
-        captured_output = io.StringIO()
+        # Run agentic loop directly (no threading — permission prompts need
+        # to be visible on the main thread, and think_with_tools has its own
+        # 120s timeout so it won't hang forever)
+        show_info("Thinking...")
+        try:
+            def _on_tool(name, args, _result):
+                desc = args.get("path") or args.get("pattern") or args.get("query") or ""
+                if not desc and "command" in args:
+                    desc = args["command"][:60]
+                show_tool_call(name, str(desc))
 
-        def _run():
-            old_stdout = sys.stdout
-            sys.stdout = captured_output
-            try:
-                result_holder["result"] = agent.run(user_input)
-            except Exception as exc:
-                result_holder["error"] = str(exc)
-            finally:
-                sys.stdout = old_stdout
-
-        thread = threading.Thread(target=_run, daemon=True)
-        thread.start()
-
-        with show_thinking():
-            thread.join()
-
-        if "error" in result_holder:
-            show_error(result_holder["error"])
+            result = agentic.run(
+                user_input,
+                on_tool_call=_on_tool,
+            )
+        except KeyboardInterrupt:
+            show_info("Interrupted.")
+            continue
+        except Exception as exc:
+            show_error(str(exc))
             continue
 
-        result = result_holder["result"]
+        if result is None:
+            show_error("No response received.")
+            continue
+
         response_text = result.get("response", "")
+        model_used = result.get("model", _current_model)
 
+        show_response(response_text, model=model_used)
+
+        # Update status bar
+        _msg_count += 1
         _current_model = agent.brain._model_override or "auto"
-        show_response(response_text, model=_current_model)
-
-        # Update status bar after response
-        _msg_count = len(agent.brain.conversation_history) if hasattr(agent.brain, 'conversation_history') else 0
+        cost_usd = 0.0
+        try:
+            stats = agent.brain.get_session_stats()
+            cost_usd = stats.get("cost_usd", 0.0)
+        except Exception:
+            pass
         show_status_bar(
             model=_current_model, project_type=_project_type,
             session_title=_session_title, message_count=_msg_count,
+            cost_usd=cost_usd,
         )
 
         if speak and response_text:
@@ -350,11 +564,13 @@ def handle_command(agent, command: str, speak: bool = False):
             memories = agent.recall_memories(arg)
             print(f"\nRecalled {len(memories)} memories:")
             for m in memories:
-                print(f"  - {m['content'][:100]}...")
+                print(f"  - {m.get('content', str(m))[:100]}...")
         else:
             print("Usage: /recall <query>")
     elif cmd == "/clear":
         agent.brain.clear_history()
+        if hasattr(agent, '_agentic_loop'):
+            agent._agentic_loop.clear_history()
         print("Conversation history cleared.")
     elif cmd == "/speak" or cmd == "/say":
         if arg:
@@ -430,45 +646,85 @@ def handle_command(agent, command: str, speak: bool = False):
         _handle_shell_command(agent, arg)
     elif cmd == "/agent":
         _handle_agent_command(agent, arg)
+    elif cmd == "/evolve":
+        _handle_evolve_command(agent, arg)
     elif cmd == "/hook":
         _handle_hook_command(agent, arg)
     elif cmd == "/sessions":
-        conversations = agent.brain.list_conversations()
-        if not conversations:
-            print("  No sessions found.")
-            return
+        # Show agentic sessions (full tool-call history) + legacy brain conversations
+        from aura.core.session import AgenticSession as _SesCmd
+        _ses = _SesCmd()
+        agentic_sessions = _ses.list_sessions()
+        brain_conversations = agent.brain.list_conversations()
+
         parts_arg = arg.split(maxsplit=1) if arg else []
         subcmd = parts_arg[0].lower() if parts_arg else "list"
-        if subcmd == "switch" and len(parts_arg) > 1:
+
+        if subcmd == "delete" and len(parts_arg) > 1:
             target = parts_arg[1]
-            # Try matching by index number
-            try:
-                idx = int(target) - 1
-                if 0 <= idx < len(conversations):
-                    conv = conversations[idx]
-                    agent.brain.switch_conversation(conv["id"])
-                    print(f"  Switched to: {conv.get('title', 'Untitled')}")
-                    return
-            except ValueError:
-                pass
-            # Try matching by ID
-            for conv in conversations:
-                if conv["id"] == target:
-                    agent.brain.switch_conversation(conv["id"])
-                    print(f"  Switched to: {conv.get('title', 'Untitled')}")
-                    return
-            print(f"  Session not found: {target}")
+            if _ses.delete(target):
+                print(f"  Deleted session: {target}")
+            else:
+                print(f"  Session not found: {target}")
         elif subcmd == "new":
-            agent.brain.new_conversation(parts_arg[1] if len(parts_arg) > 1 else None)
+            if hasattr(agent, '_agentic_session'):
+                agent._agentic_session.save()
+            new_ses = _SesCmd()
+            new_ses.new(project_root=os.getcwd())
+            if hasattr(agent, '_agentic_loop'):
+                agent._agentic_loop.session = new_ses
+                agent._agentic_loop.clear_history()
+            agent._agentic_session = new_ses
             print("  Started new session.")
         else:
-            print("\n  Sessions:\n")
-            for i, conv in enumerate(conversations[:15], 1):
-                active = " *" if conv.get("is_active") else ""
-                title = conv.get("title", "Untitled")[:50]
-                msgs = conv.get("message_count", 0)
-                print(f"    {i}. {title} ({msgs} msgs){active}")
-            print(f"\n  Usage: /sessions switch <number> | /sessions new [title]")
+            if not agentic_sessions and not brain_conversations:
+                print("  No sessions found.")
+                return
+            print("\n  Agentic Sessions:\n")
+            if agentic_sessions:
+                for i, s in enumerate(agentic_sessions[:10], 1):
+                    title = s.get("title", "Untitled")[:50]
+                    msgs = s.get("message_count", 0)
+                    model = s.get("model", "?")
+                    print(f"    {i}. {title} ({msgs} msgs) [{model}]")
+            else:
+                print("    (none)")
+            if brain_conversations:
+                print("\n  Legacy Sessions:\n")
+                for i, c in enumerate(brain_conversations[:5], 1):
+                    title = c.get("title", "Untitled")[:50]
+                    msgs = c.get("message_count", 0)
+                    print(f"    {i}. {title} ({msgs} msgs)")
+            print(f"\n  Usage: /sessions new | /sessions delete <id>")
+    elif cmd == "/trust":
+        if hasattr(agent, '_agentic_permissions'):
+            agent._agentic_permissions.set_trust_mode(True)
+        else:
+            from aura.core.permissions import PermissionManager
+            agent._agentic_permissions = PermissionManager()
+            agent._agentic_permissions.set_trust_mode(True)
+        print("  Trust mode enabled — all tool calls auto-approved.")
+    elif cmd == "/context":
+        if hasattr(agent, '_agentic_loop') and agent._agentic_loop.context_mgr:
+            mgr = agent._agentic_loop.context_mgr
+            report = mgr.usage_report(agent._agentic_loop._conversation_history)
+            print(f"\n  Context Window:")
+            print(f"    Model: {report['model'] or 'auto'}")
+            print(f"    Used: ~{report['used_tokens']:,} / {report['budget']:,} tokens ({report['pct_used']}%)")
+            print(f"    Max context: {report['max_tokens']:,}")
+            print(f"    Compactions: {report['compactions']}")
+            print()
+        else:
+            print("  Context tracking not available.")
+    elif cmd == "/cost":
+        stats = agent.brain.get_session_stats()
+        print(f"\n  Session Cost:")
+        print(f"    Input tokens:  {stats['input_tokens']:,}")
+        print(f"    Output tokens: {stats['output_tokens']:,}")
+        print(f"    Total tokens:  {stats['total_tokens']:,}")
+        print(f"    Estimated cost: ${stats['cost_usd']:.4f}")
+        print(f"    Queries: {stats['queries']}")
+        print()
     else:
         print(f"Unknown command: {cmd}")
 
@@ -835,6 +1091,51 @@ def _handle_shell_command(agent, arg: str):
         if error:
             print(f"\n  Error: {error}")
     print(f"\n  [exit {result.get('exit_code', '?')}] ({result.get('elapsed', '?')}s)")
+
+
+def _handle_evolve_command(agent, arg: str):
+    """Handle /evolve — run GEPA skill evolution."""
+    print("\n  [GEPA] Starting skill evolution...")
+    try:
+        from aura.evolution.runner import run_evolution
+
+        parts = arg.split() if arg else []
+        skill_ids = None
+        dry_run = "--dry-run" in parts
+        iterations = 10
+
+        for i, p in enumerate(parts):
+            if p == "--skill" and i + 1 < len(parts):
+                skill_ids = [parts[i + 1]]
+            if p == "--iterations" and i + 1 < len(parts):
+                try:
+                    iterations = int(parts[i + 1])
+                except ValueError:
+                    pass
+
+        result = run_evolution(
+            skill_ids=skill_ids,
+            config_overrides={"max_iterations": iterations},
+            dry_run=dry_run,
+        )
+
+        if result.get("error"):
+            print(f"  [GEPA] Error: {result['error']}")
+        elif result.get("dry_run"):
+            print(f"  [GEPA] Would evolve: {result['skills']}")
+        else:
+            print(f"  [GEPA] Done! Improvement: +{result.get('improvement', 0):.3f}")
+            print(f"  Score: {result.get('seed_score', 0):.3f} -> {result.get('best_score', 0):.3f}")
+            print(f"  Skills updated: {result.get('skills_updated', 0)}")
+            print(f"  Iterations: {result.get('iterations', 0)}, Evals: {result.get('total_evals', 0)}")
+            print(f"  Time: {result.get('duration_seconds', 0):.1f}s")
+            print(f"  Run saved to: {result.get('run_dir', 'N/A')}")
+
+    except ImportError as e:
+        print(f"  [GEPA] Import error: {e}")
+    except Exception as e:
+        print(f"  [GEPA] Failed: {e}")
+    print()
 
 
 def _handle_agent_command(agent, arg: str):
