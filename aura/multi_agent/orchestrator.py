@@ -23,6 +23,7 @@ from .specialists import (
     CoderAgent,
     AnalystAgent,
     CreativeAgent,
+    SearcherAgent,
 )
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,7 @@ class MultiAgentOrchestrator:
             "coder": CoderAgent(self.tool_registry),
             "analyst": AnalystAgent(self.tool_registry),
             "creative": CreativeAgent(self.tool_registry),
+            "searcher": SearcherAgent(self.tool_registry),
         }
 
     def chat(self, query: str, context: Optional[Dict[str, Any]] = None) -> str:

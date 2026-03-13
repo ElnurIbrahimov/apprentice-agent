@@ -7,12 +7,14 @@ import logging
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel, Field
+
+from api.auth import require_api_key
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
+router = APIRouter(prefix="/api/knowledge", tags=["knowledge"], dependencies=[Depends(require_api_key)])
 
 # Lazy-load the episodic store so the API boots even if Qdrant is unavailable
 def _get_store():

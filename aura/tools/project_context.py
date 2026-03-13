@@ -72,6 +72,44 @@ def init_project(path: str) -> str:
         return f"Failed to create AURA.md: {e}"
 
 
+def detect_and_load_context(start_path: Optional[str] = None) -> dict:
+    """Load AURA.md if it exists, otherwise auto-detect project type and return context.
+
+    This combines project context loading with auto-detection for projects
+    that don't have AURA.md yet. Returns a dict with all available context.
+    """
+    result = {
+        "has_aura_md": False,
+        "aura_md_content": None,
+        "project_type": None,
+        "stack": [],
+        "frameworks": [],
+        "key_files": [],
+    }
+
+    # Try loading AURA.md first
+    aura_content = load_project_context(start_path)
+    if aura_content:
+        result["has_aura_md"] = True
+        result["aura_md_content"] = aura_content
+
+    # Auto-detect project type regardless (useful metadata)
+    try:
+        from .code_search import CodeSearchTool
+        searcher = CodeSearchTool()
+        path = start_path or str(Path.cwd())
+        detected = searcher.detect_project_type(path)
+        if detected.get("success"):
+            result["project_type"] = detected.get("project_type")
+            result["stack"] = detected.get("stack", [])
+            result["frameworks"] = detected.get("frameworks", [])
+            result["key_files"] = detected.get("key_files", [])
+    except Exception as e:
+        logger.debug(f"[ProjectContext] Auto-detect failed: {e}")
+
+    return result
+
+
 def update_project_notes(path: str, note: str) -> bool:
     """Append note to '## Notes from AURA' section."""
     try:

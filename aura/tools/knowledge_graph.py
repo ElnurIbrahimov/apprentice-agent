@@ -1,6 +1,11 @@
-"""
-Knowledge Graph Memory System for Aura
-Relationship-based memory with semantic understanding.
+"""NetworkX-based runtime Knowledge Graph.
+
+This is the PRIMARY knowledge graph used by the agent during conversations.
+It operates in-memory with NetworkX for fast graph operations.
+
+Note: A separate Kuzu-based persistent KG exists in aura_knowledge_graph/
+for MCP server integration and long-term storage. These two KGs are
+currently independent. To propagate changes, use the sync utilities below.
 
 Author: Aura Development Team
 Created: 2025-01-26
@@ -1495,6 +1500,204 @@ class KnowledgeGraphTool:
             nodes = list(self._nodes.values())
             nodes.sort(key=lambda n: n.last_accessed, reverse=True)
             return nodes[:limit]
+
+    # =========================================================================
+    # KUZU SYNC BRIDGE
+    # =========================================================================
+
+    # Mapping from NetworkX node types to Kuzu EntityType values.
+    # NetworkX uses lowercase strings; Kuzu uses the EntityType enum.
+    _NX_TO_KUZU_TYPE = {
+        "concept": "Concept",
+        "entity": "Concept",      # No direct match — map to Concept
+        "person": "Person",
+        "project": "Project",
+        "tool": "Technology",     # Tools are closest to Technology
+        "event": "Event",
+        "emotion": "Concept",
+        "skill": "Skill",
+        "location": "Location",
+        "file": "Document",
+    }
+
+    # Reverse mapping: Kuzu EntityType.value -> NetworkX node type
+    _KUZU_TO_NX_TYPE = {
+        "Person": "person",
+        "Project": "project",
+        "Technology": "concept",
+        "Company": "entity",
+        "Concept": "concept",
+        "Task": "entity",
+        "Location": "location",
+        "Event": "event",
+        "Document": "file",
+        "Skill": "skill",
+    }
+
+    def export_to_kuzu(self, kuzu_db=None):
+        """Export current NetworkX graph state to Kuzu persistent store.
+
+        Call this during dream consolidation or on explicit save.
+        Returns dict with counts of entities and relationships synced.
+        """
+        try:
+            if kuzu_db is None:
+                from aura_knowledge_graph.graph_database import AURAKnowledgeGraph
+                kuzu_db = AURAKnowledgeGraph()
+
+            from aura_knowledge_graph.graph_database import Entity as KuzuEntity, Relationship as KuzuRelationship
+            from aura_knowledge_graph.schema import EntityType
+
+            synced = {"entities": 0, "relationships": 0}
+
+            # Build a mapping from NetworkX node_id -> Kuzu entity ID
+            # so we can wire up relationships afterwards.
+            nx_to_kuzu_id = {}
+
+            with self._lock:
+                # Export nodes
+                for node_id, node in self._nodes.items():
+                    try:
+                        kuzu_type_str = self._NX_TO_KUZU_TYPE.get(node.type, "Concept")
+                        kuzu_entity_type = EntityType(kuzu_type_str)
+
+                        entity = KuzuEntity(
+                            name=node.label,
+                            entity_type=kuzu_entity_type,
+                            description=node.properties.get("description", ""),
+                            properties={k: v for k, v in node.properties.items() if k != "description"},
+                            importance=node.confidence,
+                        )
+                        kuzu_id = kuzu_db.add_entity(entity)
+                        nx_to_kuzu_id[node_id] = kuzu_id
+                        synced["entities"] += 1
+                    except Exception:
+                        pass  # Skip incompatible entries
+
+                # Export edges
+                for edge_id, edge in self._edges.items():
+                    if not edge.is_valid:
+                        continue  # Only sync currently-valid edges
+                    try:
+                        src_kuzu = nx_to_kuzu_id.get(edge.source_id)
+                        tgt_kuzu = nx_to_kuzu_id.get(edge.target_id)
+                        if not src_kuzu or not tgt_kuzu:
+                            continue
+
+                        rel = KuzuRelationship(
+                            source_id=src_kuzu,
+                            target_id=tgt_kuzu,
+                            relationship_type=edge.type.upper().replace(" ", "_"),
+                            weight=edge.weight,
+                            evidence=edge.properties.get("context", ""),
+                        )
+                        kuzu_db.add_relationship(rel)
+                        synced["relationships"] += 1
+                    except Exception:
+                        pass
+
+            logger.info(f"[KG-SYNC] Exported {synced['entities']} entities, {synced['relationships']} relationships to Kuzu")
+            return synced
+        except ImportError:
+            logger.debug("[KG-SYNC] Kuzu not available, skipping export")
+            return {"entities": 0, "relationships": 0, "error": "kuzu_unavailable"}
+        except Exception as e:
+            logger.warning(f"[KG-SYNC] Export failed: {e}")
+            return {"entities": 0, "relationships": 0, "error": str(e)}
+
+    def import_from_kuzu(self, kuzu_db=None, limit: int = 5000):
+        """Import entities and relationships from Kuzu into this NetworkX graph.
+
+        Merges data — existing nodes with the same label are updated, not duplicated.
+        Returns dict with counts of entities and relationships imported.
+        """
+        try:
+            if kuzu_db is None:
+                from aura_knowledge_graph.graph_database import AURAKnowledgeGraph
+                kuzu_db = AURAKnowledgeGraph()
+
+            imported = {"entities": 0, "relationships": 0}
+
+            # Fetch all entities from Kuzu
+            rows = kuzu_db.execute_cypher(f"""
+                MATCH (e:Entity)
+                RETURN e.id, e.name, e.entity_type, e.description,
+                       e.importance, e.properties
+                ORDER BY e.importance DESC
+                LIMIT {limit}
+            """)
+
+            kuzu_id_to_nx_id = {}
+
+            with self._lock:
+                for row in rows:
+                    try:
+                        kuzu_id, name, entity_type_str, description, importance, props_json = row
+                        nx_type = self._KUZU_TO_NX_TYPE.get(entity_type_str, "concept")
+
+                        properties = {}
+                        if props_json:
+                            try:
+                                properties = json.loads(props_json)
+                            except (json.JSONDecodeError, TypeError):
+                                pass
+                        if description:
+                            properties["description"] = description
+
+                        node = self.add_node(
+                            node_type=nx_type,
+                            label=name,
+                            properties=properties,
+                            confidence=min(1.0, importance) if importance else 0.5,
+                            source="kuzu_import",
+                        )
+                        kuzu_id_to_nx_id[kuzu_id] = node.id
+                        imported["entities"] += 1
+                    except Exception:
+                        pass
+
+                # Fetch active relationships from Kuzu
+                rel_rows = kuzu_db.execute_cypher(f"""
+                    MATCH (s:Entity)-[r:RELATES_TO]->(t:Entity)
+                    WHERE r.is_active = true
+                    RETURN s.id, t.id, r.relationship_type, r.weight, r.evidence
+                    LIMIT {limit}
+                """)
+
+                for row in rel_rows:
+                    try:
+                        src_kuzu, tgt_kuzu, rel_type, weight, evidence = row
+                        src_nx = kuzu_id_to_nx_id.get(src_kuzu)
+                        tgt_nx = kuzu_id_to_nx_id.get(tgt_kuzu)
+                        if not src_nx or not tgt_nx:
+                            continue
+
+                        edge_type = (rel_type or "relates_to").lower().replace(" ", "_")
+                        props = {}
+                        if evidence:
+                            props["context"] = evidence
+
+                        self.add_edge(
+                            source_id=src_nx,
+                            target_id=tgt_nx,
+                            edge_type=edge_type,
+                            weight=weight if weight else 0.5,
+                            properties=props,
+                        )
+                        imported["relationships"] += 1
+                    except Exception:
+                        pass
+
+                self.save()
+
+            logger.info(f"[KG-SYNC] Imported {imported['entities']} entities, {imported['relationships']} relationships from Kuzu")
+            return imported
+        except ImportError:
+            logger.debug("[KG-SYNC] Kuzu not available, skipping import")
+            return {"entities": 0, "relationships": 0, "error": "kuzu_unavailable"}
+        except Exception as e:
+            logger.warning(f"[KG-SYNC] Import failed: {e}")
+            return {"entities": 0, "relationships": 0, "error": str(e)}
 
     # =========================================================================
     # TOOL INTERFACE

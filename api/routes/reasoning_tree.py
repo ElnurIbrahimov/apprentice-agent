@@ -9,17 +9,17 @@ import logging
 import asyncio
 import uuid
 from typing import Optional, List
-from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 
-router = APIRouter(prefix="/api/reasoning-tree", tags=["reasoning-tree"])
+from api.auth import require_api_key
+
+router = APIRouter(prefix="/api/reasoning-tree", tags=["reasoning-tree"], dependencies=[Depends(require_api_key)])
 
 logger = logging.getLogger(__name__)
 
-# Store for active reasoning sessions
-_active_sessions = {}
+# Store for reasoning session results (capped at 100)
 _session_results = {}
 
 
@@ -68,7 +68,7 @@ class SessionStatus(BaseModel):
 
 
 @router.post("/think", response_model=ReasoningResponse)
-async def think_deeply(request: ReasoningRequest, background_tasks: BackgroundTasks):
+async def think_deeply(request: ReasoningRequest):
     """
     Start deep reasoning on a problem using MCTS.
 

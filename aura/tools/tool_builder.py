@@ -18,8 +18,8 @@ from typing import Any, Optional
 _BLOCKED_BUILTINS = {"eval", "exec", "compile", "__import__", "open", "breakpoint"}
 _BLOCKED_MODULES = {"subprocess", "os", "sys", "shutil", "socket", "ctypes", "importlib", "pickle"}
 
+from .tool_contract import ToolResult
 from .tool_template import (
-    BLOCKED_PATTERNS,
     TOOL_CLASS_TEMPLATE,
     METHOD_TEMPLATE,
     EXECUTE_DISPATCH_TEMPLATE,
@@ -261,7 +261,7 @@ class ToolBuilderTool:
 
         return method_code, execute_dispatch, test_code
 
-    def create_tool(self, name: str, description: str, functions_spec: list[dict]) -> dict:
+    def create_tool(self, name: str, description: str, functions_spec: list[dict]) -> ToolResult:
         """Create a new custom tool.
 
         Args:
@@ -272,7 +272,7 @@ class ToolBuilderTool:
                   "description": "Convert currency", "body": "..."}]
 
         Returns:
-            Result dictionary with success status
+            ToolResult with success status and tool metadata.
         """
         logger.info(f"Creating tool: {name}")
 
@@ -284,10 +284,10 @@ class ToolBuilderTool:
         # Check if tool already exists
         if self._get_tool_entry(safe_name):
             logger.warning(f"Tool {safe_name} already exists")
-            return {
-                "success": False,
-                "error": f"Tool '{safe_name}' already exists. Use rollback_tool first to remove it."
-            }
+            return ToolResult(
+                success=False,
+                error=f"Tool '{safe_name}' already exists. Use rollback_tool first to remove it."
+            )
 
         # Check for network requirements
         needs_network = False
@@ -354,10 +354,10 @@ class ToolBuilderTool:
         is_dangerous, reason = self._scan_for_dangerous_code(tool_code)
         if is_dangerous:
             logger.error(f"Dangerous patterns detected in {safe_name}: {reason}")
-            return {
-                "success": False,
-                "error": f"Dangerous code patterns detected: {reason}",
-            }
+            return ToolResult(
+                success=False,
+                error=f"Dangerous code patterns detected: {reason}",
+            )
 
         # Also scan function bodies
         for func in functions_spec:
@@ -365,10 +365,10 @@ class ToolBuilderTool:
             is_dangerous, reason = self._scan_for_dangerous_code(body)
             if is_dangerous:
                 logger.error(f"Dangerous patterns in function body: {reason}")
-                return {
-                    "success": False,
-                    "error": f"Dangerous code in function '{func.get('name')}': {reason}",
-                }
+                return ToolResult(
+                    success=False,
+                    error=f"Dangerous code in function '{func.get('name')}': {reason}",
+                )
 
         # Save tool file
         tool_file = CUSTOM_TOOLS_DIR / f"{module_name}.py"
@@ -378,7 +378,7 @@ class ToolBuilderTool:
             logger.info(f"Created tool file: {tool_file}")
         except IOError as e:
             logger.error(f"Failed to write tool file: {e}")
-            return {"success": False, "error": f"Failed to write tool file: {e}"}
+            return ToolResult(success=False, error=f"Failed to write tool file: {e}")
 
         # Generate and save test file
         test_code = TEST_TEMPLATE.format(
@@ -399,7 +399,7 @@ class ToolBuilderTool:
             logger.error(f"Failed to write test file: {e}")
             # Cleanup tool file
             tool_file.unlink(missing_ok=True)
-            return {"success": False, "error": f"Failed to write test file: {e}"}
+            return ToolResult(success=False, error=f"Failed to write test file: {e}")
 
         # Create __init__.py in custom directory if not exists
         init_file = CUSTOM_TOOLS_DIR / "__init__.py"
@@ -425,43 +425,45 @@ class ToolBuilderTool:
         self._save_registry(registry)
 
         logger.info(f"Tool {safe_name} created successfully")
-        return {
-            "success": True,
-            "name": safe_name,
-            "class_name": class_name,
-            "file": str(tool_file),
-            "test_file": str(test_file),
-            "status": "pending",
-            "message": f"Tool '{safe_name}' created. Run test_tool('{safe_name}') to verify, then enable_tool('{safe_name}') to activate."
-        }
+        return ToolResult(
+            success=True,
+            result={
+                "name": safe_name,
+                "class_name": class_name,
+                "file": str(tool_file),
+                "test_file": str(test_file),
+                "status": "pending",
+                "message": f"Tool '{safe_name}' created. Run test_tool('{safe_name}') to verify, then enable_tool('{safe_name}') to activate.",
+            },
+        )
 
-    def test_tool(self, name: str) -> dict:
+    def test_tool(self, name: str) -> ToolResult:
         """Run tests for a custom tool.
 
         Args:
             name: Tool name to test
 
         Returns:
-            Test results dictionary
+            ToolResult with test output.
         """
         safe_name = self._sanitize_name(name)
         logger.info(f"Testing tool: {safe_name}")
 
         tool_entry = self._get_tool_entry(safe_name)
         if not tool_entry:
-            return {"success": False, "error": f"Tool '{safe_name}' not found in registry"}
+            return ToolResult(success=False, error=f"Tool '{safe_name}' not found in registry")
 
         test_file = Path(tool_entry.get("test_file", ""))
         if not test_file.exists():
-            return {"success": False, "error": f"Test file not found: {test_file}"}
+            return ToolResult(success=False, error=f"Test file not found: {test_file}")
 
         try:
             resolved_test = test_file.resolve()
             resolved_tests_dir = CUSTOM_TESTS_DIR.resolve()
             if not (str(resolved_test).startswith(str(resolved_tests_dir) + os.sep) or str(resolved_test) == str(resolved_tests_dir)):
-                return {"success": False, "error": "Test file path outside sandbox"}
+                return ToolResult(success=False, error="Test file path outside sandbox")
         except Exception as e:
-            return {"success": False, "error": f"Invalid test file path: {e}"}
+            return ToolResult(success=False, error=f"Invalid test file path: {e}")
 
         # Run tests in subprocess for isolation
         try:
@@ -478,28 +480,30 @@ class ToolBuilderTool:
 
             logger.info(f"Test results for {safe_name}: {'PASSED' if success else 'FAILED'}")
 
-            return {
-                "success": success,
-                "name": safe_name,
-                "exit_code": result.returncode,
-                "output": output,
-                "message": f"Tests {'PASSED' if success else 'FAILED'} for tool '{safe_name}'"
-            }
+            return ToolResult(
+                success=success,
+                result={
+                    "name": safe_name,
+                    "exit_code": result.returncode,
+                    "output": output,
+                    "message": f"Tests {'PASSED' if success else 'FAILED'} for tool '{safe_name}'",
+                },
+            )
         except subprocess.TimeoutExpired:
             logger.error(f"Tests timed out for {safe_name}")
-            return {"success": False, "error": "Tests timed out after 30 seconds"}
+            return ToolResult(success=False, error="Tests timed out after 30 seconds")
         except Exception as e:
             logger.error(f"Test execution failed: {e}")
-            return {"success": False, "error": f"Test execution failed: {e}"}
+            return ToolResult(success=False, error=f"Test execution failed: {e}")
 
-    def enable_tool(self, name: str) -> dict:
+    def enable_tool(self, name: str) -> ToolResult:
         """Enable a custom tool after successful testing.
 
         Args:
             name: Tool name to enable
 
         Returns:
-            Result dictionary
+            ToolResult with status.
         """
         safe_name = self._sanitize_name(name)
         logger.info(f"Enabling tool: {safe_name}")
@@ -508,35 +512,37 @@ class ToolBuilderTool:
         for tool in registry["tools"]:
             if tool["name"] == safe_name:
                 if tool["status"] == "active":
-                    return {"success": True, "message": f"Tool '{safe_name}' is already active"}
+                    return ToolResult(success=True, result={"message": f"Tool '{safe_name}' is already active"})
 
                 # Verify tool file exists
                 tool_file = Path(tool.get("file", ""))
                 if not tool_file.exists():
-                    return {"success": False, "error": f"Tool file not found: {tool_file}"}
+                    return ToolResult(success=False, error=f"Tool file not found: {tool_file}")
 
                 tool["status"] = "active"
                 tool["enabled_at"] = datetime.now().isoformat()
                 self._save_registry(registry)
 
                 logger.info(f"Tool {safe_name} enabled")
-                return {
-                    "success": True,
-                    "name": safe_name,
-                    "status": "active",
-                    "message": f"Tool '{safe_name}' is now active and available for use"
-                }
+                return ToolResult(
+                    success=True,
+                    result={
+                        "name": safe_name,
+                        "status": "active",
+                        "message": f"Tool '{safe_name}' is now active and available for use",
+                    },
+                )
 
-        return {"success": False, "error": f"Tool '{safe_name}' not found in registry"}
+        return ToolResult(success=False, error=f"Tool '{safe_name}' not found in registry")
 
-    def disable_tool(self, name: str) -> dict:
+    def disable_tool(self, name: str) -> ToolResult:
         """Disable a custom tool.
 
         Args:
             name: Tool name to disable
 
         Returns:
-            Result dictionary
+            ToolResult with status.
         """
         safe_name = self._sanitize_name(name)
         logger.info(f"Disabling tool: {safe_name}")
@@ -545,30 +551,32 @@ class ToolBuilderTool:
         for tool in registry["tools"]:
             if tool["name"] == safe_name:
                 if tool["status"] == "disabled":
-                    return {"success": True, "message": f"Tool '{safe_name}' is already disabled"}
+                    return ToolResult(success=True, result={"message": f"Tool '{safe_name}' is already disabled"})
 
                 tool["status"] = "disabled"
                 tool["disabled_at"] = datetime.now().isoformat()
                 self._save_registry(registry)
 
                 logger.info(f"Tool {safe_name} disabled")
-                return {
-                    "success": True,
-                    "name": safe_name,
-                    "status": "disabled",
-                    "message": f"Tool '{safe_name}' has been disabled"
-                }
+                return ToolResult(
+                    success=True,
+                    result={
+                        "name": safe_name,
+                        "status": "disabled",
+                        "message": f"Tool '{safe_name}' has been disabled",
+                    },
+                )
 
-        return {"success": False, "error": f"Tool '{safe_name}' not found in registry"}
+        return ToolResult(success=False, error=f"Tool '{safe_name}' not found in registry")
 
-    def rollback_tool(self, name: str) -> dict:
+    def rollback_tool(self, name: str) -> ToolResult:
         """Delete a custom tool completely.
 
         Args:
             name: Tool name to delete
 
         Returns:
-            Result dictionary
+            ToolResult with deletion details.
         """
         safe_name = self._sanitize_name(name)
         logger.info(f"Rolling back tool: {safe_name}")
@@ -581,7 +589,7 @@ class ToolBuilderTool:
                 break
 
         if not tool_entry:
-            return {"success": False, "error": f"Tool '{safe_name}' not found in registry"}
+            return ToolResult(success=False, error=f"Tool '{safe_name}' not found in registry")
 
         # Delete files
         deleted_files = []
@@ -599,12 +607,14 @@ class ToolBuilderTool:
         self._save_registry(registry)
 
         logger.info(f"Tool {safe_name} rolled back, deleted: {deleted_files}")
-        return {
-            "success": True,
-            "name": safe_name,
-            "deleted_files": deleted_files,
-            "message": f"Tool '{safe_name}' has been completely removed"
-        }
+        return ToolResult(
+            success=True,
+            result={
+                "name": safe_name,
+                "deleted_files": deleted_files,
+                "message": f"Tool '{safe_name}' has been completely removed",
+            },
+        )
 
     def list_custom_tools(self) -> dict:
         """List all custom tools with their status.
@@ -689,7 +699,6 @@ class ToolBuilderTool:
 
     def _extract_tool_name(self, action: str) -> Optional[str]:
         """Extract tool name from action string."""
-        import re
         # Look for quoted name
         quoted = re.findall(r'["\']([^"\']+)["\']', action)
         if quoted:

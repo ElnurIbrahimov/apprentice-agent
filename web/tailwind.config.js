@@ -7,16 +7,17 @@ export default {
   theme: {
     extend: {
       colors: {
-        // ChatGPT-like dark theme
-        'chat-bg': '#343541',
-        'chat-sidebar': '#202123',
-        'chat-user': '#343541',
-        'chat-assistant': '#444654',
-        'chat-border': '#4d4d4f',
-        'chat-text': '#ececf1',
-        'chat-text-secondary': '#8e8ea0',
-        'chat-accent': '#10a37f',
-        'chat-accent-hover': '#1a7f64',
+        // NextGen dark theme
+        'chat-bg': '#030303',
+        'chat-sidebar': '#0a0a0c',
+        'chat-user': '#030303',
+        'chat-assistant': 'rgba(20, 20, 25, 0.4)',
+        'chat-border': 'rgba(255, 255, 255, 0.06)',
+        'chat-text': '#ededed',
+        'chat-text-secondary': '#888888',
+        'chat-text-tertiary': '#444444',
+        'chat-accent': '#7c3aed',
+        'chat-accent-hover': '#6d28d9',
         // Extended palette for glows and accents
         'aura-purple': '#8b5cf6',
         'aura-purple-light': '#a78bfa',

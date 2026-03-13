@@ -8,14 +8,12 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.websockets import WebSocket as StarletteWebSocket
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from api.middleware import APIKeyAuthMiddleware, RateLimitMiddleware
+from api.middleware import APIKeyAuthMiddleware, RateLimitMiddleware, RequestIDMiddleware
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -27,7 +25,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from api.routes import chat, status, upload, features, multi_agent, reasoning_tree, introspection, proactive, memory, context, conversation_starters, thinking, idle_behaviors, self_improvement, thinking_mode, state_machine, tools_new, activity, multi_model, knowledge, search, pdf, transcribe, ocr, image_gen, agent_action, models as models_route, summarize, youtube, math as math_route, research
+from api.routes import chat, status, upload, features, multi_agent, reasoning_tree, introspection, proactive, memory, context, conversation_starters, thinking, idle_behaviors, self_improvement, thinking_mode, state_machine, tools_new, activity, multi_model, knowledge, search, pdf, transcribe, ocr, image_gen, agent_action, models as models_route, summarize, youtube, math as math_route, research, evolution
 try:
     from api.routes import reliability as reliability_route
     _reliability_available = True
@@ -35,6 +33,13 @@ except Exception as _re:
     logger.warning(f"[API] Reliability routes unavailable: {_re}")
     reliability_route = None
     _reliability_available = False
+try:
+    from api.routes import auth as auth_route
+    _auth_available = True
+except Exception as _ae:
+    logger.warning(f"[API] Auth routes unavailable: {_ae}")
+    auth_route = None
+    _auth_available = False
 try:
     from api.routes import consciousness
     _consciousness_available = True
@@ -210,7 +215,7 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"[API] Self-Improvement Engine failed to start: {e}")
 
-    asyncio.get_running_loop().create_task(_start_proactive_system())
+    app.state.proactive_startup_task = asyncio.get_running_loop().create_task(_start_proactive_system())
 
     yield
 
@@ -279,6 +284,9 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"[API] KG save error: {e}")
 
+    # Note: Episodic memory (EpisodicMemoryStore) has no global singleton,
+    # so no shutdown cleanup needed — instances are closed by their owners.
+
     # Close proactive persistence database
     try:
         from aura.proactive.persistence import get_persistence
@@ -327,13 +335,16 @@ if _cors_origins != ["*"]:
             _extra.append(_o.replace("127.0.0.1", "localhost"))
     _cors_origins = list(dict.fromkeys(_cors_origins + _extra))  # dedupe, preserve order
 
+# Chrome extension origins are dynamic (chrome-extension://<id>) — use regex
+_cors_origin_regex = r"^chrome-extension://.*$" if _cors_origins != ["*"] else None
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
+    allow_origin_regex=_cors_origin_regex,
     allow_credentials=_cors_origins != ["*"],
     allow_methods=["*"],
     allow_headers=["*", "X-API-Key"],
-    # allow_origin_regex can be used as an alternative if origin list grows
 )
 
 # API key authentication middleware (disabled by default, enable via env vars)
@@ -353,6 +364,9 @@ try:
     )
 except Exception as e:
     logger.warning(f"[API] Auth middleware setup skipped: {e}")
+
+# Request ID middleware — adds X-Request-ID header to every response
+app.add_middleware(RequestIDMiddleware)
 
 # Include all routers - frontend uses 2s stagger + 30s intervals to prevent thread pool exhaustion
 app.include_router(chat.router)
@@ -388,14 +402,13 @@ app.include_router(summarize.router)
 app.include_router(youtube.router)
 app.include_router(math_route.router)
 app.include_router(research.router)
+app.include_router(evolution.router)
 if _reliability_available and reliability_route:
     app.include_router(reliability_route.router)
+if _auth_available and auth_route:
+    app.include_router(auth_route.router)
 
-@app.get("/api/health")
-async def health_check():
-    """Liveness probe — returns 200 when the API is up."""
-    return {"status": "ok"}
-
+# /api/health is provided by status.py router
 
 # Serve static files in production (built React app)
 # NOTE: Only mount SPA routes when NOT in dev mode (Vite serves the frontend in dev)

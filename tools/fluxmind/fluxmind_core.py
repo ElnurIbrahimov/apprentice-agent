@@ -402,7 +402,7 @@ class FluxMind(nn.Module):
     @classmethod
     def load(cls, path: str, device: str = None) -> 'FluxMind':
         """Load model from file."""
-        checkpoint = torch.load(path, map_location='cpu')
+        checkpoint = torch.load(path, map_location='cpu', weights_only=True)
         cfg = FluxMindConfig.from_dict(checkpoint['config'])
         if device:
             cfg.device = device

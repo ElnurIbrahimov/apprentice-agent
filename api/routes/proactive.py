@@ -19,14 +19,7 @@ router = APIRouter(prefix="/api/proactive", tags=["proactive"], dependencies=[De
 _daemons: dict[str, object] = {}
 _daemon_lock = threading.Lock()
 
-_start_lock: asyncio.Lock | None = None
-
-
-def _get_start_lock() -> asyncio.Lock:
-    global _start_lock
-    if _start_lock is None:
-        _start_lock = asyncio.Lock()
-    return _start_lock
+_start_lock: asyncio.Lock = asyncio.Lock()
 
 
 def _get_daemon_for_session(session_id: str):
@@ -134,7 +127,7 @@ async def start_daemon(background_tasks: BackgroundTasks, session_id: str = Quer
     """Start the Gateway Daemon."""
     daemon = _get_daemon_for_session(session_id)
 
-    async with _get_start_lock():
+    async with _start_lock:
         if daemon.state.value == "running":
             return {"status": "already_running", "message": "Daemon is already running"}
 

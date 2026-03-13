@@ -18,11 +18,12 @@ import json
 import logging
 import math
 import re
-from collections import Counter
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+from aura.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -317,7 +318,7 @@ class TheoryOfMind:
         valence, arousal, frustration = _analyze_sentiment(message)
 
         # Blend with existing state (exponential moving average)
-        alpha = 0.4  # Responsiveness to new data
+        alpha = Config.TOM_EMA_ALPHA
         self._emotional_state.valence = (
             self._emotional_state.valence * (1 - alpha) + valence * alpha
         )

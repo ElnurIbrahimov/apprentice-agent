@@ -112,6 +112,9 @@ export function useFileUpload(): UseFileUploadReturn {
         body: formData,
       });
 
+      if (!response.ok) {
+        throw new Error(`Upload failed: ${response.status} ${response.statusText}`);
+      }
       const result = await response.json();
 
       if (result.success && result.attachment) {
@@ -148,7 +151,7 @@ export function useFileUpload(): UseFileUploadReturn {
       setAttachments((prev) =>
         prev.map((a) =>
           a.id === tempId
-            ? { ...a, uploading: false, error: 'Network error' }
+            ? { ...a, uploading: false, error: error instanceof Error ? error.message : 'Upload failed' }
             : a
         )
       );

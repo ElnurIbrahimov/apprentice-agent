@@ -21,6 +21,22 @@ import requests
 
 from .tool_template import BLOCKED_PATTERNS
 
+# Late import helper for the full AST security validator from agent module.
+# We call it lazily to avoid circular imports at module load time.
+_validate_custom_tool_code = None
+
+def _get_validator():
+    """Lazy-load validate_custom_tool_code from the agent module."""
+    global _validate_custom_tool_code
+    if _validate_custom_tool_code is None:
+        try:
+            from aura.agent import validate_custom_tool_code
+            _validate_custom_tool_code = validate_custom_tool_code
+        except ImportError:
+            logger.warning("[Marketplace] Could not import validate_custom_tool_code; falling back to built-in scan only")
+            _validate_custom_tool_code = False  # sentinel: unavailable
+    return _validate_custom_tool_code
+
 logger = logging.getLogger(__name__)
 
 
@@ -358,7 +374,7 @@ class MarketplaceTool:
             else:
                 logger.warning(f"[Marketplace] Plugin '{plugin_id}' has no sha256 in registry; skipping integrity check")
 
-            # Safety scan
+            # Safety scan (regex + basic AST)
             dangerous_patterns = self._scan_for_dangerous_code(plugin_code)
             if dangerous_patterns:
                 self._log("INSTALL_BLOCKED", plugin_id, f"Dangerous code: {dangerous_patterns}")
@@ -369,6 +385,19 @@ class MarketplaceTool:
                     "requires_confirmation": True,
                     "message": "This plugin contains potentially unsafe code. Installation blocked for security."
                 }
+
+            # Full AST security validation (same gate that synthesized/custom tools go through)
+            validator = _get_validator()
+            if validator and validator is not False:
+                is_valid, validation_msg = validator(plugin_code, f"marketplace/{plugin_id}")
+                if not is_valid:
+                    self._log("INSTALL_BLOCKED", plugin_id, f"Security validation failed: {validation_msg}")
+                    logger.warning("[Marketplace] Plugin '%s' BLOCKED by AST validator: %s", plugin_id, validation_msg)
+                    return {
+                        "success": False,
+                        "error": f"Plugin failed security validation: {validation_msg}",
+                        "message": "This plugin was blocked by the AST security validator. It may contain forbidden imports or patterns."
+                    }
 
             # Show what will be installed
             functions = plugin.get("functions", [])

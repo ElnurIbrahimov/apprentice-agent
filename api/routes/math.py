@@ -9,11 +9,13 @@ import os
 import re
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+
+from api.auth import require_api_key
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/math", tags=["math"])
+router = APIRouter(prefix="/api/math", tags=["math"], dependencies=[Depends(require_api_key)])
 
 OLLAMA_BASE = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 

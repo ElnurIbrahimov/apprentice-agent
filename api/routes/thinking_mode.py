@@ -1,11 +1,13 @@
 """API routes for System 1/2 explicit thinking-mode control."""
 
 import logging
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from api.auth import require_api_key
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/thinking-mode", tags=["thinking-mode"])
+router = APIRouter(prefix="/api/thinking-mode", tags=["thinking-mode"], dependencies=[Depends(require_api_key)])
 
 
 @router.get("/state")

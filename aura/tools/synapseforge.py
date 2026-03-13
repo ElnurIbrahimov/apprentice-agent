@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from ..config import Config
+from .tool_contract import ToolResult
 
 _SAFE_ENV = {
     'PATH': _os.environ.get('PATH', ''),
@@ -530,7 +531,7 @@ Fixed code:'''
 
         return tool
 
-    def execute_tool(self, tool_name: str, **kwargs) -> Dict[str, Any]:
+    def execute_tool(self, tool_name: str, **kwargs) -> ToolResult:
         """
         Execute a synthesized tool.
 
@@ -539,20 +540,20 @@ Fixed code:'''
             **kwargs: Arguments to pass to the tool
 
         Returns:
-            Dict with 'success' and 'result' or 'error'
+            ToolResult with success status, result data, or error message.
         """
         if tool_name not in self.registry:
-            return {"success": False, "error": f"Tool '{tool_name}' not found"}
+            return ToolResult(success=False, error=f"Tool '{tool_name}' not found")
 
         tool = self.registry[tool_name]
 
         if not tool.test_passed:
-            return {"success": False, "error": f"Tool '{tool_name}' failed validation"}
+            return ToolResult(success=False, error=f"Tool '{tool_name}' failed validation")
 
         # Safety check on tool code before execution
         dangerous, reason = _scan_for_dangerous_code(tool.code)
         if dangerous:
-            return {"success": False, "error": f"Generated code failed safety check: {reason}"}
+            return ToolResult(success=False, error=f"Generated code failed safety check: {reason}")
 
         # Build execution code
         args_str = ", ".join(f"{k}={repr(v)}" for k, v in kwargs.items())
@@ -593,19 +594,24 @@ if __name__ == "__main__":
                     json_str = line[len("RESULT_JSON:"):]
                     tool.usage_count += 1
                     self._save_registry()
-                    return json.loads(json_str)
+                    parsed = json.loads(json_str)
+                    return ToolResult(
+                        success=parsed.get("success", False),
+                        result=parsed.get("result"),
+                        error=parsed.get("error", ""),
+                    )
 
             if result.returncode != 0:
-                return {"success": False, "error": result.stderr}
+                return ToolResult(success=False, error=result.stderr)
 
-            return {"success": False, "error": "No result returned"}
+            return ToolResult(success=False, error="No result returned")
 
         except subprocess.TimeoutExpired:
-            return {"success": False, "error": "Execution timed out"}
+            return ToolResult(success=False, error="Execution timed out")
         except json.JSONDecodeError as e:
-            return {"success": False, "error": f"Invalid result format: {e}"}
+            return ToolResult(success=False, error=f"Invalid result format: {e}")
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            return ToolResult(success=False, error=str(e))
         finally:
             temp_path.unlink(missing_ok=True)
 

@@ -6,13 +6,15 @@ import os
 import math
 import logging
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from typing import Optional
 
+from api.auth import require_api_key
+
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/summarize", tags=["summarize"])
+router = APIRouter(prefix="/api/summarize", tags=["summarize"], dependencies=[Depends(require_api_key)])
 
 OLLAMA_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434") + "/api/generate"
 DEFAULT_MODEL = os.getenv("AURA_AGENT_MODEL", "gemini-3-flash-preview:cloud")

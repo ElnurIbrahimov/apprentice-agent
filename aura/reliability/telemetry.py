@@ -29,6 +29,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Deque, Dict, List, Optional
 
+from aura.jsonl_utils import rotate_jsonl_if_needed
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -179,6 +181,7 @@ class TelemetrySink:
         if not self._file_path:
             return
         try:
+            rotate_jsonl_if_needed(self._file_path)
             # Fire and forget — append is fast enough to not bother with a thread
             with open(self._file_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(event.to_dict(), default=str) + "\n")

@@ -4,11 +4,13 @@ import os
 import re
 import uuid
 import logging
+import unicodedata
 from pathlib import Path
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 
 from api.auth import require_api_key
+from api.utils import safe_error_detail
 
 from api.models.schemas import UploadResponse, FileAttachment, AttachmentType
 
@@ -79,6 +81,30 @@ def get_attachment_type(ext: str) -> AttachmentType:
         return AttachmentType.CODE
 
 
+def sanitize_filename(name: str) -> str:
+    """Sanitize an uploaded filename to prevent path traversal and encoding tricks.
+
+    Strips directory components, null bytes, Unicode control characters,
+    and collapses whitespace.  Returns a safe basename.
+    """
+    # Strip null bytes
+    name = name.replace("\x00", "")
+    # Normalize Unicode (NFC) to collapse look-alike chars
+    name = unicodedata.normalize("NFC", name)
+    # Remove any directory separators the client may have sent
+    name = name.replace("/", "_").replace("\\", "_")
+    # Take only the final path component (handles remaining tricks)
+    name = os.path.basename(name)
+    # Remove control characters (categories Cc, Cf) except normal space
+    name = "".join(ch for ch in name if unicodedata.category(ch) not in ("Cc", "Cf"))
+    # Collapse whitespace
+    name = re.sub(r"\s+", " ", name).strip()
+    # Fallback if nothing useful remains
+    if not name or name.startswith("."):
+        name = "upload" + name
+    return name
+
+
 def ensure_upload_dir():
     """Ensure upload directory exists."""
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -105,8 +131,10 @@ async def upload_file(file: UploadFile = File(...)) -> UploadResponse:
                 error="No filename provided"
             )
 
-        # Get file extension
-        original_name = file.filename
+        # Sanitize filename (path separators, null bytes, Unicode tricks)
+        original_name = sanitize_filename(file.filename)
+
+        # Enforce file extension whitelist
         ext = Path(original_name).suffix.lower()
 
         if ext not in ALL_EXTENSIONS:
@@ -115,16 +143,31 @@ async def upload_file(file: UploadFile = File(...)) -> UploadResponse:
                 error=f"Unsupported file type: {ext}. Supported: images (png, jpg, gif, webp, bmp), documents (pdf, txt, md, json), code files (py, js, ts, etc.)"
             )
 
-        # Read file content
-        content = await file.read()
-
-        # Validate file size (archives get a higher limit)
+        # Check Content-Length header BEFORE reading full body into memory
+        # (FastAPI/Starlette expose the raw ASGI scope for this)
         size_limit = MAX_ARCHIVE_SIZE if ext in ARCHIVE_EXTENSIONS else MAX_FILE_SIZE
-        if len(content) > size_limit:
+        declared_size = file.size  # populated by python-multipart from Content-Length
+        if declared_size is not None and declared_size > size_limit:
             return UploadResponse(
                 success=False,
                 error=f"File too large. Maximum size: {size_limit // (1024*1024)}MB"
             )
+
+        # Stream-read in chunks to enforce limit without buffering entire file
+        chunks = []
+        bytes_read = 0
+        while True:
+            chunk = await file.read(1024 * 256)  # 256KB chunks
+            if not chunk:
+                break
+            bytes_read += len(chunk)
+            if bytes_read > size_limit:
+                return UploadResponse(
+                    success=False,
+                    error=f"File too large. Maximum size: {size_limit // (1024*1024)}MB"
+                )
+            chunks.append(chunk)
+        content = b"".join(chunks)
 
         # Generate unique filename
         file_id = str(uuid.uuid4())
@@ -150,7 +193,7 @@ async def upload_file(file: UploadFile = File(...)) -> UploadResponse:
             mime_type=mime_type,
             size=len(content),
             type=attachment_type,
-            path=str(file_path.absolute())
+            path=file_path.name  # Only expose filename, not absolute path
         )
 
         return UploadResponse(
@@ -162,7 +205,7 @@ async def upload_file(file: UploadFile = File(...)) -> UploadResponse:
         logger.error(f"[Upload] Error: {e}")
         return UploadResponse(
             success=False,
-            error=str(e)
+            error=safe_error_detail(e, "Upload failed")
         )
 
 
@@ -191,4 +234,4 @@ async def delete_file(file_id: str):
 
     except Exception as e:
         logger.error(f"[Upload] Delete error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e))

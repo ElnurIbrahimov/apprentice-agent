@@ -1,12 +1,36 @@
 import { useState, useRef, useEffect, KeyboardEvent, FormEvent, DragEvent, ClipboardEvent } from 'react';
-import { PaperAirplaneIcon, PaperClipIcon, MicrophoneIcon } from '@heroicons/react/24/solid';
-import { MagnifyingGlassIcon, BookOpenIcon, CpuChipIcon, BeakerIcon, UserGroupIcon, ScaleIcon } from '@heroicons/react/24/outline';
+import {
+  PlusIcon, SpeakerWaveIcon, ChevronDownIcon,
+  PhotoIcon, MagnifyingGlassIcon, BeakerIcon, CpuChipIcon, UserGroupIcon, ScaleIcon, GlobeAltIcon,
+  PaperAirplaneIcon,
+} from '@heroicons/react/24/outline';
 import { AttachmentList } from './AttachmentPreview';
 import { useFileUpload, isSupported } from '../hooks/useFileUpload';
+import { useChatStore } from '../store/chatStore';
 import type { FileAttachment } from '../types';
 
-// Action modes for quick actions
+// Action modes
 type ActionMode = 'none' | 'search' | 'research' | 'deep_research' | 'swarm' | 'agent' | 'compare';
+
+const MODE_LABELS: Record<ActionMode, string> = {
+  none: '',
+  search: 'Search',
+  research: 'Research',
+  deep_research: 'Deep Research',
+  agent: 'Agent',
+  swarm: 'Swarm',
+  compare: 'Compare',
+};
+
+const MODE_COLORS: Record<ActionMode, string> = {
+  none: '',
+  search: 'rgba(59,130,246,0.2)',
+  research: 'rgba(16,185,129,0.2)',
+  deep_research: 'rgba(245,158,11,0.2)',
+  agent: 'rgba(168,85,247,0.2)',
+  swarm: 'rgba(6,182,212,0.2)',
+  compare: 'rgba(249,115,22,0.2)',
+};
 
 interface MessageInputProps {
   onSend: (message: string, attachments?: FileAttachment[], actionMode?: string | null) => void;
@@ -27,10 +51,16 @@ export function MessageInput({
   const [isFocused, setIsFocused] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [actionMode, setActionMode] = useState<ActionMode>('none');
+  const [showPlusMenu, setShowPlusMenu] = useState(false);
+  const [showModelMenu, setShowModelMenu] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const plusMenuRef = useRef<HTMLDivElement>(null);
+  const modelMenuRef = useRef<HTMLDivElement>(null);
   const [isListening, setIsListening] = useState(false);
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const recognitionRef = useRef<any>(null);
+
+  const { selectedModel, availableModels, setSelectedModel } = useChatStore();
 
   const {
     attachments,
@@ -44,6 +74,10 @@ export function MessageInput({
   const hasAttachments = attachments.length > 0;
   const hasReadyAttachments = attachments.some(a => !a.uploading && !a.error);
   const canSend = (hasText || hasReadyAttachments) && !disabled && !isUploading;
+
+  const modelLabel = selectedModel
+    ? selectedModel.split('/').pop()?.replace(/-\d{8}$/, '') ?? selectedModel
+    : 'Auto';
 
   // Auto-resize textarea
   useEffect(() => {
@@ -66,6 +100,20 @@ export function MessageInput({
     return () => document.removeEventListener('aura:focus-input', handler);
   }, []);
 
+  // Click outside to close dropdowns
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (plusMenuRef.current && !plusMenuRef.current.contains(e.target as Node)) {
+        setShowPlusMenu(false);
+      }
+      if (modelMenuRef.current && !modelMenuRef.current.contains(e.target as Node)) {
+        setShowModelMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
   // Cleanup speech recognition on unmount
   useEffect(() => {
     return () => { recognitionRef.current?.abort(); };
@@ -85,13 +133,13 @@ export function MessageInput({
     recognition.continuous = false;
     recognition.interimResults = false;
     recognition.lang = 'en-US';
-    recognition.onresult = (event: SpeechRecognitionEvent) => {
+    recognition.onresult = (event: any) => {
       const transcript = event.results[0][0].transcript;
       setMessage(prev => prev ? `${prev} ${transcript}` : transcript);
       setIsListening(false);
     };
-    recognition.onerror = () => setIsListening(false);
-    recognition.onend = () => setIsListening(false);
+    recognition.onerror = () => { setIsListening(false); recognitionRef.current = null; };
+    recognition.onend = () => { setIsListening(false); recognitionRef.current = null; };
 
     recognitionRef.current = recognition;
     recognition.start();
@@ -198,227 +246,53 @@ export function MessageInput({
 
   return (
     <div
-      className={`
-        border-t border-chat-border/50 bg-chat-bg/80 backdrop-blur-sm px-4 py-4
-        transition-all duration-200
-        ${isDragOver ? 'bg-aura-purple/10' : ''}
-      `}
+      className="px-4 pb-6 pt-3 transition-all duration-200"
+      style={{ background: isDragOver ? 'rgba(124,58,237,0.05)' : 'transparent' }}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <form
-        onSubmit={handleSubmit}
-        className="max-w-3xl mx-auto relative"
-      >
+      <form onSubmit={handleSubmit} className="max-w-3xl mx-auto">
         {/* Attachment previews */}
         {hasAttachments && (
-          <AttachmentList
-            attachments={attachments}
-            onRemove={removeAttachment}
-          />
+          <AttachmentList attachments={attachments} onRemove={removeAttachment} />
         )}
 
-        {/* Drag overlay */}
-        {isDragOver && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-aura-purple/20 border-2 border-dashed border-aura-purple rounded-xl pointer-events-none">
-            <span className="text-aura-purple font-medium">Drop files here</span>
-          </div>
-        )}
+        {/* Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.pdf,.txt,.md,.json,.py,.js,.ts,.tsx,.jsx,.html,.css,.java,.c,.cpp,.h,.go,.rs,.rb,.php,.sh,.yaml,.yml,.toml,.xml,.sql,.zip"
+          onChange={handleFileChange}
+          className="hidden"
+        />
 
-        {/* Action mode buttons */}
-        <div className="flex items-center gap-2 mb-2">
-          <button
-            type="button"
-            onClick={() => setActionMode(actionMode === 'search' ? 'none' : 'search')}
-            disabled={disabled || isLoading}
-            className={`
-              flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
-              transition-all duration-200 border
-              ${actionMode === 'search'
-                ? 'bg-blue-500/20 border-blue-500/50 text-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.3)]'
-                : 'bg-chat-assistant/60 border-chat-border/30 text-chat-text-secondary hover:text-blue-400 hover:border-blue-500/30 hover:bg-blue-500/10'
-              }
-              ${(disabled || isLoading) ? 'opacity-50 cursor-not-allowed' : ''}
-            `}
-            title="Quick web search"
-          >
-            <MagnifyingGlassIcon className="w-3.5 h-3.5" />
-            Search
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActionMode(actionMode === 'research' ? 'none' : 'research')}
-            disabled={disabled || isLoading}
-            className={`
-              flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
-              transition-all duration-200 border
-              ${actionMode === 'research'
-                ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.3)]'
-                : 'bg-chat-assistant/60 border-chat-border/30 text-chat-text-secondary hover:text-emerald-400 hover:border-emerald-500/30 hover:bg-emerald-500/10'
-              }
-              ${(disabled || isLoading) ? 'opacity-50 cursor-not-allowed' : ''}
-            `}
-            title="Comprehensive research with analysis"
-          >
-            <BookOpenIcon className="w-3.5 h-3.5" />
-            Research
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActionMode(actionMode === 'agent' ? 'none' : 'agent')}
-            disabled={disabled || isLoading}
-            className={`
-              flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
-              transition-all duration-200 border
-              ${actionMode === 'agent'
-                ? 'bg-purple-500/20 border-purple-500/50 text-purple-400 shadow-[0_0_10px_rgba(168,85,247,0.3)]'
-                : 'bg-chat-assistant/60 border-chat-border/30 text-chat-text-secondary hover:text-purple-400 hover:border-purple-500/30 hover:bg-purple-500/10'
-              }
-              ${(disabled || isLoading) ? 'opacity-50 cursor-not-allowed' : ''}
-            `}
-            title="Autonomous agent mode"
-          >
-            <CpuChipIcon className="w-3.5 h-3.5" />
-            Agent
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActionMode(actionMode === 'deep_research' ? 'none' : 'deep_research')}
-            disabled={disabled || isLoading}
-            className={`
-              flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
-              transition-all duration-200 border
-              ${actionMode === 'deep_research'
-                ? 'bg-amber-500/20 border-amber-500/50 text-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.3)]'
-                : 'bg-chat-assistant/60 border-chat-border/30 text-chat-text-secondary hover:text-amber-400 hover:border-amber-500/30 hover:bg-amber-500/10'
-              }
-              ${(disabled || isLoading) ? 'opacity-50 cursor-not-allowed' : ''}
-            `}
-            title="Deep multi-source research"
-          >
-            <BeakerIcon className="w-3.5 h-3.5" />
-            Deep
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActionMode(actionMode === 'swarm' ? 'none' : 'swarm')}
-            disabled={disabled || isLoading}
-            className={`
-              flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
-              transition-all duration-200 border
-              ${actionMode === 'swarm'
-                ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.3)]'
-                : 'bg-chat-assistant/60 border-chat-border/30 text-chat-text-secondary hover:text-cyan-400 hover:border-cyan-500/30 hover:bg-cyan-500/10'
-              }
-              ${(disabled || isLoading) ? 'opacity-50 cursor-not-allowed' : ''}
-            `}
-            title="Multi-agent swarm collaboration"
-          >
-            <UserGroupIcon className="w-3.5 h-3.5" />
-            Swarm
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActionMode(actionMode === 'compare' ? 'none' : 'compare')}
-            disabled={disabled || isLoading}
-            className={`
-              flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
-              transition-all duration-200 border
-              ${actionMode === 'compare'
-                ? 'bg-orange-500/20 border-orange-500/50 text-orange-400 shadow-[0_0_10px_rgba(249,115,22,0.3)]'
-                : 'bg-chat-assistant/60 border-chat-border/30 text-chat-text-secondary hover:text-orange-400 hover:border-orange-500/30 hover:bg-orange-500/10'
-              }
-              ${(disabled || isLoading) ? 'opacity-50 cursor-not-allowed' : ''}
-            `}
-            title="Compare answers from multiple models"
-          >
-            <ScaleIcon className="w-3.5 h-3.5" />
-            Compare
-          </button>
-
-          {actionMode !== 'none' && (
-            <span className="text-xs text-chat-text-secondary ml-2 animate-fade-in">
-              {actionMode === 'search' && 'Quick web search'}
-              {actionMode === 'research' && 'Comprehensive research'}
-              {actionMode === 'deep_research' && 'Multi-source deep research (20+ pages)'}
-              {actionMode === 'swarm' && 'Multiple agents working in parallel'}
-              {actionMode === 'agent' && 'Autonomous task execution'}
-              {actionMode === 'compare' && 'Compare 3 models side by side'}
-            </span>
-          )}
-        </div>
-
+        {/* Glass input wrapper */}
         <div
-          className={`
-            relative flex items-end bg-chat-assistant/80 rounded-xl border
-            transition-all duration-300 ease-out
-            ${isFocused
-              ? 'border-aura-purple/60 shadow-[0_0_0_2px_rgba(139,92,246,0.15),0_0_20px_rgba(139,92,246,0.2)]'
-              : 'border-chat-border/50 hover:border-chat-border'
-            }
-            ${actionMode === 'search' ? 'border-blue-500/40' : ''}
-            ${actionMode === 'research' ? 'border-emerald-500/40' : ''}
-            ${actionMode === 'agent' ? 'border-purple-500/40' : ''}
-            ${actionMode === 'deep_research' ? 'border-amber-500/40' : ''}
-            ${actionMode === 'swarm' ? 'border-cyan-500/40' : ''}
-            ${actionMode === 'compare' ? 'border-orange-500/40' : ''}
-          `}
+          style={{
+            position: 'relative',
+            display: 'flex',
+            flexDirection: 'column',
+            background: 'rgba(20, 20, 24, 0.6)',
+            border: isFocused ? '1px solid rgba(255,255,255,0.2)' : '1px solid rgba(255,255,255,0.06)',
+            borderRadius: 24,
+            backdropFilter: 'blur(24px)',
+            WebkitBackdropFilter: 'blur(24px)',
+            boxShadow: isFocused
+              ? '0 12px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.12), inset 0 1px 0 rgba(255,255,255,0.05)'
+              : '0 12px 40px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.05)',
+            transition: 'border-color 0.3s ease, box-shadow 0.3s ease',
+          }}
         >
-          {/* Attachment button */}
-          <button
-            type="button"
-            onClick={handleFileSelect}
-            disabled={disabled}
-            aria-label="Attach file"
-            className={`
-              p-3 rounded-lg ml-1
-              transition-all duration-200
-              ${disabled
-                ? 'text-chat-text-secondary/50 cursor-not-allowed'
-                : 'text-chat-text-secondary hover:text-aura-purple hover:bg-aura-purple/10'
-              }
-            `}
-            title="Attach files (images, documents, code)"
-          >
-            <PaperClipIcon className="w-5 h-5" />
-          </button>
+          {/* Drag overlay */}
+          {isDragOver && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-purple-600/20 border-2 border-dashed border-purple-500 rounded-3xl pointer-events-none">
+              <span className="text-purple-300 font-medium">Drop files here</span>
+            </div>
+          )}
 
-          {/* Voice input */}
-          <button
-            type="button"
-            onClick={handleVoiceToggle}
-            disabled={disabled}
-            aria-label="Voice input"
-            className={`
-              p-3 rounded-lg transition-all duration-200
-              ${isListening
-                ? 'text-red-400 bg-red-500/20 animate-pulse'
-                : disabled
-                  ? 'text-chat-text-secondary/50 cursor-not-allowed'
-                  : 'text-chat-text-secondary hover:text-aura-purple hover:bg-aura-purple/10'
-              }
-            `}
-            title={isListening ? 'Stop listening' : 'Voice input'}
-          >
-            <MicrophoneIcon className="w-5 h-5" />
-          </button>
-
-          {/* Hidden file input */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.pdf,.txt,.md,.json,.py,.js,.ts,.tsx,.jsx,.html,.css,.java,.c,.cpp,.h,.go,.rs,.rb,.php,.sh,.yaml,.yml,.toml,.xml,.sql,.zip"
-            onChange={handleFileChange}
-            className="hidden"
-          />
-
+          {/* Textarea */}
           <textarea
             ref={textareaRef}
             value={message}
@@ -435,49 +309,257 @@ export function MessageInput({
             }
             disabled={disabled}
             rows={1}
-            className="input-textarea flex-1 bg-transparent text-chat-text placeholder-chat-text-secondary px-2 py-3 pr-14 outline-none resize-none"
+            className="bg-transparent text-chat-text outline-none resize-none w-full"
+            style={{
+              padding: '14px 16px 6px',
+              fontSize: '1rem',
+              lineHeight: 1.6,
+              minHeight: 52,
+              maxHeight: 200,
+            }}
           />
 
-          {isLoading && onStop ? (
+          {/* Bottom row */}
+          <div className="flex items-center gap-2 px-3 pb-3 pt-1">
+            {/* + button with dropdown */}
+            <div className="relative" ref={plusMenuRef}>
+              <button
+                type="button"
+                onClick={() => { setShowPlusMenu(p => !p); setShowModelMenu(false); }}
+                disabled={disabled}
+                aria-label="More options"
+                style={{
+                  width: 32, height: 32, borderRadius: 8,
+                  background: showPlusMenu ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.06)',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: disabled ? 'not-allowed' : 'pointer',
+                  color: 'rgba(255,255,255,0.7)',
+                  transition: 'all 0.15s',
+                  flexShrink: 0,
+                }}
+              >
+                <PlusIcon className="w-4 h-4" />
+              </button>
+
+              {/* + Dropdown */}
+              {showPlusMenu && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    bottom: 40,
+                    left: 0,
+                    minWidth: 200,
+                    background: 'rgba(18,18,22,0.96)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: 12,
+                    backdropFilter: 'blur(20px)',
+                    boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+                    padding: '6px',
+                    zIndex: 50,
+                  }}
+                >
+                  {/* Attach files */}
+                  <button
+                    type="button"
+                    onClick={() => { handleFileSelect(); setShowPlusMenu(false); }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-chat-text hover:bg-white/8 transition-colors text-left"
+                  >
+                    <PhotoIcon className="w-4 h-4 text-chat-text-secondary flex-shrink-0" />
+                    Add photos & files
+                  </button>
+                  <div style={{ height: 1, background: 'rgba(255,255,255,0.07)', margin: '4px 6px' }} />
+                  {/* Mode options */}
+                  {([
+                    { mode: 'search' as ActionMode, icon: MagnifyingGlassIcon, label: 'Search', desc: 'Quick web search' },
+                    { mode: 'research' as ActionMode, icon: GlobeAltIcon, label: 'Research', desc: 'Comprehensive research' },
+                    { mode: 'deep_research' as ActionMode, icon: BeakerIcon, label: 'Deep Research', desc: '20+ sources' },
+                    { mode: 'agent' as ActionMode, icon: CpuChipIcon, label: 'Agent', desc: 'Autonomous execution' },
+                    { mode: 'swarm' as ActionMode, icon: UserGroupIcon, label: 'Swarm', desc: 'Multi-agent parallel' },
+                    { mode: 'compare' as ActionMode, icon: ScaleIcon, label: 'Compare', desc: 'Compare 3 models' },
+                  ] as const).map(({ mode, icon: Icon, label, desc }) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => { setActionMode(actionMode === mode ? 'none' : mode); setShowPlusMenu(false); }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors text-left"
+                      style={{
+                        color: actionMode === mode ? '#fff' : 'rgba(255,255,255,0.75)',
+                        background: actionMode === mode ? MODE_COLORS[mode] : 'transparent',
+                      }}
+                      onMouseEnter={e => { if (actionMode !== mode) (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.05)'; }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = actionMode === mode ? MODE_COLORS[mode] : 'transparent'; }}
+                    >
+                      <Icon className="w-4 h-4 flex-shrink-0 opacity-70" />
+                      <span>{label}</span>
+                      <span className="ml-auto text-xs opacity-40">{desc}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Active mode chip */}
+            {actionMode !== 'none' && (
+              <button
+                type="button"
+                onClick={() => setActionMode('none')}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 4,
+                  padding: '3px 10px',
+                  borderRadius: 20,
+                  background: MODE_COLORS[actionMode],
+                  border: '1px solid rgba(255,255,255,0.12)',
+                  color: 'rgba(255,255,255,0.85)',
+                  fontSize: 12,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {MODE_LABELS[actionMode]}
+                <span style={{ opacity: 0.5, marginLeft: 2 }}>×</span>
+              </button>
+            )}
+
+            {/* Spacer */}
+            <div className="flex-1" />
+
+            {/* Model pill */}
+            <div className="relative" ref={modelMenuRef}>
+              <button
+                type="button"
+                onClick={() => { setShowModelMenu(p => !p); setShowPlusMenu(false); }}
+                className="flex items-center gap-1.5 text-xs text-chat-text-secondary hover:text-chat-text transition-colors"
+                style={{ padding: '4px 8px', borderRadius: 8, background: 'rgba(255,255,255,0.04)' }}
+              >
+                <span className="max-w-[120px] truncate">{modelLabel}</span>
+                <ChevronDownIcon className="w-3 h-3 opacity-50" />
+              </button>
+
+              {showModelMenu && availableModels.length > 0 && (() => {
+                const chatgpt = availableModels.filter(m => m.startsWith('chatgpt:'));
+                const cloud = availableModels.filter(m => !m.startsWith('chatgpt:') && (m.includes(':cloud') || m.includes('-cloud')));
+                const local = availableModels.filter(m => !m.startsWith('chatgpt:') && !m.includes(':cloud') && !m.includes('-cloud'));
+                const renderItem = (model: string, label: string) => (
+                  <button
+                    key={model}
+                    type="button"
+                    onClick={() => { setSelectedModel(model); setShowModelMenu(false); }}
+                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-left transition-colors truncate"
+                    style={{ color: selectedModel === model ? '#fff' : 'rgba(255,255,255,0.65)', background: selectedModel === model ? 'rgba(255,255,255,0.08)' : 'transparent' }}
+                  >
+                    {label}
+                  </button>
+                );
+                const sectionHeader = (text: string, color: string) => (
+                  <div key={`h-${text}`} style={{ fontSize: 10, fontWeight: 600, color, padding: '6px 10px 2px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{text}</div>
+                );
+                return (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      bottom: 36,
+                      right: 0,
+                      width: 240,
+                      maxHeight: 320,
+                      background: 'rgba(18,18,22,0.96)',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: 12,
+                      backdropFilter: 'blur(20px)',
+                      boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+                      padding: '6px',
+                      zIndex: 50,
+                      display: 'flex',
+                      flexDirection: 'column',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => { setSelectedModel(null); setShowModelMenu(false); }}
+                      className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-left transition-colors flex-shrink-0"
+                      style={{ color: !selectedModel ? '#fff' : 'rgba(255,255,255,0.65)', background: !selectedModel ? 'rgba(255,255,255,0.08)' : 'transparent' }}
+                    >
+                      🤖 Auto (recommended)
+                    </button>
+                    <div style={{ height: 1, background: 'rgba(255,255,255,0.07)', margin: '4px 6px', flexShrink: 0 }} />
+                    <div style={{ overflowY: 'auto', flex: 1 }}>
+                      {chatgpt.length > 0 && sectionHeader('ChatGPT', 'rgba(74,222,128,0.7)')}
+                      {chatgpt.map(m => renderItem(m, '🟢 ' + m.replace('chatgpt:', '')))}
+                      {cloud.length > 0 && sectionHeader('Cloud', 'rgba(96,165,250,0.7)')}
+                      {cloud.map(m => renderItem(m, '☁️ ' + m.replace(/:cloud$/, '')))}
+                      {local.length > 0 && sectionHeader('Local', 'rgba(251,146,60,0.7)')}
+                      {local.map(m => renderItem(m, '💻 ' + m))}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Voice button */}
             <button
               type="button"
-              onClick={onStop}
-              aria-label="Stop generation"
-              className="absolute right-2 bottom-2 w-10 h-10 rounded-full border border-gray-600 bg-gray-800/90 flex items-center justify-center hover:bg-gray-700 hover:border-gray-500 transition-all duration-150"
-              title="Stop generation"
+              onClick={handleVoiceToggle}
+              disabled={disabled}
+              aria-label={isListening ? 'Stop listening' : 'Voice input'}
+              style={{
+                width: 32, height: 32, borderRadius: 8,
+                background: isListening ? 'rgba(239,68,68,0.2)' : 'transparent',
+                border: 'none',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: disabled ? 'not-allowed' : 'pointer',
+                color: isListening ? '#f87171' : 'rgba(255,255,255,0.5)',
+                transition: 'all 0.15s',
+                flexShrink: 0,
+              }}
             >
-              <svg className="w-4 h-4 text-gray-200" viewBox="0 0 24 24" fill="currentColor">
-                <rect x="6" y="6" width="12" height="12" rx="1" />
-              </svg>
+              <SpeakerWaveIcon className={`w-5 h-5 ${isListening ? 'animate-pulse' : ''}`} />
             </button>
-          ) : (
-            <button
-              type="submit"
-              disabled={!canSend}
-              aria-label="Send message"
-              className={`
-                absolute right-2 bottom-2 p-2.5 rounded-lg
-                transition-all duration-300 ease-out
-                ${!canSend
-                  ? 'text-chat-text-secondary cursor-not-allowed scale-100'
-                  : 'bg-gradient-to-r from-aura-purple to-aura-blue text-white scale-105 shadow-glow-purple hover:shadow-glow-purple-lg hover:scale-110'
-                }
-              `}
-            >
-              <PaperAirplaneIcon className={`w-5 h-5 transition-transform duration-300 ${canSend ? '-rotate-45' : ''}`} />
-            </button>
-          )}
+
+            {/* Send / Stop */}
+            {isLoading && onStop ? (
+              <button
+                type="button"
+                onClick={onStop}
+                aria-label="Stop generation"
+                style={{
+                  width: 32, height: 32, borderRadius: 8,
+                  background: 'rgba(255,255,255,0.1)',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                }}
+              >
+                <svg className="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="6" y="6" width="12" height="12" rx="1" />
+                </svg>
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={!canSend}
+                aria-label="Send message"
+                style={{
+                  width: 32, height: 32, borderRadius: 8,
+                  background: canSend ? '#fff' : 'rgba(255,255,255,0.08)',
+                  border: 'none',
+                  color: canSend ? '#000' : '#555',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: canSend ? 'pointer' : 'not-allowed',
+                  boxShadow: canSend ? '0 2px 8px rgba(255,255,255,0.2)' : 'none',
+                  transition: 'all 0.2s',
+                  flexShrink: 0,
+                }}
+              >
+                <PaperAirplaneIcon className="w-4 h-4" style={{ transform: 'rotate(-45deg)' }} />
+              </button>
+            )}
+          </div>
         </div>
 
-        <div className="mt-2 text-xs text-chat-text-secondary text-center font-light tracking-wide">
-          {isUploading ? (
-            <span className="flex items-center justify-center gap-2">
-              <span className="w-1.5 h-1.5 bg-aura-purple rounded-full animate-pulse" />
-              Uploading files...
-            </span>
-          ) : (
-            'Press Enter to send, Shift+Enter for new line. Drag & drop or paste images.'
-          )}
+        {/* Footer hint */}
+        <div className="mt-2 text-xs text-chat-text-secondary text-center font-light opacity-40">
+          {isUploading ? 'Uploading...' : 'Enter to send · Shift+Enter for newline'}
         </div>
       </form>
     </div>

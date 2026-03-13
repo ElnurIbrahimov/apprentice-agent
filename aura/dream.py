@@ -24,7 +24,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -101,14 +101,12 @@ class DreamMode:
             amem = get_amem()
             consolidation_result = _consolidate_amem_notes(amem)
             logger.debug(f"      Merged: {consolidation_result['merged']}, Pruned: {consolidation_result['pruned']}")
-            import logging
-            logging.getLogger(__name__).info(
+            logger.info(
                 f"[Dream] Memory consolidation: merged={consolidation_result['merged']}, "
                 f"pruned={consolidation_result['pruned']}"
             )
         except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(f"[Dream] Consolidation skipped: {e}")
+            logger.warning(f"[Dream] Consolidation skipped: {e}")
             logger.debug(f"      Skipped: {e}")
 
         # Print insights
@@ -329,6 +327,14 @@ Format each insight as a single clear sentence starting with a verb (Use, Prefer
 
         return stored_ids
 
+    def close(self) -> None:
+        """Release resources held by the memory backend."""
+        try:
+            if hasattr(self.memory, "close"):
+                self.memory.close()
+        except Exception:
+            pass
+
     def recall_insights(self, query: str, n_results: int = 5) -> list[dict]:
         """Recall relevant insights from memory."""
         return self.memory.recall(query, n_results=n_results)
@@ -348,9 +354,6 @@ def _consolidate_amem_notes(amem_system, similarity_threshold: float = 0.85) -> 
     Returns:
         dict with keys: merged (int), pruned (int)
     """
-    import logging
-    _log = logging.getLogger(__name__)
-
     if not amem_system:
         return {"merged": 0, "pruned": 0}
 
@@ -432,7 +435,7 @@ def _consolidate_amem_notes(amem_system, similarity_threshold: float = 0.85) -> 
     try:
         amem_system.save()
     except Exception as e:
-        _log.warning(f"[Dream] Failed to save after consolidation: {e}")
+        logger.warning(f"[Dream] Failed to save after consolidation: {e}")
 
     return {"merged": merged_count, "pruned": pruned_count}
 
@@ -440,7 +443,10 @@ def _consolidate_amem_notes(amem_system, similarity_threshold: float = 0.85) -> 
 def run_dream_mode(date: Optional[str] = None) -> dict:
     """Entry point for running dream mode."""
     dreamer = DreamMode()
-    return dreamer.dream(date)
+    try:
+        return dreamer.dream(date)
+    finally:
+        dreamer.close()
 
 
 # =============================================================================
@@ -518,7 +524,7 @@ class ConsolidationReport:
 
 
 # ---------------------------------------------------------------------------
-# Similarity helpers (no heavy ML dep — use bag-of-words Jaccard)
+# Similarity helpers — prefer embeddings, fall back to bag-of-words Jaccard
 # ---------------------------------------------------------------------------
 
 def _tokenize(text: str) -> set:
@@ -534,12 +540,36 @@ def _jaccard(a: set, b: set) -> float:
     return len(a & b) / len(a | b)
 
 
+def _get_embeddings(texts: List[str]) -> Optional[List[List[float]]]:
+    """Try to compute embeddings via sentence-transformers. Returns None on failure."""
+    try:
+        from sentence_transformers import SentenceTransformer
+        model = SentenceTransformer("all-MiniLM-L6-v2")
+        embeddings = model.encode(texts, show_progress_bar=False)
+        return [e.tolist() for e in embeddings]
+    except Exception:
+        return None
+
+
+def _cosine_similarity(a: List[float], b: List[float]) -> float:
+    """Cosine similarity between two vectors without numpy dependency."""
+    dot = sum(x * y for x, y in zip(a, b))
+    mag_a = sum(x * x for x in a) ** 0.5
+    mag_b = sum(x * x for x in b) ** 0.5
+    if mag_a < 1e-8 or mag_b < 1e-8:
+        return 0.0
+    return dot / (mag_a * mag_b)
+
+
 def _cluster_by_similarity(
     items: List[Dict[str, Any]],
     threshold: float = 0.35,
 ) -> List[List[Dict[str, Any]]]:
     """
-    Greedy single-linkage clustering by Jaccard text similarity.
+    Greedy single-linkage clustering.
+
+    Uses sentence-transformer embeddings (cosine similarity) when available,
+    falls back to Jaccard text similarity otherwise.
 
     items: list of dicts with at least a "content" key.
     Returns list of clusters (each cluster is a list of items).
@@ -547,7 +577,18 @@ def _cluster_by_similarity(
     if not items:
         return []
 
-    token_sets = [_tokenize(it.get("content", "")) for it in items]
+    texts = [it.get("content", "") for it in items]
+    embeddings = _get_embeddings(texts)
+    use_embeddings = embeddings is not None
+
+    # Pre-compute Jaccard token sets only if we need them
+    token_sets = None
+    if not use_embeddings:
+        token_sets = [_tokenize(t) for t in texts]
+
+    # Embedding-based clustering uses a higher threshold (cosine vs Jaccard)
+    effective_threshold = 0.65 if use_embeddings else threshold
+
     clusters: List[List[int]] = []
     assigned = [False] * len(items)
 
@@ -559,8 +600,11 @@ def _cluster_by_similarity(
         for j in range(i + 1, len(items)):
             if assigned[j]:
                 continue
-            sim = _jaccard(token_sets[i], token_sets[j])
-            if sim >= threshold:
+            if use_embeddings:
+                sim = _cosine_similarity(embeddings[i], embeddings[j])
+            else:
+                sim = _jaccard(token_sets[i], token_sets[j])
+            if sim >= effective_threshold:
                 cluster.append(j)
                 assigned[j] = True
         clusters.append(cluster)
@@ -695,6 +739,18 @@ class DreamConsolidator:
             emit(TelemetryKind.DREAM_CYCLE, user_id=user_id, extra=cycle.to_dict())
         except Exception:
             pass
+
+        # Sync runtime KG to persistent Kuzu store
+        try:
+            from aura.tools.knowledge_graph import KnowledgeGraphTool
+            _kg_tool = KnowledgeGraphTool()
+            _sync_result = _kg_tool.export_to_kuzu()
+            logger.info(
+                "[DreamConsolidator] KG sync: %d entities, %d relationships exported to Kuzu",
+                _sync_result.get("entities", 0), _sync_result.get("relationships", 0),
+            )
+        except Exception as e:
+            logger.debug("[DreamConsolidator] KG sync skipped: %s", e)
 
         return report
 

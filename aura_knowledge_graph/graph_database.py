@@ -1,5 +1,11 @@
-"""
-Kùzu graph database wrapper for AURA Knowledge Graph.
+"""Kuzu-based persistent Knowledge Graph.
+
+Long-term persistent graph storage using Kuzu embedded database.
+Exposed via MCP server for external tool integration.
+
+Note: The runtime KG (aura/tools/knowledge_graph.py) operates independently
+using NetworkX. Changes made here are NOT automatically reflected there
+and vice versa. See sync utilities in the runtime KG module.
 
 Key features:
 - Embedded database (no server)

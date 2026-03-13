@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { Message, Citation } from '../types';
 import { ModelCompare } from './ModelCompare';
-import { UserCircleIcon, SparklesIcon, BoltIcon } from '@heroicons/react/24/solid';
+import { SparklesIcon, BoltIcon } from '@heroicons/react/24/solid';
 import { ClipboardDocumentIcon, CheckIcon } from '@heroicons/react/24/outline';
 import { AttachmentList } from './AttachmentPreview';
 import { ToolTrace } from './ToolTrace';
@@ -15,13 +15,15 @@ function CodeBlock({ language, children }: { language: string; children: string 
     return () => { if (codeTimeoutRef.current) clearTimeout(codeTimeoutRef.current); };
   }, []);
 
-  const handleCodeCopy = () => {
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(children).catch((e) => console.warn('[Copy] Failed:', e));
+  const handleCodeCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(children);
+      if (codeTimeoutRef.current) clearTimeout(codeTimeoutRef.current);
+      setCodeCopied(true);
+      codeTimeoutRef.current = setTimeout(() => setCodeCopied(false), 2000);
+    } catch (e) {
+      console.warn('[Copy] Failed:', e);
     }
-    if (codeTimeoutRef.current) clearTimeout(codeTimeoutRef.current);
-    setCodeCopied(true);
-    codeTimeoutRef.current = setTimeout(() => setCodeCopied(false), 2000);
   };
 
   return (
@@ -111,55 +113,76 @@ export function MessageBubble({ message }: MessageBubbleProps) {
     };
   }, []);
 
-  const handleCopy = () => {
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(message.content).catch((e) => console.warn('[Copy] Failed:', e));
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(message.content);
+      if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+      setCopied(true);
+      copyTimeoutRef.current = setTimeout(() => setCopied(false), 1500);
+    } catch (e) {
+      console.warn('[Copy] Failed:', e);
     }
-    if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
-    setCopied(true);
-    copyTimeoutRef.current = setTimeout(() => setCopied(false), 1500);
   };
 
+  if (isUser) {
+    return (
+      <div className="py-4 px-4 md:px-8">
+        <div className="max-w-3xl mx-auto flex justify-end">
+          <div style={{
+            background: '#fff',
+            color: '#000',
+            padding: '12px 22px',
+            borderRadius: '24px 24px 4px 24px',
+            fontSize: '1rem',
+            fontWeight: 500,
+            maxWidth: '85%',
+            lineHeight: 1.6,
+            boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
+          }}>
+            {message.attachments && message.attachments.length > 0 && (
+              <AttachmentList attachments={message.attachments} compact />
+            )}
+            <p className="whitespace-pre-wrap">{message.content}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div
-      className={`py-6 px-4 md:px-8 ${
-        isUser ? 'bg-chat-user' : isProactive ? 'bg-gradient-to-r from-purple-900/20 to-chat-assistant' : 'bg-chat-assistant'
-      }`}
-    >
+    <div className={`py-5 px-4 md:px-8 ${isProactive ? 'bg-gradient-to-r from-purple-900/10 to-transparent' : ''}`}>
       <div className="max-w-3xl mx-auto flex gap-4">
-        {/* Avatar */}
-        <div className="flex-shrink-0 relative">
-          {isUser ? (
-            <div className="w-8 h-8 rounded-full bg-chat-accent flex items-center justify-center">
-              <UserCircleIcon className="w-6 h-6 text-white" />
-            </div>
-          ) : (
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-              isProactive ? 'bg-gradient-to-br from-purple-500 to-pink-500' : 'bg-purple-600'
-            }`}>
-              {isProactive ? (
-                <BoltIcon className="w-5 h-5 text-white" />
-              ) : (
-                <SparklesIcon className="w-5 h-5 text-white" />
-              )}
-            </div>
-          )}
-          {/* Proactive indicator pulse */}
+        {/* AI Avatar */}
+        <div className="flex-shrink-0 relative mt-1">
+          <div
+            className="w-9 h-9 flex items-center justify-center"
+            style={{
+              borderRadius: 8,
+              background: isProactive
+                ? 'linear-gradient(135deg, rgba(168,85,247,0.2) 0%, rgba(255,255,255,0.02) 100%)'
+                : 'linear-gradient(135deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.02) 100%)',
+              border: '1px solid rgba(255,255,255,0.07)',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+            }}
+          >
+            {isProactive
+              ? <BoltIcon className="w-4 h-4 text-purple-300" />
+              : <SparklesIcon className="w-4 h-4 text-white" />
+            }
+          </div>
           {isProactive && (
             <span className="absolute -top-1 -right-1 flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-pink-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-pink-500"></span>
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-pink-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-pink-500" />
             </span>
           )}
         </div>
 
         {/* Content */}
         <div className="flex-1 min-w-0 group">
-          {/* Role label with proactive badge */}
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-chat-text font-medium">
-              {isUser ? 'You' : 'AURA'}
-            </span>
+          {/* Role / badge */}
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-chat-text font-medium text-sm">AURA</span>
             {isProactive && message.proactive && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-purple-500/20 text-purple-300 border border-purple-500/30">
                 <span>{PROACTIVE_ICONS[message.proactive.action] || '💭'}</span>
@@ -168,106 +191,77 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             )}
           </div>
 
-          {/* Attachments (for user messages) */}
-          {isUser && message.attachments && message.attachments.length > 0 && (
-            <AttachmentList attachments={message.attachments} compact />
-          )}
-
-          {/* Tool trace (above content) */}
-          {!isUser && message.toolTrace && message.toolTrace.length > 0 && (
+          {/* Tool trace */}
+          {message.toolTrace && message.toolTrace.length > 0 && (
             <ToolTrace traces={message.toolTrace} isStreaming={isStreaming} />
           )}
 
           {/* Message content */}
           <div className="prose prose-invert max-w-none text-chat-text">
-            {isUser ? (
-              <p className="whitespace-pre-wrap">{message.content}</p>
-            ) : (
-              <ReactMarkdown
-                components={{
-                  // Custom rendering for code blocks
-                  code({ className, children, ...props }) {
-                    const match = /language-(\w+)/.exec(className || '');
-                    const isInline = !match;
-
-                    if (isInline) {
-                      return (
-                        <code
-                          className="bg-gray-800 px-1.5 py-0.5 rounded text-sm"
-                          {...props}
-                        >
-                          {children}
-                        </code>
-                      );
-                    }
-
+            <ReactMarkdown
+              components={{
+                code({ className, children, ...props }) {
+                  const match = /language-(\w+)/.exec(className || '');
+                  if (!match) {
                     return (
-                      <CodeBlock language={match[1]}>
-                        {String(children).replace(/\n$/, '')}
-                      </CodeBlock>
-                    );
-                  },
-                  // Custom link rendering
-                  a({ href, children }) {
-                    return (
-                      <a
-                        href={href}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-chat-accent hover:text-chat-accent-hover underline"
-                      >
+                      <code className="bg-gray-800 px-1.5 py-0.5 rounded text-sm" {...props}>
                         {children}
-                      </a>
+                      </code>
                     );
-                  },
-                }}
-              >
-                {message.content}
-              </ReactMarkdown>
-            )}
-
-            {/* Streaming cursor */}
+                  }
+                  return (
+                    <CodeBlock language={match[1]}>
+                      {String(children).replace(/\n$/, '')}
+                    </CodeBlock>
+                  );
+                },
+                a({ href, children }) {
+                  return (
+                    <a href={href} target="_blank" rel="noopener noreferrer"
+                      className="text-purple-400 hover:text-purple-300 underline">
+                      {children}
+                    </a>
+                  );
+                },
+              }}
+            >
+              {message.content}
+            </ReactMarkdown>
             {isStreaming && (
-              <span className="typing-cursor inline-block w-2 h-4 bg-chat-accent ml-1" />
+              <span className="typing-cursor inline-block w-2 h-4 bg-purple-400 ml-1" />
             )}
           </div>
 
           {/* Citations */}
-          {!isUser && message.citations && message.citations.length > 0 && !isStreaming && (
+          {message.citations && message.citations.length > 0 && !isStreaming && (
             <CitationList citations={message.citations} />
           )}
 
-          {/* Model comparison results */}
-          {!isUser && message.compareResults && message.compareResults.length > 0 && (
+          {/* Model compare */}
+          {message.compareResults && message.compareResults.length > 0 && (
             <ModelCompare
               results={message.compareResults}
               query={message.content}
-              onUseResponse={(response) => navigator.clipboard.writeText(response)}
+              onUseResponse={(response) => navigator.clipboard.writeText(response).catch(e => console.warn('[Copy] Failed:', e))}
             />
           )}
 
-          {/* Model badge for assistant messages */}
-          {!isUser && message.model_used && !isStreaming && (
-            <span className="text-xs text-chat-text-secondary/60 mt-1 inline-block">
-              {message.model_used}
-            </span>
-          )}
-
-          {/* Timestamp + copy */}
-          <div className="mt-2 flex items-center gap-2 text-xs text-chat-text-secondary">
+          {/* Footer: model + timestamp + copy */}
+          <div className="mt-2 flex items-center gap-3 text-xs text-chat-text-secondary">
+            {message.model_used && !isStreaming && (
+              <span className="opacity-50">{message.model_used}</span>
+            )}
             <span>{new Date(message.timestamp).toLocaleTimeString()}</span>
             {!isStreaming && (
               <button
                 onClick={handleCopy}
                 aria-label="Copy message"
                 className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:text-chat-text"
-                title="Copy message"
               >
-                {copied ? (
-                  <CheckIcon className="w-3.5 h-3.5 text-green-400" />
-                ) : (
-                  <ClipboardDocumentIcon className="w-3.5 h-3.5" />
-                )}
+                {copied
+                  ? <CheckIcon className="w-3.5 h-3.5 text-green-400" />
+                  : <ClipboardDocumentIcon className="w-3.5 h-3.5" />
+                }
               </button>
             )}
           </div>

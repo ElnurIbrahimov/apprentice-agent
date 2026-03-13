@@ -21,14 +21,14 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     """Request body for chat endpoint."""
-    message: str = Field(..., min_length=1, description="User message")
+    message: str = Field(..., min_length=1, max_length=100_000, description="User message")
     speak: bool = Field(default=False, description="Enable TTS for response")
     model: Optional[str] = Field(default=None, description="Model override (None = auto)")
 
 
 class RunRequest(BaseModel):
     """Request body for agent run endpoint."""
-    goal: str = Field(..., min_length=1, description="Goal for the agent")
+    goal: str = Field(..., min_length=1, max_length=100_000, description="Goal for the agent")
     context: Optional[Dict[str, Any]] = Field(default=None, description="Additional context")
     use_fastpath: Optional[bool] = Field(default=None, description="Force fast-path mode")
     max_iterations: int = Field(default=10, ge=1, le=50, description="Max iterations")

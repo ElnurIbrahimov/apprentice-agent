@@ -2,6 +2,7 @@
 
 import sys
 import os
+import time
 import threading
 import logging
 from typing import Optional, Dict, Any, Generator
@@ -386,33 +387,6 @@ class AgentService:
                 self.initialize(fast_init=False)
         return self._agent
 
-    def _needs_tools(self, message: str) -> bool:
-        """Check if message requires tool execution (search, code, etc.)."""
-        message_lower = message.lower()
-
-        # Search indicators
-        search_keywords = [
-            'search', 'look up', 'find online', 'google', 'web search',
-            'what is the price', 'current price', 'latest news',
-            'search online', 'search for', 'look online'
-        ]
-
-        # Code/calculation indicators
-        code_keywords = [
-            'calculate', 'compute', 'run code', 'execute', 'factorial',
-            'fibonacci', 'prime number', 'run python'
-        ]
-
-        # Check for search patterns
-        if any(kw in message_lower for kw in search_keywords):
-            return True
-
-        # Check for code patterns
-        if any(kw in message_lower for kw in code_keywords):
-            return True
-
-        return False
-
     def chat(self, message: str, speak: bool = False, model_override: Optional[str] = None) -> Dict[str, Any]:
         """Send a chat message to the agent.
 
@@ -481,114 +455,64 @@ class AgentService:
                 logger.info(f"[AgentService] Using model: {effective_model}")
 
             try:
-                # ===== SWARM MODE HANDLER =====
+                # ===== SWARM MODE HANDLER (via MultiAgentOrchestrator) =====
                 if detected_action == "swarm":
-                    import concurrent.futures
+                    logger.info(f"[AgentService] Multi-agent mode for: {message[:50]}...")
+                    _record_thought("connecting", "activating multi-agent orchestrator", 0.8, "service")
 
-                    logger.info(f"[AgentService] Swarm mode (REST) for: {message[:50]}...")
-                    _record_thought("connecting", "activating multi-agent swarm: Research, Analyst, Creative, Strategist", 0.8, "service")
+                    try:
+                        from aura.multi_agent.orchestrator import MultiAgentOrchestrator
 
-                    # Check if query needs real-time data (news, latest, current, etc.)
-                    needs_search_keywords = [
-                        "news", "latest", "current", "recent", "today", "now",
-                        "update", "happening", "trending", "2024", "2025", "2026",
-                        "research", "developments", "breakthroughs", "announced"
-                    ]
-                    msg_lower = message.lower()
-                    needs_search = any(kw in msg_lower for kw in needs_search_keywords)
+                        # Get or create orchestrator for this session
+                        if not hasattr(self, '_orchestrator') or self._orchestrator is None:
+                            tool_registry = getattr(self.agent, 'tool_registry', {})
+                            def llm_func(system_prompt, user_message):
+                                return self.agent.brain.think(user_message, system_prompt=system_prompt, use_history=False)
+                            self._orchestrator = MultiAgentOrchestrator(
+                                tool_registry=tool_registry,
+                                llm_func=llm_func,
+                            )
 
-                    # Gather real data first if needed
-                    search_context = ""
-                    if needs_search:
-                        logger.info("[AgentService] Swarm: Gathering real-time data first...")
-                        try:
-                            # Extract topic from message (remove swarm trigger words)
-                            topic = msg_lower
-                            for trigger in ["swarm", "multi-agent", "multiple agents", "team research", "collaborative", "all agents", "agent team"]:
-                                topic = topic.replace(trigger, "").strip()
-                            topic = topic.strip(" :,.-")
-
-                            # Use the search tool to get real data
-                            from aura.tools.web_search import WebSearchTool
-                            search_tool = WebSearchTool()
-                            search_results = search_tool.search(topic, num_results=8)
-
-                            if search_results.get("success") and search_results.get("results"):
-                                results_text = []
-                                for i, r in enumerate(search_results["results"][:8], 1):
-                                    results_text.append(f"{i}. **{r.get('title', 'No title')}**\n   {r.get('snippet', '')}\n   Source: {r.get('url', '')}")
-                                search_context = f"\n\n**Search Results for '{topic}':**\n\n" + "\n\n".join(results_text) + "\n\n---\n\n"
-                                logger.info(f"[AgentService] Swarm: Got {len(search_results['results'])} search results")
-                            else:
-                                logger.warning(f"[AgentService] Swarm: Search returned no results")
-                        except Exception as e:
-                            logger.error(f"[AgentService] Swarm search error: {e}")
-
-                    # Build the prompt with search context if available
-                    agent_prompt = message
-                    if search_context:
-                        agent_prompt = f"Based on the following real-time search results, analyze and respond to: {message}\n{search_context}\nUse the search results above to provide informed, factual analysis."
-
-                    agents = {
-                        "Research": "You are a Research Agent. Analyze the provided data and extract key facts, findings, and evidence. Cite sources when available.",
-                        "Analyst": "You are an Analyst Agent. Provide critical analysis of the data, identify patterns, trends, and assess implications.",
-                        "Creative": "You are a Creative Agent. Think outside the box, find unexpected connections, and propose innovative perspectives on the data.",
-                        "Strategist": "You are a Strategy Agent. Consider long-term implications, identify opportunities and risks, and provide actionable recommendations."
-                    }
-
-                    results = {}
-                    def run_agent(name, system_prompt):
-                        try:
-                            return name, self.agent.brain.think(agent_prompt, system_prompt=system_prompt, use_history=False)
-                        except Exception as e:
-                            return name, f"Error: {e}"
-
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-                        futures = {executor.submit(run_agent, name, prompt): name for name, prompt in agents.items()}
-                        for future in concurrent.futures.as_completed(futures, timeout=120):
+                        # Optionally gather search context for real-time queries
+                        needs_search_keywords = [
+                            "news", "latest", "current", "recent", "today", "now",
+                            "update", "happening", "trending", "2024", "2025", "2026",
+                            "research", "developments", "breakthroughs", "announced"
+                        ]
+                        msg_lower = message.lower()
+                        query = message
+                        if any(kw in msg_lower for kw in needs_search_keywords):
                             try:
-                                name, response = future.result()
-                                results[name] = response
+                                from aura.tools.web_search import WebSearchTool
+                                topic = msg_lower
+                                for trigger in ["swarm", "multi-agent", "multiple agents", "team research", "collaborative", "all agents", "agent team"]:
+                                    topic = topic.replace(trigger, "").strip()
+                                topic = topic.strip(" :,.-")
+                                search_results = WebSearchTool().search(topic, num_results=8)
+                                if search_results.get("success") and search_results.get("results"):
+                                    ctx = "\n".join([f"- {r.get('title','')}: {r.get('snippet','')}" for r in search_results["results"][:8]])
+                                    query = f"{message}\n\nSearch context:\n{ctx}"
                             except Exception as e:
-                                results[futures[future]] = f"Error: {e}"
+                                logger.warning(f"[AgentService] Swarm search error: {e}")
 
-                    # Build response
-                    mode_text = "parallel + search" if search_context else "parallel"
-                    header = f"## Agent Swarm\n\n**Agents:** Research, Analyst, Creative, Strategist\n**Mode:** {mode_text}\n\n---\n"
-                    response_parts = [header]
+                        # Route through the proper orchestrator
+                        response = self._orchestrator.chat(query)
 
-                    for name, resp in results.items():
-                        response_parts.append(f"### {name} Agent\n\n{resp}\n\n---\n")
+                        return {
+                            "response": response,
+                            "fast_path": False,
+                            "mood": self._get_mood(),
+                            "model_used": effective_model or "multi-agent"
+                        }
 
-                    # Synthesis
-                    if len(results) >= 2:
-                        synthesis_prompt = f"""You are synthesizing insights from multiple AI agents who analyzed: "{message}"
-
-Here are their perspectives:
-
-{chr(10).join([f"**{name}:** {resp[:1500]}" for name, resp in results.items()])}
-
-Write a well-formatted synthesis in readable prose (NOT JSON). Use this structure:
-
-**Key Consensus Points**
-- List the main points where agents agree
-
-**Diverse Perspectives**
-- Note any different angles or unique insights from specific agents
-
-**Conclusion**
-Write a brief integrative conclusion that captures the essential takeaways.
-
-Keep it concise, readable, and well-formatted with markdown."""
-                        synthesis = self.agent.brain.think(synthesis_prompt)
-                        response_parts.append(f"### Synthesis\n\n{synthesis}")
-
-                    return {
-                        "response": "\n".join(response_parts),
-                        "fast_path": False,
-                        "mood": self._get_mood(),
-                        "model_used": effective_model or "swarm"
-                    }
+                    except Exception as e:
+                        logger.error(f"[AgentService] Multi-agent error: {e}")
+                        return {
+                            "response": f"Multi-agent system error: {e}. Falling back to single agent.",
+                            "fast_path": False,
+                            "mood": self._get_mood(),
+                            "model_used": effective_model
+                        }
 
                 # ===== DEEP RESEARCH HANDLER =====
                 if detected_action == "deep_research":
@@ -774,12 +698,12 @@ Provide key findings and cite sources."""
 
                     logger.info(f"[AgentService] Deep research on: {topic}")
                     yield {"type": "chunk", "content": f"## Deep Research: {topic}\n\n"}
-                    yield {"type": "tool_trace", "event": "start", "tool": "deep_research", "detail": f'Researching "{topic[:50]}"', "timestamp": __import__("time").time()}
+                    yield {"type": "tool_trace", "event": "start", "tool": "deep_research", "detail": f'Researching "{topic[:50]}"', "timestamp": time.time()}
 
-                    _dr_start = __import__("time").time()
+                    _dr_start = time.time()
                     result = deep_tool.research(topic, depth="deep")
-                    _dr_elapsed = int((__import__("time").time() - _dr_start) * 1000)
-                    yield {"type": "tool_trace", "event": "done", "tool": "deep_research", "detail": f'{result.get("urls_found", 0)} sources, {result.get("pages_read", 0)} pages', "elapsed_ms": _dr_elapsed, "timestamp": __import__("time").time()}
+                    _dr_elapsed = int((time.time() - _dr_start) * 1000)
+                    yield {"type": "tool_trace", "event": "done", "tool": "deep_research", "detail": f'{result.get("urls_found", 0)} sources, {result.get("pages_read", 0)} pages', "elapsed_ms": _dr_elapsed, "timestamp": time.time()}
 
                     if result.get("success"):
                         synthesis_prompt = f"""Based on this deep research, provide a comprehensive summary:
@@ -822,25 +746,35 @@ Provide a well-structured, informative summary with key findings and cite source
                     yield {"type": "done", "mood": self._get_mood(), "model_used": "error"}
                     return
 
-            # ===== SWARM/MULTI-AGENT HANDLER =====
+            # ===== SWARM/MULTI-AGENT HANDLER (via MultiAgentOrchestrator) =====
             if detected_action == "swarm":
                 try:
-                    import concurrent.futures
+                    from aura.multi_agent.orchestrator import MultiAgentOrchestrator
 
-                    logger.info(f"[AgentService] Swarm mode activated for: {message[:50]}...")
-                    yield {"type": "chunk", "content": "## Agent Swarm\n\n"}
+                    logger.info(f"[AgentService] Multi-agent mode (WS) for: {message[:50]}...")
+                    yield {"type": "chunk", "content": "## Multi-Agent Orchestrator\n\n"}
 
+                    # Get or create orchestrator
+                    if not hasattr(self, '_orchestrator') or self._orchestrator is None:
+                        tool_registry = getattr(self.agent, 'tool_registry', {})
+                        def llm_func(system_prompt, user_message):
+                            return brain.think(user_message, system_prompt=system_prompt, use_history=False)
+                        self._orchestrator = MultiAgentOrchestrator(
+                            tool_registry=tool_registry,
+                            llm_func=llm_func,
+                        )
+
+                    # Optionally gather search context
                     needs_search_keywords = [
                         "news", "latest", "current", "recent", "today", "now",
                         "update", "happening", "trending", "2024", "2025", "2026",
                         "research", "developments", "breakthroughs", "announced"
                     ]
                     msg_lower = message.lower()
-                    needs_search = any(kw in msg_lower for kw in needs_search_keywords)
-
-                    search_context = ""
+                    query = message
                     _swarm_citations = []
-                    if needs_search:
+
+                    if any(kw in msg_lower for kw in needs_search_keywords):
                         yield {"type": "chunk", "content": "Gathering real-time data...\n\n"}
                         try:
                             topic = msg_lower
@@ -849,98 +783,30 @@ Provide a well-structured, informative summary with key findings and cite source
                             topic = topic.strip(" :,.-")
 
                             from aura.tools.web_search import WebSearchTool
-                            search_tool = WebSearchTool()
-                            search_results = search_tool.search(topic, num_results=8)
+                            search_results = WebSearchTool().search(topic, num_results=8)
 
                             if search_results.get("success") and search_results.get("results"):
-                                results_text = []
-                                for i, r in enumerate(search_results["results"][:8], 1):
-                                    results_text.append(f"{i}. **{r.get('title', 'No title')}**\n   {r.get('snippet', '')}\n   Source: {r.get('url', '')}")
-                                search_context = f"\n\n**Search Results for '{topic}':**\n\n" + "\n\n".join(results_text) + "\n\n---\n\n"
+                                ctx = "\n".join([f"- {r.get('title','')}: {r.get('snippet','')}" for r in search_results["results"][:8]])
+                                query = f"{message}\n\nSearch context:\n{ctx}"
                                 yield {"type": "chunk", "content": f"Found {len(search_results['results'])} sources.\n\n"}
 
                                 for i, r in enumerate(search_results["results"][:15], 1):
                                     if r.get("url"):
                                         _swarm_citations.append({"id": i, "title": r.get("title", r.get("url", "")), "url": r["url"], "snippet": r.get("snippet", "")[:200]})
                         except Exception as e:
-                            logger.error(f"[AgentService] Swarm search error: {e}")
+                            logger.warning(f"[AgentService] Swarm search error: {e}")
 
-                    agent_prompt = message
-                    if search_context:
-                        agent_prompt = f"Based on the following real-time search results, analyze: {message}\n{search_context}\nUse the search results to provide informed analysis. Cite sources as [1], [2], etc."
-
-                    agents_config = {
-                        "Research": "You are a Research Agent. Analyze the provided data and extract key facts, findings, and evidence. Cite sources when available.",
-                        "Analyst": "You are an Analyst Agent. Provide critical analysis of the data, identify patterns, trends, and assess implications.",
-                        "Creative": "You are a Creative Agent. Think outside the box, find unexpected connections, and propose innovative perspectives.",
-                        "Strategist": "You are a Strategy Agent. Consider long-term implications, identify opportunities and risks, and provide actionable recommendations."
-                    }
-
-                    mode_text = "parallel + search" if search_context else "parallel"
-                    yield {"type": "chunk", "content": f"**Agents:** {', '.join(agents_config.keys())}\n**Mode:** {mode_text}\n\n---\n\n"}
-
-                    # Execute all agents in parallel (brain reference captured at setup)
-                    results = {}
-                    def run_agent(name, system_prompt):
-                        try:
-                            response = brain.think(
-                                agent_prompt,
-                                system_prompt=system_prompt,
-                                use_history=False
-                            )
-                            return name, response
-                        except Exception as e:
-                            return name, f"Error: {e}"
-
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-                        futures = {executor.submit(run_agent, name, prompt): name for name, prompt in agents_config.items()}
-
-                        for future in concurrent.futures.as_completed(futures, timeout=120):
-                            try:
-                                name, response = future.result()
-                                results[name] = response
-                                yield {"type": "chunk", "content": f"### {name} Agent\n\n{response}\n\n---\n\n"}
-                            except Exception as e:
-                                name = futures[future]
-                                yield {"type": "chunk", "content": f"### {name} Agent\n\nError: {e}\n\n---\n\n"}
-
-                    if len(results) >= 2:
-                        yield {"type": "chunk", "content": "### Synthesis\n\n"}
-
-                        synthesis_prompt = f"""You are synthesizing insights from multiple AI agents who analyzed: "{message}"
-
-Here are their perspectives:
-
-{chr(10).join([f"**{name}:** {resp[:1500]}" for name, resp in results.items()])}
-
-Write a well-formatted synthesis in readable prose (NOT JSON). Use this structure:
-
-**Key Consensus Points**
-- List the main points where agents agree
-
-**Diverse Perspectives**
-- Note any different angles or unique insights from specific agents
-
-**Conclusion**
-Write a brief integrative conclusion that captures the essential takeaways.
-
-Keep it concise, readable, and well-formatted with markdown."""
-
-                        # Stream the synthesis
-                        if hasattr(brain, 'think_stream'):
-                            for chunk in brain.think_stream(synthesis_prompt):
-                                yield {"type": "chunk", "content": chunk}
-                        else:
-                            synthesis = brain.think(synthesis_prompt)
-                            yield {"type": "chunk", "content": synthesis}
+                    # Route through orchestrator (handles routing, collaboration mode, synthesis)
+                    response = self._orchestrator.chat(query)
+                    yield {"type": "chunk", "content": response}
 
                     if _swarm_citations:
                         yield {"type": "citations", "citations": _swarm_citations}
-                    yield {"type": "done", "mood": self._get_mood(), "model_used": effective_model or "swarm"}
+                    yield {"type": "done", "mood": self._get_mood(), "model_used": effective_model or "multi-agent"}
                     return
                 except Exception as e:
-                    logger.error(f"[AgentService] Swarm mode error: {e}")
-                    yield {"type": "chunk", "content": f"Swarm mode error: {e}"}
+                    logger.error(f"[AgentService] Multi-agent error: {e}")
+                    yield {"type": "chunk", "content": f"Multi-agent error: {e}"}
                     yield {"type": "done", "mood": self._get_mood(), "model_used": "error"}
                     return
 
@@ -987,7 +853,8 @@ Keep it concise, readable, and well-formatted with markdown."""
                         had_content = False
                         for chunk in agent.parliament.handle_stream(
                             enriched_message,
-                            context_addon=screen_hint or ""
+                            context_addon=screen_hint or "",
+                            model_override=effective_model,
                         ):
                             if chunk:
                                 had_content = True
@@ -1003,7 +870,7 @@ Keep it concise, readable, and well-formatted with markdown."""
             if hasattr(brain, 'think_stream'):
                 full_response = ""
                 yield {"type": "tool_status", "tool_name": "brain", "tool_action": "thinking"}
-                for chunk in brain.think_stream(enriched_message):
+                for chunk in brain.think_stream(enriched_message, model_override=effective_model):
                     full_response += chunk
                     yield {"type": "chunk", "content": chunk}
                 yield {"type": "tool_status", "tool_name": "", "tool_action": ""}  # clear status
@@ -1037,7 +904,7 @@ Keep it concise, readable, and well-formatted with markdown."""
                                 "category": "episodic",
                                 "source": "conversation",
                                 "importance": 0.5,
-                                "auto_extract": True,
+                                "auto_extract": False,  # Disabled: background LLM call competes with chat stream
                                 "auto_link": True,
                                 "auto_evolve": False,
                             },
@@ -1362,7 +1229,7 @@ Keep it concise, readable, and well-formatted with markdown."""
             return {
                 "response": f"Thinking mode command failed: {e}",
                 "fast_path": True,
-                "mood": "neutral",
+                "mood": self._get_mood(),
                 "model_used": "command",
             }
 
@@ -1405,6 +1272,16 @@ Keep it concise, readable, and well-formatted with markdown."""
                 logger.warning(f"[AgentService] Could not fetch local models: {e}")
                 local_models = []
 
+            # Add ChatGPT OAuth models if authenticated
+            chatgpt_models = []
+            try:
+                from aura.auth.chatgpt_oauth import is_authenticated
+                if is_authenticated():
+                    from aura.auth.chatgpt_client import ALL_CHATGPT_MODELS
+                    chatgpt_models = list(ALL_CHATGPT_MODELS)
+            except ImportError:
+                pass
+
             current_model = "auto"
             if self._agent is not None:
                 current_model = getattr(self._agent.brain, 'model', 'auto')
@@ -1412,6 +1289,7 @@ Keep it concise, readable, and well-formatted with markdown."""
             return {
                 "local": sorted(local_models),
                 "cloud": sorted(cloud_models),
+                "chatgpt": sorted(chatgpt_models),
                 "current": current_model
             }
         except Exception as e:

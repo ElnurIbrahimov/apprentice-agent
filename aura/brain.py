@@ -17,6 +17,14 @@ import ollama
 from .config import Config
 from .identity import get_identity_prompt
 
+# ChatGPT OAuth client (optional — uses ChatGPT Plus/Pro subscription)
+try:
+    from .auth.chatgpt_client import ChatGPTClient
+    from .auth.chatgpt_oauth import is_authenticated as _chatgpt_authenticated
+    CHATGPT_AVAILABLE = True
+except ImportError:
+    CHATGPT_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 # ALMA Emotional Intelligence System
@@ -43,14 +51,45 @@ NEURO_MIN_MULTIPLIER = 0.7   # Never reduce below 70% of default
 NEURO_MAX_MULTIPLIER = 1.4   # Never increase above 140% of default
 
 
+_wm_extraction_running = threading.Event()  # Rate limiter: skip if previous extraction still running
+_wm_consecutive_failures = 0  # Circuit breaker: disable after repeated failures
+_WM_CIRCUIT_BREAKER_THRESHOLD = 3  # Disable after N consecutive failures
+_WM_CIRCUIT_BREAKER_RESET_AFTER = 300  # Re-enable after 5 minutes
+_wm_circuit_broken_at: float = 0.0
+
 def _run_world_model_extraction(conversation_id, messages):
-    """Background thread target for world model extraction (ADV-02 Phase 2)."""
+    """Background thread target for world model extraction (ADV-02 Phase 2).
+
+    Includes circuit breaker: after 3 consecutive failures, disables extraction
+    for 5 minutes to prevent thread pool starvation.
+    """
+    global _wm_consecutive_failures, _wm_circuit_broken_at
+
+    # Circuit breaker check
+    if _wm_consecutive_failures >= _WM_CIRCUIT_BREAKER_THRESHOLD:
+        if time.time() - _wm_circuit_broken_at < _WM_CIRCUIT_BREAKER_RESET_AFTER:
+            logger.debug("[BRAIN] World model extraction circuit breaker OPEN — skipping")
+            return
+        else:
+            logger.info("[BRAIN] World model extraction circuit breaker RESET — retrying")
+            _wm_consecutive_failures = 0
+
+    if _wm_extraction_running.is_set():
+        logger.debug("[BRAIN] Skipping world model extraction — previous still running")
+        return
+    _wm_extraction_running.set()
     try:
         from aura.consciousness.world_model import get_world_model
         wm = get_world_model()
         wm.process_conversation(conversation_id, messages)
+        _wm_consecutive_failures = 0  # Reset on success
     except Exception as e:
-        logger.debug(f"[BRAIN] World model extraction failed: {e}")
+        _wm_consecutive_failures += 1
+        if _wm_consecutive_failures >= _WM_CIRCUIT_BREAKER_THRESHOLD:
+            _wm_circuit_broken_at = time.time()
+            logger.warning(f"[BRAIN] World model extraction failed {_wm_consecutive_failures}x — circuit breaker OPEN for {_WM_CIRCUIT_BREAKER_RESET_AFTER}s")
+        else:
+            logger.debug(f"[BRAIN] World model extraction failed ({_wm_consecutive_failures}/{_WM_CIRCUIT_BREAKER_THRESHOLD}): {e}")
 
     # ADV-02 Phase 3: Quick proactive awareness analysis after extraction
     try:
@@ -60,6 +99,8 @@ def _run_world_model_extraction(conversation_id, messages):
             engine.run_quick_analysis()
     except Exception as e:
         logger.debug(f"[BRAIN] Proactive awareness quick analysis failed: {e}")
+    finally:
+        _wm_extraction_running.clear()
 
 
 def _get_neuromodulator_levels() -> dict:
@@ -108,12 +149,12 @@ def _neuro_scale(base_value: float, neuro_level: float, sensitivity: float = 0.5
     multiplier = max(NEURO_MIN_MULTIPLIER, min(NEURO_MAX_MULTIPLIER, multiplier))
     return base_value * multiplier
 
-# Shared thread pool to prevent thread leaks (max 6 concurrent LLM calls)
-_SHARED_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=6, thread_name_prefix="llm_worker")
+# Shared thread pool to prevent thread leaks (max 12 concurrent LLM calls)
+_SHARED_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=12, thread_name_prefix="llm_worker")
 
 # Dedicated background pool for long-running non-user tasks (world model, self-improvement)
 # Keeps these from starving the shared chat pool
-_BG_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="aura-bg")
+_BG_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=8, thread_name_prefix="aura-bg")
 
 def _cleanup_executor():
     """Cleanup shared executor on exit."""
@@ -206,6 +247,12 @@ class OllamaBrain:
         else:
             logger.debug(f"[BRAIN] Warning: OLLAMA_API_KEY not set, cloud models unavailable")
 
+        # ChatGPT client (for chatgpt: prefixed models)
+        self._chatgpt_client = None
+        if CHATGPT_AVAILABLE and _chatgpt_authenticated():
+            self._chatgpt_client = ChatGPTClient()
+            logger.info("[BRAIN] ChatGPT OAuth client initialized")
+
         self.model = Config.MODEL_NAME
         self._max_history: int = Config.HISTORY_LIMIT
         self.conversation_history: list[dict] = []
@@ -236,6 +283,11 @@ class OllamaBrain:
             "devstral-2:123b-cloud":       (0.002,  0.002),
             "minimax-m2.5:cloud":          (0.004,  0.004),
         }
+        # ChatGPT subscription models (cost is $0 — covered by subscription)
+        if CHATGPT_AVAILABLE:
+            from .auth.chatgpt_client import ALL_CHATGPT_MODELS
+            for m in ALL_CHATGPT_MODELS:
+                self._MODEL_COST_PER_1K[m] = (0.0, 0.0)
         self._DEFAULT_COST_PER_1K = (0.003, 0.003)  # fallback for unknown models
 
         # Setup persistent history storage (legacy single-conversation path)
@@ -282,14 +334,27 @@ class OllamaBrain:
         if warmup:
             self._warmup_models()
 
-    def _get_client_for_model(self, model: str) -> tuple[ollama.Client, str]:
-        """Get the appropriate client (local or cloud) based on model name.
+    def _get_client_for_model(self, model: str) -> tuple:
+        """Get the appropriate client (local, cloud, or ChatGPT) based on model name.
 
-        Cloud models end with '-cloud' or ':cloud' suffix and require the cloud client.
+        Routing:
+        - chatgpt:* models → ChatGPT OAuth client (Codex Responses API)
+        - *-cloud / *:cloud models → Ollama cloud client
+        - everything else → local Ollama client
 
         Returns:
             Tuple of (client, actual_model_name) - model name may be modified for fallback
         """
+        # ChatGPT OAuth models (e.g., chatgpt:gpt-5.1-codex)
+        if model.startswith("chatgpt:"):
+            if self._chatgpt_client:
+                logger.debug(f"[BRAIN] Using ChatGPT OAuth client for model: {model}")
+                return self._chatgpt_client, model
+            else:
+                logger.warning(f"[BRAIN] ChatGPT not authenticated, cannot use {model}")
+                # Fall through to default
+                return self.client, Config.MODEL_FAST
+
         if model.endswith(("-cloud", ":cloud")):
             if self._cloud_client:
                 logger.debug(f"[BRAIN] Using cloud client for model: {model}")
@@ -336,6 +401,91 @@ class OllamaBrain:
                 "queries": self._total_query_count,
             }
 
+    def think_with_tools(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        model_override: str = None,
+        options: dict = None,
+    ) -> dict:
+        """Call Ollama with structured tool calling (tools= parameter).
+
+        This is the core method for the agentic dev CLI loop. Unlike think(),
+        it does NOT manage history — the agentic loop owns the message list.
+        It does NOT use neuromodulators — agentic mode uses fixed low temperature.
+
+        Args:
+            messages: Full message list (system + user + assistant + tool results)
+            tools: Ollama tool schemas (from tool_schemas.AGENTIC_TOOLS)
+            model_override: Force a specific model instead of auto-routing
+            options: Ollama options (temperature, num_predict, etc.)
+
+        Returns:
+            {message, model, input_tokens, output_tokens} or {error} on failure
+        """
+        # Use MODEL_CODE (devstral/minimax) — not MODEL_FAST (gemini) which
+        # crashes on tool-result turns with "missing thought_signature" error
+        model = model_override or self._model_override or Config.MODEL_CODE
+        client, actual_model = self._get_client_for_model(model)
+
+        # ChatGPT client doesn't support tools= parameter
+        if actual_model.startswith("chatgpt:"):
+            return {"error": "ChatGPT models don't support structured tool calling. Use an Ollama model."}
+
+        llm_options = options or {"temperature": 0.2, "num_predict": 4096}
+
+        try:
+            response = call_with_timeout(
+                lambda: client.chat(
+                    model=actual_model,
+                    messages=messages,
+                    tools=tools,
+                    options=llm_options,
+                ),
+                timeout=120,
+                default=None,
+            )
+        except Exception as e:
+            logger.error(f"[BRAIN] think_with_tools error: {e}")
+            return {"error": str(e)}
+
+        if response is None:
+            # Try fallback chain
+            chain = self._get_fallback_chain(actual_model)
+            for fallback_model in chain:
+                if fallback_model == actual_model:
+                    continue
+                try:
+                    fb_client, fb_actual = self._get_client_for_model(fallback_model)
+                    logger.info(f"[BRAIN] Tool-call fallback: {actual_model} -> {fb_actual}")
+                    response = call_with_timeout(
+                        lambda m=fb_actual, c=fb_client: c.chat(
+                            model=m, messages=messages, tools=tools, options=llm_options,
+                        ),
+                        timeout=120,
+                        default=None,
+                    )
+                    if response is not None:
+                        actual_model = fb_actual
+                        break
+                except Exception:
+                    continue
+
+        if response is None:
+            return {"error": "All models failed to respond"}
+
+        # Track tokens (Pydantic .get() returns None not the default, so use `or 0`)
+        input_tokens = response.get("prompt_eval_count", 0) or 0
+        output_tokens = response.get("eval_count", 0) or 0
+        self._record_tokens(actual_model, input_tokens, output_tokens)
+
+        return {
+            "message": response.get("message", {}),
+            "model": actual_model,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+        }
+
     def _warmup_models(self) -> None:
         """Warm up local Ollama models with a keep-alive ping. Skipped for cloud models."""
         models_to_warm = [
@@ -372,40 +522,40 @@ class OllamaBrain:
     def _save_history(self) -> None:
         """Save conversation history to disk."""
         with self._history_lock:
-            data_str = json.dumps(
-                {
-                    "history": self.conversation_history,
-                    "query_count": self._query_count,
-                    "total_query_count": self._total_query_count,
-                },
-                indent=2,
-                ensure_ascii=False,
-            )
-            # Capture path inside the lock so a concurrent conversation switch
-            # cannot cause us to write to the wrong file in the background.
-            path = self._history_file
+            self._save_history_unlocked()
+
+    def _save_history_unlocked(self) -> None:
+        """Save conversation history to disk — caller MUST hold _history_lock."""
+        data_str = json.dumps(
+            {
+                "history": self.conversation_history,
+                "query_count": self._query_count,
+                "total_query_count": self._total_query_count,
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+        # Capture path so a concurrent conversation switch
+        # cannot cause us to write to the wrong file in the background.
+        path = self._history_file
         _BG_EXECUTOR.submit(lambda p=path, d=data_str: p.write_text(d, encoding="utf-8"))
         self._update_conversation_index_entry()
 
     def _save_history_snapshot(self, history: list, query_count: int, total_query_count: int) -> None:
         """Save a pre-copied history list to disk (called OUTSIDE _history_lock).
 
-        This avoids holding the lock during disk I/O, which would serialize
-        all concurrent requests behind a slow write.
+        Serializes JSON on the calling thread (fast), then writes to disk
+        in the background pool to avoid blocking request threads on I/O.
         """
         try:
-            data = {
-                "history": history,
-                "query_count": query_count,
-                "total_query_count": total_query_count
-            }
-            self._history_file.write_text(
-                json.dumps(data, indent=2, ensure_ascii=False),
-                encoding="utf-8"
+            data_str = json.dumps(
+                {"history": history, "query_count": query_count, "total_query_count": total_query_count},
+                indent=2, ensure_ascii=False,
             )
-            # Update conversation index metadata
+            path = self._history_file
+            _BG_EXECUTOR.submit(lambda p=path, d=data_str: p.write_text(d, encoding="utf-8"))
             self._update_conversation_index_entry()
-        except IOError as e:
+        except (IOError, RuntimeError) as e:
             logger.warning(f"[BRAIN] Could not save history snapshot: {e}")
 
     # =========================================================================
@@ -636,15 +786,16 @@ class OllamaBrain:
             logger.warning(f"[BRAIN] Conversation not found: {conversation_id}")
             return False
 
-        # Save current conversation
-        self._save_history()
-        self._update_conversation_index_entry()
-        self._invalidate_conversation_cache()
+        with self._history_lock:
+            # Save current conversation (unlocked — we already hold the lock)
+            self._save_history_unlocked()
+            self._update_conversation_index_entry()
+            self._invalidate_conversation_cache()
 
-        # Load new conversation
-        self._current_conversation_id = conversation_id
-        self._history_file = conv_dir / "history.json"
-        self._load_history()
+            # Load new conversation
+            self._current_conversation_id = conversation_id
+            self._history_file = conv_dir / "history.json"
+            self._load_history()
         logger.info(f"[BRAIN] Switched to conversation: {conversation_id} ({len(self.conversation_history)} messages)")
         return True
 
@@ -829,8 +980,9 @@ class OllamaBrain:
 
     def clear_history(self):
         """Clear conversation history to free memory."""
-        self.conversation_history.clear()
-        self._query_count = 0
+        with self._history_lock:
+            self.conversation_history.clear()
+            self._query_count = 0
         self._save_history()
         logger.info("[BRAIN] Conversation history cleared")
 
@@ -858,13 +1010,15 @@ class OllamaBrain:
         self.reset_context()
         logger.info("[BRAIN] Full reset completed")
 
-    def _quick_generate(self, prompt: str) -> str:
+    def _quick_generate(self, prompt: str, timeout: int = 30) -> str:
         """Use MODEL_FAST for cheap/fast generation (summarization, planning).
 
         No history, no system prompt injection — just prompt -> response.
+        Wrapped in call_with_timeout to prevent thread pool starvation.
 
         Args:
             prompt: The prompt to send
+            timeout: Max seconds to wait for response
 
         Returns:
             Generated response string
@@ -872,19 +1026,25 @@ class OllamaBrain:
         fast_model = Config.MODEL_FAST
         try:
             client, actual_model = self._get_client_for_model(fast_model)
-            response = client.chat(
-                model=actual_model,
-                messages=[{"role": "user", "content": prompt}]
+            response = call_with_timeout(
+                lambda: client.chat(
+                    model=actual_model,
+                    messages=[{"role": "user", "content": prompt}]
+                ),
+                timeout=timeout,
+                default=None,
             )
+            if response is None:
+                logger.warning(f"[BRAIN] Quick generate timed out after {timeout}s")
+                return ""
             return response["message"]["content"]
         except Exception as e:
             logger.error(f"[BRAIN] Quick generate failed: {e}")
             return ""
 
     def compact_history(self, focus: str = None) -> str:
-        """Compact conversation history asynchronously."""
-        _BG_EXECUTOR.submit(self._do_compact_history, focus)
-        return ""
+        """Compact conversation history synchronously."""
+        return self._do_compact_history(focus)
 
     def _do_compact_history(self, focus: str = None) -> str:
         """Compact conversation history by summarizing older messages.
@@ -946,22 +1106,20 @@ class OllamaBrain:
         Instead of just resetting the counter, compacts history to preserve
         context. Falls back to simple reset if compaction fails.
         """
-        self._query_count += 1
-        self._total_query_count += 1  # Total count never resets
-        if self._query_count >= self.AUTO_RESET_INTERVAL:
-            logger.info(f"[BRAIN] Auto-compact after {self._query_count} queries (total: {self._total_query_count})")
-            self._query_count = 0
-            # Try to compact instead of just saving
-            try:
-                summary = self.compact_history()
-                if summary:
-                    logger.info(f"[BRAIN] Auto-compacted history: {summary[:100]}...")
-                    self._compaction_pending = True  # Phase 4: notify user on next response
-                else:
-                    self._save_history()
-            except Exception as e:
-                logger.warning(f"[BRAIN] Auto-compact failed, saving history: {e}")
-                self._save_history()
+        with self._history_lock:
+            self._query_count += 1
+            self._total_query_count += 1  # Total count never resets
+            needs_compact = self._query_count >= self.AUTO_RESET_INTERVAL
+            if needs_compact:
+                self._query_count = 0
+        if not needs_compact:
+            return
+        logger.info(f"[BRAIN] Auto-compact triggered (total: {self._total_query_count})")
+        # Submit compaction to background (it handles its own save on completion)
+        try:
+            self.compact_history()
+        except Exception as e:
+            logger.warning(f"[BRAIN] Auto-compact submission failed: {e}")
 
     def _get_cached_system_additions(self) -> str:
         """Return TTL-cached subsystem additions for the system prompt.
@@ -1055,6 +1213,10 @@ class OllamaBrain:
                 pass
 
             result = "\n\n".join(additions)
+            # Cap module additions to 4K chars to prevent context overflow
+            if len(result) > 4000:
+                logger.warning(f"[BRAIN] System additions too large ({len(result)} chars), truncating to 4000")
+                result = result[:4000]
             self._cached_system_additions = result
             self._system_additions_ts = time.time()
             return result
@@ -1115,9 +1277,8 @@ class OllamaBrain:
 
         # === PROJECT CONTEXT INJECTION (AURA.md + auto-detect fallback) ===
         try:
-            import os as _os
             _now = time.time()
-            _cwd = _os.getcwd()
+            _cwd = os.getcwd()
             # 60-second cache to avoid re-detecting every query
             if (not hasattr(self, '_project_ctx_cache')
                     or self._project_ctx_cache is None
@@ -1144,12 +1305,13 @@ class OllamaBrain:
             pass
 
         # === SEMANTIC CODEBASE CONTEXT ===
+        # Skip expensive operations if prompt is already near 12K cap
+        MAX_SYSTEM_PROMPT_CHARS = 12000
         try:
             from aura.tools.codebase_index import CodebaseIndex
-            import os
             _cwd = os.getcwd()
             _idx_db = Path(_cwd) / ".aura" / "index.db"
-            if _idx_db.exists():
+            if _idx_db.exists() and len(full) < MAX_SYSTEM_PROMPT_CHARS - 1000:
                 idx = CodebaseIndex(_cwd)
                 try:
                     if idx.stats()["total_chunks"] > 0:
@@ -1202,7 +1364,8 @@ class OllamaBrain:
 
         # === EPISODIC MEMORY AUTO-RECALL ===
         # Surface relevant past context for non-trivial queries (best-effort, never blocks)
-        if len(prompt) > 25:
+        # Skip if already near budget cap
+        if len(prompt) > 25 and len(full) < MAX_SYSTEM_PROMPT_CHARS - 500:
             try:
                 if hasattr(self, '_episodic_memory') and self._episodic_memory:
                     memories = self._episodic_memory.quick_recall(prompt, limit=3)
@@ -1216,7 +1379,15 @@ class OllamaBrain:
                 pass
 
         budget = self._classify_budget(prompt)
-        return f"{full}{self._build_budget_instruction(budget)}"
+        full = f"{full}{self._build_budget_instruction(budget)}"
+
+        # Safety: cap system prompt to ~12K chars (~3K tokens) to leave room
+        # for conversation history and response in the model's context window.
+        if len(full) > MAX_SYSTEM_PROMPT_CHARS:
+            logger.warning(f"[BRAIN] System prompt too large ({len(full)} chars), truncating to {MAX_SYSTEM_PROMPT_CHARS}")
+            full = full[:MAX_SYSTEM_PROMPT_CHARS] + "\n\n[System context truncated for length]"
+
+        return full
 
     def think(
         self,
@@ -1272,7 +1443,7 @@ class OllamaBrain:
         # Neuromodulator: Serotonin modulates patience (timeout)
         # High serotonin = more patience = longer timeout; low = impatient = shorter
         neuro = _get_neuromodulator_levels()
-        adjusted_timeout = int(_neuro_scale(LLM_TIMEOUT, neuro["serotonin"], sensitivity=0.3))
+        adjusted_timeout = max(45, int(_neuro_scale(LLM_TIMEOUT, neuro["serotonin"], sensitivity=0.3)))
         _llm_start_ts = time.time()  # Track LLM latency for routing stats
         logger.debug(f"[BRAIN] Calling {model} with timeout={adjusted_timeout}s (serotonin={neuro['serotonin']:.2f})")
 
@@ -1321,7 +1492,7 @@ class OllamaBrain:
         budget_tokens = self._classify_budget(prompt)
         budget_num_predict = budget_tokens * 2
         # Take the lower of neuromodulator-adjusted and budget-forced cap
-        effective_num_predict = min(adjusted_num_predict, budget_num_predict)
+        effective_num_predict = max(512, min(adjusted_num_predict, budget_num_predict))
 
         llm_options = {
             "temperature": adjusted_temp,
@@ -1457,7 +1628,8 @@ class OllamaBrain:
         system_prompt: Optional[str] = None,
         use_history: bool = True,
         task_type: Optional[TaskType] = None,
-        tone_modifier: Optional[str] = None
+        tone_modifier: Optional[str] = None,
+        model_override: Optional[str] = None
     ):
         """Generate a streaming response using Ollama for reasoning tasks.
 
@@ -1469,6 +1641,7 @@ class OllamaBrain:
             use_history: Whether to include conversation history
             task_type: Type of task for model routing (auto-detected if None)
             tone_modifier: Optional emotional tone modifier from EvoEmo/ALMA
+            model_override: Explicit model to use (bypasses all routing)
 
         Yields:
             str: Response chunks as they are generated
@@ -1483,9 +1656,14 @@ class OllamaBrain:
             except Exception as e:
                 logger.debug(f"[BRAIN] ALMA message processing failed: {e}")
 
-        # Select model based on task type, then apply outcome-aware routing overlay
-        model = self._select_model(prompt, task_type)
-        model = self._routing_stats_override(model, task_type)
+        # Use explicit model_override if provided (thread-safe, no shared state)
+        if model_override:
+            logger.info(f"[BRAIN] Using explicit model override: {model_override}")
+            model = model_override
+        else:
+            # Select model based on task type, then apply outcome-aware routing overlay
+            model = self._select_model(prompt, task_type)
+            model = self._routing_stats_override(model, task_type)
         self._last_model_used = model
 
         full_system_prompt = self._build_full_system_prompt(prompt, system_prompt, tone_modifier)
@@ -1545,12 +1723,12 @@ class OllamaBrain:
         adjusted_repeat_penalty = round(_neuro_scale(base_repeat_penalty, ach, sensitivity=0.15), 2)
 
         # Budget-forced num_predict: hard cap based on query complexity
-        # The budget classification gives: conversational=150, default=400, complex=800
+        # The budget classification gives: conversational=BUDGET_SMALL, default=BUDGET_MEDIUM, complex=BUDGET_LARGE
         # We use 2x multiplier for breathing room while still enforcing a ceiling
         budget_tokens = self._classify_budget(prompt)
         budget_num_predict = budget_tokens * 2
         # Take the lower of neuromodulator-adjusted and budget-forced cap
-        effective_num_predict = min(adjusted_num_predict, budget_num_predict)
+        effective_num_predict = max(512, min(adjusted_num_predict, budget_num_predict))
 
         llm_options = {
             "temperature": adjusted_temp,
@@ -1575,13 +1753,23 @@ class OllamaBrain:
             m for m in self._get_fallback_chain(actual_model) if m != actual_model
         ]
 
+        _STREAM_STALE_TIMEOUT = 90  # seconds without a chunk → abort
+
         for _try_model in _models_to_try:
             try:
                 _try_client, _try_actual = self._get_client_for_model(_try_model)
                 if _try_model != _models_to_try[0]:
                     logger.info(f"[BRAIN] Stream fallback: {actual_model} → {_try_actual}")
                 stream = _try_client.chat(model=_try_actual, messages=messages, stream=True, options=llm_options)
+                _last_chunk_time = time.time()
+                _stream_timed_out = False
                 for chunk in stream:
+                    now = time.time()
+                    if now - _last_chunk_time > _STREAM_STALE_TIMEOUT:
+                        logger.warning(f"[BRAIN] Stream stale for {_STREAM_STALE_TIMEOUT}s, aborting")
+                        _stream_timed_out = True
+                        break
+                    _last_chunk_time = now
                     if chunk and "message" in chunk and "content" in chunk["message"]:
                         content = chunk["message"]["content"]
                         full_response += content
@@ -1590,12 +1778,16 @@ class OllamaBrain:
                     if chunk.get("done"):
                         _stream_in_tok = chunk.get("prompt_eval_count", 0) or 0
                         _stream_out_tok = chunk.get("eval_count", 0) or 0
+                if _stream_timed_out:
+                    raise TimeoutError(f"Stream stale for {_STREAM_STALE_TIMEOUT}s")
                 actual_model = _try_actual
                 self._last_model_used = actual_model
                 break
             except Exception as e:
                 if _try_model == _models_to_try[-1]:
-                    logger.error(f"[BRAIN] All stream models failed: {e}")
+                    import traceback
+                    _tb = traceback.format_exc()
+                    logger.error(f"[BRAIN] All stream models failed: {e}\n{_tb}")
                     fallback = "I'm having trouble processing that right now. Please try again."
                     yield fallback
                     full_response += fallback
@@ -1934,236 +2126,31 @@ List 3-5 key observations. Be brief."""
 
         tool_descriptions = self._get_tool_descriptions(available_tools)
 
-        # Detect task type from goal
-        goal_lower = goal.lower()
-
-        # Vision/image analysis keywords
-        vision_keywords = [
-            'analyze', 'describe', 'what do you see', 'look at this image',
-            'what\'s in this image', 'what is in this image', 'examine image',
-            'read this image', 'interpret', 'identify', 'recognize'
-        ]
-        is_vision_task = any(kw in goal_lower for kw in vision_keywords)
-
-        # Screenshot keywords
-        screenshot_keywords = [
-            'screenshot', 'screen shot', 'capture screen', 'screen capture',
-            'take a picture of screen', 'grab screen', 'what\'s on my screen',
-            'what is on my screen', 'capture my screen', 'print screen'
-        ]
-        is_screenshot_task = any(kw in goal_lower for kw in screenshot_keywords)
-
-        # Combined screenshot + vision task (e.g., "take a screenshot and describe it")
-        is_screenshot_and_vision = is_screenshot_task and (
-            is_vision_task or
-            'and describe' in goal_lower or
-            'and analyze' in goal_lower or
-            'and tell me' in goal_lower or
-            'then describe' in goal_lower or
-            'then analyze' in goal_lower
-        )
-
-        # Search/web keywords
-        search_keywords = [
-            'search', 'find', 'look up', 'lookup', 'google', 'web', 'internet',
-            'online', 'news', 'latest', 'current', 'today', 'price', 'weather',
-            'stock', 'bitcoin', 'crypto', 'what is the', 'who is', 'where is',
-            'when did', 'how much', 'trending', 'recent', 'update'
-        ]
-        is_search_task = any(kw in goal_lower for kw in search_keywords) and not is_screenshot_task and not is_vision_task
-
-        # Code/calculation keywords
-        code_keywords = [
-            'python', 'calculate', 'compute', 'factorial', 'code', 'program',
-            'script', 'generate', 'write code', 'run', 'execute', 'math',
-            'sum', 'average', 'sort', 'algorithm', 'function', 'check',
-            'prime', 'number', 'verify', 'test', 'fibonacci', 'loop',
-            'print', 'multiply', 'divide', 'add', 'subtract', 'power',
-            'square', 'root', 'modulo', 'remainder', 'even', 'odd'
-        ]
-        is_code_task = any(kw in goal_lower for kw in code_keywords) and not is_search_task and not is_screenshot_task and not is_vision_task
-
-        # PDF keywords
-        pdf_keywords = [
-            'pdf', '.pdf', 'document', 'read pdf', 'extract pdf', 'summarize pdf',
-            'pdf file', 'open pdf', 'pdf content', 'pdf text', 'pdf pages',
-            'search pdf', 'find in pdf', 'pdf info', 'pdf metadata'
-        ]
-        is_pdf_task = any(kw in goal_lower for kw in pdf_keywords)
-
-        # Clipboard keywords - check for explicit clipboard mentions
-        clipboard_keywords = [
-            'clipboard', 'paste', 'copied', 'what\'s in my clipboard',
-            'what is in my clipboard', 'read clipboard', 'write clipboard',
-            'copy to clipboard', 'analyze clipboard', 'clipboard content'
-        ]
-        # Only mark as PURE clipboard task if clipboard is mentioned WITHOUT other tool keywords
-        # This allows multi-tool tasks like "read clipboard then search web"
-        has_clipboard = 'clipboard' in goal_lower
-        has_other_tools = is_search_task or is_code_task or is_screenshot_task or is_vision_task or is_pdf_task
-        is_clipboard_task = has_clipboard and not has_other_tools
-
-        # System control keywords
-        system_control_keywords = [
-            'system info', 'system information', 'cpu usage', 'cpu', 'ram usage',
-            'ram', 'memory usage', 'gpu', 'gpu usage', 'disk usage', 'disk space',
-            'get volume', 'set volume', 'volume level', 'get brightness',
-            'set brightness', 'brightness level', 'open app', 'launch app',
-            'open notepad', 'open calculator', 'open browser', 'open chrome',
-            'open firefox', 'open vscode', 'open terminal', 'lock screen',
-            'show me system', 'what is my cpu', 'what is my ram', 'how much ram',
-            'how much memory', 'computer info', 'pc info', 'machine info'
-        ]
-        is_system_control_task = any(kw in goal_lower for kw in system_control_keywords) and not is_code_task
-
-        # Notification keywords
-        notification_keywords = [
-            'remind', 'reminder', 'notify', 'notification', 'alert me',
-            'schedule', 'every day', 'every morning', 'every evening',
-            'daily at', 'weekly', 'weekdays', 'in 5 minutes', 'in 10 minutes',
-            'in 30 minutes', 'in an hour', 'in 2 hours', 'set reminder',
-            'set alarm', 'remind me', 'alert when', 'notify when',
-            'list reminders', 'show reminders', 'cancel reminder', 'clear reminders'
-        ]
-        is_notification_task = any(kw in goal_lower for kw in notification_keywords)
-
-        # Tool builder keywords
-        tool_builder_keywords = [
-            'create tool', 'make tool', 'build tool', 'new tool', 'i need a tool',
-            'custom tool', 'generate tool', 'tool builder', 'list custom tools',
-            'test tool', 'enable tool', 'disable tool', 'delete tool', 'remove tool',
-            'rollback tool', 'show custom tools'
-        ]
-        is_tool_builder_task = any(kw in goal_lower for kw in tool_builder_keywords)
-
-        # Store for use in decide_action and _generate_default_code
-        self._current_goal_is_code = is_code_task
-        self._current_goal_is_search = is_search_task
-        self._current_goal_is_screenshot = is_screenshot_task
-        self._current_goal_is_vision = is_vision_task
-        self._current_goal_is_screenshot_and_vision = is_screenshot_and_vision
-        self._current_goal_is_pdf = is_pdf_task
-        self._current_goal_is_clipboard = is_clipboard_task
-        self._current_goal_is_system_control = is_system_control_task
-        self._current_goal_is_notification = is_notification_task
-        self._current_goal_is_tool_builder = is_tool_builder_task
+        # Store goal for decide_action reference
         self._current_goal = goal
 
-        if is_clipboard_task:
-            prompt = f"""Goal: {goal}
+        # Detect screenshot+vision combo for multi-step handling
+        goal_lower = goal.lower()
+        self._current_goal_is_screenshot_and_vision = (
+            any(kw in goal_lower for kw in ('screenshot', 'screen capture', 'capture screen'))
+            and any(kw in goal_lower for kw in ('and describe', 'and analyze', 'and tell me', 'then describe'))
+        )
 
-This is a CLIPBOARD task. Use clipboard tool to read, write, or analyze clipboard content.
-
-Available tools:
-{tool_descriptions}
-
-Create a 1-step plan:
-1. Use clipboard to read/write/analyze the clipboard"""
-        elif is_screenshot_and_vision:
-            prompt = f"""Goal: {goal}
-
-This is a SCREENSHOT + VISION task. First capture the screen, then analyze it.
-
-Available tools:
-{tool_descriptions}
-
-Create a 2-step plan:
-1. Use screenshot to capture the screen
-2. Use vision to analyze/describe the captured screenshot"""
-        elif is_vision_task and not is_screenshot_task:
-            prompt = f"""Goal: {goal}
-
-This is a VISION/IMAGE ANALYSIS task. Use vision tool to analyze an image.
-
-Available tools:
-{tool_descriptions}
-
-Create a 1-step plan:
-1. Use vision to analyze the image"""
-        elif is_screenshot_task:
-            prompt = f"""Goal: {goal}
-
-This is a SCREENSHOT task. Use screenshot tool to capture the screen.
-
-Available tools:
-{tool_descriptions}
-
-Create a 1-step plan:
-1. Use screenshot to capture the screen"""
-        elif is_search_task:
-            prompt = f"""Goal: {goal}
-
-This is a WEB SEARCH task. Use web_search to find information online.
-DO NOT use code_executor for web searches - it cannot access the internet.
-
-Available tools:
-{tool_descriptions}
-
-Create a 2-3 step plan:
-1. Use web_search with a clear search query
-2. Summarize the results if needed"""
-        elif is_code_task:
-            prompt = f"""Goal: {goal}
-
-This is a CODE/CALCULATION task. Use code_executor to run Python code directly.
-DO NOT search the web. Just write and run the Python code.
-
-Available tools:
-{tool_descriptions}
-
-Create a 1-2 step plan:
-1. Use code_executor with the actual Python code to solve this
-2. (Optional) Summarize if needed"""
-        elif is_pdf_task:
-            prompt = f"""Goal: {goal}
-
-This is a PDF task. Use pdf_reader tool to read, extract, or search PDF content.
-
-Available tools:
-{tool_descriptions}
-
-Create a 1-2 step plan:
-1. Use pdf_reader to read/extract/search the PDF
-2. (Optional) Summarize the content if needed"""
-        elif is_system_control_task:
-            prompt = f"""Goal: {goal}
-
-This is a SYSTEM CONTROL task. Use system_control tool to get system info, control volume/brightness, or launch apps.
-
-Available tools:
-{tool_descriptions}
-
-Create a 1-step plan:
-1. Use system_control to execute the system command"""
-        elif is_notification_task:
-            prompt = f"""Goal: {goal}
-
-This is a NOTIFICATION task. Use notifications tool to set reminders, schedule notifications, or create conditional alerts.
-
-Available tools:
-{tool_descriptions}
-
-Create a 1-step plan:
-1. Use notifications to add/list/remove reminder or scheduled task"""
-        elif is_tool_builder_task:
-            prompt = f"""Goal: {goal}
-
-This is a TOOL BUILDER task. Use tool_builder to create, test, enable, disable, or list custom tools.
-
-Available tools:
-{tool_descriptions}
-
-Create a 1-step plan:
-1. Use tool_builder to list/test/enable/disable/create custom tools"""
-        else:
-            prompt = f"""Goal: {goal}
+        prompt = f"""Goal: {goal}
 
 Observations: {observations[:500]}
 
 Available tools:
 {tool_descriptions}
 
-Create a short 3-5 step plan. Be specific about which tool to use for each step."""
+IMPORTANT RULES:
+- For web/internet/online info → use web_search (code_executor CANNOT access the internet)
+- For local files/folders → use filesystem or code_search
+- For running code → use code_executor
+- For screenshots → use screenshot tool
+- For image analysis → use vision tool
+
+Create a short 1-3 step plan. Be specific about which tool to use for each step."""
 
         return self.think(prompt, system_prompt=self._planner_prompt())
 
@@ -2180,283 +2167,47 @@ Create a short 3-5 step plan. Be specific about which tool to use for each step.
 
         tool_descriptions = self._get_tool_descriptions(available_tools)
 
-        # Check task type
-        is_screenshot = getattr(self, '_current_goal_is_screenshot', False)
-        is_search = getattr(self, '_current_goal_is_search', False)
-        is_vision = getattr(self, '_current_goal_is_vision', False)
+        # Special case: screenshot+vision combo where screenshot is already done
         is_screenshot_and_vision = getattr(self, '_current_goal_is_screenshot_and_vision', False)
-        is_clipboard = getattr(self, '_current_goal_is_clipboard', False)
         screenshot_path = getattr(self, '_last_screenshot_path', None)
-
-        # Check clipboard FIRST (before vision which also has "analyze")
-        if is_clipboard:
-            prompt = f"""Plan: {plan[:500]}
-
-This is a CLIPBOARD task. Use clipboard tool to read, write, or analyze clipboard content.
-
-Pick ONE action. Reply ONLY in this format:
-
-TOOL: clipboard
-ACTION: <read/write/analyze> [text to copy]
-REASONING: <why>
-
-Examples:
-
-TOOL: clipboard
-ACTION: read
-REASONING: get current clipboard content
-
-TOOL: clipboard
-ACTION: analyze
-REASONING: detect clipboard content type
-
-TOOL: clipboard
-ACTION: write "hello world"
-REASONING: copy text to clipboard"""
-        # Check combined screenshot+vision (before screenshot alone)
-        elif is_screenshot_and_vision:
-            if screenshot_path:
-                # Screenshot already taken, now use vision
-                prompt = f"""Plan: {plan[:500]}
-
-This is a SCREENSHOT + VISION task. Screenshot was already taken at: {screenshot_path}
-
-NOW use vision tool to analyze the captured screenshot.
-
-Reply ONLY in this format:
-
-TOOL: vision
-ACTION: analyze {screenshot_path}
-REASONING: analyze the captured screenshot"""
-            else:
-                # Need to take screenshot first
-                prompt = f"""Plan: {plan[:500]}
-
-This is a SCREENSHOT + VISION task. Take screenshot first, then analyze it.
-
-Screenshot has NOT been taken yet. Use screenshot tool first.
-
-Reply ONLY in this format:
-
-TOOL: screenshot
-ACTION: capture
-REASONING: need to capture screen first"""
-        elif is_screenshot:
-            prompt = f"""Plan: {plan[:500]}
-
-This is a SCREENSHOT task. You MUST use screenshot tool.
-
-Pick ONE action. Reply ONLY in this format:
-
-TOOL: screenshot
-ACTION: capture
-REASONING: take screenshot of the screen
-
-Example:
-
-TOOL: screenshot
-ACTION: capture full screen
-REASONING: capture current screen"""
-        elif is_search:
-            prompt = f"""Plan: {plan[:500]}
-
-Available tools:
-{tool_descriptions}
-
-This is a WEB SEARCH task. You MUST use web_search tool.
-DO NOT use code_executor - it cannot access the internet!
-
-Pick ONE action. Reply ONLY in this format:
-
-TOOL: web_search
-ACTION: <your search query>
-REASONING: <why>
-
-Examples:
-
-TOOL: web_search
-ACTION: Bitcoin price today USD
-REASONING: find current Bitcoin price
-
-TOOL: web_search
-ACTION: latest AI news 2024
-REASONING: search for recent AI news
-
-TOOL: web_search
-ACTION: weather New York today
-REASONING: get current weather"""
-        elif is_vision:
-            # Vision-only task (not combined with screenshot)
-            prompt = f"""Plan: {plan[:500]}
-
-This is a VISION/IMAGE ANALYSIS task. Use vision tool to analyze an image.
-
-Pick ONE action. Reply ONLY in this format:
-
-TOOL: vision
-ACTION: <analyze/describe/read> <image_path>
-REASONING: <why>
-
-Examples:
-
-TOOL: vision
-ACTION: analyze screenshots/screenshot_20260115_152610.png
-REASONING: analyze what is in the image
-
-TOOL: vision
-ACTION: describe screen screenshots/latest.png
-REASONING: describe what is on screen
-
-TOOL: vision
-ACTION: read text document.png
-REASONING: extract text from image"""
-        elif getattr(self, '_current_goal_is_pdf', False):
-            # PDF task
-            prompt = f"""Plan: {plan[:500]}
-
-This is a PDF task. Use pdf_reader tool to read, extract, or search PDF content.
-
-Pick ONE action. Reply ONLY in this format:
-
-TOOL: pdf_reader
-ACTION: <read/extract/search/info> <pdf_path> [pages/query]
-REASONING: <why>
-
-Examples:
-
-TOOL: pdf_reader
-ACTION: read C:/Documents/report.pdf
-REASONING: read entire PDF content
-
-TOOL: pdf_reader
-ACTION: read C:/Documents/report.pdf pages 1-5
-REASONING: read first 5 pages
-
-TOOL: pdf_reader
-ACTION: search C:/Documents/report.pdf "revenue"
-REASONING: find pages mentioning revenue
-
-TOOL: pdf_reader
-ACTION: info C:/Documents/report.pdf
-REASONING: get PDF metadata and page count"""
-        elif getattr(self, '_current_goal_is_system_control', False):
-            # System control task
-            prompt = f"""Plan: {plan[:500]}
-
-This is a SYSTEM CONTROL task. Use system_control tool.
-
-Pick ONE action. Reply ONLY in this format:
-
-TOOL: system_control
-ACTION: <get_system_info/get_volume/set_volume/get_brightness/set_brightness/open_app/lock_screen> [args]
-REASONING: <why>
-
-Examples:
-
-TOOL: system_control
-ACTION: get_system_info
-REASONING: get CPU, RAM, GPU, and disk usage
-
-TOOL: system_control
-ACTION: set_volume 50
-REASONING: set volume to 50%
-
-TOOL: system_control
-ACTION: open_app notepad
-REASONING: launch notepad application
-
-TOOL: system_control
-ACTION: get_brightness
-REASONING: get current screen brightness"""
-        elif getattr(self, '_current_goal_is_notification', False):
-            # Notification task
-            prompt = f"""Plan: {plan[:500]}
-
-This is a NOTIFICATION task. Use notifications tool.
-
-Pick ONE action. Reply ONLY in this format:
-
-TOOL: notifications
-ACTION: <add_reminder/add_scheduled/add_condition/list/remove/clear> [args]
-REASONING: <why>
-
-Examples:
-
-TOOL: notifications
-ACTION: add_reminder "take a break" in 30 minutes
-REASONING: set a reminder for 30 minutes
-
-TOOL: notifications
-ACTION: add_scheduled "standup meeting" 9:00 AM daily
-REASONING: schedule daily notification at 9 AM
-
-TOOL: notifications
-ACTION: add_condition "high CPU alert" cpu 80
-REASONING: alert when CPU exceeds 80%
-
-TOOL: notifications
-ACTION: list
-REASONING: show all scheduled tasks"""
-        elif getattr(self, '_current_goal_is_tool_builder', False):
-            # Tool builder task
-            prompt = f"""Plan: {plan[:500]}
-
-This is a TOOL BUILDER task. Use tool_builder tool.
-
-Pick ONE action. Reply ONLY in this format:
-
-TOOL: tool_builder
-ACTION: <list/test/enable/disable/rollback> [tool_name]
-REASONING: <why>
-
-Examples:
-
-TOOL: tool_builder
-ACTION: list
-REASONING: list all custom tools
-
-TOOL: tool_builder
-ACTION: test my_tool
-REASONING: run tests for my_tool
-
-TOOL: tool_builder
-ACTION: enable my_tool
-REASONING: activate the tool after testing
-
-TOOL: tool_builder
-ACTION: disable my_tool
-REASONING: temporarily disable the tool"""
-        else:
-            prompt = f"""Plan: {plan[:500]}
-
+        extra_context = ""
+        if is_screenshot_and_vision and screenshot_path:
+            extra_context = f"\nNote: Screenshot was already captured at: {screenshot_path}. Use vision tool to analyze it now."
+
+        prompt = f"""Plan: {plan[:500]}
+{extra_context}
 Available tools:
 {tool_descriptions}
 
 Pick ONE action. Reply ONLY in this format:
 
 TOOL: <tool_name>
-ACTION: <actual code, path, or query>
+ACTION: <actual code, path, query, or command>
 REASONING: <why>
 
 RULES:
-- For calculations/math/Python -> use code_executor with ACTUAL Python code
-- For local files -> use filesystem
-- For internet/online info -> use web_search (NOT code_executor!)
-- code_executor CANNOT access the internet - use web_search instead!
+- For web/internet/online info → use web_search (code_executor CANNOT access the internet)
+- For local files/folders → use filesystem (list, read, write, delete)
+- For code search/grep → use code_search
+- For editing code files → use code_edit
+- For running Python code → use code_executor
+- For screenshots → use screenshot
+- For image analysis → use vision
+- For shell commands → use shell_executor
 
 Examples:
 
-TOOL: code_executor
-ACTION: import math; print(math.factorial(50))
-REASONING: calculate factorial
+TOOL: filesystem
+ACTION: list C:/Users/asus/Desktop/MyProject
+REASONING: see project contents
 
 TOOL: web_search
 ACTION: Bitcoin price today
 REASONING: search internet for price
 
-TOOL: filesystem
-ACTION: list C:/Users/project
-REASONING: see directory"""
+TOOL: code_search
+ACTION: grep "def main" *.py
+REASONING: find main function"""
 
         response = self.think(prompt, system_prompt=self._actor_prompt())
         return self._parse_action_response(response)
@@ -2596,9 +2347,6 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
         """Parse the action decision response with better extraction for local models."""
         result = {"tool": None, "action": None, "reasoning": None, "raw": response}
 
-        # Check if this is a code task - if so, force code_executor
-        is_code_task = getattr(self, '_current_goal_is_code', False)
-
         # Try to find TOOL, ACTION, REASONING in the response
         for line in response.split("\n"):
             line = line.strip()
@@ -2713,121 +2461,10 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
             # Try to extract a search query from the response
             result["action"] = self._extract_search_query(response)
 
-        # FORCE code_executor for code tasks - override any wrong tool selection
-        if is_code_task and result["tool"] != "code_executor":
-            result["tool"] = "code_executor"
-            # Try to extract code from the action or response
-            if result["action"]:
-                # Clean up action to be valid Python code
-                action = result["action"]
-                # If it looks like a description, try to extract actual code
-                if not any(ind in action for ind in ['print(', '=', 'import ', 'def ', 'for ', 'if ']):
-                    # Extract any Python-like code from the full response
-                    code = self._extract_code_from_response(response)
-                    if code:
-                        result["action"] = code
-                    else:
-                        # Generate default code based on the original goal
-                        result["action"] = self._generate_default_code()
-
-        # Also force code_executor if action looks like code
+        # If action looks like Python code, ensure tool is code_executor
         if result["tool"] != "code_executor" and result["action"]:
             if any(ind in result["action"] for ind in ['print(', 'import ', 'def ', 'for i in']):
                 result["tool"] = "code_executor"
-
-        # FORCE clipboard for clipboard tasks - override tool AND action
-        is_clipboard_task = getattr(self, '_current_goal_is_clipboard', False)
-        if is_clipboard_task:
-            result["tool"] = "clipboard"
-            goal = getattr(self, '_current_goal', '').lower()
-            current_action = (result.get("action") or "").lower()
-
-            # Determine correct action based on goal keywords
-            if 'analyze' in goal or 'type' in goal or 'detect' in goal:
-                result["action"] = "analyze"
-            elif 'copy' in goal or 'write' in goal:
-                # Extract text to copy if present in action
-                if '"' in current_action:
-                    # Keep action with quoted text
-                    pass
-                elif 'write' in current_action and len(current_action) > 10:
-                    # Keep action if it has text after "write"
-                    pass
-                else:
-                    result["action"] = "write"
-            else:
-                # Default to read for "what's in clipboard", "paste", etc.
-                result["action"] = "read"
-
-        # FORCE system_control for system control tasks
-        is_system_control_task = getattr(self, '_current_goal_is_system_control', False)
-        if is_system_control_task:
-            result["tool"] = "system_control"
-            goal = getattr(self, '_current_goal', '').lower()
-            current_action = (result.get("action") or "").lower()
-
-            # Determine correct action based on goal keywords
-            if 'volume' in goal:
-                if 'set' in goal or any(c.isdigit() for c in goal):
-                    result["action"] = current_action if 'volume' in current_action else "set_volume"
-                else:
-                    result["action"] = "get_volume"
-            elif 'brightness' in goal:
-                if 'set' in goal or any(c.isdigit() for c in goal):
-                    result["action"] = current_action if 'brightness' in current_action else "set_brightness"
-                else:
-                    result["action"] = "get_brightness"
-            elif 'open' in goal or 'launch' in goal:
-                result["action"] = current_action if 'open' in current_action else "open_app"
-            elif 'lock' in goal:
-                result["action"] = "lock_screen"
-            else:
-                # Default to get_system_info for "system info", "cpu", "ram", etc.
-                result["action"] = "get_system_info"
-
-        # FORCE notifications for notification tasks
-        is_notification_task = getattr(self, '_current_goal_is_notification', False)
-        if is_notification_task:
-            result["tool"] = "notifications"
-            goal = getattr(self, '_current_goal', '').lower()
-            current_action = (result.get("action") or "").lower()
-
-            # Determine correct action based on goal keywords
-            if 'list' in goal or 'show' in goal or 'all' in goal:
-                result["action"] = "list"
-            elif 'remove' in goal or 'delete' in goal or 'cancel' in goal:
-                result["action"] = current_action if 'remove' in current_action else "remove"
-            elif 'clear' in goal:
-                result["action"] = "clear"
-            elif 'condition' in goal or 'alert when' in goal or 'notify when' in goal or ('cpu' in goal and ('above' in goal or 'exceed' in goal or '%' in goal)):
-                result["action"] = current_action if 'condition' in current_action else "add_condition"
-            elif 'schedule' in goal or 'every day' in goal or 'daily' in goal or 'weekday' in goal or 'weekly' in goal or 'every morning' in goal or 'every evening' in goal:
-                result["action"] = current_action if 'scheduled' in current_action else "add_scheduled"
-            else:
-                # Default to add_reminder for "remind me", "in 30 minutes", etc.
-                result["action"] = current_action if 'reminder' in current_action else "add_reminder"
-
-        # FORCE tool_builder for tool builder tasks
-        is_tool_builder_task = getattr(self, '_current_goal_is_tool_builder', False)
-        if is_tool_builder_task:
-            result["tool"] = "tool_builder"
-            goal = getattr(self, '_current_goal', '').lower()
-            current_action = (result.get("action") or "").lower()
-
-            # Determine correct action based on goal keywords
-            if 'list' in goal or 'show' in goal:
-                result["action"] = "list"
-            elif 'test' in goal:
-                result["action"] = current_action if 'test' in current_action else "test"
-            elif 'enable' in goal or 'activate' in goal:
-                result["action"] = current_action if 'enable' in current_action else "enable"
-            elif 'disable' in goal or 'deactivate' in goal:
-                result["action"] = current_action if 'disable' in current_action else "disable"
-            elif 'rollback' in goal or 'delete' in goal or 'remove' in goal:
-                result["action"] = current_action if 'rollback' in current_action else "rollback"
-            else:
-                # Default to list for general tool builder queries
-                result["action"] = current_action if current_action else "list"
 
         return result
 

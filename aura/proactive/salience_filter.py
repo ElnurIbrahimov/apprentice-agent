@@ -22,6 +22,7 @@ from typing import Dict, List, Set, Any, Optional
 import hashlib
 import json
 
+from aura.config import Config
 from .event_bus import Event, EventPriority
 
 logger = logging.getLogger(__name__)
@@ -57,7 +58,7 @@ class FilteredEvent:
     @property
     def passed(self) -> bool:
         """Check if event passed the filter."""
-        return self.salience_score >= 0.3  # Default threshold
+        return self.salience_score >= Config.SALIENCE_FILTER_THRESHOLD
 
 
 class SalienceFilter:
@@ -114,20 +115,20 @@ class SalienceFilter:
     def __init__(
         self,
         weights: Optional[SalienceWeights] = None,
-        threshold: float = 0.3,
-        seen_event_ttl: float = 3600.0  # 1 hour
+        threshold: Optional[float] = None,
+        seen_event_ttl: Optional[float] = None,
     ):
         """
         Initialize the salience filter.
 
         Args:
             weights: Custom salience weights
-            threshold: Minimum salience to pass filter
-            seen_event_ttl: How long to remember seen events
+            threshold: Minimum salience to pass filter (default from Config)
+            seen_event_ttl: How long to remember seen events (default from Config)
         """
         self.weights = weights or SalienceWeights()
-        self.threshold = threshold
-        self.seen_event_ttl = seen_event_ttl
+        self.threshold = threshold if threshold is not None else Config.SALIENCE_FILTER_THRESHOLD
+        self.seen_event_ttl = seen_event_ttl if seen_event_ttl is not None else Config.SALIENCE_SEEN_EVENT_TTL
 
         # Context for relevance matching
         self.context_keywords: Set[str] = set()
@@ -135,7 +136,8 @@ class SalienceFilter:
 
         # Tracking seen events for novelty
         self._seen_events: Dict[str, float] = {}  # hash -> timestamp
-        self._seen_event_limit = 1000
+        self._seen_event_count_since_cleanup = 0
+        self._last_cleanup_time: float = time.monotonic()
 
         # Custom importance rules
         self.importance_rules: Dict[str, float] = self.DEFAULT_IMPORTANCE.copy()
@@ -329,14 +331,21 @@ class SalienceFilter:
         except Exception:
             pass
 
-        # Cleanup old entries
-        if len(self._seen_events) > self._seen_event_limit:
+        # Periodic cleanup: every N events OR every M seconds, whichever comes first
+        self._seen_event_count_since_cleanup += 1
+        mono_now = time.monotonic()
+        if (
+            self._seen_event_count_since_cleanup >= Config.SALIENCE_CLEANUP_INTERVAL
+            or mono_now - self._last_cleanup_time >= Config.SALIENCE_CLEANUP_PERIOD
+        ):
             self._cleanup_seen_events()
+            self._seen_event_count_since_cleanup = 0
+            self._last_cleanup_time = mono_now
 
         return novelty
 
     def _cleanup_seen_events(self) -> None:
-        """Remove expired entries from seen events."""
+        """Remove expired entries from seen events (TTL-based, runs periodically)."""
         now = time.time()
         expired = [
             h for h, t in self._seen_events.items()
@@ -525,9 +534,9 @@ class SalienceFilter:
             elif event.event_type in self._llm_skip_types:
                 self._stats["llm_skipped_type"] += 1
             else:
-                # Mid-range event — ask the LLM (5s timeout to avoid blocking event thread)
+                # Mid-range event — ask the LLM (timeout to avoid blocking event thread)
                 try:
-                    llm_score = self._llm_pool.submit(self._llm_score_event, event, heuristic_score).result(timeout=5.0)
+                    llm_score = self._llm_pool.submit(self._llm_score_event, event, heuristic_score).result(timeout=Config.SALIENCE_LLM_TIMEOUT)
                 except FuturesTimeoutError:
                     llm_score = None
                     logger.debug("[SalienceFilter] LLM scoring timed out")

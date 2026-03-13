@@ -92,7 +92,7 @@ class AlwaysOnContextEngine:
     SAFE_EXTENSIONS = {
         '.py', '.js', '.ts', '.tsx', '.jsx', '.html', '.css',
         '.json', '.yaml', '.yml', '.toml', '.md', '.txt',
-        '.env', '.sh', '.bat', '.sql', '.csv',
+        '.sh', '.bat', '.sql', '.csv',
     }
     MAX_FILE_CHARS = 50_000
 

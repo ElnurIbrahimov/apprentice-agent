@@ -19,6 +19,8 @@ from datetime import datetime
 import json
 import os
 
+from aura.jsonl_utils import rotate_jsonl_if_needed
+
 logger = logging.getLogger(__name__)
 
 
@@ -877,6 +879,7 @@ class MetacognitiveGuardian:
         outcomes_file = os.path.join(self.data_dir, "outcomes", "all_outcomes.jsonl")
 
         try:
+            rotate_jsonl_if_needed(outcomes_file)
             with open(outcomes_file, 'a', encoding='utf-8') as f:
                 f.write(json.dumps(outcome) + '\n')
         except (IOError, OSError) as e:

@@ -61,12 +61,12 @@ class AuraDaemon:
         self._agent_ready = threading.Event()
         self._load_agent_thread: Optional[threading.Thread] = None
         self._last_screen_hash = None
-        self._last_activity = time.time()
+        self._last_activity = time.monotonic()
         self._event_bus = EventBus()
         self._proactive = ProactiveEngine(self._event_bus)
         self._ipc = IPCServer(self._event_bus)
 
-        # Tick tracking
+        # Tick tracking (monotonic for interval measurement)
         self._last_hooks_tick = 0.0
         self._last_idle_tick = 0.0
         self._last_dream_date = None
@@ -101,7 +101,7 @@ class AuraDaemon:
     def _run_loop(self):
         """Main heartbeat loop."""
         while self._running:
-            now = time.time()
+            now = time.monotonic()
 
             # 5s: screen monitoring (non-blocking)
             t = threading.Thread(target=self._tick_screen, daemon=True)
@@ -165,7 +165,7 @@ class AuraDaemon:
 
     def _tick_idle(self):
         """Check idle state, maybe trigger light dream."""
-        idle_secs = time.time() - self._last_activity
+        idle_secs = time.monotonic() - self._last_activity
         if idle_secs >= 1800:  # 30 minutes idle
             logger.info(f"Idle for {idle_secs/60:.0f}min — triggering light dream")
             self._event_bus.emit("daemon:idle", {"idle_seconds": idle_secs})
@@ -228,37 +228,54 @@ class AuraDaemon:
 
     def record_activity(self):
         """Call this when user interacts — resets idle timer."""
-        self._last_activity = time.time()
+        self._last_activity = time.monotonic()
         if self._agent and hasattr(self._agent, 'neurodream') and self._agent.neurodream:
             self._agent.neurodream.record_activity()
 
     # ── PID management ──────────────────────────────────────────────────────
 
     def _write_pid(self):
-        PID_FILE.write_text(str(os.getpid()))
+        try:
+            PID_FILE.write_text(str(os.getpid()))
+        except OSError as e:
+            logger.error(f"Failed to write PID file: {e}")
 
     def _remove_pid(self):
-        PID_FILE.unlink(missing_ok=True)
+        try:
+            PID_FILE.unlink(missing_ok=True)
+        except OSError as e:
+            logger.warning(f"Failed to remove PID file: {e}")
 
     @staticmethod
     def is_running() -> bool:
-        if not PID_FILE.exists():
-            return False
+        """Check if daemon is running. Handles TOCTOU race on PID file."""
         try:
-            pid = int(PID_FILE.read_text().strip())
-        except (ValueError, OSError):
+            pid_text = PID_FILE.read_text().strip()
+            pid = int(pid_text)
+        except (FileNotFoundError, ValueError, OSError):
             return False
+
+        # Verify process is actually alive
         try:
             import psutil
-            return psutil.pid_exists(pid)
+            try:
+                proc = psutil.Process(pid)
+                return proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE
+            except psutil.NoSuchProcess:
+                return False
+            except psutil.AccessDenied:
+                return True  # Process exists but we can't inspect it
+            except psutil.ZombieProcess:
+                return False
         except ImportError:
             pass
+
         # Fallback: tasklist check on Windows
         try:
             import subprocess
             result = subprocess.run(
                 ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-                capture_output=True, text=True, timeout=3
+                capture_output=True, text=True, timeout=3,
             )
             return str(pid) in result.stdout
         except Exception:
@@ -313,7 +330,7 @@ class ProactiveEngine:
 
     def __init__(self, event_bus: EventBus):
         self._event_bus = event_bus
-        self._last_proactive = 0.0
+        self._last_proactive = 0.0  # monotonic timestamp
         self._cooldown_lock = threading.Lock()
         event_bus.subscribe("screen:error_detected", self._on_event)
         event_bus.subscribe("daemon:agent_ready", self._on_agent_ready)
@@ -327,7 +344,7 @@ class ProactiveEngine:
         logger.info("Proactive engine: agent ready, monitoring active")
 
     def _maybe_surface(self, event_type: str, data: dict, score: float):
-        now = time.time()
+        now = time.monotonic()
         with self._cooldown_lock:
             if now - self._last_proactive < self.COOLDOWN:
                 return

@@ -175,10 +175,11 @@ class StateExtractor:
             conversation=conversation_text,
         )
 
-        # Call LLM
+        # Call LLM — use _quick_generate (lightweight, timeout-protected) instead
+        # of brain.think() which builds a full system prompt with 8+ module injections.
         try:
             brain = self._get_brain()
-            response = brain.think(prompt, use_history=False)
+            response = brain._quick_generate(prompt, timeout=45)
         except Exception as e:
             logger.debug(f"[StateExtractor] LLM call failed: {e}")
             return None

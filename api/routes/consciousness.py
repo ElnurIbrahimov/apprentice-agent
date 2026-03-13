@@ -11,10 +11,12 @@ import logging
 import time
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 
-router = APIRouter(prefix="/api/consciousness", tags=["consciousness"])
+from api.auth import require_api_key
+
+router = APIRouter(prefix="/api/consciousness", tags=["consciousness"], dependencies=[Depends(require_api_key)])
 
 logger = logging.getLogger(__name__)
 

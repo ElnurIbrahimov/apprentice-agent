@@ -16,10 +16,12 @@ via get_awareness_context() into inner thoughts.
 import logging
 import threading
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Dict, List, Optional
+
+from aura.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +78,7 @@ class ProactiveAwarenessEngine:
     and goal blockers. Filters, deduplicates, and stores resulting insights.
     """
 
-    MIN_CONFIDENCE = 0.4
+    MIN_CONFIDENCE = Config.PROACTIVE_MIN_CONFIDENCE
     DELIVERY_URGENCY_THRESHOLD = 0.5
     SIMILAR_INSIGHT_COOLDOWN = 24  # hours
     MAX_INSIGHTS_PER_RUN = 3

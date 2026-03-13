@@ -268,10 +268,12 @@ class UserMindModel:
 
     def _update_trust(self, message: str) -> None:
         """Update trust calibration based on interaction patterns."""
+        from aura.config import Config
+
         # Positive interactions slowly increase trust
         if self.emotional_state.frustration < 0.3:
             self.relationship.trust_score = min(
-                1.0, self.relationship.trust_score + 0.002
+                1.0, self.relationship.trust_score + Config.TRUST_INCREMENT
             )
 
         # Adversarial signals decrease trust
@@ -281,7 +283,7 @@ class UserMindModel:
         ]
         if any(sig in message.lower() for sig in adversarial_signals):
             self.relationship.trust_score = max(
-                0.0, self.relationship.trust_score - 0.1
+                0.0, self.relationship.trust_score - Config.TRUST_DECREMENT_ADVERSARIAL
             )
             self.relationship.trust_level = TrustLevel.CAUTIOUS
 
@@ -289,11 +291,11 @@ class UserMindModel:
         n = self.relationship.total_messages
         score = self.relationship.trust_score
         if self.relationship.trust_level != TrustLevel.CAUTIOUS:
-            if n < 5:
+            if n < Config.TRUST_ACQUAINTANCE_MESSAGES:
                 self.relationship.trust_level = TrustLevel.NEW
-            elif n < 50 or score < 0.5:
+            elif n < Config.TRUST_FAMILIAR_MESSAGES or score < Config.TRUST_FAMILIAR_SCORE:
                 self.relationship.trust_level = TrustLevel.ACQUAINTANCE
-            elif n < 200 or score < 0.7:
+            elif n < Config.TRUST_TRUSTED_MESSAGES or score < Config.TRUST_TRUSTED_SCORE:
                 self.relationship.trust_level = TrustLevel.FAMILIAR
             else:
                 self.relationship.trust_level = TrustLevel.TRUSTED

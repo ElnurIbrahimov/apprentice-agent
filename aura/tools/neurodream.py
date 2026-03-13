@@ -23,6 +23,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from collections import Counter, defaultdict
 import re
 
+from aura.jsonl_utils import rotate_jsonl_if_needed
+
 logger = logging.getLogger(__name__)
 
 
@@ -1938,12 +1940,14 @@ Rules:
     def _save_session(self, session: SleepSession):
         """Save sleep session to dream journal."""
         journal_file = self.data_dir / "dream_journal.jsonl"
+        rotate_jsonl_if_needed(journal_file)
         with open(journal_file, 'a') as f:
             f.write(json.dumps(session.to_dict()) + '\n')
 
     def _save_insight(self, insight: DreamInsight):
         """Save dream insight."""
         insights_file = self.data_dir / "insights.jsonl"
+        rotate_jsonl_if_needed(insights_file)
         with open(insights_file, 'a') as f:
             f.write(json.dumps(insight.to_dict()) + '\n')
 
@@ -1958,6 +1962,7 @@ Rules:
     def _save_consolidated_patterns(self, patterns: List[ConsolidatedPattern]):
         """Save consolidated patterns."""
         patterns_file = self.data_dir / "consolidated_patterns.jsonl"
+        rotate_jsonl_if_needed(patterns_file)
         with open(patterns_file, 'a') as f:
             for pattern in patterns:
                 f.write(json.dumps(pattern.to_dict()) + '\n')

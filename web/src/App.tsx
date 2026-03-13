@@ -128,7 +128,17 @@ function App() {
   };
 
   return (
-    <div className="flex h-screen bg-chat-bg">
+    <>
+      {/* Animated mesh gradient background */}
+      <div className="mesh-bg">
+        <div className="mesh-blob blob-1" />
+        <div className="mesh-blob blob-2" />
+        <div className="mesh-blob blob-3" />
+        <div className="mesh-blob blob-4" />
+      </div>
+      <div className="grain" />
+
+    <div className="app-shell">
       {/* Toast notifications */}
       <ToastContainer toasts={toasts} onDismiss={removeToast} />
       {/* Sidebar - Desktop: fixed, Mobile: overlay */}
@@ -155,7 +165,7 @@ function App() {
       {/* Main content */}
       <main className="flex-1 flex flex-col min-w-0">
         {/* Header with tabs */}
-        <header className="flex items-center justify-between px-4 py-2 border-b border-chat-border bg-chat-bg">
+        <header className="flex items-center justify-between px-4 py-2 border-b border-chat-border" style={{ background: 'rgba(3,3,3,0.7)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
           <div className="flex items-center">
             <button
               onClick={toggleSidebar}
@@ -204,6 +214,7 @@ function App() {
         </div>
       </main>
     </div>
+    </>
   );
 }
 

@@ -33,6 +33,8 @@ SLASH_COMMANDS = [
     ("/say", "Text-to-speech (alias)"),
     ("/recall", "Search memories"),
     ("/goal", "Run a goal"),
+    ("/trust", "Enable trust mode (auto-approve all tools)"),
+    ("/cost", "Show session cost breakdown"),
 ]
 
 # Subcommand completions for commands that accept them

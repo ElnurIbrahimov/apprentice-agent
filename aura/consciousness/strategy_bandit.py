@@ -157,9 +157,9 @@ class ProblemClassifier:
                 best_score = score
                 best_category = category
 
-        # Zero keyword matches = conversational/greeting — use a safe category
+        # Zero keyword matches = conversational/greeting — use general-purpose category
         if best_score == 0:
-            best_category = ProblemCategory.DEBUG
+            best_category = ProblemCategory.ANALYSIS
 
         return best_category
 
@@ -382,12 +382,15 @@ class StrategyBandit:
     def _get_arms(self, category: str) -> List[ArmState]:
         """Load arm states for a category from DB."""
         conn = sqlite3.connect(self._db_path)
-        rows = conn.execute(
-            "SELECT strategy, category, alpha, beta, total_pulls, total_reward, last_updated "
-            "FROM strategy_arms WHERE category = ?",
-            (category,),
-        ).fetchall()
-        conn.close()
+        conn.execute("PRAGMA busy_timeout = 3000")
+        try:
+            rows = conn.execute(
+                "SELECT strategy, category, alpha, beta, total_pulls, total_reward, last_updated "
+                "FROM strategy_arms WHERE category = ?",
+                (category,),
+            ).fetchall()
+        finally:
+            conn.close()
 
         return [
             ArmState(

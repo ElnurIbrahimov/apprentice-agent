@@ -342,7 +342,8 @@ class LINEAdapter(ChannelAdapter):
     def _verify_signature(self, body: bytes, signature: str) -> bool:
         """Verify LINE webhook X-Line-Signature header."""
         if not self._secret:
-            return True  # No secret configured — skip verification
+            logger.warning("[LINE] No channel secret configured — rejecting webhook")
+            return False  # Fail closed: require secret for verification
         try:
             digest = hmac.new(
                 self._secret.encode("utf-8"), body, hashlib.sha256

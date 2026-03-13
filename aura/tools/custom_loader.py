@@ -6,11 +6,27 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# Lazy import of the full AST security validator to avoid circular imports.
+_validator = None
+
+def _get_validator():
+    """Lazy-load validate_custom_tool_code from the agent module."""
+    global _validator
+    if _validator is None:
+        try:
+            from aura.agent import validate_custom_tool_code
+            _validator = validate_custom_tool_code
+        except ImportError:
+            logger.warning("[CustomLoader] Could not import validate_custom_tool_code; custom tool validation unavailable")
+            _validator = False  # sentinel: unavailable
+    return _validator
+
 
 def load_custom_tools(custom_dir: Path | None = None) -> dict:
     """Scan custom/ directory and return {tool_name: tool_instance} for valid tools.
 
     A valid tool class has: name (str attr), description (str attr), execute (method).
+    Every file is AST-validated before import to prevent untrusted code execution.
     """
     if custom_dir is None:
         custom_dir = Path(__file__).parent / "custom"
@@ -22,6 +38,20 @@ def load_custom_tools(custom_dir: Path | None = None) -> dict:
     for tool_file in sorted(custom_dir.glob("*.py")):
         if tool_file.name.startswith("_"):
             continue  # Skip __init__.py, __pycache__ etc.
+
+        # SECURITY: Validate tool code before dynamic import
+        try:
+            code = tool_file.read_text(encoding="utf-8")
+        except Exception as e:
+            logger.warning(f"[CustomLoader] Failed to read {tool_file.name}: {e}")
+            continue
+
+        validator = _get_validator()
+        if validator and validator is not False:
+            is_valid, validation_msg = validator(code, str(tool_file))
+            if not is_valid:
+                logger.warning(f"[CustomLoader] BLOCKED {tool_file.name}: {validation_msg}")
+                continue
 
         module_name = f"aura.tools.custom.{tool_file.stem}"
         try:

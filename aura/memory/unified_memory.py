@@ -108,6 +108,8 @@ class UnifiedMemory:
             try:
                 from aura.tools.knowledge_graph import get_knowledge_graph
                 self._kg = get_knowledge_graph()
+                self._kg_available = True
+                self._kg_retry_after = 0.0
                 logger.debug("[UnifiedMemory] KG available")
             except Exception as e:
                 err_str = str(e).lower()
@@ -133,6 +135,8 @@ class UnifiedMemory:
                 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
                 episodic_path = os.path.join(project_root, "aura_data", "episodic_memory")
                 self._episodic = EpisodicMemoryStore(episodic_path)
+                self._episodic_available = True
+                self._episodic_retry_after = 0.0
                 logger.debug("[UnifiedMemory] Episodic available")
             except Exception as e:
                 err_str = str(e).lower()
@@ -587,6 +591,18 @@ class UnifiedMemory:
 
         # Convert to similarity (0-1)
         return 1.0 - (dist / max_dist)
+
+    def close(self) -> None:
+        """Release resources held by memory backends and the thread pool."""
+        try:
+            if self._episodic and hasattr(self._episodic, "close"):
+                self._episodic.close()
+        except Exception:
+            pass
+        try:
+            self._executor.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
 
     def get_available_sources(self) -> List[str]:
         """Get list of available memory backends."""

@@ -77,3 +77,18 @@ skills/community/
 
 # Build backup files
 extension/sidebar.js.bak
+
+# Build outputs (browser extensions)
+dist-chrome/
+dist-firefox/
+
+# SQLite databases
+*.db
+*.db-wal
+*.db-shm
+
+# Log files
+*.log
+
+# Temp audio files
+*.wav

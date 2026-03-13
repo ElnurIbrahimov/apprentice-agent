@@ -11,13 +11,15 @@ from urllib.parse import urlparse
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from api.auth import require_api_key
+
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/research", tags=["research"])
+router = APIRouter(prefix="/api/research", tags=["research"], dependencies=[Depends(require_api_key)])
 
 OLLAMA_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434") + "/api/generate"
 DEFAULT_MODEL = "qwen3.5:397b-cloud"

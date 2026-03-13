@@ -303,11 +303,9 @@ class BrowserExecutor:
                     if attempt < self._max_retries:
                         # Try fallback selector on next attempt
                         if action.fallback_selectors and attempt <= len(action.fallback_selectors):
-                            orig = action.selector
                             action.selector = action.fallback_selectors[attempt - 1]
                             logger.info("[BrowserExec] Trying fallback selector: %s", action.selector)
                             recovery_used = True
-                            action.selector = orig  # restore after dispatch
                         time.sleep(0.5 * attempt)
                         continue
                     # Give up — still mark as executed (postcondition_passed=False)
@@ -434,7 +432,7 @@ class BrowserExecutor:
         try:
             return urlparse(url).netloc == self._allowed_domain
         except Exception:
-            return True  # can't parse → don't abort
+            return False  # can't parse → block by default
 
     def _emit_telemetry(self, result: ActionResult) -> None:
         try:

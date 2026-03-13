@@ -14,6 +14,8 @@ from dataclasses import dataclass, asdict
 from collections import Counter
 import uuid
 
+from aura.jsonl_utils import rotate_jsonl_if_needed
+
 logger = logging.getLogger(__name__)
 
 # Emotion states
@@ -334,6 +336,7 @@ class EvoEmoTool:
     def _append_to_history(self, reading: EmotionReading):
         """Append reading to mood history file."""
         try:
+            rotate_jsonl_if_needed(self.mood_history_file)
             with open(self.mood_history_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(reading.to_dict()) + "\n")
         except Exception as e:

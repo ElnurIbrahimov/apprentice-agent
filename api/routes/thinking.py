@@ -5,17 +5,20 @@ import functools
 import logging
 import random
 import time
+from collections import deque
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from threading import RLock
 from enum import Enum
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+
+from api.auth import require_api_key
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/thinking", tags=["thinking"])
+router = APIRouter(prefix="/api/thinking", tags=["thinking"], dependencies=[Depends(require_api_key)])
 
 # ============================================================================
 # Thought Types and Templates
@@ -145,7 +148,7 @@ class ThinkingStateManager:
         self._lock = RLock()
         self._active_thoughts: List[ActiveThought] = []
         self._max_thoughts = max_active_thoughts
-        self._thought_history: List[ActiveThought] = []
+        self._thought_history: deque = deque(maxlen=200)
         self._last_thought_time = 0.0
         self._last_real_thought_time = 0.0  # Track when last REAL thought arrived
         self._stats = {

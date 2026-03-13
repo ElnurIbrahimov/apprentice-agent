@@ -18,6 +18,8 @@ from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional, Tuple, Set
 from collections import defaultdict
 
+from aura.jsonl_utils import rotate_jsonl_if_needed
+
 logger = logging.getLogger(__name__)
 
 
@@ -250,6 +252,7 @@ class PatternProphet:
 
         # Record to file
         try:
+            rotate_jsonl_if_needed(self.interactions_file)
             with open(self.interactions_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(asdict(interaction)) + "\n")
         except IOError as e:

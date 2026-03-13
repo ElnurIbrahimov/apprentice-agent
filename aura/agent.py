@@ -7,6 +7,12 @@ import logging
 import concurrent.futures
 import ast
 from collections import deque
+
+# Shared executor for tool calls, memory queries, and observation context.
+# Avoids creating+destroying a ThreadPoolExecutor on every message/tool call.
+_AGENT_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=4, thread_name_prefix="agent_shared"
+)
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -153,11 +159,6 @@ try:
 except ImportError:
     CONTEXT_ENGINE_AVAILABLE = False
     AlwaysOnContextEngine = None
-
-# AURA v3.0 ALIVE System — AURAEngine was removed during consolidation.
-# Context building and humanization now handled by _build_aura_context()
-# and _apply_humanization() helper methods (using ALMA).
-AURA_AVAILABLE = False
 
 # AURA Fast Path - Instant responses for simple queries
 try:
@@ -1544,105 +1545,63 @@ class ApprenticeAgent:
     def _is_simple_query(self, goal: str) -> bool:
         """Check if the goal is a simple conversational query.
 
-        IMPORTANT: Tool keywords are checked FIRST. If ANY tool keyword matches,
-        this returns False (not simple) to ensure tools are used.
-
-        Simple queries (return True) include:
-        - Greetings (hello, hi, hey, thanks, bye, etc.)
-        - Questions about the agent itself (who are you, what can you do)
-        - Opinion/preference questions
-        - General knowledge questions without tool needs
+        STRICT: Only pure greetings and identity questions go to fast-path.
+        Everything else goes through the full agent loop with tools.
         """
         goal_lower = goal.lower().strip()
         words = goal_lower.split()
 
-        # ===================================================================
-        # STEP 1: CHECK TOOL KEYWORDS FIRST (HIGHEST PRIORITY)
-        # If ANY tool keyword matches, this is NOT a simple query
-        # ===================================================================
+        # NEVER fast-path if message contains a file path or directory
+        if any(c in goal for c in ('/', '\\', ':\\', '.py', '.js', '.ts', '.md')):
+            return False
 
-        tool_keywords = _TOOL_KEYWORDS
+        # NEVER fast-path if more than 8 words — likely a real task
+        if len(words) > 8:
+            return False
 
-        # CHECK TOOL KEYWORDS FIRST
-        needs_tool = any(kw in goal_lower for kw in tool_keywords)
-        if needs_tool:
-            return False  # NOT simple - use full agent loop with tools
-
-        # Check if query matches any custom tool keywords
+        # NEVER fast-path if any tool keyword matches
+        if any(kw in goal_lower for kw in _TOOL_KEYWORDS):
+            return False
         for kw in self.custom_tool_keywords:
             if kw in goal_lower:
-                return False  # NOT simple - use full agent loop
+                return False
 
-        # ===================================================================
-        # STEP 2: NOW check for simple conversational patterns
-        # Only reaches here if NO tool keywords matched
-        # ===================================================================
-
-        # Greeting patterns - fast-path
+        # Pure greetings only (1-4 words max)
         greetings = [
-            'hello', 'hi', 'hey', 'greetings', 'howdy', 'yo',
+            'hello', 'hi', 'hey', 'yo', 'sup',
             'good morning', 'good afternoon', 'good evening', 'good night',
             'thanks', 'thank you', 'thx', 'bye', 'goodbye', 'see you',
-            'how are you', "what's up", 'whats up', 'sup', "how's it going",
-            'nice to meet you', 'pleased to meet you'
+            'how are you', "what's up", 'whats up', "how's it going",
         ]
         for greeting in greetings:
-            if goal_lower.startswith(greeting) or goal_lower == greeting:
+            if goal_lower == greeting or goal_lower.rstrip('!?.') == greeting:
                 return True
 
-        # Questions about the agent itself - fast-path
-        agent_patterns = [
-            'who are you', 'what are you', 'are you an ai', 'are you a bot',
-            'are you real', 'are you human', 'what can you do', 'what do you do',
-            'how do you work', 'what is your name', "what's your name",
-            'tell me about yourself', 'introduce yourself', 'your capabilities',
-            'what are your abilities', 'can you help', 'how can you help',
-            'what should i call you', 'who made you', 'who created you',
-            'are you chatgpt', 'are you gpt', 'are you claude', 'are you llama',
-            'what model are you', 'what llm are you',
-            # Comparison questions about the agent
-            'compare yourself', 'how do you compare', 'are you better than',
-            'are you worse than', 'vs chatgpt', 'vs gpt', 'vs claude', 'vs gemini',
-            'compared to gpt', 'compared to chatgpt', 'compared to claude',
-            'difference between you', 'how are you different',
-            # Common typos for compare
-            'cmpare yourself', 'compre yourself', 'compar yourself',
-            # Conversational questions about AURA
-            'how have you been', 'how are you doing', 'how you doing',
-            'aura how', 'hey aura', 'hi aura', 'hello aura'
+        # Identity questions only
+        identity_patterns = [
+            'who are you', 'what are you', 'what is your name',
+            "what's your name", 'what can you do', 'introduce yourself',
         ]
-        for pattern in agent_patterns:
+        for pattern in identity_patterns:
+            if goal_lower == pattern or goal_lower.rstrip('?') == pattern:
+                return True
+
+        # Conversational phrases that don't need tools (≤8 words)
+        conversational_patterns = [
+            'can you help', 'help me', 'i need help',
+            'are you there', 'are you ready', 'are you busy',
+            'what do you think', 'tell me about yourself',
+            'nice to meet you', "let's chat", "let's talk",
+            "i'm back", 'im back', 'i have a question',
+            'can i ask you something', 'can you help me',
+            'yes', 'no', 'ok', 'okay', 'sure', 'alright',
+            'got it', 'understood', 'never mind', 'nevermind',
+        ]
+        for pattern in conversational_patterns:
             if pattern in goal_lower:
                 return True
 
-        # Opinion/conversational starters - fast-path
-        conversational_starters = [
-            'what do you think', 'what is your opinion', 'do you like',
-            'do you prefer', 'which is better', 'tell me a joke',
-            'tell me something', 'say something', 'how should i',
-            'what should i do', 'why is', 'why do', 'why are',
-            'explain', 'define', 'meaning of',
-            # Additional conversational patterns
-            'what is', "what's", 'what are', 'how does', 'how do',
-            'can you explain', 'could you explain', 'tell me about',
-            'what does', 'who was', 'who is', 'what was', 'where is',
-            'when did', 'when was', 'how many', 'how much', 'how old',
-            'what do you mean', 'can you elaborate', 'what exactly',
-            'in simple terms', 'briefly explain', 'give me an example',
-            'what would', 'what if', 'is it true', 'is it possible',
-            'do you know', 'have you heard', 'what happens when',
-        ]
-        for starter in conversational_starters:
-            if goal_lower.startswith(starter):
-                # Only fast-path if the full message is under 15 words
-                if len(words) <= 15:
-                    return True
-
-        # Very short queries (under 6 words) with no tool triggers are likely conversational
-        if len(words) <= 5:
-            return True
-
-        # Default: NOT simple (use agent loop to be safe)
+        # Default: NOT simple — use full agent loop with tools
         return False
 
     def _fast_path_response(self, goal: str) -> dict:
@@ -2057,20 +2016,20 @@ Guidelines:
 
         # Gather context from memory and KG in parallel (independent lookups)
         _ctx_futures = {}
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="observe_ctx") as _pool:
-            # Memory recall
-            if self.memory:
-                _ctx_futures["memory"] = _pool.submit(
-                    self.memory.recall, self.state.goal, 3
-                )
-            # Knowledge Graph context
-            if self.kg_bridge is not None:
-                _ctx_futures["kg"] = _pool.submit(
-                    self.kg_bridge.get_context_for_query, self.state.goal, 5
-                )
+        # Memory recall
+        if self.memory:
+            _ctx_futures["memory"] = _AGENT_EXECUTOR.submit(
+                self.memory.recall, self.state.goal, 3
+            )
+        # Knowledge Graph context
+        if self.kg_bridge is not None:
+            _ctx_futures["kg"] = _AGENT_EXECUTOR.submit(
+                self.kg_bridge.get_context_for_query, self.state.goal, 5
+            )
 
-            # Collect results with timeout
-            _ctx_results = {}
+        # Collect results with timeout
+        _ctx_results = {}
+        if _ctx_futures:
             for _key, _fut in _ctx_futures.items():
                 try:
                     _ctx_results[_key] = _fut.result(timeout=2.0)
@@ -2228,55 +2187,12 @@ Guidelines:
         self.state.phase = AgentPhase.ACT
         logger.debug(f"[ACT] Deciding and executing action...")
 
-        # PRIORITY 1: Check for marketplace actions FIRST (highest priority)
-        marketplace_match = self._detect_marketplace_action(self.state.goal)
-        if marketplace_match and self.state.iteration == 1:
-            tool_name, action = marketplace_match
-            action_decision = {
-                "tool": tool_name,
-                "action": action,
-                "reasoning": "Using marketplace tool based on goal keywords"
-            }
-        # PRIORITY 2: Check for FluxMind actions
-        elif (fluxmind_match := self._detect_fluxmind_action(self.state.goal)) and self.state.iteration == 1:
-            tool_name, action = fluxmind_match
-            action_decision = {
-                "tool": tool_name,
-                "action": action,
-                "reasoning": "Using FluxMind calibrated reasoning based on goal keywords"
-            }
-        # PRIORITY 3: Check for Git actions
-        elif (git_match := self._detect_git_action(self.state.goal)) and self.state.iteration == 1:
-            tool_name, action = git_match
-            action_decision = {
-                "tool": tool_name,
-                "action": action,
-                "reasoning": "Using Git tool based on goal keywords"
-            }
-        # PRIORITY 4: Check if a custom tool should be used
-        elif (custom_tool_match := self._detect_custom_tool(self.state.goal)) and self.state.iteration == 1:
-            tool_name, action = custom_tool_match
-            logger.debug(f"[CUSTOM TOOL] Detected custom tool: {tool_name}")
-            action_decision = {
-                "tool": tool_name,
-                "action": action,
-                "reasoning": f"Using custom tool {tool_name} based on goal keywords"
-            }
-        # PRIORITY 5: Check for Inner Monologue actions
-        elif (monologue_match := self._detect_monologue_action(self.state.goal)) and self.state.iteration == 1:
-            tool_name, action = monologue_match
-            action_decision = {
-                "tool": tool_name,
-                "action": action,
-                "reasoning": "Using inner monologue tool based on goal keywords"
-            }
-        else:
-            # Include summarize as an available tool
-            available_tools = list(self.tools.keys()) + ["summarize"]
-            action_decision = self.brain.decide_action(
-                self.state.current_plan,
-                available_tools
-            )
+        # Let the LLM decide which tool to use based on the plan
+        available_tools = list(self.tools.keys()) + ["summarize"]
+        action_decision = self.brain.decide_action(
+            self.state.current_plan,
+            available_tools
+        )
 
         self.state.last_action = action_decision
         tool_name = action_decision.get('tool', 'unknown')
@@ -2590,26 +2506,25 @@ Guidelines:
 
         # Parse the action into tool method and arguments WITH TIMEOUT
         try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(
-                    self._parse_and_execute_tool_action, tool, tool_name, action
-                )
+            future = _AGENT_EXECUTOR.submit(
+                self._parse_and_execute_tool_action, tool, tool_name, action
+            )
+            try:
+                result = future.result(timeout=TOOL_TIMEOUT)
+            except concurrent.futures.TimeoutError:
+                logger.warning(f"[TOOL] {tool_name} timed out after {TOOL_TIMEOUT}s")
                 try:
-                    result = future.result(timeout=TOOL_TIMEOUT)
-                except concurrent.futures.TimeoutError:
-                    logger.warning(f"[TOOL] {tool_name} timed out after {TOOL_TIMEOUT}s")
-                    try:
-                        from aura.activity_logger import record_activity
-                        record_activity("tool", tool_name,
-                                        f"Timeout: {tool_name} after {TOOL_TIMEOUT}s",
-                                        {"success": False, "timeout": True})
-                    except Exception:
-                        pass
-                    return {
-                        "success": False,
-                        "error": f"Tool {tool_name} timed out after {TOOL_TIMEOUT} seconds",
-                        "timeout": True
-                    }
+                    from aura.activity_logger import record_activity
+                    record_activity("tool", tool_name,
+                                    f"Timeout: {tool_name} after {TOOL_TIMEOUT}s",
+                                    {"success": False, "timeout": True})
+                except Exception:
+                    pass
+                return {
+                    "success": False,
+                    "error": f"Tool {tool_name} timed out after {TOOL_TIMEOUT} seconds",
+                    "timeout": True
+                }
 
             # Store successful search results for later summarization
             if tool_name == "web_search" and result.get("success"):
@@ -5301,16 +5216,13 @@ Try these commands:
             try:
                 from aura.memory.unified_memory import get_unified_memory
                 _umem = get_unified_memory()
-                # Run memory query in background thread with 1.5s timeout to avoid blocking LLM start
-                _mem_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="mem_query")
-                _mem_future = _mem_pool.submit(_umem.query, message, 10)
+                # Run memory query in shared thread pool with 1.5s timeout to avoid blocking LLM start
+                _mem_future = _AGENT_EXECUTOR.submit(_umem.query, message, 10)
                 try:
                     unified_results = _mem_future.result(timeout=1.5)
                 except concurrent.futures.TimeoutError:
                     unified_results = []
                     logger.debug("[UnifiedMemory] Query timed out after 1.5s, proceeding without memory context")
-                finally:
-                    _mem_pool.shutdown(wait=False)
                 if unified_results:
                     _budget = _ctx_budget.allocate("unified", requested=_ctx_budget.remaining)
                     _per = max(200, (_budget * 4) // max(1, len(unified_results)))
@@ -5903,16 +5815,13 @@ Try these commands:
             try:
                 from aura.memory.unified_memory import get_unified_memory
                 _umem_s = get_unified_memory()
-                # Run memory query in background thread with 1.5s timeout to avoid blocking LLM start
-                _mem_pool_s = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="mem_query_s")
-                _mem_future_s = _mem_pool_s.submit(_umem_s.query, message, 8)
+                # Run memory query in shared thread pool with 1.5s timeout to avoid blocking LLM start
+                _mem_future_s = _AGENT_EXECUTOR.submit(_umem_s.query, message, 8)
                 try:
                     unified_results = _mem_future_s.result(timeout=1.5)
                 except concurrent.futures.TimeoutError:
                     unified_results = []
                     logger.debug("[UnifiedMemory/stream] Query timed out after 1.5s, proceeding without memory context")
-                finally:
-                    _mem_pool_s.shutdown(wait=False)
                 if unified_results:
                     texts = [f"- [{r.source.upper()}] {r.content[:300]}"
                              for r in unified_results if r.content]

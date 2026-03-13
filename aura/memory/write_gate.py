@@ -17,12 +17,12 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -348,11 +348,15 @@ class MemoryWriteGate:
     def _find_merge_target(
         self, c: MemoryCandidate, nearby: List[Dict]
     ) -> Optional[Dict]:
-        """Find a near-duplicate suitable for merging."""
+        """Find the best near-duplicate suitable for merging (highest similarity above threshold)."""
+        best: Optional[Dict] = None
+        best_score = 0.0
         for n in nearby:
-            if n.get("score", 0.0) >= self._merge_thr:
-                return n
-        return None
+            sim = n.get("score", 0.0)
+            if sim >= self._merge_thr and sim > best_score:
+                best = n
+                best_score = sim
+        return best
 
     def _find_supersede_target(
         self, c: MemoryCandidate, nearby: List[Dict]
@@ -360,6 +364,7 @@ class MemoryWriteGate:
         """
         Find a memory that the candidate likely corrects / supersedes.
         Heuristic: high semantic similarity + negation / correction language.
+        Selects the highest-similarity candidate above the threshold.
         """
         correction_phrases = [
             "actually", "correction:", "I was wrong", "update:", "changed to",
@@ -370,10 +375,14 @@ class MemoryWriteGate:
         if not has_correction:
             return None
 
+        best: Optional[Dict] = None
+        best_score = 0.0
         for n in nearby:
-            if n.get("score", 0.0) >= self._supersede_thr:
-                return n
-        return None
+            sim = n.get("score", 0.0)
+            if sim >= self._supersede_thr and sim > best_score:
+                best = n
+                best_score = sim
+        return best
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -426,11 +435,14 @@ class MemoryWriteGate:
 # ---------------------------------------------------------------------------
 
 _gate_instance: Optional[MemoryWriteGate] = None
+_gate_lock = threading.Lock()
 
 def get_write_gate() -> MemoryWriteGate:
     global _gate_instance
     if _gate_instance is None:
-        _gate_instance = MemoryWriteGate()
+        with _gate_lock:
+            if _gate_instance is None:
+                _gate_instance = MemoryWriteGate()
     return _gate_instance
 
 

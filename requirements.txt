@@ -28,7 +28,6 @@ networkx>=3.0
 
 # --- Tools ---
 arxiv>=2.0.0
-ddgs>=8.0.0
 pymupdf>=1.23.0
 pyperclip>=1.8.0
 pillow>=10.0.0
@@ -65,7 +64,7 @@ dateparser>=1.2.0
 # ============================================================
 # Optional: Predictive Life Modeling
 # ============================================================
-mesa>=3.0.0
+mesa>=2.0.0,<3.0.0
 # dowhy>=0.10.0  # Causal inference — large dependency tree
 
 # ============================================================
@@ -103,7 +102,7 @@ sounddevice>=0.4.6
 # ============================================================
 # Optional: Task scheduling
 # ============================================================
-schedule>=1.2.0
+apscheduler>=3.10.0,<4.0.0
 
 # ============================================================
 # Optional: Monty safe sandbox (pure-computation code execution)

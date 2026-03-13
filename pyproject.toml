@@ -16,3 +16,9 @@ py-modules = ["main"]
 
 [tool.setuptools.packages.find]
 exclude = ["tests*", "web*", "docs*", "scripts*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]

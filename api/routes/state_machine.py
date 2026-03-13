@@ -1,11 +1,13 @@
 """API routes for Agent State Machine observability."""
 
 import logging
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Depends
+
+from api.auth import require_api_key
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/state-machine", tags=["state-machine"])
+router = APIRouter(prefix="/api/state-machine", tags=["state-machine"], dependencies=[Depends(require_api_key)])
 
 
 @router.get("/state")

@@ -20,13 +20,15 @@ import re
 import time
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
 
+from api.auth import require_api_key
+
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/agent", tags=["agent"])
+router = APIRouter(prefix="/api/agent", tags=["agent"], dependencies=[Depends(require_api_key)])
 
 OLLAMA_BASE = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 

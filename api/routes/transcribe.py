@@ -7,11 +7,28 @@ import asyncio
 import os
 import tempfile
 import logging
-from fastapi import APIRouter, File, UploadFile, HTTPException
+from fastapi import APIRouter, File, UploadFile, HTTPException, Depends
+
+from api.auth import require_api_key
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api", tags=["transcribe"])
+router = APIRouter(prefix="/api", tags=["transcribe"], dependencies=[Depends(require_api_key)])
+
+# Cache the Whisper model to avoid reloading ~300MB per request
+_whisper_model = None
+_whisper_model_lock = __import__("threading").Lock()
+
+
+def _get_whisper_model():
+    global _whisper_model
+    if _whisper_model is None:
+        with _whisper_model_lock:
+            if _whisper_model is None:
+                import whisper as _w
+                _whisper_model = _w.load_model("base")
+                logger.info("[Transcribe] Whisper base model loaded and cached")
+    return _whisper_model
 
 
 @router.post("/transcribe")
@@ -37,11 +54,10 @@ async def transcribe(file: UploadFile = File(...)):
         tmp = f.name
 
     try:
-        import whisper as _whisper
         loop = asyncio.get_running_loop()
 
         def _run_whisper():
-            model = _whisper.load_model("base")
+            model = _get_whisper_model()
             return model.transcribe(tmp)
 
         result = await loop.run_in_executor(None, _run_whisper)

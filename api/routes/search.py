@@ -5,11 +5,13 @@ Real web search with sources via Tavily API.
 import os
 import asyncio
 import logging
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query, HTTPException, Depends
+
+from api.auth import require_api_key
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/search", tags=["search"])
+router = APIRouter(prefix="/api/search", tags=["search"], dependencies=[Depends(require_api_key)])
 
 
 @router.get("")

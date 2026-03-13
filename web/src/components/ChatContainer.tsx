@@ -7,7 +7,6 @@ import { useWebSocket } from '../hooks/useWebSocket';
 import { useProactiveMessages } from '../hooks/useProactiveMessages';
 import type { FileAttachment, ModelResult } from '../types';
 import {
-  SparklesIcon,
   ChatBubbleLeftRightIcon,
   MagnifyingGlassIcon,
   CalculatorIcon,
@@ -46,21 +45,13 @@ export function ChatContainer() {
 
   useProactiveMessages(connectionStatus === 'connected');
 
-  // Check if user is near the bottom of scroll area
-  const checkIfNearBottom = useCallback(() => {
-    const container = scrollContainerRef.current;
-    if (!container) return true;
-
-    const threshold = 100; // pixels from bottom
-    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
-    return isNearBottom;
-  }, []);
-
   // Handle scroll events to detect if user scrolled up
   const handleScroll = useCallback(() => {
-    const isNearBottom = checkIfNearBottom();
-    setIsUserScrolledUp(!isNearBottom);
-  }, [checkIfNearBottom]);
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const distFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    setIsUserScrolledUp(distFromBottom > 150);
+  }, []);
 
   // Smart auto-scroll: only scroll if user is already at bottom and autoScroll is enabled
   useEffect(() => {
@@ -98,6 +89,9 @@ export function ChatContainer() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message }),
         });
+        if (!res.ok) {
+          throw new Error(`Compare request failed: ${res.status}`);
+        }
         const data = await res.json();
         const results: ModelResult[] = data.results ?? [];
         useChatStore.setState((state) => ({
@@ -127,7 +121,7 @@ export function ChatContainer() {
   const isDisabled = isLoading || connectionStatus !== 'connected';
 
   return (
-    <div className="flex flex-col h-full bg-radial-content">
+    <div className="flex flex-col h-full" style={{ background: 'transparent' }}>
       {/* Connection status banner */}
       {connectionStatus !== 'connected' && (
         <div className={`px-4 py-2 text-center text-sm transition-all duration-300 ${
@@ -175,28 +169,25 @@ export function ChatContainer() {
           </div>
         ) : messages.length === 0 ? (
           // Empty state with enhanced styling
-          <div className="flex flex-col items-center justify-center h-full text-chat-text-secondary relative">
-            {/* Radial purple glow behind welcome area */}
-            <div className="absolute inset-0 bg-radial-welcome pointer-events-none" />
+          <div className="flex flex-col items-center justify-center h-full text-chat-text-secondary relative px-6">
+            {/* NextGen welcome heading */}
+            <h1 className="text-5xl font-light tracking-tight mb-4 text-center animate-fade-in"
+              style={{
+                background: 'linear-gradient(180deg, #fff 0%, rgba(255,255,255,0.4) 100%)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                letterSpacing: '-0.04em',
+              }}
+            >
+              What will we build today?
+            </h1>
 
-            {/* Animated sparkle icon */}
-            <div className="relative z-10 w-20 h-20 rounded-full bg-gradient-to-br from-purple-600/30 to-blue-600/20 flex items-center justify-center mb-6 animate-pulse-glow">
-              <SparklesIcon className="w-10 h-10 text-purple-400 icon-glow-pulse" />
-            </div>
-
-            {/* Enhanced welcome heading */}
-            <h2 className="relative z-10 text-3xl font-bold mb-3 text-gradient-purple animate-fade-in">
-              Welcome to AURA
-            </h2>
-
-            {/* Subtitle with better spacing */}
-            <p className="relative z-10 text-center max-w-md px-4 text-chat-text-secondary font-light tracking-wide leading-relaxed animate-fade-in animation-delay-100">
-              Autonomous Universal Reasoning Agent. Ask me anything, request a web search,
-              run code, or just chat!
+            <p className="text-center max-w-md text-chat-text-secondary mb-12 leading-relaxed animate-fade-in animation-delay-100">
+              AURA is ready to assist with complex design, deep research, and architectural engineering.
             </p>
 
-            {/* Quick action buttons with staggered animation */}
-            <div className="relative z-10 mt-10 grid grid-cols-1 sm:grid-cols-2 gap-4 px-4 max-w-2xl">
+            {/* NextGen suggestion cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-2xl">
               {QUICK_ACTIONS.map((action, index) => {
                 const Icon = action.icon;
                 return (
@@ -205,20 +196,37 @@ export function ChatContainer() {
                     onClick={() => handleSend(action.text)}
                     disabled={isDisabled}
                     className={`
-                      group flex items-center gap-3 px-5 py-4
-                      btn-glass rounded-xl text-left text-sm text-chat-text
+                      group flex flex-col gap-3 p-5 text-left
                       disabled:opacity-50 disabled:cursor-not-allowed
-                      animate-slide-up-fade
+                      animate-slide-up-fade transition-all duration-300
                       ${index === 0 ? 'animation-delay-100' : ''}
                       ${index === 1 ? 'animation-delay-200' : ''}
                       ${index === 2 ? 'animation-delay-300' : ''}
                       ${index === 3 ? 'animation-delay-400' : ''}
                     `}
+                    style={{
+                      background: 'rgba(20, 20, 25, 0.4)',
+                      border: '1px solid rgba(255,255,255,0.06)',
+                      borderRadius: '12px',
+                      backdropFilter: 'blur(12px)',
+                    }}
+                    onMouseEnter={e => {
+                      (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.05)';
+                      (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.15)';
+                    }}
+                    onMouseLeave={e => {
+                      (e.currentTarget as HTMLElement).style.background = 'rgba(20, 20, 25, 0.4)';
+                      (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.06)';
+                    }}
                   >
-                    <div className="w-8 h-8 rounded-lg bg-purple-600/20 flex items-center justify-center flex-shrink-0 transition-all duration-300 group-hover:bg-purple-600/40 group-hover:scale-110">
-                      <Icon className="w-4 h-4 text-purple-400" />
+                    <div style={{
+                      background: 'rgba(255,255,255,0.1)',
+                      width: 36, height: 36, borderRadius: 8,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      <Icon className="w-4 h-4 text-white" />
                     </div>
-                    <span className="transition-colors duration-200 group-hover:text-white">
+                    <span className="text-sm font-medium text-chat-text group-hover:text-white transition-colors">
                       {action.text}
                     </span>
                   </button>

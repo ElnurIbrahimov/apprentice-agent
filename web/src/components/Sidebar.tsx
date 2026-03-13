@@ -59,23 +59,29 @@ export function Sidebar({ onClose }: SidebarProps) {
   }, [setStatus]);
   usePolling(fetchStatus, 30000);
 
-  // Fetch available models on mount
+  // Fetch available models on mount (retry once on failure)
   useEffect(() => {
-    const fetchModels = async () => {
+    let cancelled = false;
+    const fetchModels = async (attempt = 0) => {
       try {
         const response = await fetch('/api/models');
         if (response.ok) {
           const data = await response.json();
-          const allModels = [...(data.local_models || []), ...(data.cloud_models || [])];
-          setAvailableModels(allModels);
+          const allModels = [...(data.chatgpt_models || []), ...(data.cloud_models || []), ...(data.local_models || [])];
+          if (!cancelled) setAvailableModels(allModels);
+        } else if (attempt < 1) {
+          setTimeout(() => { if (!cancelled) fetchModels(attempt + 1); }, 3000);
         }
       } catch (e) {
         console.error('[Sidebar] Failed to fetch models:', e);
+        if (attempt < 1) {
+          setTimeout(() => { if (!cancelled) fetchModels(attempt + 1); }, 3000);
+        }
       }
     };
-
     fetchModels();
-  }, []); // Run once on mount
+    return () => { cancelled = true; };
+  }, [setAvailableModels]);
 
   return (
     <>
@@ -171,33 +177,102 @@ export function Sidebar({ onClose }: SidebarProps) {
               </button>
 
               {showModelDropdown && (
-                <div className="absolute z-50 w-full mt-1 bg-chat-sidebar border border-chat-border rounded-lg shadow-xl max-h-60 overflow-y-auto">
-                  <button
-                    onClick={() => {
-                      setSelectedModel(null);
-                      setShowModelDropdown(false);
-                    }}
-                    className={`w-full text-left px-3 py-2 text-sm hover:bg-chat-assistant/50 transition-colors ${
-                      !selectedModel ? 'bg-purple-600/20 text-purple-400' : 'text-chat-text'
-                    }`}
-                  >
-                    🤖 Auto (AURA decides)
-                  </button>
-                  <div className="border-t border-chat-border/50 my-1" />
-                  {availableModels.map((model) => (
+                <div className="absolute z-50 w-full mt-1 bg-chat-sidebar border border-chat-border rounded-lg shadow-xl overflow-hidden"
+                  style={{ maxHeight: '280px', display: 'flex', flexDirection: 'column' }}
+                >
+                  {/* Search filter */}
+                  <div className="p-2 border-b border-chat-border/50 flex-shrink-0">
+                    <input
+                      type="text"
+                      placeholder="Search models..."
+                      autoFocus
+                      className="w-full px-2 py-1.5 text-xs bg-chat-bg border border-chat-border/50 rounded text-chat-text placeholder:text-chat-text-secondary/50 outline-none focus:border-purple-500/50"
+                      onChange={(e) => {
+                        const filter = e.target.value.toLowerCase();
+                        document.querySelectorAll('[data-model-item]').forEach((el) => {
+                          const name = el.getAttribute('data-model-item') || '';
+                          (el as HTMLElement).style.display = name.includes(filter) ? '' : 'none';
+                        });
+                      }}
+                    />
+                  </div>
+                  <div className="overflow-y-auto flex-1" style={{ maxHeight: '240px' }}>
                     <button
-                      key={model}
+                      data-model-item="auto"
                       onClick={() => {
-                        setSelectedModel(model);
+                        setSelectedModel(null);
                         setShowModelDropdown(false);
                       }}
-                      className={`w-full text-left px-3 py-2 text-sm hover:bg-chat-assistant/50 transition-colors truncate ${
-                        selectedModel === model ? 'bg-purple-600/20 text-purple-400' : 'text-chat-text'
+                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-chat-assistant/50 transition-colors ${
+                        !selectedModel ? 'bg-purple-600/20 text-purple-400' : 'text-chat-text'
                       }`}
                     >
-                      {model.includes('-cloud') ? '☁️ ' : '💻 '}{model}
+                      🤖 Auto (AURA decides)
                     </button>
-                  ))}
+
+                    {/* ChatGPT models */}
+                    {availableModels.some(m => m.startsWith('chatgpt:')) && (
+                      <>
+                        <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-green-400/70 font-semibold bg-green-500/5 border-t border-chat-border/30">
+                          ChatGPT (subscription)
+                        </div>
+                        {availableModels.filter(m => m.startsWith('chatgpt:')).map((model) => (
+                          <button
+                            key={model}
+                            data-model-item={model}
+                            onClick={() => { setSelectedModel(model); setShowModelDropdown(false); }}
+                            className={`w-full text-left px-3 py-1.5 text-xs hover:bg-chat-assistant/50 transition-colors truncate ${
+                              selectedModel === model ? 'bg-purple-600/20 text-purple-400' : 'text-chat-text'
+                            }`}
+                          >
+                            🟢 {model.replace('chatgpt:', '')}
+                          </button>
+                        ))}
+                      </>
+                    )}
+
+                    {/* Cloud models */}
+                    {availableModels.some(m => m.includes(':cloud') || m.includes('-cloud')) && (
+                      <>
+                        <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-blue-400/70 font-semibold bg-blue-500/5 border-t border-chat-border/30">
+                          Cloud (Ollama)
+                        </div>
+                        {availableModels.filter(m => !m.startsWith('chatgpt:') && (m.includes(':cloud') || m.includes('-cloud'))).map((model) => (
+                          <button
+                            key={model}
+                            data-model-item={model}
+                            onClick={() => { setSelectedModel(model); setShowModelDropdown(false); }}
+                            className={`w-full text-left px-3 py-1.5 text-xs hover:bg-chat-assistant/50 transition-colors truncate ${
+                              selectedModel === model ? 'bg-purple-600/20 text-purple-400' : 'text-chat-text'
+                            }`}
+                          >
+                            ☁️ {model.replace(/:cloud$/, '')}
+                          </button>
+                        ))}
+                      </>
+                    )}
+
+                    {/* Local models */}
+                    {availableModels.some(m => !m.startsWith('chatgpt:') && !m.includes(':cloud') && !m.includes('-cloud')) && (
+                      <>
+                        <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-orange-400/70 font-semibold bg-orange-500/5 border-t border-chat-border/30">
+                          Local
+                        </div>
+                        {availableModels.filter(m => !m.startsWith('chatgpt:') && !m.includes(':cloud') && !m.includes('-cloud')).map((model) => (
+                          <button
+                            key={model}
+                            data-model-item={model}
+                            onClick={() => { setSelectedModel(model); setShowModelDropdown(false); }}
+                            className={`w-full text-left px-3 py-1.5 text-xs hover:bg-chat-assistant/50 transition-colors truncate ${
+                              selectedModel === model ? 'bg-purple-600/20 text-purple-400' : 'text-chat-text'
+                            }`}
+                          >
+                            💻 {model}
+                          </button>
+                        ))}
+                      </>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

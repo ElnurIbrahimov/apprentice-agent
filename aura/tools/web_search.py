@@ -3,6 +3,7 @@
 SECURITY: Rate limited to prevent abuse and DDoS.
 """
 
+import os
 import requests
 import logging
 import threading
@@ -96,7 +97,8 @@ class WebSearchTool:
     description = "Search the web using SearXNG"
 
     # Primary instance - local SearXNG (fastest, no rate limits)
-    PRIMARY_INSTANCE = "http://localhost:8888"
+    # Configurable via SEARXNG_URL env var or Config.SEARXNG_URL
+    PRIMARY_INSTANCE = os.environ.get("SEARXNG_URL", "http://localhost:8888")
 
     # Fallback instances (if local is down)
     FALLBACK_INSTANCES = [

@@ -103,7 +103,7 @@ def test_episodic_memory():
         finally:
             try:
                 shutil.rmtree(tmpdir, ignore_errors=True)
-            except:
+            except Exception:
                 pass
     except ImportError as e:
         print(f'    FAIL: Missing dependency: {str(e)[:70]}')

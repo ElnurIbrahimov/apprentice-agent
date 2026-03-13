@@ -87,12 +87,12 @@ def get_orchestrator(session_id: str):
 
     with _orch_lock:
         if session_id not in _orchestrators:
-            # Enforce session cap before creating new orchestrator
-            if len(_orchestrators) >= 100:
-                raise HTTPException(
-                    status_code=429,
-                    detail="Too many active sessions. Please clear an existing session first."
-                )
+            # LRU eviction: drop oldest session when at cap
+            _MAX_SESSIONS = 100
+            if len(_orchestrators) >= _MAX_SESSIONS:
+                oldest_key = next(iter(_orchestrators))
+                del _orchestrators[oldest_key]
+                logger.info(f"[MultiAgent] Evicted oldest session: {oldest_key}")
 
             try:
                 from aura.multi_agent import MultiAgentOrchestrator

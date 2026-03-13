@@ -18,12 +18,15 @@ logger = logging.getLogger(__name__)
 _config_lock = threading.RLock()
 
 _validation_session = None
+_validation_session_lock = threading.Lock()
 
 def _get_validation_session():
     global _validation_session
     if _validation_session is None:
-        import requests
-        _validation_session = requests.Session()
+        with _validation_session_lock:
+            if _validation_session is None:
+                import requests
+                _validation_session = requests.Session()
     return _validation_session
 
 
@@ -66,6 +69,7 @@ VERIFIED_LOCAL_MODELS = {
 
 _tags_cache: dict = {}
 _tags_cache_ts: float = 0.0
+_tags_cache_lock = __import__("threading").Lock()
 
 
 def validate_model(model_name: str, ollama_host: str = None) -> bool:
@@ -83,20 +87,22 @@ def validate_model(model_name: str, ollama_host: str = None) -> bool:
 
     global _tags_cache, _tags_cache_ts
     now = _time.time()
-    if now - _tags_cache_ts < 30.0 and _tags_cache:
-        available_models = _tags_cache.get(host)
-        if available_models is not None:
-            if model_name in available_models:
-                return True
-            base_name = model_name.split(":")[0]
-            return any(m.startswith(base_name) for m in available_models)
+    with _tags_cache_lock:
+        if now - _tags_cache_ts < 30.0 and _tags_cache:
+            available_models = _tags_cache.get(host)
+            if available_models is not None:
+                if model_name in available_models:
+                    return True
+                base_name = model_name.split(":")[0]
+                return any(m.startswith(base_name) for m in available_models)
 
     try:
         response = _get_validation_session().get(f"{host}/api/tags", timeout=5)
         if response.status_code == 200:
             available = [m["name"] for m in response.json().get("models", [])]
-            _tags_cache[host] = available
-            _tags_cache_ts = now
+            with _tags_cache_lock:
+                _tags_cache[host] = available
+                _tags_cache_ts = now
             if model_name in available:
                 return True
             base_name = model_name.split(":")[0]
@@ -130,6 +136,17 @@ def get_best_available_model(preferred: str, fallbacks: List[str], role: str = "
 class Config:
     OLLAMA_HOST: str = os.getenv("OLLAMA_HOST", "http://localhost:11434")
     CHROMADB_PATH: Path = Path(os.getenv("CHROMADB_PATH", "./data/chromadb"))
+
+    # Feature toggles (configurable via env vars)
+    KG_BRAIN_ENABLED: bool = os.getenv("KG_BRAIN_ENABLED", "true").lower() in ("true", "1", "yes")
+    SKILL_LIBRARY_ENABLED: bool = os.getenv("SKILL_LIBRARY_ENABLED", "true").lower() in ("true", "1", "yes")
+    LIFE_MODELING_ENABLED: bool = os.getenv("LIFE_MODELING_ENABLED", "true").lower() in ("true", "1", "yes")
+
+    # Auth (canonical flag — used by middleware + route dependency)
+    API_AUTH_ENABLED: bool = os.getenv("AURA_API_AUTH_ENABLED", "false").lower() in ("true", "1", "yes")
+
+    # SearXNG search instance (configurable)
+    SEARXNG_URL: str = os.getenv("SEARXNG_URL", "http://localhost:8888")
 
     # ============================================================
     # MODEL CONFIGURATION — CLOUD-ONLY (Ollama Pro $20/month)
@@ -385,8 +402,7 @@ class Config:
     TRUST_FAMILIAR_SCORE: float = float(os.getenv("TRUST_FAMILIAR_SCORE", "0.6"))
     TRUST_TRUSTED_SCORE: float = float(os.getenv("TRUST_TRUSTED_SCORE", "0.7"))
 
-    # API Security Configuration
-    API_AUTH_ENABLED: bool = os.getenv("AURA_API_AUTH_ENABLED", "false").lower() == "true"
+    # API Security Configuration (primary definition is above, line ~143)
     API_KEY: str = os.getenv("AURA_API_KEY", "")  # Set to enable API key auth
     API_RATE_LIMIT: int = int(os.getenv("AURA_API_RATE_LIMIT", "200"))  # requests per minute
     API_CORS_ORIGINS: str = os.getenv("AURA_CORS_ORIGINS", "*")  # wildcard required for WebSocket in Starlette 0.50+
@@ -456,9 +472,9 @@ class Config:
     # Conversation / Brain defaults (aura.brain)
     HISTORY_LIMIT: int = int(os.getenv("HISTORY_LIMIT", "20"))
     AUTO_RESET_INTERVAL: int = int(os.getenv("AUTO_RESET_INTERVAL", "15"))
-    BUDGET_SMALL: int = int(os.getenv("BUDGET_SMALL", "150"))
-    BUDGET_MEDIUM: int = int(os.getenv("BUDGET_MEDIUM", "400"))
-    BUDGET_LARGE: int = int(os.getenv("BUDGET_LARGE", "800"))
+    BUDGET_SMALL: int = int(os.getenv("BUDGET_SMALL", "300"))
+    BUDGET_MEDIUM: int = int(os.getenv("BUDGET_MEDIUM", "1024"))
+    BUDGET_LARGE: int = int(os.getenv("BUDGET_LARGE", "2048"))
 
     # ============================================================
     # RELIABILITY UPGRADE — Phase 1-4 (2026-03)

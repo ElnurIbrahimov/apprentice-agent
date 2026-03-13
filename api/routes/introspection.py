@@ -10,10 +10,12 @@ import logging
 from typing import Optional
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 
-router = APIRouter(prefix="/api/introspection", tags=["introspection"])
+from api.auth import require_api_key
+
+router = APIRouter(prefix="/api/introspection", tags=["introspection"], dependencies=[Depends(require_api_key)])
 
 logger = logging.getLogger(__name__)
 

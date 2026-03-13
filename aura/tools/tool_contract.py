@@ -368,10 +368,31 @@ def _register_builtin_tools(reg: ToolRegistry) -> None:
     logger.debug("[ToolRegistry] %d built-in tools registered", len(reg._specs))
 
 
+@dataclass
+class ToolResult:
+    """Standardized return type for tool executions.
+
+    Provides a consistent shape so callers never have to guess
+    whether a tool returned a dict, raised, or returned None.
+    """
+    success: bool
+    result: Any = None
+    error: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        d: Dict[str, Any] = {"success": self.success}
+        if self.result is not None:
+            d["result"] = self.result
+        if self.error:
+            d["error"] = self.error
+        return d
+
+
 __all__ = [
     "ToolSpec",
     "ToolRegistry",
     "ToolSafety",
     "LatencyTier",
+    "ToolResult",
     "get_tool_registry",
 ]

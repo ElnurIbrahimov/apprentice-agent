@@ -9,6 +9,13 @@ const INITIAL_RECONNECT_DELAY = 1000;
 const MAX_RECONNECT_DELAY = 30000;
 const MAX_RECONNECT_ATTEMPTS = 10;
 const HEARTBEAT_INTERVAL = 30000;
+const MAX_SEEN_PROACTIVE = 500;
+
+function pruneSet(set: Set<string>, max: number): void {
+  if (set.size <= max) return;
+  const iter = set.values();
+  for (let i = 0, n = set.size - max; i < n; i++) set.delete(iter.next().value!);
+}
 
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
@@ -169,6 +176,7 @@ export function useWebSocket() {
           : `${data.action}:${(data.content || '').slice(0, 40)}`;
         if (seenProactiveIds.current.has(proactiveId)) break;
         seenProactiveIds.current.add(proactiveId);
+        pruneSet(seenProactiveIds.current, MAX_SEEN_PROACTIVE);
 
         const actionLabels: Record<string, string> = {
           notify: 'noticed something',
@@ -192,8 +200,11 @@ export function useWebSocket() {
         });
         break;
       }
+
+      default:
+        console.warn('[WebSocket] Unknown message type:', data.type);
     }
-  }, [addMessage, appendToMessage, setMessageStreaming, setMessageModelUsed, setCitationsForMessage, appendToolTrace, setMood, setIsLoading, setError, clearResponseTimeout]);
+  }, [addMessage, appendToMessage, setMessageStreaming, setMessageModelUsed, setCitationsForMessage, appendToolTrace, setMood, setIsLoading, setError, clearResponseTimeout, setToolStatus]);
 
   // Connect function
   const connect = useCallback(() => {
@@ -342,6 +353,7 @@ export function useWebSocket() {
   const disconnect = useCallback(() => {
     isManualDisconnect.current = true;
     reconnectAttempts.current = 0;
+    clearResponseTimeout();
 
     if (reconnectTimeout.current) {
       clearTimeout(reconnectTimeout.current);
@@ -354,7 +366,7 @@ export function useWebSocket() {
       wsRef.current = null;
     }
     setConnectionStatus('disconnected');
-  }, [setConnectionStatus, stopHeartbeat]);
+  }, [setConnectionStatus, stopHeartbeat, clearResponseTimeout]);
 
   // Reconnect
   const reconnect = useCallback(() => {
@@ -362,6 +374,9 @@ export function useWebSocket() {
     reconnectAttempts.current = 0;
     connect();
   }, [connect]);
+
+  const connectRef = useRef(connect);
+  useEffect(() => { connectRef.current = connect; }, [connect]);
 
   // Stop generation
   const stopGeneration = useCallback(() => {
@@ -379,7 +394,7 @@ export function useWebSocket() {
 
     // Small delay to ensure DOM is ready
     const timeoutId = setTimeout(() => {
-      connect();
+      connectRef.current();
     }, 100);
 
     return () => {
@@ -399,7 +414,7 @@ export function useWebSocket() {
         ws.close();
       }
     };
-  }, [connect, stopHeartbeat, clearResponseTimeout]);
+  }, [stopHeartbeat, clearResponseTimeout]);
 
   return {
     sendMessage,

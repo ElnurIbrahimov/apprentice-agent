@@ -35,6 +35,7 @@ from .active_inference import (
     ProactiveDecision,
     BeliefState
 )
+from aura.emotion.action_bridge import EmotionActionBridge
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +115,7 @@ class GatewayDaemon:
         self.event_bus = EventBus(use_redis=use_redis, redis_url=redis_url)
         self.salience_filter = SalienceFilter(threshold=salience_threshold)
         self.inference_engine = ActiveInferenceEngine(use_pymdp=use_pymdp)
+        self.emotion_action_bridge = EmotionActionBridge()
 
         # State
         self.state = DaemonState.STOPPED
@@ -550,6 +552,16 @@ class GatewayDaemon:
                 except Exception as e:
                     logger.debug(f"[GatewayDaemon] Emotional drift error: {e}")
 
+                # Emotion-action bridge: convert emotional state into proactive actions
+                try:
+                    bridge_state = self._gather_emotion_bridge_state()
+                    if bridge_state:
+                        emotion_actions = self.emotion_action_bridge.evaluate(bridge_state)
+                        for ea in emotion_actions:
+                            self._dispatch_emotion_action(ea)
+                except Exception as e:
+                    logger.debug(f"[GatewayDaemon] Emotion-action bridge error: {e}")
+
                 # Autonomous belief drift toward idle/receptive when no events
                 # This prevents PREPARE from winning forever by gradually shifting
                 # beliefs so SUGGEST/social check-ins can trigger
@@ -688,6 +700,170 @@ class GatewayDaemon:
         self._deliver_message(message)
         self._last_proactive_message_time = now
         self._messages_this_session += 1
+
+    # ------------------------------------------------------------------ #
+    # Emotion-Action Bridge helpers
+    # ------------------------------------------------------------------ #
+
+    def _gather_emotion_bridge_state(self) -> Optional[Dict[str, Any]]:
+        """Build the flat state dict consumed by EmotionActionBridge.evaluate().
+
+        Merges ALMA neuromodulators + PAD values + intrinsic drive urgencies
+        + context metrics into a single dict.  Returns None if ALMA is
+        unavailable (bridge will be skipped for this tick).
+        """
+        state: Dict[str, Any] = {}
+
+        # --- ALMA emotional state ---
+        try:
+            from aura.emotion.alma_engine import alma_engine
+            emo = alma_engine.get_emotional_state()
+            # Neuromodulators
+            neuro = emo.get("neuromodulators", {})
+            state["dopamine"] = neuro.get("dopamine", 0.5)
+            state["serotonin"] = neuro.get("serotonin", 0.5)
+            state["norepinephrine"] = neuro.get("norepinephrine", 0.5)
+            state["oxytocin"] = neuro.get("oxytocin", 0.5)
+            state["acetylcholine"] = neuro.get("acetylcholine", 0.5)
+            # PAD
+            pad = emo.get("pad", {})
+            state["pleasure"] = pad.get("pleasure", 0.0)
+            state["arousal"] = pad.get("arousal", 0.0)
+            state["dominance"] = pad.get("dominance", 0.0)
+        except Exception as e:
+            logger.debug(f"[GatewayDaemon] ALMA state unavailable for bridge: {e}")
+            return None
+
+        # --- Intrinsic drive urgencies ---
+        try:
+            from aura.consciousness.intrinsic_motivation import get_intrinsic_motivation
+            im = get_intrinsic_motivation()
+            drives = im.get_drives_summary()
+            state["curiosity_urgency"] = drives.get("curiosity", 0.0)
+            state["social_urgency"] = drives.get("social", 0.0)
+            state["competence_urgency"] = drives.get("competence", 0.0)
+            state["coherence_urgency"] = drives.get("coherence", 0.0)
+        except Exception:
+            pass
+
+        # --- Context metrics ---
+        idle_minutes = 0.0
+        if self.user_context.last_interaction:
+            idle_minutes = (
+                datetime.now() - self.user_context.last_interaction
+            ).total_seconds() / 60
+        state["idle_minutes"] = idle_minutes
+
+        # Recent memory count (for consolidation rule)
+        try:
+            from aura.memory.unified_memory import get_unified_memory
+            um = get_unified_memory()
+            stats = um.get_stats() if hasattr(um, "get_stats") else {}
+            state["recent_memories"] = stats.get("total_memories", 0)
+        except Exception:
+            state["recent_memories"] = 0
+
+        return state
+
+    def _dispatch_emotion_action(self, ea) -> None:
+        """Convert an EmotionAction into a proactive message and deliver it.
+
+        Maps action_type to the appropriate proactive_messages generator,
+        respecting the daemon's existing rate limiting and DND checks.
+        """
+        import time as _time
+        from collections import deque
+        from .proactive_messages import (
+            generate_proactive_content,
+            get_curiosity_message,
+            get_social_message,
+            get_competence_message,
+            get_coherence_message,
+            get_task_message,
+        )
+
+        # Respect DND
+        if self.user_context.do_not_disturb:
+            logger.debug(f"[EMOTION-ACTION] Suppressed {ea.action_type} (DND)")
+            return
+
+        # Respect rate limiting (reuse daemon's rate limiter)
+        now = _time.time()
+        effective_interval = self._min_message_interval + max(0, self._messages_this_session - 3) * 60
+        effective_interval = min(effective_interval, 600)
+        if now - self._last_proactive_message_time < effective_interval:
+            logger.debug(
+                f"[EMOTION-ACTION] Rate limited {ea.action_type} "
+                f"({now - self._last_proactive_message_time:.0f}s < {effective_interval:.0f}s)"
+            )
+            return
+
+        # Build idle hours for message generators
+        idle_hours = 0.0
+        if self.user_context.last_interaction:
+            idle_hours = (
+                datetime.now() - self.user_context.last_interaction
+            ).total_seconds() / 3600
+
+        recent = deque(maxlen=20)  # per-dispatch dedup deque
+
+        # Map action_type -> message content
+        content = None
+        if ea.action_type == "explore_topic":
+            # Try to get topics from context tracker
+            topics = []
+            try:
+                from api.routes.context import get_tracker
+                ctx = get_tracker()
+                focus = ctx.get_focus_state(limit=3)
+                topics = [item["name"] for item in focus.get("items", [])[:3]]
+            except Exception:
+                pass
+            content = get_curiosity_message(topics=topics or None, recent=recent)
+
+        elif ea.action_type == "suggest_break":
+            # Use emotional message with low pleasure
+            content = generate_proactive_content(
+                emotional_state={"pleasure": -0.4, "arousal": 0.5},
+                idle_hours=idle_hours,
+                drive_type="social",
+                recent=recent,
+            )
+            # Fallback if template returns None
+            if not content:
+                content = "You've been pushing hard. Maybe take a breather? I'll keep things warm."
+
+        elif ea.action_type == "check_in":
+            content = get_social_message(idle_hours=idle_hours, recent=recent)
+
+        elif ea.action_type == "offer_help":
+            content = get_task_message(urgent=False, recent=recent)
+
+        elif ea.action_type == "consolidate":
+            content = get_coherence_message(recent=recent)
+
+        if not content:
+            logger.debug(f"[EMOTION-ACTION] No content for {ea.action_type}")
+            return
+
+        # Create and deliver as a proactive message
+        message = ProactiveMessage(
+            action=ProactiveAction.SUGGEST,
+            content=content,
+            priority=EventPriority.LOW if ea.priority < 0.5 else EventPriority.MEDIUM,
+            metadata={
+                "source": "emotion_action_bridge",
+                "action_type": ea.action_type,
+                "reason": ea.reason,
+                "priority": ea.priority,
+            },
+        )
+        self._deliver_message(message)
+        self._last_proactive_message_time = now
+        self._messages_this_session += 1
+        logger.info(
+            f"[EMOTION-ACTION] Delivered {ea.action_type}: {content[:80]}..."
+        )
 
     def _generate_message_content(
         self,

@@ -102,7 +102,7 @@ class MessageRouter:
 
         # Start proactive message loop
         if MESSAGING_CONFIG.get("proactive_enabled", True):
-            asyncio.create_task(self._proactive_loop())
+            self._proactive_task = asyncio.create_task(self._proactive_loop())
 
         logger.info("Message Router started!")
 

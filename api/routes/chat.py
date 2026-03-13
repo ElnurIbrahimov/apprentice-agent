@@ -4,17 +4,18 @@ import json
 import logging
 import asyncio
 import os
+import time
 import threading
 from pathlib import Path
-from typing import Optional, List
+from typing import List
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Depends
-from fastapi.responses import JSONResponse
 from api.auth import verify_api_key_ws, require_api_key
+from api.utils import safe_error_detail
 
 from api.models.schemas import (
     ChatRequest, ChatResponse, RunRequest, RunResponse,
-    ClearHistoryResponse, WebSocketMessage, MoodState, AttachmentType,
+    ClearHistoryResponse, MoodState, AttachmentType,
     ConversationSummary, CreateConversationRequest, RenameConversationRequest,
     ConversationResponse, SaveToMemoryResponse,
 )
@@ -38,7 +39,6 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 # ---------------------------------------------------------------------------
 _active_websockets: List[WebSocket] = []
 _ws_lock = threading.Lock()
-_ws_async_lock = asyncio.Lock()
 
 
 def register_websocket(ws: WebSocket) -> None:
@@ -58,7 +58,7 @@ def unregister_websocket(ws: WebSocket) -> None:
 
 async def _broadcast_json(payload: dict) -> None:
     """Send a JSON message to all active WebSocket connections."""
-    async with _ws_async_lock:
+    with _ws_lock:
         targets = list(_active_websockets)
     for ws in targets:
         try:
@@ -104,6 +104,10 @@ async def process_attachments(attachments: List[dict], loop) -> str:
             if not file_path:
                 continue
 
+            # Resolve relative paths (from upload API) against upload directory
+            if not os.path.isabs(file_path):
+                file_path = str(UPLOAD_DIR / file_path)
+
             try:
                 file_path_resolved = Path(file_path).resolve(strict=True)
             except OSError:
@@ -123,7 +127,7 @@ async def process_attachments(attachments: List[dict], loop) -> str:
                     vision = VisionTool()
                     result = await loop.run_in_executor(
                         None,
-                        lambda: vision.analyze_image(file_path, "Describe this image in detail. What do you see?")
+                        lambda fp=file_path, v=vision: v.analyze_image(fp, "Describe this image in detail. What do you see?")
                     )
                     if result.get("success"):
                         description = result.get("description", "")
@@ -140,7 +144,7 @@ async def process_attachments(attachments: List[dict], loop) -> str:
                 # Extract and analyze zip project
                 try:
                     from api.services.zip_analyzer import analyze_zip
-                    zip_context = await loop.run_in_executor(None, lambda: analyze_zip(file_path))
+                    zip_context = await loop.run_in_executor(None, lambda fp=file_path: analyze_zip(fp))
                     context_parts.append(zip_context)
                     logger.info(f"[Attachments] Analyzed zip: {filename} ({len(zip_context)} chars)")
                 except Exception as e:
@@ -190,6 +194,9 @@ def cleanup_attachment_files(attachments: List[dict]):
             file_path = attachment.get("path")
             if not file_path:
                 continue
+            # Resolve relative paths against upload directory
+            if not os.path.isabs(file_path):
+                file_path = str(UPLOAD_DIR / file_path)
             real_path = os.path.realpath(file_path)
             # Only delete files that are inside the upload directory
             if not (real_path.startswith(_upload_root + os.sep) or real_path == _upload_root):
@@ -249,7 +256,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
     except Exception as e:
         logger.error(f"[Chat] Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e))
 
 
 @router.post("/run", response_model=RunResponse, dependencies=[Depends(require_api_key)])
@@ -296,7 +303,7 @@ async def run(request: RunRequest) -> RunResponse:
 
     except Exception as e:
         logger.error(f"[Run] Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e))
 
 
 @router.post("/clear", response_model=ClearHistoryResponse)
@@ -313,7 +320,7 @@ async def clear_history() -> ClearHistoryResponse:
 
     except Exception as e:
         logger.error(f"[Clear] Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e))
 
 
 # =========================================================================
@@ -353,7 +360,7 @@ async def search_messages(q: str, limit: int = 20):
         return {"results": results[:limit], "query": q}
     except Exception as e:
         logger.error(f"[SearchMessages] {e}")
-        return {"results": [], "query": q, "error": str(e)}
+        return {"results": [], "query": q, "error": safe_error_detail(e)}
 
 
 @router.get("/conversations", response_model=list[ConversationSummary])
@@ -365,7 +372,7 @@ async def list_conversations():
         return conversations
     except Exception as e:
         logger.error(f"[Conversations] List error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e))
 
 
 @router.post("/conversations", response_model=ConversationResponse)
@@ -384,7 +391,7 @@ async def create_conversation(request: CreateConversationRequest = None):
         raise
     except Exception as e:
         logger.error(f"[Conversations] Create error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e))
 
 
 @router.put("/conversations/{conversation_id}")
@@ -402,7 +409,7 @@ async def rename_conversation(conversation_id: str, request: RenameConversationR
         raise
     except Exception as e:
         logger.error(f"[Conversations] Rename error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e))
 
 
 @router.delete("/conversations/{conversation_id}")
@@ -420,7 +427,7 @@ async def delete_conversation(conversation_id: str):
         raise
     except Exception as e:
         logger.error(f"[Conversations] Delete error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e))
 
 
 @router.post("/conversations/{conversation_id}/switch", response_model=ConversationResponse)
@@ -438,7 +445,7 @@ async def switch_conversation(conversation_id: str):
         raise
     except Exception as e:
         logger.error(f"[Conversations] Switch error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e))
 
 
 @router.post("/conversations/{conversation_id}/save-to-memory", response_model=SaveToMemoryResponse)
@@ -452,7 +459,7 @@ async def save_conversation_to_memory(conversation_id: str):
         return SaveToMemoryResponse(**result)
     except Exception as e:
         logger.error(f"[Conversations] Save to memory error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e))
 
 
 @router.websocket("/stream")
@@ -478,6 +485,14 @@ async def websocket_chat(websocket: WebSocket):
 
     # Flag to signal stop to the streaming thread
     stop_generation = threading.Event()
+    # Track latest attachments for cleanup in the outer finally block
+    _last_attachments: List[dict] = []
+
+    # Per-connection WebSocket rate limiting
+    _ws_msg_count = 0
+    _ws_window_start = time.monotonic()
+    WS_RATE_LIMIT = 30  # max messages per minute per connection
+    WS_RATE_WINDOW = 60  # seconds
 
     try:
         while True:
@@ -491,6 +506,16 @@ async def websocket_chat(websocket: WebSocket):
                     "type": "error",
                     "error": "Invalid JSON"
                 })
+                continue
+
+            # Per-connection rate limiting
+            _ws_msg_count += 1
+            now = time.monotonic()
+            if now - _ws_window_start > WS_RATE_WINDOW:
+                _ws_msg_count = 1
+                _ws_window_start = now
+            elif _ws_msg_count > WS_RATE_LIMIT:
+                await websocket.send_json({"type": "error", "error": "Rate limit exceeded. Please slow down."})
                 continue
 
             # Handle ping/pong for keepalive
@@ -509,7 +534,6 @@ async def websocket_chat(websocket: WebSocket):
             stop_generation.clear()
 
             # Allow empty message if attachments are present
-            has_message = msg.get("message") is not None
             has_attachments = msg.get("attachments") and len(msg.get("attachments", [])) > 0
 
             if msg.get("type") != "chat" or (not msg.get("message") and not has_attachments):
@@ -524,6 +548,7 @@ async def websocket_chat(websocket: WebSocket):
             action_mode = msg.get("action_mode")  # Optional action mode for auto-model selection
             conversation_id = msg.get("conversation_id")  # Optional conversation context
             attachments = msg.get("attachments", [])  # Optional attachments
+            _last_attachments = attachments  # Track for outer finally cleanup
             logger.debug(f"[WebSocket] Received message: '{message[:50]}...' model={model_override} action_mode={action_mode} conv={conversation_id} attachments={len(attachments)}")
 
             # Auto-switch conversation if needed
@@ -621,7 +646,7 @@ async def websocket_chat(websocket: WebSocket):
                             # Thread-safe put into asyncio.Queue
                             loop.call_soon_threadsafe(chunk_queue.put_nowait, item)
                     except Exception as e:
-                        loop.call_soon_threadsafe(chunk_queue.put_nowait, {"type": "error", "error": str(e)})
+                        loop.call_soon_threadsafe(chunk_queue.put_nowait, {"type": "error", "error": safe_error_detail(e)})
                     finally:
                         loop.call_soon_threadsafe(chunk_queue.put_nowait, None)
 
@@ -651,6 +676,10 @@ async def websocket_chat(websocket: WebSocket):
 
                     if item is None:
                         break
+
+                    # Defensive: wrap raw strings as chunk dicts
+                    if isinstance(item, str):
+                        item = {"type": "chunk", "content": item}
 
                     if item.get("type") == "chunk":
                         content = item.get("content", "")
@@ -726,7 +755,7 @@ async def websocket_chat(websocket: WebSocket):
                 logger.error(f"[WebSocket] Processing error: {e}")
                 await websocket.send_json({
                     "type": "error",
-                    "error": str(e)
+                    "error": safe_error_detail(e)
                 })
             finally:
                 # Always cleanup attachment files, even on error
@@ -735,9 +764,32 @@ async def websocket_chat(websocket: WebSocket):
 
     except WebSocketDisconnect:
         logger.info("[WebSocket] Client disconnected")
-        stop_generation.set()  # Kill any running stream_worker thread
+        stop_generation.set()
+    except asyncio.CancelledError:
+        logger.info("[WebSocket] Connection cancelled (server shutdown or task cancellation)")
+        stop_generation.set()
+        try:
+            await websocket.send_json({"type": "error", "error": "Connection cancelled"})
+            await websocket.close(code=1001)
+        except Exception:
+            pass
     except Exception as e:
         logger.error(f"[WebSocket] Connection error: {e}")
-        stop_generation.set()  # Kill any running stream_worker thread
+        stop_generation.set()
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "error": safe_error_detail(e, "Connection error")
+            })
+            await websocket.close(code=1011)
+        except Exception:
+            pass  # Client already gone
     finally:
         unregister_websocket(websocket)
+        # Safety net: cleanup leftover attachment files if the outer loop
+        # broke mid-message before the per-message finally could run.
+        if _last_attachments:
+            try:
+                cleanup_attachment_files(_last_attachments)
+            except Exception:
+                pass

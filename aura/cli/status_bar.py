@@ -30,6 +30,8 @@ def build_status_bar(
     thinking: bool = False,
     elapsed: float = 0.0,
     tool_count: int = 0,
+    cost_usd: float = 0.0,
+    tier: str = "",
 ) -> Text:
     """Build a single-line status bar that spans the full terminal width."""
 
@@ -70,6 +72,12 @@ def build_status_bar(
 
     if tool_count > 0:
         center.append(f" | {tool_count} tools", style="dim")
+
+    if tier:
+        center.append(f" | {tier}", style="dim yellow")
+
+    if cost_usd > 0:
+        center.append(f" | ${cost_usd:.3f}", style="dim green")
 
     # -- Right section: session info --
     right_info = Text()

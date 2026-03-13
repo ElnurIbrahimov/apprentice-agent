@@ -15,6 +15,7 @@ routines, and JSON snapshot persistence. The world model starts empty
 and is populated manually or via API.
 
 Storage: SQLite (data/world_model.db) + JSON snapshot (data/world_state.json)
+Canonical DB: world_model.db (with underscore). Any "worldmodel.db" is stale.
 """
 
 import json

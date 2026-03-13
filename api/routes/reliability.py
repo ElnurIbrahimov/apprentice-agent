@@ -13,12 +13,14 @@ Author: Aura reliability upgrade (2026-03)
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query, HTTPException, Depends
 from pydantic import BaseModel
+
+from api.auth import require_api_key
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["reliability"])
+router = APIRouter(tags=["reliability"], dependencies=[Depends(require_api_key)])
 
 
 # ---------------------------------------------------------------------------

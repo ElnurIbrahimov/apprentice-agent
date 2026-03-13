@@ -5,11 +5,13 @@ Requires: pip install pytesseract pillow
 """
 
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+
+from api.auth import require_api_key
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api", tags=["ocr"])
+router = APIRouter(prefix="/api", tags=["ocr"], dependencies=[Depends(require_api_key)])
 
 
 @router.post("/ocr")

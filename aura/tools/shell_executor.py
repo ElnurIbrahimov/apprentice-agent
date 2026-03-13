@@ -71,6 +71,12 @@ ALLOWED_COMMANDS_PREFIX = [
     "cargo", "rustc", "go", "java", "javac", "dotnet", "cmake",
     "make", "gcc", "g++", "clang",
     "ipconfig", "ifconfig", "netstat", "ss",
+    # Dev tools — needed for coding agent workflows
+    "python", "python3", "pip", "pip3", "uv",
+    "node", "npm", "npx", "yarn", "pnpm", "bun", "deno",
+    "tsc", "eslint", "prettier", "vitest", "jest", "pytest",
+    "rg", "fd", "ruff", "mypy", "black", "isort",
+    "curl", "wget", "http",
 ]
 
 
@@ -380,6 +386,133 @@ class ShellExecutorTool:
             "response": f"Last {len(history)} command(s):\n" + "\n".join(formatted)
         }
 
+    def run_streaming(self, command: str, session_id: str = None,
+                      timeout: int = DEFAULT_TIMEOUT, cwd: str = None,
+                      on_output=None) -> dict:
+        """Execute a command with real-time streaming output.
+
+        Args:
+            command: Command to execute
+            session_id: Optional session ID
+            timeout: Timeout in seconds
+            cwd: Working directory override
+            on_output: Callback function(line: str) called for each line of output
+
+        Returns:
+            Same as run() but output was also streamed via on_output
+        """
+        if not command or not command.strip():
+            return {"success": False, "error": "No command provided"}
+
+        is_valid, reason = self._validate_command(command)
+        if not is_valid:
+            return {"success": False, "error": f"Security: {reason}"}
+
+        if _contains_shell_injection(command):
+            return {"success": False, "output": "", "error": "Command contains disallowed characters or flags", "exit_code": 1}
+
+        timeout = min(max(1, timeout), MAX_TIMEOUT)
+
+        with self._sessions_lock:
+            session = self._get_session(session_id)
+            working_dir = cwd or session.cwd
+            if not Path(working_dir).exists():
+                working_dir = str(Path.cwd())
+
+        if self._is_windows:
+            shell_cmd = ["cmd.exe", "/c", command]
+        else:
+            shell_cmd = ["/bin/bash", "-c", command]
+
+        start_time = time.time()
+        stdout_lines = []
+        stderr_lines = []
+
+        try:
+            proc = subprocess.Popen(
+                shell_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=working_dir,
+                text=True,
+                bufsize=1,  # Line-buffered
+                env=None,
+            )
+
+            # Read stdout in real-time
+            def read_stream(stream, collector, is_stderr=False):
+                for line in stream:
+                    collector.append(line)
+                    if on_output:
+                        prefix = "[stderr] " if is_stderr else ""
+                        on_output(prefix + line.rstrip())
+
+            stderr_thread = threading.Thread(
+                target=read_stream, args=(proc.stderr, stderr_lines, True), daemon=True
+            )
+            stderr_thread.start()
+
+            # Read stdout on main thread
+            read_stream(proc.stdout, stdout_lines)
+            stderr_thread.join(timeout=5)
+
+            proc.wait(timeout=timeout)
+            elapsed = time.time() - start_time
+            exit_code = proc.returncode
+
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()
+            elapsed = time.time() - start_time
+            return {
+                "success": False,
+                "error": f"Command timed out after {timeout}s",
+                "elapsed": round(elapsed, 2),
+                "session_id": session.id,
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Command failed: {str(e)}",
+                "session_id": session.id,
+            }
+
+        stdout = "".join(stdout_lines)
+        stderr = "".join(stderr_lines)
+        stdout = self._truncate_output(stdout)
+        stderr = self._truncate_output(stderr)
+
+        with self._sessions_lock:
+            session.history.append({
+                "command": command,
+                "stdout": stdout[:500],
+                "stderr": stderr[:500],
+                "exit_code": exit_code,
+                "timestamp": datetime.now().isoformat(),
+                "elapsed": round(elapsed, 2),
+            })
+            if len(session.history) > 100:
+                session.history = session.history[-100:]
+
+        result = {
+            "success": exit_code == 0,
+            "stdout": stdout,
+            "stderr": stderr,
+            "exit_code": exit_code,
+            "elapsed": round(elapsed, 2),
+            "session_id": session.id,
+            "cwd": session.cwd,
+        }
+
+        output_parts = []
+        if stdout.strip():
+            output_parts.append(stdout.strip())
+        if stderr.strip():
+            output_parts.append(f"[stderr] {stderr.strip()}")
+        result["response"] = "\n".join(output_parts) if output_parts else f"Command completed (exit code {exit_code})"
+
+        return result
+
     def execute(self, action: str, **kwargs) -> dict:
         """Execute a shell action."""
         action_lower = action.lower().strip()
@@ -404,10 +537,20 @@ class ShellExecutorTool:
             limit = kwargs.get("limit", 10)
             return self.get_history(session_id=session_id, limit=limit)
 
-        # Default: run command
+        # Default: run command (use streaming if callback provided)
         session_id = kwargs.get("session_id")
         timeout = kwargs.get("timeout", DEFAULT_TIMEOUT)
         cwd = kwargs.get("cwd")
+        on_output = kwargs.get("on_output")
+
+        if on_output:
+            return self.run_streaming(
+                command=action,
+                session_id=session_id,
+                timeout=timeout,
+                cwd=cwd,
+                on_output=on_output,
+            )
         return self.run(
             command=action,
             session_id=session_id,

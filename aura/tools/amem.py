@@ -24,6 +24,8 @@ ARCHITECTURE NOTE — A-MEM layer chain:
     a single store — entity extraction populates both backends simultaneously.
 """
 
+from aura.jsonl_utils import rotate_jsonl_if_needed
+
 import json
 import hashlib
 import logging
@@ -1407,6 +1409,7 @@ Guidelines:
 
     def _append_note(self, note: MemoryNote):
         """Append note to JSONL file."""
+        rotate_jsonl_if_needed(self.notes_file)
         with open(self.notes_file, 'a', encoding='utf-8') as f:
             f.write(json.dumps(note.to_dict()) + '\n')
             f.flush()

@@ -167,34 +167,70 @@ class MemorySystem:
         n_results: Optional[int] = None,
         memory_type: Optional[str] = None,
     ) -> list[dict]:
-        """Retrieve memories ranked by semantic (or Jaccard) similarity."""
+        """Retrieve memories ranked by semantic (or Jaccard) similarity.
+
+        Optimizations vs naive full-table scan:
+        - Try embedding first; only fetch embedding column if available
+        - When falling back to Jaccard, limit to most recent 500 rows
+        """
         n_results = n_results or Config.MAX_MEMORY_RESULTS
 
-        sql = "SELECT id,content,type,timestamp,metadata,embedding FROM memories"
+        # Try to embed the query first so we know which columns to fetch
+        query_vec = self._embed(query)
+
+        if query_vec:
+            # Semantic mode: fetch rows that have embeddings (best quality)
+            sql = "SELECT id,content,type,timestamp,metadata,embedding FROM memories"
+        else:
+            # Jaccard fallback: only need text, skip embedding column, limit scan
+            sql = "SELECT id,content,type,timestamp,metadata FROM memories"
+
         params: list = []
+        wheres = []
         if memory_type:
-            sql += " WHERE type=?"
+            wheres.append("type=?")
             params.append(memory_type)
+        if query_vec:
+            wheres.append("embedding IS NOT NULL")
+
+        if wheres:
+            sql += " WHERE " + " AND ".join(wheres)
+
+        if not query_vec:
+            # Jaccard: limit to recent 500 to avoid O(N) on huge tables
+            sql += " ORDER BY timestamp DESC LIMIT 500"
 
         with self._lock:
             rows = self._get_conn().execute(sql, params).fetchall()
 
         if not rows:
-            return []
-
-        query_vec = self._embed(query)
+            if query_vec:
+                # Semantic mode found no embedded rows — fall back to Jaccard
+                query_vec = None
+                sql = "SELECT id,content,type,timestamp,metadata FROM memories"
+                params = []
+                if memory_type:
+                    sql += " WHERE type=?"
+                    params.append(memory_type)
+                sql += " ORDER BY timestamp DESC LIMIT 500"
+                with self._lock:
+                    rows = self._get_conn().execute(sql, params).fetchall()
+            if not rows:
+                return []
 
         scored = []
-        for row_id, content, mem_type, ts, meta_str, emb_str in rows:
-            if query_vec and emb_str:
+        if query_vec:
+            for row_id, content, mem_type, ts, meta_str, emb_str in rows:
                 try:
                     emb = json.loads(emb_str)
                     score = _cosine(query_vec, emb)
                 except (json.JSONDecodeError, ValueError, ZeroDivisionError):
                     score = _jaccard(query, content)
-            else:
+                scored.append((score, row_id, content, mem_type, ts, meta_str))
+        else:
+            for row_id, content, mem_type, ts, meta_str in rows:
                 score = _jaccard(query, content)
-            scored.append((score, row_id, content, mem_type, ts, meta_str))
+                scored.append((score, row_id, content, mem_type, ts, meta_str))
 
         scored.sort(key=lambda x: x[0], reverse=True)
 

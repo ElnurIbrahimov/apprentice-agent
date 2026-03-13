@@ -10,12 +10,14 @@ import os
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
+
+from api.auth import require_api_key
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/image", tags=["image"])
+router = APIRouter(prefix="/api/image", tags=["image"], dependencies=[Depends(require_api_key)])
 
 COMFY = os.getenv("COMFY_BASE_URL", "http://localhost:8188")
 

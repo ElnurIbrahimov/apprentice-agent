@@ -395,10 +395,10 @@ class SelfImprovementEngine:
         domain = goal.domain
         try:
             # Use LLM to generate and solve a practice problem
-            from aura.brain import Brain
+            from aura.brain import OllamaBrain
             with self._practice_brain_lock:
                 if self._practice_brain is None:
-                    self._practice_brain = Brain()
+                    self._practice_brain = OllamaBrain(warmup=False)
                 brain = self._practice_brain
 
             practice_prompt = (

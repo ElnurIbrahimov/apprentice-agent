@@ -18,7 +18,11 @@ if env_file.exists():
 
 os.environ.setdefault('TORCHAO_NO_TRITON', '1')
 
-import gradio as gr
+try:
+    import gradio as gr
+except ImportError:
+    print("ERROR: gradio not installed. Install with: pip install gradio>=4.0.0")
+    raise SystemExit(1)
 import threading
 from typing import Generator
 from pathlib import Path

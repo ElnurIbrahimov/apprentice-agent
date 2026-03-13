@@ -11,12 +11,14 @@ from datetime import datetime
 from collections import defaultdict
 from threading import Lock
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
+
+from api.auth import require_api_key
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/context", tags=["context"])
+router = APIRouter(prefix="/api/context", tags=["context"], dependencies=[Depends(require_api_key)])
 
 # ============================================================================
 # Focus Item - Represents something AURA is paying attention to

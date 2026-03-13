@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from aura.jsonl_utils import rotate_jsonl_if_needed
+
 
 class MetacognitionLogger:
     """Logs agent actions, confidence scores, and outcomes for analysis."""
@@ -60,6 +62,7 @@ class MetacognitionLogger:
         }
 
         log_file = self._get_log_file()
+        rotate_jsonl_if_needed(log_file)
         with open(log_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(log_entry) + "\n")
 

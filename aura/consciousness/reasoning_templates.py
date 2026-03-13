@@ -640,7 +640,7 @@ class ReasoningTemplateLibrary:
     def _abstract_category(self, category: str, traces: list):
         """Use LLM to abstract reasoning patterns from traces in a category."""
         try:
-            from aura.brain import Brain
+            from aura.brain import OllamaBrain
 
             # Build prompt with trace examples (limit to top 10)
             sample = traces[:10]
@@ -666,7 +666,7 @@ class ReasoningTemplateLibrary:
                 ' "applicable_categories": ["category1", "category2"]}'
             )
 
-            brain = Brain()
+            brain = OllamaBrain(warmup=False)
             result = brain.think(prompt, task_type=None)
 
             # Parse JSON from LLM response

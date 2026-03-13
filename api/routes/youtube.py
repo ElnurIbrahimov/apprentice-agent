@@ -6,11 +6,13 @@ Fetches transcript via youtube-transcript-api, summarizes with Ollama.
 import re
 import logging
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+
+from api.auth import require_api_key
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/youtube", tags=["youtube"])
+router = APIRouter(prefix="/api/youtube", tags=["youtube"], dependencies=[Depends(require_api_key)])
 
 import os as _os
 OLLAMA_URL = _os.getenv("OLLAMA_BASE_URL", "http://localhost:11434") + "/api/generate"

@@ -17,6 +17,7 @@ Integrates with:
 import json
 import logging
 import os
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
@@ -1025,11 +1026,14 @@ class MetacognitiveEngine:
 # ============================================================================
 
 _metacognitive_engine: Optional[MetacognitiveEngine] = None
+_metacog_lock = threading.Lock()
 
 
 def get_metacognitive_engine() -> MetacognitiveEngine:
     """Get or create the metacognitive engine singleton."""
     global _metacognitive_engine
     if _metacognitive_engine is None:
-        _metacognitive_engine = MetacognitiveEngine()
+        with _metacog_lock:
+            if _metacognitive_engine is None:
+                _metacognitive_engine = MetacognitiveEngine()
     return _metacognitive_engine

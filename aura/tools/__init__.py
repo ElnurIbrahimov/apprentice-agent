@@ -192,6 +192,20 @@ except Exception as _e:
     _safe_import_error("PersonaPlexTool", _e)
 
 # ---------------------------------------------------------------------------
+#  Tool Contract (ToolResult, ToolSpec, etc.)
+# ---------------------------------------------------------------------------
+try:
+    from .tool_contract import ToolResult, ToolSpec, ToolRegistry, ToolSafety, LatencyTier, get_tool_registry
+except Exception as _e:
+    ToolResult = None
+    ToolSpec = None
+    ToolRegistry = None
+    ToolSafety = None
+    LatencyTier = None
+    get_tool_registry = None
+    _safe_import_error("ToolResult/ToolSpec/ToolRegistry", _e)
+
+# ---------------------------------------------------------------------------
 #  SesameTTS (already guarded - requires torch)
 # ---------------------------------------------------------------------------
 try:
@@ -503,6 +517,24 @@ except Exception as _e:
     _safe_import_error("CalendarTool", _e)
 
 # ---------------------------------------------------------------------------
+#  Code Search (grep, glob, definition finder)
+# ---------------------------------------------------------------------------
+try:
+    from .code_search import CodeSearchTool
+except Exception as _e:
+    CodeSearchTool = None
+    _safe_import_error("CodeSearchTool", _e)
+
+# ---------------------------------------------------------------------------
+#  Code Edit (surgical find-replace edits)
+# ---------------------------------------------------------------------------
+try:
+    from .code_edit import CodeEditTool
+except Exception as _e:
+    CodeEditTool = None
+    _safe_import_error("CodeEditTool", _e)
+
+# ---------------------------------------------------------------------------
 #  Shell Executor
 # ---------------------------------------------------------------------------
 try:
@@ -809,6 +841,13 @@ _ALL_SYMBOLS = [
     # SynapseForge - Dynamic Tool Creation
     "SynapseForge",
     "SynthesizedTool",
+    # Tool Contract
+    "ToolResult",
+    "ToolSpec",
+    "ToolRegistry",
+    "ToolSafety",
+    "LatencyTier",
+    "get_tool_registry",
     # WorldSim - Consequence Simulation
     "WorldSim",
     "RiskLevel",
@@ -848,6 +887,9 @@ _ALL_SYMBOLS = [
     "get_introspection_tool",
     # Calendar
     "CalendarTool",
+    # Code Search & Edit
+    "CodeSearchTool",
+    "CodeEditTool",
     # Shell Executor
     "ShellExecutorTool",
     # Screen Reader

@@ -349,7 +349,20 @@ async def shell_run(request: ShellRunRequest):
         return {"success": False, "error": _safe_error(e, "shell_run")}
 
 
+_SHELL_BLOCKED_PATTERNS = [
+    "rm -rf /", "rm -rf /*", "mkfs.", "dd if=", ":(){", "fork bomb",
+    "chmod -R 777 /", "shutdown", "reboot", "init 0", "init 6",
+    "taskkill //F //IM node", "pkill -f node", "killall node",
+]
+
+
 def _shell_run_sync(request: ShellRunRequest) -> dict:
+    # Block obviously destructive commands
+    cmd_lower = request.command.lower().strip()
+    for pattern in _SHELL_BLOCKED_PATTERNS:
+        if pattern in cmd_lower:
+            return {"success": False, "error": f"Blocked: command matches dangerous pattern '{pattern}'"}
+
     agent = _get_agent_service().agent
     if "shell_executor" in agent.tools:
         return agent.tools["shell_executor"].run(
@@ -610,9 +623,17 @@ class CSVImportRequest(BaseModel):
     db: str = "default"
 
 
+# SQL statements allowed via the API — blocks DROP, DELETE, INSERT, UPDATE, ALTER, etc.
+_SQL_ALLOWED_PREFIXES = ("select", "pragma", "explain", "with")
+
+
 @router.post("/database/query")
 async def database_query(request: SQLQueryRequest):
-    """Execute a SQL query."""
+    """Execute a read-only SQL query (SELECT/PRAGMA/EXPLAIN only)."""
+    # Restrict to read-only statements at the API layer
+    sql_stripped = request.sql.strip().lower()
+    if not sql_stripped.startswith(_SQL_ALLOWED_PREFIXES):
+        return {"success": False, "error": "Only SELECT, PRAGMA, EXPLAIN, and WITH queries are allowed via the API"}
     try:
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, lambda: _database_query_sync(request))
@@ -658,10 +679,21 @@ async def database_import_csv(request: CSVImportRequest):
 
 
 def _database_import_sync(request: CSVImportRequest) -> dict:
+    # Validate CSV path — block path traversal and sensitive locations
+    from pathlib import Path as _Path
+    try:
+        csv_resolved = _Path(request.csv_path).resolve(strict=True)
+    except OSError:
+        return {"success": False, "error": f"CSV file not found: {request.csv_path}"}
+    # Block system directories
+    _csv_str = str(csv_resolved).lower()
+    if any(seg in _csv_str for seg in ("/etc/", "/proc/", "/sys/", "\\windows\\", "\\system32\\")):
+        return {"success": False, "error": "Cannot import from system directories"}
+
     agent = _get_agent_service().agent
     if "database" in agent.tools:
         return agent.tools["database"].import_csv(
-            csv_path=request.csv_path, table=request.table, db=request.db
+            csv_path=str(csv_resolved), table=request.table, db=request.db
         )
     return {"success": False, "error": "Database tool not loaded"}
 

@@ -18,6 +18,8 @@ import math
 import os
 import threading
 import time
+
+from aura.jsonl_utils import rotate_jsonl_if_needed
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -241,6 +243,7 @@ class RoutingStatsStore:
                 "success": success,
                 "latency_ms": round(latency_ms, 1),
             }
+            rotate_jsonl_if_needed(self._persist_path)
             with open(self._persist_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry) + "\n")
         except OSError:

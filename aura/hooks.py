@@ -399,11 +399,22 @@ class HooksManager:
     # ---- Persistence ----
 
     def _save_hooks(self):
-        """Save hooks to JSON file."""
+        """Save hooks to JSON file (atomic write via temp file + rename)."""
         try:
+            import tempfile
             data = {"hooks": self._hooks}
-            with open(self._storage_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
+            dir_path = self._storage_path.parent
+            fd, tmp_path = tempfile.mkstemp(dir=str(dir_path), suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2)
+                os.replace(tmp_path, str(self._storage_path))
+            except BaseException:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
         except Exception as e:
             logger.error(f"[HOOKS] Save error: {e}")
 

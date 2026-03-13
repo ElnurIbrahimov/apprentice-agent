@@ -43,6 +43,13 @@ INTENT_PATTERNS = {
                      "creative", "what if", "scenario", "roleplay", "pretend"],
         "patterns": [r"create .+", r"imagine .+", r"what if .+", r"brainstorm .+"],
         "confidence": 0.75
+    },
+    "searcher": {
+        "keywords": ["find", "where", "search code", "grep", "definition",
+                     "reference", "locate", "which file", "codebase",
+                     "project structure", "find function", "find class"],
+        "patterns": [r"find .+ in .+", r"where is .+", r"grep .+"],
+        "confidence": 0.8
     }
 }
 
@@ -52,6 +59,8 @@ MULTI_AGENT_PATTERNS = [
     (r"(find|search) .+ (then|and) (analyze|explain)", ["research", "analyst"]),
     (r"analyze .+ and (create|generate)", ["analyst", "creative"]),
     (r"(code|implement) .+ (then|and) (test|analyze)", ["coder", "analyst"]),
+    (r"(find|search) .+ and (fix|edit|change)", ["searcher", "coder"]),
+    (r"(find|search) .+ and (explain|analyze)", ["searcher", "analyst"]),
 ]
 
 

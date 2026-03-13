@@ -2,10 +2,12 @@
 import asyncio
 import logging
 from typing import Optional
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from api.auth import require_api_key
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/activity", tags=["activity"])
+router = APIRouter(prefix="/api/activity", tags=["activity"], dependencies=[Depends(require_api_key)])
 
 
 def _get_persistence():

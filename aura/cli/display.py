@@ -64,6 +64,8 @@ def show_status_bar(
     message_count: int = 0,
     thinking: bool = False,
     elapsed: float = 0.0,
+    cost_usd: float = 0.0,
+    tier: str = "",
 ):
     """Print the status bar line."""
     from .status_bar import build_status_bar
@@ -72,6 +74,7 @@ def show_status_bar(
         model=model, project_type=project_type,
         session_title=session_title, message_count=message_count,
         width=width, thinking=thinking, elapsed=elapsed,
+        cost_usd=cost_usd, tier=tier,
     )
     console.print(bar, style="on grey11", end="\n")
 
@@ -96,8 +99,14 @@ def show_tool_call(tool_name: str, description: str = ""):
     console.print(line)
 
 
-def show_response(text: str, model: str = ""):
-    """Render agent response as markdown with a left-border panel."""
+def show_response(text: str, model: str = "", stream: bool = True):
+    """Render agent response as markdown with a left-border panel.
+
+    Args:
+        text: Response text (markdown)
+        model: Model name to display
+        stream: If True, simulate streaming with Live display
+    """
     console.print()
 
     # Header: label + model name
@@ -107,13 +116,31 @@ def show_response(text: str, model: str = ""):
     if model:
         label.append(f"  ({model})", style="dim")
 
-    # Render markdown content
+    if stream and len(text) > 20:
+        # Streaming effect: render progressively longer text
+        import time
+        chunks = _split_for_streaming(text)
+        accumulated = ""
+        with Live(console=console, refresh_per_second=15, transient=True) as live:
+            for chunk in chunks:
+                accumulated += chunk
+                try:
+                    md = Markdown(accumulated, code_theme="monokai")
+                except Exception:
+                    md = Text(accumulated)
+                panel = Panel(
+                    md, title=label, title_align="left",
+                    border_style="dim cyan", padding=(0, 2), expand=True,
+                )
+                live.update(Padding(panel, (0, 2)))
+                time.sleep(0.015)
+
+    # Final render (clean, complete)
     try:
         md = Markdown(text, code_theme="monokai")
     except Exception:
         md = Text(text)
 
-    # Wrap in a borderless panel with a subtle left border
     panel = Panel(
         md,
         title=label,
@@ -124,6 +151,26 @@ def show_response(text: str, model: str = ""):
     )
     console.print(Padding(panel, (0, 2)))
     console.print()
+
+
+def _split_for_streaming(text: str) -> list[str]:
+    """Split text into chunks for streaming display — by words, not chars."""
+    words = text.split(' ')
+    chunks = []
+    # Start with bigger chunks, slow down for first few words
+    for i, word in enumerate(words):
+        if i < 3:
+            chunks.append(word + ' ')
+        else:
+            # Group 2-4 words per chunk for speed
+            if i % 3 == 0:
+                chunks.append(word + ' ')
+            else:
+                if chunks:
+                    chunks[-1] += word + ' '
+                else:
+                    chunks.append(word + ' ')
+    return chunks
 
 
 def show_error(message: str):

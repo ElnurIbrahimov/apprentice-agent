@@ -24,6 +24,8 @@ from typing import Dict, List, Optional, Tuple, Any
 from enum import Enum
 import threading
 
+from aura.jsonl_utils import rotate_jsonl_if_needed
+
 logger = logging.getLogger(__name__)
 
 
@@ -964,6 +966,7 @@ class ALMAEngine:
     def _log_emotion(self, emotion: EmotionState):
         """Log emotion to history file."""
         try:
+            rotate_jsonl_if_needed(self.history_file)
             with open(self.history_file, "a", encoding="utf-8") as f:
                 entry = {
                     "emotion": emotion.name,
@@ -1086,12 +1089,11 @@ class ALMAEngine:
         """
         now = time.time()
 
-        # Rate limit: at most once per 30 seconds
-        if now - self._last_drift_time < 30:
-            return None
-        self._last_drift_time = now
-
         with self._lock:
+            # Rate limit: at most once per 30 seconds
+            if now - self._last_drift_time < 30:
+                return None
+            self._last_drift_time = now
             drift_reason = None
 
             # 1. Boredom during idle → curiosity transition

@@ -133,6 +133,7 @@ class ModelsResponse(BaseModel):
     """Response with available models."""
     local_models: List[str]
     cloud_models: List[str]
+    chatgpt_models: List[str] = []
     current_model: str
 
 
@@ -161,7 +162,8 @@ async def get_init_status(request: Request):
         else:
             return {"ready": False, "progress": "not_started"}
     except Exception as e:
-        return {"ready": False, "progress": f"error: {str(e)[:100]}"}
+        logger.warning(f"[Status] Init check error: {e}")
+        return {"ready": False, "progress": "error"}
 
 
 @router.get("/status", response_model=StatusResponse)
@@ -552,6 +554,7 @@ async def get_models() -> ModelsResponse:
         return ModelsResponse(
             local_models=models.get("local", []),
             cloud_models=models.get("cloud", []),
+            chatgpt_models=models.get("chatgpt", []),
             current_model=models.get("current", "auto")
         )
 

@@ -913,3 +913,17 @@ builder.enable_tool('bmi_calculator')
 - Inter-agent communication
 - Shared memory pool
 - Task delegation and coordination
+
+---
+
+## Recent Engineering Improvements
+
+Targeted reliability and security hardening pass (2026-03):
+
+- **Budget enforcement**: Hard `num_predict` cap alongside soft prompt hint
+- **Memory write gate**: Best-match merge target selection (was first-match)
+- **Dream consolidation**: Embedding-based clustering with Jaccard fallback
+- **API security**: Production error sanitization, request ID tracking, file upload hardening
+- **Tool security**: AST validation extended to marketplace and custom tool imports
+- **Centralized thresholds**: Key tunable values (salience, ToM, budget, history) consolidated in `Config` class with env-var overrides
+- **Daemon reliability**: Monotonic time for intervals, PID race condition fix

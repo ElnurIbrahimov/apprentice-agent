@@ -3,12 +3,14 @@
 import asyncio
 import os
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
+
+from api.auth import require_api_key
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/models", tags=["models"])
+router = APIRouter(prefix="/api/models", tags=["models"], dependencies=[Depends(require_api_key)])
 
 # Feature → chain mapping (for display in the UI)
 FEATURE_CHAIN_MAP = {
@@ -54,11 +56,22 @@ async def _ollama_models_async() -> list[dict]:
 
 @router.get("/available")
 async def list_available_models():
-    """Return all models available in Ollama, split into cloud and local."""
+    """Return all models available (Ollama + ChatGPT), split by provider."""
     models = await _ollama_models_async()
     cloud = [m for m in models if m["is_cloud"]]
     local = [m for m in models if not m["is_cloud"]]
-    return {"cloud": cloud, "local": local, "total": len(models)}
+
+    # Add ChatGPT models if authenticated
+    chatgpt = []
+    try:
+        from aura.auth.chatgpt_oauth import is_authenticated
+        if is_authenticated():
+            from aura.auth.chatgpt_client import ALL_CHATGPT_MODELS
+            chatgpt = [{"name": m, "size": 0, "is_cloud": True} for m in ALL_CHATGPT_MODELS]
+    except ImportError:
+        pass
+
+    return {"cloud": cloud, "local": local, "chatgpt": chatgpt, "total": len(models) + len(chatgpt)}
 
 
 @router.get("/config")

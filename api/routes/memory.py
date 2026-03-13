@@ -137,9 +137,15 @@ _trackers: dict[str, MemoryRecallTracker] = {}
 _tracker_lock = threading.Lock()
 
 
+_MAX_TRACKERS = 50
+
 def _get_tracker(session_id: str) -> MemoryRecallTracker:
     with _tracker_lock:
         if session_id not in _trackers:
+            # Evict oldest if at capacity
+            if len(_trackers) >= _MAX_TRACKERS:
+                oldest_key = next(iter(_trackers))
+                del _trackers[oldest_key]
             _trackers[session_id] = MemoryRecallTracker()
         return _trackers[session_id]
 

@@ -188,7 +188,7 @@ class ParliamentConductor:
         text = critic_output.strip() if isinstance(critic_output, str) else str(critic_output).strip()
         return len(text) > 80 and any(c.isalpha() for c in text)
 
-    def handle_stream(self, query: str, context_addon: str = ""):
+    def handle_stream(self, query: str, context_addon: str = "", model_override: str = None):
         """Streaming entry point — yields text chunks as they arrive.
 
         SIMPLE and STANDARD tiers stream directly via brain.think_stream().
@@ -221,6 +221,7 @@ class ParliamentConductor:
             for chunk in self.agent.brain.think_stream(
                 query,
                 system_prompt=stream_system,
+                model_override=model_override,
             ):
                 full_response += chunk
                 yield chunk

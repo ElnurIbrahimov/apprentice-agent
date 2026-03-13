@@ -106,7 +106,7 @@ class ProtoAGIWrapper:
         if self._progress_callback:
             try:
                 self._progress_callback(message)
-            except:
+            except Exception:
                 pass
 
     def generate_response(self, user_message: str, chat_id: str = None) -> str:

@@ -9,12 +9,14 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 from threading import Lock
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+
+from api.auth import require_api_key
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/conversation", tags=["conversation"])
+router = APIRouter(prefix="/api/conversation", tags=["conversation"], dependencies=[Depends(require_api_key)])
 
 # ============================================================================
 # Conversation Starter Templates

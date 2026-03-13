@@ -88,7 +88,9 @@ def _analyze_impl(zip_path: str, tmp_dir: str) -> str:
     with zipfile.ZipFile(zip_path, "r") as zf:
         for member in zf.infolist():
             target = (root / member.filename).resolve()
-            if not str(target).startswith(str(resolved_root)):
+            try:
+                target.relative_to(resolved_root)
+            except ValueError:
                 logger.warning(f"[ZipAnalyzer] Skipping unsafe path: {member.filename}")
                 continue
             zf.extract(member, tmp_dir)

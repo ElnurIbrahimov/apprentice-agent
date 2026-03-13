@@ -23,6 +23,8 @@ from typing import Callable, List, Optional, Tuple
 
 import requests
 
+from aura.jsonl_utils import rotate_jsonl_if_needed
+
 from ..config import Config
 
 logger = logging.getLogger(__name__)
@@ -174,6 +176,7 @@ class ReflexionEngine:
         SECURITY: Uses exclusive lock to prevent corruption from concurrent writes.
         """
         try:
+            rotate_jsonl_if_needed(self.memory_path)
             # Use exclusive lock for writing
             with file_lock(self.memory_path, 'a', exclusive=True) as f:
                 f.write(json.dumps(asdict(reflection)) + "\n")

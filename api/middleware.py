@@ -1,13 +1,13 @@
 """API middleware for authentication, rate limiting, and security."""
 
-import asyncio
 import time
+import uuid
 import logging
 import secrets
 from collections import defaultdict
-from typing import Dict, Tuple
+from typing import Dict
 
-from fastapi import Request, Response, WebSocket
+from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
@@ -26,6 +26,9 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         "/",
         "/health",
         "/api/status",
+        "/api/auth/chatgpt/status",
+        "/api/auth/chatgpt/login",
+        "/api/auth/chatgpt/logout",
         "/docs",
         "/openapi.json",
         "/redoc",
@@ -91,7 +94,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._requests: Dict[str, list] = defaultdict(list)
         self._cleanup_interval = 300  # Clean old entries every 5 min
         self._last_cleanup = time.time()
-        self._lock = asyncio.Lock()
+        # No lock needed: asyncio is single-threaded and there's no await
+        # inside the critical section, so no coroutine can interleave.
         if self.enabled:
             logger.info(f"[RateLimit] Enabled: {requests_per_minute} requests/minute per IP")
 
@@ -121,23 +125,43 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         client_ip = request.client.host if request.client else "unknown"
         now = time.time()
 
-        async with self._lock:
-            window_start = now - 60
+        window_start = now - 60
 
-            # Count requests in the current window
-            self._requests[client_ip] = [
-                t for t in self._requests[client_ip] if t > window_start
-            ]
+        # Count requests in the current window
+        self._requests[client_ip] = [
+            t for t in self._requests[client_ip] if t > window_start
+        ]
 
-            if len(self._requests[client_ip]) >= self.requests_per_minute:
-                retry_after = int(60 - (now - self._requests[client_ip][0]))
-                return JSONResponse(
-                    status_code=429,
-                    content={"detail": f"Rate limit exceeded. Try again in {max(1, retry_after)}s."},
-                    headers={"Retry-After": str(max(1, retry_after))}
-                )
+        if len(self._requests[client_ip]) >= self.requests_per_minute:
+            retry_after = int(60 - (now - self._requests[client_ip][0]))
+            return JSONResponse(
+                status_code=429,
+                content={"detail": f"Rate limit exceeded. Try again in {max(1, retry_after)}s."},
+                headers={"Retry-After": str(max(1, retry_after))}
+            )
 
-            self._requests[client_ip].append(now)
-            self._cleanup_old_entries()
+        self._requests[client_ip].append(now)
+        self._cleanup_old_entries()
 
         return await call_next(request)
+
+
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    """Attach a unique X-Request-ID header to every HTTP response.
+
+    If the client already provides an X-Request-ID header, it is reused;
+    otherwise a new UUID4 is generated.  The ID is also stored on
+    ``request.state.request_id`` so error handlers can include it.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        # Skip WebSocket upgrades — headers can't be added to WS responses
+        if request.headers.get("upgrade", "").lower() == "websocket":
+            return await call_next(request)
+
+        request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+        request.state.request_id = request_id
+
+        response: Response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
