@@ -28,10 +28,8 @@ def _record_thought(thought_type: str, content: str, intensity: float = 0.6, sou
     try:
         from api.routes.thinking import record_thought
         record_thought(thought_type, content, intensity, source)
-    except Exception:
-        pass
-
-
+    except Exception as e:
+        logger.debug(f"[Agent] non-critical: {e}")
 # ============================================================================
 #                    SECURITY: Safe Custom Tool Validator
 # ============================================================================
@@ -115,7 +113,7 @@ def validate_custom_tool_code(code: str, tool_path: str) -> Tuple[bool, str]:
                         if item.name in ("execute", "run", "__call__"):
                             has_execute = True
         elif isinstance(node, ast.FunctionDef) and node.name == "execute":
-            # SynapseForge-generated tools use a module-level execute() function
+            # Synthesized tools may use a module-level execute() function
             has_module_execute = True
 
     if has_tool_class and has_execute:
@@ -139,19 +137,9 @@ from .identity import load_identity, get_identity_prompt, detect_name_change, de
 from .memory import MemorySystem
 from .metacognition import MetacognitionLogger
 from .config import Config
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, FluxMindTool, FLUXMIND_AVAILABLE, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, get_monologue, KnowledgeGraphTool, get_knowledge_graph, MetacognitiveGuardian, GuardianConfig, NeuroDreamEngine, SleepPhase, ReflexionEngine, SynapseForge, WorldSim, RiskLevel, CalendarTool, SpacedRepetitionTool, TaskManagerTool, ClipboardHistoryTool, APITesterTool, DatabaseTool, AudioTranscriberTool, ResearchTool, BraveSearchTool, TavilyTool, FirecrawlTool, ClipboardMemoryTool, ObsidianTool, GitHubTool, LogAnalystTool, DocumentGeneratorTool, WindowsControlTool, HomeAssistantTool, TaskSchedulerTool, DiscordTool, SlackTool, LocalImageGenTool, AmbientAudioTool, PredictiveTaskTool, MeetingIntelTool, VoiceSynthTool, LifeLoggerTool, CodeSearchTool, CodeEditTool
-from .tools.mirrormind import MirrorMind
-from .tools.cognitive_theater import CognitiveTheater, is_decision_question
-from .parliament import ParliamentConductor
-
-# IntrospectionCircuit — zero-LLM query triage via heuristic classification
-try:
-    from .tools.introspection_circuit import IntrospectionCircuit
-    INTROSPECTION_AVAILABLE = True
-except ImportError:
-    INTROSPECTION_AVAILABLE = False
-    IntrospectionCircuit = None
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, get_monologue, KnowledgeGraphTool, get_knowledge_graph, NeuroDreamEngine, SleepPhase, CalendarTool, SpacedRepetitionTool, TaskManagerTool, ClipboardHistoryTool, APITesterTool, DatabaseTool, AudioTranscriberTool, ResearchTool, BraveSearchTool, TavilyTool, FirecrawlTool, ClipboardMemoryTool, ObsidianTool, GitHubTool, LogAnalystTool, DocumentGeneratorTool, WindowsControlTool, HomeAssistantTool, TaskSchedulerTool, DiscordTool, SlackTool, LocalImageGenTool, AmbientAudioTool, PredictiveTaskTool, MeetingIntelTool, VoiceSynthTool, LifeLoggerTool, CodeSearchTool, CodeEditTool
 from .tools.crypto_price import CryptoPriceTool
+
 from .memory_retriever import MemoryRetriever
 try:
     from .context_engine import AlwaysOnContextEngine
@@ -176,14 +164,6 @@ except ImportError:
     DreamMode = None
     DREAM_MODE_AVAILABLE = False
 
-# Proto-AGI Core - Autonomous Cognitive Loop
-try:
-    from .proto_agi_core import ProtoAGI
-    PROTO_AGI_AVAILABLE = True
-except ImportError:
-    PROTO_AGI_AVAILABLE = False
-    ProtoAGI = None
-
 # Strategy Bandit - Adaptive reasoning strategy selection
 try:
     from aura.consciousness.strategy_bandit import (
@@ -199,7 +179,6 @@ try:
     from aura.consciousness.reasoning_templates import (
         get_template_library,
         build_trace_from_mcts,
-        build_trace_from_reflexion,
     )
     TEMPLATE_LIBRARY_AVAILABLE = True
 except ImportError:
@@ -431,30 +410,6 @@ _TOOL_KEYWORDS = frozenset([
     'regex', 'regular expression', 'build regex', 'test regex',
     'regex pattern', 'match pattern', 'validate regex', 'explain regex',
 
-    # --- Cognitive System 17: MirrorMind (self-critique) ---
-    'critique', 'self-critique', 'review my', 'check my work',
-    'mirrormind', 'mirror mind', 'evaluate my',
-
-    # --- Cognitive System 18: CognitiveTheater (perspectives) ---
-    'perspectives', 'different perspectives', 'multiple viewpoints',
-    'cognitive theater', 'debate this', 'argue both sides',
-
-    # --- Cognitive System 19: Reflexion (learning) ---
-    'reflexion', 'learn from', 'what did you learn', 'lessons learned',
-    'past mistakes', 'improve from',
-
-    # --- Cognitive System 20: SynapseForge (dynamic tools) ---
-    'synapseforge', 'synapse forge', 'dynamic tool', 'synthesize tool',
-    'create capability',
-
-    # --- Cognitive System 21: WorldSim (consequences) ---
-    'worldsim', 'world sim', 'simulate', 'consequences of',
-    'what would happen if', 'predict outcome', 'scenario',
-
-    # --- Cognitive System 22: MetacognitiveGuardian ---
-    'guardian', 'guardian stats', 'guardian status', 'failure prediction',
-    'metacognitive', 'monitoring level', 'show predictions', 'failure patterns',
-
     # --- Cognitive System 23: NeuroDream (memory consolidation) ---
     'neurodream', 'go to sleep', 'sleep now', 'dream status',
     'dream journal', 'show dreams', 'sleep insights', 'dream insights',
@@ -475,10 +430,6 @@ _TOOL_KEYWORDS = frozenset([
     # --- Tool: Clawdbot (messaging) ---
     'clawdbot', 'send message', 'send whatsapp', 'send telegram',
     'text message', 'discord message', 'message to',
-
-    # --- Tool: FluxMind (calibrated reasoning) ---
-    'fluxmind', 'calibrated', 'confidence check', 'uncertainty',
-    'how confident', 'verify sequence',
 
     # --- Tool: deep_research ---
     'deep research', 'research thoroughly', 'thorough research',
@@ -667,13 +618,6 @@ class ApprenticeAgent:
             except Exception as e:
                 logger.warning(f"voice not loaded: {e}")
 
-            # mirrormind (as tool) - uses module-level import
-            try:
-                self.tools['mirrormind'] = MirrorMind()
-                logger.info("[LOADED] mirrormind")
-            except Exception as e:
-                logger.warning(f"mirrormind not loaded: {e}")
-
             # local_rag - Local document RAG system
             try:
                 from .tools.local_rag import LocalRAGTool
@@ -774,7 +718,7 @@ class ApprenticeAgent:
                                     self.tools[tool_name] = tool_class()
                                     logger.info(f"[LOADED] synthesized/{tool_name}")
                                 elif hasattr(module, 'execute'):
-                                    # SynapseForge-generated tools with module-level execute()
+                                    # Synthesized tools with module-level execute()
                                     # Wrap in a simple object so tool dispatch works uniformly
                                     exec_fn = module.execute
                                     wrapper = type(f'{tool_name}_tool', (), {
@@ -809,12 +753,6 @@ class ApprenticeAgent:
         if Config.PERSONAPLEX_ENABLED:
             self.tools["personaplex"] = PersonaPlexTool()
             logger.debug("[LOADED] PersonaPlex - Real-time full-duplex voice (requires HF_TOKEN)")
-        # Add FluxMind if available (skip for fast init)
-        if FLUXMIND_AVAILABLE and not fast_init:
-            models_path = Path(__file__).parent.parent / "models" / "fluxmind_v0751.pt"
-            self.tools["fluxmind"] = FluxMindTool(str(models_path))
-            if "fluxmind" in self.tools and self.tools["fluxmind"].is_available():
-                logger.debug("[LOADED] FluxMind v0.75.1 - Calibrated reasoning engine")
         self.state = AgentState()
         self.max_iterations = 10
         self.metacognition = MetacognitionLogger()
@@ -824,15 +762,8 @@ class ApprenticeAgent:
         self._load_custom_tools()  # Load active custom tools
         self._fast_init = fast_init
 
-        # Initialize Metacognitive Guardian (Tool #23)
-        self.guardian = MetacognitiveGuardian(
-            inner_monologue=self.monologue,
-            evoemo=self.tools.get("evoemo"),
-            knowledge_graph=self.tools.get("knowledge_graph"),
-            config=GuardianConfig(monitoring_level="medium")
-        )
-        self._pending_prediction = None  # Track for outcome recording
-        logger.debug("[LOADED] Metacognitive Guardian - Failure prediction system")
+        self.guardian = None
+        self._pending_prediction = None
 
         # Initialize NeuroDream (Tool #24) - Sleep/Dream Memory Consolidation
         self.neurodream = NeuroDreamEngine(
@@ -855,118 +786,34 @@ class ApprenticeAgent:
                 try:
                     if self.neurodream and self.neurodream.current_phase.value == "awake":
                         self.neurodream.check_idle_trigger()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[Agent] non-critical: {e}")
         _nd_poll_thread = _threading.Thread(
             target=_neurodream_idle_poll, daemon=True, name="NeuroDream-IdlePoll"
         )
         _nd_poll_thread.start()
         logger.debug("[NeuroDream] Idle polling thread started (60s interval)")
 
-        # Initialize MirrorMind (Tool #21) - Self-Critique System
-        self.mirrormind = MirrorMind(
-            ollama_url=Config.OLLAMA_HOST,
-            model=Config.MODEL_FAST,
-            quality_threshold=getattr(Config, 'MIRRORMIND_THRESHOLD', 0.75),
-            max_iterations=getattr(Config, 'MIRRORMIND_MAX_ITERATIONS', 2)
-        )
-        self.mirrormind_enabled = getattr(Config, 'MIRRORMIND_ENABLED', False)
-        if self.mirrormind_enabled:
-            logger.debug("[LOADED] MirrorMind - Self-critique response improvement")
-
-        # IntrospectionCircuit — zero-LLM query triage
+        # Dead modules — stubs to prevent AttributeError
+        self.mirrormind = None
+        self.mirrormind_enabled = False
         self.introspection = None
-        if INTROSPECTION_AVAILABLE:
-            try:
-                # Pass a no-op llm_func; we only use _classify_query (pure heuristics)
-                self.introspection = IntrospectionCircuit(
-                    llm_func=lambda prompt, system=None: "",
-                    config=None,
-                )
-                logger.debug("[LOADED] IntrospectionCircuit - Zero-LLM query triage")
-            except Exception as _e:
-                logger.debug(f"[Introspection] Init failed: {_e}")
-
-        # Initialize CognitiveTheater (Tool #22) - Multi-Perspective Reasoning
-        self.theater = CognitiveTheater(
-            ollama_url=Config.OLLAMA_HOST,
-            model=Config.MODEL_FAST
-        )
-        self.theater_enabled = getattr(Config, 'COGNITIVE_THEATER_ENABLED', True)
-        if self.theater_enabled:
-            logger.debug("[LOADED] CognitiveTheater - Multi-perspective reasoning")
-
-        # Initialize Reflexion Engine (Tool #25) - Learn From Mistakes
-        self.reflexion_enabled = getattr(Config, 'REFLEXION_ENABLED', True)
-        if self.reflexion_enabled:
-            self.reflexion = ReflexionEngine(
-                ollama_url=Config.OLLAMA_HOST,
-                model=Config.MODEL_CODE,  # Use code model for code tasks
-                max_attempts=getattr(Config, 'REFLEXION_MAX_ATTEMPTS', 3)
-            )
-            logger.debug(f"[LOADED] Reflexion - Learn from mistakes ({len(self.reflexion.reflections)} lessons)")
-        else:
-            self.reflexion = None
-
-        # Initialize SynapseForge (Tool #26) - Dynamic Tool Creation
-        self.synapseforge_enabled = getattr(Config, 'SYNAPSEFORGE_ENABLED', True)
-        if self.synapseforge_enabled:
-            self.forge = SynapseForge(
-                ollama_url=Config.OLLAMA_HOST,
-                model=Config.MODEL_CODE  # Use code model for tool synthesis
-            )
-            logger.debug(f"[LOADED] SynapseForge - Dynamic tool creation ({len(self.forge.registry)} tools)")
-        else:
-            self.forge = None
-
-        # Initialize WorldSim (Tool #27) - Consequence Simulation
-        self.worldsim_enabled = getattr(Config, 'WORLDSIM_ENABLED', True)
-        if self.worldsim_enabled:
-            self.worldsim = WorldSim(
-                ollama_url=Config.OLLAMA_HOST,
-                model=Config.MODEL_REASON  # Use reasoning model for safety analysis
-            )
-            logger.debug("[LOADED] WorldSim - Consequence simulation")
-        else:
-            self.worldsim = None
-
-        # Register cognitive tools in self.tools for uniform access
-        try:
-            self.tools['metacog_guardian'] = self.guardian
-        except Exception as e:
-            logger.debug(f"[SKIP] MetacogGuardian registry: {e}")
-
-        try:
-            if self.theater_enabled:
-                self.tools['cognitive_theater'] = self.theater
-        except Exception as e:
-            logger.debug(f"[SKIP] CognitiveTheater registry: {e}")
-
-        try:
-            if self.forge:
-                self.tools['synapseforge'] = self.forge
-        except Exception as e:
-            logger.debug(f"[SKIP] SynapseForge registry: {e}")
+        self.theater = None
+        self.theater_enabled = False
+        self.reflexion = None
+        self.reflexion_enabled = False
+        self.forge = None
+        self.synapseforge_enabled = False
+        self.worldsim = None
+        self.worldsim_enabled = False
 
         try:
             self.tools['neurodream'] = self.neurodream
         except Exception as e:
             logger.debug(f"[SKIP] NeuroDream registry: {e}")
 
-        try:
-            if self.reflexion:
-                self.tools['reflexion'] = self.reflexion
-        except Exception as e:
-            logger.debug(f"[SKIP] Reflexion registry: {e}")
-
-        try:
-            if self.worldsim:
-                self.tools['worldsim'] = self.worldsim
-        except Exception as e:
-            logger.debug(f"[SKIP] WorldSim registry: {e}")
-
         # AURA v3.0 ALIVE — AURAEngine removed; context/humanization via ALMA helpers.
-        # self.aura_enabled controls whether _build_aura_context / _apply_humanization run.
+        # self.aura_enabled controls whether _build_aura_context runs.
         self.aura_enabled = getattr(Config, 'AURA_ENABLED', True)
 
         # Soul — personality/identity config from soul files
@@ -990,14 +837,7 @@ class ApprenticeAgent:
         except Exception as e:
             logger.debug(f"[SKIP] VisibleThinking: {e}")
 
-        # ResponseHumanizer — natural language post-processing
         self._humanizer = None
-        try:
-            from aura.humanize.response_humanizer import ResponseHumanizer
-            self._humanizer = ResponseHumanizer()
-            logger.info("[LOADED] ResponseHumanizer")
-        except Exception as e:
-            logger.debug(f"[SKIP] ResponseHumanizer: {e}")
 
         # Initialize AURA Fast Path - Instant responses
         if FAST_PATH_AVAILABLE:
@@ -1028,9 +868,8 @@ class ApprenticeAgent:
                 """Delivery callback: log proactive messages; API wires WebSocket push separately."""
                 try:
                     logger.info(f"[GatewayDaemon] Proactive: {getattr(msg, 'content', str(msg))[:120]}")
-                except Exception:
-                    pass
-
+                except Exception as e:
+                    logger.debug(f"[Agent] non-critical: {e}")
             # Only set fallback callback if none wired yet (api/main.py sets a richer one)
             if getattr(self.gateway_daemon, '_notification_callback', None) is None:
                 self.gateway_daemon.set_notification_callback(_on_proactive_agent)
@@ -1039,31 +878,32 @@ class ApprenticeAgent:
             logger.warning(f"[GatewayDaemon] Initialization failed: {e}")
             self.gateway_daemon = None
 
-        # Initialize Proto-AGI Core - Autonomous Cognitive Loop
-        # NOTE: Proto-AGI is initialized but NOT auto-started. It runs on-demand
-        # via start_proto_agi() or when explicitly triggered (e.g., by Telegram bot).
         self.proto_agi = None
-        self._proto_agi_output_callback = None  # Set by Telegram bot
 
-        if PROTO_AGI_AVAILABLE:
+        # Initialize Tool RAG for dynamic tool selection
+        self.tool_rag = None
+        try:
+            from aura.tools.tool_rag import ToolRAG
+            from aura.core.tool_schemas import AGENTIC_TOOLS
+            self.tool_rag = ToolRAG()
+            self.tool_rag.initialize(self.tools, AGENTIC_TOOLS)
+        except Exception as e:
+            logger.debug(f"[ToolRAG] Init failed (will use fallback): {e}")
+
+        # Initialize ToolExecutor for ReAct loop (handles dev tools without sandbox)
+        self._tool_executor = None
+        try:
+            from aura.core.agentic_loop import ToolExecutor
+            _project_root = os.getcwd()
             try:
-                self.proto_agi = ProtoAGI(
-                    llm_func=self._proto_agi_llm,
-                    action_func=self._proto_agi_action,
-                    output_func=self._proto_agi_output,
-                    data_path="data/proto_agi/"
-                )
-                logger.debug(f"[LOADED] Proto-AGI Core - Autonomous cognitive loop (Cycle {self.proto_agi.cycle_count})")
-            except Exception as e:
-                logger.warning(f"[WARNING] Proto-AGI initialization failed: {e}")
-                self.proto_agi = None
-        else:
-            logger.debug("[INFO] Proto-AGI Core not available")
-
-        # ===== Phase 3 Fix 3C: Wire proto_agi to NeuroDream for Truth Spine r/w =====
-        if hasattr(self, 'neurodream') and self.neurodream and self.proto_agi:
-            self.neurodream.proto_agi = self.proto_agi
-            logger.debug("[Phase3] NeuroDream wired to Truth Spine (proto_agi)")
+                from aura.core.context import find_project_root
+                _project_root = find_project_root() or _project_root
+            except Exception:
+                pass
+            self._tool_executor = ToolExecutor(project_root=_project_root)
+            logger.debug(f"[ToolExecutor] Initialized at {_project_root}")
+        except Exception as e:
+            logger.debug(f"[ToolExecutor] Init failed: {e}")
 
         # CLI permission confirmation callback (set by main.py for interactive mode)
         self._cli_confirm_callback: Optional[Callable] = None
@@ -1110,8 +950,8 @@ class ApprenticeAgent:
                     try:
                         from aura.memory.unified_memory import get_unified_memory
                         get_unified_memory().set_kg_brain(self.kg_bridge)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"[Agent] non-critical: {e}")
             except Exception as e:
                 logger.warning(f"[WARNING] Knowledge Graph Brain initialization failed: {e}")
                 self.kg_brain = None
@@ -1134,13 +974,7 @@ class ApprenticeAgent:
                 logger.debug("[ACE] Context engine initialized")
             except Exception as _e:
                 logger.warning(f"[ACE] Failed to initialize: {_e}")
-        # Parliament conductor
         self.parliament = None
-        try:
-            self.parliament = ParliamentConductor(self)
-            logger.debug("[Parliament] Conductor initialized")
-        except Exception as _e:
-            logger.warning(f"[Parliament] Failed to init: {_e}")
         self.episodic_consolidator = None
         self.episodic_memory_enabled = getattr(Config, 'EPISODIC_MEMORY_ENABLED', True)
 
@@ -1314,56 +1148,6 @@ class ApprenticeAgent:
                 "progress": response,
             }
         return result
-
-    def _proto_agi_llm(self, prompt: str) -> str:
-        """LLM function for Proto-AGI - uses brain.think()"""
-        try:
-            return self.brain.think(prompt)
-        except Exception as e:
-            return f"[LLM Error: {e}]"
-
-    def _proto_agi_action(self, action: str) -> dict:
-        """Action function for Proto-AGI - executes tools via run()"""
-        try:
-            result = self.run(action, timeout_seconds=60)
-            return {"success": True, "result": result}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-    def _proto_agi_output(self, message: str, chat_id: str = None):
-        """Output function for Proto-AGI - sends to Telegram"""
-        if self._proto_agi_output_callback:
-            try:
-                self._proto_agi_output_callback(message, chat_id)
-            except Exception as e:
-                logger.debug(f"[Proto-AGI] Output callback error: {e}")
-        else:
-            logger.debug(f"[Proto-AGI] Output (no callback): {message}")
-
-    def set_proto_agi_output_callback(self, callback: Callable):
-        """Set the callback for Proto-AGI proactive messages (e.g., Telegram send)"""
-        self._proto_agi_output_callback = callback
-
-    def start_proto_agi(self, cycle_interval: float = 60.0):
-        """Start the Proto-AGI autonomous loop"""
-        if self.proto_agi:
-            self.proto_agi.start(cycle_interval)
-            logger.debug(f"[Proto-AGI] Started autonomous loop (interval: {cycle_interval}s)")
-        else:
-            logger.debug("[Proto-AGI] Not available - cannot start")
-
-    def stop_proto_agi(self):
-        """Stop the Proto-AGI autonomous loop"""
-        if self.proto_agi:
-            self.proto_agi.stop()
-
-    def proto_agi_process(self, message: str, chat_id: str = None) -> str:
-        """Process message through Proto-AGI (for Telegram integration)"""
-        if self.proto_agi:
-            return self.proto_agi.process_input(message, chat_id)
-        else:
-            # Fallback to regular chat
-            return self.chat(message)
 
     def _ensure_tool(self, tool_name: str):
         """Lazily load a tool if not already loaded."""
@@ -1793,11 +1577,6 @@ Guidelines:
         if identity_response:
             return identity_response
 
-        # Check for FluxMind commands - handle directly without LLM
-        fluxmind_response = self._handle_fluxmind_command(goal)
-        if fluxmind_response:
-            return self._make_response(goal, fluxmind_response, fast_path=True, metadata={"fluxmind_direct": True})
-
         # Check for Git commands - handle directly without LLM hallucination
         git_response = self._handle_git_command(goal)
         if git_response:
@@ -1813,183 +1592,226 @@ Guidelines:
         if kg_response:
             return self._make_response(goal, kg_response, fast_path=True, metadata={"kg_direct": True})
 
-        # Check for Guardian commands - handle directly
-        guardian_response = self._handle_guardian_command(goal)
-        if guardian_response:
-            return self._make_response(goal, guardian_response, fast_path=True, metadata={"guardian_direct": True})
-
         # Check for NeuroDream commands - handle directly
         neurodream_response = self._handle_neurodream_command(goal)
         if neurodream_response:
             return self._make_response(goal, neurodream_response, fast_path=True, metadata={"neurodream_direct": True})
 
-        # === METACOGNITIVE GUARDIAN PRE-CHECK ===
-        # Assess risk before processing (works with or without FluxMind)
-        if hasattr(self, 'guardian') and self.guardian:
-            prediction = self.guardian.assess_risk(
-                task=goal,
-                tool=None,  # No tool selected yet
-                context=context or {}
-            )
-
-            if prediction:
-                self._pending_prediction = prediction
-
-                # If very high risk, intervene before even starting
-                if prediction.probability >= self.guardian.config.intervention_threshold:
-                    intervention = self.guardian.execute_intervention(prediction)
-
-                    if intervention["should_abort"]:
-                        return self._make_response(
-                            goal,
-                            intervention["message"],
-                            completed=False,
-                            metadata={
-                                "guardian_abort": True,
-                                "final_evaluation": {
-                                    "success": False,
-                                    "confidence": int((1 - prediction.probability) * 100),
-                                    "progress": f"Guardian intervention: {prediction.failure_type.value}",
-                                },
-                            },
-                        )
-
-        # Zero-LLM query triage via IntrospectionCircuit
         self._current_query_tier = "standard"
-        if self.introspection is not None:
-            try:
-                _qtype = self.introspection._classify_query(goal)
-                _qtype_val = _qtype.value if hasattr(_qtype, 'value') else str(_qtype)
-                if _qtype_val in ("conversational",):
-                    self._current_query_tier = "simple"
-                elif _qtype_val in ("analytical", "procedural"):
-                    self._current_query_tier = "complex"
-                # factual, opinion, creative, unknown → "standard"
-                logger.debug(f"[Triage] Query tier: {self._current_query_tier} (type={_qtype_val})")
-            except Exception:
-                pass
-
         # Check for fast-path eligibility
         fastpath_enabled = use_fastpath if use_fastpath is not None else self.use_fastpath
         if fastpath_enabled and self._is_simple_query(goal):
             return self._fast_path_response(goal)
 
-        self.state = AgentState(goal=goal)
-        # Always-On Context: gather before running agent loop
-        self._ace_context = ""
+        # Always-On Context
+        ace_context = ""
         if self.context_engine is not None:
             try:
                 _bundle = self.context_engine.gather(goal)
-                self._ace_context = _bundle.to_system_prompt()
-                if self._ace_context:
-                    logger.debug(f"[ACE] Context gathered: {_bundle.summary_line()}")
-            except Exception as _e:
-                logger.debug(f"[ACE] Context gather failed: {_e}")
+                ace_context = _bundle.to_system_prompt()
+            except Exception:
+                pass
         context = context or {}
-        # Clear screenshot path for new task
         self.brain._last_screenshot_path = None
-        # Start metacognition tracking for this goal
         self.metacognition.start_goal(goal)
-
-        # Start state machine tracking
-        try:
-            from aura.state_machine import get_agent_state_machine, Phase as _SMPhase
-            self._state_machine = get_agent_state_machine()
-            # Hook: long ACT phases bump cognitive load
-            def _act_exit_hook(from_phase, to_phase, duration_ms, metadata):
-                if duration_ms > 5000:
-                    try:
-                        from aura.thinking_mode import get_thinking_mode_manager
-                        tmm = get_thinking_mode_manager()
-                        tmm.cognitive_load.record_query(0.3, True, True)
-                    except Exception:
-                        pass
-            self._state_machine.on_exit(_SMPhase.ACT, _act_exit_hook)
-            self._state_machine.start_run(goal)
-        except Exception:
-            self._state_machine = None
-
-        # Start inner monologue session
         self.monologue.start_session()
         self.monologue.think("perceive", f"Received: '{goal[:80]}{'...' if len(goal) > 80 else ''}'")
 
-        logger.debug(f"\n{'='*60}")
-        logger.debug(f"Agent starting with goal: {goal}")
-        logger.debug(f"{'='*60}\n")
+        logger.info(f"[AGENT] Starting ReAct loop for: {goal[:80]}")
 
-        while not self.state.completed and self.state.iteration < self.max_iterations:
-            # Check for overall timeout
+        # ===== ReAct Loop =====
+        # Build system prompt with memory, identity, emotion, context
+        system_prompt = self._build_react_system_prompt(goal, ace_context)
+
+        # Select relevant tools via Tool RAG
+        tool_schemas = self._build_tool_schemas(goal)
+
+        # Conversation messages for the LLM
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": goal},
+        ]
+
+        # Loop state
+        iteration = 0
+        final_response = ""
+        done = False
+        state_hashes = set()
+        consecutive_failures = 0
+        tool_calls_total = 0
+
+        while not done and iteration < self.max_iterations:
             elapsed = time.time() - start_time
             if elapsed > timeout_seconds:
-                logger.warning(f"[AGENT] Timeout after {elapsed:.1f}s - returning partial result")
-                return self._format_timeout_response(goal, self.state.iteration, elapsed)
+                logger.warning(f"[AGENT] Timeout after {elapsed:.1f}s")
+                return self._format_timeout_response(goal, iteration, elapsed)
 
-            self.state.iteration += 1
+            iteration += 1
             self.metacognition.increment_iteration()
-            logger.debug(f"\n--- Iteration {self.state.iteration} ---")
-            logger.info(f"[AGENT] Iteration {self.state.iteration}/{self.max_iterations}")
+            logger.info(f"[AGENT] Iteration {iteration}/{self.max_iterations}")
 
             try:
-                # Phase 1: OBSERVE
-                logger.debug("[AGENT] Phase: OBSERVE")
-                if self._state_machine:
-                    from aura.state_machine import Phase as _Phase
-                    self._state_machine.set_iteration(self.state.iteration)
-                    if self.state.iteration > 1:
-                        self._state_machine.transition(_Phase.OBSERVE)
-                self._observe(context)
+                # Pick model for this step
+                step_model = self._pick_react_model(messages, iteration)
 
-                # Phase 2: PLAN
-                logger.debug("[AGENT] Phase: PLAN")
-                if self._state_machine:
-                    from aura.state_machine import Phase as _Phase
-                    self._state_machine.transition(_Phase.PLAN)
-                self._plan()
+                # Single LLM call with tool schemas
+                result = self.brain.think_with_tools(
+                    messages, tool_schemas, model_override=step_model
+                )
 
-                # Phase 3: ACT
-                logger.debug("[AGENT] Phase: ACT")
-                if self._state_machine:
-                    from aura.state_machine import Phase as _Phase
-                    self._state_machine.transition(_Phase.ACT)
-                self._act()
+                if "error" in result:
+                    logger.error(f"[AGENT] LLM error: {result['error']}")
+                    # Try known-good fallback models in order
+                    _fallback_models = ["glm-5:cloud", "deepseek-v3.2:cloud", "kimi-k2.5:cloud"]
+                    # Remove the model that just failed
+                    _fallback_models = [m for m in _fallback_models if m != step_model]
+                    _recovered = False
+                    for _fb_model in _fallback_models:
+                        logger.info(f"[AGENT] Trying fallback model: {_fb_model}")
+                        result = self.brain.think_with_tools(
+                            messages, tool_schemas, model_override=_fb_model
+                        )
+                        if "error" not in result:
+                            _recovered = True
+                            break
+                    if not _recovered:
+                        final_response = f"I encountered an error: {result['error']}"
+                        break
 
-                # Phase 4: EVALUATE
-                logger.debug("[AGENT] Phase: EVALUATE")
-                if self._state_machine:
-                    from aura.state_machine import Phase as _Phase
-                    self._state_machine.transition(_Phase.EVALUATE)
-                self._evaluate()
+                raw_msg = result.get("message", {})
 
-                # Phase 5: REMEMBER
-                logger.debug("[AGENT] Phase: REMEMBER")
-                if self._state_machine:
-                    from aura.state_machine import Phase as _Phase
-                    self._state_machine.transition(_Phase.REMEMBER)
-                self._remember()
+                # Handle both dict and Pydantic message objects
+                if isinstance(raw_msg, dict):
+                    content = raw_msg.get("content", "") or ""
+                    tool_calls = raw_msg.get("tool_calls")
+                else:
+                    content = getattr(raw_msg, "content", "") or ""
+                    tool_calls = getattr(raw_msg, "tool_calls", None)
+
+                # Record thought
+                if content:
+                    self.monologue.think("reason", content[:200])
+
+                # No tool calls → LLM is done, content is the answer
+                # Guard: if content is very short and looks like thinking aloud
+                # (no punctuation ending, under 20 chars), nudge LLM to continue
+                if not tool_calls:
+                    _stripped = (content or "").strip()
+                    _looks_incomplete = (
+                        len(_stripped) < 20
+                        and _stripped
+                        and not _stripped[-1] in '.!?'
+                        and iteration < self.max_iterations - 1
+                    )
+                    if _looks_incomplete:
+                        # Nudge the LLM to provide a real answer or use a tool
+                        messages.append({"role": "assistant", "content": content})
+                        messages.append({
+                            "role": "user",
+                            "content": "Please provide your complete answer, or use a tool if you need more information.",
+                        })
+                        continue
+                    final_response = content
+                    done = True
+                    break
+
+                # Serialize message for conversation history
+                msg_dict = {
+                    "role": "assistant",
+                    "content": content,
+                    "tool_calls": [],
+                }
+
+                # Parse tool calls — handle both dict and Pydantic ToolCall objects
+                parsed_calls = []
+                for tc in tool_calls:
+                    if isinstance(tc, dict):
+                        fn = tc.get("function", {})
+                        tool_name = fn.get("name", "")
+                        raw_args = fn.get("arguments", {})
+                    else:
+                        fn = getattr(tc, "function", None)
+                        tool_name = getattr(fn, "name", "") if fn else ""
+                        raw_args = getattr(fn, "arguments", {}) if fn else {}
+
+                    # Parse arguments
+                    if isinstance(raw_args, str):
+                        try:
+                            args = json.loads(raw_args)
+                        except (json.JSONDecodeError, TypeError):
+                            args = {"action": raw_args}
+                    elif isinstance(raw_args, dict):
+                        args = raw_args
+                    elif raw_args is None:
+                        args = {}
+                    else:
+                        args = {"action": str(raw_args)}
+
+                    parsed_calls.append((tool_name, args))
+                    msg_dict["tool_calls"].append({
+                        "function": {"name": tool_name, "arguments": args}
+                    })
+
+                messages.append(msg_dict)
+
+                # Execute each parsed tool call
+                for tool_name, args in parsed_calls:
+
+                    # Loop guard: state hash dedup
+                    try:
+                        call_hash = hash(f"{tool_name}:{json.dumps(args, sort_keys=True, default=str)}")
+                    except (TypeError, ValueError):
+                        call_hash = hash(f"{tool_name}:{str(args)}")
+                    if call_hash in state_hashes:
+                        messages.append({
+                            "role": "tool",
+                            "content": json.dumps({"error": "Duplicate action. Try a different approach."}),
+                        })
+                        continue
+                    state_hashes.add(call_hash)
+
+                    # Execute tool
+                    tool_result = self._execute_tool_call(tool_name, args)
+                    tool_calls_total += 1
+                    messages.append({"role": "tool", "content": tool_result})
+
+                    # Loop guard: consecutive failures
+                    if '"success": false' in tool_result.lower() or '"error"' in tool_result.lower():
+                        consecutive_failures += 1
+                        if consecutive_failures >= 2:
+                            messages.append({
+                                "role": "tool",
+                                "content": json.dumps({"warning": "Multiple failures. Try a different tool or approach."}),
+                            })
+                            consecutive_failures = 0
+                    else:
+                        consecutive_failures = 0
 
             except Exception as e:
-                logger.error(f"[AGENT] Error in iteration {self.state.iteration}: {e}")
-                if self._state_machine:
-                    try:
-                        from aura.state_machine import Phase as _Phase
-                        self._state_machine.transition(_Phase.ERROR)
-                        self._state_machine.transition(_Phase.OBSERVE)
-                    except Exception:
-                        pass
-                # Continue to next iteration on error
+                logger.error(f"[AGENT] Error in iteration {iteration}: {e}")
                 continue
 
         elapsed = time.time() - start_time
-        logger.info(f"[AGENT] Completed in {elapsed:.1f}s after {self.state.iteration} iterations")
+        logger.info(f"[AGENT] Completed in {elapsed:.1f}s, {iteration} iterations, {tool_calls_total} tool calls")
 
-        # End state machine run
-        if self._state_machine:
-            try:
-                self._state_machine.end_run(completed=self.state.completed)
-            except Exception:
-                pass
+        # Store episode in memory (no LLM call — defer summarization to NeuroDream)
+        self._store_episode(goal, final_response)
 
-        return self._get_final_result()
+        return self._make_response(
+            goal,
+            final_response,
+            completed=done,
+            iterations=iteration,
+            metadata={
+                "react_loop": True,
+                "tool_calls": tool_calls_total,
+                "final_evaluation": {
+                    "success": done and bool(final_response),
+                    "confidence": 90 if done else 30,
+                    "progress": final_response[:200] if final_response else "No response generated",
+                },
+            },
+        )
 
     def _format_timeout_response(self, goal: str, iteration: int, elapsed: float) -> dict:
         """Format a response when agent times out."""
@@ -2009,8 +1831,200 @@ Guidelines:
             },
         )
 
+    # =================================================================
+    # ReAct Loop Helper Methods
+    # =================================================================
+
+    def _build_react_system_prompt(self, goal: str, ace_context: str = "") -> str:
+        """Build system prompt for ReAct loop with memory, identity, emotion.
+
+        Keeps total prompt compact for tool-calling mode where context is precious.
+        Identity + emotion are capped at 1500 chars combined.
+        """
+        parts = []
+
+        # Identity (truncate for tool-calling mode)
+        identity_text = get_identity_prompt()
+        if len(identity_text) > 1200:
+            identity_text = identity_text[:1200] + "..."
+        parts.append(identity_text)
+
+        # ALMA emotional tone (truncate to keep prompt lean)
+        try:
+            from aura.emotion.integration import get_emotional_tone_modifier
+            tone = get_emotional_tone_modifier()
+            if tone:
+                parts.append(tone[:300])
+        except Exception:
+            pass
+
+        # ACE context
+        if ace_context:
+            parts.append(ace_context)
+
+        # Memory recall (parallel)
+        try:
+            _ctx_futures = {}
+            if self.memory:
+                _ctx_futures["memory"] = _AGENT_EXECUTOR.submit(self.memory.recall, goal, 3)
+            if self.kg_bridge is not None:
+                _ctx_futures["kg"] = _AGENT_EXECUTOR.submit(self.kg_bridge.get_context_for_query, goal, 5)
+
+            for _key, _fut in _ctx_futures.items():
+                try:
+                    _result = _fut.result(timeout=2.0)
+                    if _key == "memory" and _result:
+                        mem_text = "\n".join(m["content"][:150] for m in _result[:3])
+                        parts.append(f"[Relevant memories]\n{mem_text}")
+                    elif _key == "kg" and _result:
+                        parts.append(f"[Knowledge context]\n{str(_result)[:300]}")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # ReAct instructions
+        parts.append(
+            "You are an AI agent with access to tools. "
+            "Use the provided tools to accomplish the user's goal. "
+            "When done, respond with your final answer (no tool call). "
+            "Be concise and direct."
+        )
+
+        return "\n\n".join(parts)
+
+    def _build_tool_schemas(self, goal: str) -> list:
+        """Select relevant tool schemas for this goal.
+
+        Always includes the 11 core dev tools (read_file, grep, list_dir, etc.)
+        plus up to 4 additional agent-specific tools from Tool RAG.
+        """
+        try:
+            from aura.core.tool_schemas import AGENTIC_TOOLS
+            core_schemas = list(AGENTIC_TOOLS)
+            core_names = {s["function"]["name"] for s in core_schemas}
+        except ImportError:
+            return []
+
+        # Add a few agent-specific tools from RAG if relevant
+        if self.tool_rag and self.tool_rag._initialized:
+            extra = self.tool_rag.select_tools(goal, k=6)
+            for schema in extra:
+                name = schema["function"]["name"]
+                if name not in core_names:
+                    core_schemas.append(schema)
+                    core_names.add(name)
+                    if len(core_schemas) >= 15:  # Cap at 15 total tools
+                        break
+
+        return core_schemas
+
+    # Tool name mapping: Ollama schema names → agent tool dispatch
+    _TOOL_NAME_MAP = {
+        "read_file": ("filesystem", "read"),
+        "grep": ("code_search", "grep"),
+        "glob": ("code_search", "glob"),
+        "list_dir": ("filesystem", "list"),
+        "edit_file": ("code_edit", "edit"),
+        "write_file": ("filesystem", "write"),
+        "shell": ("shell_executor", "execute"),
+        "git": ("git", "execute"),
+        "search_web": (None, None),  # Special: try tavily, brave, web_search
+        "project_structure": ("code_search", "project_structure"),
+        "spawn_agent": (None, None),  # Not dispatched via self.tools
+    }
+
+    def _execute_tool_call(self, tool_name: str, args: dict) -> str:
+        """Execute a tool call and return result as string for the LLM.
+
+        Priority:
+        1. ToolExecutor (handles dev tools: read_file, grep, list_dir, shell, etc.)
+           Also resolves aliases (filesystem→list_dir, code_search→grep, etc.)
+        2. Agent tools (self.tools dict — screenshot, vision, search, etc.)
+        3. Web search fallback chain (tavily → brave → web_search)
+        """
+        MAX_RESULT = 8000
+
+        # 1. Try ToolExecutor first — handles dev tools + aliases + sandbox bypass
+        if self._tool_executor:
+            result = self._tool_executor.execute(tool_name, args)
+            # Check if executor returned an "Unknown tool" error — if so, fall through
+            if isinstance(result, str):
+                try:
+                    parsed = json.loads(result)
+                    if isinstance(parsed, dict) and parsed.get("error", "").startswith("Unknown tool"):
+                        pass  # Fall through to agent tools
+                    else:
+                        return result[:MAX_RESULT]
+                except (json.JSONDecodeError, ValueError):
+                    return result[:MAX_RESULT]
+
+        # 2. Agent tools dispatch
+        if tool_name in self.tools:
+            try:
+                tool = self.tools[tool_name]
+                action = args.get("action", "") if isinstance(args, dict) else str(args)
+                if not action:
+                    # Build action string from structured args
+                    action = " ".join(f"{v}" for v in args.values()) if isinstance(args, dict) else str(args)
+                if hasattr(tool, 'execute'):
+                    result = tool.execute(action)
+                    return json.dumps(result, default=str)[:MAX_RESULT]
+            except Exception as e:
+                return json.dumps({"error": f"Tool '{tool_name}' failed: {e}"})
+
+        # 3. Web search fallback chain
+        if tool_name in ("search_web", "web_search", "search"):
+            query = args.get("query", args.get("action", str(args)))
+            for sn in ("tavily_search", "brave_search", "web_search"):
+                if sn in self.tools:
+                    try:
+                        result = self.tools[sn].execute(f"search {query}")
+                        return json.dumps(result, default=str)[:MAX_RESULT]
+                    except Exception:
+                        continue
+
+        return json.dumps({"error": f"No handler for tool: {tool_name}"})
+
+    # Cloud models known to support tool calling well, in preference order
+    _REACT_TOOL_MODEL = "glm-5:cloud"         # Fast, reliable tool calling
+    _REACT_CODE_MODEL = "deepseek-v3.2:cloud"  # Better for code tasks
+    _REACT_REASON_MODEL = "kimi-k2.5:cloud"    # Best for complex reasoning
+
+    def _pick_react_model(self, messages: list, iteration: int) -> str:
+        """Pick model for this ReAct iteration. Always returns a known-good model."""
+        has_edits = False
+        for msg in messages:
+            for tc in msg.get("tool_calls", []) or []:
+                fn_name = tc.get("function", {}).get("name", "")
+                if fn_name in ("edit_file", "write_file"):
+                    has_edits = True
+                    break
+
+        if has_edits:
+            return self._REACT_CODE_MODEL
+        return self._REACT_TOOL_MODEL
+
+    def _store_episode(self, goal: str, response: str):
+        """Store goal+response in memory after the loop ends. No LLM call."""
+        if not response:
+            return
+        try:
+            if self.memory:
+                self.memory.remember(
+                    content=f"Goal: {goal[:200]}\nResult: {response[:300]}",
+                    memory_type="episodic",
+                    metadata={"importance": 0.5, "source": "react_loop"},
+                )
+        except Exception as e:
+            logger.debug(f"[AGENT] Episode storage failed: {e}")
+
+    # =================================================================
+    # Legacy methods (deprecated — kept for backward compat)
+    # =================================================================
+
     def _observe(self, context: dict) -> None:
-        """Phase 1: Observe the current state and context."""
+        """Phase 1: Observe the current state and context. DEPRECATED — use ReAct loop."""
         self.state.phase = AgentPhase.OBSERVE
         logger.debug(f"[OBSERVE] Analyzing current context...")
 
@@ -2069,30 +2083,6 @@ Guidelines:
 
         # Include summarize as an available tool
         available_tools = list(self.tools.keys()) + ["summarize"]
-
-        # ===== Phase 5 Fix 5A: GWT content type → tool filtering + drive hints =====
-        try:
-            from aura.consciousness.global_workspace import get_global_workspace
-            _gwt_cs = get_global_workspace().get_conscious_state()
-            if _gwt_cs and _gwt_cs.broadcast_content:
-                _bc = _gwt_cs.broadcast_content
-                _ctype = getattr(_bc, 'content_type', '')
-                _pad = getattr(_bc, 'pad_signature', {}) or {}
-
-                # Negative emotional state → gate high-risk tools
-                if _ctype == "emotion_shift" and _pad.get("pleasure", 0.0) < -0.4:
-                    _high_risk = {"system_control", "shell_executor", "bash", "execute_code", "synapseforge"}
-                    available_tools = [t for t in available_tools if t not in _high_risk]
-                    logger.debug(f"[GWT] Negative pleasure {_pad.get('pleasure', 0):.2f} → gated high-risk tools")
-
-                # Drive urge broadcast → inject motivation hint into observations
-                if _ctype == "drive_urge":
-                    _drive_txt = getattr(_bc, 'content', '')[:150]
-                    _hint = f"\n[Intrinsic drive: {_drive_txt}]"
-                    self.state.observations = (self.state.observations or "") + _hint
-                    logger.debug("[GWT] Drive urge → injected into observations")
-        except Exception:
-            pass
 
         # ===== Strategy Bandit — select reasoning strategy for this task =====
         self._bandit_plan_sel = None
@@ -2224,32 +2214,6 @@ Guidelines:
         last_tool = self.state.last_action.get('tool', '').lower() if self.state.last_action else ''
         result_success = self.state.last_result.get('success', False) if self.state.last_result else False
 
-        # SPECIAL HANDLING: FluxMind results bypass LLM evaluation to prevent hallucination
-        if last_tool == 'fluxmind' and result_success:
-            result = self.state.last_result
-            # Build evaluation directly from tool results (no LLM interpretation)
-            if 'next_state' in result:
-                progress = f"FluxMind step result: next_state={result['next_state']}, confidence={result['confidence']:.2%}"
-            elif 'confidence' in result:
-                progress = f"FluxMind confidence: {result['confidence']:.2%} - {result.get('interpretation', '')}"
-            elif 'trajectory' in result:
-                progress = f"FluxMind program executed: {len(result['trajectory'])} states, mean_confidence={result.get('mean_confidence', 0):.2%}"
-            else:
-                progress = f"FluxMind result: {result.get('formatted', str(result))}"
-
-            self.state.evaluation = {
-                'success': True,
-                'confidence': 100,
-                'progress': progress,
-                'next': 'complete'
-            }
-            self.state.completed = True
-            logger.debug(f"Success: True")
-            logger.debug(f"Confidence: 100%")
-            logger.debug(f"Progress: {progress}")
-            logger.debug("[FLUXMIND] Direct result (no LLM interpretation)")
-            return
-
         # SPECIAL HANDLING: Git tool results bypass LLM evaluation to prevent hallucination
         if last_tool == 'git' and result_success:
             result = self.state.last_result
@@ -2337,9 +2301,8 @@ Guidelines:
                                 trigger="agent_evaluation")
             elif not eval_success:
                 trigger_emotion("disappointment", intensity=0.5, trigger="agent_evaluation")
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[Agent] non-critical: {e}")
         # ===== Fix 1B: Record Strategy Bandit outcome from plan phase =====
         if STRATEGY_BANDIT_AVAILABLE and getattr(self, '_bandit_plan_sel', None):
             try:
@@ -2354,9 +2317,8 @@ Guidelines:
                              "confidence": eval_confidence / 100.0},
                 )
                 self._bandit_plan_sel = None
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[Agent] non-critical: {e}")
         # Check for marketplace read-only actions - complete immediately on success
         last_tool = self.state.last_action.get('tool', '').lower() if self.state.last_action else ''
         last_action = self.state.last_action.get('action', '').lower() if self.state.last_action else ''
@@ -2469,11 +2431,6 @@ Guidelines:
             return self._execute_summarize()
 
         if tool_name not in self.tools:
-            # Try SynapseForge to create a dynamic tool
-            if self.synapseforge_enabled and self.forge:
-                synth_result = self._try_synthesize_tool(tool_name, action)
-                if synth_result:
-                    return synth_result
             return {
                 "success": False,
                 "error": f"Unknown tool: {tool_name}",
@@ -2518,8 +2475,8 @@ Guidelines:
                     record_activity("tool", tool_name,
                                     f"Timeout: {tool_name} after {TOOL_TIMEOUT}s",
                                     {"success": False, "timeout": True})
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[Agent] non-critical: {e}")
                 return {
                     "success": False,
                     "error": f"Tool {tool_name} timed out after {TOOL_TIMEOUT} seconds",
@@ -2544,9 +2501,8 @@ Guidelines:
                     {"success": result.get("success"), "action": action[:200]},
                     _act_dur,
                 )
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[Agent] non-critical: {e}")
             # ===== Auto-Verify: run tests after code edits =====
             if tool_name == "code_edit" and result.get("success"):
                 try:
@@ -2578,42 +2534,6 @@ Guidelines:
                                 logger.debug(f"[EditTestFix] Loop error: {_etf_err}")
                 except Exception as _av_err:
                     logger.debug(f"[AutoVerify] Error: {_av_err}")
-
-            # ===== Phase 3 Fix 3A: Truth Spine reverse bridge =====
-            # Verify successful tool results and store in Truth Spine tiered memory
-            if result.get("success") and self.proto_agi:
-                try:
-                    from .proto_agi_core import ActionRequest, ActionType
-                    _ts_type_map = {
-                        "web_search": ActionType.SEARCH,
-                        "filesystem": ActionType.READ_FILE,
-                        "read_file": ActionType.READ_FILE,
-                        "write_file": ActionType.WRITE_FILE,
-                        "bash": ActionType.EXECUTE_CODE,
-                        "execute_code": ActionType.EXECUTE_CODE,
-                        "send_message": ActionType.SEND_MESSAGE,
-                    }
-                    _ts_action_type = _ts_type_map.get(tool_name, ActionType.ANALYZE)
-                    _ts_request = ActionRequest(
-                        action_type=_ts_action_type,
-                        intent=action[:200],
-                        params={"tool": tool_name},
-                        expected_checks=[],
-                        timeout_seconds=30,
-                    )
-                    _ts_artifact = {
-                        "success": True,
-                        "stdout": str(result.get("result") or result.get("output") or result.get("summary") or "")[:2000],
-                        "returncode": 0,
-                    }
-                    _ts_verification = self.proto_agi.verifier.verify_action(
-                        tool_name, _ts_artifact
-                    )
-                    _ts_tier = self.proto_agi._determine_memory_tier(_ts_request, _ts_verification)
-                    self.proto_agi._store_in_memory(_ts_request, _ts_verification, _ts_tier)
-                    logger.debug(f"[TruthSpine] {tool_name} → {_ts_tier.value}")
-                except Exception as _ts_err:
-                    logger.debug(f"[TruthSpine] Reverse bridge error: {_ts_err}")
 
             return result
         except Exception as e:
@@ -3073,14 +2993,6 @@ Guidelines:
             # Handle voice/TTS actions
             return tool.speak(action)
 
-        elif tool_name == "mirrormind":
-            # Handle mirrormind self-critique
-            return tool.critique(action)
-
-        elif tool_name == "fluxmind":
-            # Handle FluxMind calibrated reasoning actions
-            return self._execute_fluxmind_action(tool, action)
-
         elif tool_name == "regex_builder":
             # Handle regex builder actions
             return tool.execute(action)
@@ -3338,124 +3250,6 @@ Guidelines:
                 "success": False,
                 "error": f"Original error: {error}. Reflexion error: {str(e)}"
             }
-
-    def _try_synthesize_tool(self, tool_name: str, action: str) -> Optional[dict]:
-        """
-        Try to synthesize a new tool using SynapseForge.
-
-        Args:
-            tool_name: The requested tool name
-            action: The action/capability description
-
-        Returns:
-            Execution result if successful, None if synthesis failed
-        """
-        # Build capability description from tool name and action
-        capability = f"{tool_name.replace('_', ' ')}: {action}"
-
-        # First check if we already have a matching tool
-        existing = self.forge.find_tool(capability)
-        if existing:
-            # Parse kwargs from action if possible
-            kwargs = self._parse_tool_kwargs(action)
-            result = self.forge.execute_tool(existing.name, **kwargs)
-            result["synthesized_tool"] = existing.name
-            result["tool_reused"] = True
-            return result
-
-        # Try to synthesize a new tool
-        logger.debug(f"  SynapseForge: Attempting to create tool for '{capability}'...")
-        tool = self.forge.synthesize(capability)
-
-        if tool and tool.test_passed:
-            # Parse kwargs from action
-            kwargs = self._parse_tool_kwargs(action)
-            result = self.forge.execute_tool(tool.name, **kwargs)
-            result["synthesized_tool"] = tool.name
-            result["tool_created"] = True
-            return result
-
-        return None
-
-    def _parse_tool_kwargs(self, action: str) -> dict:
-        """Extract keyword arguments from action string."""
-        import re
-        kwargs = {}
-
-        # Look for patterns like "key=value" or "key: value"
-        patterns = [
-            r'(\w+)\s*=\s*(["\']?)([^"\',\s]+)\2',  # key=value or key="value"
-            r'(\w+)\s*:\s*(["\']?)([^"\',\s]+)\2',  # key: value or key: "value"
-        ]
-
-        for pattern in patterns:
-            for match in re.finditer(pattern, action):
-                key = match.group(1).lower()
-                value = match.group(3)
-                # Try to convert to appropriate type
-                try:
-                    if '.' in value:
-                        kwargs[key] = float(value)
-                    else:
-                        kwargs[key] = int(value)
-                except ValueError:
-                    kwargs[key] = value
-
-        # If no kwargs found, try to extract the main argument
-        if not kwargs:
-            # For simple cases like "100 celsius" or "convert 100"
-            numbers = re.findall(r'[-+]?\d*\.?\d+', action)
-            if numbers:
-                # Use the first number as input
-                try:
-                    kwargs['input'] = float(numbers[0]) if '.' in numbers[0] else int(numbers[0])
-                except (ValueError, IndexError):
-                    pass
-
-            # Also try to capture text after common patterns
-            text_match = re.search(r'(?:text|string|input)[:\s]+["\']?(.+?)["\']?$', action, re.I)
-            if text_match:
-                kwargs['text'] = text_match.group(1).strip()
-
-        return kwargs
-
-    def check_action_safety(self, action: str, context: str = "") -> Optional[str]:
-        """
-        Check action safety using WorldSim before execution.
-
-        Args:
-            action: The action to check
-            context: Additional context about the action
-
-        Returns:
-            Warning message if action is risky, None if safe to proceed
-        """
-        if not self.worldsim_enabled or not self.worldsim:
-            return None
-
-        result = self.worldsim.simulate(action, context)
-
-        # Blocked -> Return blocking message
-        if result.risk_level == RiskLevel.BLOCKED:
-            return self.worldsim.format_warning(result)
-
-        # Dangerous -> Return strong warning
-        if result.risk_level == RiskLevel.DANGEROUS:
-            warning = self.worldsim.format_warning(result)
-            if result.safer_alternative:
-                warning += f"\n\n💡 Suggested: {result.safer_alternative}"
-            return warning
-
-        # Caution -> Log but allow
-        if result.risk_level == RiskLevel.CAUTION:
-            if hasattr(self, 'monologue') and self.monologue:
-                self.monologue.think(
-                    "reflect",
-                    f"WorldSim: {result.consequences[0] if result.consequences else 'Proceeding with caution'}",
-                    confidence=70
-                )
-
-        return None
 
     def _extract_pages(self, action: str) -> Optional[str]:
         """Extract page specification from action string."""
@@ -3876,140 +3670,6 @@ Output ONLY the JSON object, no other text."""
         except Exception as e:
             return {"error": f"Failed to generate tool spec: {e}"}
 
-    @staticmethod
-    def _parse_fluxmind_args(text: str) -> tuple:
-        """Parse FluxMind state, operation, and context from a text string.
-
-        Returns:
-            (state, operation, context) where state is List[int]|None, others are int.
-        """
-        text_lower = text.lower()
-        state_match = re.search(r'\[?\(?\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\]?\)?', text)
-        state = [int(state_match.group(i)) for i in range(1, 5)] if state_match else None
-        op_match = re.search(r'op(?:eration)?\s*[=:]?\s*(\d+)', text_lower)
-        ctx_match = re.search(r'(?:context|ctx|dsl)\s*[=:]?\s*(\d+)', text_lower)
-        operation = int(op_match.group(1)) if op_match else 0
-        context = int(ctx_match.group(1)) if ctx_match else 0
-        return state, operation, context
-
-    def _execute_fluxmind_action(self, tool, action: str) -> dict:
-        """Execute FluxMind calibrated reasoning actions.
-
-        Handles commands like:
-        - "Ask FluxMind about state [5,3,7,2]"
-        - "Ask FluxMind how confident it is about state [5,3,7,2]"
-        - "FluxMind step [5,3,7,2] op 0 context 0"
-        - "FluxMind verify sequence"
-        - "FluxMind status"
-
-        Args:
-            tool: The FluxMindTool instance
-            action: The action string to parse
-
-        Returns:
-            dict with success status and results
-        """
-        action_lower = action.lower()
-
-        # Check if tool is available
-        if not tool.is_available():
-            return {
-                "success": False,
-                "error": "FluxMind model not loaded. Train it first with train_fluxmind().",
-                "status": tool.status()
-            }
-
-        # Status check
-        if "status" in action_lower:
-            status = tool.status()
-            return {"success": True, "status": status, "formatted": tool.format_for_aura(status)}
-
-        # Extract state, operation, and context from action string
-        state, operation, context = self._parse_fluxmind_args(action)
-
-        # "Ask FluxMind" or "how confident" - get confidence check
-        if "ask fluxmind" in action_lower or "how confident" in action_lower or "confidence" in action_lower:
-            if not state:
-                return {
-                    "success": False,
-                    "error": "No state provided. Use format: Ask FluxMind about state [5,3,7,2]"
-                }
-            result = tool.get_confidence(state, operation, context)
-            result["success"] = True
-            result["formatted"] = tool.format_for_aura(result)
-            return result
-
-        # "step" command - execute single step
-        if "step" in action_lower:
-            if not state:
-                return {
-                    "success": False,
-                    "error": "No state provided. Use format: FluxMind step [5,3,7,2] op 0 context 0"
-                }
-            result = tool.step(state, operation, context)
-            result["success"] = True
-            result["formatted"] = tool.format_for_aura(result)
-            return result
-
-        # "execute" or "program" - run full program
-        if "execute" in action_lower or "program" in action_lower:
-            if not state:
-                return {
-                    "success": False,
-                    "error": "No initial state provided."
-                }
-            # Extract operations list
-            ops_match = re.search(r'ops?\s*[=:]?\s*\[([0-9,\s]+)\]', action_lower)
-            ctxs_match = re.search(r'(?:contexts?|dsls?)\s*[=:]?\s*\[([0-9,\s]+)\]', action_lower)
-            if ops_match:
-                operations = [int(x.strip()) for x in ops_match.group(1).split(',')]
-                contexts = [int(x.strip()) for x in ctxs_match.group(1).split(',')] if ctxs_match else [0] * len(operations)
-                result = tool.execute(state, operations, contexts)
-                result["success"] = True
-                result["formatted"] = tool.format_for_aura(result)
-                return result
-            return {"success": False, "error": "No operations list provided. Use format: ops=[0,2,4]"}
-
-        # "verify" - verify action sequence
-        if "verify" in action_lower:
-            return {
-                "success": False,
-                "error": "Verify requires a sequence of actions. Use tool.verify_sequence() directly."
-            }
-
-        # Default: if state provided, do confidence check
-        if state:
-            result = tool.get_confidence(state, operation, context)
-            result["success"] = True
-            result["formatted"] = tool.format_for_aura(result)
-            return result
-
-        return {
-            "success": False,
-            "error": "Could not parse FluxMind action. Try: 'Ask FluxMind about state [5,3,7,2]'"
-        }
-
-    def _detect_fluxmind_action(self, goal: str) -> Optional[tuple[str, str]]:
-        """Detect if the goal requires the FluxMind tool.
-
-        Args:
-            goal: The user's goal
-
-        Returns:
-            (tool_name, action) tuple if FluxMind matches, None otherwise
-        """
-        goal_lower = goal.lower()
-
-        fluxmind_keywords = [
-            'ask fluxmind', 'fluxmind', 'how confident', 'calibrated',
-            'confidence check', 'verify sequence', 'uncertainty'
-        ]
-
-        # Check if any FluxMind keyword is present
-        if any(kw in goal_lower for kw in fluxmind_keywords):
-            logger.debug(f"[FLUXMIND] Detected FluxMind action in: {goal[:50]}...")
-            return ("fluxmind", goal)
-
     def _detect_git_action(self, goal: str) -> Optional[tuple[str, str]]:
         """Detect if the goal requires the Git tool.
 
@@ -4248,95 +3908,14 @@ Output ONLY the JSON object, no other text."""
 
         return result.get("error", "Unknown error")
 
-    def _handle_guardian_command(self, message: str) -> Optional[str]:
-        """Handle Metacognitive Guardian commands directly.
-
-        Args:
-            message: The user's message
-
-        Returns:
-            Formatted result string if guardian command, None otherwise
-        """
-        msg_lower = message.lower()
-
-        guardian_keywords = [
-            'guardian stats', 'guardian status', 'guardian level',
-            'set guardian', 'monitoring level', 'show predictions',
-            'how confident', 'failure patterns', 'reset guardian'
-        ]
-
-        if not any(kw in msg_lower for kw in guardian_keywords):
-            return None
-
-        if not hasattr(self, 'guardian') or self.guardian is None:
-            return "Metacognitive Guardian not available."
-
-        # Handle specific patterns
-        if "guardian stats" in msg_lower or "guardian status" in msg_lower:
-            stats = self.guardian.get_stats()
-            return (f"**Metacognitive Guardian Status**\n"
-                   f"- Monitoring Level: {stats['monitoring_level']}\n"
-                   f"- Session Predictions: {stats['session_predictions']}\n"
-                   f"- Interventions Triggered: {stats['interventions_triggered']}\n"
-                   f"- Failure Patterns Learned: {stats['failure_patterns_learned']}\n"
-                   f"- Thresholds: Warning={stats['thresholds']['warning']:.0%}, "
-                   f"Intervention={stats['thresholds']['intervention']:.0%}, "
-                   f"Abort={stats['thresholds']['abort']:.0%}")
-
-        if "set guardian" in msg_lower or "monitoring level" in msg_lower:
-            for level in ["low", "medium", "high", "critical"]:
-                if level in msg_lower:
-                    self.guardian.set_monitoring_level(level)
-                    return f"Guardian monitoring level set to **{level}**."
-            return ("Available monitoring levels:\n"
-                   "- **low**: Only critical risks\n"
-                   "- **medium**: Balanced monitoring (default)\n"
-                   "- **high**: Sensitive monitoring\n"
-                   "- **critical**: Maximum sensitivity")
-
-        if "show predictions" in msg_lower:
-            predictions = self.guardian.session_predictions
-            if not predictions:
-                return "No predictions made in this session yet."
-            recent = predictions[-5:]
-            lines = ["**Recent Predictions:**"]
-            for p in recent:
-                lines.append(f"- [{p.failure_type.value}] {p.probability:.0%} - {p.reasoning[:50]}...")
-            return "\n".join(lines)
-
-        if "failure patterns" in msg_lower:
-            patterns = self.guardian.failure_patterns
-            if not patterns:
-                return "No failure patterns learned yet."
-            return f"Guardian has learned from **{len(patterns)}** past failures."
-
-        if "reset guardian" in msg_lower:
-            self.guardian.reset_session()
-            return "Guardian session stats reset."
-
-        if "how confident" in msg_lower:
-            stats = self.guardian.get_stats()
-            level = stats['monitoring_level']
-            return (f"I'm monitoring at **{level}** sensitivity. "
-                   f"This session: {stats['session_predictions']} risk assessments, "
-                   f"{stats['interventions_triggered']} interventions.")
-
-        return None
-
     def record_user_feedback(self, was_helpful: bool, feedback_text: str = None):
-        """Record user feedback to improve guardian predictions.
+        """Record user feedback.
 
         Args:
             was_helpful: Whether the response was helpful
             feedback_text: Optional text feedback
         """
-        if self._pending_prediction and hasattr(self, 'guardian'):
-            self.guardian.record_outcome(
-                prediction_id=self._pending_prediction.id,
-                was_successful=was_helpful,
-                user_feedback=feedback_text
-            )
-            self._pending_prediction = None
+        pass
 
     def _handle_neurodream_command(self, message: str) -> Optional[str]:
         """Handle NeuroDream sleep/dream commands directly.
@@ -4512,12 +4091,6 @@ Output ONLY the JSON object, no other text."""
             "history": self.state.history,
             "monologue_summary": session_summary.get("summary", {})
         }
-        # Include actual tool result for FluxMind (prevents LLM hallucination in output)
-        if self.state.last_action and self.state.last_action.get('tool', '').lower() == 'fluxmind':
-            result["fluxmind_result"] = self.state.last_result
-            if self.state.last_result and self.state.last_result.get('formatted'):
-                result["response"] = self.state.last_result['formatted']
-
         # Include actual tool result for Git (prevents LLM hallucination in output)
         if self.state.last_action and self.state.last_action.get('tool', '').lower() == 'git':
             result["git_result"] = self.state.last_result
@@ -4947,76 +4520,6 @@ Python code:"""
             logger.debug(f"[DIRECT CODE] Error: {e}")
             return f"Code execution error: {e}"
 
-    def _handle_fluxmind_command(self, message: str) -> Optional[str]:
-        """Handle FluxMind commands directly, bypassing the LLM.
-
-        Args:
-            message: The user's message
-
-        Returns:
-            Formatted result string if FluxMind command, None otherwise
-        """
-        message_lower = message.lower()
-
-        # Check if this is a FluxMind command
-        fluxmind_keywords = ['fluxmind', 'ask fluxmind', 'how confident']
-        if not any(kw in message_lower for kw in fluxmind_keywords):
-            return None  # Not a FluxMind command
-
-        # Check if FluxMind tool is available
-        if 'fluxmind' not in self.tools:
-            return "FluxMind tool not available. Make sure it's installed and the model is trained."
-
-        tool = self.tools['fluxmind']
-        if not tool.is_available():
-            return "FluxMind model not loaded. Train it first with: python -c \"from tools.fluxmind import train_fluxmind; train_fluxmind('models/fluxmind_v0751.pt')\""
-
-        # Status command
-        if "status" in message_lower:
-            status = tool.status()
-            return f"FluxMind Status:\n  Available: {status['available']}\n  Version: {status['version']}\n  Capabilities: {', '.join(status['capabilities'])}"
-
-        # Extract state, operation, and context from message
-        state, operation, context = self._parse_fluxmind_args(message)
-
-        # Step command
-        if "step" in message_lower:
-            if not state:
-                return "FluxMind step requires a state. Example: FluxMind step [5,3,7,2] op 0 context 0"
-            result = tool.step(state, operation, context)
-            return f"FluxMind Step Result:\n  Input: {state}\n  Next State: {result['next_state']}\n  Confidence: {result['confidence']:.2%}\n  Should Trust: {result['should_trust']}"
-
-        # Confidence check (ask fluxmind, how confident, about state)
-        if state and ("confident" in message_lower or "about" in message_lower or "ask" in message_lower):
-            result = tool.get_confidence(state, operation, context)
-            trust_msg = "Yes, proceed" if result['should_trust'] else ("No, abstain" if result['should_abstain'] else "Verify recommended")
-            return f"FluxMind Confidence Check:\n  State: {state}\n  Confidence: {result['confidence']:.2%}\n  Should Trust: {trust_msg}\n  Interpretation: {result['interpretation']}"
-
-        # Default: if we have a state, do confidence check
-        if state:
-            result = tool.get_confidence(state, operation, context)
-            return f"FluxMind Confidence: {result['confidence']:.2%} - {result['interpretation']}"
-
-        # Fallback: Any FluxMind question that doesn't match specific commands
-        # Returns a helpful summary of capabilities
-        status = tool.status()
-        return f"""FluxMind Capabilities:
-
-Version: {status['version']}
-Status: {'Online' if status['available'] else 'Offline'}
-
-What I can do with FluxMind:
-- Calibrated confidence (I actually know when I don't know)
-- 99.86% accuracy on familiar inputs
-- 0.06% confidence on unfamiliar inputs (1664x drop!)
-- Sub-millisecond inference (<1ms vs 500ms+ for LLMs)
-
-Try these commands:
-- "FluxMind status"
-- "Ask FluxMind about state [5,3,7,2]"
-- "FluxMind step [5,3,7,2] op 0 context 0"
-- "How confident is FluxMind about [25,25,25,25]?\""""
-
     def chat(self, message: str, speak: bool = False) -> str:
         """Simple chat interface for one-off interactions.
 
@@ -5036,9 +4539,8 @@ Try these commands:
         try:
             from api.routes.context import track_context_from_message
             track_context_from_message(message, is_user=True)
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[Agent] non-critical: {e}")
         # NeuroDream: check idle trigger FIRST (before resetting the timer), then record activity
         if hasattr(self, 'neurodream') and self.neurodream:
             try:
@@ -5046,9 +4548,8 @@ Try these commands:
                         and self.neurodream.current_phase == SleepPhase.AWAKE):
                     self.neurodream.enter_sleep(trigger="idle")
                 self.neurodream.record_activity()
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[Agent] non-critical: {e}")
         # ===== AURA FAST PATH - TRY FIRST =====
         # Handle simple queries instantly (greetings, memory, emotions)
         if self.use_fastpath and hasattr(self, 'fast_path_handler') and self.fast_path_handler:
@@ -5079,9 +4580,8 @@ Try these commands:
             try:
                 from api.routes.context import track_context_from_emotion
                 track_context_from_emotion(emotion_reading.emotion, emotion_reading.confidence / 100.0)
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[Agent] non-critical: {e}")
         # Handle /init-project command
         if message.strip().lower().startswith("/init-project"):
             parts = message.strip().split(None, 1)
@@ -5092,13 +4592,6 @@ Try these commands:
                 return result
             except Exception as e:
                 return f"Failed to initialize project: {e}"
-
-        # Check for FluxMind commands FIRST, before LLM
-        fluxmind_result = self._handle_fluxmind_command(message)
-        if fluxmind_result:
-            if speak:
-                self._speak(fluxmind_result, emotion=emotion_reading.emotion if emotion_reading else None)
-            return fluxmind_result
 
         # Check for EvoEmo commands
         evoemo_result = self._handle_evoemo_command(message)
@@ -5114,32 +4607,6 @@ Try these commands:
                 if speak:
                     self._speak(aura_result)
                 return aura_result
-
-        # Check for decision questions - use CognitiveTheater (Tool #22)
-        # BUT exclude self-referential questions (questions about AURA itself)
-        # AND exclude file attachment contexts (code review, file analysis, etc.)
-        message_lower = message.lower()
-        is_self_referential = any(pattern in message_lower for pattern in [
-            'compare yourself', 'compare you', 'how do you compare',
-            'are you better', 'are you worse', 'about yourself', 'about you',
-            'tell me about you', 'describe yourself', 'what are you',
-            # Common typos
-            'cmpare yourself', 'compre yourself', 'compar yourself'
-        ])
-        # Skip CognitiveTheater for file attachments - these need direct analysis, not deliberation
-        has_file_attachment = "[FILE_ATTACHMENT_CONTEXT]" in message
-        if self.theater_enabled and is_decision_question(message) and not is_self_referential and not has_file_attachment:
-            try:
-                # Pass model override to CognitiveTheater if set
-                if hasattr(self.brain, '_model_override') and self.brain._model_override:
-                    self.theater.set_model(self.brain._model_override)
-                response = self.theater.quick_debate(message)
-                if speak:
-                    self._speak(response, emotion=emotion_reading.emotion if emotion_reading else None)
-                return response
-            except Exception as e:
-                # Fall through to normal processing on error
-                logger.debug(f"[CognitiveTheater] Error: {e}")
 
         # ===== EMOTIONAL PREPROCESSING - DISABLED =====
         # Let the LLM (llama3:8b) handle conversational/emotional messages naturally
@@ -5237,13 +4704,13 @@ Try these commands:
                         from api.routes.memory import record_memory_recall
                         record_memory_recall("unified", len(unified_results), message,
                                              [r.content[:100] for r in unified_results[:5]])
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"[Agent] non-critical: {e}")
                     try:
                         from api.routes.context import track_context_from_memory
                         track_context_from_memory([r.content[:100] for r in unified_results[:5]])
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"[Agent] non-critical: {e}")
             except Exception as e:
                 logger.debug(f"[UnifiedMemory] Query error: {e}")
 
@@ -5275,9 +4742,8 @@ Try these commands:
                 profile_text = profile_path.read_text(encoding='utf-8').strip()
                 if profile_text:
                     context_parts.append(f"USER PROFILE:\n{profile_text}")
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[Agent] non-critical: {e}")
         if amem_context:
             context_parts.append(amem_context)
         if kg_context:
@@ -5293,9 +4759,8 @@ Try these commands:
                 nd_context = self.neurodream.get_learned_context_prompt()
                 if nd_context:
                     context_parts.append(f"LEARNED CONTEXT (from memory consolidation):\n{nd_context}")
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[Agent] non-critical: {e}")
         # Inject applicable skills from Skill Library
         try:
             if hasattr(self, 'skill_library') and self.skill_library:
@@ -5418,19 +4883,6 @@ Try these commands:
                 else:
                     response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
 
-            elif selected_strategy == ReasoningStrategy.MIRRORMIND:
-                # think + refine (replaces the old MirrorMind post-process block)
-                response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
-                if self.mirrormind_enabled and hasattr(self, 'mirrormind') and self.mirrormind:
-                    _record_thought("analyzing", "self-critiquing response with MirrorMind...", 0.5, "agent")
-                    try:
-                        critique_result = self.mirrormind.refine(message, response)
-                        if critique_result.was_improved():
-                            _record_thought("observing", "MirrorMind improved the response", 0.6, "agent")
-                            response = critique_result.improved
-                    except Exception as e:
-                        logger.debug(f"[MirrorMind] Error: {e}")
-
             else:
                 # Unknown strategy — safe fallback
                 response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
@@ -5439,30 +4891,12 @@ Try these commands:
             logger.debug(f"[StrategyBandit] Strategy execution error, falling back to CoT: {e}")
             response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
 
-        # Apply MirrorMind self-critique if enabled AND bandit didn't already select it
-        if (selected_strategy != ReasoningStrategy.MIRRORMIND
-                and self.mirrormind_enabled and not self._is_simple_query(message)):
-            _record_thought("analyzing", "self-critiquing response with MirrorMind...", 0.5, "agent")
-            try:
-                critique_result = self.mirrormind.refine(message, response)
-                if critique_result.was_improved():
-                    _record_thought("observing", "MirrorMind improved the response", 0.6, "agent")
-                    response = critique_result.improved
-            except Exception as e:
-                logger.debug(f"[MirrorMind] Error: {e}")
-
         # Record response generation in monologue
         if hasattr(self, 'monologue') and self.monologue:
             self.monologue.think("respond", f"Generated response ({len(response)} chars)")
 
-        # AURA v3.0 - Apply humanization via ALMA
-        if self.aura_enabled and aura_context:
-            try:
-                humanized = self._apply_humanization(response, aura_context)
-                response = thinking_prefix + humanized
-            except Exception as e:
-                logger.debug(f"[AURA] Response processing error: {e}")
-                response = thinking_prefix + response
+        if thinking_prefix:
+            response = thinking_prefix + response
 
         if speak:
             self._speak(response, emotion=emotion_reading.emotion if emotion_reading else None)
@@ -5555,8 +4989,6 @@ Try these commands:
                     try:
                         if strategy_name == "mcts" and _mcts_raw_result is not None:
                             full_trace = build_trace_from_mcts(_mcts_raw_result)
-                        elif strategy_name == "reflexion" and _reflexion_raw_result is not None:
-                            full_trace = build_trace_from_reflexion(_reflexion_raw_result)
                         else:
                             full_trace = json.dumps([
                                 {"step": "problem_understanding", "content": message[:500]},
@@ -5603,8 +5035,8 @@ Try these commands:
                         _pad = {"pleasure": _s.get("pleasure", 0.0),
                                 "arousal": _s.get("arousal", 0.0),
                                 "dominance": _s.get("dominance", 0.0)}
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[Agent] non-critical: {e}")
                 _umem_ref = _get_umem()
                 _content_ref = _mem_content
                 _pad_ref = _pad
@@ -5650,7 +5082,7 @@ Try these commands:
 
         Pre-processes (fast path, emotion, context) BEFORE streaming starts,
         then streams LLM output via brain.think_stream(), and runs
-        post-processing (MirrorMind, AURA humanizer, KG extraction) after.
+        post-processing (KG extraction) after.
 
         Args:
             message: User message
@@ -5681,9 +5113,8 @@ Try these commands:
         try:
             from api.routes.context import track_context_from_message
             track_context_from_message(message, is_user=True)
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[Agent] non-critical: {e}")
         # Handle /init-project command in streaming path
         if message.strip().lower().startswith("/init-project"):
             parts = message.strip().split(None, 1)
@@ -5713,20 +5144,12 @@ Try these commands:
         if self.aura_enabled:
             try:
                 aura_context = self._build_aura_context(message)
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[Agent] non-critical: {e}")
         # Emotion analysis
         emotion_reading = self._analyze_emotion(message)
 
-        # FluxMind / EvoEmo / AURA command checks — yield as single chunk
-        fluxmind_result = self._handle_fluxmind_command(message)
-        if fluxmind_result:
-            if speak:
-                self._speak(fluxmind_result, emotion=emotion_reading.emotion if emotion_reading else None)
-            yield fluxmind_result
-            return
-
+        # EvoEmo / AURA command checks — yield as single chunk
         evoemo_result = self._handle_evoemo_command(message)
         if evoemo_result:
             if speak:
@@ -5741,26 +5164,6 @@ Try these commands:
                     self._speak(aura_result)
                 yield aura_result
                 return
-
-        # CognitiveTheater for decision questions — yield as single chunk
-        message_lower = message.lower()
-        is_self_referential = any(pattern in message_lower for pattern in [
-            'compare yourself', 'compare you', 'how do you compare',
-            'are you better', 'are you worse', 'about yourself', 'about you',
-            'tell me about you', 'describe yourself', 'what are you',
-        ])
-        has_file_attachment = "[FILE_ATTACHMENT_CONTEXT]" in message
-        if self.theater_enabled and is_decision_question(message) and not is_self_referential and not has_file_attachment:
-            try:
-                if hasattr(self.brain, '_model_override') and self.brain._model_override:
-                    self.theater.set_model(self.brain._model_override)
-                response = self.theater.quick_debate(message)
-                if speak:
-                    self._speak(response, emotion=emotion_reading.emotion if emotion_reading else None)
-                yield response
-                return
-            except Exception:
-                pass
 
         # Direct search/crypto/code handlers — yield as single chunk
         search_response = self._handle_direct_search(message)
@@ -5850,9 +5253,8 @@ Try these commands:
                 profile_text = profile_path.read_text(encoding='utf-8').strip()
                 if profile_text:
                     context_parts.append(f"USER PROFILE:\n{profile_text}")
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[Agent] non-critical: {e}")
         if unified_context:
             context_parts.append(unified_context)
         if context_parts:
@@ -5865,30 +5267,6 @@ Try these commands:
             yield chunk
 
         # ===== POST-PROCESSING =====
-
-        # MirrorMind self-critique
-        if self.mirrormind_enabled and not is_simple:
-            try:
-                critique_result = self.mirrormind.refine(message, full_response)
-                if critique_result.was_improved():
-                    # Yield correction as extra chunk
-                    correction = "\n\n[Refined] " + critique_result.improved
-                    full_response = critique_result.improved
-                    yield correction
-            except Exception:
-                pass
-
-        # AURA humanizer via ALMA (apply silently)
-        if self.aura_enabled and aura_context:
-            try:
-                humanized = self._apply_humanization(full_response, aura_context)
-                if humanized != full_response:
-                    thinking_prefix = ""
-                    if aura_context.get("thinking_prefix"):
-                        thinking_prefix = aura_context["thinking_prefix"] + "\n\n"
-                    full_response = thinking_prefix + humanized
-            except Exception:
-                pass
 
         # TTS on full response
         if speak:
@@ -5907,17 +5285,15 @@ Try these commands:
                     })
                     if len(self.kg_bridge.extraction_queue) >= self.kg_bridge.config.batch_size:
                         self.kg_bridge.flush()
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[Agent] non-critical: {e}")
         # Extract and persist user facts (name, location, role, etc.) — kept separate,
         # this does regex-based profile extraction, not memory backend writes.
         if hasattr(self, 'memory_retriever') and self.memory_retriever is not None:
             try:
                 self.memory_retriever._extract_facts(message)
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[Agent] non-critical: {e}")
         # ===== Fix 2D: Unified memory write (stream path) — gated store =====
         # Uses store_gated() which runs MemoryWriteGate before fan-out.
         if not is_simple and len(full_response) > 20:
@@ -5935,8 +5311,8 @@ Try these commands:
                         _pad = {"pleasure": _s.get("pleasure", 0.0),
                                 "arousal": _s.get("arousal", 0.0),
                                 "dominance": _s.get("dominance", 0.0)}
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[Agent] non-critical: {e}")
                 _umem_s = _get_umem_s()
                 import threading
                 _store_fn_s = getattr(_umem_s, "store_gated", _umem_s.store)
@@ -6134,48 +5510,17 @@ Try these commands:
             if alma:
                 state = alma.get_emotional_state()
                 context["mood"] = state.get("dominant_emotion", "neutral")
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[Agent] non-critical: {e}")
         # Generate thinking prefix via VisibleThinking
         if self._visible_thinking:
             try:
                 prefix = self._visible_thinking.generate_thinking_prefix(message)
                 if prefix:
                     context["thinking_prefix"] = prefix
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[Agent] non-critical: {e}")
         return context
-
-    def _apply_humanization(self, response: str, context: dict) -> str:
-        """Apply humanization using ResponseHumanizer + ALMA tone context."""
-        if self._humanizer is None:
-            return response
-        try:
-            from aura.humanize.response_humanizer import ResponseTone
-            # Map mood from context to ResponseTone
-            mood = context.get('mood', 'neutral')
-            tone_map = {
-                'happy': ResponseTone.WARM,
-                'joy': ResponseTone.WARM,
-                'excited': ResponseTone.ENTHUSIASTIC,
-                'enthusiastic': ResponseTone.ENTHUSIASTIC,
-                'thoughtful': ResponseTone.THOUGHTFUL,
-                'curious': ResponseTone.THOUGHTFUL,
-                'concerned': ResponseTone.EMPATHETIC,
-                'sad': ResponseTone.EMPATHETIC,
-                'empathetic': ResponseTone.EMPATHETIC,
-                'neutral': ResponseTone.CASUAL,
-                'calm': ResponseTone.CASUAL,
-                'professional': ResponseTone.PROFESSIONAL,
-                'direct': ResponseTone.DIRECT,
-            }
-            tone = tone_map.get(mood, ResponseTone.CASUAL)
-            result = self._humanizer.humanize(response, tone=tone)
-            return result.humanized
-        except Exception:
-            return response
 
     def _handle_aura_command(self, message: str) -> Optional[str]:
         """Handle AURA system commands (legacy AURAEngine removed; uses ALMA/unified memory)."""
@@ -7169,14 +6514,6 @@ Try these commands:
                 results["freed_resources"].append("conversation_history:saved")
         except Exception as e:
             results["errors"].append(f"History save: {e}")
-
-        # 8. Reset guardian session
-        try:
-            if hasattr(self, 'guardian') and self.guardian:
-                self.guardian.reset_session()
-                results["freed_resources"].append("guardian_session")
-        except Exception as e:
-            results["errors"].append(f"Guardian reset: {e}")
 
         # 9. Close Knowledge Graph Brain
         try:

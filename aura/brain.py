@@ -124,11 +124,11 @@ def _get_neuromodulator_levels() -> dict:
             if nd.current_phase.value != "awake":
                 influence = nd.get_sleep_neuromodulator_influence()
                 return {k: max(0.0, min(1.0, base[k] + influence.get(k, 0.0))) for k in base}
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[Brain] non-critical: {e}")
         return base
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"[Brain] non-critical: {e}")
     return _DEFAULTS
 
 
@@ -485,6 +485,91 @@ class OllamaBrain:
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
         }
+
+    def think_with_tools_stream(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        model_override: str = None,
+        options: dict = None,
+    ):
+        """Streaming version of think_with_tools(). Yields (chunk_type, data) tuples.
+
+        chunk_type: "content" | "tool_calls" | "done" | "error"
+        data: str for content, list for tool_calls, dict for done/error
+        """
+        model = model_override or self._model_override or Config.MODEL_CODE
+        client, actual_model = self._get_client_for_model(model)
+
+        if actual_model.startswith("chatgpt:"):
+            yield ("error", {"error": "ChatGPT models don't support structured tool calling."})
+            return
+
+        llm_options = options or {"temperature": 0.2, "num_predict": 4096}
+
+        try:
+            stream = client.chat(
+                model=actual_model,
+                messages=messages,
+                tools=tools,
+                options=llm_options,
+                stream=True,
+            )
+
+            accumulated_content = ""
+            tool_calls = None
+            input_tokens = 0
+            output_tokens = 0
+
+            for chunk in stream:
+                # Ollama streaming returns ChatResponse objects or dicts
+                if isinstance(chunk, dict):
+                    msg = chunk.get("message", {})
+                    done = chunk.get("done", False)
+                    if done:
+                        input_tokens = chunk.get("prompt_eval_count", 0) or 0
+                        output_tokens = chunk.get("eval_count", 0) or 0
+                else:
+                    msg = getattr(chunk, "message", None)
+                    done = getattr(chunk, "done", False)
+                    if done:
+                        input_tokens = getattr(chunk, "prompt_eval_count", 0) or 0
+                        output_tokens = getattr(chunk, "eval_count", 0) or 0
+
+                if msg is None:
+                    if done:
+                        break
+                    continue
+
+                # Content chunk
+                c = msg.get("content", "") if isinstance(msg, dict) else getattr(msg, "content", "")
+                if c:
+                    accumulated_content += c
+                    yield ("content", c)
+
+                # Tool calls (usually only in final chunk)
+                tc = msg.get("tool_calls") if isinstance(msg, dict) else getattr(msg, "tool_calls", None)
+                if tc:
+                    tool_calls = tc
+
+                if done:
+                    break
+
+            if tool_calls:
+                yield ("tool_calls", tool_calls)
+
+            self._record_tokens(actual_model, input_tokens, output_tokens)
+
+            yield ("done", {
+                "content": accumulated_content,
+                "tool_calls": tool_calls,
+                "model": actual_model,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+            })
+
+        except Exception as e:
+            yield ("error", {"error": str(e)})
 
     def _warmup_models(self) -> None:
         """Warm up local Ollama models with a keep-alive ping. Skipped for cloud models."""
@@ -1141,9 +1226,8 @@ class OllamaBrain:
                 learned_ctx = nd.get_learned_context_prompt()
                 if learned_ctx:
                     additions.append(learned_ctx)
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[Brain] non-critical: {e}")
             # === CALENDAR CONTEXT INJECTION (Phase 5D) ===
             try:
                 from aura.proactive.monitors.calendar_monitor import get_calendar_monitor
@@ -1151,9 +1235,8 @@ class OllamaBrain:
                 cal_ctx = cm.get_context_for_prompt()
                 if cal_ctx:
                     additions.append(cal_ctx)
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[Brain] non-critical: {e}")
             # === SELF-MODEL INJECTION (Phase 6B: Metacognitive Self-Improvement) ===
             try:
                 from aura.consciousness.metacognition import get_metacognitive_engine
@@ -1161,9 +1244,8 @@ class OllamaBrain:
                 self_model_ctx = mc.get_self_model_prompt()
                 if self_model_ctx:
                     additions.append(self_model_ctx)
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[Brain] non-critical: {e}")
             # === USER MODEL INJECTION (Phase 6C / ADV-04: Theory of Mind) ===
             try:
                 if Config.MULTI_USER_ENABLED:
@@ -1180,9 +1262,8 @@ class OllamaBrain:
                     user_model_ctx = tom.get_context_for_prompt()
                     if user_model_ctx:
                         additions.append(user_model_ctx)
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[Brain] non-critical: {e}")
             # === MOTIVATION INJECTION (Phase 6E: Intrinsic Motivation) ===
             try:
                 from aura.consciousness.intrinsic_motivation import get_intrinsic_motivation
@@ -1190,18 +1271,9 @@ class OllamaBrain:
                 motivation_ctx = im.get_context_for_prompt()
                 if motivation_ctx:
                     additions.append(motivation_ctx)
-            except Exception:
-                pass
-
-            # === CONSCIOUS FOCUS INJECTION (Phase 7: Global Workspace Theory) ===
-            try:
-                from aura.consciousness.global_workspace import get_global_workspace
-                conscious_ctx = get_global_workspace().get_conscious_state().to_prompt_context()
-                if conscious_ctx:
-                    additions.append(conscious_ctx)
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[Brain] non-critical: {e}")
+            # Global Workspace Theory injection removed
             # === WORLD STATE INJECTION (ADV-02: Persistent World Model) ===
             try:
                 from aura.consciousness.world_model import get_world_model
@@ -1209,9 +1281,8 @@ class OllamaBrain:
                 world_ctx = wm.get_context_summary()
                 if world_ctx:
                     additions.append(world_ctx)
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[Brain] non-critical: {e}")
             result = "\n\n".join(additions)
             # Cap module additions to 4K chars to prevent context overflow
             if len(result) > 4000:
@@ -1264,13 +1335,13 @@ class OllamaBrain:
                 from aura.proactive.theory_of_mind import get_theory_of_mind
                 tom = get_theory_of_mind()
                 tom.observe_message(prompt, role="user")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[Brain] non-critical: {e}")
         try:
             from aura.consciousness.intrinsic_motivation import get_intrinsic_motivation
             get_intrinsic_motivation().record_interaction()  # Satisfies social drive
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[Brain] non-critical: {e}")
         sys_additions = self._get_cached_system_additions()
         if sys_additions:
             full = f"{full}\n\n{sys_additions}"
@@ -1301,9 +1372,8 @@ class OllamaBrain:
                 if ctx.get("key_files"):
                     parts.append(f"**Key Files:** {', '.join(ctx['key_files'][:10])}")
                 full = f"{full}\n\n## Auto-Detected Project Context\n" + "\n".join(parts)
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[Brain] non-critical: {e}")
         # === SEMANTIC CODEBASE CONTEXT ===
         # Skip expensive operations if prompt is already near 12K cap
         MAX_SYSTEM_PROMPT_CHARS = 12000
@@ -1359,9 +1429,8 @@ class OllamaBrain:
                     mod_parts.append("Prefer proven, reliable approaches.")
                 if mod_parts:
                     full = f"{full}\n\n[Style guidance: {' '.join(mod_parts)}]"
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[Brain] non-critical: {e}")
         # === EPISODIC MEMORY AUTO-RECALL ===
         # Surface relevant past context for non-trivial queries (best-effort, never blocks)
         # Skip if already near budget cap
@@ -1375,9 +1444,8 @@ class OllamaBrain:
                             ts = m.get("timestamp", "")[:10] if m.get("timestamp") else ""
                             memory_ctx += f"- [{ts}] {m.get('title', '')}: {m.get('summary', '')}\n"
                         full = f"{full}{memory_ctx}"
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[Brain] non-critical: {e}")
         budget = self._classify_budget(prompt)
         full = f"{full}{self._build_budget_instruction(budget)}"
 
@@ -1429,9 +1497,8 @@ class OllamaBrain:
                 summary = self.compact_history()
                 if summary:
                     logger.info(f"[BRAIN] Auto-compacted history → {len(self.conversation_history)} msgs remain")
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[Brain] non-critical: {e}")
         messages = []
         if full_system_prompt:
             messages.append({"role": "system", "content": full_system_prompt})
@@ -1460,9 +1527,8 @@ class OllamaBrain:
             from api.routes.thinking import get_manager as get_thinking_manager
             tm = get_thinking_manager()
             tm.record_real_thought("formulating", f"reasoning with {actual_model}...", intensity=0.7, source="brain")
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[Brain] non-critical: {e}")
         # Neuromodulator: Dopamine modulates temperature (creativity/exploration)
         # High dopamine = slightly higher temp = more creative; low = more conservative
         base_temp = 0.7
@@ -1526,9 +1592,8 @@ class OllamaBrain:
                     f"neuromodulators influencing response: {', '.join(neuro_effects)}",
                     0.4, "emotion"
                 )
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[Brain] non-critical: {e}")
         # Call with timeout protection (serotonin-modulated)
         response = call_with_timeout(
             lambda: client.chat(model=actual_model, messages=messages, options=llm_options),
@@ -1615,9 +1680,8 @@ class OllamaBrain:
                 get_self_improvement_engine().record_chat_outcome,
                 prompt, assistant_message, actual_model
             )
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[Brain] non-critical: {e}")
         self._trigger_world_model_extraction(list(recent), _BG_EXECUTOR)
 
         return assistant_message
@@ -1674,9 +1738,8 @@ class OllamaBrain:
                 summary = self.compact_history()
                 if summary:
                     logger.info(f"[BRAIN] Auto-compacted history → {len(self.conversation_history)} msgs remain")
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[Brain] non-critical: {e}")
         messages = []
         if full_system_prompt:
             messages.append({"role": "system", "content": full_system_prompt})
@@ -1700,9 +1763,8 @@ class OllamaBrain:
             from api.routes.thinking import get_manager as get_thinking_manager
             tm = get_thinking_manager()
             tm.record_real_thought("formulating", f"streaming response with {actual_model}...", intensity=0.7, source="brain")
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[Brain] non-critical: {e}")
         # Neuromodulator: Dopamine modulates temperature (creativity/exploration)
         neuro = _get_neuromodulator_levels()
         base_temp = 0.7
@@ -1825,9 +1887,8 @@ class OllamaBrain:
                 get_self_improvement_engine().record_chat_outcome,
                 prompt, full_response, actual_model
             )
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[Brain] non-critical: {e}")
         self._trigger_world_model_extraction(list(recent), _BG_EXECUTOR)
 
     def _trigger_world_model_extraction(self, recent: list, executor=None) -> None:
@@ -1850,9 +1911,8 @@ class OllamaBrain:
                 daemon=True,
                 name=f"wm-extract-{conv_id[:8]}",
             ).start()
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[Brain] non-critical: {e}")
     def _is_complex_query(self, prompt: str) -> bool:
         """Detect if a query is complex and needs cloud model.
 
@@ -1983,8 +2043,8 @@ class OllamaBrain:
                     model, stats_model, category,
                 )
                 return stats_model
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[Brain] non-critical: {e}")
         return model
 
     def _record_routing_outcome(
@@ -2001,9 +2061,8 @@ class OllamaBrain:
             }
             category = _CAT_MAP.get(task_type, MicrotaskCategory.GENERAL)
             get_routing_stats().record(category, model, success=success, latency_ms=latency_ms)
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[Brain] non-critical: {e}")
     def _select_model(self, prompt: str, task_type: Optional[TaskType] = None) -> str:
         """Select the appropriate model based on task type and complexity.
 
@@ -2121,9 +2180,8 @@ List 3-5 key observations. Be brief."""
             from api.routes.thinking import get_manager as get_thinking_manager
             tm = get_thinking_manager()
             tm.record_real_thought("analyzing", f"planning approach for: {goal[:60]}", intensity=0.7, source="brain")
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[Brain] non-critical: {e}")
         tool_descriptions = self._get_tool_descriptions(available_tools)
 
         # Store goal for decide_action reference
@@ -2162,9 +2220,8 @@ Create a short 1-3 step plan. Be specific about which tool to use for each step.
             tm = get_thinking_manager()
             tools_short = ", ".join(available_tools[:4])
             tm.record_real_thought("connecting", f"selecting tool from: {tools_short}", intensity=0.6, source="brain")
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[Brain] non-critical: {e}")
         tool_descriptions = self._get_tool_descriptions(available_tools)
 
         # Special case: screenshot+vision combo where screenshot is already done
@@ -2219,9 +2276,8 @@ REASONING: find main function"""
             from api.routes.thinking import get_manager as get_thinking_manager
             tm = get_thinking_manager()
             tm.record_real_thought("observing", f"evaluating result of: {action[:50]}", intensity=0.5, source="brain")
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[Brain] non-critical: {e}")
         # Truncate result to avoid overwhelming the model
         result_truncated = result[:1000] if len(result) > 1000 else result
 
@@ -2677,8 +2733,8 @@ Say 'NEXT: complete' when the goal is achieved."""
         if self._alma_enabled:
             try:
                 return get_mood_emoji()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[Brain] non-critical: {e}")
         return "🤖"
 
     def update_emotional_state(self, success: bool = True, user_satisfied: bool = True):

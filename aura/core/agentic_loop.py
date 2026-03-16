@@ -15,6 +15,7 @@ import logging
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
@@ -32,6 +33,7 @@ console = Console()
 
 MAX_ITERATIONS = 50
 MAX_TOOL_OUTPUT_CHARS = 15000
+_TOOL_POOL = ThreadPoolExecutor(max_workers=4)
 
 
 AGENTIC_SYSTEM_PROMPT = """You are Aura, an AI coding agent with persistent memory. You help users with software engineering tasks by reading files, writing code, running commands, and iterating until the task is complete.
@@ -120,9 +122,11 @@ def _typewriter_print(text: str, delay: float = 0.008) -> None:
 class ToolExecutor:
     """Executes tool calls by dispatching to existing Aura tool classes."""
 
-    def __init__(self, project_root: str, sub_agent_mgr=None):
+    def __init__(self, project_root: str, sub_agent_mgr=None, permissions=None, mcp_client=None):
         self.project_root = project_root
         self.sub_agent_mgr = sub_agent_mgr
+        self.permissions = permissions
+        self._mcp_client = mcp_client
         self._fs = None
         self._code_edit = None
         self._search = None
@@ -183,7 +187,28 @@ class ToolExecutor:
             logger.error(f"[ToolExecutor] {tool_name} failed: {e}")
             return json.dumps({"error": str(e)})
 
+    # Aliases for when the LLM uses agent-style names instead of dev-tool names
+    _TOOL_ALIASES = {
+        "filesystem": "list_dir",
+        "code_search": "grep",
+        "code_edit": "edit_file",
+        "shell_executor": "shell",
+        "web_search": "search_web",
+        "tavily_search": "search_web",
+        "brave_search": "search_web",
+        "ls": "list_dir",
+        "find": "glob",
+        "cat": "read_file",
+    }
+
     def _dispatch(self, tool_name: str, args: dict) -> dict:
+        # Resolve aliases first
+        tool_name = self._TOOL_ALIASES.get(tool_name, tool_name)
+
+        # If args has 'action' but no structured params, try to parse it
+        if "action" in args and len(args) == 1:
+            args = self._parse_action_to_args(tool_name, args["action"])
+
         if tool_name == "read_file":
             return self._read_file(args)
         elif tool_name == "grep":
@@ -202,7 +227,7 @@ class ToolExecutor:
             )
         elif tool_name == "list_dir":
             path = self._resolve_path(args.get("path", "."))
-            return self.fs.list_directory(path)
+            return self._list_dir(path)
         elif tool_name == "edit_file":
             return self._edit_file(args)
         elif tool_name == "write_file":
@@ -229,8 +254,104 @@ class ToolExecutor:
                 task=args.get("task", ""),
                 role=args.get("role", "reader"),
             )
+        elif tool_name.startswith("mcp_"):
+            # Route to MCP client
+            if self._mcp_client:
+                return {"result": self._mcp_client.call_tool(tool_name, args)}
+            return {"error": f"MCP client not available for: {tool_name}"}
         else:
             return {"error": f"Unknown tool: {tool_name}"}
+
+    def _parse_action_to_args(self, tool_name: str, action: str) -> dict:
+        """Convert a freeform 'action' string into structured args for a tool.
+
+        When the LLM uses a generic {action: "..."} schema (from ToolRAG-generated schemas),
+        we need to extract the actual parameters the tool expects.
+        """
+        action = action.strip()
+
+        if tool_name == "read_file":
+            # Strip common prefixes: "read README.md" → "README.md"
+            for prefix in ("read ", "cat ", "open "):
+                if action.lower().startswith(prefix):
+                    action = action[len(prefix):].strip()
+                    break
+            return {"path": action}
+        elif tool_name == "list_dir":
+            # Strip common prefixes: "list ." → ".", "ls src/" → "src/"
+            for prefix in ("list ", "ls ", "dir ", "list_directory "):
+                if action.lower().startswith(prefix):
+                    action = action[len(prefix):].strip()
+                    break
+            return {"path": action or "."}
+        elif tool_name == "grep":
+            parts = action.split(maxsplit=1)
+            if len(parts) >= 2:
+                return {"pattern": parts[0], "path": parts[1]}
+            return {"pattern": action, "path": "."}
+        elif tool_name == "glob":
+            return {"pattern": action or "*"}
+        elif tool_name == "shell":
+            return {"command": action}
+        elif tool_name == "search_web":
+            return {"query": action}
+        elif tool_name == "write_file":
+            # Try to parse JSON
+            try:
+                import json as _json
+                parsed = _json.loads(action)
+                if isinstance(parsed, dict):
+                    return parsed
+            except Exception:
+                pass
+            return {"path": action, "content": ""}
+        elif tool_name == "edit_file":
+            try:
+                import json as _json
+                parsed = _json.loads(action)
+                if isinstance(parsed, dict):
+                    return parsed
+            except Exception:
+                pass
+            return {"path": action, "old_string": "", "new_string": ""}
+        elif tool_name == "git":
+            return {"action": action}
+        elif tool_name == "project_structure":
+            return {"path": action or "."}
+
+        # Default: keep as action
+        return {"action": action}
+
+    def _list_dir(self, path: str) -> dict:
+        """List directory contents — direct filesystem access, no sandbox."""
+        try:
+            entries = []
+            for entry in sorted(os.listdir(path)):
+                full = os.path.join(path, entry)
+                if os.path.isdir(full):
+                    entries.append(f"  {entry}/")
+                else:
+                    try:
+                        size = os.path.getsize(full)
+                        if size < 1024:
+                            size_str = f"{size}B"
+                        elif size < 1024 * 1024:
+                            size_str = f"{size // 1024}KB"
+                        else:
+                            size_str = f"{size // (1024 * 1024)}MB"
+                        entries.append(f"  {entry} ({size_str})")
+                    except OSError:
+                        entries.append(f"  {entry}")
+            return {
+                "success": True,
+                "path": path,
+                "count": len(entries),
+                "entries": "\n".join(entries),
+            }
+        except FileNotFoundError:
+            return {"error": f"Directory not found: {path}"}
+        except PermissionError:
+            return {"error": f"Permission denied: {path}"}
 
     def _read_file(self, args: dict) -> dict:
         path = self._resolve_path(args["path"])
@@ -263,23 +384,38 @@ class ToolExecutor:
         }
 
     def _edit_file(self, args: dict) -> dict:
-        """Edit file with diff preview. Uses CodeEditTool for fuzzy matching."""
+        """Edit file with diff preview and approval. Uses CodeEditTool for fuzzy matching."""
         path = self._resolve_path(args["path"])
-        # Use CodeEditTool which has fuzzy matching + backup + diff
+
+        # Step 1: dry-run to preview
+        preview = self.code_edit.edit(
+            path=path,
+            old_string=args["old_string"],
+            new_string=args["new_string"],
+            dry_run=True,
+        )
+        if not preview.get("success"):
+            return preview
+
+        # Step 2: show diff and get approval (skip prompt in trust mode)
+        from .diff_display import show_diff_and_confirm
+        if not self.permissions.trust_mode:
+            approved = show_diff_and_confirm(path, args["old_string"], args["new_string"], trust_mode=False)
+            if not approved:
+                return {"success": False, "error": "Edit rejected by user"}
+        else:
+            # Trust mode: show diff briefly, auto-approve
+            from .diff_display import show_diff
+            try:
+                show_diff(path, args["old_string"], args["new_string"])
+            except Exception as e:
+                logger.debug(f"[AgenticLoop] non-critical: {e}")
+        # Step 3: apply for real
         result = self.code_edit.edit(
             path=path,
             old_string=args["old_string"],
             new_string=args["new_string"],
         )
-
-        # Show diff in console if edit succeeded
-        if result.get("success") and result.get("diff"):
-            from .diff_display import show_diff
-            try:
-                show_diff(path, args["old_string"], args["new_string"])
-            except Exception:
-                pass
-
         return result
 
     def _write_file(self, args: dict) -> dict:
@@ -319,9 +455,8 @@ class ToolExecutor:
                 from aura.tools.tavily_tool import TavilyTool
                 self._tavily = TavilyTool()
             return self._tavily.search(query=query, max_results=max_results)
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[AgenticLoop] non-critical: {e}")
         try:
             if self._brave is None:
                 from aura.tools.brave_search import BraveSearchTool
@@ -344,6 +479,8 @@ class AgenticLoop:
         budget_usd: Optional[float] = None,
         context: str = "",
         session: Optional[AgenticSession] = None,
+        aura_config: dict = None,
+        router=None,
     ):
         self.brain = brain
         self.project_root = os.path.abspath(project_root)
@@ -352,10 +489,11 @@ class AgenticLoop:
         self.max_iterations = max_iterations
         self.budget_usd = budget_usd
         self.context = context
+        self._router = router  # Per-step model routing
 
         from .sub_agent import SubAgentManager
         self._sub_agent_mgr = SubAgentManager(self)
-        self.executor = ToolExecutor(self.project_root, sub_agent_mgr=self._sub_agent_mgr)
+        self.executor = ToolExecutor(self.project_root, sub_agent_mgr=self._sub_agent_mgr, permissions=self.permissions)
         self.iteration = 0
         self.tool_calls_total = 0
         self._edits_this_turn = 0  # Track edits for auto-test
@@ -371,9 +509,51 @@ class AgenticLoop:
         # Persistent conversation history for interactive mode
         self._conversation_history: list[dict] = []
 
+        # MCP client for external tool servers
+        from .mcp_client import MCPClientManager
+        self._mcp_client = MCPClientManager()
+        if aura_config:
+            try:
+                self._mcp_client.load_from_config(aura_config)
+            except Exception as e:
+                logger.debug(f"[AgenticLoop] MCP client init failed (non-fatal): {e}")
+        self.executor._mcp_client = self._mcp_client
+
+    def _get_active_tools(self) -> list:
+        """Get all active tools including MCP tools if connected."""
+        base_tools = getattr(self, '_sub_agent_tools', None) or AGENTIC_TOOLS
+        if hasattr(self, '_mcp_client') and self._mcp_client.connections:
+            mcp_tools = self._mcp_client.list_all_tools()
+            # Convert MCP tools to Ollama tool schema format
+            ollama_mcp = []
+            for t in mcp_tools:
+                schema = {
+                    "type": "function",
+                    "function": {
+                        "name": t["name"],
+                        "description": t.get("description", ""),
+                        "parameters": t.get("inputSchema", {"type": "object", "properties": {}}),
+                    },
+                }
+                ollama_mcp.append(schema)
+            return list(base_tools) + ollama_mcp
+        return base_tools
+
     def _build_system_prompt(self, prompt: str) -> str:
-        """Build system prompt with context and relevant memories."""
+        """Build system prompt with context and relevant memories. Hot-reloads AURA.md if changed."""
         memories = _recall_memories(prompt)
+
+        # Hot-reload AURA.md if it changed on disk
+        aura_md_path = os.path.join(self.project_root, "AURA.md")
+        try:
+            current_mtime = os.path.getmtime(aura_md_path)
+            if not hasattr(self, '_aura_md_mtime') or current_mtime != self._aura_md_mtime:
+                from .context import gather_context
+                self.context = gather_context(self.project_root)
+                self._aura_md_mtime = current_mtime
+        except OSError:
+            pass
+
         return AGENTIC_SYSTEM_PROMPT.format(
             context=self.context or "(No project context loaded)",
             memories=memories or "(No relevant memories found)",
@@ -429,36 +609,84 @@ class AgenticLoop:
             messages = self.context_mgr.check_and_compact(messages, self.brain)
 
             # Call LLM with tools (sub-agents may have restricted tool sets)
-            active_tools = getattr(self, '_sub_agent_tools', None) or AGENTIC_TOOLS
-            result = self.brain.think_with_tools(
-                messages=messages,
-                tools=active_tools,
-                model_override=self.model_override,
-            )
+            active_tools = self._get_active_tools()
 
-            if "error" in result:
-                final_response = f"Error: {result['error']}"
-                break
+            # Per-step model routing: pick best model for THIS iteration
+            step_model = self.model_override
+            if self._router and not self.model_override:
+                step_model = self._pick_step_model(messages)
 
-            msg = result["message"]
-            model_used = result.get("model", "")
-
-            # Extract tool calls and content.
-            # Ollama returns Pydantic objects — msg.tool_calls is None or list of ToolCall,
-            # msg.content is None or str. Use `or` to handle None defaults.
+            # Try streaming first, fall back to blocking
+            accumulated = ""
             tool_calls = None
             content = ""
-            if isinstance(msg, dict):
-                tool_calls = msg.get("tool_calls")
-                content = msg.get("content", "") or ""
+            stream_error = None
+
+            try:
+                # Show spinner
+                model_tag = f" [{step_model.split(':')[0]}]" if step_model else ""
+                sys.stdout.write(f"  \033[90m● thinking{model_tag}...\033[0m")
+                sys.stdout.flush()
+
+                for chunk_type, data in self.brain.think_with_tools_stream(
+                    messages=messages, tools=active_tools,
+                    model_override=step_model,
+                ):
+                    if chunk_type == "content":
+                        if not accumulated:
+                            sys.stdout.write("\r\033[K")  # Clear spinner
+                        sys.stdout.write(data)
+                        sys.stdout.flush()
+                        accumulated += data
+                    elif chunk_type == "tool_calls":
+                        if not accumulated:
+                            sys.stdout.write("\r\033[K")
+                        tool_calls = data
+                    elif chunk_type == "done":
+                        model_used = data.get("model", "")
+                    elif chunk_type == "error":
+                        stream_error = data.get("error", "Unknown stream error")
+                        break
+
+                if accumulated:
+                    sys.stdout.write("\n")
+                    sys.stdout.flush()
+                elif not tool_calls:
+                    sys.stdout.write("\r\033[K")  # Clear spinner if no output
+                    sys.stdout.flush()
+
+            except Exception as e:
+                stream_error = str(e)
+
+            # Fallback to non-streaming if streaming failed
+            if stream_error:
+                sys.stdout.write("\r\033[K")
+                sys.stdout.flush()
+                logger.debug(f"[AgenticLoop] Streaming failed ({stream_error}), falling back to blocking call")
+                result = self.brain.think_with_tools(
+                    messages=messages, tools=active_tools,
+                    model_override=step_model,
+                )
+                if "error" in result:
+                    final_response = f"Error: {result['error']}"
+                    break
+
+                msg = result["message"]
+                model_used = result.get("model", "")
+                if isinstance(msg, dict):
+                    tool_calls = msg.get("tool_calls")
+                    content = msg.get("content", "") or ""
+                else:
+                    tool_calls = getattr(msg, "tool_calls", None)
+                    content = getattr(msg, "content", "") or ""
             else:
-                tool_calls = getattr(msg, "tool_calls", None)
-                content = getattr(msg, "content", "") or ""
+                content = accumulated
 
             if not tool_calls:
                 # No tool calls — LLM is done
                 final_response = content or "(No response)"
-                if on_response:
+                if on_response and not accumulated:
+                    # Only call on_response if we didn't already stream it
                     on_response(final_response, self.iteration)
                 break
 
@@ -476,9 +704,9 @@ class AgenticLoop:
             if content and on_response:
                 on_response(content, self.iteration)
 
-            # Execute each tool call
+            # Parse all tool calls first
+            parsed_calls = []
             for tc in tool_calls:
-                # Handle both Pydantic ToolCall objects and plain dicts
                 if isinstance(tc, dict):
                     func = tc.get("function", {})
                     tool_name = func.get("name", "")
@@ -487,7 +715,6 @@ class AgenticLoop:
                     func = getattr(tc, "function", None)
                     tool_name = getattr(func, "name", "") if func else ""
                     args = getattr(func, "arguments", {}) if func else {}
-
                 try:
                     if isinstance(args, str):
                         args = json.loads(args)
@@ -495,25 +722,44 @@ class AgenticLoop:
                         args = {}
                 except (json.JSONDecodeError, TypeError):
                     args = {}
+                parsed_calls.append((tool_name, args))
 
+            # Permission checks + status display on main thread
+            approved = []
+            for tool_name, args in parsed_calls:
                 self.tool_calls_total += 1
-
-                # Permission check
                 if not self.permissions.check(tool_name, args):
-                    tool_result = json.dumps({"error": "Permission denied by user"})
+                    approved.append((tool_name, args, json.dumps({"error": "Permission denied by user"})))
                     self._show_tool_status(tool_name, args, denied=True)
                 else:
                     self._show_tool_status(tool_name, args)
-                    tool_result = self.executor.execute(tool_name, args)
+                    approved.append((tool_name, args, None))  # None = needs execution
 
-                    # Track edits for auto-test
-                    if tool_name in ("edit_file", "write_file"):
-                        self._edits_this_turn += 1
+            # Execute: parallel if 2+ calls, direct if 1
+            needs_exec = [(i, t, a) for i, (t, a, r) in enumerate(approved) if r is None]
+            if len(needs_exec) == 1:
+                idx, t, a = needs_exec[0]
+                result = self.executor.execute(t, a)
+                approved[idx] = (t, a, result)
+            elif len(needs_exec) > 1:
+                futures = {}
+                for idx, t, a in needs_exec:
+                    fut = _TOOL_POOL.submit(self.executor.execute, t, a)
+                    futures[idx] = fut
+                for idx, fut in futures.items():
+                    try:
+                        result = fut.result(timeout=300)
+                    except Exception as e:
+                        result = json.dumps({"error": f"Tool execution failed: {e}"})
+                    t, a, _ = approved[idx]
+                    approved[idx] = (t, a, result)
 
+            # Collect results in original order
+            for tool_name, args, tool_result in approved:
+                if tool_name in ("edit_file", "write_file") and '"error"' not in tool_result:
+                    self._edits_this_turn += 1
                 if on_tool_call:
                     on_tool_call(tool_name, args, tool_result)
-
-                # Append tool result to messages
                 tool_msg = {"role": "tool", "content": tool_result}
                 messages.append(tool_msg)
                 if self.session:
@@ -551,9 +797,8 @@ class AgenticLoop:
         # Store in persistent memory (background, non-blocking)
         try:
             _store_interaction(prompt, final_response)
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[AgenticLoop] non-critical: {e}")
         return {
             "success": not final_response.startswith("Error:"),
             "response": final_response,
@@ -589,6 +834,80 @@ class AgenticLoop:
         except Exception as e:
             logger.debug(f"[AgenticLoop] Auto-test error (non-fatal): {e}")
             return None
+
+    def _pick_step_model(self, messages: list[dict]) -> str:
+        """Pick the best model for this iteration using phase-based routing.
+
+        Tracks task phase based on tool calls (structured signals), not text
+        classification on LLM prose (which fails because keyword matching
+        was designed for user prompts, not assistant messages).
+
+        Phases:
+          1. understand — first 1-2 iterations, reading/searching
+          2. code       — once edit_file/write_file is called, stay here
+          3. fix        — after test failure, stay on code model (not reasoning)
+
+        Switching happens at most 1-2 times per task to avoid:
+          - Model thrashing (different models interpret conversation differently)
+          - Breaking coding flow by inserting a reasoning model mid-implementation
+        """
+        from .router import classify_task
+
+        # Phase detection from tool call history
+        has_edits = False
+        has_test_failure = False
+        last_tools_were_reads = True
+
+        for msg in messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "") or ""
+            tool_calls = msg.get("tool_calls")
+
+            if role == "tool":
+                if "auto_test_result" in content and "FAILED" in content:
+                    has_test_failure = True
+
+            if tool_calls:
+                for tc in tool_calls:
+                    if isinstance(tc, dict):
+                        name = tc.get("function", {}).get("name", "")
+                    else:
+                        func = getattr(tc, "function", None)
+                        name = getattr(func, "name", "") if func else ""
+                    if name in ("edit_file", "write_file"):
+                        has_edits = True
+                        last_tools_were_reads = False
+                    elif name in ("read_file", "grep", "glob", "list_dir", "project_structure"):
+                        last_tools_were_reads = True
+                    else:
+                        last_tools_were_reads = False
+
+        # Phase 1: First iteration — classify from user prompt
+        if self.iteration == 1:
+            user_prompt = ""
+            for msg in messages:
+                if msg.get("role") == "user":
+                    user_prompt = msg.get("content", "")
+            category = classify_task(user_prompt) if user_prompt else "orchestrator"
+
+        # Phase 3: Test failure — stay on code model to fix
+        elif has_test_failure and has_edits:
+            category = "code_gen"
+
+        # Phase 2: Coding phase — once edits start, stay on code_gen
+        elif has_edits:
+            category = "code_gen"
+
+        # Still exploring/reading — use orchestrator (reliable, low hallucination)
+        elif last_tools_were_reads:
+            category = "orchestrator"
+
+        else:
+            category = "orchestrator"
+
+        model = self._router.select(category)
+        logger.debug(f"[AgenticLoop] Step {self.iteration} phase={category} -> {model}")
+        return model
 
     def get_session(self) -> Optional[AgenticSession]:
         """Get the current session object."""
@@ -646,6 +965,8 @@ class AgenticLoop:
             if len(task_desc) > 50:
                 task_desc = task_desc[:47] + "..."
             desc = f"spawn {role}: {task_desc}"
+        elif tool_name.startswith("mcp_"):
+            desc = f"mcp {tool_name[4:]}"
 
         console.print(f"  [dim cyan]tool[/dim cyan] {desc}", highlight=False)
 
@@ -660,6 +981,8 @@ def run_agentic(
     budget_usd: Optional[float] = None,
     context: str = "",
     trust_mode: bool = False,
+    aura_config: dict = None,
+    router=None,
 ) -> dict:
     """Convenience function to run a single agentic task."""
     if permissions is None:
@@ -675,6 +998,8 @@ def run_agentic(
         max_iterations=max_iterations,
         budget_usd=budget_usd,
         context=context,
+        aura_config=aura_config,
+        router=router,
     )
 
     def on_response(text, iteration):

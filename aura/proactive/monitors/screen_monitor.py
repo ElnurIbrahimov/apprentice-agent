@@ -190,9 +190,8 @@ class ScreenMonitor(BaseMonitor):
                         visual_event = self._check_visual_change(screenshot_path)
                         if visual_event:
                             events.append(visual_event)
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[ScreenMonitor] non-critical: {e}")
         # Check for idle state
         idle_event = self._check_idle()
         if idle_event:
@@ -294,9 +293,8 @@ class ScreenMonitor(BaseMonitor):
                 if result.returncode == 0:
                     parts = result.stdout.strip().split("|")
                     return (parts[0], parts[1] if len(parts) > 1 else "")
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[ScreenMonitor] non-critical: {e}")
         elif sys.platform.startswith("linux"):
             try:
                 import subprocess
@@ -326,9 +324,8 @@ class ScreenMonitor(BaseMonitor):
                         if len(parts) >= 4:
                             app_name = parts[3]
                     return (app_name, title)
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[ScreenMonitor] non-critical: {e}")
         return (None, None)
 
     async def _check_screen_content(self) -> List[Event]:

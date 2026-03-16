@@ -205,9 +205,8 @@ class IdlePresenceEngine:
                 thought_type = "connecting" if "eureka" in content.lower() else "analyzing"
 
             tm.record_real_thought(thought_type, content, intensity=0.6, source="neurodream")
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[IdlePresence] non-critical: {e}")
     # ====================================================================
     # Cognitive Load Computation
     # ====================================================================
@@ -233,9 +232,8 @@ class IdlePresenceEngine:
             real = stats.get("real_thoughts", 0)
             # Active thoughts are the strongest signal
             load.thinking_load = min(1.0, active / 10.0 + real / 50.0)
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[IdlePresence] non-critical: {e}")
         # 2. NeuroDream load (oscillation-aware pulsing)
         try:
             from aura.tools.neurodream import get_neurodream
@@ -249,9 +247,8 @@ class IdlePresenceEngine:
                     load.dream_load = base_load * osc["modifiers"]["cognitive_intensity"]
                 else:
                     load.dream_load = base_load
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[IdlePresence] non-critical: {e}")
         # 3. Gateway Daemon load
         try:
             from aura.proactive.gateway_daemon import get_gateway_daemon
@@ -262,9 +259,8 @@ class IdlePresenceEngine:
                 decisions = stats.get("decisions_made", 0)
                 # Normalize: ~100 events/50 decisions = full load
                 load.daemon_load = min(1.0, events / 100.0 * 0.5 + decisions / 50.0 * 0.5)
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[IdlePresence] non-critical: {e}")
         # 4. Inner thoughts load
         try:
             from api.services.inner_thoughts_engine import get_inner_thoughts_engine
@@ -274,9 +270,8 @@ class IdlePresenceEngine:
                 generated = stats.get("total_generated", 0)
                 # Active engine contributes base load + activity
                 load.inner_thoughts_load = min(1.0, 0.2 + generated / 100.0)
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[IdlePresence] non-critical: {e}")
         # 5. Metacognition load
         try:
             from aura.consciousness.metacognition import get_metacognitive_engine
@@ -285,16 +280,14 @@ class IdlePresenceEngine:
             active_goals = [g for g in model.learning_goals if g.status in ("pending", "active")]
             if active_goals:
                 load.metacognition_load = min(1.0, len(active_goals) / 5.0 * 0.3)
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[IdlePresence] non-critical: {e}")
         # 6. Global Workspace load
         try:
             from aura.consciousness.global_workspace import get_global_workspace
             load.workspace_load = get_global_workspace().get_cognitive_load_contribution()
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[IdlePresence] non-critical: {e}")
         # Weighted aggregate
         load.total_load = min(1.0, (
             load.thinking_load * 0.20 +
@@ -501,9 +494,8 @@ class IdlePresenceEngine:
                 ctx = get_tracker()
                 focus = ctx.get_focus_state(limit=3)
                 topics = [item["name"] for item in focus.get("items", [])[:3]]
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[IdlePresence] non-critical: {e}")
             if topics:
                 topic_str = ", ".join(topics)
                 thought = f"reflecting on recent discussion about {topic_str}"
@@ -528,9 +520,9 @@ class IdlePresenceEngine:
                 tm.record_real_thought("connecting", desc, intensity=0.3, source="idle_presence")
                 self._record_activity(IdleActivity.PATTERN_MINING, desc, cognitive_load=0.2)
 
-        except Exception:
-            pass
+        except Exception as e:
 
+            logger.debug(f"[IdlePresence] non-critical: {e}")
     def _run_kg_maintenance(self) -> None:
         """Run knowledge graph maintenance if available."""
         try:
@@ -543,9 +535,8 @@ class IdlePresenceEngine:
                 if sessions > 0:
                     desc = f"maintaining knowledge connections ({sessions} consolidation sessions completed)"
                     self._record_activity(IdleActivity.KG_PRUNING, desc, cognitive_load=0.15)
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[IdlePresence] non-critical: {e}")
     def _run_awareness_analysis(self) -> None:
         """Run proactive awareness full analysis (ADV-02 Phase 3)."""
         try:
@@ -618,9 +609,8 @@ class IdlePresenceEngine:
             from aura.tools.neurodream import get_neurodream
             nd = get_neurodream()
             nd.record_activity()
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[IdlePresence] non-critical: {e}")
     # ====================================================================
     # Full State for UI
     # ====================================================================

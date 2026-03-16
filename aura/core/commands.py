@@ -1,3 +1,7 @@
+import logging
+
+logger = logging.getLogger(__name__)
+
 """Subcommand handlers for Aura Dev CLI.
 
 Handles: aura init, aura doctor, aura config, aura models, aura commit, aura cost
@@ -458,9 +462,8 @@ def _detect_test_cmd(project_root: str) -> str:
                 elif "jest" in test_script:
                     return "npx jest"
                 return "npm test"
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[Commands] non-critical: {e}")
     # Rust
     if (root / "Cargo.toml").exists():
         return "cargo test"

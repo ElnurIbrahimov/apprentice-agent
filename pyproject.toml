@@ -4,9 +4,82 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aura"
-version = "1.0.0"
+version = "4.3.0"
 description = "AURA - Autonomous Universal Reasoning Agent"
 requires-python = ">=3.12"
+dependencies = [
+    "ollama>=0.4.0",
+    "requests>=2.31.0",
+    "pydantic>=2.0.0,<3.0.0",
+    "python-dotenv>=1.0.0",
+    "psutil>=5.9.0",
+    "pyyaml>=6.0",
+    "tenacity>=8.2.0",
+    "rich>=13.0.0",
+]
+
+[project.optional-dependencies]
+ml = [
+    "torch>=2.0.0,<3.0.0",
+    "numpy>=1.24.0,<3.0.0",
+    "transformers>=4.40.0,<5.0.0",
+    "accelerate>=0.25.0",
+    "sentence-transformers>=2.2.0",
+]
+memory = [
+    "chromadb>=1.0.0",
+    "networkx>=3.0",
+    "kuzu>=0.4.0,<1.0.0",
+    "qdrant-client>=1.7.0",
+    "dateparser>=1.2.0",
+]
+messaging = [
+    "python-telegram-bot>=20.0",
+    "websockets>=12.0",
+]
+voice = [
+    "pyttsx3>=2.90",
+    "sounddevice>=0.4.6",
+]
+api = [
+    "fastapi>=0.109.0,<1.0.0",
+    "uvicorn[standard]>=0.27.0,<1.0.0",
+]
+tools = [
+    "arxiv>=2.0.0",
+    "pymupdf>=1.23.0",
+    "pyperclip>=1.8.0",
+    "pillow>=10.0.0",
+    "imagehash>=4.3.0",
+    "mss>=9.0.0",
+]
+calendar = [
+    "icalendar>=5.0.0",
+    "recurring-ical-events>=3.0.0",
+    "python-dateutil>=2.8.0",
+]
+treesitter = [
+    "tree-sitter>=0.24.0",
+    "tree-sitter-language-pack>=0.13.0",
+]
+simulation = [
+    "mesa>=2.0.0,<3.0.0",
+]
+windows = [
+    "comtypes>=1.2.0",
+    "pycaw>=20230407",
+    "winotify>=1.1.0",
+    "screen-brightness-control>=0.22.0",
+]
+scheduler = [
+    "apscheduler>=3.10.0,<4.0.0",
+]
+security = [
+    "cryptography>=41.0.0",
+]
+all = [
+    "aura[ml,memory,messaging,voice,api,tools,calendar,treesitter,simulation,scheduler,security]",
+]
 
 [project.scripts]
 aura = "main:main"
@@ -15,7 +88,7 @@ aura = "main:main"
 py-modules = ["main"]
 
 [tool.setuptools.packages.find]
-exclude = ["tests*", "web*", "docs*", "scripts*"]
+include = ["aura*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

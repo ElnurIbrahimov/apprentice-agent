@@ -41,11 +41,7 @@ class ProblemCategory(Enum):
 class ReasoningStrategy(Enum):
     """Available reasoning strategies mapped to AURA tools."""
     CHAIN_OF_THOUGHT = "chain_of_thought"       # brain.think() — 1 LLM call
-    COGNITIVE_THEATER = "cognitive_theater"       # CognitiveTheater.quick_debate() — 2 calls
     MCTS = "mcts"                                # ReasoningTreeTool.execute() — 10-30 calls
-    REFLEXION = "reflexion"                      # ReflexionEngine.solve() — 2-6 calls
-    MIRRORMIND = "mirrormind"                    # brain.think() + MirrorMind.refine() — 2-3 calls
-    DEBATE = "debate"                            # CognitiveTheater.quick_debate() — 2 calls
 
 
 # Strategy availability per category (not all strategies suit all problems)
@@ -53,46 +49,30 @@ CATEGORY_STRATEGIES: Dict[ProblemCategory, List[ReasoningStrategy]] = {
     ProblemCategory.MATH: [
         ReasoningStrategy.CHAIN_OF_THOUGHT,
         ReasoningStrategy.MCTS,
-        ReasoningStrategy.REFLEXION,
     ],
     ProblemCategory.CODE: [
         ReasoningStrategy.CHAIN_OF_THOUGHT,
-        ReasoningStrategy.REFLEXION,
-        ReasoningStrategy.MIRRORMIND,
         ReasoningStrategy.MCTS,
     ],
     ProblemCategory.ANALYSIS: [
         ReasoningStrategy.CHAIN_OF_THOUGHT,
-        ReasoningStrategy.COGNITIVE_THEATER,
-        ReasoningStrategy.MIRRORMIND,
-        ReasoningStrategy.DEBATE,
     ],
     ProblemCategory.CREATIVE: [
         ReasoningStrategy.CHAIN_OF_THOUGHT,
-        ReasoningStrategy.COGNITIVE_THEATER,
-        ReasoningStrategy.DEBATE,
     ],
     ProblemCategory.PLANNING: [
         ReasoningStrategy.CHAIN_OF_THOUGHT,
         ReasoningStrategy.MCTS,
-        ReasoningStrategy.COGNITIVE_THEATER,
-        ReasoningStrategy.REFLEXION,
     ],
     ProblemCategory.DEBUG: [
         ReasoningStrategy.CHAIN_OF_THOUGHT,
-        ReasoningStrategy.REFLEXION,
-        ReasoningStrategy.MIRRORMIND,
     ],
 }
 
 # Estimated LLM call costs per strategy (for logging/awareness)
 STRATEGY_COST: Dict[ReasoningStrategy, int] = {
     ReasoningStrategy.CHAIN_OF_THOUGHT: 1,
-    ReasoningStrategy.COGNITIVE_THEATER: 2,
     ReasoningStrategy.MCTS: 15,
-    ReasoningStrategy.REFLEXION: 4,
-    ReasoningStrategy.MIRRORMIND: 3,
-    ReasoningStrategy.DEBATE: 2,
 }
 
 

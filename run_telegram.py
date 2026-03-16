@@ -1,26 +1,9 @@
 #!/usr/bin/env python3
 """
-Proto-AGI v5 Telegram Bot - TRUTH SPINE
-=======================================
+AURA Telegram Bot
+=================
 
-This version ENFORCES verification at every step.
-
-Features:
-- TRUTH SPINE: Non-negotiable verification layer
-- ARTIFACTS: Physical proof (file hash, stdout, return code, JSON)
-- 3-TIER MEMORY: FACT (verified), BELIEF (inferred), SPECULATION (unverified)
-- SECURE EXECUTOR: Confirmation required for dangerous operations
-- SANDBOX ENFORCEMENT: Not suggestions, enforcement
-
-The Contract:
-    ACTION → ARTIFACT → VERIFICATION → MEMORY TIER
-
-Core Principle: "If you can't verify it with an artifact, it's SPECULATION"
-
-Modes:
-- idle: Think internally only, no external actions
-- assist: Act only in response to user (DEFAULT)
-- operate: Autonomous actions under budgets (10/hr, 3 msgs/hr)
+Connects AURA agent to Telegram for chat interaction.
 
 Usage:
     python run_telegram.py
@@ -68,21 +51,16 @@ def load_env():
                     os.environ[key.strip()] = value
 
 
-class ProtoAGIWrapper:
+class TelegramAgentWrapper:
     """
-    Wrapper that connects Proto-AGI to Telegram.
+    Wrapper that connects AURA agent to Telegram.
 
-    Routes all messages through Proto-AGI's process_input() which:
-    - Updates needs (connection satisfied)
-    - Stores in memory
-    - Recalls relevant context
-    - Generates personality-aware response
+    Routes all messages through the agent's chat/run methods.
     """
 
     def __init__(self, agent):
         self.agent = agent
-        self.proto_agi = agent.proto_agi
-        self.aura = agent.aura  # Keep AURA reference for compatibility
+        self.aura = getattr(agent, 'aura', None)
 
         # Expose attributes for Telegram bot compatibility
         if self.aura:
@@ -110,15 +88,7 @@ class ProtoAGIWrapper:
                 pass
 
     def generate_response(self, user_message: str, chat_id: str = None) -> str:
-        """
-        Route message through Proto-AGI.
-
-        Proto-AGI handles:
-        - Need satisfaction (connection +40)
-        - Memory storage and recall
-        - Personality/emotion-colored response
-        - Tool detection happens separately
-        """
+        """Route message through the agent."""
         import time
         start_time = time.time()
 
@@ -140,7 +110,6 @@ class ProtoAGIWrapper:
 
         try:
             if needs_tools:
-                # Tool-based query - use agent.run() with timeout
                 if is_research:
                     self._send_progress("Researching... This may take up to 60 seconds.")
                     print(f"[RESEARCH] Starting: {user_message[:50]}...")
@@ -164,43 +133,24 @@ class ProtoAGIWrapper:
                     return response if response else "I processed your request but couldn't find a clear answer."
                 return str(result)
             else:
-                # Conversational query - route through Proto-AGI
-                if self.proto_agi:
-                    response = self.proto_agi.process_input(user_message, chat_id)
-                    elapsed = time.time() - start_time
-                    print(f"[PROTO-AGI] Completed in {elapsed:.1f}s")
-                    return response
-                else:
-                    # Fallback to regular chat
-                    response = self.agent.chat(user_message)
-                    elapsed = time.time() - start_time
-                    print(f"[CHAT] Completed in {elapsed:.1f}s")
-                    return response
+                response = self.agent.chat(user_message)
+                elapsed = time.time() - start_time
+                print(f"[CHAT] Completed in {elapsed:.1f}s")
+                return response
 
         except Exception as e:
             print(f"[ERROR] generate_response failed: {e}")
             return f"Sorry, something went wrong: {str(e)[:100]}"
 
     def get_status(self):
-        """Get combined status from Proto-AGI v5 and agent."""
+        """Get agent status."""
         status = {
-            "version": "5.0 PROTO-AGI-v5-TRUTH-SPINE",
-            "soul": "Truth Spine Verification-First Cognition",
+            "version": "AURA Telegram",
             "tools": len(self.agent.tools),
             "mood": {},
             "patterns": {},
             "turns": 0
         }
-
-        if self.proto_agi:
-            agi_status = self.proto_agi.get_status()
-            status["mode"] = agi_status.get("mode", "assist")
-            status["needs"] = agi_status.get("needs", {})
-            status["memory"] = agi_status.get("memory", {})
-            status["governance"] = agi_status.get("governance", {})
-            status["cycle_count"] = agi_status.get("cycle_count", 0)
-            status["running"] = agi_status.get("running", False)
-            status["agi_version"] = agi_status.get("version", "v3")
 
         if self.aura:
             aura_status = self.aura.get_status()
@@ -237,31 +187,19 @@ async def main():
 
     print("")
     print("=" * 60)
-    print("  PROTO-AGI v5 - TRUTH SPINE VERIFICATION")
+    print("  AURA Telegram Bot")
     print("=" * 60)
     print("")
 
-    # Load ApprenticeAgent with Proto-AGI
+    # Load ApprenticeAgent
     try:
         from aura.agent import ApprenticeAgent
-        print("Loading ApprenticeAgent + Proto-AGI (this may take a moment)...")
+        print("Loading ApprenticeAgent (this may take a moment)...")
         agent = ApprenticeAgent(fast_init=False)
         print(f"ApprenticeAgent loaded with {len(agent.tools)} tools")
 
         # Wrap agent for Telegram
-        wrapped = ProtoAGIWrapper(agent)
-
-        if wrapped.proto_agi:
-            status = wrapped.proto_agi.get_status()
-            mem = status.get('memory', {})
-            gov = status.get('governance', {})
-            verifier = status.get('verifier', {})
-            print(f"Proto-AGI v5: Mode={status.get('mode', 'assist')}, Cycle={status['cycle_count']}")
-            print(f"  Memory: {mem.get('facts', 0)} FACTS, {mem.get('beliefs', 0)} BELIEFS, {mem.get('speculations', 0)} SPECULATIONS")
-            print(f"  Verifier: {verifier.get('total_verifications', 0)} checks, {verifier.get('success_rate', 0):.0%} pass rate")
-            print(f"  Budget: {gov.get('actions_remaining', 10)}/10 actions, {gov.get('messages_remaining', 3)}/3 messages")
-        else:
-            print("[WARNING] Proto-AGI not available - using fallback mode")
+        wrapped = TelegramAgentWrapper(agent)
 
         if wrapped.aura:
             print(f"AURA: Soul={wrapped.aura.soul.name}, Mood={wrapped.aura.emotion.state.mood.value}")
@@ -287,45 +225,12 @@ async def main():
         print("  pip install python-telegram-bot>=20.0")
         return
 
-    # Setup Proto-AGI output callback for proactive messages
-    if agent.proto_agi:
-        def telegram_output_callback(message: str, chat_id: str = None):
-            """Send proactive message to Telegram"""
-            if chat_id and bot.bot:
-                try:
-                    # Create async task for sending
-                    asyncio.create_task(
-                        bot.bot.send_message(chat_id=int(chat_id), text=message)
-                    )
-                except Exception as e:
-                    print(f"[Proto-AGI] Failed to send proactive message: {e}")
-
-        agent.set_proto_agi_output_callback(telegram_output_callback)
-
     try:
         await bot.start()
 
-        # Start Proto-AGI autonomous loop
-        if agent.proto_agi:
-            agent.start_proto_agi(cycle_interval=60.0)  # Think every 60 seconds
-            print("")
-            print("[Proto-AGI] Autonomous loop STARTED (60s interval)")
-
         print("")
         print("=" * 60)
-        print("  Proto-AGI v5 is now ALIVE on Telegram!")
-        print("")
-        print("  TRUTH SPINE - Non-Negotiable Verification:")
-        print("    - ACTION → ARTIFACT → VERIFICATION → MEMORY TIER")
-        print("    - FACT: verified with artifact (hash, return code)")
-        print("    - BELIEF: inferred but not proven")
-        print("    - SPECULATION: unverified (including LLM output)")
-        print("")
-        print("  \"If you can't verify it with an artifact, it's SPECULATION\"")
-        print("")
-        print("  MODES: idle | assist (default) | operate")
-        print("    - assist: Responds to user only")
-        print("    - operate: Autonomous actions (10/hr, 3 msgs/hr)")
+        print("  AURA is now ALIVE on Telegram!")
         print("")
         print("  Open Telegram and message your bot.")
         print("  Press Ctrl+C to stop")
@@ -344,11 +249,8 @@ async def main():
         import traceback
         traceback.print_exc()
     finally:
-        # Stop Proto-AGI loop
-        if agent.proto_agi:
-            agent.stop_proto_agi()
         await bot.stop()
-        print("Proto-AGI v5 stopped cleanly")
+        print("AURA Telegram bot stopped cleanly")
 
 
 if __name__ == "__main__":

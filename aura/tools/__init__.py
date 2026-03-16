@@ -303,27 +303,6 @@ except Exception as _e:
     _safe_import_error("HybridMemory", _e)
 
 # ---------------------------------------------------------------------------
-#  Metacognitive Guardian
-# ---------------------------------------------------------------------------
-try:
-    from .metacog_guardian import (
-        MetacognitiveGuardian,
-        GuardianConfig,
-        FailureType,
-        InterventionType,
-        FailurePrediction,
-        get_guardian
-    )
-except Exception as _e:
-    MetacognitiveGuardian = None
-    GuardianConfig = None
-    FailureType = None
-    InterventionType = None
-    FailurePrediction = None
-    get_guardian = None
-    _safe_import_error("MetacognitiveGuardian", _e)
-
-# ---------------------------------------------------------------------------
 #  NeuroDream
 # ---------------------------------------------------------------------------
 try:
@@ -349,70 +328,42 @@ except Exception as _e:
     _safe_import_error("NeuroDreamEngine", _e)
 
 # ---------------------------------------------------------------------------
-#  MirrorMind
+#  MirrorMind (REMOVED)
 # ---------------------------------------------------------------------------
-try:
-    from .mirrormind import MirrorMind, CritiqueResult
-except Exception as _e:
-    MirrorMind = None
-    CritiqueResult = None
-    _safe_import_error("MirrorMind/CritiqueResult", _e)
+MirrorMind = None
+CritiqueResult = None
 
 # ---------------------------------------------------------------------------
-#  Cognitive Theater
+#  Cognitive Theater (REMOVED)
 # ---------------------------------------------------------------------------
-try:
-    from .cognitive_theater import CognitiveTheater, Deliberation, is_decision_question
-except Exception as _e:
-    CognitiveTheater = None
-    Deliberation = None
-    is_decision_question = None
-    _safe_import_error("CognitiveTheater", _e)
+CognitiveTheater = None
+Deliberation = None
+is_decision_question = None
 
 # ---------------------------------------------------------------------------
-#  Reflexion
+#  Reflexion (REMOVED)
 # ---------------------------------------------------------------------------
-try:
-    from .reflexion import (
-        ReflexionEngine,
-        Reflection,
-        ReflexionResult,
-        code_syntax_evaluator,
-        function_evaluator,
-        json_evaluator,
-        answer_completeness_evaluator
-    )
-except Exception as _e:
-    ReflexionEngine = None
-    Reflection = None
-    ReflexionResult = None
-    code_syntax_evaluator = None
-    function_evaluator = None
-    json_evaluator = None
-    answer_completeness_evaluator = None
-    _safe_import_error("ReflexionEngine", _e)
+ReflexionEngine = None
+Reflection = None
+ReflexionResult = None
+code_syntax_evaluator = None
+function_evaluator = None
+json_evaluator = None
+answer_completeness_evaluator = None
 
 # ---------------------------------------------------------------------------
-#  SynapseForge
+#  SynapseForge (REMOVED)
 # ---------------------------------------------------------------------------
-try:
-    from .synapseforge import SynapseForge, SynthesizedTool
-except Exception as _e:
-    SynapseForge = None
-    SynthesizedTool = None
-    _safe_import_error("SynapseForge/SynthesizedTool", _e)
+SynapseForge = None
+SynthesizedTool = None
 
 # ---------------------------------------------------------------------------
-#  WorldSim
+#  WorldSim (REMOVED)
 # ---------------------------------------------------------------------------
-try:
-    from .worldsim import WorldSim, RiskLevel, SimulationResult, quick_check
-except Exception as _e:
-    WorldSim = None
-    RiskLevel = None
-    SimulationResult = None
-    quick_check = None
-    _safe_import_error("WorldSim", _e)
+WorldSim = None
+RiskLevel = None
+SimulationResult = None
+quick_check = None
 
 # ---------------------------------------------------------------------------
 #  A-MEM (Zettelkasten Agentic Memory)
@@ -474,38 +425,19 @@ except Exception as _e:
     _safe_import_error("ReasoningTreeTool/deep_reason", _e)
 
 # ---------------------------------------------------------------------------
-#  Introspection Circuit
+#  Introspection Circuit (REMOVED)
 # ---------------------------------------------------------------------------
-try:
-    from .introspection_circuit import (
-        IntrospectionCircuit,
-        IntrospectionConfig,
-        IntrospectionResult,
-        IntrospectionAction,
-        ConfidenceLevel,
-        ConfidenceSignal,
-        QueryType,
-        create_introspection_circuit,
-        quick_confidence_check
-    )
-except Exception as _e:
-    IntrospectionCircuit = None
-    IntrospectionConfig = None
-    IntrospectionResult = None
-    IntrospectionAction = None
-    ConfidenceLevel = None
-    ConfidenceSignal = None
-    QueryType = None
-    create_introspection_circuit = None
-    quick_confidence_check = None
-    _safe_import_error("IntrospectionCircuit", _e)
-
-try:
-    from .introspection_tool import IntrospectionTool, get_introspection_tool
-except Exception as _e:
-    IntrospectionTool = None
-    get_introspection_tool = None
-    _safe_import_error("IntrospectionTool/get_introspection_tool", _e)
+IntrospectionCircuit = None
+IntrospectionConfig = None
+IntrospectionResult = None
+IntrospectionAction = None
+ConfidenceLevel = None
+ConfidenceSignal = None
+QueryType = None
+create_introspection_circuit = None
+quick_confidence_check = None
+IntrospectionTool = None
+get_introspection_tool = None
 
 # ---------------------------------------------------------------------------
 #  Calendar
@@ -730,21 +662,10 @@ except Exception as _e:
     _safe_import_error("LifeLoggerTool", _e)
 
 # ---------------------------------------------------------------------------
-#  FluxMind (external tools directory - already guarded)
+#  FluxMind (REMOVED)
 # ---------------------------------------------------------------------------
-import sys
-from pathlib import Path
-
-_tools_dir = Path(__file__).parent.parent.parent / "tools"
-if _tools_dir.exists() and str(_tools_dir) not in sys.path:
-    sys.path.insert(0, str(_tools_dir))
-
-try:
-    from fluxmind import FluxMindTool
-    FLUXMIND_AVAILABLE = True
-except ImportError:
-    FluxMindTool = None
-    FLUXMIND_AVAILABLE = False
+FluxMindTool = None
+FLUXMIND_AVAILABLE = False
 
 # ---------------------------------------------------------------------------
 #  __all__ — only export symbols that actually imported successfully
@@ -770,8 +691,6 @@ _ALL_SYMBOLS = [
     "NotificationTool",
     "ToolBuilderTool",
     "MarketplaceTool",
-    "FluxMindTool",
-    "FLUXMIND_AVAILABLE",
     "RegexBuilderTool",
     "GitTool",
     "PersonaPlexTool",
@@ -807,13 +726,6 @@ _ALL_SYMBOLS = [
     "HybridMemory",
     "create_hybrid_memory",
     "MemoryResult",
-    # Metacognitive Guardian
-    "MetacognitiveGuardian",
-    "GuardianConfig",
-    "FailureType",
-    "InterventionType",
-    "FailurePrediction",
-    "get_guardian",
     # NeuroDream
     "NeuroDreamEngine",
     "SleepPhase",
@@ -823,24 +735,6 @@ _ALL_SYMBOLS = [
     "ConsolidatedPattern",
     "get_neurodream",
     "create_neurodream",
-    # MirrorMind
-    "MirrorMind",
-    "CritiqueResult",
-    # CognitiveTheater
-    "CognitiveTheater",
-    "Deliberation",
-    "is_decision_question",
-    # Reflexion - Learn From Mistakes
-    "ReflexionEngine",
-    "Reflection",
-    "ReflexionResult",
-    "code_syntax_evaluator",
-    "function_evaluator",
-    "json_evaluator",
-    "answer_completeness_evaluator",
-    # SynapseForge - Dynamic Tool Creation
-    "SynapseForge",
-    "SynthesizedTool",
     # Tool Contract
     "ToolResult",
     "ToolSpec",
@@ -848,11 +742,6 @@ _ALL_SYMBOLS = [
     "ToolSafety",
     "LatencyTier",
     "get_tool_registry",
-    # WorldSim - Consequence Simulation
-    "WorldSim",
-    "RiskLevel",
-    "SimulationResult",
-    "quick_check",
     # A-MEM - Zettelkasten Agentic Memory
     "AMEMSystem",
     "MemoryNote",
@@ -873,18 +762,6 @@ _ALL_SYMBOLS = [
     "mcts_reason",
     "ReasoningTreeTool",
     "deep_reason",
-    # Introspection Circuit
-    "IntrospectionCircuit",
-    "IntrospectionConfig",
-    "IntrospectionResult",
-    "IntrospectionAction",
-    "ConfidenceLevel",
-    "ConfidenceSignal",
-    "QueryType",
-    "create_introspection_circuit",
-    "quick_confidence_check",
-    "IntrospectionTool",
-    "get_introspection_tool",
     # Calendar
     "CalendarTool",
     # Code Search & Edit
@@ -933,7 +810,7 @@ _ALL_SYMBOLS = [
 
 # Filter out symbols that failed to import (are None) — but keep
 # SESAME_AVAILABLE and FLUXMIND_AVAILABLE which are intentionally bool.
-_ALWAYS_EXPORT = {"SESAME_AVAILABLE", "FLUXMIND_AVAILABLE"}
+_ALWAYS_EXPORT = {"SESAME_AVAILABLE"}
 _ns = vars()
 __all__ = [
     s for s in _ALL_SYMBOLS

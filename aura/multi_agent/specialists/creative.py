@@ -47,15 +47,9 @@ Guidelines:
 - Build on previous ideas
 - Balance creativity with practicality when needed
 
-When exploring scenarios, use: [TOOL: worldsim] scenario description
-For self-critique, use: [TOOL: mirrormind] content to evaluate
-For multi-perspective debate, use: [TOOL: cognitive_theater] topic"""
+Explore scenarios and ideas creatively."""
 
-    tools = [
-        "worldsim",
-        "mirrormind",
-        "cognitive_theater",
-    ]
+    tools = []
 
     triggers = [
         "create", "imagine", "brainstorm", "story",
@@ -84,23 +78,8 @@ For multi-perspective debate, use: [TOOL: cognitive_theater] topic"""
             is_story = any(kw in query for kw in ["story", "write", "tale", "narrative"])
             is_debate = any(kw in query for kw in ["perspective", "debate", "argue", "both sides"])
 
-            # Use WorldSim for "what-if" scenarios
             worldsim_result = None
-            if is_whatif and "worldsim" in self._available_tools:
-                logger.info("[Creative] Running WorldSim scenario...")
-                worldsim_result = self._execute_tool("worldsim", message.content)
-                tools_used.append("worldsim")
-                if worldsim_result.get("success"):
-                    creative_artifacts["worldsim"] = worldsim_result
-
-            # Use CognitiveTheater for multi-perspective debate
             theater_result = None
-            if is_debate and "cognitive_theater" in self._available_tools:
-                logger.info("[Creative] Running CognitiveTheater debate...")
-                theater_result = self._execute_tool("cognitive_theater", message.content)
-                tools_used.append("cognitive_theater")
-                if theater_result.get("success"):
-                    creative_artifacts["debate"] = theater_result
 
             # Generate creative content
             creative_prompt = system_prompt
@@ -140,15 +119,6 @@ Multi-Perspective Debate:
 Synthesize these perspectives into a balanced conclusion."""
 
             response = llm_func(creative_prompt, message.content)
-
-            # Optional: Use MirrorMind for self-critique
-            if "mirrormind" in self._available_tools and len(response) > 200:
-                logger.info("[Creative] Running MirrorMind self-critique...")
-                critique = self._execute_tool("mirrormind", response[:1000])
-                tools_used.append("mirrormind")
-                if critique.get("success") and critique.get("suggestions"):
-                    creative_artifacts["critique"] = critique
-                    response += f"\n\n*Self-Critique: {critique.get('suggestions', '')}*"
 
             return AgentResult(
                 success=True,

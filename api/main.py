@@ -25,7 +25,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from api.routes import chat, status, upload, features, multi_agent, reasoning_tree, introspection, proactive, memory, context, conversation_starters, thinking, idle_behaviors, self_improvement, thinking_mode, state_machine, tools_new, activity, multi_model, knowledge, search, pdf, transcribe, ocr, image_gen, agent_action, models as models_route, summarize, youtube, math as math_route, research, evolution
+from api.routes import chat, status, upload, features, multi_agent, reasoning_tree, proactive, memory, context, conversation_starters, thinking, idle_behaviors, self_improvement, thinking_mode, tools_new, activity, multi_model, knowledge, search, pdf, transcribe, ocr, image_gen, agent_action, models as models_route, summarize, youtube, math as math_route, research, evolution
 try:
     from api.routes import reliability as reliability_route
     _reliability_available = True
@@ -40,13 +40,7 @@ except Exception as _ae:
     logger.warning(f"[API] Auth routes unavailable: {_ae}")
     auth_route = None
     _auth_available = False
-try:
-    from api.routes import consciousness
-    _consciousness_available = True
-except Exception as _e:
-    logger.warning(f"[API] Consciousness module unavailable (degraded mode): {_e}")
-    consciousness = None
-    _consciousness_available = False
+_consciousness_available = False
 # Lazy-loaded agent_service (import removed - now lazy in routes)
 # from api.services.agent_service import agent_service
 
@@ -192,13 +186,7 @@ async def lifespan(app: FastAPI):
             logger.warning(f"[API] VoicePresenceService failed to start: {e}")
             app.state.voice_presence = None
 
-        # Start Global Workspace Engine (consciousness)
-        try:
-            from aura.consciousness.global_workspace import get_global_workspace
-            get_global_workspace().start()
-            logger.info("[API] Global Workspace Engine started")
-        except Exception as e:
-            logger.warning(f"[API] Global Workspace Engine failed to start: {e}")
+        # Global Workspace Engine removed
 
         # Start Idle Presence Engine (sleep scheduling)
         try:
@@ -246,13 +234,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"[API] Voice shutdown error: {e}")
 
-    # Stop Global Workspace Engine
-    try:
-        from aura.consciousness.global_workspace import get_global_workspace
-        get_global_workspace().stop()
-        logger.info("[API] Global Workspace Engine stopped")
-    except Exception:
-        pass
+    # Global Workspace Engine removed
 
     # Stop Self-Improvement Engine
     try:
@@ -375,18 +357,15 @@ app.include_router(upload.router)
 app.include_router(features.router)
 app.include_router(multi_agent.router)
 app.include_router(reasoning_tree.router)
-app.include_router(introspection.router)
 app.include_router(proactive.router)
 app.include_router(memory.router)
 app.include_router(context.router)
 app.include_router(conversation_starters.router)
 app.include_router(thinking.router)
 app.include_router(idle_behaviors.router)
-if _consciousness_available and consciousness is not None:
-    app.include_router(consciousness.router)
+# consciousness route removed
 app.include_router(self_improvement.router)
 app.include_router(thinking_mode.router)
-app.include_router(state_machine.router)
 app.include_router(tools_new.router)
 app.include_router(activity.router)
 app.include_router(multi_model.router)

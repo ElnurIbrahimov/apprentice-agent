@@ -10,50 +10,82 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 # Routing table: task_category -> {tier: model_name}
+# Updated 2026-03-13 — based on verified benchmarks (SWE-bench, AIME, MMLU-Pro)
+#
+# Models available (cloud): kimi-k2.5, glm-5, minimax-m2.5, deepseek-v3.2,
+#   qwen3.5, qwen3-coder:480b, qwen3-coder-next, nemotron-3-super, gpt-oss
+# Models available (local): qwen3:8b, qwen2.5-coder:7b, deepseek-r1:8b,
+#   deepcoder:1.5b, gemma3:4b, hermes3:8b
+#
 ROUTING_TABLE = {
     "orchestrator": {
-        "max": "qwen3.5:397b-cloud",
-        "balanced": "qwen3.5:397b-cloud",
+        "max": "kimi-k2.5:cloud",              # MMLU-Pro 86.4%, SWE 76.8%, AIME 96.1%
+        "balanced": "glm-5:cloud",              # SWE 77.8%, hallucination 34% (lowest)
         "local": "qwen3:8b",
     },
     "code_gen": {
-        "max": "minimax-m2.5:cloud",
-        "balanced": "kimi-k2.5:cloud",
+        "max": "minimax-m2.5:cloud",           # SWE 80.2%, Multi-SWE 51.3%, BFCL 76.8%
+        "balanced": "glm-5:cloud",              # SWE 77.8%, HumanEval 90%
         "local": "qwen2.5-coder:7b",
     },
     "small_edit": {
-        "max": "qwen3-coder:480b-cloud",
+        "max": "qwen3-coder-next:cloud",       # SWE 70.6%, 3B active — fast for edits
         "balanced": "qwen2.5-coder:7b",
         "local": "qwen2.5-coder:7b",
     },
     "reasoning": {
-        "max": "cogito-2.1:671b-cloud",
-        "balanced": "kimi-k2-thinking:cloud",
+        "max": "deepseek-v3.2:cloud",          # AIME 94.2%, IMO gold, MMLU-Pro 85%
+        "balanced": "kimi-k2.5:cloud",          # AIME 96.1%, MMLU-Pro 86.4%
         "local": "deepseek-r1:8b",
     },
     "tool_dispatch": {
-        "max": "qwen3:8b",
+        "max": "qwen3:8b",                     # local, instant, sufficient for routing
         "balanced": "qwen3:8b",
         "local": "qwen3:8b",
     },
     "long_context": {
-        "max": "gemini-3-flash-preview:cloud",
-        "balanced": "nemotron-3-nano:30b-cloud",
+        "max": "qwen3.5:cloud",                # 1M context, 397B MoE, SWE 76.4%
+        "balanced": "nemotron-3-super:cloud",   # 1M context, 2.2x throughput
         "local": "hermes3:8b",
     },
     "vision": {
-        "max": "qwen3.5:397b-cloud",
-        "balanced": "qwen3-vl:235b-cloud",
+        "max": "kimi-k2.5:cloud",              # MMMU-Pro 78.5%, OCR 92.3%, MathVision 84.2%
+        "balanced": "qwen3.5:cloud",            # 397B MoE, multimodal capable
         "local": "gemma3:4b",
     },
     "throughput": {
-        "max": "nemotron-3-super:cloud",
-        "balanced": "qwen3-coder:480b-cloud",
-        "local": "phi4-mini",
+        "max": "nemotron-3-super:cloud",       # 2.2x faster than GPT-OSS, PinchBench 85.6%
+        "balanced": "gpt-oss:120b-cloud",       # 5.1B active, fast, MMLU 90%
+        "local": "deepcoder:1.5b",
     },
 }
 
 VALID_TIERS = ("local", "balanced", "max")
+
+# Keyword patterns for task classification
+TASK_KEYWORDS = {
+    "code_gen": {"implement", "create", "build", "add feature", "new file", "write a", "scaffold"},
+    "small_edit": {"fix", "change", "rename", "update", "modify", "replace", "typo", "tweak"},
+    "reasoning": {"explain", "why", "how does", "analyze", "review", "what is", "understand", "compare"},
+    "long_context": {"summarize this file", "entire codebase", "all files", "full project"},
+    "vision": {"screenshot", "image", "diagram", "visual"},
+    "tool_dispatch": {"search for", "find", "list", "show me", "grep", "look for"},
+}
+
+
+def classify_task(prompt: str) -> str:
+    """Classify a prompt into a task category using keyword matching."""
+    prompt_lower = prompt.lower()
+    scores = {}
+    for category, keywords in TASK_KEYWORDS.items():
+        score = sum(1 for kw in keywords if kw in prompt_lower)
+        if score > 0:
+            scores[category] = score
+
+    if not scores:
+        return "orchestrator"
+
+    return max(scores, key=scores.get)
 
 
 class ModelRouter:
@@ -77,12 +109,16 @@ class ModelRouter:
         logger.debug(f"[Router] {task_category}/{self.tier} -> {model}")
         return model
 
-    def select_agentic(self) -> str:
-        """Select the best model for the agentic loop (orchestrator role).
+    def select_agentic(self, prompt: str = None) -> str:
+        """Select the best model for the agentic loop.
 
-        For the main agentic loop, we want the best tool-calling model
-        available at the current tier.
+        If a prompt is provided, classifies the task and routes to the
+        best model for that category. Otherwise defaults to orchestrator.
         """
+        if prompt:
+            category = classify_task(prompt)
+            logger.debug(f"[Router] Task classified as '{category}' for: {prompt[:60]}")
+            return self.select(category)
         return self.select("orchestrator")
 
     def check_budget(self, brain) -> bool:

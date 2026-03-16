@@ -394,9 +394,8 @@ class GatewayDaemon:
         try:
             from .persistence import get_persistence
             get_persistence().log_event(event, filtered.salience_score)
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[GatewayDaemon] non-critical: {e}")
         # Convert event to observations for belief update
         observations = self._event_to_observations(event, filtered)
         self.inference_engine.update_beliefs(observations)
@@ -598,9 +597,8 @@ class GatewayDaemon:
                         persistence.save_beliefs(
                             self.inference_engine.get_beliefs()
                         )
-                except Exception:
-                    pass
-
+                except Exception as e:
+                    logger.debug(f"[GatewayDaemon] non-critical: {e}")
                 # Log non-WAIT decisions to activity timeline
                 if decision.action != ProactiveAction.WAIT:
                     try:
@@ -611,9 +609,8 @@ class GatewayDaemon:
                             {"confidence": round(decision.confidence, 3),
                              "efe": round(decision.expected_free_energy, 3)},
                         )
-                    except Exception:
-                        pass
-
+                    except Exception as e:
+                        logger.debug(f"[GatewayDaemon] non-critical: {e}")
                 # Notify decision callback if set
                 if self._decision_callback:
                     try:
@@ -743,9 +740,8 @@ class GatewayDaemon:
             state["social_urgency"] = drives.get("social", 0.0)
             state["competence_urgency"] = drives.get("competence", 0.0)
             state["coherence_urgency"] = drives.get("coherence", 0.0)
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[GatewayDaemon] non-critical: {e}")
         # --- Context metrics ---
         idle_minutes = 0.0
         if self.user_context.last_interaction:
@@ -817,8 +813,8 @@ class GatewayDaemon:
                 ctx = get_tracker()
                 focus = ctx.get_focus_state(limit=3)
                 topics = [item["name"] for item in focus.get("items", [])[:3]]
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[GatewayDaemon] non-critical: {e}")
             content = get_curiosity_message(topics=topics or None, recent=recent)
 
         elif ea.action_type == "suggest_break":
@@ -1203,8 +1199,8 @@ class GatewayDaemon:
                     title = event_info.get("title", "an event")
                     minutes = event_info.get("minutes_until", 15)
                     return f"Reminder: '{title}' starts in about {minutes} minutes."
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[GatewayDaemon] non-critical: {e}")
         return None
 
     def _prepare_context(self) -> None:
@@ -1216,9 +1212,8 @@ class GatewayDaemon:
             if query:
                 um = get_unified_memory()
                 um.query(query, k=3)  # Pre-warm cache
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[GatewayDaemon] non-critical: {e}")
     def _event_to_message(self, event: Event) -> str:
         """
         Convert event to user-facing message.
@@ -1337,8 +1332,8 @@ class GatewayDaemon:
                 try:
                     from aura.emotion.alma_engine import alma_engine
                     emotion = alma_engine.get_current_emotion()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[GatewayDaemon] non-critical: {e}")
                 vps.speak(message.content, emotion=emotion, block=False)
         except Exception as e:
             logger.debug(f"[GatewayDaemon] Voice delivery error: {e}")

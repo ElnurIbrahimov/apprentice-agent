@@ -52,9 +52,8 @@ class DeepResearchTool:
         if self._progress_callback:
             try:
                 self._progress_callback(message)
-            except:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[DeepResearch] non-critical: {e}")
     def _generate_queries(self, topic: str) -> List[str]:
         """Generate multiple search angles."""
         return [

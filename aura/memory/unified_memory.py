@@ -242,9 +242,8 @@ class UnifiedMemory:
                     query,
                     [r.content[:60] for r in filtered[:5]]
                 )
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[UnifiedMemory] non-critical: {e}")
         return filtered[:k]
 
     def _query_amem(
@@ -469,9 +468,8 @@ class UnifiedMemory:
                 confidence=decision.score,
                 extra=decision.as_log_dict(),
             )
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[UnifiedMemory] non-critical: {e}")
         if decision.kind == MemoryDecisionKind.DISCARD:
             return {"decision": decision.kind.value, "score": round(decision.score, 3)}
 
@@ -597,13 +595,12 @@ class UnifiedMemory:
         try:
             if self._episodic and hasattr(self._episodic, "close"):
                 self._episodic.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[UnifiedMemory] non-critical: {e}")
         try:
             self._executor.shutdown(wait=False, cancel_futures=True)
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[UnifiedMemory] non-critical: {e}")
     def get_available_sources(self) -> List[str]:
         """Get list of available memory backends."""
         self._init_backends()
@@ -628,23 +625,20 @@ class UnifiedMemory:
         if self._amem:
             try:
                 stats["amem_notes"] = len(self._amem._notes)
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[UnifiedMemory] non-critical: {e}")
         if self._kg:
             try:
                 kg_stats = self._kg.get_stats()
                 stats["kg_nodes"] = kg_stats.get("total_nodes", 0)
                 stats["kg_edges"] = kg_stats.get("total_edges", 0)
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[UnifiedMemory] non-critical: {e}")
         if self._rag:
             try:
                 stats["rag_chunks"] = len(getattr(self._rag, '_chunks', []))
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[UnifiedMemory] non-critical: {e}")
         return stats
 
 

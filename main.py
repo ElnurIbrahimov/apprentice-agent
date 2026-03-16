@@ -121,6 +121,12 @@ def main():
         action="store_true",
         help="Trust mode: auto-approve all tool calls (no prompts)"
     )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Use a specific model (e.g., --model deepseek-r1:8b)"
+    )
 
     args = parser.parse_args()
 
@@ -250,7 +256,7 @@ def main():
         run_agentic_oneshot(agent, prompt, args)
     else:
         # Default: interactive chat mode (just type 'aura' to start)
-        run_chat_mode(agent, speak=args.speak, trust=args.trust)
+        run_chat_mode(agent, speak=args.speak, trust=args.trust, model=args.model)
 
 
 def run_voice_mode(agent, enable_barge_in: bool = True):
@@ -280,7 +286,9 @@ def run_agentic_oneshot(agent, prompt: str, args):
     tier = aura_config.get("tier", args.tier)
     budget = args.budget or aura_config.get("budget")
     router = ModelRouter(tier=tier, budget_usd=budget)
-    model = aura_config.get("model") or router.select_agentic()
+    # If user explicitly set a model, lock to it. Otherwise let router pick per-step.
+    model = args.model or aura_config.get("model") or None
+    display_model = model or f"auto-route ({tier})"
 
     # Setup permissions
     permissions = PermissionManager()
@@ -305,7 +313,7 @@ def run_agentic_oneshot(agent, prompt: str, args):
     if args.trust:
         permissions.set_trust_mode(True)
 
-    console.print(f"  [dim]Model: {model} | Tier: {tier}[/dim]")
+    console.print(f"  [dim]Model: {display_model} | Tier: {tier}[/dim]")
     console.print()
 
     result = run_agentic(
@@ -318,6 +326,8 @@ def run_agentic_oneshot(agent, prompt: str, args):
         budget_usd=budget,
         context=context,
         trust_mode=args.trust,
+        aura_config=aura_config,
+        router=router,
     )
 
     # Show final stats
@@ -327,7 +337,7 @@ def run_agentic_oneshot(agent, prompt: str, args):
     sys.exit(0 if result.get("success") else 1)
 
 
-def run_chat_mode(agent, speak: bool = False, trust: bool = False):
+def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = None):
     """Interactive CLI — agentic loop with status bar, model picker, tool calling."""
     from aura.cli.display import (
         console, show_banner, show_response,
@@ -395,16 +405,22 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False):
     atexit.register(session.save)
 
     # Create persistent agentic loop (maintains conversation history)
-    model_override = agent.brain._model_override
+    # If user explicitly set a model, lock to it. Otherwise let router pick per-step.
+    from aura.core.router import ModelRouter
+    explicit_model = model or agent.brain._model_override or aura_config.get("model") or None
+    chat_tier = aura_config.get("tier", "balanced")
+    chat_router = ModelRouter(tier=chat_tier, budget_usd=aura_config.get("budget"))
     agentic = AgenticLoop(
         brain=agent.brain,
         project_root=project_root,
         permissions=permissions,
-        model_override=model_override or aura_config.get("model"),
+        model_override=explicit_model,
         max_iterations=aura_config.get("max_iterations", 25),
         budget_usd=aura_config.get("budget"),
         context=project_context,
         session=session,
+        aura_config=aura_config,
+        router=chat_router,
     )
     # Store on agent so /clear and /trust can access it
     agent._agentic_loop = agentic
@@ -725,6 +741,69 @@ def handle_command(agent, command: str, speak: bool = False):
         print(f"    Estimated cost: ${stats['cost_usd']:.4f}")
         print(f"    Queries: {stats['queries']}")
         print()
+    elif cmd == "/undo":
+        if hasattr(agent, '_agentic_loop'):
+            tool_exec = agent._agentic_loop.executor
+            if arg:
+                result = tool_exec.code_edit.rollback(arg)
+                if result.get("success"):
+                    print(f"  Rolled back: {result.get('restored', arg)}")
+                else:
+                    print(f"  Error: {result.get('error', 'Unknown error')}")
+            else:
+                backups = tool_exec.code_edit._last_backups
+                if backups:
+                    last_path = list(backups.keys())[-1]
+                    result = tool_exec.code_edit.rollback(last_path)
+                    if result.get("success"):
+                        print(f"  Rolled back: {last_path}")
+                    else:
+                        print(f"  Error: {result.get('error', 'Unknown error')}")
+                else:
+                    print("  No edits to undo (no .bak files)")
+        else:
+            print("  No active agentic loop.")
+    elif cmd == "/diff":
+        import subprocess as _sp
+        try:
+            diff_args = ["git", "diff"]
+            if arg:
+                diff_args.extend(arg.split())
+            result = _sp.run(diff_args, capture_output=True, text=True, cwd=os.getcwd(), timeout=10)
+            if result.stdout:
+                print(result.stdout[:5000])
+            else:
+                print("  No changes.")
+        except Exception as e:
+            print(f"  Error: {e}")
+    elif cmd == "/git":
+        if not arg:
+            print("Usage: /git <command> (e.g., /git status, /git log, /git diff)")
+        else:
+            import subprocess as _sp
+            try:
+                result = _sp.run(
+                    ["git"] + arg.split(),
+                    capture_output=True, text=True, cwd=os.getcwd(), timeout=15,
+                )
+                output = result.stdout or result.stderr
+                print(output[:5000] if output else "  (no output)")
+            except Exception as e:
+                print(f"  Error: {e}")
+    elif cmd == "/mcp":
+        if hasattr(agent, '_agentic_loop') and hasattr(agent._agentic_loop, '_mcp_client'):
+            mgr = agent._agentic_loop._mcp_client
+            if not mgr.connections:
+                print("  No MCP servers connected. Configure in AURA.md under mcp_servers:")
+            else:
+                for name, conn in mgr.connections.items():
+                    print(f"  {name}: {len(conn.tools)} tools")
+                    for t in conn.tools[:5]:
+                        print(f"    - {t['name']}: {t.get('description', '')[:60]}")
+                    if len(conn.tools) > 5:
+                        print(f"    ... and {len(conn.tools) - 5} more")
+        else:
+            print("  No MCP servers connected. Configure in AURA.md under mcp_servers:")
     else:
         print(f"Unknown command: {cmd}")
 

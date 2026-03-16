@@ -329,59 +329,6 @@ def _get_kg_sync(center: Optional[str], depth: int) -> dict:
 
 
 # ============================================================================
-# METACOGNITIVE GUARDIAN
-# ============================================================================
-
-class GuardianResponse(BaseModel):
-    enabled: bool = False
-    monitoring_level: str = "medium"
-    interventions: int = 0
-    patterns_learned: int = 0
-    session_predictions: int = 0
-    recent_predictions: List[Dict[str, Any]] = []
-
-
-@router.get("/guardian", response_model=GuardianResponse)
-async def get_guardian_status():
-    """Get Metacognitive Guardian status."""
-    try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, _get_guardian_sync)
-        return result
-    except Exception as e:
-        logger.error(f"[Guardian] Error: {e}")
-        return GuardianResponse()
-
-
-def _get_guardian_sync() -> dict:
-    agent = _get_agent_service().agent
-    if hasattr(agent, 'guardian') and agent.guardian:
-        guardian = agent.guardian
-        # Use get_stats() - the correct method name
-        stats = guardian.get_stats() if hasattr(guardian, 'get_stats') else {}
-        # Get recent predictions from the guardian's session_predictions list
-        recent = []
-        if hasattr(guardian, 'session_predictions'):
-            recent = [
-                {
-                    "risk_score": p.risk_score if hasattr(p, 'risk_score') else p.get('risk_score', 0),
-                    "action": p.action if hasattr(p, 'action') else p.get('action', 'unknown'),
-                    "recommendation": p.recommendation if hasattr(p, 'recommendation') else p.get('recommendation', '')
-                }
-                for p in guardian.session_predictions[-5:]
-            ]
-        return {
-            "enabled": True,
-            "monitoring_level": stats.get("monitoring_level", "medium"),
-            "interventions": stats.get("interventions_triggered", 0),
-            "patterns_learned": stats.get("failure_patterns_learned", 0),
-            "session_predictions": stats.get("session_predictions", 0),
-            "recent_predictions": recent
-        }
-    return {"enabled": False}
-
-
-# ============================================================================
 # NEURODREAM
 # ============================================================================
 
@@ -544,47 +491,8 @@ async def generate_learned_context():
 
 
 # ============================================================================
-# FLUXMIND
+# FLUXMIND (REMOVED)
 # ============================================================================
-
-class FluxMindResponse(BaseModel):
-    enabled: bool = False
-    version: str = "unknown"
-    accuracy: float = 0.0
-    calibration: str = "unknown"
-
-
-@router.get("/fluxmind", response_model=FluxMindResponse)
-async def get_fluxmind_status():
-    """Get FluxMind calibrated reasoning status."""
-    try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, _get_fluxmind_sync)
-        return result
-    except Exception as e:
-        logger.error(f"[FluxMind] Error: {e}")
-        return FluxMindResponse()
-
-
-def _get_fluxmind_sync() -> dict:
-    agent = _get_agent_service().agent
-    if "fluxmind" in agent.tools:
-        fm = agent.tools["fluxmind"]
-        status = fm.status() if hasattr(fm, 'status') else {}
-        # FluxMind uses OOD-calibrated uncertainty - derive calibration from thresholds
-        thresholds = status.get("thresholds", {})
-        calibration = "ood_calibrated" if status.get("available", False) else "unknown"
-        # Calculate accuracy from model capabilities if available
-        # FluxMind's accuracy is based on calibration quality, not prediction accuracy
-        accuracy = 0.95 if status.get("available", False) else 0.0
-        return {
-            "enabled": status.get("available", False),
-            "version": status.get("version", "unknown"),
-            "accuracy": accuracy,
-            "calibration": calibration,
-            "thresholds": thresholds
-        }
-    return {"enabled": False}
 
 
 # ============================================================================
@@ -666,9 +574,7 @@ _TOOL_CATEGORIES: dict = {
     "regex_builder": "Development", "tool_builder": "Development",
     # AI / Research
     "research": "AI", "arxiv_search": "AI", "mcts_reasoning": "AI",
-    "reasoning_tree": "AI", "introspection": "AI", "worldsim": "AI",
-    "synapseforge": "AI", "reflexion": "AI", "mirrormind": "AI",
-    "cognitive_theater": "AI",
+    "reasoning_tree": "AI",
     # Monitoring
     "ambient_audio": "Monitoring", "meeting_intel": "Monitoring",
     "screen_reader": "Monitoring", "screenshot": "Monitoring", "browser": "Monitoring",
@@ -1254,146 +1160,8 @@ def _consolidate_amem_sync() -> dict:
 
 
 # ============================================================================
-# PROTO-AGI (Truth Spine - Cognitive Core)
+# PROTO-AGI (REMOVED)
 # ============================================================================
-
-class ProtoAGIResponse(BaseModel):
-    enabled: bool = False
-    available: bool = False
-    loading: bool = False
-    mode: str = "idle"
-    cycle_count: int = 0
-    facts: int = 0
-    beliefs: int = 0
-    speculations: int = 0
-    verifier_pass_rate: float = 0.0
-    pending_confirmations: int = 0
-    last_action: Optional[str] = None
-
-
-@router.get("/proto-agi", response_model=ProtoAGIResponse)
-async def get_proto_agi_status():
-    """Get Proto-AGI Truth Spine status."""
-    try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, _get_proto_agi_sync)
-        return result
-    except Exception as e:
-        logger.error(f"[Proto-AGI] Error: {e}")
-        return ProtoAGIResponse()
-
-
-def _get_proto_agi_sync() -> dict:
-    svc = _get_agent_service()
-    if not svc.is_ready:
-        return {"enabled": False, "available": False, "loading": True}
-    agent = svc.agent
-    if hasattr(agent, 'proto_agi') and agent.proto_agi:
-        agi = agent.proto_agi
-        try:
-            is_running = agi.is_running if hasattr(agi, 'is_running') else getattr(agi, '_is_running', False)
-            status = agi.get_status() if hasattr(agi, 'get_status') else {}
-            memory = status.get('memory', {})
-            verifier = status.get('verifier', {})
-
-            return {
-                "enabled": is_running,
-                "available": True,
-                "loading": False,
-                "mode": status.get('mode', 'idle'),
-                "cycle_count": status.get('cycle_count', 0),
-                "facts": memory.get('facts', 0),
-                "beliefs": memory.get('beliefs', 0),
-                "speculations": memory.get('speculations', 0),
-                "verifier_pass_rate": verifier.get('success_rate', 0.0),
-                "pending_confirmations": status.get('pending_confirmations', 0),
-                "last_action": status.get('last_action')
-            }
-        except Exception as e:
-            logger.error(f"[Proto-AGI] Status error: {e}")
-            return {"enabled": False, "available": True, "loading": False, "mode": "error"}
-    return {"enabled": False, "available": False, "loading": False}
-
-
-@router.post("/proto-agi/mode", dependencies=[Depends(require_api_key)])
-async def set_proto_agi_mode(mode: str):
-    """Set Proto-AGI operation mode (idle, assist, operate)."""
-    try:
-        agent = _get_agent_service().agent
-        if hasattr(agent, 'proto_agi') and agent.proto_agi:
-            agent.proto_agi.set_mode(mode)
-            return {"success": True, "mode": mode}
-        return {"success": False, "error": "Proto-AGI not available"}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-
-@router.post("/proto-agi/start", dependencies=[Depends(require_api_key)])
-async def start_proto_agi_loop(cycle_interval: float = 60.0):
-    """Start the Proto-AGI autonomous cognitive loop."""
-    try:
-        agent = _get_agent_service().agent
-        # Check agent wrapper method first, then fall back to proto_agi.start() directly
-        if hasattr(agent, 'start_proto_agi'):
-            agent.start_proto_agi(cycle_interval)
-        elif hasattr(agent, 'proto_agi') and agent.proto_agi:
-            agent.proto_agi.start(cycle_interval)
-        else:
-            return {"success": False, "error": "Proto-AGI not available"}
-        return {"success": True, "message": f"Proto-AGI loop started (interval: {cycle_interval}s)"}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-
-@router.post("/proto-agi/stop", dependencies=[Depends(require_api_key)])
-async def stop_proto_agi_loop():
-    """Stop the Proto-AGI autonomous cognitive loop."""
-    try:
-        agent = _get_agent_service().agent
-        if hasattr(agent, 'stop_proto_agi'):
-            agent.stop_proto_agi()
-        elif hasattr(agent, 'proto_agi') and agent.proto_agi:
-            agent.proto_agi.stop()
-        else:
-            return {"success": False, "error": "Proto-AGI not available"}
-        return {"success": True, "message": "Proto-AGI loop stopped"}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-
-@router.get("/proto-agi/traces")
-async def get_proto_agi_traces(limit: int = 10):
-    """Get recent verification traces."""
-    try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(
-            None, lambda: _get_traces_sync(limit)
-        )
-        return result
-    except Exception as e:
-        return {"traces": [], "error": str(e)}
-
-
-def _get_traces_sync(limit: int) -> dict:
-    agent = _get_agent_service().agent
-    if hasattr(agent, 'proto_agi') and agent.proto_agi:
-        agi = agent.proto_agi
-        if hasattr(agi, 'get_recent_traces'):
-            traces = agi.get_recent_traces(limit)
-            return {
-                "traces": [
-                    {
-                        "id": t.id if hasattr(t, 'id') else str(i),
-                        "action": t.action if hasattr(t, 'action') else "unknown",
-                        "tier": t.tier.value if hasattr(t, 'tier') else "unknown",
-                        "verified": t.verified if hasattr(t, 'verified') else False,
-                        "timestamp": t.timestamp if hasattr(t, 'timestamp') else ""
-                    }
-                    for i, t in enumerate(traces)
-                ],
-                "count": len(traces)
-            }
-    return {"traces": [], "count": 0}
 
 
 # ============================================================================

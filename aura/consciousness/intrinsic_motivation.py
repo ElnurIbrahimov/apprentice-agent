@@ -193,9 +193,8 @@ class IntrinsicMotivationEngine:
                 if avg_conf < 0.5:
                     intensity += (0.5 - avg_conf) * 0.2
                     triggers.append(f"low average confidence: {avg_conf:.2f}")
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[IntrinsicMotivation] non-critical: {e}")
         # Check if recent topics have unexplored connections
         try:
             from api.routes.context import get_tracker
@@ -207,9 +206,8 @@ class IntrinsicMotivationEngine:
                 intensity += 0.1
                 topics = [i["name"] for i in items[:3]]
                 triggers.append(f"multiple active topics: {', '.join(topics)}")
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[IntrinsicMotivation] non-critical: {e}")
         # Time decay: curiosity grows when not explored
         hours_since = (time.time() - drive.last_satisfied) / 3600.0
         time_growth = min(0.2, hours_since / 48.0 * 0.2)  # Grows over 48h
@@ -249,21 +247,9 @@ class IntrinsicMotivationEngine:
                 if rate < 0.5:
                     intensity += 0.15
                     triggers.append(f"improvement rate: {rate:.0%}")
-        except Exception:
-            pass
-
-        # Check reflexion memory for repeated failures
-        try:
-            from aura.tools.reflexion import get_reflexion_engine
-            ref = get_reflexion_engine()
-            stats = ref.get_stats()
-            failures = stats.get("total_failures", 0)
-            if failures > 3:
-                intensity += min(0.2, failures / 20.0)
-                triggers.append(f"{failures} recorded failures")
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[IntrinsicMotivation] non-critical: {e}")
+        # Reflexion removed
         drive.intensity = min(1.0, max(0.0, intensity))
         drive.satisfaction = 1.0 - drive.intensity
         drive.triggers = triggers
@@ -290,9 +276,8 @@ class IntrinsicMotivationEngine:
                 # Active conversation reduces social drive
                 intensity = max(0.0, intensity - 0.1)
                 drive.last_satisfied = time.time()
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[IntrinsicMotivation] non-critical: {e}")
         # Check Theory of Mind for engagement level
         try:
             from aura.proactive.theory_of_mind import get_theory_of_mind
@@ -304,9 +289,8 @@ class IntrinsicMotivationEngine:
             if emo.frustration > 0.5:
                 intensity += 0.2
                 triggers.append(f"user frustration detected: {emo.frustration:.2f}")
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[IntrinsicMotivation] non-critical: {e}")
         # Time decay: social need grows when not interacting
         hours_since = (time.time() - drive.last_satisfied) / 3600.0
         time_growth = min(0.3, hours_since / 8.0 * 0.3)  # Grows over 8h
@@ -337,9 +321,8 @@ class IntrinsicMotivationEngine:
                 if cluster_ratio > 0.3:
                     intensity += cluster_ratio * 0.3
                     triggers.append(f"fragmented knowledge: {clusters} clusters/{total_nodes} nodes")
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[IntrinsicMotivation] non-critical: {e}")
         # Check for conflicting learned context
         try:
             from aura.tools.neurodream import get_neurodream
@@ -351,9 +334,8 @@ class IntrinsicMotivationEngine:
                 # Many facts increases chance of contradictions
                 intensity += min(0.15, facts_count / 100.0)
                 triggers.append(f"{facts_count} key facts to maintain consistency")
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[IntrinsicMotivation] non-critical: {e}")
         drive.intensity = min(1.0, max(0.0, intensity))
         drive.satisfaction = 1.0 - drive.intensity
         drive.triggers = triggers
@@ -587,9 +569,8 @@ class IntrinsicMotivationEngine:
             dominant = max(self._drives.values(), key=lambda d: d.urgency)
             desc = f"motivation cycle: {dominant.drive_type.value} drive active ({dominant.urgency:.0%})"
             ipe._record_activity(IdleActivity.METACOGNITION, desc, cognitive_load=0.2)
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[IntrinsicMotivation] non-critical: {e}")
         return {
             "drives": {d.value: self._drives[d].to_dict() for d in DriveType},
             "actions": [

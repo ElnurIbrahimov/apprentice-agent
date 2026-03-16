@@ -555,9 +555,8 @@ class ALMAEngine:
                     min(0.8, intensity),
                     "emotion"
                 )
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[AlmaEngine] non-critical: {e}")
             try:
                 from aura.activity_logger import record_activity
                 record_activity(
@@ -565,9 +564,8 @@ class ALMAEngine:
                     f"Felt {emotion_name} ({intensity:.1f}) — {trigger[:60]}",
                     {"intensity": round(intensity, 3), "trigger": trigger},
                 )
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[AlmaEngine] non-critical: {e}")
             return emotion
 
     def trigger_from_appraisal(
@@ -929,8 +927,8 @@ class ALMAEngine:
             except Exception:
                 try:
                     os.unlink(tmp_path)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[AlmaEngine] non-critical: {e}")
                 raise
         except Exception as e:
             logger.error(f"[ALMA] Failed to save state: {e}")
@@ -1133,9 +1131,8 @@ class ALMAEngine:
                             drift_reason += f"; {recent_events} events detected"
                         else:
                             drift_reason = f"{recent_events} events detected, drifting toward curiosity"
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[AlmaEngine] non-critical: {e}")
             # 3b. Circadian rhythm — gentle time-of-day PAD nudges
             try:
                 import datetime as _dt
@@ -1169,9 +1166,8 @@ class ALMAEngine:
                     drift_reason += f"; circadian: {circadian_label}"
                 else:
                     drift_reason = f"circadian: {circadian_label}"
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[AlmaEngine] non-critical: {e}")
             # 4. Natural baseline pull (enhanced)
             self.mood.decay_toward_baseline()
 
@@ -1206,9 +1202,8 @@ class ALMAEngine:
                         f"emotional drift: {drift_reason}",
                         0.3, "emotion"
                     )
-                except Exception:
-                    pass
-
+                except Exception as e:
+                    logger.debug(f"[AlmaEngine] non-critical: {e}")
                 self._save_state()
 
             return drift_reason

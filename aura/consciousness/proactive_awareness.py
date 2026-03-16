@@ -572,9 +572,8 @@ class ProactiveAwarenessEngine:
                         pass
             if approaching:
                 workload_parts.append(f"{approaching} deadline(s) within 7 days")
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[ProactiveAwareness] non-critical: {e}")
         workload_context = "; ".join(workload_parts) if workload_parts else "no specific workload data"
         urgency = min(0.9, 0.5 + stress_score)
         confidence = min(0.8, 0.5 + len(stress_sources) * 0.15)
@@ -722,9 +721,8 @@ class ProactiveAwarenessEngine:
                     parts.append(
                         f"- {p['title']} (urgency: {p['urgency']:.1f})"
                     )
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[ProactiveAwareness] non-critical: {e}")
         # Add summary counts
         try:
             from aura.consciousness.world_model import ProjectStatus
@@ -740,9 +738,9 @@ class ProactiveAwarenessEngine:
             if unresolved:
                 parts.append(f"- {len(unresolved)} unresolved contradiction(s)")
 
-        except Exception:
-            pass
+        except Exception as e:
 
+            logger.debug(f"[ProactiveAwareness] non-critical: {e}")
         if not parts:
             return ""
 

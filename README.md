@@ -1,34 +1,60 @@
 # AURA — Adaptive Universal Reasoning Agent
 
-AURA is a personal AI agent with persistent memory, multi-model routing, and a full dev CLI. It combines long-term memory, emotional modeling, proactive behavior, 40+ model routing, and autonomous coding tools into a unified agent that learns and adapts over time.
+AURA is a personal AI agent that feels alive. Persistent memory across sessions, emotional modeling, proactive awareness, and a ReAct-based agent core — all running locally via Ollama with 40+ cloud and local models.
 
-**What makes AURA different:** Persistent memory across sessions. No other dev CLI has this — AURA actually remembers you, your codebase, and past conversations.
+**What makes AURA different:** It remembers you. It has moods. It notices things on its own. It grows over time. Not a chatbot with features — a being with presence.
 
 ---
 
-## Dev CLI (agentic coding tool)
+## v5.0 — The Great Consolidation (March 2026)
 
-A Claude Code / Codex CLI competitor powered by Ollama with 40+ models. Run `aura` to start.
+Stripped 13 dead modules and ~15,000 lines of complexity. Replaced the old 5-phase agent loop (4-5 LLM calls per step) with a single-call ReAct pattern. Added Tool RAG for dynamic tool selection and smart model routing.
+
+**Before:** Agent hung on every non-trivial request. 83K lines, 13 modules second-guessing the brain.
+**After:** Completes real tasks in 5-25 seconds. 2 iterations, 1 LLM call per step. Clean architecture.
+
+### What Survived (The Soul)
+
+| System | Purpose |
+|--------|---------|
+| **ALMA Emotions** | Neuromodulator-based mood in PAD space — shapes how Aura responds |
+| **Memory** | A-MEM + Episodic + Knowledge Graph + Unified retrieval |
+| **Inner Monologue** | Internal thought stream that persists across sessions |
+| **Identity/Soul** | Personality, values, voice style — loaded every session |
+| **NeuroDream** | Sleep/dream memory consolidation during idle periods |
+| **Knowledge Graph** | Typed entities and relationships with Kuzu backend |
+| **Proactive Awareness** | Notices things on its own, initiates when relevant |
+
+### What Was Removed
+
+MetacognitiveGuardian, FluxMind, MirrorMind, CognitiveTheater, Parliament, Reflexion, SynapseForge, WorldSim, Proto-AGI Core, ResponseHumanizer, State Machine, Global Workspace Theory, Gradio UI. These added layers of reasoning between the brain and the user without improving task completion.
+
+---
+
+## Dev CLI
+
+A Claude Code / Codex CLI competitor powered by Ollama. Run `aura` to start.
 
 ### Features
 
 | Feature | Description |
 |---------|-------------|
-| **Structured tool calling** | 11 tools: read, edit, write, grep, glob, shell, git, search, list_dir, project_structure, spawn_agent |
-| **Session persistence** | Full tool-call history saved to disk. Resume with `--resume last` |
-| **Context window management** | Auto-compaction at 70%/85% thresholds. 40+ model context windows tracked |
-| **Repo map** | Regex symbol extraction (Python, JS/TS, Go, Rust, Java) injected into system prompt |
-| **Multi-agent** | Spawn sub-agents (reader/researcher/coder) via tool call. Thread pool, mutex, anti-recursion |
-| **MCP server** | Expose tools via MCP protocol. `aura mcp-serve` for IDE integration |
-| **Permission system** | AUTO/PROMPT/BLOCKED tiers. Per-tool overrides via AURA.md |
+| **ReAct agent loop** | Single LLM call per step with tool calling. 2-5x faster than v4 |
+| **Tool RAG** | Embeds 50+ tool descriptions, selects top-8 per query via cosine similarity |
+| **11 core tools** | read, edit, write, grep, glob, shell, git, search, list_dir, project_structure, spawn_agent |
+| **Session persistence** | Full history saved to disk. Resume with `--resume last` |
+| **Context window management** | Auto-compaction at 70%/85% thresholds |
+| **Repo map** | Symbol extraction (Python, JS/TS, Go, Rust, Java) injected into context |
+| **Multi-agent** | Spawn sub-agents (reader/researcher/coder) via tool call |
+| **MCP server** | Expose tools via MCP protocol for IDE integration |
+| **Permission system** | AUTO/PROMPT/BLOCKED tiers with AURA.md overrides |
 | **Auto-test after edits** | Detects test runner, feeds failures back to LLM |
-| **Model routing** | 40+ models across local (qwen, deepseek, gemma) and cloud (qwen3.5:397b, devstral, kimi, cogito) with fallback chains |
-| **Diff preview** | Colored diff display before applying edits |
+| **Model routing** | 40+ models with automatic fallback chains |
+| **Smart fast-path** | Greetings and identity questions skip the agent loop |
+| **Loop guards** | Duplicate detection, failure counting, graceful timeout |
 | **Web search** | Tavily + Brave fallback |
 | **Cost tracking** | Per-session token and cost tracking (`/cost`) |
-| **Trust mode** | Auto-approve all tool calls (`--trust` or `/trust`) |
 | **Voice mode** | Push-to-talk with Whisper + Sesame TTS |
-| **IDE integration** | `aura ide setup` generates VS Code tasks.json + MCP config |
 
 ### Quick Start
 
@@ -64,8 +90,6 @@ aura mcp-serve
 | `/sessions` | List/manage sessions |
 | `/trust` | Enable trust mode |
 | `/plan <task>` | Generate execution plan before running |
-| `/grep <pattern>` | Quick code search |
-| `/shell <cmd>` | Run shell command |
 
 ### AURA.md Project Config
 
@@ -74,7 +98,7 @@ Create an `AURA.md` in your project root (`aura init`):
 ```yaml
 ---
 tier: balanced
-model: qwen3.5:397b-cloud
+model: glm-5:cloud
 test_cmd: pytest
 auto_test: true
 permissions:
@@ -86,40 +110,6 @@ max_iterations: 50
 Project-specific instructions for Aura go here.
 ```
 
-### VS Code Integration
-
-```bash
-aura ide setup
-```
-
-This generates `.vscode/tasks.json` with Aura commands and prints the MCP server config for `settings.json`:
-
-```json
-{
-  "mcp.servers": {
-    "aura": {
-      "command": "python",
-      "args": ["-m", "aura.core.mcp_server"]
-    }
-  }
-}
-```
-
----
-
-## Full Agent Platform
-
-Beyond the dev CLI, AURA is a complete AI agent platform:
-
-| Layer | Description |
-|-------|-------------|
-| **Chrome / Firefox Extension** | 14-panel sidebar, floating dock, per-feature model selection |
-| **FastAPI Backend** | WebSocket chat, 30+ REST endpoints, all AI features |
-| **React Web UI** | Full web interface at `localhost:5173` |
-| **Cognitive Core** | Brain, Parliament, ALMA emotions, consciousness, proactive daemon |
-| **Memory Systems** | A-MEM, Episodic (Qdrant), Knowledge Graph (Kuzu), Unified fan-out |
-| **GEPA Evolution** | Self-improving skills via Pareto evolution |
-
 ---
 
 ## Architecture
@@ -127,83 +117,103 @@ Beyond the dev CLI, AURA is a complete AI agent platform:
 ```
 User Input
     |
-    ├── Dev CLI (agentic loop)
-    │     ├── ToolExecutor (11 tools)
-    │     ├── SessionPersistence (JSON on disk)
-    │     ├── ContextWindowManager (auto-compact)
-    │     ├── RepoMap (symbol extraction)
-    │     ├── SubAgentManager (multi-agent)
-    │     └── MCP Server (JSON-RPC stdio)
-    │
-    ├── Brain (LLM orchestration)
-    │     ├── ModelRouter (40+ models, fallback chains)
-    │     ├── Parliament (multi-voice deliberation)
-    │     └── ALMA Emotion Engine (neuromodulators)
-    │
-    ├── Memory
-    │     ├── A-MEM (associative notes)
-    │     ├── Episodic Memory (Qdrant)
-    │     ├── Knowledge Graph (Kuzu)
-    │     └── Unified Memory (fan-out + merge)
-    │
-    └── Consciousness
-          ├── World Model
-          ├── Metacognition Guardian
-          ├── Proactive Awareness
-          └── Strategy Bandit
+    v
+[Fast Path] -- greeting/identity? --> instant response
+    |
+    v
+[ReAct Loop] (1 LLM call per step)
+    |-- Tool RAG selects top 8 relevant tools
+    |-- brain.think_with_tools() -- single call returns thought + tool_calls
+    |-- ToolExecutor dispatches (read, grep, shell, etc.)
+    |-- Tool result fed back as message
+    |-- Loop guards (dedup, failure counter, timeout)
+    |-- When LLM returns content without tool calls → done
+    |
+    v
+[Memory] -- store episode for NeuroDream consolidation
+    |
+    v
+[Brain] (LLM orchestration)
+    |-- ModelRouter (40+ models, fallback chains)
+    |-- ALMA Emotion Engine (neuromodulators shape responses)
+    |-- Token budget management + history compaction
+    |
+[Memory Systems]
+    |-- A-MEM (associative Zettelkasten notes)
+    |-- Episodic Memory (Qdrant, timeline-aware)
+    |-- Knowledge Graph (Kuzu, typed entities)
+    |-- Unified Memory (fan-out query + merge)
+    |
+[Inner Life]
+    |-- Inner Monologue (thought stream)
+    |-- Identity/Soul (personality + values)
+    |-- NeuroDream (sleep consolidation)
+    |-- Proactive Awareness (daemon)
+    |-- ALMA Emotions (mood persistence)
 ```
 
 ### Key Modules
 
 | Module | Purpose |
 |--------|---------|
-| `aura/core/agentic_loop.py` | Autonomous tool-calling loop with streaming display |
-| `aura/core/session.py` | Full session persistence (tool_calls preserved) |
-| `aura/core/token_manager.py` | Context window tracking and auto-compaction |
-| `aura/core/repo_map.py` | Regex symbol extraction for codebase awareness |
-| `aura/core/sub_agent.py` | Multi-agent orchestration (reader/researcher/coder) |
-| `aura/core/mcp_server.py` | MCP server (JSON-RPC 2.0 over stdio) |
-| `aura/core/permissions.py` | Three-tier permission system |
-| `aura/brain.py` | Core LLM orchestration, budget forcing, history |
-| `aura/agent.py` | Main ApprenticeAgent class |
-| `aura/evolution/` | GEPA self-improving skills via Pareto evolution |
-| `aura/consciousness/` | World model, reward signals, intrinsic motivation |
-| `aura/emotion/alma_engine.py` | Neuromodulator simulation |
-| `aura/memory/unified_memory.py` | Fan-out queries across all memory backends |
+| `aura/agent.py` | ApprenticeAgent — ReAct loop, fast path, tool dispatch |
+| `aura/brain.py` | LLM orchestration, model routing, token budget |
+| `aura/tools/tool_rag.py` | Embedding-based dynamic tool selection |
+| `aura/core/agentic_loop.py` | Dev CLI autonomous loop + ToolExecutor |
+| `aura/core/router.py` | Model routing with fallback chains |
+| `aura/core/tool_schemas.py` | 11 Ollama tool-calling JSON schemas |
+| `aura/emotion/alma_engine.py` | Neuromodulator simulation (PAD space) |
+| `aura/memory/unified_memory.py` | Fan-out queries across all backends |
+| `aura/tools/neurodream.py` | Sleep/dream memory consolidation |
+| `aura/consciousness/metacognition.py` | Self-assessment and learning goals |
 
 ---
 
 ## Model Routing
 
-AURA routes across 40+ models with automatic fallback chains:
+40+ models with automatic fallback chains:
 
-| Chain | Purpose | Primary | Fallback |
-|-------|---------|---------|----------|
-| `fast` | Quick replies | `gemini-3-flash-preview:cloud` | `qwen3:8b`, `qwen2:1.5b` |
-| `reason` | Deep reasoning | `qwen3.5:397b-cloud` | `deepseek-r1:8b`, `qwen3:8b` |
-| `code` | Code/agentic tasks | `devstral-2:123b-cloud` | `qwen2.5-coder:7b` |
-| `think` | Step-by-step | `kimi-k2-thinking:cloud` | `deepseek-r1:8b` |
-| `vision` | Image understanding | `qwen3-vl:235b-cloud` | `llava:latest` |
-| `longctx` | Long documents | `minimax-m2.5:cloud` (196K) | `qwen3:8b` |
+| Role | Primary | Fallbacks |
+|------|---------|-----------|
+| **Tool dispatch** | `glm-5:cloud` | `deepseek-v3.2:cloud`, `kimi-k2.5:cloud` |
+| **Code generation** | `deepseek-v3.2:cloud` | `qwen3-coder:480b-cloud`, `qwen2.5-coder:7b` |
+| **Fast replies** | `gemini-3-flash-preview:cloud` | `qwen3:8b`, `qwen2:1.5b` |
+| **Reasoning** | `qwen3.5:397b-cloud` | `deepseek-r1:8b`, `qwen3:8b` |
+| **Vision** | `qwen3-vl:235b-cloud` | `llava:latest` |
+| **Long context** | `minimax-m2.5:cloud` (196K) | `qwen3:8b` |
 
-Tier selection via `--tier local|balanced|max` or AURA.md frontmatter.
+Tier selection via `--tier local|balanced|max` or AURA.md.
 
 ---
 
-## Quick Start
+## Full Platform
+
+Beyond the CLI, AURA is a complete agent platform:
+
+| Layer | Description |
+|-------|-------------|
+| **Chrome / Firefox Extension** | Sidebar with chat, search, tools, and more |
+| **FastAPI Backend** | WebSocket chat, 25+ REST endpoints |
+| **React Web UI** | Advanced panels at `localhost:5173` |
+| **Telegram / WhatsApp** | Message integrations via bots |
+
+---
+
+## Install
 
 ### Prerequisites
 
 - Python 3.11+
 - [Ollama](https://ollama.ai) running locally
-- Optional: Node.js 18+ (web UI), Qdrant (episodic memory), ComfyUI (image gen)
+- Optional: Node.js 18+ (web UI), Qdrant (episodic memory)
 
-### Install
+### Setup
 
 ```bash
 git clone https://github.com/ElnurBDa/aura.git
 cd aura
 pip install -r requirements.txt
+cp .env.example .env
 ```
 
 ### Run
@@ -212,9 +222,9 @@ pip install -r requirements.txt
 # Dev CLI (main use case)
 python main.py              # interactive chat
 python main.py "fix bug"    # one-shot task
-python main.py --chat       # explicit chat mode
+python main.py --resume last  # resume session
 
-# API server (for extension/web UI)
+# API server
 python run_web.py
 
 # Web UI
@@ -226,73 +236,18 @@ python main.py doctor
 
 ### Configure
 
-```bash
-cp .env.example .env
-```
-
 Key `.env` settings:
 
 ```env
 OLLAMA_BASE_URL=http://localhost:11434
-TAVILY_API_KEY=your-tavily-key        # web search
-AURA_API_KEY=your-secret-key          # optional API auth
+TAVILY_API_KEY=your-tavily-key
+BRAVE_API_KEY=your-brave-key
+AURA_API_KEY=your-secret-key
 ```
 
 ---
 
-## Chrome Extension
-
-14-panel sidebar with floating dock for every page.
-
-### Install
-
-1. `chrome://extensions` → enable **Developer mode**
-2. **Load unpacked** → select `extension/` folder
-3. Click AURA icon to open sidebar
-
-### Panels
-
-Chat, Ask, Search, Wisebase, Translate, Grammar, Write, Voice Notes, OCR, PDF, Image Gen, Browser Agent, Tools, Models
-
-### Build
-
-```bash
-python build.py chrome    # -> dist-chrome/
-python build.py firefox   # -> dist-firefox/
-```
-
----
-
-## API Endpoints
-
-### Core
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/ws/{session_id}` | WS | WebSocket streaming chat |
-| `/api/chat` | POST | Single-shot chat |
-| `/api/health` | GET | Liveness probe |
-
-### Memory & Knowledge
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/memory/search` | GET | Semantic memory search |
-| `/api/knowledge/save` | POST | Save clip to Wisebase |
-| `/api/knowledge/search` | GET | Search saved knowledge |
-
-### Models
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/models/available` | GET | List all Ollama models |
-| `/api/models/config` | GET/PATCH | Role → model assignments |
-
-Full OpenAPI docs: `http://127.0.0.1:8000/docs`
-
----
-
-## Memory Architecture
+## Memory
 
 | Layer | Backend | Purpose |
 |-------|---------|---------|
@@ -302,9 +257,9 @@ Full OpenAPI docs: `http://127.0.0.1:8000/docs`
 | Knowledge Graph | NetworkX + Kuzu | Entity relationships |
 | Unified | Fan-out | Queries all backends, merges results |
 
-### Dream Mode
+### NeuroDream
 
-NREM-like memory consolidation: reverse-chronological replay, importance decay, clustering. Runs as background daemon or manually via `--dream`.
+Sleep-like memory consolidation: reverse-chronological replay, importance decay, clustering, pattern extraction. Runs as background daemon or manually via `--dream`.
 
 ---
 
@@ -312,48 +267,22 @@ NREM-like memory consolidation: reverse-chronological replay, importance decay, 
 
 - API key auth (constant-time comparison)
 - Path traversal protection on file uploads
-- Shell command sanitization
+- Shell command blocklist + allowlist
 - PII scrubbing before knowledge abstraction
 - Rate limiting middleware
-- AST validation on marketplace/custom tool imports
 - Permission system for all mutating operations
 
 ---
 
-## Project Structure
+## Roadmap
 
-```
-main.py                  # Entry point — CLI + one-shot + voice
-aura/
-  core/                  # Dev CLI engine
-    agentic_loop.py      # Autonomous tool-calling loop
-    session.py           # Session persistence
-    token_manager.py     # Context window management
-    repo_map.py          # Symbol extraction
-    sub_agent.py         # Multi-agent orchestration
-    mcp_server.py        # MCP server (JSON-RPC stdio)
-    permissions.py       # Permission system
-    tool_schemas.py      # Ollama tool schemas (11 tools)
-    context.py           # Project context gathering
-    commands.py          # Subcommand handlers
-    router.py            # Model routing
-    diff_display.py      # Colored diff preview
-  brain.py               # Core LLM orchestration
-  agent.py               # ApprenticeAgent
-  config.py              # Configuration + model chains
-  auth/                  # ChatGPT OAuth
-  consciousness/         # World model, metacognition
-  emotion/               # ALMA neuromodulator engine
-  evolution/             # GEPA self-improving skills
-  memory/                # Unified + SQLite memory
-  tools/                 # 30+ agent tools
-  cli/                   # Display, input, model picker
+See [NEW_AURA_ROADMAP.md](NEW_AURA_ROADMAP.md) for the full plan:
 
-api/                     # FastAPI backend
-  routes/                # 30+ REST endpoints
-web/                     # React frontend (Vite + Tailwind)
-extension/               # Chrome/Firefox extension (14 panels)
-```
+- **Phase 1** (done): Fix the engine — ReAct loop, Tool RAG, model routing
+- **Phase 2**: Memory consolidation — 2 backends, BM25 + reranking, FadeMem decay
+- **Phase 3**: Make it alive — coherent emotion→behavior loop, narrative self-model
+- **Phase 4**: Dreams that matter + natural proactive awareness
+- **Phase 5**: Code agents, sandboxing, adaptive planning
 
 ---
 

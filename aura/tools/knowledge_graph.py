@@ -425,8 +425,8 @@ class KnowledgeGraphTool:
                 from api.routes.memory import record_memory_recall
                 if final_nodes:
                     record_memory_recall("kg", len(final_nodes), query, [n.label for n in final_nodes[:5]])
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[KnowledgeGraph] non-critical: {e}")
             return final_nodes
 
     def update_node(self, node_id: str, properties: Dict[str, Any]) -> bool:
@@ -878,14 +878,14 @@ class KnowledgeGraphTool:
             from api.routes.memory import record_memory_recall
             if results:
                 record_memory_recall("kg", len(results), question, [n.label for n in results[:5]])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[KnowledgeGraph] non-critical: {e}")
         try:
             from api.routes.context import track_context_from_memory
             if results:
                 track_context_from_memory([n.label for n in results[:5]])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[KnowledgeGraph] non-critical: {e}")
         return results
 
     def get_related(
@@ -1593,9 +1593,8 @@ class KnowledgeGraphTool:
                         )
                         kuzu_db.add_relationship(rel)
                         synced["relationships"] += 1
-                    except Exception:
-                        pass
-
+                    except Exception as e:
+                        logger.debug(f"[KnowledgeGraph] non-critical: {e}")
             logger.info(f"[KG-SYNC] Exported {synced['entities']} entities, {synced['relationships']} relationships to Kuzu")
             return synced
         except ImportError:
@@ -1653,9 +1652,8 @@ class KnowledgeGraphTool:
                         )
                         kuzu_id_to_nx_id[kuzu_id] = node.id
                         imported["entities"] += 1
-                    except Exception:
-                        pass
-
+                    except Exception as e:
+                        logger.debug(f"[KnowledgeGraph] non-critical: {e}")
                 # Fetch active relationships from Kuzu
                 rel_rows = kuzu_db.execute_cypher(f"""
                     MATCH (s:Entity)-[r:RELATES_TO]->(t:Entity)
@@ -1685,9 +1683,8 @@ class KnowledgeGraphTool:
                             properties=props,
                         )
                         imported["relationships"] += 1
-                    except Exception:
-                        pass
-
+                    except Exception as e:
+                        logger.debug(f"[KnowledgeGraph] non-critical: {e}")
                 self.save()
 
             logger.info(f"[KG-SYNC] Imported {imported['entities']} entities, {imported['relationships']} relationships from Kuzu")

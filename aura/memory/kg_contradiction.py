@@ -112,9 +112,8 @@ class KGContradictionDetector:
         try:
             from aura.config import Config
             self._enabled = getattr(Config, "ENABLE_KG_CONTRADICTIONS", True)
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[KGContradiction] non-critical: {e}")
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -253,8 +252,8 @@ class KGContradictionDetector:
             g = self._kg.graph
             if node_id in g.nodes:
                 return dict(g.nodes[node_id])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[KGContradiction] non-critical: {e}")
         return None
 
     def _find_similar_nodes(
@@ -323,17 +322,15 @@ class KGContradictionDetector:
                 g.nodes[id_a]["lifecycle_state"] = KG_NODE_CONTESTED
             if id_b in g.nodes:
                 g.nodes[id_b]["lifecycle_state"] = KG_NODE_CONTESTED
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[KGContradiction] non-critical: {e}")
     def _set_lifecycle(self, node_id: str, state: str) -> None:
         try:
             g = self._kg.graph
             if node_id in g.nodes:
                 g.nodes[node_id]["lifecycle_state"] = state
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[KGContradiction] non-critical: {e}")
     def _add_contradiction_edge(
         self, id_a: str, id_b: str, rec: ContradictionRecord
     ) -> None:
@@ -370,10 +367,8 @@ class KGContradictionDetector:
                     "node_b": rec.label_b[:60],
                 },
             )
-        except Exception:
-            pass
-
-
+        except Exception as e:
+            logger.debug(f"[KGContradiction] non-critical: {e}")
 __all__ = [
     "KGContradictionDetector",
     "ContradictionRecord",

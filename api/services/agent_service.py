@@ -839,32 +839,7 @@ Provide a well-structured, informative summary with key findings and cite source
 
             enriched_message = message + screen_hint if screen_hint else message
 
-            # ===== PARLIAMENT ROUTING (non-tool conversational queries) =====
-            # Parliament handles SIMPLE (direct think) and STANDARD (think + mirror review) tiers.
-            # Skip for action modes (search/agent/swarm/etc) — those need the full OPEAR loop.
-            if (not detected_action
-                    and hasattr(agent, 'parliament')
-                    and agent.parliament is not None):
-                try:
-                    from aura.parliament import QueryTier
-                    tier = agent.parliament.classify(enriched_message)
-                    if tier in (QueryTier.SIMPLE, QueryTier.STANDARD, QueryTier.COMPLEX):
-                        logger.info(f"[AgentService] Parliament routing (streaming): {tier.value}")
-                        had_content = False
-                        for chunk in agent.parliament.handle_stream(
-                            enriched_message,
-                            context_addon=screen_hint or "",
-                            model_override=effective_model,
-                        ):
-                            if chunk:
-                                had_content = True
-                                yield {"type": "chunk", "content": chunk}
-                        if had_content:
-                            yield {"type": "done", "mood": self._get_mood(),
-                                   "model_used": brain.get_last_model_used()}
-                            return
-                except Exception as e:
-                    logger.warning(f"[AgentService] Parliament routing failed, falling back: {e}")
+            # Parliament routing removed
 
             # ===== STANDARD STREAMING =====
             if hasattr(brain, 'think_stream'):

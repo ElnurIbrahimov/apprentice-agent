@@ -409,9 +409,8 @@ class AMEMSystem:
                     # Scale importance by ±20% based on dopamine
                     dopamine_factor = 1.0 + (dopamine - 0.5) * 0.4
                     note.importance = max(0.0, min(1.0, note.importance * dopamine_factor))
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[AMem] non-critical: {e}")
             # Step 1: Extract attributes via LLM
             if auto_extract and self.llm_func:
                 self._extract_attributes(note)
@@ -559,21 +558,21 @@ class AMEMSystem:
                             from aura.tools.mood_memory import apply_mood_bias_to_tuples
                             final = apply_mood_bias_to_tuples(final, mood_pad)
                             final.sort(key=lambda x: x[1], reverse=True)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"[AMem] non-critical: {e}")
                         # === PHASE 1: Track memory recall ===
                         try:
                             from api.routes.memory import record_memory_recall
                             if final:
                                 record_memory_recall("amem", len(final), query, [n.content[:80] for n, _ in final[:5]])
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"[AMem] non-critical: {e}")
                         try:
                             from api.routes.context import track_context_from_memory
                             if final:
                                 track_context_from_memory([n.content[:80] for n, _ in final[:5]])
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"[AMem] non-critical: {e}")
                         return final
                 except Exception as e:
                     logger.warning(f"[A-MEM] Qdrant search failed: {e}")
@@ -588,21 +587,21 @@ class AMEMSystem:
                         from aura.tools.mood_memory import apply_mood_bias_to_tuples
                         emb_results = apply_mood_bias_to_tuples(emb_results, mood_pad)
                         emb_results.sort(key=lambda x: x[1], reverse=True)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"[AMem] non-critical: {e}")
                     # === PHASE 1: Track memory recall ===
                     try:
                         from api.routes.memory import record_memory_recall
                         if emb_results:
                             record_memory_recall("amem", len(emb_results), query, [n.content[:80] for n, _ in emb_results[:5]])
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"[AMem] non-critical: {e}")
                     try:
                         from api.routes.context import track_context_from_memory
                         if emb_results:
                             track_context_from_memory([n.content[:80] for n, _ in emb_results[:5]])
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"[AMem] non-critical: {e}")
                     return emb_results
 
             # Final fallback: keyword search
@@ -612,14 +611,14 @@ class AMEMSystem:
                 from api.routes.memory import record_memory_recall
                 if results:
                     record_memory_recall("amem", len(results), query, [n.content[:80] for n, _ in results[:5]])
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[AMem] non-critical: {e}")
             try:
                 from api.routes.context import track_context_from_memory
                 if results:
                     track_context_from_memory([n.content[:80] for n, _ in results[:5]])
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[AMem] non-critical: {e}")
             return results
 
     def search_agentic(
@@ -707,8 +706,8 @@ class AMEMSystem:
                 from api.routes.context import track_context_from_memory
                 record_memory_recall("amem", len(results), query, [r["content"][:80] for r in results[:5]])
                 track_context_from_memory([r["content"][:80] for r in results[:5]])
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[AMem] non-critical: {e}")
             return results[:k * 2]
 
     def update(

@@ -328,9 +328,8 @@ class SalienceFilter:
         try:
             from .persistence import get_persistence
             get_persistence().save_seen_event(event_hash, now)
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[SalienceFilter] non-critical: {e}")
         # Periodic cleanup: every N events OR every M seconds, whichever comes first
         self._seen_event_count_since_cleanup += 1
         mono_now = time.monotonic()
@@ -391,9 +390,8 @@ class SalienceFilter:
                         if m.get("role") == "user"
                     ]
                     ctx["recent_chat"] = user_msgs[-3:]
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[SalienceFilter] non-critical: {e}")
         # Focus keywords and current activity
         if self.context_keywords:
             ctx["focus_keywords"] = list(self.context_keywords)[:10]
@@ -406,9 +404,8 @@ class SalienceFilter:
             tom = get_theory_of_mind()
             emo = tom.get_emotional_state()
             ctx["user_mood"] = emo.describe()
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[SalienceFilter] non-critical: {e}")
         self._context_cache = ctx
         self._context_cache_time = now
         return ctx

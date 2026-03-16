@@ -473,9 +473,8 @@ class NeuroDreamEngine:
                     )
                     intensity = max(0.2, min(0.6, items * 0.05))
                     trigger_emotion("satisfaction", intensity, f"sleep_consolidation: {items} items")
-                except Exception:
-                    pass
-
+                except Exception as e:
+                    logger.debug(f"[NeuroDream] non-critical: {e}")
             # Natural wake up
             if not self._interrupt_flag.is_set():
                 self.wake_up("cycle_complete")
@@ -979,9 +978,8 @@ class NeuroDreamEngine:
                         "metadata": {"source": "truth_spine", "tier": "belief"},
                         "id": f"ts_belief_{key[:20]}"
                     })
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[NeuroDream] non-critical: {e}")
         return memories[:200]  # Limit to prevent overload
 
     def _get_monologue_memories(self, hours: int = 24) -> List[Dict[str, Any]]:
@@ -1956,9 +1954,8 @@ Rules:
             try:
                 insight_key = f"dream_{insight.insight_type}_{insight.id[:16]}"
                 self.proto_agi.memory.store_belief(insight_key, insight.content[:500])
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug(f"[NeuroDream] non-critical: {e}")
     def _save_consolidated_patterns(self, patterns: List[ConsolidatedPattern]):
         """Save consolidated patterns."""
         patterns_file = self.data_dir / "consolidated_patterns.jsonl"

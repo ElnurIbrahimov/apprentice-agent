@@ -77,6 +77,12 @@ ALLOWED_COMMANDS_PREFIX = [
     "tsc", "eslint", "prettier", "vitest", "jest", "pytest",
     "rg", "fd", "ruff", "mypy", "black", "isort",
     "curl", "wget", "http",
+    # Common read-only / informational commands
+    "date", "cal", "uptime", "uname", "arch", "df", "du", "free",
+    "id", "groups", "printenv", "file", "stat", "realpath", "basename",
+    "dirname", "md5sum", "sha256sum", "sha1sum", "wc", "yes", "true",
+    "false", "tee", "xargs", "time", "timeout", "nproc", "lscpu",
+    "ver", "systeminfo",
 ]
 
 

@@ -48,13 +48,11 @@ Guidelines:
 - Cite sources and data points
 
 When querying knowledge, use: [TOOL: knowledge_graph] query
-When searching documents, use: [TOOL: local_rag] search query
-For calibrated reasoning, use: [TOOL: fluxmind] question"""
+When searching documents, use: [TOOL: local_rag] search query"""
 
     tools = [
         "knowledge_graph",
         "local_rag",
-        "fluxmind",
     ]
 
     triggers = [
@@ -99,17 +97,8 @@ For calibrated reasoning, use: [TOOL: fluxmind] question"""
                     context_parts.append(f"Document Search:\n{rag_result['results']}")
                     analysis_data["rag_results"] = rag_result
 
-            # Step 2: Use FluxMind for calibrated reasoning if available
+            # Step 2: Synthesize analysis
             fluxmind_reasoning = None
-            if "fluxmind" in self._available_tools:
-                logger.info("[Analyst] Using FluxMind for calibrated reasoning...")
-                fm_result = self._execute_tool("fluxmind", query)
-                tools_used.append("fluxmind")
-                if fm_result.get("success"):
-                    fluxmind_reasoning = fm_result
-                    analysis_data["fluxmind"] = fm_result
-
-            # Step 3: Synthesize analysis
             analysis_prompt = system_prompt
 
             if context_parts:
@@ -135,8 +124,6 @@ Now provide a thorough analysis. Structure your response:
                 confidence += 0.1
             if "local_rag" in tools_used:
                 confidence += 0.15
-            if "fluxmind" in tools_used:
-                confidence += 0.1
             confidence = min(confidence, 0.95)
 
             return AgentResult(

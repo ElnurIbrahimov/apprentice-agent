@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import type { Tool, FluxMindStatus, VoiceStatus, SessionCosts } from '../types';
+import type { Tool, VoiceStatus, SessionCosts } from '../types';
 import {
   ArrowPathIcon,
   WrenchScrewdriverIcon,
@@ -13,7 +13,6 @@ import {
 export function ToolsPanel() {
   const [tools, setTools] = useState<Tool[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
-  const [fluxmind, setFluxmind] = useState<FluxMindStatus | null>(null);
   const [voice, setVoice] = useState<VoiceStatus | null>(null);
   const [costs, setCosts] = useState<SessionCosts | null>(null);
   const [loading, setLoading] = useState(false);
@@ -31,9 +30,8 @@ export function ToolsPanel() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [toolsRes, fluxRes, voiceRes, costsRes] = await Promise.all([
+      const [toolsRes, voiceRes, costsRes] = await Promise.all([
         fetch('/api/tools'),
-        fetch('/api/fluxmind'),
         fetch('/api/voice'),
         fetch('/api/costs/summary'),
       ]);
@@ -43,7 +41,6 @@ export function ToolsPanel() {
         setTools(data.tools || []);
         setCategories(data.categories || []);
       }
-      if (fluxRes.ok) setFluxmind(await fluxRes.json());
       if (voiceRes.ok) setVoice(await voiceRes.json());
       if (costsRes.ok) {
         const c = await costsRes.json();
@@ -127,43 +124,6 @@ export function ToolsPanel() {
 
   return (
     <div className="space-y-4">
-      {/* FluxMind */}
-      <div className="bg-chat-sidebar rounded-lg p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-chat-text font-medium flex items-center gap-2">
-            <CpuChipIcon className="w-5 h-5 text-cyan-400" />
-            FluxMind
-          </h3>
-          <button
-            onClick={fetchData}
-            className="p-1 text-chat-text-secondary hover:text-chat-text rounded"
-            disabled={loading}
-            title="Refresh"
-          >
-            <ArrowPathIcon className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-        </div>
-
-        {fluxmind?.enabled ? (
-          <div className="space-y-2">
-            <div className="flex justify-between text-sm">
-              <span className="text-chat-text-secondary">Version</span>
-              <span className="text-chat-text">{fluxmind.version}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-chat-text-secondary">Accuracy</span>
-              <span className="text-green-400">{(fluxmind.accuracy * 100).toFixed(2)}%</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-chat-text-secondary">Calibration</span>
-              <span className="text-chat-text">{fluxmind.calibration}</span>
-            </div>
-          </div>
-        ) : (
-          <div className="text-chat-text-secondary text-sm">FluxMind not available</div>
-        )}
-      </div>
-
       {/* Voice */}
       <div className="bg-chat-sidebar rounded-lg p-4">
         <h3 className="text-chat-text font-medium flex items-center gap-2 mb-3">

@@ -7,10 +7,7 @@ Three pillars of metacognition:
 3. Metacognitive Evaluation: Reflect on learning effectiveness
 
 Integrates with:
-- Reflexion: Past lessons from failures
-- MetacognitiveGuardian: Failure prediction patterns
 - Skill Library: Skill success rates
-- SynapseForge: Synthesize new tools for capability gaps
 - NeuroDream: Consolidation during sleep cycles
 """
 
@@ -191,7 +188,7 @@ class MetacognitiveEngine:
 
         # Gather signals from each source
         reflexion_signals = self._gather_reflexion_signals()
-        guardian_signals = self._gather_guardian_signals()
+        guardian_signals = {}
         skill_signals = self._gather_skill_signals()
         outcome_signals = self._gather_outcome_signals()
 
@@ -466,55 +463,12 @@ class MetacognitiveEngine:
         return ("unknown strategy", False)
 
     def _strategy_learn_pattern(self, goal: LearningGoal) -> tuple:
-        """Extract success patterns from Reflexion lessons."""
-        try:
-            from aura.tools.reflexion import ReflexionEngine
-            re = ReflexionEngine()
-            lessons = re.get_lessons_summary()
-
-            if not lessons:
-                return ("no reflexion lessons available", False)
-
-            # Count domain-relevant lessons
-            domain_keywords = self._domain_keywords(goal.domain)
-            relevant = [
-                l for l in (lessons if isinstance(lessons, list) else [lessons])
-                if isinstance(l, str) and any(kw in l.lower() for kw in domain_keywords)
-            ]
-
-            if relevant:
-                # Record the pattern extraction as an outcome
-                self._record_outcome(goal.domain, True, f"extracted {len(relevant)} patterns")
-                return (f"extracted {len(relevant)} patterns from reflexion lessons", True)
-
-            return ("no relevant patterns found in reflexion", False)
-        except Exception as e:
-            logger.debug(f"[Metacognition] Pattern learning failed: {e}")
-            return (f"pattern extraction failed: {e}", False)
+        """Reflexion removed -- pattern learning unavailable."""
+        return ("unavailable", False)
 
     def _strategy_synthesize_tool(self, goal: LearningGoal) -> tuple:
-        """Use SynapseForge to create a new tool for capability gap."""
-        try:
-            from aura.tools.synapseforge import SynapseForge
-            sf = SynapseForge()
-
-            # Check if a tool already exists for this domain
-            existing = sf.find_tool(goal.domain)
-            if existing:
-                return (f"tool already exists: {existing}", True)
-
-            # Record the intent (actual synthesis needs LLM)
-            self._record_outcome(
-                goal.domain, True,
-                f"identified tool synthesis opportunity for {goal.domain}"
-            )
-            return (
-                f"flagged {goal.domain} for tool synthesis (requires LLM)",
-                True
-            )
-        except Exception as e:
-            logger.debug(f"[Metacognition] Tool synthesis failed: {e}")
-            return (f"synthesis failed: {e}", False)
+        """SynapseForge removed -- tool synthesis unavailable."""
+        return ("unavailable", False)
 
     def _strategy_refine_skill(self, goal: LearningGoal) -> tuple:
         """Refine existing skills using Skill Library."""
@@ -694,72 +648,12 @@ class MetacognitiveEngine:
     # ====================================================================
 
     def _gather_reflexion_signals(self) -> Dict[str, Dict]:
-        """Gather signals from Reflexion lesson history."""
-        signals = {}
-        try:
-            from aura.tools.reflexion import ReflexionEngine
-            re = ReflexionEngine()
-            summary = re.get_lessons_summary()
-
-            if not summary:
-                return signals
-
-            # Parse summary for domain signals
-            if isinstance(summary, str):
-                text = summary.lower()
-                for domain in CapabilityDomain:
-                    d = domain.value
-                    keywords = self._domain_keywords(d)
-                    hits = sum(1 for kw in keywords if kw in text)
-                    if hits > 0:
-                        # More mentions = more lessons = could be strength or weakness
-                        # Assume lessons are mostly about failures => lower score
-                        signals[d] = {
-                            "score": max(0.2, 0.6 - hits * 0.1),
-                            "detail": f"{hits} lesson mentions",
-                        }
-        except Exception as e:
-            logger.debug(f"[Metacognition] Reflexion signals unavailable: {e}")
-
-        return signals
+        """Reflexion removed -- returns empty signals."""
+        return {}
 
     def _gather_guardian_signals(self) -> Dict[str, Dict]:
-        """Gather signals from MetacognitiveGuardian failure patterns."""
-        signals = {}
-        try:
-            from aura.tools.metacog_guardian import MetacognitiveGuardian
-            guardian = MetacognitiveGuardian()
-            stats = guardian.get_stats()
-            patterns = guardian.failure_patterns
-
-            if not patterns:
-                return signals
-
-            # Count failures per domain-relevant keyword
-            domain_failures: Dict[str, int] = {}
-            total = len(patterns)
-
-            for pattern in patterns:
-                task_kw = pattern.get("task_keywords", [])
-                task_text = " ".join(task_kw).lower()
-
-                for domain in CapabilityDomain:
-                    d = domain.value
-                    keywords = self._domain_keywords(d)
-                    if any(kw in task_text for kw in keywords):
-                        domain_failures[d] = domain_failures.get(d, 0) + 1
-
-            for d, count in domain_failures.items():
-                # More failures = lower score
-                failure_rate = min(1.0, count / max(total, 1))
-                signals[d] = {
-                    "score": max(0.1, 1.0 - failure_rate),
-                    "detail": f"{count}/{total} failure patterns",
-                }
-        except Exception as e:
-            logger.debug(f"[Metacognition] Guardian signals unavailable: {e}")
-
-        return signals
+        """Guardian removed — returns empty signals."""
+        return {}
 
     def _gather_skill_signals(self) -> Dict[str, Dict]:
         """Gather signals from Skill Library success rates."""

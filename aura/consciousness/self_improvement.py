@@ -335,9 +335,8 @@ class SelfImprovementEngine:
             mc._run_strategy = self._original_run_strategy
             self._original_run_strategy = None
             logger.info("[SelfImprovement] Strategy override removed")
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[SelfImprovement] non-critical: {e}")
     def _enhanced_run_strategy(self, strategy, goal) -> Tuple[str, bool]:
         """Enhanced strategy dispatcher that provides real implementations."""
         from aura.consciousness.metacognition import ImprovementStrategy
@@ -440,8 +439,8 @@ class SelfImprovementEngine:
                     domain, False,
                     f"practice attempt failed for {domain}: {e}"
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[SelfImprovement] non-critical: {e}")
             return (f"practice attempt for {domain} failed: LLM unavailable", False)
 
     def _enhanced_param_tuning(self, goal) -> Tuple[str, bool]:
@@ -534,22 +533,7 @@ class SelfImprovementEngine:
         if models_used:
             patterns.append(f"models: {', '.join(models_used)}")
 
-        # Also try reflexion lessons
-        try:
-            from aura.tools.reflexion import ReflexionEngine
-            re = ReflexionEngine()
-            lessons = re.get_lessons_summary()
-            if lessons:
-                keyword_list = self._get_domain_keywords(domain)
-                relevant = [
-                    l for l in (lessons if isinstance(lessons, list) else [lessons])
-                    if isinstance(l, str) and any(kw in l.lower() for kw in keyword_list)
-                ]
-                if relevant:
-                    patterns.append(f"{len(relevant)} reflexion patterns found")
-        except Exception:
-            pass
-
+        # Reflexion removed
         pattern_summary = "; ".join(patterns)
 
         # Record pattern extraction as positive outcome
@@ -560,9 +544,8 @@ class SelfImprovementEngine:
             get_metacognitive_engine()._record_outcome(
                 domain, True, f"pattern extraction: {pattern_summary}"
             )
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"[SelfImprovement] non-critical: {e}")
         return (f"extracted patterns for {domain}: {pattern_summary}", True)
 
     def _enhanced_skill_refinement(self, goal) -> Tuple[str, bool]:
@@ -595,8 +578,8 @@ class SelfImprovementEngine:
                         domain, True,
                         f"identified {len(low_rate)} skills needing refinement: {', '.join(names)}"
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[SelfImprovement] non-critical: {e}")
                 return (
                     f"identified {len(low_rate)} skills for refinement in {domain}: "
                     + ", ".join(names),
@@ -610,54 +593,8 @@ class SelfImprovementEngine:
             return (f"skill refinement failed: {e}", False)
 
     def _enhanced_tool_synthesis(self, goal) -> Tuple[str, bool]:
-        """Actually invoke SynapseForge for capability gap tools."""
-        domain = goal.domain
-
-        try:
-            from aura.tools.synapseforge import SynapseForge
-            sf = SynapseForge()
-
-            # Check if tool already exists
-            existing = sf.find_tool(domain)
-            if existing:
-                return (f"tool already exists for {domain}: {existing}", True)
-
-            # Attempt actual synthesis
-            description = (
-                f"A tool to help with {domain} tasks. "
-                f"Goal: {goal.description}"
-            )
-            result = sf.synthesize_tool(description=description, domain=domain)
-
-            if result:
-                try:
-                    from aura.consciousness.metacognition import (
-                        get_metacognitive_engine,
-                    )
-                    get_metacognitive_engine()._record_outcome(
-                        domain, True,
-                        f"synthesized tool for {domain}: {result}"
-                    )
-                except Exception:
-                    pass
-                return (f"synthesized tool for {domain}: {result}", True)
-
-            return (f"tool synthesis for {domain} produced no result", False)
-
-        except Exception as e:
-            logger.debug(f"[SelfImprovement] Tool synthesis failed for {domain}: {e}")
-            # Record the intent at least
-            try:
-                from aura.consciousness.metacognition import (
-                    get_metacognitive_engine,
-                )
-                get_metacognitive_engine()._record_outcome(
-                    domain, True,
-                    f"identified tool synthesis opportunity for {domain}"
-                )
-            except Exception:
-                pass
-            return (f"flagged {domain} for tool synthesis (synapse unavailable)", True)
+        """SynapseForge removed -- tool synthesis unavailable."""
+        return ("unavailable", False)
 
     def _get_domain_keywords(self, domain: str) -> List[str]:
         """Get keywords for a domain (local copy to avoid circular deps)."""
@@ -1198,24 +1135,21 @@ class SelfImprovementEngine:
             for o_data in data.get("outcomes", []):
                 try:
                     self._outcomes.append(InteractionOutcome(**o_data))
-                except Exception:
-                    pass
-
+                except Exception as e:
+                    logger.debug(f"[SelfImprovement] non-critical: {e}")
             # Restore cycle history
             for c_data in data.get("cycle_history", []):
                 try:
                     self._cycle_history.append(ImprovementCycleResult(**c_data))
-                except Exception:
-                    pass
-
+                except Exception as e:
+                    logger.debug(f"[SelfImprovement] non-critical: {e}")
             # Restore tunable params (merge with defaults)
             for name, p_data in data.get("tunable_params", {}).items():
                 if name in self._tunable_params:
                     try:
                         self._tunable_params[name] = TunableParam(**p_data)
-                    except Exception:
-                        pass
-
+                    except Exception as e:
+                        logger.debug(f"[SelfImprovement] non-critical: {e}")
             # Restore strategy results
             self._strategy_results = data.get("strategy_results", [])
 
