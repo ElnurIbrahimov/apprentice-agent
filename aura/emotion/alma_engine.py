@@ -536,30 +536,29 @@ class ALMAEngine:
 
             logger.debug(f"Triggered emotion: {emotion_name} ({intensity:.2f})")
 
-        # Log to history OUTSIDE lock (file I/O shouldn't block other threads)
+        # Log and record OUTSIDE lock (I/O shouldn't block other threads)
         self._log_emotion(emotion)
 
-            # Record real thought: emotional state change
-            try:
-                from api.routes.thinking import record_thought
-                record_thought(
-                    "observing",
-                    f"feeling {emotion_name} ({intensity:.1f}) triggered by: {trigger[:40]}",
-                    min(0.8, intensity),
-                    "emotion"
-                )
-            except Exception as e:
-                logger.debug(f"[AlmaEngine] non-critical: {e}")
-            try:
-                from aura.activity_logger import record_activity
-                record_activity(
-                    "emotion", emotion_name,
-                    f"Felt {emotion_name} ({intensity:.1f}) — {trigger[:60]}",
-                    {"intensity": round(intensity, 3), "trigger": trigger},
-                )
-            except Exception as e:
-                logger.debug(f"[AlmaEngine] non-critical: {e}")
-            return emotion
+        try:
+            from api.routes.thinking import record_thought
+            record_thought(
+                "observing",
+                f"feeling {emotion_name} ({intensity:.1f}) triggered by: {trigger[:40]}",
+                min(0.8, intensity),
+                "emotion"
+            )
+        except Exception as e:
+            logger.debug(f"[AlmaEngine] non-critical: {e}")
+        try:
+            from aura.activity_logger import record_activity
+            record_activity(
+                "emotion", emotion_name,
+                f"Felt {emotion_name} ({intensity:.1f}) — {trigger[:60]}",
+                {"intensity": round(intensity, 3), "trigger": trigger},
+            )
+        except Exception as e:
+            logger.debug(f"[AlmaEngine] non-critical: {e}")
+        return emotion
 
     def trigger_from_appraisal(
         self,
