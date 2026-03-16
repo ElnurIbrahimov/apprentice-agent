@@ -623,8 +623,10 @@ class AgenticLoop:
             active_tools = self._get_active_tools()
 
             # Per-step model routing: pick best model for THIS iteration
-            step_model = self.model_override
-            if self._router and not self.model_override:
+            # Check brain's live model override (user may change via /model mid-session)
+            brain_override = getattr(self.brain, '_model_override', None)
+            step_model = brain_override or self.model_override
+            if self._router and not step_model:
                 step_model = self._pick_step_model(messages)
 
             # Try streaming first, fall back to blocking
