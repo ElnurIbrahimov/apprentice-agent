@@ -67,7 +67,17 @@ def _build_model_list(current_model: str) -> list:
             seen.add(model)
             items.append((model, role, ctx))
 
-    # All Ollama models not already in role list
+    # Cloud models from config (these don't appear in /api/tags)
+    try:
+        from aura.config import VERIFIED_CLOUD_MODELS
+        for m in sorted(VERIFIED_CLOUD_MODELS):
+            if m not in seen:
+                seen.add(m)
+                items.append((m, "cloud", ""))
+    except ImportError:
+        pass
+
+    # All Ollama local models not already listed
     all_models = _fetch_all_models()
     for m in all_models:
         if m not in seen:
