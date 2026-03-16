@@ -119,6 +119,7 @@ class ShellExecutorTool:
     def __init__(self, sandbox_executor=None):
         self._sessions: Dict[str, ShellSession] = {}
         self._sessions_lock = threading.Lock()
+        self._sandbox_lock = threading.Lock()
         self._is_windows = sys.platform == "win32"
         self._sandbox = sandbox_executor  # Optional SandboxExecutor for sandboxed runs
 
@@ -591,34 +592,35 @@ class ShellExecutorTool:
 
         Falls back to normal self.run() if no SandboxExecutor is wired in.
         """
-        if self._sandbox is None:
-            # Lazy-init: try to create a SandboxExecutor
-            try:
-                from aura.sandbox import SandboxExecutor
-                self._sandbox = SandboxExecutor(
-                    timeout=timeout,
-                    workspace=cwd or str(Path.cwd()),
-                )
-            except ImportError:
-                # sandbox module not available — execute directly via subprocess
-                # (do NOT call self.run() here — it routes back to run_sandboxed, causing recursion)
-                import subprocess
+        with self._sandbox_lock:
+            if self._sandbox is None:
                 try:
-                    result = subprocess.run(
-                        command, shell=True, capture_output=True, text=True,
-                        timeout=min(timeout, MAX_TIMEOUT), cwd=cwd,
+                    from aura.sandbox import SandboxExecutor
+                    self._sandbox = SandboxExecutor(
+                        timeout=timeout,
+                        workspace=cwd or str(Path.cwd()),
                     )
-                    return {
-                        "success": result.returncode == 0,
-                        "stdout": result.stdout,
-                        "stderr": result.stderr,
-                        "exit_code": result.returncode,
-                        "response": result.stdout.strip() or result.stderr.strip() or f"Exit code {result.returncode}",
-                    }
-                except subprocess.TimeoutExpired:
-                    return {"success": False, "error": f"Command timed out after {timeout}s"}
-                except Exception as e:
-                    return {"success": False, "error": str(e)}
+                except ImportError:
+                    # Sandbox unavailable — safe fallback with shell=False
+                    import subprocess
+                    import shlex
+                    try:
+                        cmd_args = shlex.split(command)
+                        result = subprocess.run(
+                            cmd_args, shell=False, capture_output=True, text=True,
+                            timeout=min(timeout, MAX_TIMEOUT), cwd=cwd,
+                        )
+                        return {
+                            "success": result.returncode == 0,
+                            "stdout": result.stdout,
+                            "stderr": result.stderr,
+                            "exit_code": result.returncode,
+                            "response": result.stdout.strip() or result.stderr.strip() or f"Exit code {result.returncode}",
+                        }
+                    except subprocess.TimeoutExpired:
+                        return {"success": False, "error": f"Command timed out after {timeout}s"}
+                    except Exception as e:
+                        return {"success": False, "error": str(e)}
 
         result = self._sandbox.run_shell(command, cwd=cwd)
         return {

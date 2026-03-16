@@ -60,8 +60,9 @@ def _decrypt(ciphertext: str) -> tuple:
     try:
         f = Fernet(key)
         return f.decrypt(ciphertext.encode("utf-8")).decode("utf-8"), None
-    except Exception:
-        return ciphertext, None  # If decryption fails, assume plaintext
+    except Exception as e:
+        logger.warning(f"[Email] Decryption failed (check AURA_EMAIL_KEY): {e}")
+        return None, f"Decryption failed — check AURA_EMAIL_KEY: {e}"
 
 
 def _sanitize_imap_string(value: str) -> str:

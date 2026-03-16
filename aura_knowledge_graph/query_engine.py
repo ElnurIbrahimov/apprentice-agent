@@ -146,7 +146,7 @@ class KGQueryEngine:
             MATCH (e:Entity)
             RETURN e.id, e.name, e.entity_type, e.description, e.importance
             ORDER BY e.importance DESC
-            LIMIT {max_entities}
+            LIMIT {int(max(1, min(100, max_entities)))}
         """)
 
         entities = []
@@ -373,7 +373,13 @@ class KGQueryEngine:
         source_id = source_entities[0]["id"]
         target_id = target_entities[0]["id"]
 
-        # Try to find path using Cypher
+        # Try to find path using Cypher (sanitize IDs to prevent injection)
+        import re
+        _safe_id = re.compile(r'^[a-zA-Z0-9_-]+$')
+        if not _safe_id.match(source_id) or not _safe_id.match(target_id):
+            logger.warning(f"[QueryEngine] Invalid entity IDs for path query: {source_id}, {target_id}")
+            return None
+        max_hops = int(max(1, min(10, max_hops)))
         try:
             result = self.kg.execute_cypher(f"""
                 MATCH path = shortestPath(
