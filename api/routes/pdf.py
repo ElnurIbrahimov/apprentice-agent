@@ -64,15 +64,35 @@ async def extract_url(body: dict):
     if not url.startswith(("http://", "https://")):
         raise HTTPException(400, "Only http:// and https:// URLs are allowed")
 
-    # Block private/loopback IPs (basic SSRF protection)
+    # Block private/loopback IPs (SSRF protection including IPv6)
     from urllib.parse import urlparse
+    import ipaddress
     _host = urlparse(url).hostname or ""
-    _blocked = ("127.", "10.", "172.16.", "172.17.", "172.18.", "172.19.",
-                "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.",
-                "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.",
-                "192.168.", "169.254.", "0.", "localhost", "[::1]")
-    if any(_host.startswith(b) for b in _blocked) or _host == "localhost":
+
+    # Reject obviously blocked hostnames first
+    _blocked_prefixes = (
+        "127.", "10.", "172.16.", "172.17.", "172.18.", "172.19.",
+        "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.",
+        "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.",
+        "192.168.", "169.254.", "0.", "localhost",
+    )
+    if any(_host.startswith(b) for b in _blocked_prefixes) or _host == "localhost":
         raise HTTPException(400, "Cannot fetch from private/loopback addresses")
+
+    # Resolve the hostname to an IP and check it — catches IPv6 loopback,
+    # IPv4-mapped IPv6 (::ffff:127.0.0.1), link-local, and other bypasses
+    try:
+        import socket
+        infos = socket.getaddrinfo(_host, None, type=socket.SOCK_STREAM)
+        for _family, _type, _proto, _canon, sockaddr in infos:
+            addr = ipaddress.ip_address(sockaddr[0])
+            if addr.is_loopback or addr.is_private or addr.is_reserved or addr.is_link_local:
+                raise HTTPException(400, "Cannot fetch from private/loopback addresses")
+    except HTTPException:
+        raise
+    except Exception:
+        # If DNS resolution fails, let httpx handle it below
+        pass
 
     _MAX_PDF_SIZE = 50 * 1024 * 1024  # 50MB
     try:

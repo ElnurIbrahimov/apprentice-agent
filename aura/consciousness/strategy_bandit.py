@@ -433,8 +433,8 @@ class StrategyBandit:
                         f"Strategy: {chosen.value} for {cat.value}",
                         {"category": cat.value, "explore": True},
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[StrategyBandit] activity log failed: {e}")
                 return BanditSelection(
                     request_id=request_id,
                     strategy=chosen,
@@ -477,8 +477,8 @@ class StrategyBandit:
                     f"Strategy: {best_strategy.value} for {cat.value}",
                     {"category": cat.value, "explore": False},
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[StrategyBandit] activity log failed: {e}")
 
             return BanditSelection(
                 request_id=request_id,

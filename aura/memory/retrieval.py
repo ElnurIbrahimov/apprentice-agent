@@ -183,7 +183,11 @@ def retrieve(
     # ------------------------------------------------------------------
     # Channel 3: Kuzu graph traversal (uses kg_brain passed directly)
     # ------------------------------------------------------------------
+    # The KG returns entity names/descriptions, not memory IDs directly.
+    # We use entity context as an expanded BM25 query, then deduplicate
+    # against the BM25 channel to prevent double-counting in RRF fusion.
     graph_ranked: List[Tuple[str, float]] = []
+    bm25_ids = {mid for mid, _ in bm25_ranked}
     if use_graph and kg_brain is not None:
         try:
             context = kg_brain.get_context_for_query(query, max_entities=min(k_candidates, 10))
@@ -193,6 +197,9 @@ def retrieve(
                     lifecycle_states=states, user_id=user_id,
                 )
                 for record, score in graph_results:
+                    # Skip results already returned by the BM25 channel
+                    if record.id in bm25_ids:
+                        continue
                     graph_ranked.append((record.id, score))
                     if record.id not in all_records:
                         all_records[record.id] = record

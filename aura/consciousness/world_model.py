@@ -1579,8 +1579,8 @@ class WorldModel:
             pending = self.get_pending_insights(max_count=1)
             if pending:
                 sections.append(f"Pending insight: {pending[0]['title']}")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[WorldModel] pending insight fetch failed: {e}")
 
         if not sections:
             return ""

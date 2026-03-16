@@ -521,11 +521,9 @@ class MemoryStore:
 
         with self._lock:
             conn = self._get_conn()
-            before = conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
             conn.executemany(sql, rows_data)
             conn.commit()
-            after = conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
-        return after - before
+        return len(rows_data)
 
     def batch_decay(self) -> int:
         """Apply exponential decay to all active memories in one SQL UPDATE.

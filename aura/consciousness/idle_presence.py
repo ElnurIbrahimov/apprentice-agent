@@ -455,7 +455,8 @@ class IdlePresenceEngine:
             from api.routes.idle_behaviors import get_manager
             mgr = get_manager()
             return mgr.get_idle_duration()
-        except Exception:
+        except Exception as e:
+            logger.debug(f"[IdlePresence] idle duration check failed: {e}")
             return 0.0
 
     def _run_idle_tasks(self, idle_seconds: float) -> None:
@@ -597,7 +598,8 @@ class IdlePresenceEngine:
                 return False
             count = len(agent_service.agent.brain.conversation_history)
             return count >= self._conversation_threshold
-        except Exception:
+        except Exception as e:
+            logger.debug(f"[IdlePresence] conversation check failed: {e}")
             return False
 
     def record_user_activity(self) -> None:

@@ -417,8 +417,8 @@ class IntrinsicMotivationEngine:
                 else:
                     # Fallback: use public API
                     all_nodes = kg.get_recent_nodes(limit=200) if hasattr(kg, 'get_recent_nodes') else []
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[IntrinsicMotivation] KG node snapshot failed: {e}")
 
             # 1. Stale nodes (not accessed in 7+ days, access_count >= 3, important types)
             for node in all_nodes:
@@ -465,8 +465,8 @@ class IntrinsicMotivationEngine:
                                 "urgency": 0.6,
                                 "node_id": node.id,
                             })
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[IntrinsicMotivation] orphan node check failed: {e}")
 
         except Exception as e:
             logger.debug(f"[IntrinsicMotivation] KG gap scan error: {e}")

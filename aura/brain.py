@@ -1348,6 +1348,7 @@ class OllamaBrain:
         """
         with self._history_lock:
             history = list(self.conversation_history)
+            snapshot_len = len(self.conversation_history)
         if len(history) < 6:
             return ""
 
@@ -1376,11 +1377,21 @@ class OllamaBrain:
         if not summary:
             return ""
 
-        # Replace history: summary as system message + recent messages
+        # Replace history: summary as system message + recent messages.
+        # Re-acquire lock and check if new messages arrived during the LLM call.
         new_history = [
             {"role": "system", "content": f"[Conversation summary] {summary}"}
         ] + recent_messages
         with self._history_lock:
+            current_len = len(self.conversation_history)
+            if current_len > snapshot_len:
+                # Messages were added while we were summarizing — append them
+                new_messages = self.conversation_history[snapshot_len:]
+                new_history.extend(new_messages)
+                logger.info(
+                    "[BRAIN] Preserved %d messages added during compaction",
+                    len(new_messages),
+                )
             self.conversation_history = new_history
         self._save_history()
 

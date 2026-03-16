@@ -777,7 +777,8 @@ class ReasoningTemplateLibrary:
                 if sim > self.DEDUP_THRESHOLD:
                     return True
             return False
-        except Exception:
+        except Exception as e:
+            logger.debug(f"[TemplateLib] dedup check failed: {e}")
             return False
 
     # ----------------------------------------------------------------

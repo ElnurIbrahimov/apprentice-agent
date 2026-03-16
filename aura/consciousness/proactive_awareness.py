@@ -615,7 +615,8 @@ class ProactiveAwarenessEngine:
 
         try:
             rates = self._world_model.get_insight_engagement_rates(days=30)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"[ProactiveAwareness] engagement rate fetch failed: {e}")
             return
 
         for insight_type, data in rates.items():

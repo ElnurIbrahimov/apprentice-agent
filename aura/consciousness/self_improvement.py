@@ -367,7 +367,8 @@ class SelfImprovementEngine:
             if self._original_run_strategy:
                 try:
                     result = self._original_run_strategy(strategy, goal)
-                except Exception:
+                except Exception as e2:
+                    logger.debug(f"[SelfImprovement] fallback strategy also failed: {e2}")
                     result = (f"strategy failed: {e}", False)
             else:
                 result = (f"strategy failed: {e}", False)
@@ -692,9 +693,9 @@ class SelfImprovementEngine:
             competence_urgency = drives.get("competence", {}).get("urgency", 0)
             if competence_urgency < self.COMPETENCE_URGENCY_THRESHOLD:
                 return False
-        except Exception:
+        except Exception as e:
             # If motivation system unavailable, just use outcome count + timing
-            pass
+            logger.debug(f"[SelfImprovement] motivation check skipped: {e}")
 
         return True
 
