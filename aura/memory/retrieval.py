@@ -15,8 +15,10 @@ Created: 2026-03-16
 """
 
 import logging
+import threading
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -29,27 +31,33 @@ logger = logging.getLogger(__name__)
 # RRF constant (standard value from Cormack et al.)
 RRF_K = 60
 
-# Cross-encoder singleton (lazy-loaded)
+# Cross-encoder singleton (lazy-loaded, thread-safe)
 _cross_encoder = None
 _cross_encoder_attempted = False
+_cross_encoder_lock = threading.Lock()
 
 
 def _get_cross_encoder():
-    """Lazy-load the cross-encoder reranker model."""
+    """Lazy-load the cross-encoder reranker model (thread-safe)."""
     global _cross_encoder, _cross_encoder_attempted
     if _cross_encoder is not None:
         return _cross_encoder
     if _cross_encoder_attempted:
         return None
-    _cross_encoder_attempted = True
-    try:
-        from sentence_transformers import CrossEncoder
-        logger.info("[Retrieval] Loading cross-encoder: cross-encoder/ms-marco-MiniLM-L-6-v2")
-        _cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", max_length=512)
-        return _cross_encoder
-    except Exception as e:
-        logger.warning("[Retrieval] Cross-encoder unavailable (CPU reranking disabled): %s", e)
-        return None
+    with _cross_encoder_lock:
+        if _cross_encoder is not None:
+            return _cross_encoder
+        if _cross_encoder_attempted:
+            return None
+        _cross_encoder_attempted = True
+        try:
+            from sentence_transformers import CrossEncoder
+            logger.info("[Retrieval] Loading cross-encoder: cross-encoder/ms-marco-MiniLM-L-6-v2")
+            _cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", max_length=512)
+            return _cross_encoder
+        except Exception as e:
+            logger.warning("[Retrieval] Cross-encoder unavailable (CPU reranking disabled): %s", e)
+            return None
 
 
 def _get_query_embedding(text: str) -> Optional[np.ndarray]:
@@ -72,6 +80,10 @@ def _get_query_embedding(text: str) -> Optional[np.ndarray]:
     return None
 
 
+# Sentinel for "reranking was not attempted"
+_RERANK_NOT_SET = float('-inf')
+
+
 @dataclass
 class RetrievalResult:
     """A single result from the retrieval pipeline."""
@@ -81,7 +93,7 @@ class RetrievalResult:
     bm25_rank: int = 0
     graph_rank: int = 0
     rrf_score: float = 0.0
-    rerank_score: float = 0.0
+    rerank_score: float = _RERANK_NOT_SET  # Sentinel: not reranked
     strength: float = 1.0            # FadeMem strength at retrieval time
     channels_hit: int = 0            # How many channels returned this result
 
@@ -110,19 +122,11 @@ def retrieve(
     user_id: Optional[str] = None,
     use_reranker: bool = True,
     use_graph: bool = True,
+    kg_brain=None,
     lifecycle_states: Optional[List[str]] = None,
     touch_results: bool = True,
 ) -> List[RetrievalResult]:
     """Multi-channel retrieval with RRF fusion and optional reranking.
-
-    Pipeline:
-      1. Semantic search (cosine on embedding BLOBs)
-      2. BM25 keyword search (FTS5)
-      3. Kuzu graph traversal (optional)
-      4. RRF fusion
-      5. Cross-encoder reranking (top k_candidates → top k)
-      6. FadeMem strength multiplier
-      7. Touch accessed memories
 
     Args:
         query: Search query text
@@ -132,12 +136,17 @@ def retrieve(
         user_id: Filter by user (None = all users)
         use_reranker: Apply cross-encoder reranking
         use_graph: Include Kuzu graph channel
+        kg_brain: KG brain instance (avoids circular import of unified_memory)
         lifecycle_states: Filter by lifecycle states
         touch_results: Whether to touch/reinforce returned memories
 
     Returns:
         List of RetrievalResult sorted by final score descending
     """
+    # Guard: empty query
+    if not query or not query.strip():
+        return []
+
     if store is None:
         store = get_memory_store()
 
@@ -184,29 +193,26 @@ def retrieve(
     ranked_lists.append(bm25_ranked)
 
     # ------------------------------------------------------------------
-    # Channel 3: Kuzu graph traversal
+    # Channel 3: Kuzu graph traversal (uses kg_brain passed directly)
     # ------------------------------------------------------------------
     graph_ranked: List[Tuple[str, float]] = []
-    if use_graph:
+    if use_graph and kg_brain is not None:
         try:
-            from aura.memory.unified_memory import get_unified_memory
-            um = get_unified_memory()
-            if hasattr(um, '_kg_brain') and um._kg_brain is not None:
-                context = um._kg_brain.get_context_for_query(query, max_entities=min(k_candidates, 10))
-                if context and len(context) > 20:
-                    # Graph returns context string — search store for matching memories
-                    graph_results = store.search_bm25(
-                        context[:200], k=k_candidates // 2,
-                        lifecycle_states=states, user_id=user_id,
-                    )
-                    for record, score in graph_results:
-                        graph_ranked.append((record.id, score))
-                        if record.id not in all_records:
-                            all_records[record.id] = record
-                        channel_hits[record.id] = channel_hits.get(record.id, 0) + 1
+            context = kg_brain.get_context_for_query(query, max_entities=min(k_candidates, 10))
+            if context and len(context) > 20:
+                graph_results = store.search_bm25(
+                    context[:200], k=k_candidates // 2,
+                    lifecycle_states=states, user_id=user_id,
+                )
+                for record, score in graph_results:
+                    graph_ranked.append((record.id, score))
+                    if record.id not in all_records:
+                        all_records[record.id] = record
+                    channel_hits[record.id] = channel_hits.get(record.id, 0) + 1
         except Exception as e:
             logger.debug("[Retrieval] Graph channel error: %s", e)
-    ranked_lists.append(graph_ranked)
+    if graph_ranked:
+        ranked_lists.append(graph_ranked)
 
     if not all_records:
         return []
@@ -216,6 +222,11 @@ def retrieve(
     # ------------------------------------------------------------------
     rrf_scores = reciprocal_rank_fusion(ranked_lists)
 
+    # Pre-build rank index dicts (O(1) lookup instead of O(n) scan)
+    sem_index = {mid: i for i, (mid, _) in enumerate(semantic_ranked)}
+    bm_index = {mid: i for i, (mid, _) in enumerate(bm25_ranked)}
+    gr_index = {mid: i for i, (mid, _) in enumerate(graph_ranked)}
+
     # Build candidate list sorted by RRF score
     candidates: List[RetrievalResult] = []
     for mem_id, rrf_score in sorted(rrf_scores.items(), key=lambda x: -x[1]):
@@ -223,17 +234,12 @@ def retrieve(
         if not record:
             continue
 
-        # Compute per-channel ranks
-        sem_rank = next((i for i, (mid, _) in enumerate(semantic_ranked) if mid == mem_id), -1)
-        bm_rank = next((i for i, (mid, _) in enumerate(bm25_ranked) if mid == mem_id), -1)
-        gr_rank = next((i for i, (mid, _) in enumerate(graph_ranked) if mid == mem_id), -1)
-
         candidates.append(RetrievalResult(
             record=record,
             rrf_score=rrf_score,
-            semantic_rank=sem_rank + 1 if sem_rank >= 0 else 0,
-            bm25_rank=bm_rank + 1 if bm_rank >= 0 else 0,
-            graph_rank=gr_rank + 1 if gr_rank >= 0 else 0,
+            semantic_rank=sem_index.get(mem_id, -1) + 1,
+            bm25_rank=bm_index.get(mem_id, -1) + 1,
+            graph_rank=gr_index.get(mem_id, -1) + 1,
             channels_hit=channel_hits.get(mem_id, 0),
         ))
 
@@ -243,6 +249,7 @@ def retrieve(
     # ------------------------------------------------------------------
     # Cross-encoder reranking
     # ------------------------------------------------------------------
+    reranked = False
     if use_reranker and len(top_candidates) > 1:
         encoder = _get_cross_encoder()
         if encoder is not None:
@@ -251,7 +258,7 @@ def retrieve(
                 scores = encoder.predict(pairs)
                 for i, score in enumerate(scores):
                     top_candidates[i].rerank_score = float(score)
-                # Re-sort by rerank score
+                reranked = True
                 top_candidates.sort(key=lambda c: c.rerank_score, reverse=True)
             except Exception as e:
                 logger.debug("[Retrieval] Cross-encoder rerank error: %s", e)
@@ -259,7 +266,6 @@ def retrieve(
     # ------------------------------------------------------------------
     # FadeMem strength multiplier
     # ------------------------------------------------------------------
-    from datetime import datetime
     now_ts = datetime.now().timestamp()
     for candidate in top_candidates:
         rec = candidate.record
@@ -271,8 +277,8 @@ def retrieve(
         strength = compute_strength(rec.strength, rec.decay_rate, hours)
         candidate.strength = strength
 
-        # Final score = RRF * strength (or rerank * strength if reranked)
-        if candidate.rerank_score > 0:
+        # Final score: use rerank score if reranking was performed, else RRF
+        if reranked and candidate.rerank_score != _RERANK_NOT_SET:
             candidate.score = candidate.rerank_score * strength
         else:
             candidate.score = candidate.rrf_score * strength

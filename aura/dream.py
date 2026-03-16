@@ -366,8 +366,10 @@ def _consolidate_amem_notes(amem_system, similarity_threshold: float = 0.85) -> 
     embeddings = {}
     for note in notes:
         note_id = note.id
-        if note_id and hasattr(amem_system, '_embeddings') and note_id in amem_system._embeddings:
-            embeddings[note_id] = amem_system._embeddings[note_id]
+        if note_id and hasattr(amem_system, '_embeddings'):
+            emb = amem_system._embeddings.get(note_id)
+            if emb is not None:
+                embeddings[note_id] = emb
 
     # Find pairs with high cosine similarity and merge note_b into note_a
     for i, note_a in enumerate(notes):
@@ -654,6 +656,7 @@ class DreamConsolidator:
         self._running   = False
         self._lock      = threading.Lock()
         self._last_seen_ids: set = set()
+        self._MAX_SEEN_IDS = 500
 
     # ------------------------------------------------------------------
     # Entry points
@@ -701,6 +704,11 @@ class DreamConsolidator:
                     cycle.summaries_written += 1
                     self._write_summary_memory(summary, user_id, store)
                     self._last_seen_ids.update(ids)
+                    # Evict oldest IDs to prevent unbounded growth
+                    if len(self._last_seen_ids) > self._MAX_SEEN_IDS:
+                        excess = len(self._last_seen_ids) - self._MAX_SEEN_IDS
+                        for _ in range(excess):
+                            self._last_seen_ids.pop()
 
             # 4. USER PROFILE UPDATE
             try:
@@ -927,10 +935,12 @@ class DreamConsolidator:
                         if rec_a.importance >= rec_b.importance:
                             store.update(ids[j], lifecycle_state="archived")
                             merged_ids.add(ids[j])
+                            merged_count += 1
                         else:
                             store.update(ids[i], lifecycle_state="archived")
                             merged_ids.add(ids[i])
-                        merged_count += 1
+                            merged_count += 1
+                            break  # ids[i] is archived, stop comparing it
         except Exception as e:
             logger.debug("[DreamConsolidator] Merge similar error: %s", e)
         return merged_count
@@ -973,7 +983,7 @@ class DreamConsolidator:
                 try:
                     ts = datetime.fromisoformat(rec.created_at).timestamp()
                 except (ValueError, TypeError):
-                    ts = time.time()
+                    ts = 0  # Treat corrupt timestamps as ancient (pruneable)
                 if ts < stale_cutoff:
                     store.update(rec.id, lifecycle_state="archived")
                     pruned.append(rec.id)
@@ -1046,6 +1056,7 @@ class DreamConsolidator:
                 store = get_memory_store()
 
             record = MemoryRecord(
+                id=f"dream_{summary.cluster_id}",  # Stable ID prevents duplicate summaries
                 content=summary.compressed_text,
                 title=summary.compressed_text[:80],
                 source="dream_consolidation",

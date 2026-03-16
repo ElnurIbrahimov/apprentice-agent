@@ -20,13 +20,19 @@ from .store import MemoryStore, get_memory_store
 
 logger = logging.getLogger(__name__)
 
-# ln(2) / (14 days * 24 hours) ≈ 0.00206
-DEFAULT_HALF_LIFE_HOURS = 14 * 24  # 336 hours = 2 weeks
+# Read from Config if available, else use defaults
+try:
+    from aura.config import Config
+    DEFAULT_HALF_LIFE_HOURS = getattr(Config, "FADEM_HALF_LIFE_HOURS", 14 * 24)
+    PRUNE_THRESHOLD = getattr(Config, "FADEM_PRUNE_THRESHOLD", 0.05)
+except Exception:
+    DEFAULT_HALF_LIFE_HOURS = 14 * 24  # 336 hours = 2 weeks
+    PRUNE_THRESHOLD = 0.05
+
 DEFAULT_DECAY_RATE = math.log(2) / DEFAULT_HALF_LIFE_HOURS  # ≈ 0.00206
 
 REINFORCE_STRENGTH_DELTA = 0.05
 REINFORCE_DECAY_REDUCTION = 0.10  # 10% reduction in decay_rate per access
-PRUNE_THRESHOLD = 0.05
 MIN_DECAY_RATE = 0.0001  # Floor — memories can't become fully permanent
 
 
@@ -55,13 +61,23 @@ def reinforce(
 ) -> Optional[float]:
     """Touch a memory: increase strength, reduce decay rate (spaced repetition).
 
+    Computes real-time decayed strength before adding the reinforcement delta,
+    preventing inflated strength from stale stored values.
     Returns new strength, or None if memory not found.
     """
     record = store.get(memory_id)
     if not record:
         return None
 
-    new_strength = min(1.0, record.strength + REINFORCE_STRENGTH_DELTA)
+    # Compute real-time strength (apply elapsed decay first)
+    try:
+        la_ts = datetime.fromisoformat(record.last_accessed).timestamp()
+    except (ValueError, TypeError):
+        la_ts = datetime.now().timestamp()
+    hours = max(0, (datetime.now().timestamp() - la_ts) / 3600)
+    current_strength = compute_strength(record.strength, record.decay_rate, hours)
+
+    new_strength = min(1.0, current_strength + REINFORCE_STRENGTH_DELTA)
     new_decay = max(MIN_DECAY_RATE, record.decay_rate * (1.0 - REINFORCE_DECAY_REDUCTION))
 
     store.update(

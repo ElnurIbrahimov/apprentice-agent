@@ -26,7 +26,7 @@ from .retrieval import retrieve, RetrievalResult
 from .fade_mem import batch_decay_and_prune, reinforce
 
 # User profile
-from .user_profile import UserProfile, load_profile, save_profile
+from .user_profile import UserProfile, load_profile, save_profile, update_profile_from_memories
 
 __all__ = [
     # Legacy
@@ -49,4 +49,5 @@ __all__ = [
     "UserProfile",
     "load_profile",
     "save_profile",
+    "update_profile_from_memories",
 ]

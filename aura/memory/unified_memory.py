@@ -16,7 +16,6 @@ import json
 import logging
 import math
 import threading
-import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -63,7 +62,6 @@ class UnifiedMemory:
         self._store = None
         self._kg_brain = None
         self._init_lock = threading.Lock()
-        self._store_initialized = False
 
     def set_kg_brain(self, bridge) -> None:
         """Register the Kuzu KG Brain bridge (called by agent after initialization)."""
@@ -73,10 +71,10 @@ class UnifiedMemory:
 
     def _ensure_store(self):
         """Lazy-init the MemoryStore singleton."""
-        if self._store_initialized:
+        if self._store is not None:
             return
         with self._init_lock:
-            if self._store_initialized:
+            if self._store is not None:
                 return
             try:
                 from .store import get_memory_store
@@ -84,7 +82,6 @@ class UnifiedMemory:
                 logger.debug("[UnifiedMemory] SQLite store initialized")
             except Exception as e:
                 logger.error("[UnifiedMemory] Failed to init store: %s", e)
-            self._store_initialized = True
 
     # ------------------------------------------------------------------
     # Query
@@ -126,6 +123,7 @@ class UnifiedMemory:
                 k_candidates=k * 3,
                 use_reranker=True,
                 use_graph=(self._kg_brain is not None),
+                kg_brain=self._kg_brain,
             )
             for rr in retrieval_results:
                 rec = rr.record
@@ -384,7 +382,7 @@ class UnifiedMemory:
         c_d = current_pad.get("dominance", 0.0)
         dist = math.sqrt((m_p - c_p)**2 + (m_a - c_a)**2 + (m_d - c_d)**2)
         max_dist = math.sqrt(12)
-        return 1.0 - (dist / max_dist)
+        return max(0.0, min(1.0, 1.0 - (dist / max_dist)))
 
     # ------------------------------------------------------------------
     # Info / lifecycle
@@ -435,6 +433,7 @@ def get_unified_memory() -> UnifiedMemory:
         with _unified_memory_lock:
             if _unified_instance is None:
                 _unified_instance = UnifiedMemory()
+                atexit.register(_unified_instance.close)
     return _unified_instance
 
 

@@ -96,6 +96,9 @@ def migrate_memory_system(store, dry_run=False):
         except json.JSONDecodeError:
             pass
 
+        row_id = str(row_id)
+        if not content or not content.strip():
+            continue
         record = MemoryRecord(
             id=f"ms_{row_id}" if not row_id.startswith("ms_") else row_id,
             content=content,
@@ -174,6 +177,8 @@ def migrate_amem(store, dry_run=False):
     for note in notes:
         note_id = note.get("id", "")
         if not note_id:
+            continue
+        if not note.get("content", "").strip():
             continue
 
         keywords = note.get("keywords", [])
@@ -310,12 +315,29 @@ def migrate_rag(store, dry_run=False):
 
     try:
         conn = sqlite3.connect(str(chroma_path))
-        # ChromaDB internal schema — try to extract documents
-        rows = conn.execute("""
-            SELECT e.id, e.document, e.metadata
-            FROM embeddings e
-            WHERE e.document IS NOT NULL AND e.document != ''
-        """).fetchall()
+        # ChromaDB stores documents in embeddings_queue (WAL) or embedding_metadata
+        # Try embeddings_queue first (has document column directly)
+        rows = []
+        try:
+            rows = conn.execute("""
+                SELECT id, document, metadata
+                FROM embeddings_queue
+                WHERE document IS NOT NULL AND document != ''
+                AND operation != 3
+            """).fetchall()
+        except sqlite3.OperationalError:
+            pass
+        # Fallback: try segments_metadata for _document key
+        if not rows:
+            try:
+                rows = conn.execute("""
+                    SELECT DISTINCT em.id, em.string_value, ''
+                    FROM embedding_metadata em
+                    WHERE em.key = 'chroma:document'
+                    AND em.string_value IS NOT NULL AND em.string_value != ''
+                """).fetchall()
+            except sqlite3.OperationalError:
+                pass
         conn.close()
     except Exception as e:
         logger.info("[Phase D] ChromaDB extraction failed: %s — skipping", e)
@@ -391,6 +413,9 @@ def migrate_dream_insights(store, dry_run=False):
 
     records = []
     for row_id, content, mem_type, ts, meta_str in rows:
+        row_id = str(row_id)
+        if not content or not content.strip():
+            continue
         record = MemoryRecord(
             id=f"dream_{row_id}" if not row_id.startswith("dream_") else row_id,
             content=content,
@@ -418,6 +443,12 @@ def migrate_dream_insights(store, dry_run=False):
 def re_embed(store, batch_size=50):
     """Re-embed all memories that lack embeddings."""
     import numpy as np
+
+    # Preflight: verify Ollama is reachable
+    test_emb = get_embedding("test connection")
+    if test_emb is None:
+        logger.warning("[Phase F] Ollama not reachable — skipping re-embedding")
+        return 0
 
     ids_without = store.get_all_ids_with_embeddings(has_embedding=False)
     if not ids_without:

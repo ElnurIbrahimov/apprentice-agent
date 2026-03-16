@@ -15,12 +15,12 @@ Created: 2026-03-16
 import atexit
 import json
 import logging
+import math
 import sqlite3
-import struct
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -268,10 +268,22 @@ class MemoryStore:
             return _blob_to_float32(row[0])
         return None
 
+    # Fields allowed in update() — prevents SQL injection via kwargs keys
+    _UPDATABLE_FIELDS = frozenset({
+        "content", "title", "source", "memory_type", "importance",
+        "keywords", "tags", "category", "boxes", "links",
+        "temporal_context", "emotional_valence", "emotional_pad",
+        "strength", "decay_rate", "access_count", "last_accessed",
+        "lifecycle_state", "user_id", "metadata", "updated_at",
+    })
+
     def update(self, memory_id: str, **kwargs) -> bool:
         """Update specific fields on a memory record."""
         if not kwargs:
             return False
+        bad_fields = set(kwargs) - self._UPDATABLE_FIELDS
+        if bad_fields:
+            raise ValueError(f"Invalid update fields: {bad_fields}")
         kwargs["updated_at"] = datetime.now().isoformat()
         sets = ", ".join(f"{k}=?" for k in kwargs)
         vals = list(kwargs.values()) + [memory_id]
@@ -387,7 +399,8 @@ class MemoryStore:
             return []
         match_expr = " OR ".join(f'"{w}"' for w in words[:10])  # Cap at 10 terms
 
-        sql = f"""SELECT m.*, bm25(memories_fts) as rank
+        col_list = ", ".join(f"m.{c}" for c in _COLUMNS)
+        sql = f"""SELECT {col_list}, bm25(memories_fts) as rank
                   FROM memories m
                   JOIN memories_fts ON memories_fts.rowid = m.rowid
                   WHERE memories_fts MATCH ?
@@ -461,14 +474,13 @@ class MemoryStore:
     ) -> List[Tuple[str, bool]]:
         """Get (id, has_embedding) for all memories. Used by migration/re-embed."""
         sql = "SELECT id, CASE WHEN embedding IS NOT NULL THEN 1 ELSE 0 END FROM memories"
+        if has_embedding is True:
+            sql += " WHERE embedding IS NOT NULL"
+        elif has_embedding is False:
+            sql += " WHERE embedding IS NULL"
         with self._lock:
             rows = self._get_conn().execute(sql).fetchall()
-        results = [(r[0], bool(r[1])) for r in rows]
-        if has_embedding is True:
-            return [(r[0], r[1]) for r in results if r[1]]
-        elif has_embedding is False:
-            return [(r[0], r[1]) for r in results if not r[1]]
-        return results
+        return [(r[0], bool(r[1])) for r in rows]
 
     # ------------------------------------------------------------------
     # Batch operations
@@ -504,9 +516,11 @@ class MemoryStore:
 
         with self._lock:
             conn = self._get_conn()
-            cur = conn.executemany(sql, rows_data)
+            before = conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
+            conn.executemany(sql, rows_data)
             conn.commit()
-        return cur.rowcount
+            after = conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
+        return after - before
 
     def batch_decay(self) -> int:
         """Apply exponential decay to all active memories in one SQL UPDATE.
@@ -514,33 +528,30 @@ class MemoryStore:
         strength = strength * exp(-decay_rate * hours_since_last_access)
         Returns number of rows affected.
         """
-        # SQLite doesn't have exp(), so we compute in Python
         now = datetime.now().isoformat()
+        now_ts = datetime.now().timestamp()
         sql = """SELECT id, strength, decay_rate, last_accessed
                  FROM memories
                  WHERE lifecycle_state IN ('candidate', 'stable', 'summary')
                  AND strength > 0.01"""
-        with self._lock:
-            rows = self._get_conn().execute(sql).fetchall()
-
-        if not rows:
-            return 0
-
-        import math
-        now_ts = datetime.now().timestamp()
-        updates: List[Tuple[float, str, str]] = []
-        for mem_id, strength, decay_rate, last_accessed in rows:
-            try:
-                la_ts = datetime.fromisoformat(last_accessed).timestamp()
-            except (ValueError, TypeError):
-                la_ts = now_ts
-            hours = max(0, (now_ts - la_ts) / 3600)
-            new_strength = strength * math.exp(-decay_rate * hours)
-            new_strength = max(0.0, min(1.0, new_strength))
-            updates.append((new_strength, now, mem_id))
 
         with self._lock:
             conn = self._get_conn()
+            rows = conn.execute(sql).fetchall()
+            if not rows:
+                return 0
+
+            updates: List[Tuple[float, str, str]] = []
+            for mem_id, strength, decay_rate, last_accessed in rows:
+                try:
+                    la_ts = datetime.fromisoformat(last_accessed).timestamp()
+                except (ValueError, TypeError):
+                    la_ts = now_ts
+                hours = max(0, (now_ts - la_ts) / 3600)
+                new_strength = strength * math.exp(-decay_rate * hours)
+                new_strength = max(0.0, min(1.0, new_strength))
+                updates.append((new_strength, now, mem_id))
+
             conn.executemany(
                 "UPDATE memories SET strength=?, updated_at=? WHERE id=?",
                 updates,

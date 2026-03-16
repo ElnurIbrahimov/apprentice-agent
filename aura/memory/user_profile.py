@@ -73,9 +73,20 @@ class UserProfile:
 
     @classmethod
     def from_json(cls, json_str: str) -> "UserProfile":
-        """Deserialize from JSON string."""
+        """Deserialize from JSON string with type coercion for safety."""
         data = json.loads(json_str)
-        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+        filtered = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
+        # Coerce list fields that might be stored as strings
+        for list_field in ("expertise", "active_goals", "key_facts"):
+            if list_field in filtered and isinstance(filtered[list_field], str):
+                filtered[list_field] = [filtered[list_field]] if filtered[list_field] else []
+        # Coerce dict fields that might be stored as strings
+        if "preferences" in filtered and isinstance(filtered["preferences"], str):
+            try:
+                filtered["preferences"] = json.loads(filtered["preferences"])
+            except (json.JSONDecodeError, TypeError):
+                filtered["preferences"] = {}
+        return cls(**filtered)
 
     def is_empty(self) -> bool:
         """Check if the profile has any meaningful content."""
