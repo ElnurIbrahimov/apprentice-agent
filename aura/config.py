@@ -10,7 +10,9 @@ from pathlib import Path
 from typing import Dict, List
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load .env from the project root (not cwd, which may be different)
+_project_root = Path(__file__).resolve().parent.parent
+load_dotenv(_project_root / ".env")
 
 logger = logging.getLogger(__name__)
 
