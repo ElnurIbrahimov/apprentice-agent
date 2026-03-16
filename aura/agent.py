@@ -4583,10 +4583,10 @@ Python code:"""
             except Exception as e:
                 logger.debug(f"[AURA] Input processing error: {e}")
 
-        # Chain-of-Emotion Appraisal — LLM-based mood update before response
+        # Chain-of-Emotion Appraisal — fire-and-forget to avoid blocking response
         try:
             from aura.emotion.integration import appraise_message
-            appraise_message(message, brain=self.brain)
+            _AGENT_EXECUTOR.submit(appraise_message, message, self.brain)
         except Exception as e:
             logger.debug(f"[ALMA] Appraisal error: {e}")
 
@@ -4944,7 +4944,7 @@ Python code:"""
 
         # Close the coherent loop — feed outcome back to ALMA
         try:
-            self.brain.update_emotional_state(success=True)
+            self.brain.update_emotional_state(success=bool(response and len(response) > 10))
         except Exception:
             pass
 
@@ -5204,10 +5204,10 @@ Python code:"""
                 aura_context = self._build_aura_context(message)
             except Exception as e:
                 logger.debug(f"[Agent] non-critical: {e}")
-        # Chain-of-Emotion Appraisal (streaming path)
+        # Chain-of-Emotion Appraisal — fire-and-forget (streaming path)
         try:
             from aura.emotion.integration import appraise_message
-            appraise_message(message, brain=self.brain)
+            _AGENT_EXECUTOR.submit(appraise_message, message, self.brain)
         except Exception as e:
             logger.debug(f"[ALMA] Appraisal error: {e}")
 
@@ -5343,7 +5343,7 @@ Python code:"""
 
         # Close the coherent loop — feed outcome back to ALMA (streaming path)
         try:
-            self.brain.update_emotional_state(success=True)
+            self.brain.update_emotional_state(success=bool(full_response and len(full_response) > 10))
         except Exception:
             pass
 
@@ -5587,15 +5587,18 @@ Python code:"""
         except Exception:
             return ""
 
+    _temporal_lock = threading.Lock()
+
     def _temporal_grounding(self) -> Optional[str]:
         """Build temporal grounding context if this is a new session.
 
         Detects session start (>5 min since last interaction), loads narrative
         self-model, calculates time elapsed, returns grounding context.
         """
-        now = time.time()
-        last = getattr(self, '_last_interaction_ts', 0)
-        self._last_interaction_ts = now
+        with self._temporal_lock:
+            now = time.time()
+            last = getattr(self, '_last_interaction_ts', 0)
+            self._last_interaction_ts = now
 
         if last == 0:
             # First call ever — skip grounding

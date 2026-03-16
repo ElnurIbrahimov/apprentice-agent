@@ -213,7 +213,10 @@ def save_narrative_self(narrative: NarrativeSelf, path: Optional[str] = None) ->
             os.close(tmp_fd)
             os.replace(tmp_path, str(file_path))
         except Exception:
-            os.close(tmp_fd) if not os.get_inheritable(tmp_fd) else None
+            try:
+                os.close(tmp_fd)
+            except OSError:
+                pass
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
             raise

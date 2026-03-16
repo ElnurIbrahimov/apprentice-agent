@@ -10,7 +10,7 @@ Connects ALMA emotional engine to AURA's brain and response pipeline:
 
 import logging
 import re
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List
 
 from .alma_engine import (
     alma_engine,
@@ -139,17 +139,24 @@ def get_current_pad_dict() -> Optional[Dict[str, float]]:
 
 def get_emotional_context_for_prompt() -> Dict[str, Any]:
     """Get structured emotional context for advanced prompt engineering."""
-    state = get_emotional_state()
-    mod = get_response_modulation()
-
-    return {
-        "emotion": state.get("dominant_emotion", "neutral"),
-        "mood": state.get("mood", {}).get("label", "neutral"),
-        "intensity": state.get("intensity", 0),
-        "pad": state.get("pad", {"pleasure": 0, "arousal": 0, "dominance": 0}),
-        "modulation": mod,
-        "style_prompt": get_emotional_style_prompt(),
-    }
+    try:
+        state = get_emotional_state()
+        mod = get_response_modulation()
+        return {
+            "emotion": state.get("dominant_emotion", "neutral"),
+            "mood": state.get("mood", {}).get("label", "neutral"),
+            "intensity": state.get("intensity", 0),
+            "pad": state.get("pad", {"pleasure": 0, "arousal": 0, "dominance": 0}),
+            "modulation": mod,
+            "style_prompt": get_emotional_style_prompt(),
+        }
+    except Exception as e:
+        logger.debug("[ALMA] Emotional context error: %s", e)
+        return {
+            "emotion": "neutral", "mood": "neutral", "intensity": 0,
+            "pad": {"pleasure": 0, "arousal": 0, "dominance": 0},
+            "modulation": {}, "style_prompt": "",
+        }
 
 
 # =============================================================================
@@ -178,11 +185,14 @@ def appraise_message(message: str, brain=None) -> Optional[Dict[str, Any]]:
     # Get current state for the prompt
     pad = get_current_pad_dict() or {"pleasure": 0.0, "arousal": 0.0, "dominance": 0.0}
 
+    # Sanitize message to prevent pipe-delimiter injection
+    safe_msg = message[:300].replace("|", " ").replace("\n", " ")
+
     prompt = (
         f"Given my current mood (P={pad['pleasure']:.1f}, A={pad['arousal']:.1f}, D={pad['dominance']:.1f}) "
         f"and my personality (curious, warm, helpful, subtly witty):\n"
         f"How would I naturally react to this message?\n"
-        f'"{message[:300]}"\n'
+        f'"{safe_msg}"\n'
         f"Reply EXACTLY in this format (one line):\n"
         f"emotion_name | intensity 0.0-1.0 | desirability -1.0 to 1.0 | one-sentence reason"
     )
@@ -190,7 +200,7 @@ def appraise_message(message: str, brain=None) -> Optional[Dict[str, Any]]:
     # Try LLM appraisal
     if brain and hasattr(brain, '_quick_generate'):
         try:
-            raw = brain._quick_generate(prompt, timeout=10)
+            raw = brain._quick_generate(prompt, timeout=5)
             result = _parse_appraisal(raw)
             if result:
                 # Feed into ALMA OCC appraisal

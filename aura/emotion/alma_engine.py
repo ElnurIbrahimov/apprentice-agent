@@ -961,7 +961,11 @@ class ALMAEngine:
             if "saved_at" in data:
                 try:
                     saved_time = datetime.fromisoformat(data["saved_at"])
-                    hours_elapsed = (datetime.now() - saved_time).total_seconds() / 3600
+                    # Normalize both to naive local time to avoid aware/naive mismatch
+                    now = datetime.now()
+                    if saved_time.tzinfo is not None:
+                        saved_time = saved_time.replace(tzinfo=None)
+                    hours_elapsed = (now - saved_time).total_seconds() / 3600
                     # 5% decay per hour, capped at 30% total
                     decay_factor = min(0.3, hours_elapsed * 0.05)
                     if decay_factor > 0.01:

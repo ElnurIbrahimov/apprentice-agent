@@ -409,7 +409,7 @@ class InnerMonologueTool:
             result = brain._quick_generate(
                 f"Based on these recent internal thoughts:\n{thought_text}\n"
                 f"What should I keep in mind for my next response? Reply in 1-2 sentences only.",
-                timeout=10,
+                timeout=3,
             )
             return result.strip()[:300] if result else ""
         except Exception as e:
