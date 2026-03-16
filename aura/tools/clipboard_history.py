@@ -14,6 +14,11 @@ MAX_HISTORY = 200
 HISTORY_FILE = Path(__file__).parent.parent.parent / "data" / "clipboard_history.json"
 
 
+import threading as _threading
+
+_file_lock = _threading.Lock()
+
+
 class ClipboardHistoryTool:
     """Extended clipboard manager with history, search, pinning, and categories."""
 
@@ -29,22 +34,24 @@ class ClipboardHistoryTool:
             self._save_history({"entries": [], "pinned": []})
 
     def _load_history(self) -> dict:
-        try:
-            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, IOError):
-            return {"entries": [], "pinned": []}
+        with _file_lock:
+            try:
+                with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError):
+                return {"entries": [], "pinned": []}
 
     def _save_history(self, data: dict) -> bool:
-        try:
-            # Enforce max history
-            if len(data.get("entries", [])) > MAX_HISTORY:
-                data["entries"] = data["entries"][-MAX_HISTORY:]
-            with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
-            return True
-        except IOError:
-            return False
+        with _file_lock:
+            try:
+                # Enforce max history
+                if len(data.get("entries", [])) > MAX_HISTORY:
+                    data["entries"] = data["entries"][-MAX_HISTORY:]
+                with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2)
+                return True
+            except IOError:
+                return False
 
     def _get_clipboard(self) -> Optional[str]:
         """Read current system clipboard."""

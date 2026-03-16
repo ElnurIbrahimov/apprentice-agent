@@ -534,10 +534,10 @@ class ALMAEngine:
             # Update neuromodulators
             self._update_neuromodulators()
 
-            # Log to history
-            self._log_emotion(emotion)
-
             logger.debug(f"Triggered emotion: {emotion_name} ({intensity:.2f})")
+
+        # Log to history OUTSIDE lock (file I/O shouldn't block other threads)
+        self._log_emotion(emotion)
 
             # Record real thought: emotional state change
             try:

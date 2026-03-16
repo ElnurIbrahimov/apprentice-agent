@@ -177,6 +177,7 @@ class MemoryWriteGate:
 
         # Recent candidate hashes for ultra-fast exact-dup suppression
         self._recent_hashes: Dict[str, float] = {}   # hash → epoch
+        self._hash_lock = threading.Lock()  # Protect _recent_hashes across threads
         self._RECENT_TTL = 300.0  # 5 min
 
     # ------------------------------------------------------------------
@@ -390,19 +391,21 @@ class MemoryWriteGate:
 
     def _is_recent_exact_dup(self, c: MemoryCandidate) -> bool:
         now = time.time()
-        # Purge stale entries
-        stale = [h for h, ts in self._recent_hashes.items() if now - ts > self._RECENT_TTL]
-        for h in stale:
-            del self._recent_hashes[h]
-        return c.content_hash in self._recent_hashes
+        with self._hash_lock:
+            # Purge stale entries
+            stale = [h for h, ts in self._recent_hashes.items() if now - ts > self._RECENT_TTL]
+            for h in stale:
+                del self._recent_hashes[h]
+            return c.content_hash in self._recent_hashes
 
     def _record_hash(self, c: MemoryCandidate) -> None:
-        self._recent_hashes[c.content_hash] = time.time()
-        # Hard cap to prevent unbounded growth
-        if len(self._recent_hashes) > 10000:
-            sorted_items = sorted(self._recent_hashes.items(), key=lambda x: x[1])
-            for h, _ in sorted_items[:5000]:
-                del self._recent_hashes[h]
+        with self._hash_lock:
+            self._recent_hashes[c.content_hash] = time.time()
+            # Hard cap to prevent unbounded growth
+            if len(self._recent_hashes) > 10000:
+                sorted_items = sorted(self._recent_hashes.items(), key=lambda x: x[1])
+                for h, _ in sorted_items[:5000]:
+                    del self._recent_hashes[h]
 
     def _decide(
         self,

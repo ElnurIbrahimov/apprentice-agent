@@ -56,6 +56,28 @@ _wm_consecutive_failures = 0  # Circuit breaker: disable after repeated failures
 _WM_CIRCUIT_BREAKER_THRESHOLD = 3  # Disable after N consecutive failures
 _WM_CIRCUIT_BREAKER_RESET_AFTER = 300  # Re-enable after 5 minutes
 _wm_circuit_broken_at: float = 0.0
+_wm_lock = threading.Lock()  # Protect circuit breaker globals
+
+
+def _resp_content(response) -> str:
+    """Extract content from an Ollama response (dict or Pydantic object)."""
+    if response is None:
+        return ""
+    if isinstance(response, dict):
+        msg = response.get("message", {})
+        return msg.get("content", "") if isinstance(msg, dict) else ""
+    # Pydantic ChatResponse object
+    msg = getattr(response, "message", None)
+    if msg is not None:
+        return getattr(msg, "content", "") or ""
+    return ""
+
+
+def _resp_get(response, key, default=None):
+    """Get a field from an Ollama response (dict or Pydantic)."""
+    if isinstance(response, dict):
+        return response.get(key, default)
+    return getattr(response, key, default)
 
 def _run_world_model_extraction(conversation_id, messages):
     """Background thread target for world model extraction (ADV-02 Phase 2).
@@ -65,14 +87,15 @@ def _run_world_model_extraction(conversation_id, messages):
     """
     global _wm_consecutive_failures, _wm_circuit_broken_at
 
-    # Circuit breaker check
-    if _wm_consecutive_failures >= _WM_CIRCUIT_BREAKER_THRESHOLD:
-        if time.time() - _wm_circuit_broken_at < _WM_CIRCUIT_BREAKER_RESET_AFTER:
-            logger.debug("[BRAIN] World model extraction circuit breaker OPEN — skipping")
-            return
-        else:
-            logger.info("[BRAIN] World model extraction circuit breaker RESET — retrying")
-            _wm_consecutive_failures = 0
+    # Circuit breaker check (protected by lock)
+    with _wm_lock:
+        if _wm_consecutive_failures >= _WM_CIRCUIT_BREAKER_THRESHOLD:
+            if time.time() - _wm_circuit_broken_at < _WM_CIRCUIT_BREAKER_RESET_AFTER:
+                logger.debug("[BRAIN] World model extraction circuit breaker OPEN — skipping")
+                return
+            else:
+                logger.info("[BRAIN] World model extraction circuit breaker RESET — retrying")
+                _wm_consecutive_failures = 0
 
     if _wm_extraction_running.is_set():
         logger.debug("[BRAIN] Skipping world model extraction — previous still running")
@@ -82,14 +105,16 @@ def _run_world_model_extraction(conversation_id, messages):
         from aura.consciousness.world_model import get_world_model
         wm = get_world_model()
         wm.process_conversation(conversation_id, messages)
-        _wm_consecutive_failures = 0  # Reset on success
+        with _wm_lock:
+            _wm_consecutive_failures = 0
     except Exception as e:
-        _wm_consecutive_failures += 1
-        if _wm_consecutive_failures >= _WM_CIRCUIT_BREAKER_THRESHOLD:
-            _wm_circuit_broken_at = time.time()
-            logger.warning(f"[BRAIN] World model extraction failed {_wm_consecutive_failures}x — circuit breaker OPEN for {_WM_CIRCUIT_BREAKER_RESET_AFTER}s")
-        else:
-            logger.debug(f"[BRAIN] World model extraction failed ({_wm_consecutive_failures}/{_WM_CIRCUIT_BREAKER_THRESHOLD}): {e}")
+        with _wm_lock:
+            _wm_consecutive_failures += 1
+            if _wm_consecutive_failures >= _WM_CIRCUIT_BREAKER_THRESHOLD:
+                _wm_circuit_broken_at = time.time()
+                logger.warning(f"[BRAIN] World model extraction failed {_wm_consecutive_failures}x — circuit breaker OPEN for {_WM_CIRCUIT_BREAKER_RESET_AFTER}s")
+            else:
+                logger.debug(f"[BRAIN] World model extraction failed ({_wm_consecutive_failures}/{_WM_CIRCUIT_BREAKER_THRESHOLD}): {e}")
 
     # ADV-02 Phase 3: Quick proactive awareness analysis after extraction
     try:
@@ -468,19 +493,20 @@ class OllamaBrain:
                     if response is not None:
                         actual_model = fb_actual
                         break
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"[BRAIN] Fallback model {fb_actual} failed: {e}")
                     continue
 
         if response is None:
             return {"error": "All models failed to respond"}
 
-        # Track tokens (Pydantic .get() returns None not the default, so use `or 0`)
-        input_tokens = response.get("prompt_eval_count", 0) or 0
-        output_tokens = response.get("eval_count", 0) or 0
+        # Track tokens (handle both dict and Pydantic response objects)
+        input_tokens = _resp_get(response, "prompt_eval_count", 0) or 0
+        output_tokens = _resp_get(response, "eval_count", 0) or 0
         self._record_tokens(actual_model, input_tokens, output_tokens)
 
         return {
-            "message": response.get("message", {}),
+            "message": _resp_get(response, "message", {}),
             "model": actual_model,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
@@ -1298,7 +1324,7 @@ class OllamaBrain:
             if response is None:
                 logger.warning(f"[BRAIN] Quick generate timed out after {timeout}s")
                 return ""
-            return response["message"]["content"]
+            return _resp_content(response)
         except Exception as e:
             logger.error(f"[BRAIN] Quick generate failed: {e}")
             return ""
@@ -1571,8 +1597,8 @@ class OllamaBrain:
                                 full = f"{full}\n\n## Relevant Code\n" + "\n\n".join(ctx_parts)
                 finally:
                     idx.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[BRAIN] Code context retrieval failed: {e}")
 
         # Apply emotional style prompt — behavioral directives from ALMA
         # The style prompt already encodes verbosity/formality/enthusiasm as behavior
@@ -1775,7 +1801,8 @@ class OllamaBrain:
                         self._last_model_used = actual_model
                         logger.info(f"[BRAIN] Fallback succeeded with: {actual_model}")
                         break
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"[BRAIN] Fallback model failed: {e}")
                     continue
 
         if response is None:
@@ -1787,7 +1814,7 @@ class OllamaBrain:
             )
             return "I'm having trouble processing that right now. Please try again."
 
-        assistant_message = response["message"]["content"]
+        assistant_message = _resp_content(response)
 
         # Record routing success to stats store (background, non-blocking)
         _BG_EXECUTOR.submit(
@@ -1796,8 +1823,8 @@ class OllamaBrain:
         )
 
         # ===== Phase 4 Fix 4D: Track tokens and cost =====
-        _in_tok = response.get("prompt_eval_count", 0) or 0
-        _out_tok = response.get("eval_count", 0) or 0
+        _in_tok = _resp_get(response, "prompt_eval_count", 0) or 0
+        _out_tok = _resp_get(response, "eval_count", 0) or 0
         if _in_tok or _out_tok:
             self._record_tokens(actual_model, _in_tok, _out_tok)
 
@@ -1987,14 +2014,14 @@ class OllamaBrain:
                         _stream_timed_out = True
                         break
                     _last_chunk_time = now
-                    if chunk and "message" in chunk and "content" in chunk["message"]:
-                        content = chunk["message"]["content"]
+                    content = _resp_content(chunk) if chunk else ""
+                    if content:
                         full_response += content
                         yield content
                     # Extract token counts from final done chunk
-                    if chunk.get("done"):
-                        _stream_in_tok = chunk.get("prompt_eval_count", 0) or 0
-                        _stream_out_tok = chunk.get("eval_count", 0) or 0
+                    if _resp_get(chunk, "done", False):
+                        _stream_in_tok = _resp_get(chunk, "prompt_eval_count", 0) or 0
+                        _stream_out_tok = _resp_get(chunk, "eval_count", 0) or 0
                 if _stream_timed_out:
                     raise TimeoutError(f"Stream stale for {_STREAM_STALE_TIMEOUT}s")
                 actual_model = _try_actual
@@ -2131,7 +2158,8 @@ class OllamaBrain:
             if cap and cap.confidence > 0.1:
                 return (domain.value, cap.score)
             return (domain.value, 0.5)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"[BRAIN] Capability check failed: {e}")
             return (None, 0.5)
 
     def _should_escalate_to_system2(self, prompt: str, task_type: Optional[TaskType] = None) -> tuple:
@@ -2303,8 +2331,8 @@ class OllamaBrain:
             # Track this query in cognitive load window
             was_complex = use_cloud or (task_type == TaskType.CODE)
             tmm.cognitive_load.record_query(confidence, was_complex, use_s2)
-        except Exception:
-            pass  # Graceful fallback if thinking_mode not available
+        except Exception as e:
+            logger.debug(f"[BRAIN] Thinking mode not available: {e}")
 
         if use_s2:
             model = Config.get_model("reason")

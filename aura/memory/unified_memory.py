@@ -183,8 +183,8 @@ class UnifiedMemory:
                     "unified", len(filtered), query,
                     [r.content[:60] for r in filtered[:5]]
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[UnifiedMemory] Non-critical: {e}")
 
         return filtered[:k]
 
@@ -301,8 +301,8 @@ class UnifiedMemory:
                 confidence=decision.score,
                 extra=decision.as_log_dict(),
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[UnifiedMemory] Non-critical: {e}")
 
         if decision.kind == MemoryDecisionKind.DISCARD:
             return {"decision": decision.kind.value, "score": round(decision.score, 3)}
@@ -356,8 +356,8 @@ class UnifiedMemory:
             if ids.get("store") and decision.lifecycle_state:
                 try:
                     self._store.update(ids["store"], lifecycle_state=decision.lifecycle_state.value)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[UnifiedMemory] Non-critical: {e}")
             return ids
 
         # STORE_NEW / ARCHIVE_CANDIDATE — proceed with normal write
@@ -376,8 +376,8 @@ class UnifiedMemory:
         if ids.get("store") and decision.lifecycle_state:
             try:
                 self._store.update(ids["store"], lifecycle_state=decision.lifecycle_state.value)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[UnifiedMemory] Non-critical: {e}")
 
         return ids
 
@@ -455,8 +455,8 @@ class UnifiedMemory:
         try:
             if self._store and hasattr(self._store, "close"):
                 self._store.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[UnifiedMemory] Non-critical: {e}")
 
 
 # ---------------------------------------------------------------------------

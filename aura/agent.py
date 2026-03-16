@@ -1797,6 +1797,10 @@ Guidelines:
 
             except Exception as e:
                 logger.error(f"[AGENT] Error in iteration {iteration}: {e}")
+                consecutive_failures += 1
+                if consecutive_failures >= 3:
+                    final_response = f"Encountered repeated errors: {e}"
+                    break
                 continue
 
         elapsed = time.time() - start_time
