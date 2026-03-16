@@ -453,9 +453,11 @@ class OllamaBrain:
         model = model_override or self._model_override or Config.MODEL_CODE
         client, actual_model = self._get_client_for_model(model)
 
-        # ChatGPT client doesn't support tools= parameter
+        # ChatGPT client doesn't support tools= parameter — fall back to default Ollama model
         if actual_model.startswith("chatgpt:"):
-            return {"error": "ChatGPT models don't support structured tool calling. Use an Ollama model."}
+            model = Config.MODEL_CODE or "glm-5:cloud"
+            client, actual_model = self._get_client_for_model(model)
+            logger.debug(f"[BRAIN] ChatGPT can't do tool calling, using {actual_model} for this step")
 
         llm_options = options or {"temperature": 0.2, "num_predict": 4096}
 
@@ -636,7 +638,9 @@ class OllamaBrain:
         client, actual_model = self._get_client_for_model(model)
 
         if actual_model.startswith("chatgpt:"):
-            return {"error": "ChatGPT models don't support code agent mode via this path."}
+            model = Config.MODEL_CODE or "glm-5:cloud"
+            client, actual_model = self._get_client_for_model(model)
+            logger.debug(f"[BRAIN] ChatGPT can't do code agent, using {actual_model}")
 
         llm_options = {"temperature": 0.2, "num_predict": 4096}
 
@@ -704,8 +708,9 @@ class OllamaBrain:
         client, actual_model = self._get_client_for_model(model)
 
         if actual_model.startswith("chatgpt:"):
-            yield ("error", {"error": "ChatGPT models don't support structured tool calling."})
-            return
+            model = Config.MODEL_CODE or "glm-5:cloud"
+            client, actual_model = self._get_client_for_model(model)
+            logger.debug(f"[BRAIN] ChatGPT can't do streaming tools, using {actual_model}")
 
         llm_options = options or {"temperature": 0.2, "num_predict": 4096}
 

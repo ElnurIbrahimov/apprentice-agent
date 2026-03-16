@@ -644,6 +644,9 @@ class AgenticLoop:
             if self._router and not step_model:
                 step_model = self._pick_step_model(messages)
 
+            # Note: ChatGPT models can't do tool calling — brain.react_step()
+            # auto-falls back to default Ollama model for tool steps.
+
             # Try streaming first, fall back to blocking
             accumulated = ""
             tool_calls = None
