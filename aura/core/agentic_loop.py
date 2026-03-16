@@ -233,7 +233,7 @@ class ToolExecutor:
         elif tool_name == "write_file":
             return self._write_file(args)
         elif tool_name == "shell":
-            return self.shell.run(
+            return self.shell.run_sandboxed(
                 command=args["command"],
                 cwd=args.get("cwd", self.project_root),
                 timeout=min(args.get("timeout", 60), 300),
@@ -304,7 +304,7 @@ class ToolExecutor:
                     return parsed
             except Exception:
                 pass
-            return {"path": action, "content": ""}
+            return {"error": f"Could not parse write_file arguments from: {action[:100]}"}
         elif tool_name == "edit_file":
             try:
                 import json as _json
@@ -313,7 +313,7 @@ class ToolExecutor:
                     return parsed
             except Exception:
                 pass
-            return {"path": action, "old_string": "", "new_string": ""}
+            return {"error": "Could not parse edit_file arguments"}
         elif tool_name == "git":
             return {"action": action}
         elif tool_name == "project_structure":
@@ -509,6 +509,11 @@ class AgenticLoop:
         # Persistent conversation history for interactive mode
         self._conversation_history: list[dict] = []
 
+        # Incremental tracking for _pick_step_model (avoids O(n) rescan each iteration)
+        self._has_edits = False
+        self._has_test_failure = False
+        self._last_tools_were_reads = True
+
         # MCP client for external tool servers
         from .mcp_client import MCPClientManager
         self._mcp_client = MCPClientManager()
@@ -574,6 +579,9 @@ class AgenticLoop:
         self.iteration = 0
         self.tool_calls_total = 0
         self._edits_this_turn = 0
+        self._has_edits = False
+        self._has_test_failure = False
+        self._last_tools_were_reads = True
 
         system_prompt = self._build_system_prompt(prompt)
 
@@ -756,8 +764,14 @@ class AgenticLoop:
 
             # Collect results in original order
             for tool_name, args, tool_result in approved:
-                if tool_name in ("edit_file", "write_file") and '"error"' not in tool_result:
+                if tool_name in ("edit_file", "write_file") and not self._tool_result_has_error(tool_result):
                     self._edits_this_turn += 1
+                    self._has_edits = True
+                    self._last_tools_were_reads = False
+                elif tool_name in ("read_file", "grep", "glob", "list_dir", "project_structure"):
+                    self._last_tools_were_reads = True
+                else:
+                    self._last_tools_were_reads = False
                 if on_tool_call:
                     on_tool_call(tool_name, args, tool_result)
                 tool_msg = {"role": "tool", "content": tool_result}
@@ -770,6 +784,7 @@ class AgenticLoop:
             if self._edits_this_turn > 0:
                 test_result = self._run_auto_test()
                 if test_result:
+                    self._has_test_failure = True
                     messages.append({
                         "role": "tool",
                         "content": test_result,
@@ -807,6 +822,21 @@ class AgenticLoop:
             "model": model_used,
         }
 
+    @staticmethod
+    def _tool_result_has_error(tool_result: str) -> bool:
+        """Check if a tool result indicates an error.
+
+        Tries structured JSON parsing first, falls back to string matching.
+        """
+        try:
+            parsed = json.loads(tool_result)
+            if isinstance(parsed, dict) and "error" in parsed:
+                return True
+            return False
+        except (json.JSONDecodeError, TypeError, ValueError):
+            # Fallback: string matching for non-JSON results
+            return '"error"' in tool_result
+
     def _run_auto_test(self) -> Optional[str]:
         """Run project tests after edits. Returns test output for LLM or None."""
         try:
@@ -838,9 +868,9 @@ class AgenticLoop:
     def _pick_step_model(self, messages: list[dict]) -> str:
         """Pick the best model for this iteration using phase-based routing.
 
-        Tracks task phase based on tool calls (structured signals), not text
-        classification on LLM prose (which fails because keyword matching
-        was designed for user prompts, not assistant messages).
+        Uses incrementally-tracked instance variables (_has_edits, _has_test_failure,
+        _last_tools_were_reads) updated when messages are appended in the main loop,
+        instead of rescanning the full message history each iteration (O(1) vs O(n)).
 
         Phases:
           1. understand — first 1-2 iterations, reading/searching
@@ -853,35 +883,6 @@ class AgenticLoop:
         """
         from .router import classify_task
 
-        # Phase detection from tool call history
-        has_edits = False
-        has_test_failure = False
-        last_tools_were_reads = True
-
-        for msg in messages:
-            role = msg.get("role", "")
-            content = msg.get("content", "") or ""
-            tool_calls = msg.get("tool_calls")
-
-            if role == "tool":
-                if "auto_test_result" in content and "FAILED" in content:
-                    has_test_failure = True
-
-            if tool_calls:
-                for tc in tool_calls:
-                    if isinstance(tc, dict):
-                        name = tc.get("function", {}).get("name", "")
-                    else:
-                        func = getattr(tc, "function", None)
-                        name = getattr(func, "name", "") if func else ""
-                    if name in ("edit_file", "write_file"):
-                        has_edits = True
-                        last_tools_were_reads = False
-                    elif name in ("read_file", "grep", "glob", "list_dir", "project_structure"):
-                        last_tools_were_reads = True
-                    else:
-                        last_tools_were_reads = False
-
         # Phase 1: First iteration — classify from user prompt
         if self.iteration == 1:
             user_prompt = ""
@@ -891,15 +892,15 @@ class AgenticLoop:
             category = classify_task(user_prompt) if user_prompt else "orchestrator"
 
         # Phase 3: Test failure — stay on code model to fix
-        elif has_test_failure and has_edits:
+        elif self._has_test_failure and self._has_edits:
             category = "code_gen"
 
         # Phase 2: Coding phase — once edits start, stay on code_gen
-        elif has_edits:
+        elif self._has_edits:
             category = "code_gen"
 
         # Still exploring/reading — use orchestrator (reliable, low hallucination)
-        elif last_tools_were_reads:
+        elif self._last_tools_were_reads:
             category = "orchestrator"
 
         else:

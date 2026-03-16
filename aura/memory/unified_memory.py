@@ -10,7 +10,6 @@ Author: Aura Development Team
 Created: 2026-02-07 | Rewritten: 2026-03-16
 """
 
-import atexit
 import hashlib
 import json
 import logging
@@ -308,8 +307,61 @@ class UnifiedMemory:
         if decision.kind == MemoryDecisionKind.DISCARD:
             return {"decision": decision.kind.value, "score": round(decision.score, 3)}
 
-        # Proceed with actual write
-        ids = self.store(
+        ids: Dict[str, Any] = {
+            "decision": decision.kind.value,
+            "score": round(decision.score, 3),
+        }
+
+        if decision.kind == MemoryDecisionKind.MERGE_INTO and decision.target_id:
+            # Update the existing target record in-place with new content
+            try:
+                self._store.update(
+                    decision.target_id,
+                    content=content,
+                    importance=max(importance, 0.5),
+                    lifecycle_state=decision.lifecycle_state.value,
+                )
+                ids["store"] = decision.target_id
+                ids["lifecycle"] = decision.lifecycle_state.value
+                ids["merged_into"] = decision.target_id
+            except Exception as e:
+                logger.warning("[UnifiedMemory] MERGE_INTO failed, falling back to STORE_NEW: %s", e)
+                # Fall back to normal store
+                ids.update(self.store(
+                    content=content, source=source, importance=importance,
+                    tags=tags, emotional_pad=emotional_pad, episode_type=episode_type,
+                ))
+            return ids
+
+        if decision.kind == MemoryDecisionKind.SUPERSEDE and decision.target_id:
+            # Archive the old record, then insert the new one
+            try:
+                self._store.update(
+                    decision.target_id,
+                    lifecycle_state="archived",
+                )
+                ids["archived"] = decision.target_id
+            except Exception as e:
+                logger.warning("[UnifiedMemory] SUPERSEDE archive failed: %s", e)
+
+            # Insert new record
+            new_ids = self.store(
+                content=content, source=source, importance=importance,
+                tags=tags, emotional_pad=emotional_pad, episode_type=episode_type,
+            )
+            ids.update(new_ids)
+            ids["lifecycle"] = decision.lifecycle_state.value
+
+            # Update lifecycle state on new record
+            if ids.get("store") and decision.lifecycle_state:
+                try:
+                    self._store.update(ids["store"], lifecycle_state=decision.lifecycle_state.value)
+                except Exception:
+                    pass
+            return ids
+
+        # STORE_NEW / ARCHIVE_CANDIDATE — proceed with normal write
+        new_ids = self.store(
             content=content,
             source=source,
             importance=importance,
@@ -317,8 +369,7 @@ class UnifiedMemory:
             emotional_pad=emotional_pad,
             episode_type=episode_type,
         )
-        ids["decision"] = decision.kind.value
-        ids["score"] = round(decision.score, 3)
+        ids.update(new_ids)
         ids["lifecycle"] = decision.lifecycle_state.value
 
         # Update lifecycle state in store
@@ -335,22 +386,11 @@ class UnifiedMemory:
     # ------------------------------------------------------------------
 
     def _get_embedding(self, text: str) -> Optional[np.ndarray]:
-        """Get embedding for text via Ollama nomic-embed-text."""
-        try:
-            import requests
-            from aura.config import Config
-            url = getattr(Config, 'OLLAMA_HOST', 'http://localhost:11434') + '/api/embeddings'
-            r = requests.post(
-                url,
-                json={"model": "nomic-embed-text:latest", "prompt": text[:1000]},
-                timeout=3,
-            )
-            if r.status_code == 200:
-                emb = r.json().get("embedding")
-                if emb:
-                    return np.array(emb, dtype=np.float32)
-        except Exception as e:
-            logger.debug("[UnifiedMemory] Embedding failed: %s", e)
+        """Get embedding for text via shared Ollama helper."""
+        from .embedding import get_embedding
+        emb = get_embedding(text, timeout=3.0)
+        if emb is not None:
+            return np.array(emb, dtype=np.float32)
         return None
 
     # ------------------------------------------------------------------
@@ -374,12 +414,13 @@ class UnifiedMemory:
         """Compute emotional congruence between memory's PAD and current PAD."""
         if not memory_pad or not current_pad:
             return 0.5
-        m_p = memory_pad.get("pleasure", 0.0)
-        m_a = memory_pad.get("arousal", 0.0)
-        m_d = memory_pad.get("dominance", 0.0)
-        c_p = current_pad.get("pleasure", 0.0)
-        c_a = current_pad.get("arousal", 0.0)
-        c_d = current_pad.get("dominance", 0.0)
+        _clamp = lambda v: max(-1.0, min(1.0, float(v)))
+        m_p = _clamp(memory_pad.get("pleasure", 0.0))
+        m_a = _clamp(memory_pad.get("arousal", 0.0))
+        m_d = _clamp(memory_pad.get("dominance", 0.0))
+        c_p = _clamp(current_pad.get("pleasure", 0.0))
+        c_a = _clamp(current_pad.get("arousal", 0.0))
+        c_d = _clamp(current_pad.get("dominance", 0.0))
         dist = math.sqrt((m_p - c_p)**2 + (m_a - c_a)**2 + (m_d - c_d)**2)
         max_dist = math.sqrt(12)
         return max(0.0, min(1.0, 1.0 - (dist / max_dist)))
@@ -433,7 +474,9 @@ def get_unified_memory() -> UnifiedMemory:
         with _unified_memory_lock:
             if _unified_instance is None:
                 _unified_instance = UnifiedMemory()
-                atexit.register(_unified_instance.close)
+                # Note: atexit cleanup is handled by MemoryStore itself.
+                # Do NOT register _unified_instance.close here to avoid
+                # double-close of the underlying SQLite connection.
     return _unified_instance
 
 

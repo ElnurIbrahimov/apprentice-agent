@@ -16,7 +16,6 @@ Created: 2026-03-16
 
 import logging
 import threading
-import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -61,22 +60,11 @@ def _get_cross_encoder():
 
 
 def _get_query_embedding(text: str) -> Optional[np.ndarray]:
-    """Get embedding for query text via Ollama nomic-embed-text."""
-    try:
-        import requests
-        from aura.config import Config
-        url = getattr(Config, 'OLLAMA_HOST', 'http://localhost:11434') + '/api/embeddings'
-        r = requests.post(
-            url,
-            json={"model": "nomic-embed-text:latest", "prompt": text[:1000]},
-            timeout=3,
-        )
-        if r.status_code == 200:
-            emb = r.json().get("embedding")
-            if emb:
-                return np.array(emb, dtype=np.float32)
-    except Exception as e:
-        logger.debug("[Retrieval] Embedding query failed: %s", e)
+    """Get embedding for query text via shared Ollama helper."""
+    from .embedding import get_embedding
+    emb = get_embedding(text, timeout=3.0)
+    if emb is not None:
+        return np.array(emb, dtype=np.float32)
     return None
 
 

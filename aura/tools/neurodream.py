@@ -9,6 +9,7 @@ Based on research showing 38% reduction in catastrophic forgetting
 and 17.6% increase in zero-shot transfer through latent replay synthesis.
 """
 
+import atexit
 import json
 import logging
 import math
@@ -271,27 +272,32 @@ class NeuroDreamEngine:
         # Phase 4: DreamConsolidator report (shared between deep → REM phases)
         self._last_consolidation_report = None
 
+        # Register atexit handler for graceful shutdown
+        atexit.register(self._atexit_shutdown)
+
+    def _atexit_shutdown(self):
+        """Atexit handler — best-effort shutdown."""
+        try:
+            self.shutdown(timeout=2.0)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _count_lines(filepath) -> int:
+        """Count lines in a file without parsing content."""
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                return sum(1 for _ in f)
+        except FileNotFoundError:
+            return 0
+
     def _count_insights(self) -> int:
         """Count total insights generated."""
-        insights_file = self.data_dir / "insights.jsonl"
-        if not insights_file.exists():
-            return 0
-        count = 0
-        with open(insights_file, 'r') as f:
-            for _ in f:
-                count += 1
-        return count
+        return self._count_lines(self.data_dir / "insights.jsonl")
 
     def _count_sessions(self) -> int:
         """Count total sleep sessions."""
-        journal_file = self.data_dir / "dream_journal.jsonl"
-        if not journal_file.exists():
-            return 0
-        count = 0
-        with open(journal_file, 'r') as f:
-            for _ in f:
-                count += 1
-        return count
+        return self._count_lines(self.data_dir / "dream_journal.jsonl")
 
     def _generate_id(self, prefix: str = "dream") -> str:
         """Generate unique ID."""
@@ -480,6 +486,35 @@ class NeuroDreamEngine:
                     trigger_emotion("satisfaction", intensity, f"sleep_consolidation: {items} items")
                 except Exception as e:
                     logger.debug(f"[NeuroDream] non-critical: {e}")
+
+            # ===== Coherent Loop: Dream -> Self-Model update (Phase 3.1) =====
+            # Feed dream-consolidated insights into the narrative self-model
+            # so the next session's baseline personality is shaped by what was learned.
+            if not self._interrupt_flag.is_set() and self.current_session:
+                try:
+                    from aura.narrative_self import get_narrative_self
+                    narrative = get_narrative_self()
+                    # Build lightweight summary objects from learned context
+                    summaries = []
+                    lc = self.get_learned_context()
+                    if lc:
+                        # LearnedContext has key_facts, preferences (dict), principles,
+                        # ongoing_topics, emotional_patterns
+                        for fact in getattr(lc, 'key_facts', [])[:3]:
+                            summaries.append(type('S', (), {'compressed_text': f"Key fact: {fact}"})())
+                        for k, v in list(getattr(lc, 'preferences', {}).items())[:3]:
+                            summaries.append(type('S', (), {'compressed_text': f"User preference — {k}: {v}"})())
+                        for topic in getattr(lc, 'ongoing_topics', [])[:2]:
+                            summaries.append(type('S', (), {'compressed_text': f"Ongoing topic: {topic}"})())
+                        ep = getattr(lc, 'emotional_patterns', '')
+                        if ep:
+                            summaries.append(type('S', (), {'compressed_text': f"Emotional pattern: {ep}"})())
+                    if summaries:
+                        narrative.update_from_dream(summaries, self.brain)
+                        logger.info("[NeuroDream] Narrative self-model updated from dream (%d summaries)", len(summaries))
+                except Exception as e:
+                    logger.debug(f"[NeuroDream] Narrative self update error: {e}")
+
             # Natural wake up
             if not self._interrupt_flag.is_set():
                 self.wake_up("cycle_complete")
@@ -1018,7 +1053,7 @@ class NeuroDreamEngine:
     def _get_monologue_memories(self, hours: int = 24) -> List[Dict[str, Any]]:
         """Get memories from inner monologue session logs."""
         memories = []
-        logs_dir = Path("logs/inner_monologue/sessions")
+        logs_dir = Path(__file__).parent.parent.parent / "data" / "inner_monologue" / "sessions"
 
         if not logs_dir.exists():
             return memories
@@ -1032,7 +1067,7 @@ class NeuroDreamEngine:
                 file_date = datetime.strptime(date_str, "%Y-%m-%d")
 
                 if file_date.date() >= cutoff.date():
-                    with open(log_file, 'r') as f:
+                    with open(log_file, 'r', encoding='utf-8') as f:
                         for line in f:
                             try:
                                 thought = json.loads(line.strip())
@@ -1289,7 +1324,7 @@ class NeuroDreamEngine:
         patterns = []
 
         # Analyze monologue logs for temporal patterns
-        logs_dir = Path("logs/inner_monologue/sessions")
+        logs_dir = Path(__file__).parent.parent.parent / "data" / "inner_monologue" / "sessions"
         if not logs_dir.exists():
             return patterns
 
@@ -1297,7 +1332,7 @@ class NeuroDreamEngine:
 
         for log_file in logs_dir.glob("*.jsonl"):
             try:
-                with open(log_file, 'r') as f:
+                with open(log_file, 'r', encoding='utf-8') as f:
                     for line in f:
                         try:
                             thought = json.loads(line.strip())
@@ -1614,7 +1649,7 @@ class NeuroDreamEngine:
 
         if patterns_file.exists():
             try:
-                with open(patterns_file, 'r') as f:
+                with open(patterns_file, 'r', encoding='utf-8') as f:
                     for line in f:
                         patterns.append(json.loads(line.strip()))
             except (IOError, OSError, json.JSONDecodeError) as e:
@@ -1972,14 +2007,14 @@ Rules:
         """Save sleep session to dream journal."""
         journal_file = self.data_dir / "dream_journal.jsonl"
         rotate_jsonl_if_needed(journal_file)
-        with open(journal_file, 'a') as f:
+        with open(journal_file, 'a', encoding='utf-8') as f:
             f.write(json.dumps(session.to_dict()) + '\n')
 
     def _save_insight(self, insight: DreamInsight):
         """Save dream insight."""
         insights_file = self.data_dir / "insights.jsonl"
         rotate_jsonl_if_needed(insights_file)
-        with open(insights_file, 'a') as f:
+        with open(insights_file, 'a', encoding='utf-8') as f:
             f.write(json.dumps(insight.to_dict()) + '\n')
 
         # ===== Phase 3 Fix 3E: Store REM insight as Truth Spine belief =====
@@ -2072,7 +2107,7 @@ Rules:
         """Save consolidated patterns."""
         patterns_file = self.data_dir / "consolidated_patterns.jsonl"
         rotate_jsonl_if_needed(patterns_file)
-        with open(patterns_file, 'a') as f:
+        with open(patterns_file, 'a', encoding='utf-8') as f:
             for pattern in patterns:
                 f.write(json.dumps(pattern.to_dict()) + '\n')
 
@@ -2084,7 +2119,7 @@ Rules:
         entries = []
 
         if journal_file.exists():
-            with open(journal_file, 'r') as f:
+            with open(journal_file, 'r', encoding='utf-8') as f:
                 for line in f:
                     try:
                         entries.append(json.loads(line.strip()))
@@ -2099,7 +2134,7 @@ Rules:
         insights = []
 
         if insights_file.exists():
-            with open(insights_file, 'r') as f:
+            with open(insights_file, 'r', encoding='utf-8') as f:
                 for line in f:
                     try:
                         insights.append(json.loads(line.strip()))
@@ -2114,7 +2149,7 @@ Rules:
         patterns = []
 
         if patterns_file.exists():
-            with open(patterns_file, 'r') as f:
+            with open(patterns_file, 'r', encoding='utf-8') as f:
                 for line in f:
                     try:
                         patterns.append(json.loads(line.strip()))
@@ -2189,29 +2224,27 @@ Rules:
 
         return result
 
-    def __del__(self):
-        """Cleanup on deletion."""
-        try:
-            self.shutdown(timeout=2.0)
-        except Exception:
-            pass  # Best effort cleanup
 
 
 # ==================== Singleton Access ====================
 
 _neurodream_instance: Optional[NeuroDreamEngine] = None
+_neurodream_lock = threading.Lock()
 
 
 def get_neurodream(**kwargs) -> NeuroDreamEngine:
-    """Get or create NeuroDream singleton."""
+    """Get or create NeuroDream singleton (thread-safe with double-checked locking)."""
     global _neurodream_instance
     if _neurodream_instance is None:
-        _neurodream_instance = NeuroDreamEngine(**kwargs)
+        with _neurodream_lock:
+            if _neurodream_instance is None:
+                _neurodream_instance = NeuroDreamEngine(**kwargs)
     return _neurodream_instance
 
 
 def create_neurodream(**kwargs) -> NeuroDreamEngine:
     """Create new NeuroDream instance (replaces singleton)."""
     global _neurodream_instance
-    _neurodream_instance = NeuroDreamEngine(**kwargs)
+    with _neurodream_lock:
+        _neurodream_instance = NeuroDreamEngine(**kwargs)
     return _neurodream_instance

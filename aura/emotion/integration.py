@@ -345,6 +345,11 @@ def _detect_message_triggers(message: str) -> list:
     if any(word in message_lower for word in excitement_words):
         triggers.append(("excited", 0.4, "shared_excitement"))
 
+    # Cap at 2 strongest triggers to prevent emotional oscillation
+    if len(triggers) > 2:
+        triggers.sort(key=lambda t: t[1], reverse=True)
+        triggers = triggers[:2]
+
     return triggers
 
 
@@ -394,6 +399,165 @@ def process_response_outcome(
         trigger_emotion("concerned", 0.4, "response_error")
     elif not user_satisfied:
         trigger_emotion("disappointed", 0.3, "user_unsatisfied")
+
+
+# =============================================================================
+# Post-Response Feedback — Coherent Loop Closer (Phase 3.1)
+# =============================================================================
+
+def analyze_user_reaction(
+    current_message: str,
+    previous_response: str,
+    brain=None,
+) -> Optional[Dict[str, Any]]:
+    """Analyze the user's new message as a *reaction* to our previous response.
+
+    This closes the coherent loop: after AURA responds, the user's next
+    message implicitly carries feedback (satisfied, confused, frustrated,
+    engaged, etc.).  A cheap fast-model call classifies that reaction and
+    feeds the outcome back into ALMA so the mood drifts accordingly.
+
+    Args:
+        current_message: The user's latest message (their reaction).
+        previous_response: AURA's previous response that they are reacting to.
+        brain: OllamaBrain instance (uses _quick_generate for fast model).
+
+    Returns:
+        Dict with {satisfaction 0-1, engagement 0-1, emotion, reason} or None.
+    """
+    if not current_message or not previous_response:
+        return None
+
+    safe_msg = current_message[:250].replace("|", " ").replace("\n", " ")
+    safe_resp = previous_response[:250].replace("|", " ").replace("\n", " ")
+
+    prompt = (
+        f"I just said: \"{safe_resp}\"\n"
+        f"The user replied: \"{safe_msg}\"\n"
+        f"How satisfied and engaged does the user seem with my response?\n"
+        f"Reply EXACTLY in this format (one line):\n"
+        f"satisfaction 0.0-1.0 | engagement 0.0-1.0 | emotion_name | one-sentence reason"
+    )
+
+    if brain and hasattr(brain, '_quick_generate'):
+        try:
+            raw = brain._quick_generate(prompt, timeout=5)
+            result = _parse_reaction(raw)
+            if result:
+                # Feed back into ALMA via OCC appraisal
+                # satisfaction maps to desirability, engagement to praiseworthiness (self)
+                desirability = (result["satisfaction"] - 0.5) * 2  # 0..1 -> -1..1
+                praiseworthiness = (result["engagement"] - 0.3) * 1.5  # mild positive bias
+                praiseworthiness = max(-1.0, min(1.0, praiseworthiness))
+
+                alma_engine.trigger_from_appraisal(
+                    event=f"user_reaction: {current_message[:80]}",
+                    desirability=desirability,
+                    praiseworthiness=praiseworthiness,
+                    appealingness=0.0,
+                    likelihood=0.9,
+                    is_self=True,  # AURA was the agent that produced the response
+                )
+                logger.debug(
+                    "[ALMA] Reaction feedback: sat=%.2f eng=%.2f %s — %s",
+                    result["satisfaction"], result["engagement"],
+                    result["emotion"], result["reason"],
+                )
+                return result
+        except Exception as e:
+            logger.debug("[ALMA] Reaction analysis failed: %s", e)
+
+    # Lightweight keyword fallback — no LLM needed
+    return _keyword_reaction_fallback(current_message)
+
+
+def _parse_reaction(raw: str) -> Optional[Dict[str, Any]]:
+    """Parse pipe-delimited reaction response from LLM."""
+    if not raw or "|" not in raw:
+        return None
+    try:
+        for line in raw.strip().split("\n"):
+            if "|" not in line:
+                continue
+            parts = [p.strip() for p in line.split("|")]
+            if len(parts) < 4:
+                continue
+
+            sat_match = re.search(r'(\d+\.?\d*)', parts[0])
+            satisfaction = float(sat_match.group(1)) if sat_match else 0.5
+            satisfaction = max(0.0, min(1.0, satisfaction))
+
+            eng_match = re.search(r'(\d+\.?\d*)', parts[1])
+            engagement = float(eng_match.group(1)) if eng_match else 0.5
+            engagement = max(0.0, min(1.0, engagement))
+
+            emotion = re.sub(r'[^a-z_]', '', parts[2].lower().strip()) or "neutral"
+            reason = parts[3][:200] if len(parts) > 3 else ""
+
+            return {
+                "satisfaction": satisfaction,
+                "engagement": engagement,
+                "emotion": emotion,
+                "reason": reason,
+            }
+    except (ValueError, IndexError, AttributeError):
+        pass
+    return None
+
+
+def _keyword_reaction_fallback(message: str) -> Optional[Dict[str, Any]]:
+    """Cheap keyword-based reaction classification (no LLM)."""
+    msg = message.lower()
+    satisfaction = 0.5
+    engagement = 0.5
+    emotion = "neutral"
+
+    # Positive signals
+    pos_words = ["thanks", "thank you", "perfect", "great", "awesome",
+                 "exactly", "yes", "nice", "got it", "makes sense", "love it"]
+    # Negative signals
+    neg_words = ["no", "wrong", "not what", "doesn't work", "that's not",
+                 "confused", "don't understand", "try again", "not helpful"]
+    # High engagement signals (asking more, going deeper)
+    deep_words = ["tell me more", "what about", "how does", "can you also",
+                  "and then", "what if", "interesting", "elaborate"]
+
+    # Use elif so only the first matching category wins — avoids conflicting signals
+    if any(w in msg for w in pos_words):
+        satisfaction = 0.8
+        engagement = 0.7
+        emotion = "satisfied"
+    elif any(w in msg for w in neg_words):
+        satisfaction = 0.2
+        engagement = 0.6
+        emotion = "frustrated"
+    elif any(w in msg for w in deep_words):
+        engagement = 0.85
+        emotion = "curious"
+
+    if emotion == "neutral":
+        return None  # No clear signal, skip feedback
+
+    # Feed into ALMA
+    desirability = (satisfaction - 0.5) * 2
+    praiseworthiness = (engagement - 0.3) * 1.5
+    praiseworthiness = max(-1.0, min(1.0, praiseworthiness))
+
+    alma_engine.trigger_from_appraisal(
+        event=f"user_reaction_keyword: {message[:80]}",
+        desirability=desirability,
+        praiseworthiness=praiseworthiness,
+        appealingness=0.0,
+        likelihood=0.9,
+        is_self=True,
+    )
+
+    return {
+        "satisfaction": satisfaction,
+        "engagement": engagement,
+        "emotion": emotion,
+        "reason": f"keyword signal: {emotion}",
+    }
 
 
 # =============================================================================

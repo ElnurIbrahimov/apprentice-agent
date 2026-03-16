@@ -22,6 +22,7 @@ decisions based on the user's current context and the agent's beliefs.
 import asyncio
 import logging
 import threading
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional, Callable, Any
@@ -117,10 +118,13 @@ class GatewayDaemon:
         self.inference_engine = ActiveInferenceEngine(use_pymdp=use_pymdp)
         self.emotion_action_bridge = EmotionActionBridge()
 
+        # Per-instance dedup deque for emotion action dispatch
+        self._emotion_action_recent: deque = deque(maxlen=20)
+
         # State
         self.state = DaemonState.STOPPED
         self.user_context = UserContext()
-        self._pending_messages: List[ProactiveMessage] = []
+        self._pending_messages: deque = deque(maxlen=100)
 
         # Callbacks
         self._notification_callback: Optional[Callable[[ProactiveMessage], None]] = None
@@ -585,6 +589,24 @@ class GatewayDaemon:
                         logger.debug(f"[GatewayDaemon] Outcome feedback error: {e}")
                     self._last_non_wait_decision = None
 
+                # Phase 4.3: Curiosity scanning — full scan when idle, quick otherwise
+                try:
+                    from .curiosity_scanner import get_curiosity_scanner
+                    scanner = get_curiosity_scanner()
+                    idle_minutes = 0.0
+                    if self.user_context.last_interaction:
+                        idle_minutes = (
+                            datetime.now() - self.user_context.last_interaction
+                        ).total_seconds() / 60.0
+                    if idle_minutes > 5.0:
+                        scanner.scan_full()
+                    else:
+                        scanner.scan_quick()
+                    # Try curiosity-driven proactive message
+                    await self._try_curiosity_proactive(scanner)
+                except Exception as e:
+                    logger.debug(f"[GatewayDaemon] CuriosityScanner error: {e}")
+
                 # Make proactive decision
                 decision = self.inference_engine.select_action()
                 self._stats["decisions_made"] += 1
@@ -632,6 +654,8 @@ class GatewayDaemon:
 
             except asyncio.CancelledError:
                 break
+            except (SystemExit, KeyboardInterrupt):
+                raise
             except BaseException as e:
                 # Catch BaseException to survive Rust panics (pyo3 PanicException)
                 # and other non-Exception errors that would kill the loop
@@ -643,6 +667,9 @@ class GatewayDaemon:
     async def _execute_decision(self, decision: ProactiveDecision) -> None:
         """
         Execute a proactive decision.
+
+        Phase 4.2: Uses MotivationAccumulator for 5-factor scoring and
+        learned threshold gating instead of raw rate limiting.
 
         Args:
             decision: The decision to execute
@@ -690,6 +717,49 @@ class GatewayDaemon:
             logger.info(f"[GatewayDaemon] No content generated for {decision.action.value}")
             return
 
+        # Phase 4.2: Motivation Accumulator scoring
+        # Score this message through the 5-factor formula and check the learned threshold
+        import uuid as _uuid
+        try:
+            from .motivation_accumulator import (
+                get_motivation_accumulator, PotentialMessage as PotMsg
+            )
+            accumulator = get_motivation_accumulator()
+
+            # Determine source category from action type
+            source = decision.action.value
+            if decision.reasoning:
+                for drive in ("curiosity", "social", "coherence", "competence"):
+                    if drive in decision.reasoning.lower():
+                        source = drive
+                        break
+
+            potential = PotMsg(
+                message_id=f"daemon_{_uuid.uuid4().hex[:8]}",
+                content=content,
+                source=source,
+                relevance_to_user=accumulator.compute_relevance(content),
+            )
+            potential = accumulator.enrich_factors(potential)
+            motivation_score = accumulator.score(potential)
+
+            user_busy = (
+                self.user_context.do_not_disturb
+                or self.user_context.activity_level > 0.8
+            )
+            if not accumulator.should_deliver(potential, user_busy=user_busy):
+                logger.info(
+                    f"[GatewayDaemon] Motivation below threshold for {decision.action.value} "
+                    f"(score={motivation_score:.3f})"
+                )
+                return
+
+            # Record delivery in accumulator for engagement tracking
+            accumulator.record_delivery(potential, motivation_score)
+        except Exception as e:
+            logger.debug(f"[GatewayDaemon] MotivationAccumulator not available, using fallback: {e}")
+            motivation_score = decision.confidence  # Fallback
+
         # Create message
         message = ProactiveMessage(
             action=decision.action,
@@ -698,7 +768,8 @@ class GatewayDaemon:
             metadata={
                 "confidence": decision.confidence,
                 "expected_free_energy": decision.expected_free_energy,
-                "reasoning": decision.reasoning
+                "reasoning": decision.reasoning,
+                "motivation_score": motivation_score,
             }
         )
 
@@ -706,6 +777,77 @@ class GatewayDaemon:
         self._deliver_message(message)
         self._last_proactive_message_time = now
         self._messages_this_session += 1
+
+    async def _try_curiosity_proactive(self, scanner) -> None:
+        """Try to generate a proactive message from curiosity targets.
+
+        Picks the top curiosity target, scores it through the MotivationAccumulator,
+        and delivers if it passes the learned threshold.
+        """
+        import time as _time
+        import uuid as _uuid
+
+        top = scanner.get_top_target()
+        if not top or not top.question:
+            return
+
+        # Rate limit check (reuse daemon's limiter)
+        now = _time.time()
+        effective_interval = self._min_message_interval + max(0, self._messages_this_session - 3) * 60
+        effective_interval = min(effective_interval, 600)
+        if now - self._last_proactive_message_time < effective_interval:
+            return
+
+        # Score through MotivationAccumulator
+        try:
+            from .motivation_accumulator import (
+                get_motivation_accumulator, PotentialMessage as PotMsg
+            )
+            accumulator = get_motivation_accumulator()
+
+            potential = PotMsg(
+                message_id=f"curiosity_{_uuid.uuid4().hex[:8]}",
+                content=top.question,
+                source="curiosity",
+                relevance_to_user=accumulator.compute_relevance(
+                    top.question, [top.entity_name]
+                ),
+                curiosity_drive=top.urgency,
+            )
+            potential = accumulator.enrich_factors(potential)
+
+            user_busy = (
+                self.user_context.do_not_disturb
+                or self.user_context.activity_level > 0.8
+            )
+            if not accumulator.should_deliver(potential, user_busy=user_busy):
+                return
+
+            motivation_score = accumulator.score(potential)
+            accumulator.record_delivery(potential, motivation_score)
+        except Exception as e:
+            logger.debug(f"[GatewayDaemon] Curiosity motivation scoring failed: {e}")
+            return
+
+        # Deliver as ASK action
+        message = ProactiveMessage(
+            action=ProactiveAction.ASK,
+            content=top.question,
+            priority=EventPriority.LOW,
+            metadata={
+                "curiosity_target": top.entity_name,
+                "gap_type": top.gap_type,
+                "urgency": top.urgency,
+                "motivation_score": motivation_score,
+            },
+        )
+        self._deliver_message(message)
+        self._last_proactive_message_time = now
+        self._messages_this_session += 1
+
+        logger.info(
+            f"[GatewayDaemon] Curiosity proactive sent: {top.gap_type}:{top.entity_name}"
+        )
 
     # ------------------------------------------------------------------ #
     # Emotion-Action Bridge helpers
@@ -810,21 +952,43 @@ class GatewayDaemon:
                 datetime.now() - self.user_context.last_interaction
             ).total_seconds() / 3600
 
-        recent = deque(maxlen=20)  # per-dispatch dedup deque
+        recent = self._emotion_action_recent  # persistent dedup deque
 
         # Map action_type -> message content
         content = None
         if ea.action_type == "explore_topic":
-            # Try to get topics from context tracker
-            topics = []
+            # Phase 4.3: Use CuriosityScanner for KG-grounded questions first
             try:
-                from api.routes.context import get_tracker
-                ctx = get_tracker()
-                focus = ctx.get_focus_state(limit=3)
-                topics = [item["name"] for item in focus.get("items", [])[:3]]
+                from .curiosity_scanner import get_curiosity_scanner
+                scanner = get_curiosity_scanner()
+                scanner.scan_quick()
+                question = scanner.get_question_for_top_target()
+                if question:
+                    content = question
             except Exception as e:
-                logger.debug(f"[GatewayDaemon] non-critical: {e}")
-            content = get_curiosity_message(topics=topics or None, recent=recent)
+                logger.debug(f"[GatewayDaemon] CuriosityScanner not available: {e}")
+
+            # Fallback: context tracker topics + template
+            if not content:
+                topics = []
+                try:
+                    from api.routes.context import get_tracker
+                    ctx = get_tracker()
+                    focus = ctx.get_focus_state(limit=3)
+                    topics = [item["name"] for item in focus.get("items", [])[:3]]
+                except Exception as e:
+                    logger.debug(f"[GatewayDaemon] non-critical: {e}")
+
+                # Also try CuriosityScanner topics for template messages
+                if not topics:
+                    try:
+                        from .curiosity_scanner import get_curiosity_scanner
+                        scanner = get_curiosity_scanner()
+                        topics = scanner.get_topics_for_message(max_topics=2)
+                    except Exception:
+                        pass
+
+                content = get_curiosity_message(topics=topics or None, recent=recent)
 
         elif ea.action_type == "suggest_break":
             # Use emotional message with low pleasure
@@ -851,6 +1015,38 @@ class GatewayDaemon:
             logger.debug(f"[EMOTION-ACTION] No content for {ea.action_type}")
             return
 
+        # Phase 4.2: Run through MotivationAccumulator before delivery
+        import uuid as _uuid
+        motivation_score = ea.priority  # Fallback
+        try:
+            from .motivation_accumulator import (
+                get_motivation_accumulator, PotentialMessage as PotMsg
+            )
+            accumulator = get_motivation_accumulator()
+            potential = PotMsg(
+                message_id=f"emo_{_uuid.uuid4().hex[:8]}",
+                content=content,
+                source=ea.action_type,
+                relevance_to_user=accumulator.compute_relevance(content),
+            )
+            potential = accumulator.enrich_factors(potential)
+            motivation_score = accumulator.score(potential)
+
+            user_busy = (
+                self.user_context.do_not_disturb
+                or self.user_context.activity_level > 0.8
+            )
+            if not accumulator.should_deliver(potential, user_busy=user_busy):
+                logger.debug(
+                    f"[EMOTION-ACTION] Motivation below threshold for {ea.action_type} "
+                    f"(score={motivation_score:.3f})"
+                )
+                return
+
+            accumulator.record_delivery(potential, motivation_score)
+        except Exception as e:
+            logger.debug(f"[EMOTION-ACTION] MotivationAccumulator not available: {e}")
+
         # Create and deliver as a proactive message
         message = ProactiveMessage(
             action=ProactiveAction.SUGGEST,
@@ -861,6 +1057,7 @@ class GatewayDaemon:
                 "action_type": ea.action_type,
                 "reason": ea.reason,
                 "priority": ea.priority,
+                "motivation_score": motivation_score,
             },
         )
         self._deliver_message(message)
@@ -1102,6 +1299,23 @@ class GatewayDaemon:
         except BaseException:
             pass
 
+        # 5b. Phase 4.3: Curiosity targets from KG gaps
+        curiosity_context = ""
+        try:
+            from .curiosity_scanner import get_curiosity_scanner
+            scanner = get_curiosity_scanner()
+            targets = scanner.get_targets()
+            if targets:
+                top = targets[0]
+                curiosity_context = (
+                    f"Knowledge gap detected: '{top.entity_name}' ({top.gap_type}) — "
+                    f"{top.context}"
+                )
+                if top.question:
+                    curiosity_context += f"\nSuggested question: {top.question}"
+        except Exception:
+            pass
+
         # 6. Time of day
         hour = datetime.now().hour
         time_period = (
@@ -1134,6 +1348,8 @@ class GatewayDaemon:
             context_parts.append(emotional_summary)
         if drive_summary:
             context_parts.append(drive_summary)
+        if curiosity_context:
+            context_parts.append(curiosity_context)
 
         if recent_chat:
             chat_lines = []
@@ -1363,12 +1579,16 @@ class GatewayDaemon:
         channel = channel or event.source
         return await self.event_bus.publish(channel, event)
 
-    def record_user_response(self, engaged: bool, response_type: str = "unknown") -> None:
+    def record_user_response(self, engaged: bool, response_type: str = "unknown",
+                             message_id: Optional[str] = None,
+                             response_time: Optional[float] = None) -> None:
         """Record user response to a proactive message for learning.
 
         Args:
             engaged: Whether the user engaged (replied/interacted).
             response_type: "replied", "dismissed", "ignored".
+            message_id: ID of the specific message (for MotivationAccumulator tracking).
+            response_time: Seconds between delivery and response.
         """
         # Update simplified engine cooldowns
         self.inference_engine.record_simple_outcome(engaged, response_type)
@@ -1387,12 +1607,46 @@ class GatewayDaemon:
                 "observation_confidence": 0.6,
             })
 
-        # Phase 4.2: Track engagement for threshold adaptation
+        # Phase 4.2: Track engagement for threshold adaptation (legacy)
         with self._engagement_lock:
             self._engagement_history.append(engaged)
             if len(self._engagement_history) > self._max_engagement_window:
                 self._engagement_history.pop(0)
             self._adapt_message_threshold()
+
+        # Phase 4.2: Forward to MotivationAccumulator for fine-grained threshold learning
+        try:
+            from .motivation_accumulator import get_motivation_accumulator
+            accumulator = get_motivation_accumulator()
+            # Map response_type to accumulator format
+            acc_type = "engaged" if engaged else (
+                "dismissed" if response_type == "dismissed" else "ignored"
+            )
+            if message_id:
+                accumulator.record_engagement(message_id, acc_type, response_time)
+            else:
+                # Find the most recent pending delivery and record against that
+                for record in reversed(accumulator._engagement_history):
+                    if record.get("response_type") == "pending":
+                        accumulator.record_engagement(
+                            record["message_id"], acc_type, response_time
+                        )
+                        break
+        except Exception as e:
+            logger.debug(f"[GatewayDaemon] MotivationAccumulator feedback error: {e}")
+
+        # Phase 4.3: Mark curiosity target as explored if user engaged with it
+        if engaged and message_id and message_id.startswith("curiosity_"):
+            try:
+                from .curiosity_scanner import get_curiosity_scanner
+                scanner = get_curiosity_scanner()
+                # Find the entity from pending messages metadata
+                for msg in reversed(list(self._pending_messages)):
+                    if msg.metadata.get("curiosity_target"):
+                        scanner.mark_target_explored(msg.metadata.get("curiosity_target", ""))
+                        break
+            except Exception as e:
+                logger.debug(f"[GatewayDaemon] Curiosity exploration marking error: {e}")
 
         logger.info(f"[GatewayDaemon] User response recorded: engaged={engaged}, type={response_type}")
 
@@ -1440,20 +1694,23 @@ class GatewayDaemon:
 
     def get_pending_messages(self) -> List[ProactiveMessage]:
         """Get and clear pending messages."""
-        messages = self._pending_messages.copy()
+        messages = list(self._pending_messages)
         self._pending_messages.clear()
         return messages
 
 
 # Singleton instance for global access
 _gateway_daemon: Optional[GatewayDaemon] = None
+_gateway_daemon_lock = threading.Lock()
 
 
 def get_gateway_daemon() -> GatewayDaemon:
     """Get or create the global Gateway Daemon instance."""
     global _gateway_daemon
     if _gateway_daemon is None:
-        _gateway_daemon = GatewayDaemon()
+        with _gateway_daemon_lock:
+            if _gateway_daemon is None:
+                _gateway_daemon = GatewayDaemon()
     return _gateway_daemon
 
 

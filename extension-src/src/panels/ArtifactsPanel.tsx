@@ -186,7 +186,7 @@ export default function ArtifactsPanel() {
         {/* Preview iframe */}
         <iframe
           ref={iframeRef}
-          sandbox="allow-scripts allow-same-origin"
+          sandbox="allow-scripts"
           style={{
             position: 'absolute',
             inset: 0,

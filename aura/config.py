@@ -337,13 +337,7 @@ class Config:
     MEMORY_COLLECTION_NAME: str = "agent_memory"
     MAX_MEMORY_RESULTS: int = 5
 
-    # PersonaPlex Configuration (Tool #17)
-    # NOTE: Disabled by default due to huggingface-hub<1.0 conflict with transformers/sentence-transformers
-    # moshi (required by PersonaPlex) requires huggingface-hub<1.0, but transformers/sentence-transformers
-    # need huggingface-hub>=1.0 (breaking change in Dec 2024 release). They are incompatible.
-    # To enable: export PERSONAPLEX_ENABLED=true (requires manual moshi installation & separate env)
-    # Fallback: Use VoiceTool (pyttsx3/Whisper) or SesameTTS for voice functionality
-    PERSONAPLEX_ENABLED: bool = os.getenv("PERSONAPLEX_ENABLED", "false").lower() == "true"
+    # PersonaPlex and Sesame voice removed — using external voice provider
 
     # MirrorMind Configuration (Tool #21) - Self-Critique System
     MIRRORMIND_ENABLED: bool = os.getenv("MIRRORMIND_ENABLED", "true").lower() == "true"
@@ -420,23 +414,9 @@ class Config:
     def is_production(cls) -> bool:
         return cls.AURA_ENV == "production"
 
-    # Voice Configuration (Hybrid System)
+    # Voice Configuration
     VOICE_CONFIG = {
-        "default_mode": "pipeline",  # "pipeline" (Sesame) or "duplex" (PersonaPlex)
-        "sesame": {
-            "speaker": 0,           # Default speaker ID
-            "sample_rate": 24000,
-            "max_audio_length_ms": 30000
-        },
-        "personaplex": {
-            "voice_prompt": "NATM1.pt",  # Natural Male 1
-            "text_prompt": (
-                "You are Aura, an intelligent AI assistant. "
-                "You are wise, helpful, and occasionally witty with subtle sarcasm. "
-                "You speak clearly and professionally."
-            ),
-            "cpu_offload": True  # Required for 8GB GPU
-        }
+        "default_mode": "whisper",  # Using external voice provider
     }
 
     # Vision model VRAM requirements (GB) — used by _can_fit_model() in vision.py

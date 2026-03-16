@@ -486,8 +486,38 @@ def generate_proactive_content(
         if roll <= cumulative:
             try:
                 return gen()
-            except BaseException as e:
+            except Exception as e:
                 logger.debug(f"[ProactiveMessages] Generator error: {e}")
                 continue
 
     return None
+
+
+# ============================================================================
+# CURIOSITY PROACTIVE — From CuriosityScanner targets (Phase 4.3)
+# ============================================================================
+
+def generate_curiosity_proactive_content(target) -> Optional[Dict[str, Any]]:
+    """Generate a scored PotentialMessage dict from a CuriosityTarget.
+
+    Args:
+        target: A CuriosityTarget from the CuriosityScanner.
+
+    Returns:
+        Dict with 'content', 'source', 'relevance_to_user', 'curiosity_drive'
+        suitable for feeding into MotivationAccumulator, or None.
+    """
+    if not target or not getattr(target, "question", None):
+        return None
+
+    return {
+        "content": target.question,
+        "source": "curiosity",
+        "relevance_to_user": min(1.0, target.urgency * 0.8 + 0.2),
+        "curiosity_drive": target.urgency,
+        "metadata": {
+            "entity_name": target.entity_name,
+            "entity_id": target.entity_id,
+            "gap_type": target.gap_type,
+        },
+    }

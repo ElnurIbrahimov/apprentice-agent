@@ -22,6 +22,8 @@ Integrates with:
 import json
 import logging
 import math
+import os
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -170,34 +172,82 @@ class IntrinsicMotivationEngine:
         return dict(self._drives)
 
     def _assess_curiosity(self) -> None:
-        """Assess curiosity drive from knowledge graph gaps."""
+        """Assess curiosity drive from knowledge graph gaps.
+
+        Phase 4.3: Uses CuriosityScanner for information-gain-based assessment
+        grounded in actual KG gaps, with fallback to generic heuristics.
+        """
         drive = self._drives[DriveType.CURIOSITY]
         triggers = []
         intensity = 0.3  # Base curiosity level
 
-        # Check knowledge graph for isolated nodes (knowledge gaps)
+        # Phase 4.3: Use CuriosityScanner as primary source of curiosity signals
+        scanner_used = False
         try:
-            from aura.tools.knowledge_graph import get_knowledge_graph
-            kg = get_knowledge_graph()
-            stats = kg.get_stats()
-            total_nodes = stats.get("total_nodes", 0)
-            total_edges = stats.get("total_edges", 0)
+            from aura.proactive.curiosity_scanner import get_curiosity_scanner
+            scanner = get_curiosity_scanner()
+            targets = scanner.scan_quick()
 
-            if total_nodes > 0:
-                # Low edge-to-node ratio = many isolated concepts = curiosity
-                ratio = total_edges / total_nodes if total_nodes > 0 else 0
-                if ratio < 1.5:
-                    gap_signal = 1.0 - min(1.0, ratio / 1.5)
-                    intensity += gap_signal * 0.3
-                    triggers.append(f"knowledge gaps: {total_nodes} nodes, {total_edges} edges (ratio {ratio:.1f})")
+            if targets:
+                # Use information gain score as primary intensity signal
+                ig_score = scanner.get_information_gain_score()
+                intensity += ig_score * 0.4
+                scanner_used = True
 
-                # Check for low-confidence nodes
-                avg_conf = stats.get("avg_confidence", 0.5)
-                if avg_conf < 0.5:
-                    intensity += (0.5 - avg_conf) * 0.2
-                    triggers.append(f"low average confidence: {avg_conf:.2f}")
+                # Add specific triggers from top gaps
+                for t in targets[:3]:
+                    triggers.append(f"{t.gap_type}: {t.entity_name}")
+
+                # Store targets for action generation
+                self._curiosity_targets = [
+                    {
+                        "target": t.entity_name,
+                        "reason": t.gap_type,
+                        "urgency": t.urgency,
+                        "node_id": t.entity_id,
+                        "question": t.question,
+                    }
+                    for t in targets
+                ]
+
+                logger.debug(
+                    f"[IntrinsicMotivation] CuriosityScanner: {len(targets)} targets, "
+                    f"IG={ig_score:.2f}"
+                )
         except Exception as e:
-            logger.debug(f"[IntrinsicMotivation] non-critical: {e}")
+            logger.debug(f"[IntrinsicMotivation] CuriosityScanner not available: {e}")
+
+        # Fallback: generic KG heuristics if scanner didn't find anything
+        if not scanner_used:
+            try:
+                from aura.tools.knowledge_graph import get_knowledge_graph
+                kg = get_knowledge_graph()
+                stats = kg.get_stats()
+                total_nodes = stats.get("total_nodes", 0)
+                total_edges = stats.get("total_edges", 0)
+
+                if total_nodes > 0:
+                    ratio = total_edges / total_nodes if total_nodes > 0 else 0
+                    if ratio < 1.5:
+                        gap_signal = 1.0 - min(1.0, ratio / 1.5)
+                        intensity += gap_signal * 0.3
+                        triggers.append(f"knowledge gaps: {total_nodes} nodes, {total_edges} edges (ratio {ratio:.1f})")
+
+                    avg_conf = stats.get("avg_confidence", 0.5)
+                    if avg_conf < 0.5:
+                        intensity += (0.5 - avg_conf) * 0.2
+                        triggers.append(f"low average confidence: {avg_conf:.2f}")
+            except Exception as e:
+                logger.debug(f"[IntrinsicMotivation] non-critical: {e}")
+
+            # Fallback gap scan
+            gap_targets = self.scan_kg_gaps(max_targets=5)
+            if gap_targets:
+                intensity += min(0.2, len(gap_targets) * 0.04)
+                for t in gap_targets[:2]:
+                    triggers.append(f"{t['reason']}: {t['target']}")
+                self._curiosity_targets = gap_targets
+
         # Check if recent topics have unexplored connections
         try:
             from api.routes.context import get_tracker
@@ -205,24 +255,16 @@ class IntrinsicMotivationEngine:
             focus = ctx.get_focus_state(limit=5)
             items = focus.get("items", [])
             if items and len(items) >= 3:
-                # Multiple active topics = opportunity for connections
                 intensity += 0.1
                 topics = [i["name"] for i in items[:3]]
                 triggers.append(f"multiple active topics: {', '.join(topics)}")
         except Exception as e:
             logger.debug(f"[IntrinsicMotivation] non-critical: {e}")
+
         # Time decay: curiosity grows when not explored
         hours_since = (time.time() - drive.last_satisfied) / 3600.0
-        time_growth = min(0.2, hours_since / 48.0 * 0.2)  # Grows over 48h
+        time_growth = min(0.2, hours_since / 48.0 * 0.2)
         intensity += time_growth
-
-        # Scan for specific curiosity targets (Phase 4.3)
-        gap_targets = self.scan_kg_gaps(max_targets=5)
-        if gap_targets:
-            intensity += min(0.2, len(gap_targets) * 0.04)
-            for t in gap_targets[:2]:
-                triggers.append(f"{t['reason']}: {t['target']}")
-        self._curiosity_targets = gap_targets
 
         drive.intensity = min(1.0, max(0.0, intensity))
         drive.satisfaction = 1.0 - drive.intensity
@@ -513,12 +555,20 @@ class IntrinsicMotivationEngine:
             targets = getattr(self, '_curiosity_targets', [])
             if targets and drive.urgency > 0.5:
                 top = targets[0]
+                # Use pre-generated question if available (from CuriosityScanner)
+                question = top.get("question", "")
+                desc = question if question else f"Ask about '{top['target']}' ({top['reason']})"
                 actions.append(DriveAction(
                     drive=DriveType.CURIOSITY,
                     action="explore_specific_gap",
-                    description=f"Ask about '{top['target']}' ({top['reason']})",
+                    description=desc,
                     priority=drive.urgency * 0.8,
-                    metadata={"target": top["target"], "reason": top["reason"], "node_id": top["node_id"]},
+                    metadata={
+                        "target": top["target"],
+                        "reason": top["reason"],
+                        "node_id": top["node_id"],
+                        "question": question,
+                    },
                 ))
             elif drive.urgency > 0.5:
                 actions.append(DriveAction(
@@ -784,7 +834,7 @@ class IntrinsicMotivationEngine:
             logger.warning(f"[IntrinsicMotivation] Failed to load state: {e}")
 
     def _save_state(self) -> None:
-        """Save drive state to disk."""
+        """Save drive state to disk (atomic write via tempfile + os.replace)."""
         try:
             data = {
                 "drives": {
@@ -798,10 +848,20 @@ class IntrinsicMotivationEngine:
                 "stats": self._stats,
                 "saved_at": datetime.now().isoformat(),
             }
-            self._state_file().write_text(
-                json.dumps(data, indent=2, default=str),
-                encoding="utf-8",
+            target = self._state_file()
+            fd, tmp_path = tempfile.mkstemp(
+                dir=str(target.parent), suffix=".tmp"
             )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2, default=str)
+                os.replace(tmp_path, str(target))
+            except BaseException:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
         except Exception as e:
             logger.warning(f"[IntrinsicMotivation] Failed to save state: {e}")
 

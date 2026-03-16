@@ -20,6 +20,7 @@ import signal
 import logging
 import threading
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
@@ -65,6 +66,8 @@ class AuraDaemon:
         self._event_bus = EventBus()
         self._proactive = ProactiveEngine(self._event_bus)
         self._ipc = IPCServer(self._event_bus)
+        self._screen_pool = ThreadPoolExecutor(max_workers=1)
+        self._screen_tick_pending = False
 
         # Tick tracking (monotonic for interval measurement)
         self._last_hooks_tick = 0.0
@@ -94,6 +97,7 @@ class AuraDaemon:
 
     def stop(self):
         self._running = False
+        self._screen_pool.shutdown(wait=False)
         self._ipc.stop()
         self._remove_pid()
         logger.info("AURA daemon stopped.")
@@ -103,10 +107,10 @@ class AuraDaemon:
         while self._running:
             now = time.monotonic()
 
-            # 5s: screen monitoring (non-blocking)
-            t = threading.Thread(target=self._tick_screen, daemon=True)
-            t.start()
-            # Don't join — fire-and-forget, keeps loop non-blocking
+            # 5s: screen monitoring (non-blocking, skip if previous tick still running)
+            if not self._screen_tick_pending:
+                self._screen_tick_pending = True
+                self._screen_pool.submit(self._tick_screen_wrapper)
 
             # 30s: hooks + system health
             if now - self._last_hooks_tick >= self.TICK_HOOKS:
@@ -122,6 +126,13 @@ class AuraDaemon:
             self._check_dream_time()
 
             time.sleep(self.TICK_SCREEN)
+
+    def _tick_screen_wrapper(self):
+        """Wrapper that clears the pending flag after _tick_screen completes."""
+        try:
+            self._tick_screen()
+        finally:
+            self._screen_tick_pending = False
 
     def _tick_screen(self):
         """Check screen for changes. ~2ms."""
@@ -418,8 +429,8 @@ class IPCServer:
                 msg = json.loads(data)
                 self._event_bus.emit(f"ipc:{msg.get('type', 'message')}", msg)
                 conn.send(json.dumps({"status": "ok"}).encode())
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"IPC client error: {e}")
         finally:
             conn.close()
 

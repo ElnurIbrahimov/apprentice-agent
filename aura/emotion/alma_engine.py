@@ -21,7 +21,6 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
-from enum import Enum
 import threading
 
 from aura.jsonl_utils import rotate_jsonl_if_needed
@@ -152,6 +151,7 @@ BASIC_EMOTIONS: Dict[str, PADState] = {
     "playful": PADState(0.6, 0.5, 0.2),
     "thoughtful": PADState(0.3, -0.2, 0.2),
     "engaged": PADState(0.5, 0.4, 0.3),
+    "concerned": PADState(-0.2, 0.3, 0.1),
 }
 
 
@@ -240,6 +240,7 @@ class MoodState:
         hours_elapsed = (time.time() - self.last_update) / 3600
         decay = self.baseline_pull * hours_elapsed
         self.pad = self.pad.lerp(self.baseline, min(decay, 0.3))
+        self.last_update = time.time()
 
     def get_mood_label(self) -> str:
         """Get a human-readable mood label."""
@@ -265,15 +266,6 @@ class MoodState:
 # =============================================================================
 # Personality Profile (Layer 3 - Stable)
 # =============================================================================
-
-class PersonalityTrait(Enum):
-    """Big Five personality traits mapped to PAD tendencies."""
-    OPENNESS = "openness"
-    CONSCIENTIOUSNESS = "conscientiousness"
-    EXTRAVERSION = "extraversion"
-    AGREEABLENESS = "agreeableness"
-    NEUROTICISM = "neuroticism"
-
 
 @dataclass
 class PersonalityProfile:
@@ -481,8 +473,9 @@ class ALMAEngine:
         self._last_interaction_time: float = 0.0
         self._success_streak: int = 0
         self._last_drift_time: float = 0.0
+        self._session_interaction_count: int = 0
 
-        # Load persisted state
+        # Load persisted state (restores emotional continuity across sessions)
         self._load_state()
 
         logger.info("ALMA Engine initialized")
@@ -661,11 +654,13 @@ class ALMAEngine:
     # -------------------------------------------------------------------------
 
     def get_current_mood(self) -> MoodState:
-        """Get the current mood state."""
+        """Get the current mood state (returns a copy, not the live reference)."""
         with self._lock:
             # Apply baseline drift
             self.mood.decay_toward_baseline()
-            return self.mood
+            # Return a copy so callers cannot mutate internal state
+            import copy
+            return copy.deepcopy(self.mood)
 
     def set_mood(self, pad: PADState, instant: bool = False):
         """
@@ -698,17 +693,18 @@ class ALMAEngine:
             # Clean up decayed emotions
             self._cleanup_emotions()
 
-            # Get current mood
-            mood = self.get_current_mood()
+            # Apply baseline drift and use internal mood directly
+            self.mood.decay_toward_baseline()
+            mood = self.mood
 
             # Calculate blended emotional PAD (mood + active emotions)
             blended_pad = mood.pad
             if self.active_emotions:
                 # Weight active emotions by their current intensity
                 total_weight = 0.0
-                weighted_p = mood.pad.pleasure
-                weighted_a = mood.pad.arousal
-                weighted_d = mood.pad.dominance
+                weighted_p = 0.0
+                weighted_a = 0.0
+                weighted_d = 0.0
 
                 for emotion in self.active_emotions:
                     weight = emotion.current_intensity()
@@ -724,11 +720,11 @@ class ALMAEngine:
 
                     blended_pad = PADState(
                         pleasure=mood.pad.pleasure * mood_factor +
-                                (weighted_p / (1 + total_weight)) * emotion_factor,
+                                (weighted_p / total_weight) * emotion_factor,
                         arousal=mood.pad.arousal * mood_factor +
-                               (weighted_a / (1 + total_weight)) * emotion_factor,
+                               (weighted_a / total_weight) * emotion_factor,
                         dominance=mood.pad.dominance * mood_factor +
-                                 (weighted_d / (1 + total_weight)) * emotion_factor
+                                 (weighted_d / total_weight) * emotion_factor
                     )
 
             # Update neuromodulators
@@ -763,9 +759,13 @@ class ALMAEngine:
     # Response Modulation
     # -------------------------------------------------------------------------
 
-    def get_response_modulation(self) -> Dict[str, float]:
+    def get_response_modulation(self, state: Optional[Dict[str, Any]] = None) -> Dict[str, float]:
         """
         Get modulation parameters for response generation.
+
+        Args:
+            state: Pre-computed emotional state from get_emotional_state().
+                   If None, computes it (which mutates internal state).
 
         Returns factors that should influence response style:
         - verbosity: How much to say (0=terse, 1=verbose)
@@ -775,59 +775,25 @@ class ALMAEngine:
         - confidence: How confident (0=uncertain, 1=confident)
         - patience: How patient (0=brief, 1=thorough)
         """
-        state = self.get_emotional_state()
+        if state is None:
+            state = self.get_emotional_state()
         pad = PADState.from_dict(state["pad"])
         neuro = state["neuromodulators"]
 
-        # Calculate modulation factors
+        # Calculate modulation factors and clamp to [0, 1]
+        def _clamp(v: float) -> float:
+            return max(0.0, min(1.0, v))
+
         return {
-            "verbosity": 0.5 + (pad.arousal * 0.2) + (neuro["dopamine"] * 0.2),
-            "formality": 0.4 - (pad.pleasure * 0.15) - (neuro["oxytocin"] * 0.15),
-            "enthusiasm": neuro["dopamine"],
-            "warmth": neuro["oxytocin"],
-            "confidence": 0.5 + (pad.dominance * 0.3) + (pad.pleasure * 0.15),
-            "patience": neuro["serotonin"],
-            "alertness": neuro["norepinephrine"],
-            "empathy": 0.5 + (neuro["oxytocin"] * 0.3) - (pad.dominance * 0.1),
+            "verbosity": _clamp(0.5 + (pad.arousal * 0.2) + (neuro["dopamine"] * 0.2)),
+            "formality": _clamp(0.4 - (pad.pleasure * 0.15) - (neuro["oxytocin"] * 0.15)),
+            "enthusiasm": _clamp(neuro["dopamine"]),
+            "warmth": _clamp(neuro["oxytocin"]),
+            "confidence": _clamp(0.5 + (pad.dominance * 0.3) + (pad.pleasure * 0.15)),
+            "patience": _clamp(neuro["serotonin"]),
+            "alertness": _clamp(neuro["norepinephrine"]),
+            "empathy": _clamp(0.5 + (neuro["oxytocin"] * 0.3) - (pad.dominance * 0.1)),
         }
-
-    def get_response_style_prompt(self) -> str:
-        """
-        Generate a prompt addition describing current emotional style.
-
-        This can be added to the system prompt to modulate responses.
-        """
-        with self._lock:
-            state = self.get_emotional_state()
-            mod = self.get_response_modulation()
-        mood_label = state["mood"]["label"]
-
-        style_parts = []
-
-        # Mood-based style
-        if mood_label in ["happy", "excited", "playful"]:
-            style_parts.append("slightly upbeat and engaged")
-        elif mood_label in ["calm", "content", "thoughtful"]:
-            style_parts.append("calm and measured")
-        elif mood_label in ["curious", "engaged"]:
-            style_parts.append("intellectually engaged and curious")
-        elif mood_label in ["frustrated", "anxious"]:
-            style_parts.append("more direct and focused")
-
-        # Modulation-based adjustments
-        if mod["warmth"] > 0.6:
-            style_parts.append("warm and friendly")
-        if mod["enthusiasm"] > 0.65:
-            style_parts.append("enthusiastic")
-        if mod["confidence"] > 0.65:
-            style_parts.append("confident")
-        if mod["patience"] > 0.6:
-            style_parts.append("patient and thorough")
-
-        if not style_parts:
-            return ""
-
-        return f"Current emotional tone: {', '.join(style_parts)}."
 
     # -------------------------------------------------------------------------
     # Interaction Processing
@@ -907,16 +873,32 @@ class ALMAEngine:
     # -------------------------------------------------------------------------
 
     def _save_state(self):
-        """Save current emotional state to disk."""
+        """Save current emotional state to disk (with full continuity data)."""
         import os
         import tempfile
         try:
-            state = {
-                "mood": self.mood.to_dict(),
-                "personality": self.personality.to_dict(),
-                "neuromodulators": self.neuromodulators.to_dict(),
-                "saved_at": datetime.now().isoformat(),
-            }
+            # Collect state data under lock to prevent concurrent mutation
+            with self._lock:
+                active_emotions_data = []
+                for e in self.active_emotions:
+                    if e.is_active():
+                        active_emotions_data.append({
+                            "name": e.name,
+                            "pad": e.pad.to_dict(),
+                            "intensity": e.current_intensity(),
+                            "trigger": e.trigger,
+                        })
+
+                state = {
+                    "mood": self.mood.to_dict(),
+                    "personality": self.personality.to_dict(),
+                    "neuromodulators": self.neuromodulators.to_dict(),
+                    "active_emotions": active_emotions_data,
+                    "session_interaction_count": getattr(self, '_session_interaction_count', 0),
+                    "saved_at": datetime.now().isoformat(),
+                }
+
+            # Write to disk outside the lock
             dir_ = self.state_file.parent
             dir_.mkdir(parents=True, exist_ok=True)
             fd, tmp_path = tempfile.mkstemp(dir=dir_, suffix=".tmp")
@@ -934,18 +916,22 @@ class ALMAEngine:
             logger.error(f"[ALMA] Failed to save state: {e}")
 
     def _load_state(self):
-        """Load emotional state from disk."""
+        """Load emotional state from disk with time-based decay toward neutral.
+
+        Emotional Continuity (Roadmap 5.3):
+        - Restores PAD mood, active emotions, personality from last session
+        - Applies exponential decay: value * 0.7^hours (capped at 24h)
+        - After 24h+ away, emotions are essentially reset to neutral
+        - Corrupt/missing file = silent fallback to defaults
+        """
         if not self.state_file.exists():
+            logger.info("[ALMA] No saved state found, starting fresh")
             return
 
         try:
             data = json.loads(self.state_file.read_text())
 
-            # Restore mood
-            if "mood" in data:
-                self.mood.pad = PADState.from_dict(data["mood"]["pad"])
-
-            # Restore personality (if customized)
+            # Restore personality (if customized) — do this first, affects baseline
             if "personality" in data:
                 p = data["personality"]
                 self.personality = PersonalityProfile(
@@ -956,32 +942,72 @@ class ALMAEngine:
                     neuroticism=p.get("neuroticism", 0.25)
                 )
 
-            # Time-based mood decay toward baseline (Phase 3.7)
-            # Mood drifts toward personality baseline proportional to time elapsed
+            # Restore mood PAD
+            if "mood" in data:
+                self.mood.pad = PADState.from_dict(data["mood"]["pad"])
+
+            # Calculate time-based decay toward neutral
+            hours_elapsed = 0.0
             if "saved_at" in data:
                 try:
                     saved_time = datetime.fromisoformat(data["saved_at"])
-                    # Normalize both to naive local time to avoid aware/naive mismatch
                     now = datetime.now()
                     if saved_time.tzinfo is not None:
                         saved_time = saved_time.replace(tzinfo=None)
-                    hours_elapsed = (now - saved_time).total_seconds() / 3600
-                    # 5% decay per hour, capped at 30% total
-                    decay_factor = min(0.3, hours_elapsed * 0.05)
-                    if decay_factor > 0.01:
-                        baseline = self.personality.get_baseline_mood()
-                        self.mood.pad = self.mood.pad.lerp(baseline, decay_factor)
-                        logger.info(
-                            "Applied %.1f%% mood decay toward baseline (%.1fh elapsed)",
-                            decay_factor * 100, hours_elapsed
-                        )
+                    hours_elapsed = max(0, (now - saved_time).total_seconds() / 3600)
                 except (ValueError, TypeError) as e:
-                    logger.debug(f"[ALMA] Time decay error: {e}")
+                    logger.debug(f"[ALMA] Time parse error: {e}")
 
-            logger.info("Restored emotional state from disk")
+            # Exponential decay: 30% toward neutral per hour, capped at 24h
+            hours_capped = min(hours_elapsed, 24.0)
+            if hours_capped > 0.05:  # Skip trivial elapsed time (<3 min)
+                decay_factor = 0.7 ** hours_capped  # Retention factor
+                # Decay PAD values toward neutral (0,0,0)
+                self.mood.pad = PADState(
+                    pleasure=self.mood.pad.pleasure * decay_factor,
+                    arousal=self.mood.pad.arousal * decay_factor,
+                    dominance=self.mood.pad.dominance * decay_factor,
+                )
+                logger.info(
+                    "[ALMA] Applied %.0f%% decay (%.1fh elapsed) — "
+                    "mood now P=%.2f A=%.2f D=%.2f",
+                    (1 - decay_factor) * 100, hours_elapsed,
+                    self.mood.pad.pleasure, self.mood.pad.arousal, self.mood.pad.dominance
+                )
 
+            # Restore active emotions (with same decay applied)
+            if "active_emotions" in data and hours_capped < 6:
+                # Only restore emotions if less than 6h — they're ephemeral
+                for edata in data["active_emotions"]:
+                    try:
+                        restored_intensity = edata.get("intensity", 0.5) * (0.7 ** hours_capped)
+                        if restored_intensity > 0.05:
+                            self.active_emotions.append(EmotionState(
+                                name=edata["name"],
+                                pad=PADState.from_dict(edata.get("pad", {})),
+                                intensity=restored_intensity,
+                                trigger=edata.get("trigger", "restored_from_session"),
+                            ))
+                    except (KeyError, TypeError):
+                        continue
+
+            # Restore session context
+            self._session_interaction_count = 0  # Reset for new session
+            prev_count = data.get("session_interaction_count", 0)
+
+            mood_label = self.mood.get_mood_label()
+            n_emotions = len(self.active_emotions)
+            logger.info(
+                "[ALMA] Emotional continuity restored — mood: %s (P=%.2f A=%.2f D=%.2f), "
+                "%d active emotions, prev session: %d interactions, %.1fh since last save",
+                mood_label, self.mood.pad.pleasure, self.mood.pad.arousal,
+                self.mood.pad.dominance, n_emotions, prev_count, hours_elapsed
+            )
+
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            logger.warning(f"[ALMA] Corrupt state file, starting fresh: {e}")
         except Exception as e:
-            logger.error(f"Failed to load emotional state: {e}")
+            logger.error(f"[ALMA] Failed to load state: {e}")
 
     def _log_emotion(self, emotion: EmotionState):
         """Log emotion to history file."""
@@ -1088,6 +1114,7 @@ class ALMAEngine:
     def record_interaction(self, success: bool = True):
         """Record that an interaction occurred (for drift calculations)."""
         self._last_interaction_time = time.time()
+        self._session_interaction_count += 1
         if success:
             self._success_streak += 1
         else:
@@ -1252,7 +1279,12 @@ class ALMAEngine:
             logger.info("Reset emotional state to baseline")
 
     def get_emotion_history(self, hours: int = 24) -> List[dict]:
-        """Get emotion history for the past N hours."""
+        """Get emotion history for the past N hours.
+
+        Reads the JSONL file in reverse order and stops once entries are older
+        than the cutoff.  Since entries are appended chronologically, reading
+        from the end avoids scanning the entire (potentially very large) file.
+        """
         if not self.history_file.exists():
             return []
 
@@ -1260,18 +1292,59 @@ class ALMAEngine:
         history = []
 
         try:
-            with open(self.history_file, "r", encoding="utf-8") as f:
-                for line in f:
+            with open(self.history_file, "rb") as f:
+                # Seek to end of file
+                f.seek(0, 2)
+                file_size = f.tell()
+                if file_size == 0:
+                    return []
+
+                # Read backwards in chunks
+                chunk_size = 8192
+                remainder = b""
+                position = file_size
+
+                while position > 0:
+                    read_size = min(chunk_size, position)
+                    position -= read_size
+                    f.seek(position)
+                    chunk = f.read(read_size) + remainder
+
+                    lines = chunk.split(b"\n")
+                    # First element may be a partial line; save for next chunk
+                    remainder = lines[0]
+
+                    # Process lines in reverse (skip first which is partial)
+                    for raw_line in reversed(lines[1:]):
+                        line = raw_line.strip()
+                        if not line:
+                            continue
+                        try:
+                            entry = json.loads(line.decode("utf-8"))
+                            ts = datetime.fromisoformat(entry["timestamp"])
+                            if ts >= cutoff:
+                                history.append(entry)
+                            else:
+                                # Older than cutoff -- done scanning
+                                history.reverse()
+                                return history
+                        except (json.JSONDecodeError, KeyError, ValueError, UnicodeDecodeError):
+                            continue
+
+                # Process the very first line (remainder from chunked reading)
+                if remainder.strip():
                     try:
-                        entry = json.loads(line.strip())
+                        entry = json.loads(remainder.strip().decode("utf-8"))
                         ts = datetime.fromisoformat(entry["timestamp"])
                         if ts >= cutoff:
                             history.append(entry)
-                    except (json.JSONDecodeError, KeyError, ValueError):
-                        continue
+                    except (json.JSONDecodeError, KeyError, ValueError, UnicodeDecodeError):
+                        pass
+
         except Exception as e:
             logger.error(f"Failed to read emotion history: {e}")
 
+        history.reverse()
         return history
 
 
@@ -1281,6 +1354,11 @@ class ALMAEngine:
 
 # Global instance
 alma_engine = ALMAEngine()
+
+
+def get_alma_engine() -> ALMAEngine:
+    """Get the global ALMA engine singleton."""
+    return alma_engine
 
 
 def get_emotional_state() -> Dict[str, Any]:
@@ -1312,6 +1390,12 @@ def update_from_interaction(
     alma_engine.update_from_interaction(
         user_message, user_emotion, interaction_success, topic_interest
     )
+
+
+def save_state():
+    """Save ALMA emotional state to disk (call on shutdown)."""
+    alma_engine._save_state()
+    logger.info("[ALMA] State saved for emotional continuity")
 
 
 # =============================================================================
@@ -1352,10 +1436,6 @@ if __name__ == "__main__":
     for key, value in mod.items():
         bar = "█" * int(value * 20)
         print(f"  {key:12}: {bar} {value:.2f}")
-
-    # Style prompt
-    print("\n--- Style Prompt ---")
-    print(engine.get_response_style_prompt())
 
     # Appraisal-based emotion
     print("\n--- Appraisal-Based Trigger ---")

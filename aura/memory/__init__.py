@@ -8,7 +8,11 @@ Phase 2 Memory Consolidation:
   unified_memory.py — Public API (backward-compatible query/store/store_gated)
   write_gate.py    — Memory write worthiness scoring (unchanged)
   context_budget.py — Token budget allocation (unchanged)
+  embedding.py     — Shared Ollama nomic-embed-text helper
 """
+
+# Shared embedding utility
+from .embedding import get_embedding
 
 # Backward compatibility: re-export MemorySystem from old memory.py
 from .memory_system import MemorySystem
@@ -29,6 +33,8 @@ from .fade_mem import batch_decay_and_prune, reinforce
 from .user_profile import UserProfile, load_profile, save_profile, update_profile_from_memories
 
 __all__ = [
+    # Embedding
+    "get_embedding",
     # Legacy
     "MemorySystem",
     # Consolidated store

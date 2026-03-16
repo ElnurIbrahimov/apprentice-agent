@@ -38,78 +38,101 @@ class NarrativeSelf:
     last_updated: str = ""
     version: int = 1
 
+    def __post_init__(self):
+        self._lock = threading.Lock()
+
     def to_prompt(self) -> str:
         """Format for system prompt injection (~400-600 tokens)."""
-        parts = []
+        with self._lock:
+            parts = []
 
-        if self.core_identity:
-            parts.append(self.core_identity)
+            if self.core_identity:
+                parts.append(self.core_identity)
 
-        if self.recent_growth:
-            parts.append(f"Recent growth: {self.recent_growth}")
+            if self.recent_growth:
+                parts.append(f"Recent growth: {self.recent_growth}")
 
-        if self.active_concerns:
-            concerns = "; ".join(self.active_concerns[:5])
-            parts.append(f"Active concerns: {concerns}")
+            if self.active_concerns:
+                concerns = "; ".join(self.active_concerns[:5])
+                parts.append(f"Active concerns: {concerns}")
 
-        if self.unresolved_questions:
-            questions = "; ".join(self.unresolved_questions[:5])
-            parts.append(f"Open questions: {questions}")
+            if self.unresolved_questions:
+                questions = "; ".join(self.unresolved_questions[:5])
+                parts.append(f"Open questions: {questions}")
 
-        if self.relationship_state:
-            parts.append(f"Relationship: {self.relationship_state}")
+            if self.relationship_state:
+                parts.append(f"Relationship: {self.relationship_state}")
 
-        if not parts:
-            return ""
+            if not parts:
+                return ""
 
-        return "[Self-Model]\n" + "\n".join(parts)
+            return "[Self-Model]\n" + "\n".join(parts)
 
     def update_from_interaction(self, message: str, response: str, brain=None) -> None:
         """Update narrative after a significant interaction using fast LLM."""
         if not brain or not hasattr(brain, '_quick_generate'):
             return
 
-        prompt = (
-            f"You are updating your self-model after this interaction.\n"
-            f"Current self-model:\n"
-            f"- Growth: {self.recent_growth or '(none yet)'}\n"
-            f"- Concerns: {', '.join(self.active_concerns[:3]) or '(none)'}\n"
-            f"- Questions: {', '.join(self.unresolved_questions[:3]) or '(none)'}\n"
-            f"- Relationship: {self.relationship_state or '(new)'}\n\n"
-            f"Interaction:\nUser: {message[:300]}\nYou: {response[:300]}\n\n"
-            f"Update the self-model. Reply in EXACTLY this format:\n"
-            f"growth: <one sentence about what you learned or improved>\n"
-            f"concern: <one current concern, or NONE>\n"
-            f"question: <one open question, or NONE>\n"
-            f"relationship: <one sentence about how the relationship is going>"
-        )
+        # Read current state under lock for prompt construction
+        with self._lock:
+            prompt = (
+                f"You are updating your self-model after this interaction.\n"
+                f"Current self-model:\n"
+                f"- Growth: {self.recent_growth or '(none yet)'}\n"
+                f"- Concerns: {', '.join(self.active_concerns[:3]) or '(none)'}\n"
+                f"- Questions: {', '.join(self.unresolved_questions[:3]) or '(none)'}\n"
+                f"- Relationship: {self.relationship_state or '(new)'}\n\n"
+                f"Interaction:\nUser: {message[:300]}\nYou: {response[:300]}\n\n"
+                f"Update the self-model. Reply in EXACTLY this format:\n"
+                f"growth: <one sentence about what you learned or improved>\n"
+                f"concern: <one current concern, or NONE>\n"
+                f"question: <one open question, or NONE>\n"
+                f"relationship: <one sentence about how the relationship is going>"
+            )
 
         try:
+            # LLM call outside lock (slow I/O)
             raw = brain._quick_generate(prompt, timeout=15)
             if not raw:
                 return
+
+            # Parse results, then apply mutations under lock
+            new_growth = None
+            new_concern = None
+            new_question = None
+            new_relationship = None
 
             for line in raw.strip().split("\n"):
                 line = line.strip()
                 if line.lower().startswith("growth:"):
                     val = line[7:].strip()
                     if val and val.lower() != "none":
-                        self.recent_growth = val[:300]
+                        new_growth = val[:300]
                 elif line.lower().startswith("concern:"):
                     val = line[8:].strip()
                     if val and val.lower() != "none":
-                        self.active_concerns = [val] + self.active_concerns[:4]
+                        new_concern = val
                 elif line.lower().startswith("question:"):
                     val = line[9:].strip()
                     if val and val.lower() != "none":
-                        self.unresolved_questions = [val] + self.unresolved_questions[:4]
+                        new_question = val
                 elif line.lower().startswith("relationship:"):
                     val = line[13:].strip()
                     if val and val.lower() != "none":
-                        self.relationship_state = val[:200]
+                        new_relationship = val[:200]
 
-            self.last_updated = datetime.now().isoformat()
-            self.version += 1
+            with self._lock:
+                if new_growth is not None:
+                    self.recent_growth = new_growth
+                if new_concern is not None:
+                    self.active_concerns = [new_concern] + self.active_concerns[:4]
+                if new_question is not None:
+                    self.unresolved_questions = [new_question] + self.unresolved_questions[:4]
+                if new_relationship is not None:
+                    self.relationship_state = new_relationship
+                self.last_updated = datetime.now().isoformat()
+                self.version += 1
+
             save_narrative_self(self)
             logger.debug("[NarrativeSelf] Updated from interaction (v%d)", self.version)
 
@@ -130,37 +153,49 @@ class NarrativeSelf:
         if not summary_texts:
             return
 
-        prompt = (
-            f"During a sleep/dream cycle, these insights were consolidated:\n"
-            f"{chr(10).join('- ' + t for t in summary_texts)}\n\n"
-            f"Current self-model:\n"
-            f"- Growth: {self.recent_growth or '(none)'}\n"
-            f"- Concerns: {', '.join(self.active_concerns[:3]) or '(none)'}\n\n"
-            f"Update your recent_growth and active_concerns based on these insights.\n"
-            f"Reply in EXACTLY this format:\n"
-            f"growth: <updated growth summary>\n"
-            f"concern: <updated primary concern, or NONE>"
-        )
+        # Read current state under lock for prompt construction
+        with self._lock:
+            prompt = (
+                f"During a sleep/dream cycle, these insights were consolidated:\n"
+                f"{chr(10).join('- ' + t for t in summary_texts)}\n\n"
+                f"Current self-model:\n"
+                f"- Growth: {self.recent_growth or '(none)'}\n"
+                f"- Concerns: {', '.join(self.active_concerns[:3]) or '(none)'}\n\n"
+                f"Update your recent_growth and active_concerns based on these insights.\n"
+                f"Reply in EXACTLY this format:\n"
+                f"growth: <updated growth summary>\n"
+                f"concern: <updated primary concern, or NONE>"
+            )
 
         try:
+            # LLM call outside lock (slow I/O)
             raw = brain._quick_generate(prompt, timeout=15)
             if not raw:
                 return
+
+            new_growth = None
+            new_concern = None
 
             for line in raw.strip().split("\n"):
                 line = line.strip()
                 if line.lower().startswith("growth:"):
                     val = line[7:].strip()
                     if val and val.lower() != "none":
-                        self.recent_growth = val[:300]
+                        new_growth = val[:300]
                 elif line.lower().startswith("concern:"):
                     val = line[8:].strip()
                     if val and val.lower() != "none":
-                        if val not in self.active_concerns:
-                            self.active_concerns = [val] + self.active_concerns[:4]
+                        new_concern = val
 
-            self.last_updated = datetime.now().isoformat()
-            self.version += 1
+            with self._lock:
+                if new_growth is not None:
+                    self.recent_growth = new_growth
+                if new_concern is not None:
+                    if new_concern not in self.active_concerns:
+                        self.active_concerns = [new_concern] + self.active_concerns[:4]
+                self.last_updated = datetime.now().isoformat()
+                self.version += 1
+
             save_narrative_self(self)
             logger.debug("[NarrativeSelf] Updated from dream (v%d)", self.version)
 

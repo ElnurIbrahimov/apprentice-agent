@@ -35,15 +35,19 @@ logger = logging.getLogger(__name__)
 
 def load_env():
     """Load environment variables from .env file"""
-    env_file = Path(".env")
-    if env_file.exists():
-        with open(env_file) as f:
-            for line in f:
-                line = line.strip()
-                if "=" in line and not line.startswith("#"):
-                    key, value = line.split("=", 1)
-                    value = value.strip().strip('"').strip("'")
-                    os.environ[key.strip()] = value
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        env_file = Path(".env")
+        if env_file.exists():
+            with open(env_file) as f:
+                for line in f:
+                    line = line.strip()
+                    if "=" in line and not line.startswith("#"):
+                        key, value = line.split("=", 1)
+                        value = value.strip().strip('"').strip("'")
+                        os.environ[key.strip()] = value
 
 
 async def main():

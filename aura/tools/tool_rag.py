@@ -151,12 +151,13 @@ class ToolRAG:
         ]
 
     def _embed(self, text: str) -> Optional[list[float]]:
-        """Compute embedding using nomic-embed-text."""
+        """Compute embedding using nomic-embed-text via the batch embed() API."""
         if not self._client:
             return None
         try:
-            resp = self._client.embeddings(model="nomic-embed-text", prompt=text[:2000])
-            return resp.get("embedding") or (resp.get("embeddings") or [None])[0]
+            resp = self._client.embed(model="nomic-embed-text", input=[text[:2000]])
+            embeddings = resp.get("embeddings") or []
+            return embeddings[0] if embeddings else None
         except Exception:
             return None
 

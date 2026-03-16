@@ -79,13 +79,16 @@ def reinforce(
 
     new_strength = min(1.0, current_strength + REINFORCE_STRENGTH_DELTA)
     new_decay = max(MIN_DECAY_RATE, record.decay_rate * (1.0 - REINFORCE_DECAY_REDUCTION))
+    now = datetime.now().isoformat()
 
+    # Atomic: update strength, decay_rate, last_accessed, and access_count in one call
     store.update(
         memory_id,
         strength=new_strength,
         decay_rate=new_decay,
+        last_accessed=now,
+        access_count=record.access_count + 1,
     )
-    store.touch(memory_id)
     return new_strength
 
 

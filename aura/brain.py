@@ -486,6 +486,182 @@ class OllamaBrain:
             "output_tokens": output_tokens,
         }
 
+    # -----------------------------------------------------------------
+    # ReAct Step — single LLM call combining thought + action (1.1)
+    # -----------------------------------------------------------------
+
+    def react_step(
+        self,
+        messages: list[dict],
+        tool_schemas: list[dict],
+        model_override: str = None,
+    ) -> dict:
+        """Execute one ReAct step: single LLM call that produces thought + tool call(s).
+
+        This is the core brain method for roadmap 1.1 (Collapse to ReAct Loop).
+        It wraps think_with_tools and parses the response into a structured result
+        that the agent loop can act on without additional LLM calls.
+
+        Args:
+            messages: Full conversation history (system + user + assistant + tool results)
+            tool_schemas: Ollama tool schemas (from Tool RAG selection)
+            model_override: Force a specific model
+
+        Returns:
+            {
+                "thought": str,       # LLM's reasoning (content text)
+                "tool_calls": list,    # Parsed tool calls: [{"name": str, "args": dict}, ...]
+                "done": bool,          # True if LLM returned final answer (no tool calls)
+                "final_answer": str,   # Final answer text (only when done=True)
+                "model": str,          # Model used
+                "input_tokens": int,
+                "output_tokens": int,
+            }
+            or {"error": str} on failure.
+        """
+        result = self.think_with_tools(messages, tool_schemas, model_override=model_override)
+
+        if "error" in result:
+            return result
+
+        raw_msg = result.get("message", {})
+
+        # Handle both dict and Pydantic message objects
+        if isinstance(raw_msg, dict):
+            content = raw_msg.get("content", "") or ""
+            raw_tool_calls = raw_msg.get("tool_calls")
+        else:
+            content = getattr(raw_msg, "content", "") or ""
+            raw_tool_calls = getattr(raw_msg, "tool_calls", None)
+
+        # Parse tool calls into a clean list
+        parsed_calls = []
+        if raw_tool_calls:
+            for tc in raw_tool_calls:
+                if isinstance(tc, dict):
+                    fn = tc.get("function", {})
+                    tool_name = fn.get("name", "")
+                    raw_args = fn.get("arguments", {})
+                else:
+                    fn = getattr(tc, "function", None)
+                    tool_name = getattr(fn, "name", "") if fn else ""
+                    raw_args = getattr(fn, "arguments", {}) if fn else {}
+
+                # Parse arguments
+                if isinstance(raw_args, str):
+                    try:
+                        args = json.loads(raw_args)
+                    except (json.JSONDecodeError, TypeError):
+                        args = {"action": raw_args}
+                elif isinstance(raw_args, dict):
+                    args = raw_args
+                elif raw_args is None:
+                    args = {}
+                else:
+                    args = {"action": str(raw_args)}
+
+                parsed_calls.append({"name": tool_name, "args": args})
+
+        done = not bool(parsed_calls)
+
+        return {
+            "thought": content,
+            "tool_calls": parsed_calls,
+            "done": done,
+            "final_answer": content if done else "",
+            "model": result.get("model", ""),
+            "input_tokens": result.get("input_tokens", 0),
+            "output_tokens": result.get("output_tokens", 0),
+            "raw_message": raw_msg,  # Kept for conversation history serialization
+        }
+
+    # -----------------------------------------------------------------
+    # ReAct Code Step — LLM writes Python code instead of tool calls (5.1)
+    # -----------------------------------------------------------------
+
+    def react_step_code(
+        self,
+        messages: list[dict],
+        model_override: str = None,
+    ) -> dict:
+        """Execute one ReAct code step: LLM produces Thought + Python code block.
+
+        Unlike react_step() which uses Ollama structured tool calling,
+        this method prompts the LLM to write Python code as its action.
+        No tools= parameter is passed — the LLM generates free-form text.
+
+        Args:
+            messages: Full conversation history (system + user + assistant + code results)
+            model_override: Force a specific model
+
+        Returns:
+            {
+                "thought": str,       # LLM's reasoning text
+                "code": str | None,   # Python code block (None if final answer)
+                "done": bool,         # True if no code block (final answer)
+                "final_answer": str,  # Full text when done
+                "model": str,
+                "input_tokens": int,
+                "output_tokens": int,
+            }
+            or {"error": str} on failure.
+        """
+        model = model_override or self._model_override or Config.MODEL_CODE
+        client, actual_model = self._get_client_for_model(model)
+
+        if actual_model.startswith("chatgpt:"):
+            return {"error": "ChatGPT models don't support code agent mode via this path."}
+
+        llm_options = {"temperature": 0.2, "num_predict": 4096}
+
+        try:
+            response = call_with_timeout(
+                lambda: client.chat(
+                    model=actual_model,
+                    messages=messages,
+                    options=llm_options,
+                ),
+                timeout=120,
+                default=None,
+            )
+        except Exception as e:
+            logger.error(f"[BRAIN] react_step_code error: {e}")
+            return {"error": str(e)}
+
+        if response is None:
+            return {"error": "Model failed to respond (timeout)"}
+
+        # Extract content from response
+        raw_msg = response.get("message", {}) if isinstance(response, dict) else getattr(response, "message", {})
+        if isinstance(raw_msg, dict):
+            content = raw_msg.get("content", "") or ""
+        else:
+            content = getattr(raw_msg, "content", "") or ""
+
+        # Track tokens
+        input_tokens = (response.get("prompt_eval_count", 0) if isinstance(response, dict)
+                        else getattr(response, "prompt_eval_count", 0)) or 0
+        output_tokens = (response.get("eval_count", 0) if isinstance(response, dict)
+                         else getattr(response, "eval_count", 0)) or 0
+        self._record_tokens(actual_model, input_tokens, output_tokens)
+
+        # Parse: extract thought and code block
+        from aura.core.code_agent import _extract_code_block, _extract_thought
+
+        code = _extract_code_block(content)
+        thought = _extract_thought(content)
+        done = code is None
+
+        return {
+            "thought": thought,
+            "code": code,
+            "done": done,
+            "final_answer": content if done else "",
+            "model": actual_model,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+        }
+
     def think_with_tools_stream(
         self,
         messages: list[dict],
@@ -2144,7 +2320,10 @@ class OllamaBrain:
         return self._last_model_used
 
     def observe(self, context: dict) -> str:
-        """Process observations about the current state."""
+        """Process observations about the current state.
+
+        DEPRECATED: Use react_step() instead. Kept for backward compatibility.
+        """
         prompt = f"""Context:
 {self._format_context(context)}
 
@@ -2153,7 +2332,10 @@ List 3-5 key observations. Be brief."""
         return self.think(prompt, system_prompt=self._observer_prompt())
 
     def plan(self, goal: str, observations: str, available_tools: list[str]) -> str:
-        """Create a plan to achieve the goal based on observations."""
+        """Create a plan to achieve the goal based on observations.
+
+        DEPRECATED: Use react_step() instead. Kept for backward compatibility.
+        """
         # === PHASE 1: Record real thinking — planning ===
         try:
             from api.routes.thinking import get_manager as get_thinking_manager
@@ -2192,7 +2374,10 @@ Create a short 1-3 step plan. Be specific about which tool to use for each step.
         return self.think(prompt, system_prompt=self._planner_prompt())
 
     def decide_action(self, plan: str, available_tools: list[str]) -> dict:
-        """Decide the next action to take based on the plan."""
+        """Decide the next action to take based on the plan.
+
+        DEPRECATED: Use react_step() instead. Kept for backward compatibility.
+        """
         # === PHASE 1: Record real thinking — deciding action ===
         try:
             from api.routes.thinking import get_manager as get_thinking_manager
@@ -2249,7 +2434,11 @@ REASONING: find main function"""
         return self._parse_action_response(response)
 
     def evaluate(self, action: str, result: str, goal: str) -> dict:
-        """Evaluate the result of an action."""
+        """Evaluate the result of an action.
+
+        DEPRECATED: Use deterministic evaluation in agent._evaluate_tool_result() instead.
+        Kept for backward compatibility.
+        """
         # === PHASE 1: Record real thinking — evaluating result ===
         try:
             from api.routes.thinking import get_manager as get_thinking_manager
@@ -2290,7 +2479,11 @@ If the goal is achieved, say NEXT: complete"""
         return self._parse_evaluation_response(response)
 
     def summarize_for_memory(self, episode: dict) -> str:
-        """Create a memory-worthy summary of an episode."""
+        """Create a memory-worthy summary of an episode.
+
+        DEPRECATED: Episode storage in react loop uses no LLM call.
+        Kept for backward compatibility.
+        """
         prompt = f"""Summarize in 2-3 sentences:
 Goal: {episode.get('goal', 'N/A')}
 Actions: {episode.get('actions', [])}

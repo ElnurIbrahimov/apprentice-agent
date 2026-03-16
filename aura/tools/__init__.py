@@ -327,43 +327,6 @@ except Exception as _e:
     create_neurodream = None
     _safe_import_error("NeuroDreamEngine", _e)
 
-# ---------------------------------------------------------------------------
-#  MirrorMind (REMOVED)
-# ---------------------------------------------------------------------------
-MirrorMind = None
-CritiqueResult = None
-
-# ---------------------------------------------------------------------------
-#  Cognitive Theater (REMOVED)
-# ---------------------------------------------------------------------------
-CognitiveTheater = None
-Deliberation = None
-is_decision_question = None
-
-# ---------------------------------------------------------------------------
-#  Reflexion (REMOVED)
-# ---------------------------------------------------------------------------
-ReflexionEngine = None
-Reflection = None
-ReflexionResult = None
-code_syntax_evaluator = None
-function_evaluator = None
-json_evaluator = None
-answer_completeness_evaluator = None
-
-# ---------------------------------------------------------------------------
-#  SynapseForge (REMOVED)
-# ---------------------------------------------------------------------------
-SynapseForge = None
-SynthesizedTool = None
-
-# ---------------------------------------------------------------------------
-#  WorldSim (REMOVED)
-# ---------------------------------------------------------------------------
-WorldSim = None
-RiskLevel = None
-SimulationResult = None
-quick_check = None
 
 # ---------------------------------------------------------------------------
 #  A-MEM (Zettelkasten Agentic Memory)
@@ -424,20 +387,6 @@ except Exception as _e:
     deep_reason = None
     _safe_import_error("ReasoningTreeTool/deep_reason", _e)
 
-# ---------------------------------------------------------------------------
-#  Introspection Circuit (REMOVED)
-# ---------------------------------------------------------------------------
-IntrospectionCircuit = None
-IntrospectionConfig = None
-IntrospectionResult = None
-IntrospectionAction = None
-ConfidenceLevel = None
-ConfidenceSignal = None
-QueryType = None
-create_introspection_circuit = None
-quick_confidence_check = None
-IntrospectionTool = None
-get_introspection_tool = None
 
 # ---------------------------------------------------------------------------
 #  Calendar
@@ -474,6 +423,16 @@ try:
 except Exception as _e:
     ShellExecutorTool = None
     _safe_import_error("ShellExecutorTool", _e)
+
+# ---------------------------------------------------------------------------
+#  Sandbox Executor (E2B cloud + local subprocess fallback)
+# ---------------------------------------------------------------------------
+try:
+    from ..sandbox import SandboxExecutor, ExecutionResult
+except Exception as _e:
+    SandboxExecutor = None
+    ExecutionResult = None
+    _safe_import_error("SandboxExecutor", _e)
 
 # ---------------------------------------------------------------------------
 #  Screen Reader
@@ -661,11 +620,6 @@ except Exception as _e:
     LifeLoggerTool = None
     _safe_import_error("LifeLoggerTool", _e)
 
-# ---------------------------------------------------------------------------
-#  FluxMind (REMOVED)
-# ---------------------------------------------------------------------------
-FluxMindTool = None
-FLUXMIND_AVAILABLE = False
 
 # ---------------------------------------------------------------------------
 #  __all__ — only export symbols that actually imported successfully
@@ -769,6 +723,9 @@ _ALL_SYMBOLS = [
     "CodeEditTool",
     # Shell Executor
     "ShellExecutorTool",
+    # Sandbox Executor
+    "SandboxExecutor",
+    "ExecutionResult",
     # Screen Reader
     "ScreenReaderTool",
     # Email
@@ -809,7 +766,7 @@ _ALL_SYMBOLS = [
 ]
 
 # Filter out symbols that failed to import (are None) — but keep
-# SESAME_AVAILABLE and FLUXMIND_AVAILABLE which are intentionally bool.
+# SESAME_AVAILABLE which is intentionally bool.
 _ALWAYS_EXPORT = {"SESAME_AVAILABLE"}
 _ns = vars()
 __all__ = [

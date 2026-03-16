@@ -1,4 +1,4 @@
-"""Main agent implementation with observe/plan/act/evaluate/remember loop."""
+"""Main agent implementation with ReAct loop (single LLM call per step)."""
 
 import json
 import re
@@ -13,6 +13,9 @@ from collections import deque
 _AGENT_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
     max_workers=4, thread_name_prefix="agent_shared"
 )
+import atexit as _atexit
+_atexit.register(_AGENT_EXECUTOR.shutdown, wait=False)
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -148,6 +151,23 @@ except ImportError:
     CONTEXT_ENGINE_AVAILABLE = False
     AlwaysOnContextEngine = None
 
+# Code Agent Mode — LLM writes Python code as actions (5.1)
+try:
+    from aura.core.code_agent import CodeAgentMode, should_use_code_agent, CODE_AGENT_SYSTEM_PROMPT
+    CODE_AGENT_AVAILABLE = True
+except ImportError:
+    CODE_AGENT_AVAILABLE = False
+    CodeAgentMode = None
+    should_use_code_agent = None
+
+# Adaptive Planner — skip planning for simple tasks, re-plan for complex ones (5.4)
+try:
+    from aura.core.adaptive_planner import AdaptivePlanner
+    ADAPTIVE_PLANNER_AVAILABLE = True
+except ImportError:
+    ADAPTIVE_PLANNER_AVAILABLE = False
+    AdaptivePlanner = None
+
 # AURA Fast Path - Instant responses for simple queries
 try:
     from aura.fast_path import FastPathHandler
@@ -163,6 +183,15 @@ try:
 except ImportError:
     DreamMode = None
     DREAM_MODE_AVAILABLE = False
+
+# Thinker — MIRROR dual-process async background reasoning (roadmap 3.6)
+try:
+    from .thinker import get_thinker, ThinkerEngine
+    THINKER_AVAILABLE = True
+except ImportError:
+    THINKER_AVAILABLE = False
+    get_thinker = None
+    ThinkerEngine = None
 
 # Strategy Bandit - Adaptive reasoning strategy selection
 try:
@@ -450,11 +479,16 @@ _TOOL_KEYWORDS = frozenset([
 
 
 class AgentPhase(Enum):
-    """Phases of the agent loop."""
-    OBSERVE = "observe"
-    PLAN = "plan"
-    ACT = "act"
-    EVALUATE = "evaluate"
+    """Phases of the agent loop.
+
+    The main loop now uses REACT (single step) instead of the old
+    OBSERVE/PLAN/ACT/EVALUATE sequence. Legacy values kept for compat.
+    """
+    REACT = "react"       # Single ReAct step (thought + action + deterministic eval)
+    OBSERVE = "observe"   # DEPRECATED
+    PLAN = "plan"         # DEPRECATED
+    ACT = "act"           # DEPRECATED
+    EVALUATE = "evaluate" # DEPRECATED
     REMEMBER = "remember"
 
 
@@ -462,7 +496,7 @@ class AgentPhase(Enum):
 class AgentState:
     """Current state of the agent."""
     goal: str = ""
-    phase: AgentPhase = AgentPhase.OBSERVE
+    phase: AgentPhase = AgentPhase.REACT
     observations: str = ""
     current_plan: str = ""
     last_action: Optional[dict] = None
@@ -496,7 +530,12 @@ DESTRUCTIVE_ACTIONS = frozenset({
 
 
 class ApprenticeAgent:
-    """An AI agent that learns and acts using observe/plan/act/evaluate/remember."""
+    """An AI agent that learns and acts using a ReAct loop (single LLM call per step).
+
+    The main loop (run()) uses brain.react_step() for combined thought+action,
+    with deterministic tool result evaluation (no LLM call for eval).
+    Old OPAE methods (_observe/_plan/_act/_evaluate) are deprecated but kept.
+    """
 
     def __init__(self, fast_init: bool = False):
         """Initialize the agent.
@@ -765,6 +804,19 @@ class ApprenticeAgent:
         self.guardian = None
         self._pending_prediction = None
 
+        # Coherent Loop state — tracks previous exchange for reaction feedback
+        self._prev_message = None   # User's previous message
+        self._prev_response = None  # AURA's previous response
+
+        # Initialize Thinker — MIRROR dual-process background reasoning (roadmap 3.6)
+        self.thinker = None
+        if THINKER_AVAILABLE:
+            try:
+                self.thinker = get_thinker(brain=self.brain)
+                logger.info("[LOADED] Thinker — MIRROR dual-process background reasoning")
+            except Exception as e:
+                logger.warning(f"[Thinker] Init failed: {e}")
+
         # Initialize NeuroDream (Tool #24) - Sleep/Dream Memory Consolidation
         self.neurodream = NeuroDreamEngine(
             knowledge_graph=self.tools.get("knowledge_graph"),
@@ -889,6 +941,17 @@ class ApprenticeAgent:
             self.tool_rag.initialize(self.tools, AGENTIC_TOOLS)
         except Exception as e:
             logger.debug(f"[ToolRAG] Init failed (will use fallback): {e}")
+
+        # Initialize Adaptive Planner (Roadmap 5.4)
+        self.adaptive_planner = None
+        if ADAPTIVE_PLANNER_AVAILABLE:
+            try:
+                self.adaptive_planner = AdaptivePlanner(
+                    brain=self.brain, planning_interval=3
+                )
+                logger.debug("[LOADED] AdaptivePlanner — adaptive planning for complex tasks")
+            except Exception as e:
+                logger.debug(f"[AdaptivePlanner] Init failed: {e}")
 
         # Initialize ToolExecutor for ReAct loop (handles dev tools without sandbox)
         self._tool_executor = None
@@ -1598,8 +1661,7 @@ Guidelines:
             return self._make_response(goal, neurodream_response, fast_path=True, metadata={"neurodream_direct": True})
 
         self._current_query_tier = "standard"
-        # Check for fast-path eligibility
-        fastpath_enabled = use_fastpath if use_fastpath is not None else self.use_fastpath
+        # Check for fast-path eligibility (reuse fastpath_enabled from above)
         if fastpath_enabled and self._is_simple_query(goal):
             return self._fast_path_response(goal)
 
@@ -1619,18 +1681,54 @@ Guidelines:
 
         logger.info(f"[AGENT] Starting ReAct loop for: {goal[:80]}")
 
+        # ===== Adaptive Planning (Roadmap 5.4) =====
+        # Classify task complexity and generate plan for complex tasks
+        task_plan = None
+        task_is_complex = False
+        if self.adaptive_planner:
+            try:
+                task_is_complex = self.adaptive_planner.classify(goal)
+                if task_is_complex:
+                    task_plan = self.adaptive_planner.generate_plan(goal)
+                    if task_plan:
+                        logger.info(f"[Planner] Plan generated: {len(task_plan.steps)} steps")
+                    else:
+                        logger.debug("[Planner] Complex task but plan generation failed, proceeding without plan")
+            except Exception as _plan_err:
+                logger.debug(f"[Planner] Classification/planning failed: {_plan_err}")
+
         # ===== ReAct Loop =====
         # Build system prompt with memory, identity, emotion, context
         system_prompt = self._build_react_system_prompt(goal, ace_context)
 
-        # Select relevant tools via Tool RAG
-        tool_schemas = self._build_tool_schemas(goal)
+        # Decide: Code Agent Mode vs Standard Tool Mode (Roadmap 5.1)
+        use_code_agent = self._should_use_code_agent(goal)
+        _code_agent_inst = None
+        _tool_namespace = None
+
+        if use_code_agent:
+            logger.info(f"[AGENT] Using CODE AGENT MODE for: {goal[:80]}")
+            _code_agent_inst = CodeAgentMode(self)
+            _tool_namespace = _code_agent_inst.build_tool_namespace()
+            # Use code agent system prompt instead of tool schemas
+            system_prompt += "\n\n" + CODE_AGENT_SYSTEM_PROMPT
+            tool_schemas = []  # No Ollama tool schemas in code mode
+        else:
+            # Select relevant tools via Tool RAG
+            tool_schemas = self._build_tool_schemas(goal)
 
         # Conversation messages for the LLM
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": goal},
         ]
+
+        # Inject plan context into conversation if we have a plan
+        if task_plan:
+            messages.append({
+                "role": "assistant",
+                "content": f"Let me work through this systematically.\n\n{task_plan.to_prompt_context()}",
+            })
 
         # Loop state
         iteration = 0
@@ -1651,141 +1749,58 @@ Guidelines:
             logger.info(f"[AGENT] Iteration {iteration}/{self.max_iterations}")
 
             try:
-                # Pick model for this step
-                step_model = self._pick_react_model(messages, iteration)
-
-                # Single LLM call with tool schemas
-                result = self.brain.think_with_tools(
-                    messages, tool_schemas, model_override=step_model
-                )
-
-                if "error" in result:
-                    logger.error(f"[AGENT] LLM error: {result['error']}")
-                    # Try known-good fallback models in order
-                    _fallback_models = ["glm-5:cloud", "deepseek-v3.2:cloud", "kimi-k2.5:cloud"]
-                    # Remove the model that just failed
-                    _fallback_models = [m for m in _fallback_models if m != step_model]
-                    _recovered = False
-                    for _fb_model in _fallback_models:
-                        logger.info(f"[AGENT] Trying fallback model: {_fb_model}")
-                        result = self.brain.think_with_tools(
-                            messages, tool_schemas, model_override=_fb_model
-                        )
-                        if "error" not in result:
-                            _recovered = True
-                            break
-                    if not _recovered:
-                        final_response = f"I encountered an error: {result['error']}"
-                        break
-
-                raw_msg = result.get("message", {})
-
-                # Handle both dict and Pydantic message objects
-                if isinstance(raw_msg, dict):
-                    content = raw_msg.get("content", "") or ""
-                    tool_calls = raw_msg.get("tool_calls")
-                else:
-                    content = getattr(raw_msg, "content", "") or ""
-                    tool_calls = getattr(raw_msg, "tool_calls", None)
-
-                # Record thought
-                if content:
-                    self.monologue.think("reason", content[:200])
-
-                # No tool calls → LLM is done, content is the answer
-                # Guard: if content is very short and looks like thinking aloud
-                # (no punctuation ending, under 20 chars), nudge LLM to continue
-                if not tool_calls:
-                    _stripped = (content or "").strip()
-                    _looks_incomplete = (
-                        len(_stripped) < 20
-                        and _stripped
-                        and not _stripped[-1] in '.!?'
-                        and iteration < self.max_iterations - 1
+                # Route to code agent or standard tool mode
+                if use_code_agent and _code_agent_inst and _tool_namespace is not None:
+                    step_result = self._react_step_code(
+                        messages, _code_agent_inst, _tool_namespace,
+                        iteration, consecutive_failures,
                     )
-                    if _looks_incomplete:
-                        # Nudge the LLM to provide a real answer or use a tool
-                        messages.append({"role": "assistant", "content": content})
-                        messages.append({
-                            "role": "user",
-                            "content": "Please provide your complete answer, or use a tool if you need more information.",
-                        })
-                        continue
-                    final_response = content
+                else:
+                    step_result = self._react_step(
+                        messages, tool_schemas, iteration,
+                        state_hashes, consecutive_failures,
+                    )
+
+                status = step_result["status"]
+                if status == "error":
+                    final_response = step_result.get("response", "An error occurred.")
+                    break
+                elif status == "done":
+                    final_response = step_result["response"]
                     done = True
                     break
+                elif status == "incomplete":
+                    pass  # LLM gave too-short answer, nudge injected
+                # else: "continue" -- tools executed, loop continues
 
-                # Serialize message for conversation history
-                msg_dict = {
-                    "role": "assistant",
-                    "content": content,
-                    "tool_calls": [],
-                }
+                tool_calls_total += step_result.get("tool_calls_count", 0)
+                consecutive_failures = step_result.get("consecutive_failures", consecutive_failures)
 
-                # Parse tool calls — handle both dict and Pydantic ToolCall objects
-                parsed_calls = []
-                for tc in tool_calls:
-                    if isinstance(tc, dict):
-                        fn = tc.get("function", {})
-                        tool_name = fn.get("name", "")
-                        raw_args = fn.get("arguments", {})
-                    else:
-                        fn = getattr(tc, "function", None)
-                        tool_name = getattr(fn, "name", "") if fn else ""
-                        raw_args = getattr(fn, "arguments", {}) if fn else {}
-
-                    # Parse arguments
-                    if isinstance(raw_args, str):
-                        try:
-                            args = json.loads(raw_args)
-                        except (json.JSONDecodeError, TypeError):
-                            args = {"action": raw_args}
-                    elif isinstance(raw_args, dict):
-                        args = raw_args
-                    elif raw_args is None:
-                        args = {}
-                    else:
-                        args = {"action": str(raw_args)}
-
-                    parsed_calls.append((tool_name, args))
-                    msg_dict["tool_calls"].append({
-                        "function": {"name": tool_name, "arguments": args}
-                    })
-
-                messages.append(msg_dict)
-
-                # Execute each parsed tool call
-                for tool_name, args in parsed_calls:
-
-                    # Loop guard: state hash dedup
+                # === Adaptive Re-planning (Roadmap 5.4) ===
+                if task_plan and self.adaptive_planner and status == "continue":
                     try:
-                        call_hash = hash(f"{tool_name}:{json.dumps(args, sort_keys=True, default=str)}")
-                    except (TypeError, ValueError):
-                        call_hash = hash(f"{tool_name}:{str(args)}")
-                    if call_hash in state_hashes:
-                        messages.append({
-                            "role": "tool",
-                            "content": json.dumps({"error": "Duplicate action. Try a different approach."}),
-                        })
-                        continue
-                    state_hashes.add(call_hash)
-
-                    # Execute tool
-                    tool_result = self._execute_tool_call(tool_name, args)
-                    tool_calls_total += 1
-                    messages.append({"role": "tool", "content": tool_result})
-
-                    # Loop guard: consecutive failures
-                    if '"success": false' in tool_result.lower() or '"error"' in tool_result.lower():
-                        consecutive_failures += 1
-                        if consecutive_failures >= 2:
-                            messages.append({
-                                "role": "tool",
-                                "content": json.dumps({"warning": "Multiple failures. Try a different tool or approach."}),
-                            })
-                            consecutive_failures = 0
-                    else:
-                        consecutive_failures = 0
+                        # Advance plan step on successful tool execution
+                        if step_result.get("tool_calls_count", 0) > 0 and consecutive_failures == 0:
+                            self.adaptive_planner.advance_step(
+                                step_result.get("response", "")[:200]
+                            )
+                        # Tick the planner step counter, then check if re-planning is due
+                        self.adaptive_planner.tick()
+                        if self.adaptive_planner.should_replan(iteration):
+                            recent_results = ""
+                            for msg in messages[-4:]:
+                                if msg.get("role") == "tool":
+                                    recent_results += msg.get("content", "")[:200] + "\n"
+                            updated_plan = self.adaptive_planner.replan(recent_results)
+                            if updated_plan:
+                                task_plan = updated_plan
+                                messages.append({
+                                    "role": "assistant",
+                                    "content": f"[Re-planning after {iteration} steps]\n{task_plan.to_prompt_context()}",
+                                })
+                                logger.info(f"[Planner] Re-planned at iteration {iteration}: {len(task_plan.remaining_steps)} steps remaining")
+                    except Exception as _replan_err:
+                        logger.debug(f"[Planner] Re-plan check failed: {_replan_err}")
 
             except Exception as e:
                 logger.error(f"[AGENT] Error in iteration {iteration}: {e}")
@@ -1797,6 +1812,20 @@ Guidelines:
         # Store episode in memory (no LLM call — defer summarization to NeuroDream)
         self._store_episode(goal, final_response)
 
+        # Clean up planner state
+        plan_metadata = {}
+        if self.adaptive_planner:
+            if task_plan:
+                plan_metadata = {
+                    "planned": True,
+                    "plan_steps": len(task_plan.steps),
+                    "plan_completed": len(task_plan.completed_steps),
+                    "replans": task_plan.replan_count,
+                }
+            else:
+                plan_metadata = {"planned": False}
+            self.adaptive_planner.reset()
+
         return self._make_response(
             goal,
             final_response,
@@ -1804,7 +1833,9 @@ Guidelines:
             iterations=iteration,
             metadata={
                 "react_loop": True,
+                "code_agent_mode": use_code_agent,
                 "tool_calls": tool_calls_total,
+                "adaptive_planning": plan_metadata,
                 "final_evaluation": {
                     "success": done and bool(final_response),
                     "confidence": 90 if done else 30,
@@ -1894,13 +1925,20 @@ Guidelines:
         except Exception:
             pass
 
-        # ReAct instructions
-        parts.append(
+        # ReAct instructions (plan-aware when a plan exists)
+        react_instruction = (
             "You are an AI agent with access to tools. "
             "Use the provided tools to accomplish the user's goal. "
             "When done, respond with your final answer (no tool call). "
             "Be concise and direct."
         )
+        if self.adaptive_planner and self.adaptive_planner.current_plan:
+            react_instruction += (
+                "\n\nYou have a plan for this task. Follow the plan steps in order. "
+                "Reference the current step in your reasoning. "
+                "If a step is blocked or unnecessary, skip it and move on."
+            )
+        parts.append(react_instruction)
 
         return "\n\n".join(parts)
 
@@ -1918,7 +1956,7 @@ Guidelines:
             return []
 
         # Add a few agent-specific tools from RAG if relevant
-        if self.tool_rag and self.tool_rag._initialized:
+        if self.tool_rag and self.tool_rag._schemas_loaded:
             extra = self.tool_rag.select_tools(goal, k=6)
             for schema in extra:
                 name = schema["function"]["name"]
@@ -2031,6 +2069,356 @@ Guidelines:
             logger.debug(f"[AGENT] Episode storage failed: {e}")
 
     # =================================================================
+    # ReAct Step — single-step agent method (Roadmap 1.1)
+    # =================================================================
+
+    def _react_step(
+        self,
+        messages: list,
+        tool_schemas: list,
+        iteration: int,
+        state_hashes: set,
+        consecutive_failures: int,
+    ) -> dict:
+        """Execute one ReAct step: LLM call + tool execution + deterministic evaluation.
+
+        This replaces the old 4-phase OPAE loop (observe/plan/act/evaluate) with a
+        single LLM call that combines thought + action, followed by deterministic
+        evaluation of the tool result (no LLM call for eval).
+
+        Args:
+            messages: Conversation history (mutated in-place with new messages)
+            tool_schemas: Tool schemas for Ollama tool calling
+            iteration: Current iteration number
+            state_hashes: Set of seen action hashes (mutated in-place)
+            consecutive_failures: Current failure count
+
+        Returns:
+            {
+                "status": "done" | "continue" | "error" | "incomplete",
+                "response": str (final answer when done, error message when error),
+                "tool_calls_count": int,
+                "consecutive_failures": int,
+            }
+        """
+        # Pick model for this step
+        step_model = self._pick_react_model(messages, iteration)
+
+        # === Single LLM call (thought + action combined) ===
+        step = self.brain.react_step(messages, tool_schemas, model_override=step_model)
+
+        # Handle LLM error with fallback chain
+        if "error" in step:
+            logger.error(f"[REACT] LLM error: {step['error']}")
+            _fallback_models = ["glm-5:cloud", "deepseek-v3.2:cloud", "kimi-k2.5:cloud"]
+            _fallback_models = [m for m in _fallback_models if m != step_model]
+            for _fb_model in _fallback_models:
+                logger.info(f"[REACT] Trying fallback model: {_fb_model}")
+                step = self.brain.react_step(messages, tool_schemas, model_override=_fb_model)
+                if "error" not in step:
+                    break
+            if "error" in step:
+                return {"status": "error", "response": f"I encountered an error: {step['error']}",
+                        "tool_calls_count": 0, "consecutive_failures": consecutive_failures}
+
+        thought = step.get("thought", "")
+        tool_calls = step.get("tool_calls", [])
+
+        # Record thought in inner monologue
+        if thought:
+            self.monologue.think("reason", thought[:200])
+
+        # === No tool calls: LLM is done, content is the final answer ===
+        if step.get("done"):
+            _stripped = (thought or "").strip()
+            _looks_incomplete = (
+                len(_stripped) < 20
+                and _stripped
+                and _stripped[-1] not in '.!?'
+                and iteration < self.max_iterations - 1
+            )
+            if _looks_incomplete:
+                # Nudge the LLM to provide a real answer or use a tool
+                messages.append({"role": "assistant", "content": thought})
+                messages.append({
+                    "role": "user",
+                    "content": "Please provide your complete answer, or use a tool if you need more information.",
+                })
+                return {"status": "incomplete", "response": "",
+                        "tool_calls_count": 0, "consecutive_failures": consecutive_failures}
+
+            return {"status": "done", "response": step.get("final_answer", thought),
+                    "tool_calls_count": 0, "consecutive_failures": consecutive_failures}
+
+        # === Has tool calls: serialize message, execute tools, evaluate deterministically ===
+
+        # Build assistant message for conversation history
+        msg_dict = {
+            "role": "assistant",
+            "content": thought,
+            "tool_calls": [
+                {"function": {"name": tc["name"], "arguments": tc["args"]}}
+                for tc in tool_calls
+            ],
+        }
+        messages.append(msg_dict)
+
+        # Execute each tool call
+        calls_this_step = 0
+        for tc in tool_calls:
+            tool_name = tc["name"]
+            args = tc["args"]
+
+            # Loop guard: state dedup using raw string keys (hash() can collide)
+            try:
+                state_key = f"{tool_name}:{json.dumps(args, sort_keys=True, default=str)}"
+            except (TypeError, ValueError):
+                state_key = f"{tool_name}:{str(args)}"
+            if state_key in state_hashes:
+                messages.append({
+                    "role": "tool",
+                    "content": json.dumps({"error": "Duplicate action. Try a different approach."}),
+                })
+                continue
+            state_hashes.add(state_key)
+
+            # Execute tool
+            tool_result = self._execute_tool_call(tool_name, args)
+            calls_this_step += 1
+            messages.append({"role": "tool", "content": tool_result})
+
+            # === Deterministic evaluation (no LLM call) ===
+            eval_result = self._evaluate_tool_result(tool_result)
+
+            if not eval_result["success"]:
+                consecutive_failures += 1
+                if consecutive_failures >= 2:
+                    messages.append({
+                        "role": "tool",
+                        "content": json.dumps({
+                            "warning": f"Multiple failures ({consecutive_failures}). Try a different tool or approach.",
+                        }),
+                    })
+                    consecutive_failures = 0
+            else:
+                consecutive_failures = 0
+
+            # Log deterministic eval to metacognition
+            self.metacognition.log_evaluation(
+                tool=tool_name,
+                action=json.dumps(args, default=str)[:200],
+                confidence=eval_result["confidence"],
+                success=eval_result["success"],
+                progress=eval_result["reason"],
+                next_step="continue",
+                result_summary=tool_result[:500],
+                model_used=step.get("model", ""),
+            )
+
+        return {
+            "status": "continue",
+            "response": "",
+            "tool_calls_count": calls_this_step,
+            "consecutive_failures": consecutive_failures,
+        }
+
+    @staticmethod
+    def _evaluate_tool_result(tool_result: str) -> dict:
+        """Deterministic evaluation of a tool result — no LLM call.
+
+        Tries to parse the result as JSON first and checks structured keys
+        (``success``, ``error``). Falls back to string matching only when
+        JSON parsing fails.
+
+        Returns:
+            {"success": bool, "confidence": int (0-100), "reason": str}
+        """
+        # --- Phase 1: Try structured JSON evaluation first ---
+        try:
+            parsed = json.loads(tool_result)
+            if isinstance(parsed, dict):
+                # Explicit "success" key is the strongest signal
+                if "success" in parsed:
+                    if parsed["success"]:
+                        if "error" not in parsed:
+                            return {"success": True, "confidence": 95, "reason": "Tool reported success"}
+                        # success=True but also has error key — trust success flag
+                        return {"success": True, "confidence": 80, "reason": "Tool reported success (with warning)"}
+                    else:
+                        reason = str(parsed.get("error", "Tool reported failure"))[:100]
+                        return {"success": False, "confidence": 90, "reason": reason}
+
+                # No "success" key, but has "error" key
+                if "error" in parsed:
+                    error_msg = str(parsed["error"])[:100]
+                    return {"success": False, "confidence": 85, "reason": f"Error: {error_msg}"}
+
+                # Structured dict with no success/error keys — assume OK
+                if len(parsed) > 0:
+                    return {"success": True, "confidence": 70, "reason": "Structured result (no error keys)"}
+        except (json.JSONDecodeError, ValueError, TypeError):
+            pass
+
+        # --- Phase 2: Fallback to string matching for non-JSON output ---
+        result_lower = tool_result.lower()
+
+        has_traceback = 'traceback' in result_lower or 'exception' in result_lower
+        has_not_found = 'not found' in result_lower or 'no such file' in result_lower
+        has_permission = 'permission denied' in result_lower or 'access denied' in result_lower
+        has_timeout = 'timeout' in result_lower or 'timed out' in result_lower
+
+        if has_traceback:
+            return {"success": False, "confidence": 90, "reason": "Exception traceback in output"}
+        if has_permission:
+            return {"success": False, "confidence": 95, "reason": "Permission denied"}
+        if has_timeout:
+            return {"success": False, "confidence": 90, "reason": "Operation timed out"}
+        if has_not_found:
+            return {"success": False, "confidence": 80, "reason": "Resource not found"}
+
+        # No explicit indicators — assume success if we got non-empty output
+        if len(tool_result.strip()) > 2:
+            return {"success": True, "confidence": 70, "reason": "Non-empty result (no error indicators)"}
+
+        # Empty or minimal output
+        return {"success": False, "confidence": 50, "reason": "Empty or minimal output"}
+
+    # =================================================================
+    # Code Agent Mode — LLM writes Python code as actions (5.1)
+    # =================================================================
+
+    def _should_use_code_agent(self, goal: str) -> bool:
+        """Decide whether to use code agent mode for this goal.
+
+        Code agent mode is better for complex multi-step tasks where the LLM
+        can write Python loops, conditionals, and compose tool calls in code.
+        Standard tool mode remains the default for simple queries.
+
+        Returns True if code agent mode should be used.
+        """
+        if not CODE_AGENT_AVAILABLE:
+            return False
+
+        # Check config flag (allow disabling globally)
+        if not getattr(Config, 'CODE_AGENT_ENABLED', True):
+            return False
+
+        return should_use_code_agent(goal)
+
+    def _react_step_code(
+        self,
+        messages: list,
+        code_agent: "CodeAgentMode",
+        tool_namespace: dict,
+        iteration: int,
+        consecutive_failures: int,
+    ) -> dict:
+        """Execute one ReAct code step: LLM writes Python code, we execute it.
+
+        This is the code-agent-mode equivalent of _react_step(). Instead of
+        Ollama structured tool calling, the LLM writes a Python code block
+        that calls tool functions directly.
+
+        Args:
+            messages: Conversation history (mutated in-place)
+            code_agent: CodeAgentMode instance
+            tool_namespace: Dict of tool functions for the code sandbox
+            iteration: Current iteration number
+            consecutive_failures: Current failure count
+
+        Returns:
+            Same shape as _react_step():
+            {"status": "done"|"continue"|"error", "response": str, ...}
+        """
+        step_model = self._pick_react_model(messages, iteration)
+
+        # LLM call — produces thought + Python code block (no tools= param)
+        step = self.brain.react_step_code(messages, model_override=step_model)
+
+        if "error" in step:
+            logger.error(f"[REACT-CODE] LLM error: {step['error']}")
+            return {
+                "status": "error",
+                "response": f"Code agent error: {step['error']}",
+                "tool_calls_count": 0,
+                "consecutive_failures": consecutive_failures,
+            }
+
+        thought = step.get("thought", "")
+        code = step.get("code")
+
+        # Record thought
+        if thought:
+            self.monologue.think("reason", f"[code-mode] {thought[:200]}")
+
+        # No code block = LLM is done, final answer
+        if step.get("done"):
+            final = step.get("final_answer", thought)
+            if len(final.strip()) < 20 and iteration < self.max_iterations - 1:
+                messages.append({"role": "assistant", "content": final})
+                messages.append({
+                    "role": "user",
+                    "content": "Please provide your complete answer, or write more code if needed.",
+                })
+                return {
+                    "status": "incomplete",
+                    "response": "",
+                    "tool_calls_count": 0,
+                    "consecutive_failures": consecutive_failures,
+                }
+            return {
+                "status": "done",
+                "response": final,
+                "tool_calls_count": 0,
+                "consecutive_failures": consecutive_failures,
+            }
+
+        # Has code block — execute it
+        messages.append({
+            "role": "assistant",
+            "content": step.get("final_answer", "") or f"Thought: {thought}\n\n```python\n{code}\n```",
+        })
+
+        logger.info(f"[REACT-CODE] Executing code block ({len(code)} chars)")
+        exec_result = code_agent.execute_code_safely(code, tool_namespace)
+        formatted = code_agent.format_execution_result(exec_result)
+
+        # Add execution result as a "user" message (simulates tool result)
+        messages.append({"role": "user", "content": f"Code execution result:\n{formatted}"})
+
+        # Deterministic eval of execution result
+        has_error = bool(exec_result.get("error")) or exec_result.get("timed_out", False)
+        if has_error:
+            consecutive_failures += 1
+            if consecutive_failures >= 3:
+                messages.append({
+                    "role": "user",
+                    "content": "Multiple code execution failures. Try a simpler approach or give your best answer now.",
+                })
+                consecutive_failures = 0
+        else:
+            consecutive_failures = 0
+
+        # Log to metacognition
+        self.metacognition.log_evaluation(
+            tool="code_agent",
+            action=code[:200],
+            confidence=70 if not has_error else 30,
+            success=not has_error,
+            progress="Code executed" if not has_error else "Code failed",
+            next_step="continue",
+            result_summary=formatted[:500],
+            model_used=step.get("model", ""),
+        )
+
+        return {
+            "status": "continue",
+            "response": "",
+            "tool_calls_count": 1,  # Count each code execution as 1 "tool call"
+            "consecutive_failures": consecutive_failures,
+        }
+
+    # =================================================================
     # Legacy methods (deprecated — kept for backward compat)
     # =================================================================
 
@@ -2088,7 +2476,7 @@ Guidelines:
         logger.debug(f"Observations: {self.state.observations[:200]}...")
 
     def _plan(self) -> None:
-        """Phase 2: Create or update the plan."""
+        """Phase 2: Create or update the plan. DEPRECATED -- use _react_step()."""
         self.state.phase = AgentPhase.PLAN
         logger.debug(f"[PLAN] Creating action plan...")
 
@@ -2184,7 +2572,7 @@ Guidelines:
         return ("marketplace", goal)
 
     def _act(self) -> None:
-        """Phase 3: Execute an action."""
+        """Phase 3: Execute an action. DEPRECATED -- use _react_step()."""
         self.state.phase = AgentPhase.ACT
         logger.debug(f"[ACT] Deciding and executing action...")
 
@@ -2217,7 +2605,7 @@ Guidelines:
         logger.debug(f"Result: {str(self.state.last_result)[:200]}...")
 
     def _evaluate(self) -> None:
-        """Phase 4: Evaluate the result."""
+        """Phase 4: Evaluate the result. DEPRECATED -- use _evaluate_tool_result()."""
         self.state.phase = AgentPhase.EVALUATE
         logger.debug(f"[EVALUATE] Assessing result...")
 
@@ -2356,7 +2744,7 @@ Guidelines:
                 logger.debug("Goal achieved!")
 
     def _remember(self) -> None:
-        """Phase 5: Store important information in memory."""
+        """Phase 5: Store important information in memory. DEPRECATED -- use _store_episode()."""
         self.state.phase = AgentPhase.REMEMBER
         logger.debug(f"[REMEMBER] Storing experience...")
 
@@ -4531,17 +4919,24 @@ Python code:"""
             logger.debug(f"[DIRECT CODE] Error: {e}")
             return f"Code execution error: {e}"
 
-    def chat(self, message: str, speak: bool = False) -> str:
-        """Simple chat interface for one-off interactions.
+    # ------------------------------------------------------------------
+    # Shared pre/post processing for chat() and chat_stream()
+    # ------------------------------------------------------------------
 
-        Args:
-            message: User message
-            speak: If True, speak the response using TTS
+    def _prepare_chat(self, message: str, speak: bool = False) -> dict:
+        """Shared pre-processing for chat() and chat_stream().
 
-        Returns:
-            Agent response text
+        Runs monologue start, context tracking, feedback loops, fast path,
+        AURA context, emotion analysis, command/handler detection, task type
+        classification, memory query, tone modifier, and system prompt building.
+
+        Returns a context dict with all gathered state.  If the dict contains
+        an ``early_return`` key, the caller should yield/return that value
+        immediately without calling the LLM.
         """
-        # Start inner monologue session for this chat
+        ctx: dict = {}
+
+        # Start inner monologue session
         if hasattr(self, 'monologue') and self.monologue:
             self.monologue.start_session()
             self.monologue.think("perceive", f"Received: '{message[:80]}{'...' if len(message) > 80 else ''}'")
@@ -4552,6 +4947,7 @@ Python code:"""
             track_context_from_message(message, is_user=True)
         except Exception as e:
             logger.debug(f"[Agent] non-critical: {e}")
+
         # NeuroDream: check idle trigger FIRST (before resetting the timer), then record activity
         if hasattr(self, 'neurodream') and self.neurodream:
             try:
@@ -4561,8 +4957,22 @@ Python code:"""
                 self.neurodream.record_activity()
             except Exception as e:
                 logger.debug(f"[Agent] non-critical: {e}")
+
+        # ===== COHERENT LOOP: Post-response feedback (Phase 3.1) =====
+        self._post_response_feedback(message)
+
+        # Handle /init-project command
+        if message.strip().lower().startswith("/init-project"):
+            parts = message.strip().split(None, 1)
+            target_path = parts[1].strip() if len(parts) > 1 else "."
+            try:
+                from aura.tools.project_context import init_project
+                ctx["early_return"] = init_project(target_path)
+            except Exception as e:
+                ctx["early_return"] = f"Failed to initialize project: {e}"
+            return ctx
+
         # ===== AURA FAST PATH - TRY FIRST =====
-        # Handle simple queries instantly (greetings, memory, emotions)
         if self.use_fastpath and hasattr(self, 'fast_path_handler') and self.fast_path_handler:
             fast_response = self.fast_path_handler.try_fast_path(message)
             if fast_response:
@@ -4573,7 +4983,8 @@ Python code:"""
                     self.monologue.think("respond", f"Fast path response ({len(fast_response)} chars)")
                 if speak:
                     self._speak(fast_response)
-                return fast_response
+                ctx["early_return"] = fast_response
+                return ctx
 
         # AURA v3.0 ALIVE - Build context using ALMA/unified memory
         aura_context = None
@@ -4582,16 +4993,14 @@ Python code:"""
                 aura_context = self._build_aura_context(message)
             except Exception as e:
                 logger.debug(f"[AURA] Input processing error: {e}")
+        ctx["aura_context"] = aura_context
 
-        # Chain-of-Emotion Appraisal — fire-and-forget to avoid blocking response
-        try:
-            from aura.emotion.integration import appraise_message
-            _AGENT_EXECUTOR.submit(appraise_message, message, self.brain)
-        except Exception as e:
-            logger.debug(f"[ALMA] Appraisal error: {e}")
+        # ===== COHERENT LOOP: Pre-response appraisal (Phase 3.2) =====
+        self._pre_response_appraisal(message)
 
         # Analyze emotional state (EvoEmo - Tool #20)
         emotion_reading = self._analyze_emotion(message)
+        ctx["emotion_reading"] = emotion_reading
 
         # Track emotional context for UI heatmap
         if emotion_reading and emotion_reading.emotion:
@@ -4600,23 +5009,14 @@ Python code:"""
                 track_context_from_emotion(emotion_reading.emotion, emotion_reading.confidence / 100.0)
             except Exception as e:
                 logger.debug(f"[Agent] non-critical: {e}")
-        # Handle /init-project command
-        if message.strip().lower().startswith("/init-project"):
-            parts = message.strip().split(None, 1)
-            target_path = parts[1].strip() if len(parts) > 1 else "."
-            try:
-                from aura.tools.project_context import init_project
-                result = init_project(target_path)
-                return result
-            except Exception as e:
-                return f"Failed to initialize project: {e}"
 
         # Check for EvoEmo commands
         evoemo_result = self._handle_evoemo_command(message)
         if evoemo_result:
             if speak:
                 self._speak(evoemo_result)
-            return evoemo_result
+            ctx["early_return"] = evoemo_result
+            return ctx
 
         # Check for AURA-specific commands
         if self.aura_enabled:
@@ -4624,57 +5024,45 @@ Python code:"""
             if aura_result:
                 if speak:
                     self._speak(aura_result)
-                return aura_result
+                ctx["early_return"] = aura_result
+                return ctx
 
-        # ===== EMOTIONAL PREPROCESSING - DISABLED =====
-        # Let the LLM (llama3:8b) handle conversational/emotional messages naturally
-        # The canned responses were too generic - LLM provides better conversation
-        # emotional_response = self._handle_emotional_message(message)
-        # if emotional_response:
-        #     if speak:
-        #         self._speak(emotional_response, emotion=emotion_reading.emotion if emotion_reading else None)
-        #     return emotional_response
-
-        # ===== DIRECT SEARCH HANDLER =====
-        # Bypass agent loop for explicit search requests to prevent query hallucination
+        # ===== DIRECT HANDLERS — bypass agent loop =====
         search_response = self._handle_direct_search(message)
         if search_response:
             if speak:
                 self._speak(search_response, emotion=emotion_reading.emotion if emotion_reading else None)
-            return search_response
+            ctx["early_return"] = search_response
+            return ctx
 
-        # ===== DIRECT CRYPTO HANDLER =====
-        # Bypass agent loop for crypto price requests to prevent hallucination
         crypto_response = self._handle_direct_crypto(message)
         if crypto_response:
             if speak:
                 self._speak(crypto_response, emotion=emotion_reading.emotion if emotion_reading else None)
-            return crypto_response
+            ctx["early_return"] = crypto_response
+            return ctx
 
-        # ===== DIRECT CODE EXECUTION HANDLER =====
-        # Bypass agent loop for explicit code execution requests
         code_response = self._handle_direct_code(message)
         if code_response:
             if hasattr(self, 'monologue') and self.monologue:
                 self.monologue.think("execute", "Running code via direct handler")
             if speak:
                 self._speak(code_response, emotion=emotion_reading.emotion if emotion_reading else None)
-            return code_response
+            ctx["early_return"] = code_response
+            return ctx
 
-        # Classify task type explicitly for better model routing
+        # ===== TASK TYPE CLASSIFICATION =====
         is_simple = self._is_simple_query(message)
         message_lower = message.lower()
 
-        # Detect code/calculation tasks explicitly
         code_patterns = [
             'calculate', 'compute', 'factorial', 'fibonacci', 'prime',
             'run code', 'execute code', 'run python', 'execute python',
             'write code', 'write a function', 'write a script', 'implement',
             'algorithm', 'sort', 'binary search', 'recursion',
-            'what is', 'what\'s'  # For math questions like "what's 20!"
+            'what is', 'what\'s'
         ]
         math_patterns = ['!', '+', '-', '*', '/', '^', '**', 'squared', 'cubed', 'power of']
-
         is_code_task = any(p in message_lower for p in code_patterns)
         is_math_task = any(p in message for p in math_patterns) and any(c.isdigit() for c in message)
 
@@ -4683,18 +5071,12 @@ Python code:"""
         elif is_code_task or is_math_task:
             task_type = TaskType.CODE
         else:
-            task_type = None  # Let brain auto-detect
+            task_type = None
 
-        # Unified context budget — prevents combined memory context from overflowing LLM window
-        from .memory.context_budget import ContextBudget
-        _ctx_budget = ContextBudget(total_tokens=3000)
+        ctx["is_simple"] = is_simple
+        ctx["task_type"] = task_type
 
-        # ===== Fix 2C: Single unified memory read — all backends in one parallel call =====
-        # Replaces 4 independent fetches (kg, rag, amem, unified) with one coordinated query.
-        # UnifiedMemory now includes kg_brain (Kuzu), amem, NetworkX KG, RAG, and Episodic.
-        kg_context = ""    # Kept for backward compat with downstream context_parts checks
-        rag_context = ""   # (will be empty — all context now flows through unified_context)
-        amem_context = ""  # (will be empty — all context now flows through unified_context)
+        # ===== UNIFIED MEMORY QUERY =====
         unified_context = ""
         if not is_simple:
             _record_thought("recalling", f"searching all memory backends for: {message[:40]}", 0.5, "memory")
@@ -4703,7 +5085,6 @@ Python code:"""
                 from aura.emotion.integration import get_current_pad_dict
                 _umem = get_unified_memory()
                 _current_pad = get_current_pad_dict()
-                # Run memory query in shared thread pool with 1.5s timeout to avoid blocking LLM start
                 _mem_future = _AGENT_EXECUTOR.submit(_umem.query, message, 10, None, 0.0, _current_pad)
                 try:
                     unified_results = _mem_future.result(timeout=1.5)
@@ -4711,6 +5092,8 @@ Python code:"""
                     unified_results = []
                     logger.debug("[UnifiedMemory] Query timed out after 1.5s, proceeding without memory context")
                 if unified_results:
+                    from .memory.context_budget import ContextBudget
+                    _ctx_budget = ContextBudget(total_tokens=3000)
                     _budget = _ctx_budget.allocate("unified", requested=_ctx_budget.remaining)
                     _per = max(200, (_budget * 4) // max(1, len(unified_results)))
                     texts = [f"- [{r.source.upper()}] {r.content[:_per]}"
@@ -4734,23 +5117,24 @@ Python code:"""
             except Exception as e:
                 logger.debug(f"[UnifiedMemory] Query error: {e}")
 
-        # Apply emotional tone modifier - prefer AURA's tone if available
+        # ===== TONE MODIFIER =====
         tone_modifier = None
         if aura_context and aura_context.get("tone"):
             tone_modifier = f"Respond in a {aura_context['tone']} manner."
         elif emotion_reading and emotion_reading.confidence >= 50:
             tone_modifier = get_tone_modifier(emotion_reading.emotion)
+        ctx["tone_modifier"] = tone_modifier
 
-        # Add AURA thinking prefix if enabled
+        # AURA thinking prefix
         thinking_prefix = ""
         if aura_context and aura_context.get("thinking_prefix"):
             thinking_prefix = aura_context["thinking_prefix"] + "\n\n"
+        ctx["thinking_prefix"] = thinking_prefix
 
-        # Inject user profile, KG context, RAG context, and A-MEM context into system prompt
-        system_prompt_addon = None
+        # ===== BUILD SYSTEM PROMPT ADDON =====
         context_parts = []
 
-        # Temporal grounding — inject session awareness if returning after absence
+        # Temporal grounding
         try:
             _grounding = self._temporal_grounding()
             if _grounding:
@@ -4758,12 +5142,12 @@ Python code:"""
         except Exception:
             pass
 
-        # Inject Soul personality into system prompt
+        # Soul personality
         soul_prompt = self._get_soul_prompt()
         if soul_prompt:
             context_parts.append(f"PERSONALITY:\n{soul_prompt}")
 
-        # Always load user profile so AURA knows who it's talking to
+        # User profile
         try:
             from aura.memory.user_profile import load_profile
             _profile = load_profile()
@@ -4771,7 +5155,6 @@ Python code:"""
             if _profile_str:
                 context_parts.append(_profile_str)
             else:
-                # Fallback to legacy file-based profile
                 profile_path = Path("data/memory/user_profile.md")
                 if profile_path.exists():
                     profile_text = profile_path.read_text(encoding='utf-8').strip()
@@ -4779,16 +5162,11 @@ Python code:"""
                         context_parts.append(f"USER PROFILE:\n{profile_text}")
         except Exception as e:
             logger.debug(f"[Agent] non-critical: {e}")
-        if amem_context:
-            context_parts.append(amem_context)
-        if kg_context:
-            context_parts.append(kg_context)
-        if rag_context:
-            context_parts.append(rag_context)
+
         if unified_context:
             context_parts.append(unified_context)
 
-        # Inject NeuroDream learned context (distilled from past sleep sessions)
+        # NeuroDream learned context
         try:
             if hasattr(self, 'neurodream') and self.neurodream:
                 nd_context = self.neurodream.get_learned_context_prompt()
@@ -4796,7 +5174,8 @@ Python code:"""
                     context_parts.append(f"LEARNED CONTEXT (from memory consolidation):\n{nd_context}")
         except Exception as e:
             logger.debug(f"[Agent] non-critical: {e}")
-        # Inject applicable skills from Skill Library
+
+        # Skill Library context
         try:
             if hasattr(self, 'skill_library') and self.skill_library:
                 _skill_context = self.skill_library.get_skill_context(message)
@@ -4806,23 +5185,170 @@ Python code:"""
         except Exception as e:
             logger.debug("[SkillLibrary] Skill lookup error: %s", e)
 
-        # Thinker context — private reflection from inner monologue
+        # Thinker context — MIRROR dual-process private reflection (roadmap 3.6)
         try:
-            if hasattr(self, 'monologue') and self.monologue:
+            _thinker_ctx = None
+            if hasattr(self, 'thinker') and self.thinker:
+                _thinker_ctx = self.thinker.get_talker_context()
+            if not _thinker_ctx and hasattr(self, 'monologue') and self.monologue:
                 _thinker_ctx = self.monologue.generate_thinking_context(brain=self.brain)
-                if _thinker_ctx:
-                    context_parts.append(f"PRIVATE REFLECTION:\n{_thinker_ctx}")
+            if _thinker_ctx:
+                context_parts.append(_thinker_ctx)
         except Exception:
             pass
 
+        system_prompt_addon = None
         if context_parts:
             system_prompt_addon = "\n\n".join(context_parts) + "\n\nUse this knowledge and memories when relevant to the conversation. Remember personal details about the user. Always address the user by their name if known."
+        ctx["system_prompt_addon"] = system_prompt_addon
 
         # Record reasoning in monologue
         if hasattr(self, 'monologue') and self.monologue:
             self.monologue.think("reason", f"Processing query with task_type={task_type}")
 
         _record_thought("formulating", f"reasoning about: {message[:50]}...", 0.7, "agent")
+
+        return ctx
+
+    def _finalize_chat(self, message: str, response: str, ctx: dict, speak: bool = False) -> None:
+        """Shared post-processing for chat() and chat_stream().
+
+        Handles ALMA emotional update, narrative self update, TTS, KG extraction,
+        memory writes, fact extraction, skill library recording, monologue end,
+        thinker kickoff, and prev_message/prev_response tracking.
+        """
+        is_simple = ctx.get("is_simple", False)
+        emotion_reading = ctx.get("emotion_reading")
+
+        # Close the coherent loop — feed outcome back to ALMA
+        try:
+            self.brain.update_emotional_state(success=bool(response and len(response) > 10))
+        except Exception:
+            pass
+
+        # Update narrative self-model for significant interactions (background)
+        if len(response) > 200:
+            try:
+                from aura.narrative_self import get_narrative_self
+                _AGENT_EXECUTOR.submit(get_narrative_self().update_from_interaction, message, response, self.brain)
+            except Exception:
+                pass
+
+        # TTS
+        if speak:
+            self._speak(response, emotion=emotion_reading.emotion if emotion_reading else None)
+
+        # KG entity extraction (background)
+        if not is_simple and self.kg_bridge is not None:
+            try:
+                if len(response) > 20:
+                    extraction_text = f"User: {message}\nAssistant: {response[:500]}"
+                    self.kg_bridge.extraction_queue.append({
+                        "trace_id": f"chat_{time.time()}",
+                        "content": extraction_text,
+                        "surprise": 0.6,
+                        "timestamp": time.time()
+                    })
+                    if len(self.kg_bridge.extraction_queue) >= self.kg_bridge.config.batch_size:
+                        self.kg_bridge.flush()
+            except Exception as e:
+                logger.debug(f"[KG BRAIN] Chat entity extraction error: {e}")
+
+        # Extract and persist user facts (name, location, role, etc.)
+        if hasattr(self, 'memory_retriever') and self.memory_retriever is not None:
+            try:
+                self.memory_retriever._extract_facts(message)
+            except Exception as e:
+                logger.debug(f"[Agent] non-critical: {e}")
+
+        # ===== Unified memory write — gated store =====
+        if not is_simple and len(response) > 20:
+            try:
+                from aura.memory.unified_memory import get_unified_memory as _get_umem
+                _clean_message = message.split("\n[Screen context:")[0].strip()
+                _clean_response = response.split("\n\n---\n")[0].strip() if "\n\n---\n" in response else response
+                _mem_content = f"User: {_clean_message[:200]}\nAURA: {_clean_response[:400]}"
+                _pad = None
+                try:
+                    from aura.emotion.alma_engine import get_alma_engine
+                    _alma = get_alma_engine()
+                    if _alma:
+                        _s = _alma.get_emotional_state()
+                        _pad = {"pleasure": _s.get("pleasure", 0.0),
+                                "arousal": _s.get("arousal", 0.0),
+                                "dominance": _s.get("dominance", 0.0)}
+                except Exception as e:
+                    logger.debug(f"[Agent] non-critical: {e}")
+                _umem_ref = _get_umem()
+                import threading as _threading
+                _store_fn = getattr(_umem_ref, "store_gated", _umem_ref.store)
+                def _safe_store(_fn=_store_fn, _c=_mem_content, _p=_pad):
+                    try:
+                        _fn(content=_c, source="conversation", importance=0.5, emotional_pad=_p)
+                    except Exception as _e:
+                        logger.debug("[UnifiedMemory] Background store error: %s", _e)
+                _threading.Thread(target=_safe_store, daemon=True).start()
+            except Exception as e:
+                logger.debug(f"[UnifiedMemory] Conversation store error: {e}")
+
+        # Record interaction for skill learning (background, non-blocking)
+        try:
+            if hasattr(self, 'skill_library') and self.skill_library:
+                _sl_ref = self.skill_library
+                _sl_msg = message[:500]
+                _sl_resp = response[:500]
+                import threading as _threading
+                _threading.Thread(
+                    target=lambda: _sl_ref.record_interaction(
+                        user_input=_sl_msg, output=_sl_resp,
+                        success=True, context={}
+                    ),
+                    daemon=True,
+                    name="skill-learner",
+                ).start()
+        except Exception as e:
+            logger.debug("[SkillLibrary] Record interaction error: %s", e)
+
+        # End monologue session
+        if hasattr(self, 'monologue') and self.monologue:
+            self.monologue.think("reflect", "Chat response completed")
+
+        # ===== THINKER: Kick off async background reasoning (roadmap 3.6) =====
+        if hasattr(self, 'thinker') and self.thinker:
+            try:
+                _conv_hist = self.brain.conversation_history if hasattr(self.brain, 'conversation_history') else None
+                self.thinker.run_async(message, response, _conv_hist)
+            except Exception as e:
+                logger.debug(f"[Thinker] Async kickoff error: {e}")
+
+        # ===== COHERENT LOOP: Track exchange for next-turn feedback =====
+        self._prev_message = message
+        self._prev_response = response
+
+    # ------------------------------------------------------------------
+
+    def chat(self, message: str, speak: bool = False) -> str:
+        """Simple chat interface for one-off interactions.
+
+        Args:
+            message: User message
+            speak: If True, speak the response using TTS
+
+        Returns:
+            Agent response text
+        """
+        # ===== SHARED PRE-PROCESSING =====
+        ctx = self._prepare_chat(message, speak=speak)
+
+        # Early return for commands, fast path, direct handlers
+        if "early_return" in ctx:
+            return ctx["early_return"]
+
+        task_type = ctx["task_type"]
+        tone_modifier = ctx["tone_modifier"]
+        thinking_prefix = ctx["thinking_prefix"]
+        system_prompt_addon = ctx["system_prompt_addon"]
+        is_simple = ctx["is_simple"]
 
         # ===== Strategy Bandit — Adaptive Reasoning Strategy Selection =====
         bandit_selection = None
@@ -4942,41 +5468,6 @@ Python code:"""
         if thinking_prefix:
             response = thinking_prefix + response
 
-        # Close the coherent loop — feed outcome back to ALMA
-        try:
-            self.brain.update_emotional_state(success=bool(response and len(response) > 10))
-        except Exception:
-            pass
-
-        # Update narrative self-model for significant interactions (background)
-        if len(response) > 200:
-            try:
-                from aura.narrative_self import get_narrative_self
-                _AGENT_EXECUTOR.submit(get_narrative_self().update_from_interaction, message, response, self.brain)
-            except Exception:
-                pass
-
-        if speak:
-            self._speak(response, emotion=emotion_reading.emotion if emotion_reading else None)
-
-        # Queue entity extraction for non-simple conversations (KG Brain)
-        if not is_simple and self.kg_bridge is not None:
-            try:
-                # Only extract from meaningful exchanges (>20 chars response)
-                if len(response) > 20:
-                    extraction_text = f"User: {message}\nAssistant: {response[:500]}"
-                    self.kg_bridge.extraction_queue.append({
-                        "trace_id": f"chat_{time.time()}",
-                        "content": extraction_text,
-                        "surprise": 0.6,  # Moderate surprise for chat
-                        "timestamp": time.time()
-                    })
-                    # Flush if queue is getting large
-                    if len(self.kg_bridge.extraction_queue) >= self.kg_bridge.config.batch_size:
-                        self.kg_bridge.flush()
-            except Exception as e:
-                logger.debug(f"[KG BRAIN] Chat entity extraction error: {e}")
-
         # ===== Strategy Bandit — Record Outcome =====
         composite_reward = 0.5  # Default if bandit is skipped
         if bandit_selection is not None and STRATEGY_BANDIT_AVAILABLE:
@@ -5075,72 +5566,17 @@ Python code:"""
             except Exception as e:
                 logger.debug(f"[TemplateLib] Trace/usage recording error: {e}")
 
-        # ===== Fix 2D: Unified memory write — gated store (write gate + dedup) =====
-        # Uses store_gated() which runs MemoryWriteGate before fan-out.
-        # Falls back to store() if gate unavailable.
-        if not is_simple and len(response) > 20:
-            try:
-                from aura.memory.unified_memory import get_unified_memory as _get_umem
-                _clean_message = message.split("\n[Screen context:")[0].strip()
-                _clean_response = response.split("\n\n---\n")[0].strip() if "\n\n---\n" in response else response
-                _mem_content = f"User: {_clean_message[:200]}\nAURA: {_clean_response[:400]}"
-                _pad = None
-                try:
-                    from aura.emotion.alma_engine import get_alma_engine
-                    _alma = get_alma_engine()
-                    if _alma:
-                        _s = _alma.get_emotional_state()
-                        _pad = {"pleasure": _s.get("pleasure", 0.0),
-                                "arousal": _s.get("arousal", 0.0),
-                                "dominance": _s.get("dominance", 0.0)}
-                except Exception as e:
-                    logger.debug(f"[Agent] non-critical: {e}")
-                _umem_ref = _get_umem()
-                _content_ref = _mem_content
-                _pad_ref = _pad
-                import threading
-                _store_fn = getattr(_umem_ref, "store_gated", _umem_ref.store)
-                def _safe_store(_fn=_store_fn, _c=_content_ref, _p=_pad_ref):
-                    try:
-                        _fn(content=_c, source="conversation", importance=0.5, emotional_pad=_p)
-                    except Exception as _e:
-                        logger.debug("[UnifiedMemory] Background store error: %s", _e)
-                threading.Thread(target=_safe_store, daemon=True).start()
-            except Exception as e:
-                logger.debug(f"[UnifiedMemory] Conversation store error: {e}")
-
-        # Record interaction for skill learning (background, non-blocking)
-        try:
-            if hasattr(self, 'skill_library') and self.skill_library:
-                _sl_ref = self.skill_library
-                _sl_msg = message[:500]
-                _sl_resp = response[:500]
-                import threading
-                threading.Thread(
-                    target=lambda: _sl_ref.record_interaction(
-                        user_input=_sl_msg, output=_sl_resp,
-                        success=True, context={}
-                    ),
-                    daemon=True,
-                    name="skill-learner",
-                ).start()
-        except Exception as e:
-            logger.debug("[SkillLibrary] Record interaction error: %s", e)
-
-        # End inner monologue session
-        if hasattr(self, 'monologue') and self.monologue:
-            self.monologue.think("reflect", "Chat response completed")
-            # Don't end session immediately - let frontend poll for thoughts
-            # Session will auto-close on next chat or after timeout
+        # ===== SHARED POST-PROCESSING =====
+        self._finalize_chat(message, response, ctx, speak=speak)
 
         return response
 
     def chat_stream(self, message: str, speak: bool = False):
         """Streaming chat interface that yields response chunks in real-time.
 
-        Pre-processes (fast path, emotion, context) BEFORE streaming starts,
+        Pre-processes (fast path, emotion, context) via _prepare_chat(),
         then streams LLM output via brain.think_stream(), and runs
-        post-processing (KG extraction) after.
+        post-processing via _finalize_chat().
 
         Args:
             message: User message
@@ -5162,176 +5598,17 @@ Python code:"""
         except Exception as _e:
             logger.warning(f"[Agent] Custom tool reload check failed: {_e}")
 
-        # Start inner monologue session
-        if hasattr(self, 'monologue') and self.monologue:
-            self.monologue.start_session()
-            self.monologue.think("perceive", f"Received: '{message[:80]}{'...' if len(message) > 80 else ''}'")
+        # ===== SHARED PRE-PROCESSING =====
+        ctx = self._prepare_chat(message, speak=speak)
 
-        # Track context for UI heatmap
-        try:
-            from api.routes.context import track_context_from_message
-            track_context_from_message(message, is_user=True)
-        except Exception as e:
-            logger.debug(f"[Agent] non-critical: {e}")
-        # Handle /init-project command in streaming path
-        if message.strip().lower().startswith("/init-project"):
-            parts = message.strip().split(None, 1)
-            target_path = parts[1].strip() if len(parts) > 1 else "."
-            try:
-                from aura.tools.project_context import init_project
-                result = init_project(target_path)
-                yield result
-                return
-            except Exception as e:
-                yield f"Failed to initialize project: {e}"
-                return
-
-        # ===== FAST PATH - yield entire response as single chunk =====
-        if self.use_fastpath and hasattr(self, 'fast_path_handler') and self.fast_path_handler:
-            fast_response = self.fast_path_handler.try_fast_path(message)
-            if fast_response:
-                if speak:
-                    self._speak(fast_response)
-                yield fast_response
-                return
-
-        # ===== PRE-PROCESSING (runs before streaming starts) =====
-
-        # AURA context via ALMA/unified memory
-        aura_context = None
-        if self.aura_enabled:
-            try:
-                aura_context = self._build_aura_context(message)
-            except Exception as e:
-                logger.debug(f"[Agent] non-critical: {e}")
-        # Chain-of-Emotion Appraisal — fire-and-forget (streaming path)
-        try:
-            from aura.emotion.integration import appraise_message
-            _AGENT_EXECUTOR.submit(appraise_message, message, self.brain)
-        except Exception as e:
-            logger.debug(f"[ALMA] Appraisal error: {e}")
-
-        # Emotion analysis
-        emotion_reading = self._analyze_emotion(message)
-
-        # EvoEmo / AURA command checks — yield as single chunk
-        evoemo_result = self._handle_evoemo_command(message)
-        if evoemo_result:
-            if speak:
-                self._speak(evoemo_result)
-            yield evoemo_result
+        # Early return for commands, fast path, direct handlers — yield as single chunk
+        if "early_return" in ctx:
+            yield ctx["early_return"]
             return
 
-        if self.aura_enabled:
-            aura_result = self._handle_aura_command(message)
-            if aura_result:
-                if speak:
-                    self._speak(aura_result)
-                yield aura_result
-                return
-
-        # Direct search/crypto/code handlers — yield as single chunk
-        search_response = self._handle_direct_search(message)
-        if search_response:
-            if speak:
-                self._speak(search_response, emotion=emotion_reading.emotion if emotion_reading else None)
-            yield search_response
-            return
-
-        crypto_response = self._handle_direct_crypto(message)
-        if crypto_response:
-            if speak:
-                self._speak(crypto_response, emotion=emotion_reading.emotion if emotion_reading else None)
-            yield crypto_response
-            return
-
-        code_response = self._handle_direct_code(message)
-        if code_response:
-            if speak:
-                self._speak(code_response, emotion=emotion_reading.emotion if emotion_reading else None)
-            yield code_response
-            return
-
-        # ===== CONTEXT GATHERING (before streaming) =====
-        is_simple = self._is_simple_query(message)
-
-        # Detect task type for model routing
-        code_patterns = [
-            'calculate', 'compute', 'factorial', 'fibonacci', 'prime',
-            'run code', 'execute code', 'run python', 'execute python',
-            'write code', 'write a function', 'write a script', 'implement',
-            'algorithm', 'sort', 'binary search', 'recursion',
-            'what is', 'what\'s'
-        ]
-        math_patterns = ['!', '+', '-', '*', '/', '^', '**', 'squared', 'cubed', 'power of']
-        is_code_task = any(p in message_lower for p in code_patterns)
-        is_math_task = any(p in message for p in math_patterns) and any(c.isdigit() for c in message)
-
-        if is_simple:
-            task_type = TaskType.SIMPLE
-        elif is_code_task or is_math_task:
-            task_type = TaskType.CODE
-        else:
-            task_type = None
-
-        # ===== Fix 2C: Single unified memory read (stream path) =====
-        kg_context = ""    # Kept for downstream context_parts compat (will be empty)
-        rag_context = ""
-        amem_context = ""
-        unified_context = ""
-        if not is_simple:
-            try:
-                from aura.memory.unified_memory import get_unified_memory
-                from aura.emotion.integration import get_current_pad_dict
-                _umem_s = get_unified_memory()
-                _current_pad_s = get_current_pad_dict()
-                # Run memory query in shared thread pool with 1.5s timeout to avoid blocking LLM start
-                _mem_future_s = _AGENT_EXECUTOR.submit(_umem_s.query, message, 8, None, 0.0, _current_pad_s)
-                try:
-                    unified_results = _mem_future_s.result(timeout=1.5)
-                except concurrent.futures.TimeoutError:
-                    unified_results = []
-                    logger.debug("[UnifiedMemory/stream] Query timed out after 1.5s, proceeding without memory context")
-                if unified_results:
-                    texts = [f"- [{r.source.upper()}] {r.content[:300]}"
-                             for r in unified_results if r.content]
-                    if texts:
-                        unified_context = "MEMORY CONTEXT:\n" + "\n".join(texts)
-                    logger.debug(f"[UnifiedMemory/stream] {len(unified_results)} results from "
-                                 f"{set(r.source for r in unified_results)}")
-            except Exception as e:
-                logger.debug(f"[UnifiedMemory/stream] Query error: {e}")
-
-        # Tone modifier
-        tone_modifier = None
-        if aura_context and aura_context.get("tone"):
-            tone_modifier = f"Respond in a {aura_context['tone']} manner."
-        elif emotion_reading and emotion_reading.confidence >= 50:
-            tone_modifier = get_tone_modifier(emotion_reading.emotion)
-
-        # System prompt addon with contexts
-        system_prompt_addon = None
-        context_parts = []
-
-        # Always load user profile so AURA knows who it's talking to
-        try:
-            from aura.memory.user_profile import load_profile
-            _profile = load_profile()
-            _profile_str = _profile.to_system_prompt()
-            if _profile_str:
-                context_parts.append(_profile_str)
-            else:
-                profile_path = Path("data/memory/user_profile.md")
-                if profile_path.exists():
-                    profile_text = profile_path.read_text(encoding='utf-8').strip()
-                    if profile_text:
-                        context_parts.append(f"USER PROFILE:\n{profile_text}")
-        except Exception as e:
-            logger.debug(f"[Agent] non-critical: {e}")
-        if unified_context:
-            context_parts.append(unified_context)
-        if context_parts:
-            system_prompt_addon = "\n\n".join(context_parts) + "\n\nUse this knowledge and memories when relevant to the conversation. Remember personal details about the user. Always address the user by their name if known."
+        task_type = ctx["task_type"]
+        tone_modifier = ctx["tone_modifier"]
+        system_prompt_addon = ctx["system_prompt_addon"]
 
         # ===== STREAMING LLM RESPONSE =====
         full_response = ""
@@ -5339,82 +5616,8 @@ Python code:"""
             full_response += chunk
             yield chunk
 
-        # ===== POST-PROCESSING =====
-
-        # Close the coherent loop — feed outcome back to ALMA (streaming path)
-        try:
-            self.brain.update_emotional_state(success=bool(full_response and len(full_response) > 10))
-        except Exception:
-            pass
-
-        # Update narrative self-model for significant interactions (background)
-        if len(full_response) > 200:
-            try:
-                from aura.narrative_self import get_narrative_self
-                _AGENT_EXECUTOR.submit(get_narrative_self().update_from_interaction, message, full_response, self.brain)
-            except Exception:
-                pass
-
-        # TTS on full response
-        if speak:
-            self._speak(full_response, emotion=emotion_reading.emotion if emotion_reading else None)
-
-        # KG entity extraction (background)
-        if not is_simple and self.kg_bridge is not None:
-            try:
-                if len(full_response) > 20:
-                    extraction_text = f"User: {message}\nAssistant: {full_response[:500]}"
-                    self.kg_bridge.extraction_queue.append({
-                        "trace_id": f"chat_{time.time()}",
-                        "content": extraction_text,
-                        "surprise": 0.6,
-                        "timestamp": time.time()
-                    })
-                    if len(self.kg_bridge.extraction_queue) >= self.kg_bridge.config.batch_size:
-                        self.kg_bridge.flush()
-            except Exception as e:
-                logger.debug(f"[Agent] non-critical: {e}")
-        # Extract and persist user facts (name, location, role, etc.) — kept separate,
-        # this does regex-based profile extraction, not memory backend writes.
-        if hasattr(self, 'memory_retriever') and self.memory_retriever is not None:
-            try:
-                self.memory_retriever._extract_facts(message)
-            except Exception as e:
-                logger.debug(f"[Agent] non-critical: {e}")
-        # ===== Fix 2D: Unified memory write (stream path) — gated store =====
-        # Uses store_gated() which runs MemoryWriteGate before fan-out.
-        if not is_simple and len(full_response) > 20:
-            try:
-                from aura.memory.unified_memory import get_unified_memory as _get_umem_s
-                _clean_msg = message.split("\n[Screen context:")[0].strip()
-                _clean_resp = full_response.split("\n\n---\n")[0].strip() if "\n\n---\n" in full_response else full_response
-                _mem_content = f"User: {_clean_msg[:200]}\nAURA: {_clean_resp[:400]}"
-                _pad = None
-                try:
-                    from aura.emotion.alma_engine import get_alma_engine
-                    _alma = get_alma_engine()
-                    if _alma:
-                        _s = _alma.get_emotional_state()
-                        _pad = {"pleasure": _s.get("pleasure", 0.0),
-                                "arousal": _s.get("arousal", 0.0),
-                                "dominance": _s.get("dominance", 0.0)}
-                except Exception as e:
-                    logger.debug(f"[Agent] non-critical: {e}")
-                _umem_s = _get_umem_s()
-                import threading
-                _store_fn_s = getattr(_umem_s, "store_gated", _umem_s.store)
-                def _safe_store_s(_fn=_store_fn_s, _c=_mem_content, _p=_pad):
-                    try:
-                        _fn(content=_c, source="conversation", importance=0.5, emotional_pad=_p)
-                    except Exception as _e:
-                        logger.debug("[UnifiedMemory/stream] Background store error: %s", _e)
-                threading.Thread(target=_safe_store_s, daemon=True).start()
-            except Exception as e:
-                logger.debug(f"[UnifiedMemory/stream] Store error: {e}")
-
-        # End monologue session
-        if hasattr(self, 'monologue') and self.monologue:
-            self.monologue.think("reflect", "Streaming chat response completed")
+        # ===== SHARED POST-PROCESSING =====
+        self._finalize_chat(message, full_response, ctx, speak=speak)
 
     def create_plan(self, task: str) -> dict:
         """Create an execution plan without acting.
@@ -5658,9 +5861,11 @@ Python code:"""
 
     def _build_aura_context(self, message: str) -> dict:
         """Build AURA context using ALMA and unified memory."""
-        context = {"mood": "neutral", "tone": "warm", "memory_context": "", "thinking_prefix": ""}
+        context = {"mood": "neutral", "tone": None, "memory_context": "", "thinking_prefix": ""}
         try:
-            # Get mood from ALMA if available
+            # Get mood from ALMA if available — drives both mood label and tone.
+            # tone=None lets _build_full_system_prompt use get_emotional_style_prompt()
+            # which reads live ALMA state instead of a hardcoded "warm".
             from aura.emotion.alma_engine import get_alma_engine
             alma = get_alma_engine()
             if alma:
@@ -5677,6 +5882,58 @@ Python code:"""
             except Exception as e:
                 logger.debug(f"[Agent] non-critical: {e}")
         return context
+
+    # =================================================================
+    # Coherent Loop — Phase 3.1: Pre-response appraisal & post-response feedback
+    # =================================================================
+
+    def _pre_response_appraisal(self, message: str) -> None:
+        """Run chain-of-emotion appraisal BEFORE generating a response.
+
+        Calls the fast model to ask "how would I naturally feel about this
+        message?" and feeds the result into ALMA so the mood is updated
+        before the response style prompt is generated.
+
+        Must be synchronous (with a short timeout) so the mood is ready
+        by the time the response generation starts.
+        """
+        try:
+            from aura.emotion.integration import appraise_message
+            result = appraise_message(message, self.brain)
+            if result:
+                _record_thought(
+                    "observing",
+                    f"emotional appraisal: {result.get('emotion', '?')} "
+                    f"(intensity={result.get('intensity', 0):.1f})",
+                    0.4, "emotion",
+                )
+        except Exception as e:
+            logger.debug("[ALMA] Pre-response appraisal error: %s", e)
+
+    def _post_response_feedback(self, current_message: str) -> None:
+        """Analyze the user's new message as a reaction to our previous response.
+
+        Closes the coherent loop: response outcome feeds back into ALMA so
+        the mood drifts based on how the user actually reacted.  Runs only
+        when there is a previous exchange to compare against.
+        """
+        if not self._prev_message or not self._prev_response:
+            return
+        try:
+            from aura.emotion.integration import analyze_user_reaction
+            result = analyze_user_reaction(
+                current_message, self._prev_response, self.brain,
+            )
+            if result:
+                _record_thought(
+                    "reflecting",
+                    f"user reaction: {result.get('emotion', '?')} "
+                    f"(sat={result.get('satisfaction', 0):.1f} "
+                    f"eng={result.get('engagement', 0):.1f})",
+                    0.4, "emotion",
+                )
+        except Exception as e:
+            logger.debug("[ALMA] Post-response feedback error: %s", e)
 
     def _handle_aura_command(self, message: str) -> Optional[str]:
         """Handle AURA system commands (legacy AURAEngine removed; uses ALMA/unified memory)."""
@@ -6603,6 +6860,9 @@ Python code:"""
 
         # 1. Shutdown NeuroDream if sleeping
         try:
+            if hasattr(self, '_neurodream_stop_event'):
+                self._neurodream_stop_event.set()
+                results["freed_resources"].append("neurodream_idle_poll_thread")
             if hasattr(self, 'neurodream') and self.neurodream:
                 if self.neurodream.current_phase != SleepPhase.AWAKE:
                     self.neurodream.wake_up(reason="shutdown")
@@ -6701,12 +6961,14 @@ Python code:"""
         except Exception as e:
             results["errors"].append(f"Skill Library close: {e}")
 
+        # 12. Save ALMA emotional state for cross-session continuity
+        try:
+            from aura.emotion.alma_engine import save_state as alma_save_state
+            alma_save_state()
+            results["freed_resources"].append("alma_emotional_state:saved")
+        except Exception as e:
+            results["errors"].append(f"ALMA state save: {e}")
+
         results["success"] = len(results["errors"]) == 0
         return results
 
-    def __del__(self):
-        """Destructor - attempt graceful shutdown."""
-        try:
-            self.shutdown()
-        except Exception:
-            pass  # Ignore errors during destruction

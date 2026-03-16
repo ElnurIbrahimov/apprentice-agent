@@ -57,9 +57,7 @@ BLOCKED_PATTERNS = [
     r"del\s+/[fq]\s+.*[cC]:\\",     # Windows delete system files
 ]
 
-# Security: allowed command prefixes
-# NOTE: python/pip/node/npm removed — use CodeExecutorTool for code execution
-# NOTE: curl/wget removed — use WebSearchTool for HTTP requests
+# Security: allowed command prefixes (safe for direct execution)
 ALLOWED_COMMANDS_PREFIX = [
     "ls", "dir", "cd", "pwd", "echo", "cat", "head", "tail",
     "grep", "find", "wc", "sort", "uniq", "diff", "mkdir", "cp",
@@ -71,12 +69,9 @@ ALLOWED_COMMANDS_PREFIX = [
     "cargo", "rustc", "go", "java", "javac", "dotnet", "cmake",
     "make", "gcc", "g++", "clang",
     "ipconfig", "ifconfig", "netstat", "ss",
-    # Dev tools — needed for coding agent workflows
-    "python", "python3", "pip", "pip3", "uv",
-    "node", "npm", "npx", "yarn", "pnpm", "bun", "deno",
+    # Dev tools — read-only / linting / testing
     "tsc", "eslint", "prettier", "vitest", "jest", "pytest",
     "rg", "fd", "ruff", "mypy", "black", "isort",
-    "curl", "wget", "http",
     # Common read-only / informational commands
     "date", "cal", "uptime", "uname", "arch", "df", "du", "free",
     "id", "groups", "printenv", "file", "stat", "realpath", "basename",
@@ -84,6 +79,14 @@ ALLOWED_COMMANDS_PREFIX = [
     "false", "tee", "xargs", "time", "timeout", "nproc", "lscpu",
     "ver", "systeminfo",
 ]
+
+# Commands that allow arbitrary code execution or data exfiltration.
+# These are auto-routed through run_sandboxed() instead of direct execution.
+SANDBOX_REQUIRED_COMMANDS = {
+    "python", "python3", "pip", "pip3", "uv",
+    "node", "npm", "npx", "yarn", "pnpm", "bun", "deno",
+    "curl", "wget", "http",
+}
 
 
 @dataclass
@@ -113,19 +116,25 @@ class ShellExecutorTool:
     name = "shell_executor"
     description = "Execute shell commands with persistent sessions"
 
-    def __init__(self):
+    def __init__(self, sandbox_executor=None):
         self._sessions: Dict[str, ShellSession] = {}
         self._sessions_lock = threading.Lock()
         self._is_windows = sys.platform == "win32"
+        self._sandbox = sandbox_executor  # Optional SandboxExecutor for sandboxed runs
 
     def _validate_command(self, command: str) -> tuple:
-        """Validate command against security rules. Returns (is_valid, reason)."""
+        """Validate command against security rules.
+
+        Returns:
+            (is_valid, reason) where reason is "OK", "SANDBOX_REQUIRED", or a block reason.
+        """
         cmd_stripped = command.strip()
         cmd_lower = cmd_stripped.lower()
 
-        # Check exact blocked commands
+        # Check blocked commands against the command portion (before first pipe/semicolon)
+        cmd_portion = re.split(r'[|;]', cmd_lower, maxsplit=1)[0].strip()
         for blocked in BLOCKED_COMMANDS:
-            if blocked.lower() in cmd_lower:
+            if blocked.lower() in cmd_portion:
                 return False, f"Blocked command: {blocked}"
 
         # Check blocked patterns
@@ -157,6 +166,10 @@ class ShellExecutorTool:
                 for ext in (".exe", ".cmd", ".bat", ".ps1"):
                     if base_cmd.endswith(ext):
                         base_cmd = base_cmd[:-len(ext)]
+
+            # Check if command needs sandbox routing
+            if base_cmd in SANDBOX_REQUIRED_COMMANDS:
+                return True, "SANDBOX_REQUIRED"
 
             is_allowed = any(base_cmd == prefix.lower() or base_cmd.startswith(prefix.lower() + ".")
                              for prefix in ALLOWED_COMMANDS_PREFIX)
@@ -217,6 +230,10 @@ class ShellExecutorTool:
         is_valid, reason = self._validate_command(command)
         if not is_valid:
             return {"success": False, "error": f"Security: {reason}"}
+
+        # Route sandbox-required commands (python, curl, wget, etc.)
+        if reason == "SANDBOX_REQUIRED":
+            return self.run_sandboxed(command=command, cwd=cwd, timeout=timeout)
 
         if _contains_shell_injection(command):
             return {"success": False, "output": "", "error": "Command contains disallowed characters or flags", "exit_code": 1}
@@ -414,6 +431,10 @@ class ShellExecutorTool:
         if not is_valid:
             return {"success": False, "error": f"Security: {reason}"}
 
+        # Route sandbox-required commands (python, curl, wget, etc.)
+        if reason == "SANDBOX_REQUIRED":
+            return self.run_sandboxed(command=command, cwd=cwd, timeout=timeout)
+
         if _contains_shell_injection(command):
             return {"success": False, "output": "", "error": "Command contains disallowed characters or flags", "exit_code": 1}
 
@@ -563,6 +584,36 @@ class ShellExecutorTool:
             timeout=timeout,
             cwd=cwd
         )
+
+    def run_sandboxed(self, command: str, cwd: str = None, timeout: int = DEFAULT_TIMEOUT) -> dict:
+        """Execute command through the SandboxExecutor (E2B first, local fallback).
+
+        Falls back to normal self.run() if no SandboxExecutor is wired in.
+        """
+        if self._sandbox is None:
+            # Lazy-init: try to create a SandboxExecutor
+            try:
+                from aura.sandbox import SandboxExecutor
+                self._sandbox = SandboxExecutor(
+                    timeout=timeout,
+                    workspace=cwd or str(Path.cwd()),
+                )
+            except ImportError:
+                # sandbox module not available — fall through to normal run
+                return self.run(command=command, cwd=cwd, timeout=timeout)
+
+        result = self._sandbox.run_shell(command, cwd=cwd)
+        return {
+            "success": result.success,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "exit_code": result.exit_code,
+            "elapsed": result.execution_time,
+            "sandbox": result.sandbox,
+            "cwd": cwd or (self._sandbox.workspace if hasattr(self._sandbox, 'workspace') else ""),
+            "response": result.stdout.strip() or result.stderr.strip() or f"Command completed (exit code {result.exit_code})",
+            **({"error": result.error} if result.error else {}),
+        }
 
 
 # Singleton

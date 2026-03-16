@@ -14,10 +14,14 @@ import json
 import os
 import re
 import tempfile
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+
+# Module-level lock for identity file read/modify/save operations
+_identity_lock = threading.Lock()
 
 # Path to identity file (same directory as this module)
 IDENTITY_FILE = Path(__file__).parent / "identity.json"
@@ -31,9 +35,8 @@ def _default_identity() -> dict:
         "user_preferences": {}
     }
 
-# Keep a module-level reference for backward compatibility, but with a static timestamp
-# placeholder.  The actual default is produced by _default_identity().
-DEFAULT_IDENTITY = _default_identity()
+# DEFAULT_IDENTITY removed — use _default_identity() to get a fresh dict with
+# a current timestamp.  The module-level constant froze created_at at import time.
 
 
 def load_identity() -> dict:
@@ -110,9 +113,10 @@ def update_name(name: str) -> dict:
     name = _sanitize_identity_field(name, max_length=100)
     if not name:
         return load_identity()  # no-op on empty name
-    identity = load_identity()
-    identity["name"] = name
-    save_identity(identity)
+    with _identity_lock:
+        identity = load_identity()
+        identity["name"] = name
+        save_identity(identity)
     return identity
 
 
@@ -128,9 +132,10 @@ def update_personality(description: str) -> dict:
     description = _sanitize_identity_field(description, max_length=500)
     if not description:
         return load_identity()  # no-op on empty description
-    identity = load_identity()
-    identity["personality"] = description
-    save_identity(identity)
+    with _identity_lock:
+        identity = load_identity()
+        identity["personality"] = description
+        save_identity(identity)
     return identity
 
 
@@ -144,9 +149,10 @@ def update_preference(key: str, value) -> dict:
     Returns:
         Updated identity dict
     """
-    identity = load_identity()
-    identity["user_preferences"][key] = value
-    save_identity(identity)
+    with _identity_lock:
+        identity = load_identity()
+        identity["user_preferences"][key] = value
+        save_identity(identity)
     return identity
 
 
@@ -271,6 +277,10 @@ def detect_personality_change(message: str) -> Optional[str]:
             for end_char in ['.', '!', '?', '\n']:
                 if end_char in rest:
                     rest = rest[:rest.index(end_char)]
+            # Limit to first 10 words to avoid capturing unrelated text
+            words = rest.split()
+            if len(words) > 10:
+                rest = " ".join(words[:10])
             if rest:
                 return rest.strip()
 

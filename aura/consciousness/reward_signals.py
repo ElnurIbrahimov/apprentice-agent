@@ -269,12 +269,6 @@ class RewardSignalCollector:
         self._executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="reward_eval")
         atexit.register(self.shutdown)
 
-    def __del__(self):
-        try:
-            self._executor.shutdown(wait=False, cancel_futures=True)
-        except Exception:
-            pass
-
     def collect_sync(
         self,
         question: str,

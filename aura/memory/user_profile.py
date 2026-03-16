@@ -180,25 +180,48 @@ Only include facts clearly stated by the user. Be concise."""
         end = response.rfind("}") + 1
         if start >= 0 and end > start:
             data = json.loads(response[start:end])
+
+            # Validate and truncate string fields to 200 chars
+            def _safe_str(val, max_len=200) -> str:
+                if not isinstance(val, str):
+                    return str(val)[:max_len]
+                return val[:max_len]
+
+            # Validate list fields: must be list of strings, cap at 20 items
+            def _safe_str_list(val, max_items=20, max_len=200) -> list:
+                if not isinstance(val, list):
+                    return []
+                return [_safe_str(item, max_len) for item in val[:max_items]
+                        if isinstance(item, (str, int, float))]
+
             if data.get("name"):
-                profile.name = data["name"]
+                profile.name = _safe_str(data["name"])
             if data.get("communication_style"):
-                profile.communication_style = data["communication_style"]
+                profile.communication_style = _safe_str(data["communication_style"])
             if data.get("expertise"):
-                profile.expertise = data["expertise"][:10]
+                profile.expertise = _safe_str_list(data["expertise"], max_items=10)
             if data.get("active_goals"):
-                profile.active_goals = data["active_goals"][:8]
+                profile.active_goals = _safe_str_list(data["active_goals"], max_items=8)
             if data.get("preferences"):
-                profile.preferences.update(data["preferences"])
+                prefs = data["preferences"]
+                if isinstance(prefs, dict):
+                    # Only accept string keys and string values
+                    validated = {
+                        _safe_str(k, 100): _safe_str(v)
+                        for k, v in list(prefs.items())[:20]
+                        if isinstance(k, str) and isinstance(v, (str, int, float))
+                    }
+                    profile.preferences.update(validated)
             if data.get("key_facts"):
+                facts = _safe_str_list(data["key_facts"], max_items=20)
                 # Merge, dedup
                 existing = set(profile.key_facts)
-                for fact in data["key_facts"]:
+                for fact in facts:
                     if fact not in existing:
                         profile.key_facts.append(fact)
                 profile.key_facts = profile.key_facts[:15]
             if data.get("emotional_baseline"):
-                profile.emotional_baseline = data["emotional_baseline"]
+                profile.emotional_baseline = _safe_str(data["emotional_baseline"])
     except Exception as e:
         logger.warning("[UserProfile] LLM profile extraction failed: %s", e)
 

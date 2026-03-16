@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { Message, StreamState, Context, PanelId } from './types';
+import { HTTP } from './api';
 import ext from './ext';
 
 interface AuraStore {
@@ -124,7 +125,7 @@ export const useStore = create<AuraStore>((set, get) => {
       });
       // Tell backend to clear
       if (s.wsReady && s.ws?.readyState === WebSocket.OPEN) {
-        fetch('http://localhost:8000/api/chat/clear', { method: 'POST' }).catch(() => {});
+        fetch(`${HTTP}/api/chat/clear`, { method: 'POST' }).catch(() => {});
       }
     },
 

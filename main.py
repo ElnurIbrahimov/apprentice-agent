@@ -5,7 +5,7 @@ import os
 os.environ["TQDM_DISABLE"] = "1"
 
 import warnings
-warnings.filterwarnings("ignore")
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 import argparse
 import sys
@@ -399,10 +399,10 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
         permissions.apply_aura_md_overrides(aura_config)
 
     # Create session persistence
-    session = AgenticSession()
-    session.new(project_root=project_root, model=agent.brain._model_override or "auto")
+    agentic_session = AgenticSession()
+    agentic_session.new(project_root=project_root, model=agent.brain._model_override or "auto")
     import atexit
-    atexit.register(session.save)
+    atexit.register(agentic_session.save)
 
     # Create persistent agentic loop (maintains conversation history)
     # If user explicitly set a model, lock to it. Otherwise let router pick per-step.
@@ -431,12 +431,12 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
     resume_id = getattr(agent, '_resume_session_id', None)
     if resume_id:
         if agentic.load_session(resume_id):
-            session.load(resume_id)  # Sync the session object too
+            agentic_session.load(resume_id)  # Sync the session object too
             show_info(f"Session restored ({len(agentic._conversation_history)} messages)")
         delattr(agent, '_resume_session_id')
 
     # Status bar state
-    _current_model = model_override or "auto"
+    _current_model = explicit_model or "auto"
     _session_title = ""
     _msg_count = 0
     show_status_bar(

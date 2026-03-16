@@ -398,6 +398,11 @@ class MemoryWriteGate:
 
     def _record_hash(self, c: MemoryCandidate) -> None:
         self._recent_hashes[c.content_hash] = time.time()
+        # Hard cap to prevent unbounded growth
+        if len(self._recent_hashes) > 10000:
+            sorted_items = sorted(self._recent_hashes.items(), key=lambda x: x[1])
+            for h, _ in sorted_items[:5000]:
+                del self._recent_hashes[h]
 
     def _decide(
         self,

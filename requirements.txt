@@ -14,6 +14,7 @@ psutil>=5.9.0
 pyyaml>=6.0
 pydantic>=2.0.0,<3.0.0
 tenacity>=8.2.0
+rich>=13.0.0
 
 # --- ML / AI ---
 torch>=2.0.0,<3.0.0
@@ -74,11 +75,12 @@ mesa>=2.0.0,<3.0.0
 
 # ============================================================
 # Optional: Windows-specific (voice, notifications, display)
+# These packages only work on Windows. On Linux/macOS, skip them.
 # ============================================================
-comtypes>=1.2.0
+comtypes>=1.2.0              # Windows only (COM automation)
 pyttsx3>=2.90
-pycaw>=20230407
-winotify>=1.1.0
+pycaw>=20230407               # Windows only (audio control)
+winotify>=1.1.0               # Windows only (notifications)
 screen-brightness-control>=0.22.0
 sounddevice>=0.4.6
 
@@ -117,27 +119,4 @@ apscheduler>=3.10.0,<4.0.0
 # ============================================================
 # e2b-code-interpreter>=0.0.1
 
-# ============================================================
-# Optional: PersonaPlex voice (DISABLED - huggingface-hub conflict)
-# ============================================================
-# PersonaPlex is NOT installed by default due to hard dependency conflict:
-#
-# PROBLEM:
-#   • moshi (PersonaPlex) requires: huggingface-hub<1.0.0,>=0.24
-#   • transformers requires: huggingface-hub<1.0,>=0.34.0
-#   • sentence-transformers requires: huggingface-hub>=0.20.0
-#   • huggingface-hub 1.0 (Dec 2024) has breaking API changes
-#   • Current installed: huggingface-hub>=1.0 (needed by transformers)
-#   • Therefore: CANNOT downgrade huggingface-hub without breaking transformers
-#
-# STATUS: PersonaPlex disabled by default (PERSONAPLEX_ENABLED=false)
-#
-# FALLBACK VOICE OPTIONS:
-#   • VoiceTool: Whisper (STT) + pyttsx3 (TTS) with barge-in support
-#   • SesameTTS: High-quality TTS using Sesame CSM 1B model
-#
-# IF YOU NEED PersonaPlex:
-#   1. Create a separate Python environment for moshi with huggingface-hub<1.0
-#   2. Install: pip install moshi @ git+https://github.com/NVIDIA/personaplex.git@052206ac#subdirectory=moshi
-#   3. Set: export PERSONAPLEX_ENABLED=true
-#   4. Note: This breaks transformers/sentence-transformers in that environment
+# PersonaPlex and Sesame voice modules removed — using external voice provider

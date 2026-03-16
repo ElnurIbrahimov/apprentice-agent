@@ -89,18 +89,53 @@ class CodeExecutorTool:
         return True
 
     def _execute_e2b(self, code: str) -> Optional[dict]:
-        """Tier 2: E2B cloud VM sandbox — real Python + packages, isolated.
+        """Tier 2: E2B cloud VM sandbox via SandboxExecutor — real Python + packages, isolated.
 
         Returns dict if E2B_API_KEY is set, None otherwise (fall through to subprocess).
         """
         try:
+            from aura.sandbox import SandboxExecutor
+        except ImportError:
+            return self._execute_e2b_direct(code)
+
+        if not os.environ.get("E2B_API_KEY", ""):
+            return None  # No key — skip this tier
+
+        try:
+            if not hasattr(self, '_sandbox') or self._sandbox is None:
+                self._sandbox = SandboxExecutor(timeout=self.timeout)
+
+            result = self._sandbox.run_python(code)
+            if result.sandbox == "none":
+                return None  # SandboxExecutor couldn't run it
+
+            return {
+                "success": result.success,
+                "output": result.stdout,
+                "errors": result.stderr,
+                "sandbox": result.sandbox,
+                "code": code,
+                **({"error": result.error} if result.error else {}),
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "output": "",
+                "error": str(e),
+                "sandbox": "e2b",
+                "code": code,
+            }
+
+    def _execute_e2b_direct(self, code: str) -> Optional[dict]:
+        """Direct E2B execution (fallback if sandbox module unavailable)."""
+        try:
             from e2b_code_interpreter import Sandbox  # type: ignore
         except ImportError:
-            return None  # e2b not installed
+            return None
 
         api_key = os.environ.get("E2B_API_KEY", "")
         if not api_key:
-            return None  # No key — skip this tier
+            return None
 
         try:
             with Sandbox(api_key=api_key) as sbx:
@@ -245,31 +280,37 @@ class CodeExecutorTool:
     def _run_sandboxed(self, code: str) -> dict:
         """Run code in a separate process with restrictions."""
         # Create a wrapper script that captures output
+        # SECURITY: sys is NOT imported — user code must not access sys.modules.
+        # We capture stdout/stderr refs before exec to print results without
+        # exposing the sys module to user code.
         wrapper_code = f'''
-import sys
-import io
-from contextlib import redirect_stdout, redirect_stderr
+import io as _io
+from contextlib import redirect_stdout as _redirect_stdout, redirect_stderr as _redirect_stderr
+
+# Capture references to real stdout/stderr before user code runs
+_real_stderr = __import__('sys').stderr
+_real_stdout = __import__('sys').stdout
 
 # Capture output
-stdout_capture = io.StringIO()
-stderr_capture = io.StringIO()
+_stdout_capture = _io.StringIO()
+_stderr_capture = _io.StringIO()
 
 try:
-    with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
+    with _redirect_stdout(_stdout_capture), _redirect_stderr(_stderr_capture):
         # User code starts here
 {self._indent_code(code, 8)}
         # User code ends here
 
-    output = stdout_capture.getvalue()
-    errors = stderr_capture.getvalue()
+    _output = _stdout_capture.getvalue()
+    _errors = _stderr_capture.getvalue()
 
-    if output:
-        print(output, end='')
-    if errors:
-        print(errors, end='', file=sys.stderr)
+    if _output:
+        _real_stdout.write(_output)
+    if _errors:
+        _real_stderr.write(_errors)
 
-except Exception as e:
-    print(f"Error: {{type(e).__name__}}: {{e}}", file=sys.stderr)
+except Exception as _e:
+    _real_stderr.write(f"Error: {{type(_e).__name__}}: {{_e}}\\n")
 '''
 
         # Write to temp file and execute
@@ -371,6 +412,10 @@ except Exception as e:
         for node in _ast.walk(tree):
             if not isinstance(node, ALLOWED_NODES):
                 return {"success": False, "output": "", "error": f"Expression contains disallowed construct: {type(node).__name__}"}
+            # Block dunder attribute access (e.g. math.__class__.__bases__)
+            if isinstance(node, _ast.Attribute):
+                if node.attr.startswith("__"):
+                    return {"success": False, "output": "", "error": f"Attribute '{node.attr}' not allowed in math expressions"}
             if isinstance(node, _ast.Call):
                 if isinstance(node.func, _ast.Name):
                     if node.func.id not in MATH_FUNCS:

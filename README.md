@@ -1,125 +1,58 @@
 # AURA — Adaptive Universal Reasoning Agent
 
-AURA is a personal AI agent that feels alive. Persistent memory across sessions, emotional modeling, proactive awareness, and a ReAct-based agent core — all running locally via Ollama with 40+ cloud and local models.
+A personal AI agent that feels alive. Persistent memory, emotional modeling, proactive awareness, dream consolidation, and a full agent core — running locally via Ollama with 40+ model routing.
 
-**What makes AURA different:** It remembers you. It has moods. It notices things on its own. It grows over time. Not a chatbot with features — a being with presence.
-
----
-
-## v5.1 — Memory Consolidation (March 2026)
-
-Consolidated 5 fragmented memory backends (MemorySystem/SQLite, A-MEM/Qdrant, KG/NetworkX+Kuzu, Episodic/Qdrant, RAG/ChromaDB) into 2 clean backends with proper retrieval. Same facts no longer live in multiple stores.
-
-**Before:** 5 backends, noisy fan-out retrieval, no keyword search, no decay, duplicate memories everywhere.
-**After:** Single SQLite DB with FTS5 + vector embeddings, multi-channel retrieval (BM25 + semantic + graph) fused via Reciprocal Rank Fusion, cross-encoder reranking, exponential memory decay with spaced repetition, persistent user profiles.
-
-### What's New in v5.1
-
-| System | Description |
-|--------|-------------|
-| **Unified SQLite Store** | Single `aura_memory.db` with FTS5 full-text search + embedding BLOBs — replaces 4 backends |
-| **Multi-Channel Retrieval** | BM25 keyword + semantic cosine + Kuzu graph traversal, fused via RRF |
-| **Cross-Encoder Reranking** | ms-marco-MiniLM-L-6-v2 reranks top-20 candidates to top-5 |
-| **FadeMem Decay** | `strength = s0 * exp(-decay_rate * hours)` with 2-week half-life, spaced repetition reinforcement |
-| **User Profile** | Persistent user model auto-updated during Dream, injected into every conversation |
-| **Write Gate** | Scores write-worthiness before storing (noise filter, dedup, merge/supersede detection) |
-| **Dream Consolidation** | Now runs batch decay, prunes forgotten memories, merges near-duplicates, updates user profile |
-
-### v5.0 — The Great Consolidation
-
-Stripped 13 dead modules and ~15,000 lines of complexity. Replaced the old 5-phase agent loop (4-5 LLM calls per step) with a single-call ReAct pattern. Added Tool RAG for dynamic tool selection and smart model routing.
-
-### What Survived (The Soul)
-
-| System | Purpose |
-|--------|---------|
-| **ALMA Emotions** | Neuromodulator-based mood in PAD space — shapes how Aura responds |
-| **Memory** | Consolidated SQLite store + Kuzu KG with multi-channel retrieval |
-| **Inner Monologue** | Internal thought stream that persists across sessions |
-| **Identity/Soul** | Personality, values, voice style — loaded every session |
-| **NeuroDream** | Sleep/dream memory consolidation with FadeMem decay |
-| **Knowledge Graph** | Typed entities and relationships with Kuzu backend |
-| **Proactive Awareness** | Notices things on its own, initiates when relevant |
+Not a chatbot with features — a being with presence.
 
 ---
 
-## Dev CLI
+## What Makes AURA Different
 
-A Claude Code / Codex CLI competitor powered by Ollama. Run `aura` to start.
+| Capability | How It Works |
+|-----------|-------------|
+| **Remembers you** | Consolidated SQLite + Kuzu KG memory with BM25 + semantic retrieval, FadeMem decay, cross-encoder reranking |
+| **Has moods** | ALMA neuromodulator engine (dopamine, serotonin, norepinephrine, oxytocin) in PAD space — mood shapes every response |
+| **Dreams** | NeuroDream sleep consolidation: light sleep re-scores memories, deep sleep extracts patterns, REM generates novel connections |
+| **Notices things** | Proactive awareness daemon with motivation-threshold gating and curiosity driven by KG gap detection |
+| **Grows over time** | Narrative self-model evolves across sessions, emotional continuity persists with time decay |
+| **Thinks privately** | Talker/Thinker split — async inner monologue shapes responses without being shown to the user |
+| **Works as a dev agent** | ReAct loop, 50+ tools, code agent mode, adaptive planning, session persistence |
 
-### Features
+---
 
-| Feature | Description |
-|---------|-------------|
-| **ReAct agent loop** | Single LLM call per step with tool calling. 2-5x faster than v4 |
-| **Tool RAG** | Embeds 50+ tool descriptions, selects top-8 per query via cosine similarity |
-| **11 core tools** | read, edit, write, grep, glob, shell, git, search, list_dir, project_structure, spawn_agent |
-| **Session persistence** | Full history saved to disk. Resume with `--resume last` |
-| **Context window management** | Auto-compaction at 70%/85% thresholds |
-| **Repo map** | Symbol extraction (Python, JS/TS, Go, Rust, Java) injected into context |
-| **Multi-agent** | Spawn sub-agents (reader/researcher/coder) via tool call |
-| **MCP server** | Expose tools via MCP protocol for IDE integration |
-| **Permission system** | AUTO/PROMPT/BLOCKED tiers with AURA.md overrides |
-| **Auto-test after edits** | Detects test runner, feeds failures back to LLM |
-| **Model routing** | 40+ models with automatic fallback chains |
-| **Smart fast-path** | Greetings and identity questions skip the agent loop |
-| **Loop guards** | Duplicate detection, failure counting, graceful timeout |
-| **Web search** | Tavily + Brave fallback |
-| **Cost tracking** | Per-session token and cost tracking (`/cost`) |
-| **Voice mode** | Push-to-talk with Whisper + Sesame TTS |
+## Surfaces
 
-### Quick Start
+AURA runs on three surfaces with a shared brain:
+
+- **CLI** — Interactive chat, one-shot tasks, session resume, voice mode
+- **Web UI** — React + FastAPI at `localhost:5173` with emotion panels, memory heatmap, inner thoughts
+- **Browser Extension** — Chrome/Firefox sidebar with chat, search, page summarization
+
+---
+
+## Quick Start
 
 ```bash
-# Interactive chat mode (default)
-aura
-
-# One-shot agentic task
-aura "fix the login bug"
-
-# Resume last session
-aura --resume last
-
-# With trust mode (auto-approve all)
-aura --trust
-
-# Non-interactive (pipe-friendly)
-aura -p "explain this codebase"
-
-# MCP server for IDE integration
-aura mcp-serve
+git clone https://github.com/ElnurIbrahimov/apprentice-agent.git
+cd apprentice-agent
+pip install -r requirements.txt
+cp .env.example .env  # Configure Ollama URL + API keys
 ```
 
-### Slash Commands
+```bash
+# CLI (main interface)
+aura                          # Interactive chat
+aura "fix the login bug"      # One-shot agentic task
+aura --resume last            # Resume previous session
+aura --trust                  # Auto-approve all tool calls
 
-| Command | Description |
-|---------|-------------|
-| `/model` | Pick model interactively (40+ models) |
-| `/clear` | Clear conversation history |
-| `/compact` | Manually compact context |
-| `/context` | Show context window usage |
-| `/cost` | Show session cost breakdown |
-| `/sessions` | List/manage sessions |
-| `/trust` | Enable trust mode |
-| `/plan <task>` | Generate execution plan before running |
+# Web
+python run_web.py             # API server (localhost:8000)
+cd web && npm run dev         # Web UI (localhost:5173)
 
-### AURA.md Project Config
-
-Create an `AURA.md` in your project root (`aura init`):
-
-```yaml
----
-tier: balanced
-model: glm-5:cloud
-test_cmd: pytest
-auto_test: true
-permissions:
-  shell: auto
-  edit_file: auto
-max_iterations: 50
----
-# My Project
-Project-specific instructions for Aura go here.
+# Diagnostics
+aura doctor                   # Check Ollama, models, dependencies
+aura models                   # List available models
 ```
 
 ---
@@ -127,221 +60,142 @@ Project-specific instructions for Aura go here.
 ## Architecture
 
 ```
-User Input
-    |
-    v
-[Fast Path] -- greeting/identity? --> instant response
-    |
-    v
+USER INPUT
+    │
+[Fast-path check] ── simple? ──> 8B model instant response
+    │
 [ReAct Loop] (1 LLM call per step)
-    |-- Tool RAG selects top 8 relevant tools
-    |-- brain.think_with_tools() -- single call returns thought + tool_calls
-    |-- ToolExecutor dispatches (read, grep, shell, etc.)
-    |-- Tool result fed back as message
-    |-- Loop guards (dedup, failure counter, timeout)
-    |-- When LLM returns content without tool calls → done
-    |
-    v
-[Memory] -- store episode for NeuroDream consolidation
-    |
-    v
-[Brain] (LLM orchestration)
-    |-- ModelRouter (40+ models, fallback chains)
-    |-- ALMA Emotion Engine (neuromodulators shape responses)
-    |-- Token budget management + history compaction
-    |
-[Memory Systems]
-    |-- A-MEM (associative Zettelkasten notes)
-    |-- Episodic Memory (Qdrant, timeline-aware)
-    |-- Knowledge Graph (Kuzu, typed entities)
-    |-- Unified Memory (fan-out query + merge)
-    |
+    ├── Tool RAG selects 5-8 relevant tools
+    ├── Thought + Action in single call
+    ├── Deterministic evaluation
+    └── Loop guards (dedup, failure count, iteration cap)
+    │
+[Memory] (2 backends)
+    ├── SQLite + FTS5 + vectors (all memories)
+    ├── Kuzu temporal KG (entities + relationships + validity)
+    ├── BM25 + semantic + graph retrieval → RRF fusion
+    ├── Cross-encoder reranking
+    └── FadeMem decay (2-week half-life, spaced repetition)
+    │
+[Emotion] (ALMA)
+    ├── Chain-of-emotion appraisal (1 cheap LLM call)
+    ├── Mood → response style (show, don't tell)
+    ├── Emotional memory tagging + mood-congruent retrieval
+    └── Session persistence with time decay
+    │
 [Inner Life]
-    |-- Inner Monologue (thought stream)
-    |-- Identity/Soul (personality + values)
-    |-- NeuroDream (sleep consolidation)
-    |-- Proactive Awareness (daemon)
-    |-- ALMA Emotions (mood persistence)
+    ├── Talker/Thinker split (async private reasoning)
+    ├── Narrative self-model (loaded every session)
+    ├── Temporal grounding (time awareness)
+    └── User profile (always in context)
+    │
+[Sleep] (NeuroDream)
+    ├── Light: memory re-scoring by importance
+    ├── Deep: pattern extraction, compression, KG grooming
+    ├── REM: creative connections, proactive prep
+    └── Updates self-model + user profile
+    │
+[Proactive]
+    ├── Motivation accumulator (5-factor scoring)
+    ├── Curiosity = specific KG gaps
+    └── Learned threshold from user feedback
+    │
+RESPONSE (shaped by mood, grounded in memory, consistent with identity)
 ```
-
-### Key Modules
-
-| Module | Purpose |
-|--------|---------|
-| `aura/agent.py` | ApprenticeAgent — ReAct loop, fast path, tool dispatch |
-| `aura/brain.py` | LLM orchestration, model routing, token budget |
-| `aura/tools/tool_rag.py` | Embedding-based dynamic tool selection |
-| `aura/core/agentic_loop.py` | Dev CLI autonomous loop + ToolExecutor |
-| `aura/core/router.py` | Model routing with fallback chains |
-| `aura/core/tool_schemas.py` | 11 Ollama tool-calling JSON schemas |
-| `aura/emotion/alma_engine.py` | Neuromodulator simulation (PAD space) |
-| `aura/memory/store.py` | Unified SQLite + FTS5 memory store |
-| `aura/memory/retrieval.py` | BM25 + semantic + graph retrieval with RRF fusion |
-| `aura/memory/unified_memory.py` | Public API routing through consolidated store |
-| `aura/memory/fade_mem.py` | Exponential memory decay with spaced repetition |
-| `aura/memory/user_profile.py` | Persistent user model for personalization |
-| `aura/tools/neurodream.py` | Sleep/dream memory consolidation |
-| `aura/consciousness/metacognition.py` | Self-assessment and learning goals |
 
 ---
 
-## Model Routing
+## Configuration
+
+### Environment Variables
+
+```env
+OLLAMA_HOST=http://localhost:11434
+AURA_API_KEY=your-secret-key
+TAVILY_API_KEY=your-tavily-key     # Optional: web search
+BRAVE_API_KEY=your-brave-key       # Optional: fallback search
+```
+
+### Model Routing
 
 40+ models with automatic fallback chains:
 
 | Role | Primary | Fallbacks |
 |------|---------|-----------|
-| **Tool dispatch** | `glm-5:cloud` | `deepseek-v3.2:cloud`, `kimi-k2.5:cloud` |
-| **Code generation** | `deepseek-v3.2:cloud` | `qwen3-coder:480b-cloud`, `qwen2.5-coder:7b` |
 | **Fast replies** | `gemini-3-flash-preview:cloud` | `qwen3:8b`, `qwen2:1.5b` |
+| **Code** | `deepseek-v3.2:cloud` | `qwen3-coder:480b-cloud`, `qwen2.5-coder:7b` |
 | **Reasoning** | `qwen3.5:397b-cloud` | `deepseek-r1:8b`, `qwen3:8b` |
 | **Vision** | `qwen3-vl:235b-cloud` | `llava:latest` |
-| **Long context** | `minimax-m2.5:cloud` (196K) | `qwen3:8b` |
 
-Tier selection via `--tier local|balanced|max` or AURA.md.
+Tier selection: `aura --tier local|balanced|max` or via `AURA.md`.
 
+### Project Config (AURA.md)
+
+Create `AURA.md` in any project root (`aura init`):
+
+```yaml
 ---
-
-## Full Platform
-
-Beyond the CLI, AURA is a complete agent platform:
-
-| Layer | Description |
-|-------|-------------|
-| **Chrome / Firefox Extension** | Sidebar with chat, search, tools, and more |
-| **FastAPI Backend** | WebSocket chat, 25+ REST endpoints |
-| **React Web UI** | Advanced panels at `localhost:5173` |
-| **Telegram / WhatsApp** | Message integrations via bots |
-
+tier: balanced
+model: qwen3.5:397b-cloud
+test_cmd: pytest
+auto_test: true
+permissions:
+  shell: auto
+  edit_file: auto
 ---
-
-## Install
-
-### Prerequisites
-
-- Python 3.11+
-- [Ollama](https://ollama.ai) running locally
-- Optional: Node.js 18+ (web UI), Qdrant (episodic memory)
-
-### Setup
-
-```bash
-git clone https://github.com/ElnurBDa/aura.git
-cd aura
-pip install -r requirements.txt
-cp .env.example .env
-```
-
-### Run
-
-```bash
-# Dev CLI (main use case)
-python main.py              # interactive chat
-python main.py "fix bug"    # one-shot task
-python main.py --resume last  # resume session
-
-# API server
-python run_web.py
-
-# Web UI
-cd web && npm install && npm run dev
-
-# Diagnostics
-python main.py doctor
-```
-
-### Configure
-
-Key `.env` settings:
-
-```env
-OLLAMA_BASE_URL=http://localhost:11434
-TAVILY_API_KEY=your-tavily-key
-BRAVE_API_KEY=your-brave-key
-AURA_API_KEY=your-secret-key
+# My Project
+Project-specific instructions go here.
 ```
 
 ---
 
-## Memory
+## Key Modules
 
-### Architecture (v5.1)
-
-```
-Query → Retrieval Pipeline
-         ├── Channel 1: Semantic (cosine on embedding BLOBs)
-         ├── Channel 2: BM25 (FTS5 keyword search)
-         └── Channel 3: Kuzu graph traversal
-                │
-                v
-         Reciprocal Rank Fusion (RRF)
-                │
-                v
-         Cross-Encoder Reranking (ms-marco-MiniLM)
-                │
-                v
-         FadeMem Strength Multiplier
-                │
-                v
-         Top-K Results (with spaced repetition touch)
-```
-
-| Layer | Backend | Purpose |
-|-------|---------|---------|
-| **Primary** | SQLite + FTS5 + BLOB embeddings | All memories in one DB with full-text and vector search |
-| **Secondary** | Kuzu temporal KG | Entity relationships with bi-temporal validity |
-| **Decay** | FadeMem | Exponential strength decay, 2-week half-life, spaced repetition |
-| **Gating** | Write Gate | Scores write-worthiness, dedup, merge/supersede detection |
-| **Profile** | UserProfile | Persistent user model injected into every conversation |
-
-### NeuroDream + Dream Consolidation
-
-Sleep-like memory consolidation pipeline:
-1. Cluster similar memories by embedding similarity
-2. LLM-compress clusters into summaries
-3. Update UserProfile from recent memories
-4. Batch exponential decay on all memories
-5. Prune forgotten memories (strength < 0.05)
-6. Merge near-duplicate memories
-7. Extract routine patterns
-8. Surface KG contradictions
-
-Runs as background daemon or manually via `--dream`.
-
-### Migration
-
-To migrate from v5.0's fragmented backends to the consolidated store:
-
-```bash
-python scripts/migrate_memory.py             # Migrate all data
-python scripts/migrate_memory.py --re-embed  # Also re-embed with nomic-embed-text
-```
+| Module | Purpose |
+|--------|---------|
+| `main.py` | CLI entry — argument parsing, chat loop, subcommands |
+| `aura/agent.py` | ReAct agent loop, fast path, tool dispatch, code agent mode |
+| `aura/brain.py` | OllamaBrain — LLM orchestration, model routing, neuromodulator scaling |
+| `aura/core/agentic_loop.py` | Dev CLI loop — tool executor, context management |
+| `aura/core/adaptive_planner.py` | Complexity detection, plan generation, re-planning |
+| `aura/core/code_agent.py` | LLM writes Python as actions (smolagents-style) |
+| `aura/emotion/alma_engine.py` | ALMA neuromodulator simulation in PAD space |
+| `aura/emotion/integration.py` | Behavioral style prompts, chain-of-emotion appraisal |
+| `aura/emotion/temporal_grounding.py` | Session continuity — time awareness, mood decay |
+| `aura/emotion/memory_tagging.py` | PAD tagging on memories, mood-congruent retrieval |
+| `aura/memory/store.py` | Unified SQLite + FTS5 + vector memory store |
+| `aura/memory/retrieval.py` | Multi-channel retrieval with RRF fusion |
+| `aura/memory/fade_mem.py` | Exponential memory decay with spaced repetition |
+| `aura/narrative_self.py` | Evolving identity narrative |
+| `aura/tools/neurodream.py` | Sleep/dream consolidation (light/deep/REM) |
+| `aura/proactive/gateway_daemon.py` | Proactive decision-making center |
+| `aura/proactive/curiosity_scanner.py` | KG gap detection for curiosity-driven outreach |
+| `aura/proactive/motivation_accumulator.py` | 5-factor scored message gating with learned threshold |
 
 ---
 
 ## Security
 
 - API key auth (constant-time comparison)
-- Path traversal protection on file uploads
 - Shell command blocklist + allowlist
-- PII scrubbing before knowledge abstraction
+- Path traversal protection
+- AST-validated code sandbox + E2B fallback
 - Rate limiting middleware
-- Permission system for all mutating operations
+- Permission system (AUTO/PROMPT/BLOCKED tiers)
+- PII scrubbing before knowledge abstraction
 
 ---
 
 ## Roadmap
 
-See [NEW_AURA_ROADMAP.md](NEW_AURA_ROADMAP.md) for the full plan:
+All core phases complete. See [NEW_AURA_ROADMAP.md](NEW_AURA_ROADMAP.md) for details.
 
-- **Phase 1** (done): Fix the engine — ReAct loop, Tool RAG, model routing
-- **Phase 2** (done): Memory consolidation — 2 backends, BM25 + reranking, FadeMem decay, UserProfile
-- **Phase 3**: Make it alive — coherent emotion→behavior loop, narrative self-model
-- **Phase 4**: Dreams that matter + natural proactive awareness
-- **Phase 5**: Code agents, sandboxing, adaptive planning
+- **Phase 1**: Engine — ReAct loop, Tool RAG, model routing
+- **Phase 2**: Memory — 2 backends, BM25 + reranking, FadeMem, UserProfile
+- **Phase 3**: Alive — coherent emotion→behavior loop, narrative self-model, temporal grounding
+- **Phase 4**: Dreams — NeuroDream phases, proactive curiosity, motivation threshold
+- **Phase 5**: Polish — code agent mode, adaptive planning, emotional continuity, sandboxing
 
 ---
 
-## License
-
-MIT
+Created by [Elnur Ibrahimov](https://github.com/ElnurIbrahimov)

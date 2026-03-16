@@ -482,6 +482,32 @@ async def get_screen_context():
         return {"available": False, "error": str(e)}
 
 
+@router.get("/motivation")
+async def get_motivation_status():
+    """Get MotivationAccumulator status — threshold, engagement rate, stats."""
+    try:
+        from aura.proactive.motivation_accumulator import get_motivation_accumulator
+        acc = get_motivation_accumulator()
+        return acc.get_status()
+    except ImportError:
+        return {"error": "MotivationAccumulator not available"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.get("/curiosity")
+async def get_curiosity_status():
+    """Get CuriosityScanner status — targets, gap types, information gain score."""
+    try:
+        from aura.proactive.curiosity_scanner import get_curiosity_scanner
+        scanner = get_curiosity_scanner()
+        return scanner.get_status()
+    except ImportError:
+        return {"error": "CuriosityScanner not available"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @router.get("/workflow")
 async def get_workflow_state():
     """Get current workflow boundary detection state (Phase 5B).

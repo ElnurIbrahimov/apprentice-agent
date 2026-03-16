@@ -16,6 +16,7 @@ import atexit
 import json
 import logging
 import math
+import re
 import sqlite3
 import threading
 import time
@@ -367,6 +368,8 @@ class MemoryStore:
             if not emb_blob:
                 continue
             vec = _blob_to_float32(emb_blob)
+            if vec.shape != q.shape:
+                continue
             vec_norm = np.linalg.norm(vec)
             if vec_norm < 1e-8:
                 continue
@@ -391,10 +394,12 @@ class MemoryStore:
         states = lifecycle_states or ["candidate", "stable", "summary"]
         state_placeholders = ",".join(["?"] * len(states))
 
-        # FTS5 match query — escape special chars
-        fts_query = query.replace('"', '""')
-        # Use each word as a separate OR term for robustness
-        words = [w.strip() for w in fts_query.split() if w.strip()]
+        # FTS5 match query — strip special FTS5 characters from each word
+        words = []
+        for w in query.split():
+            fts_safe = re.sub(r'[*"(){}^]', '', w.strip())
+            if fts_safe:
+                words.append(fts_safe)
         if not words:
             return []
         match_expr = " OR ".join(f'"{w}"' for w in words[:10])  # Cap at 10 terms
@@ -495,7 +500,7 @@ class MemoryStore:
         if not records:
             return 0
         placeholders = ",".join(["?"] * len(_COLUMNS))
-        sql = f"INSERT OR IGNORE INTO memories({','.join(_COLUMNS)}) VALUES({placeholders})"
+        sql = f"INSERT OR REPLACE INTO memories({','.join(_COLUMNS)}) VALUES({placeholders})"
 
         rows_data = []
         for i, rec in enumerate(records):
@@ -677,10 +682,17 @@ _store_lock = threading.Lock()
 def get_memory_store(db_path: Optional[str] = None) -> MemoryStore:
     """Get or create the global MemoryStore singleton."""
     global _store_instance
-    if _store_instance is None:
-        with _store_lock:
-            if _store_instance is None:
-                _store_instance = MemoryStore(db_path)
+    if _store_instance is not None:
+        if db_path and str(db_path) != str(_store_instance._db_path):
+            logger.warning(
+                "get_memory_store called with different path %s, "
+                "returning existing store at %s",
+                db_path, _store_instance._db_path,
+            )
+        return _store_instance
+    with _store_lock:
+        if _store_instance is None:
+            _store_instance = MemoryStore(db_path)
     return _store_instance
 
 

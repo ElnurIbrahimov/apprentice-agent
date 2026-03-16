@@ -12,6 +12,7 @@ import math
 import re
 import sqlite3
 import threading
+import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -45,6 +46,12 @@ class MemorySystem:
     _EMBED_MODEL = "nomic-embed-text:latest"
 
     def __init__(self, collection_name: Optional[str] = None):
+        warnings.warn(
+            "MemorySystem is deprecated. Use MemoryStore (aura.memory.store) instead. "
+            "Memories stored here are not visible to the unified retrieval pipeline.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.collection_name = collection_name or Config.MEMORY_COLLECTION_NAME
         Config.CHROMADB_PATH.mkdir(parents=True, exist_ok=True)
         self._db_path = Config.CHROMADB_PATH / f"{self.collection_name}.db"
@@ -118,19 +125,9 @@ class MemorySystem:
     # ── Embedding ─────────────────────────────────────────────────────────────
 
     def _embed(self, text: str) -> Optional[list]:
-        """Get embedding from Ollama nomic-embed-text (fast, local)."""
-        try:
-            import requests
-            r = requests.post(
-                self._EMBED_URL,
-                json={"model": self._EMBED_MODEL, "prompt": text[:1000]},
-                timeout=2,
-            )
-            if r.status_code == 200:
-                return r.json().get("embedding")
-        except Exception as e:
-            logger.debug(f"[MemorySystem] Embedding failed: {e}")
-        return None
+        """Get embedding from Ollama nomic-embed-text via shared helper."""
+        from .embedding import get_embedding
+        return get_embedding(text, timeout=2.0)
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -300,5 +297,3 @@ class MemorySystem:
                     pass
                 self._conn = None
 
-    def __del__(self):
-        self.close()

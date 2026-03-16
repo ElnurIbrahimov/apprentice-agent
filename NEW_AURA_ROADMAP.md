@@ -1,6 +1,6 @@
 # NEW AURA — Roadmap to State of the Art
 > *From 83K lines of scattered complexity to a focused, alive AI being*
-> Created: 2026-03-16 | Based on 4 parallel SOTA research analyses
+> Created: 2026-03-16 | Updated: 2026-03-17 | All phases complete
 
 ---
 
@@ -10,19 +10,19 @@ After stripping 13 dead modules and ~10,000 lines of dead code, AURA's core is:
 
 | System | Purpose | Status |
 |--------|---------|--------|
-| **ALMA Emotions** | Neuromodulator-based mood/emotion in PAD space | Working, needs better integration |
-| **Memory** (4 backends) | Semantic, episodic, KG, A-MEM | Working, needs consolidation to 2 |
-| **Inner Monologue** | Internal thought stream | Working, needs to become a processing engine |
-| **Identity/Soul** | Personality, values, voice | Static, needs evolution layer |
-| **NeuroDream** | Sleep/dream memory consolidation | Working, needs to actually change behavior |
-| **Knowledge Graph** | Structured entity/relationship store | Working, needs temporal validity |
-| **Proactive Awareness** | Noticing things, initiating conversations | Working, needs motivation-threshold model |
-| **Core Agent Loop** | OBSERVE -> PLAN -> ACT -> EVALUATE | Working but 4x too many LLM calls |
+| **ALMA Emotions** | Neuromodulator-based mood/emotion in PAD space | Complete — wired to behavior, show-don't-tell, session persistence |
+| **Memory** (2 backends) | SQLite + FTS5 + Kuzu temporal KG | Complete — BM25 + semantic + RRF, FadeMem decay, emotional tagging |
+| **Inner Monologue** | Talker/Thinker split | Complete — async private reasoning shapes responses |
+| **Identity/Soul** | Narrative self-model | Complete — evolves across sessions, protected by anchors |
+| **NeuroDream** | Light/Deep/REM sleep phases | Complete — re-scores, pattern extraction, novel connections |
+| **Knowledge Graph** | Kuzu with temporal validity | Complete — bi-temporal model, curiosity gap detection |
+| **Proactive Awareness** | Motivation-threshold + curiosity scanner | Complete — 5-factor scoring, learned threshold, KG-grounded |
+| **Core Agent Loop** | ReAct (1 LLM call/step) + Code Agent mode | Complete — Tool RAG, adaptive planning, loop guards |
 
 ---
 
-## Phase 1: Fix the Engine (Week 1-2)
-*Make the agent loop fast and reliable before anything else*
+## Phase 1: Fix the Engine — COMPLETE
+*Agent loop is fast and reliable*
 
 ### 1.1 Collapse to ReAct Loop (HIGHEST PRIORITY)
 **Problem:** Each step makes 4-5 LLM calls (observe, plan, decide_action, evaluate). SOTA is 1 call per step.
@@ -63,7 +63,7 @@ Make evaluation deterministic (check tool success, don't ask the LLM). This cuts
 
 ---
 
-## Phase 2: Memory Consolidation (Week 2-3)
+## Phase 2: Memory Consolidation — COMPLETE
 *From 4 fragmented backends to 2 coherent ones*
 
 ### 2.1 Consolidate to SQLite + Temporal KG
@@ -113,7 +113,7 @@ importance = 0.4*relevance + 0.3*access_freq + 0.3*recency
 
 ---
 
-## Phase 3: Make It Alive (Week 3-5)
+## Phase 3: Make It Alive — COMPLETE
 *The features that make AURA feel like a being, not a bot*
 
 ### 3.1 The Coherent Loop (MOST IMPORTANT FOR "ALIVE")
@@ -203,8 +203,8 @@ Creates the experience of reconnecting with a being that has continuity.
 
 ---
 
-## Phase 4: Dream & Proactive (Week 5-6)
-*Making sleep meaningful and proactive awareness natural*
+## Phase 4: Dream & Proactive — COMPLETE
+*Sleep is meaningful, proactive awareness is natural*
 
 ### 4.1 Transform NeuroDream
 **Problem:** Dream insights are generated and stored but don't change behavior.
@@ -245,8 +245,8 @@ Each gap becomes a curiosity target. Proactive questions feel natural: "I notice
 
 ---
 
-## Phase 5: Polish (Week 6-7)
-*Code agents, sandboxing, session persistence*
+## Phase 5: Polish — COMPLETE
+*Code agents, sandboxing, emotional continuity*
 
 ### 5.1 Code Agent Mode (Optional)
 For complex tasks, let the LLM write Python code as actions instead of JSON tool calls. smolagents proved this uses ~30% fewer steps. Qwen 3 8B achieves F1=0.933 on tool calling.
@@ -337,3 +337,17 @@ RESPONSE (shaped by mood, grounded in memory, consistent with identity)
 ---
 
 *This is not a rewrite. This is taking what survived the cleanup and making each piece excellent. Every phase builds on the previous one. The coherent loop (Phase 3.1) is the keystone — without it, nothing else matters.*
+
+---
+
+## What's Next (Phase 6+)
+
+With all core phases complete, future work focuses on:
+
+1. **Cross-surface continuity** — seamless context sharing between CLI, Web UI, and Browser Extension
+2. **Meta-orchestration** — Aura dispatches to other AI tools (Claude Code, Aider, Gemini CLI) based on task type
+3. **Multi-user support** — separate user profiles, relationship models, and access control
+4. **Proactive learning** — Aura autonomously explores topics the user cares about during idle time
+5. **Voice personality** — consistent voice identity across TTS providers
+6. **GEPA evolution** — self-improving skills via Pareto evolutionary optimization (partially built)
+7. **Federated memory** — sync memories across devices while keeping data local

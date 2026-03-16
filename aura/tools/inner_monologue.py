@@ -345,9 +345,18 @@ class InnerMonologueTool:
         """
         Generator yielding thoughts in real-time.
 
+        IMPORTANT: The subscriber is only cleaned up inside the finally block,
+        which runs when the generator is closed or garbage-collected.  Callers
+        MUST either exhaust the generator, explicitly call gen.close(), or use
+        it inside a contextlib.closing() wrapper to avoid leaking subscribers.
+
         Usage:
-            for thought in monologue.get_stream():
-                print(thought.format_display())
+            gen = monologue.get_stream()
+            try:
+                for thought in gen:
+                    print(thought.format_display())
+            finally:
+                gen.close()
         """
         # Create a queue for this consumer
         import queue
@@ -384,37 +393,39 @@ class InnerMonologueTool:
         return self.stream.get_recent(n)
 
     def generate_thinking_context(self, brain=None) -> str:
-        """Synthesize recent thoughts into a private directive for the next response.
+        """Get the Thinker's private context for the next Talker response.
 
-        The Thinker: reviews recent internal thoughts and generates a short
-        context string that shapes the next response. Not shown to user.
+        Delegates to the ThinkerEngine (MIRROR dual-process architecture).
+        The Thinker runs asynchronously between turns; this method just
+        retrieves whatever it produced last cycle.
+
+        Falls back to a simple monologue summary if the Thinker has no state.
 
         Args:
-            brain: OllamaBrain instance (uses _quick_generate for fast model)
+            brain: OllamaBrain instance (passed to Thinker if it needs init)
 
         Returns:
-            Short directive string, or empty string if no useful context.
+            Private context string, or empty string if nothing useful.
         """
-        recent = self.stream.get_recent(5)
-        if not recent or not brain or not hasattr(brain, '_quick_generate'):
-            return ""
+        # Primary: use the ThinkerEngine's structured output
+        try:
+            from aura.thinker import get_thinker
+            thinker = get_thinker(brain=brain)
+            ctx = thinker.get_talker_context()
+            if ctx:
+                return ctx
+        except Exception as e:
+            logger.debug("[Monologue] Thinker context unavailable: %s", e)
 
-        # Only synthesize if there are substantive thoughts
+        # Fallback: simple monologue summary (no LLM call)
+        recent = self.stream.get_recent(5)
+        if not recent:
+            return ""
         substantive = [t for t in recent if t.type in ("reason", "reflect", "decide", "uncertain", "eureka")]
         if not substantive:
             return ""
-
-        thought_text = "\n".join(f"- [{t.type}] {t.content[:150]}" for t in substantive[-5:])
-        try:
-            result = brain._quick_generate(
-                f"Based on these recent internal thoughts:\n{thought_text}\n"
-                f"What should I keep in mind for my next response? Reply in 1-2 sentences only.",
-                timeout=3,
-            )
-            return result.strip()[:300] if result else ""
-        except Exception as e:
-            logger.debug("[Monologue] Thinking context generation error: %s", e)
-            return ""
+        lines = [f"- [{t.type}] {t.content[:150]}" for t in substantive[-3:]]
+        return "Recent thoughts:\n" + "\n".join(lines)
 
     def set_verbosity(self, level: int) -> str:
         """
