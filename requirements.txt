@@ -57,6 +57,12 @@ cryptography>=41.0.0
 kuzu>=0.4.0,<1.0.0
 
 # ============================================================
+# Optional: Code Search (tree-sitter AST parsing)
+# ============================================================
+# tree-sitter>=0.24.0
+# tree-sitter-language-pack>=0.13.0
+
+# ============================================================
 # Optional: Episodic Memory (requires Qdrant vector DB)
 # ============================================================
 qdrant-client>=1.7.0

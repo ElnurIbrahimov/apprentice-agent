@@ -2,8 +2,9 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
-# Set API key before importing app
+# Set API key and enable auth before importing app
 os.environ["AURA_API_KEY"] = "test-key-123"
+os.environ["AURA_API_AUTH_ENABLED"] = "true"
 
 from api.main import app
 

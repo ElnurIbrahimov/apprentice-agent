@@ -5,7 +5,7 @@ import sys
 import uuid
 
 # Ensure project root is importable
-sys.path.insert(0, "D:/Aura")
+sys.path.insert(0, str(os.path.join(os.path.dirname(__file__), "..")))
 
 
 # ── Test 1: write_gate merge target picks best match (not first) ─────────
@@ -123,15 +123,15 @@ class TestConfigThresholds:
 
     def test_budget_small(self):
         from aura.config import Config
-        assert Config.BUDGET_SMALL == 150
+        assert Config.BUDGET_SMALL == 300
 
     def test_budget_medium(self):
         from aura.config import Config
-        assert Config.BUDGET_MEDIUM == 400
+        assert Config.BUDGET_MEDIUM == 1024
 
     def test_budget_large(self):
         from aura.config import Config
-        assert Config.BUDGET_LARGE == 800
+        assert Config.BUDGET_LARGE == 2048
 
 
 # ── Test 5: RequestIDMiddleware adds X-Request-ID header ─────────────────

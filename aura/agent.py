@@ -451,10 +451,6 @@ _TOOL_KEYWORDS = frozenset([
     'inner monologue', 'show thoughts', 'your thoughts', 'think aloud',
     'reasoning chain', 'what were you thinking', 'export thoughts',
 
-    # --- Tool: PersonaPlex (voice) ---
-    'personaplex', 'voice server', 'start voice', 'stop voice',
-    'set voice', 'change voice', 'list voices', 'real-time voice',
-
     # --- Tool: Clawdbot (messaging) ---
     'clawdbot', 'send message', 'send whatsapp', 'send telegram',
     'text message', 'discord message', 'message to',

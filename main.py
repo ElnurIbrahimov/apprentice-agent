@@ -261,7 +261,7 @@ def main():
 
 def run_voice_mode(agent, enable_barge_in: bool = True):
     """Run the agent in voice conversation mode."""
-    from aura.tools.voice import VoiceConversation  # lazy: avoids ~7s sesame_tts load
+    from aura.tools.voice import VoiceConversation  # lazy import
     conversation = VoiceConversation(agent, whisper_model="base", enable_barge_in=enable_barge_in)
     conversation.start()
 

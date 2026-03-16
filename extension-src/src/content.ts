@@ -281,7 +281,13 @@ function safeSend(msg: OutboundMessage, cb?: (response: SaveKnowledgeResponse) =
   toast.id = 'toast';
   shadow.appendChild(toast);
 
-  // ── Floating Action Dock (direct DOM injection — no shadow DOM) ────────
+  // ── Floating Action Dock (Shadow DOM isolated) ────────
+
+  const dockShadowHost: HTMLDivElement = document.createElement('div');
+  dockShadowHost.id = 'aura-dock-shadow';
+  Object.assign(dockShadowHost.style, { position: 'fixed', right: '0', top: '0', zIndex: '2147483647', pointerEvents: 'none' });
+  document.body.appendChild(dockShadowHost);
+  const dockShadow = dockShadowHost.attachShadow({ mode: 'closed' });
 
   const dockHost: HTMLDivElement = document.createElement('div');
   dockHost.id = 'aura-dock-host';
@@ -308,7 +314,7 @@ function safeSend(msg: OutboundMessage, cb?: (response: SaveKnowledgeResponse) =
     boxSizing: 'border-box',
     fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   });
-  document.body.appendChild(dockHost);
+  dockShadow.appendChild(dockHost);
 
   // Logo — always visible
   const dockLogo: HTMLDivElement = document.createElement('div');
@@ -699,6 +705,15 @@ function safeSend(msg: OutboundMessage, cb?: (response: SaveKnowledgeResponse) =
     });
 
     document.addEventListener('keydown', onEsc);
+
+    // Safety cleanup: remove listener if overlay is removed by page navigation or other means
+    const ocrCleanupObserver = new MutationObserver(() => {
+      if (!document.body.contains(overlay)) {
+        document.removeEventListener('keydown', onEsc);
+        ocrCleanupObserver.disconnect();
+      }
+    });
+    ocrCleanupObserver.observe(document.body, { childList: true });
   }
 
   // ── Message Listener ──────────────────────────────────────────────────
