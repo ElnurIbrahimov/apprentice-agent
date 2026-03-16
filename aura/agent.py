@@ -5631,6 +5631,25 @@ Python code:"""
         except Exception:
             pass
 
+        # Load dream insights from last sleep cycle (Phase 4)
+        try:
+            dream_queue = Path("data/neurodream/dream_proactive_queue.json")
+            if dream_queue.exists():
+                import json as _json
+                queue_data = _json.loads(dream_queue.read_text(encoding='utf-8'))
+                dream_msgs = queue_data.get("messages", [])
+                if dream_msgs:
+                    dream_text = "\n".join(
+                        f"- [{m['type']}] {m['content']}" for m in dream_msgs[:3]
+                    )
+                    parts.append(
+                        "Thoughts from my last sleep cycle:\n" + dream_text
+                    )
+                # Clear the queue so it doesn't repeat
+                dream_queue.unlink(missing_ok=True)
+        except Exception:
+            pass
+
         if not parts:
             return None
 

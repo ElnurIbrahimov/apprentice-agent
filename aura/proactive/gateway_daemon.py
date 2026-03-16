@@ -135,8 +135,10 @@ class GatewayDaemon:
 
         # Phase 6E: Proactive message rate limiting
         self._last_proactive_message_time: float = 0.0
-        self._min_message_interval = 300.0  # 5 minutes between proactive messages
+        self._min_message_interval = 300.0  # 5 minutes between proactive messages (adaptive)
         self._messages_this_session = 0  # Track total messages to slow down over time
+        self._engagement_history: list = []  # Rolling window for threshold adaptation
+        self._max_engagement_window = 20
 
         # Statistics
         self._stats = {
@@ -174,6 +176,9 @@ class GatewayDaemon:
                     self.user_context.current_task = ctx.get("current_task")
                     self.user_context.focus_keywords = ctx.get("focus_keywords", [])
                     self.user_context.do_not_disturb = ctx.get("do_not_disturb", False)
+                    # Phase 4.2: Restore learned threshold
+                    self._min_message_interval = ctx.get("learned_message_interval", 300.0)
+                    self._engagement_history = ctx.get("engagement_history", [])
                 logger.info("[GatewayDaemon] Restored persisted daemon state")
 
             # Restore beliefs into inference engine
@@ -218,6 +223,9 @@ class GatewayDaemon:
                 "current_task": self.user_context.current_task,
                 "focus_keywords": self.user_context.focus_keywords,
                 "do_not_disturb": self.user_context.do_not_disturb,
+                # Phase 4.2: Persist learned threshold
+                "learned_message_interval": self._min_message_interval,
+                "engagement_history": self._engagement_history[-20:],
             }
             persistence.save_daemon_state(
                 self._stats, ctx_dict, self._last_proactive_message_time
@@ -1378,7 +1386,37 @@ class GatewayDaemon:
                 "observation_confidence": 0.6,
             })
 
+        # Phase 4.2: Track engagement for threshold adaptation
+        self._engagement_history.append(engaged)
+        if len(self._engagement_history) > self._max_engagement_window:
+            self._engagement_history.pop(0)
+        self._adapt_message_threshold()
+
         logger.info(f"[GatewayDaemon] User response recorded: engaged={engaged}, type={response_type}")
+
+    def _adapt_message_threshold(self) -> None:
+        """Adapt base message interval from engagement history.
+
+        High engagement (>60%) -> decrease interval (min 120s)
+        Low engagement (<30%) -> increase interval (max 600s)
+        Middle -> converge toward 300s default
+        """
+        if len(self._engagement_history) < 5:
+            return  # Not enough data
+
+        rate = sum(self._engagement_history) / len(self._engagement_history)
+
+        if rate > 0.6:
+            self._min_message_interval = max(120.0, self._min_message_interval * 0.95)
+        elif rate < 0.3:
+            self._min_message_interval = min(600.0, self._min_message_interval * 1.10)
+        else:
+            self._min_message_interval += (300.0 - self._min_message_interval) * 0.05
+
+        logger.debug(
+            "[GatewayDaemon] Threshold adapted: interval=%.0fs, engagement=%.0f%% (%d samples)",
+            self._min_message_interval, rate * 100, len(self._engagement_history),
+        )
 
     def get_stats(self) -> Dict[str, Any]:
         """Get daemon statistics."""

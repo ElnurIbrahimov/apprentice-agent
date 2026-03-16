@@ -213,6 +213,14 @@ class IntrinsicMotivationEngine:
         time_growth = min(0.2, hours_since / 48.0 * 0.2)  # Grows over 48h
         intensity += time_growth
 
+        # Scan for specific curiosity targets (Phase 4.3)
+        gap_targets = self.scan_kg_gaps(max_targets=5)
+        if gap_targets:
+            intensity += min(0.2, len(gap_targets) * 0.04)
+            for t in gap_targets[:2]:
+                triggers.append(f"{t['reason']}: {t['target']}")
+        self._curiosity_targets = gap_targets
+
         drive.intensity = min(1.0, max(0.0, intensity))
         drive.satisfaction = 1.0 - drive.intensity
         drive.triggers = triggers
@@ -341,6 +349,80 @@ class IntrinsicMotivationEngine:
         drive.triggers = triggers
         drive.last_assessed = time.time()
 
+    def scan_kg_gaps(self, max_targets: int = 5) -> List[Dict[str, Any]]:
+        """Scan KG for specific curiosity targets: orphans, stale nodes, low-confidence.
+
+        Returns list of dicts with {target, reason, urgency, node_id}.
+        """
+        targets: List[Dict[str, Any]] = []
+        try:
+            from aura.tools.knowledge_graph import get_knowledge_graph
+            kg = get_knowledge_graph()
+
+            # 1. Stale nodes (not accessed in 7+ days, access_count >= 3, important types)
+            from datetime import datetime, timedelta
+            cutoff = (datetime.now() - timedelta(days=7)).isoformat()
+            try:
+                all_nodes = list(kg._nodes.values()) if hasattr(kg, '_nodes') else []
+                for node in all_nodes:
+                    if (hasattr(node, 'last_accessed') and node.last_accessed < cutoff
+                            and getattr(node, 'access_count', 0) >= 3
+                            and getattr(node, 'type', '') in ("project", "concept", "person", "tool")):
+                        try:
+                            days_stale = (datetime.now() - datetime.fromisoformat(node.last_accessed)).days
+                        except (ValueError, TypeError):
+                            days_stale = 7
+                        targets.append({
+                            "target": node.label,
+                            "reason": f"stale_{days_stale}d",
+                            "urgency": min(0.9, 0.4 + days_stale / 30),
+                            "node_id": node.id,
+                        })
+            except Exception:
+                pass
+
+            # 2. Low-confidence nodes (user-mentioned but uncertain)
+            try:
+                for node in all_nodes:
+                    if (getattr(node, 'confidence', 1.0) < 0.4
+                            and getattr(node, 'access_count', 0) >= 2):
+                        targets.append({
+                            "target": node.label,
+                            "reason": "low_confidence",
+                            "urgency": 0.5 + (0.4 - getattr(node, 'confidence', 0.4)),
+                            "node_id": node.id,
+                        })
+            except Exception:
+                pass
+
+            # 3. Orphan nodes (few edges, actually mentioned by user)
+            try:
+                for node in all_nodes:
+                    if getattr(node, 'access_count', 0) > 0:
+                        edges = kg.get_edges(node.id) if hasattr(kg, 'get_edges') else []
+                        if len(edges) <= 1:
+                            targets.append({
+                                "target": node.label,
+                                "reason": "isolated_concept",
+                                "urgency": 0.6,
+                                "node_id": node.id,
+                            })
+            except Exception:
+                pass
+
+        except Exception as e:
+            logger.debug(f"[IntrinsicMotivation] KG gap scan error: {e}")
+
+        # Deduplicate and sort by urgency
+        seen = set()
+        unique = []
+        for t in targets:
+            if t["node_id"] not in seen:
+                seen.add(t["node_id"])
+                unique.append(t)
+        unique.sort(key=lambda t: t["urgency"], reverse=True)
+        return unique[:max_targets]
+
     def _apply_awareness_modifiers(self) -> None:
         """Blend proactive awareness drive signals into current drive intensities.
 
@@ -411,7 +493,18 @@ class IntrinsicMotivationEngine:
         actions = []
 
         if drive.drive_type == DriveType.CURIOSITY:
-            if drive.urgency > 0.5:
+            # Phase 4.3: Use specific KG gap targets when available
+            targets = getattr(self, '_curiosity_targets', [])
+            if targets and drive.urgency > 0.5:
+                top = targets[0]
+                actions.append(DriveAction(
+                    drive=DriveType.CURIOSITY,
+                    action="explore_specific_gap",
+                    description=f"Ask about '{top['target']}' ({top['reason']})",
+                    priority=drive.urgency * 0.8,
+                    metadata={"target": top["target"], "reason": top["reason"], "node_id": top["node_id"]},
+                ))
+            elif drive.urgency > 0.5:
                 actions.append(DriveAction(
                     drive=DriveType.CURIOSITY,
                     action="explore_knowledge_gaps",

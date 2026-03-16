@@ -266,6 +266,9 @@ class NeuroDreamEngine:
         # Truth Spine bridge — set from agent.py after ProtoAGI init
         self.proto_agi = None
 
+        # Phase 4: DreamConsolidator report (shared between deep → REM phases)
+        self._last_consolidation_report = None
+
     def _count_insights(self) -> int:
         """Count total insights generated."""
         insights_file = self.data_dir / "insights.jsonl"
@@ -717,6 +720,26 @@ class NeuroDreamEngine:
             except Exception as e:
                 logger.error(f"[NeuroDream] Merge nodes error: {e}")
 
+        # === DreamConsolidator integration (Phase 4) ===
+        # Runs SQLite-based consolidation: clustering, FadeMem decay, UserProfile,
+        # narrative self update, merge similar, prune stale, contradiction report
+        if not self._interrupt_flag.is_set():
+            try:
+                from aura.dream import get_dream_consolidator
+                consolidator = get_dream_consolidator()
+                dc_report = consolidator.run_cycle()
+                results["consolidator_summaries"] = dc_report.cycle.summaries_written
+                results["consolidator_pruned"] = dc_report.cycle.pruned_count
+                self._last_consolidation_report = dc_report
+                logger.info(
+                    "[NeuroDream] DreamConsolidator: summaries=%d pruned=%d contradictions=%d",
+                    dc_report.cycle.summaries_written, dc_report.cycle.pruned_count,
+                    dc_report.cycle.contradictions_found,
+                )
+            except Exception as e:
+                logger.error(f"[NeuroDream] DreamConsolidator error: {e}")
+                self._last_consolidation_report = None
+
         # === Letta-style learned context generation (Phase 4D) ===
         learned_context_result = {}
         if not self._interrupt_flag.is_set():
@@ -845,6 +868,13 @@ class NeuroDreamEngine:
 
         self._total_insights += results["insights_generated"]
         results["duration_seconds"] = time.time() - start_time
+
+        # === Prepare proactive messages from dream insights (Phase 4) ===
+        if insights and not self._interrupt_flag.is_set():
+            try:
+                self._prepare_dream_proactive_messages(insights)
+            except Exception as e:
+                logger.debug(f"[NeuroDream] Proactive message prep error: {e}")
 
         # Log dream thought
         if self.monologue and not self._interrupt_flag.is_set():
@@ -1956,6 +1986,71 @@ Rules:
                 self.proto_agi.memory.store_belief(insight_key, insight.content[:500])
             except Exception as e:
                 logger.debug(f"[NeuroDream] non-critical: {e}")
+    def _prepare_dream_proactive_messages(self, insights: List[DreamInsight]) -> None:
+        """Distill REM insights into proactive messages for next session.
+
+        Selects top insights by confidence, includes consolidation findings,
+        writes to a queue file that temporal_grounding reads at session start.
+        """
+        # Pick best insights (confidence > 0.4, max 3)
+        candidates = sorted(
+            [i for i in insights if i.confidence > 0.4],
+            key=lambda i: i.confidence,
+            reverse=True
+        )[:3]
+
+        messages = []
+        for insight in candidates:
+            messages.append({
+                "type": insight.insight_type,
+                "content": insight.content[:300],
+                "confidence": round(insight.confidence, 2),
+                "source_nodes": insight.source_nodes[:4],
+                "timestamp": insight.timestamp,
+            })
+
+        # Include consolidation highlights from deep phase
+        report = self._last_consolidation_report
+        if report:
+            if report.cycle.contradictions_found > 0:
+                messages.append({
+                    "type": "consolidation",
+                    "content": f"Found {report.cycle.contradictions_found} unresolved contradiction(s) in knowledge base.",
+                    "confidence": 0.8,
+                    "source_nodes": report.contradiction_ids[:3],
+                    "timestamp": datetime.now().isoformat(),
+                })
+            if report.routines:
+                top_routine = report.routines[0]
+                desc = getattr(top_routine, 'trigger_context', str(top_routine))[:100]
+                messages.append({
+                    "type": "routine_detected",
+                    "content": f"Noticed a recurring pattern: {desc}",
+                    "confidence": 0.7,
+                    "source_nodes": [],
+                    "timestamp": datetime.now().isoformat(),
+                })
+
+        if not messages:
+            return
+
+        # Write queue file (atomic via temp + replace)
+        queue_file = self.data_dir / "dream_proactive_queue.json"
+        import tempfile, os
+        try:
+            data = json.dumps({
+                "session_id": self.current_session.session_id if self.current_session else "unknown",
+                "generated_at": datetime.now().isoformat(),
+                "messages": messages,
+            }, indent=2)
+            tmp_fd, tmp_path = tempfile.mkstemp(dir=str(self.data_dir), suffix=".tmp")
+            os.write(tmp_fd, data.encode("utf-8"))
+            os.close(tmp_fd)
+            os.replace(tmp_path, str(queue_file))
+            logger.info(f"[NeuroDream] Queued {len(messages)} proactive messages for next session")
+        except Exception as e:
+            logger.debug(f"[NeuroDream] Queue file write error: {e}")
+
     def _save_consolidated_patterns(self, patterns: List[ConsolidatedPattern]):
         """Save consolidated patterns."""
         patterns_file = self.data_dir / "consolidated_patterns.jsonl"
