@@ -93,17 +93,18 @@ class DreamMode:
         stored_ids = self._store_insights(insights, date)
         logger.debug(f"      Stored {len(stored_ids)} insights")
 
-        # Step 5: A-MEM memory consolidation (merge similar notes, prune stale ones)
-        logger.debug("\n[5/5] Consolidating A-MEM notes...")
+        # Step 5: Memory consolidation — delegate to DreamConsolidator
+        logger.debug("\n[5/5] Running DreamConsolidator cycle...")
         consolidation_result = {"merged": 0, "pruned": 0}
         try:
-            from .tools.amem import get_amem
-            amem = get_amem()
-            consolidation_result = _consolidate_amem_notes(amem)
-            logger.debug(f"      Merged: {consolidation_result['merged']}, Pruned: {consolidation_result['pruned']}")
+            consolidator = get_dream_consolidator()
+            report = consolidator.run_cycle()
+            consolidation_result["merged"] = report.cycle.summaries_written
+            consolidation_result["pruned"] = report.cycle.pruned_count
+            logger.debug(f"      Summaries: {report.cycle.summaries_written}, Pruned: {report.cycle.pruned_count}")
             logger.info(
-                f"[Dream] Memory consolidation: merged={consolidation_result['merged']}, "
-                f"pruned={consolidation_result['pruned']}"
+                f"[Dream] Consolidation: summaries={report.cycle.summaries_written}, "
+                f"pruned={report.cycle.pruned_count}"
             )
         except Exception as e:
             logger.warning(f"[Dream] Consolidation skipped: {e}")
@@ -345,7 +346,9 @@ Format each insight as a single clear sentence starting with a verb (Use, Prefer
 
 
 def _consolidate_amem_notes(amem_system, similarity_threshold: float = 0.85) -> dict:
-    """Merge A-MEM notes with high cosine similarity and prune low-importance notes.
+    """DEPRECATED: Use DreamConsolidator._merge_similar() instead.
+
+    Legacy function — Merge A-MEM notes with high cosine similarity and prune low-importance notes.
 
     Args:
         amem_system: An initialized AMEMSystem instance
@@ -992,13 +995,31 @@ class DreamConsolidator:
         return pruned
 
     def _contradiction_report(self) -> List[Dict[str, Any]]:
-        """Fetch unresolved contradiction edges from the KG."""
+        """Fetch unresolved contradiction edges directly from the KG graph."""
         try:
-            from aura.memory.kg_contradiction import KGContradictionDetector
+            from aura.memory.kg_contradiction import CONTRADICTS_EDGE, KG_NODE_CONTESTED
             from aura.tools.knowledge_graph import get_knowledge_graph
             kg = get_knowledge_graph()
-            detector = KGContradictionDetector(kg)
-            return detector.get_all_contradictions()
+            g = kg.graph
+
+            contradictions = []
+            for u, v, data in g.edges(data=True):
+                if data.get("type") != CONTRADICTS_EDGE:
+                    continue
+                # Check if still unresolved (both nodes contested)
+                u_state = g.nodes[u].get("lifecycle_state", "") if u in g.nodes else ""
+                v_state = g.nodes[v].get("lifecycle_state", "") if v in g.nodes else ""
+                if u_state == KG_NODE_CONTESTED or v_state == KG_NODE_CONTESTED:
+                    contradictions.append({
+                        "contradiction_id": data.get("contradiction_id", ""),
+                        "node_a_id": u,
+                        "node_b_id": v,
+                        "node_a": g.nodes[u].get("label", u) if u in g.nodes else u,
+                        "node_b": g.nodes[v].get("label", v) if v in g.nodes else v,
+                        "confidence": data.get("confidence", 0.7),
+                        "resolved": False,
+                    })
+            return contradictions
         except Exception as e:
             logger.debug("[DreamConsolidator] Contradiction report error: %s", e)
             return []

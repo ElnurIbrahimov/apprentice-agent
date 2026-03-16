@@ -78,7 +78,7 @@ class MemoryRecord:
 
     def __post_init__(self):
         if not self.id:
-            self.id = str(uuid.uuid4())[:12]
+            self.id = uuid.uuid4().hex
         now = datetime.now().isoformat()
         if not self.created_at:
             self.created_at = now

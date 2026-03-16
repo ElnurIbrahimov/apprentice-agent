@@ -5060,12 +5060,12 @@ Python code:"""
                 _pad_ref = _pad
                 import threading
                 _store_fn = getattr(_umem_ref, "store_gated", _umem_ref.store)
-                threading.Thread(
-                    target=_store_fn,
-                    kwargs={"content": _content_ref, "source": "conversation",
-                            "importance": 0.5, "emotional_pad": _pad_ref},
-                    daemon=True
-                ).start()
+                def _safe_store(_fn=_store_fn, _c=_content_ref, _p=_pad_ref):
+                    try:
+                        _fn(content=_c, source="conversation", importance=0.5, emotional_pad=_p)
+                    except Exception as _e:
+                        logger.debug("[UnifiedMemory] Background store error: %s", _e)
+                threading.Thread(target=_safe_store, daemon=True).start()
             except Exception as e:
                 logger.debug(f"[UnifiedMemory] Conversation store error: {e}")
 
@@ -5340,12 +5340,12 @@ Python code:"""
                 _umem_s = _get_umem_s()
                 import threading
                 _store_fn_s = getattr(_umem_s, "store_gated", _umem_s.store)
-                threading.Thread(
-                    target=_store_fn_s,
-                    kwargs={"content": _mem_content, "source": "conversation",
-                            "importance": 0.5, "emotional_pad": _pad},
-                    daemon=True
-                ).start()
+                def _safe_store_s(_fn=_store_fn_s, _c=_mem_content, _p=_pad):
+                    try:
+                        _fn(content=_c, source="conversation", importance=0.5, emotional_pad=_p)
+                    except Exception as _e:
+                        logger.debug("[UnifiedMemory/stream] Background store error: %s", _e)
+                threading.Thread(target=_safe_store_s, daemon=True).start()
             except Exception as e:
                 logger.debug(f"[UnifiedMemory/stream] Store error: {e}")
 
