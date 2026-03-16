@@ -453,11 +453,9 @@ class OllamaBrain:
         model = model_override or self._model_override or Config.MODEL_CODE
         client, actual_model = self._get_client_for_model(model)
 
-        # ChatGPT client doesn't support tools= parameter — fall back to default Ollama model
+        # ChatGPT: use prompt-based tool calling adapter
         if actual_model.startswith("chatgpt:"):
-            model = Config.MODEL_CODE or "glm-5:cloud"
-            client, actual_model = self._get_client_for_model(model)
-            logger.debug(f"[BRAIN] ChatGPT can't do tool calling, using {actual_model} for this step")
+            return self._think_with_tools_chatgpt(messages, tools, actual_model, client)
 
         llm_options = options or {"temperature": 0.2, "num_predict": 4096}
 
@@ -513,6 +511,122 @@ class OllamaBrain:
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
         }
+
+    # -----------------------------------------------------------------
+    # ChatGPT prompt-based tool calling
+    # -----------------------------------------------------------------
+
+    def _think_with_tools_chatgpt(
+        self,
+        messages: list,
+        tools: list,
+        model: str,
+        client,
+    ) -> dict:
+        """Tool calling for ChatGPT via prompt injection + XML parsing.
+
+        Injects tool descriptions into the system prompt, sends to ChatGPT,
+        parses <tool_call> blocks from the text response.
+        Returns same format as think_with_tools() for transparent integration.
+        """
+        from aura.core.prompt_tool_adapter import build_tool_prompt, parse_tool_calls
+
+        # Build tool-augmented messages
+        aug_messages = self._inject_tool_prompt(messages, tools)
+
+        try:
+            response = call_with_timeout(
+                lambda: client.chat(model=model, messages=aug_messages),
+                timeout=120,
+                default=None,
+            )
+        except Exception as e:
+            logger.error(f"[BRAIN] ChatGPT tool call failed: {e}")
+            return {"error": str(e)}
+
+        if response is None:
+            return {"error": "ChatGPT request timed out"}
+
+        text = _resp_content(response)
+        content, tool_calls = parse_tool_calls(text)
+
+        msg = {"role": "assistant", "content": content}
+        if tool_calls:
+            msg["tool_calls"] = tool_calls
+
+        in_tok = _resp_get(response, "prompt_eval_count", 0) or 0
+        out_tok = _resp_get(response, "eval_count", 0) or 0
+        self._record_tokens(model, in_tok, out_tok)
+
+        return {
+            "message": msg,
+            "model": model,
+            "input_tokens": in_tok,
+            "output_tokens": out_tok,
+        }
+
+    def _think_with_tools_stream_chatgpt(
+        self,
+        messages: list,
+        tools: list,
+        model: str,
+        client,
+    ):
+        """Streaming tool calling for ChatGPT.
+
+        Streams text chunks, then parses tool calls from the accumulated text.
+        Yields same tuple format as think_with_tools_stream().
+        """
+        from aura.core.prompt_tool_adapter import parse_tool_calls
+
+        aug_messages = self._inject_tool_prompt(messages, tools)
+        accumulated = ""
+
+        try:
+            for chunk in client.chat(model=model, messages=aug_messages, stream=True):
+                delta = _resp_content(chunk) if chunk else ""
+                if delta:
+                    accumulated += delta
+                    yield ("content", delta)
+        except Exception as e:
+            logger.error(f"[BRAIN] ChatGPT stream error: {e}")
+            yield ("error", {"error": str(e)})
+            return
+
+        # Parse tool calls from full accumulated text
+        content, tool_calls = parse_tool_calls(accumulated)
+
+        if tool_calls:
+            yield ("tool_calls", tool_calls)
+
+        yield ("done", {
+            "content": content,
+            "tool_calls": tool_calls,
+            "model": model,
+        })
+
+    def _inject_tool_prompt(self, messages: list, tools: list) -> list:
+        """Inject tool descriptions into the system message."""
+        if not tools:
+            return messages
+
+        from aura.core.prompt_tool_adapter import build_tool_prompt
+        tool_text = build_tool_prompt(tools)
+
+        aug = []
+        injected = False
+        for msg in messages:
+            if msg.get("role") == "system" and not injected:
+                aug.append({**msg, "content": msg.get("content", "") + "\n" + tool_text})
+                injected = True
+            else:
+                aug.append(msg)
+
+        # No system message found — prepend one
+        if not injected:
+            aug.insert(0, {"role": "system", "content": tool_text})
+
+        return aug
 
     # -----------------------------------------------------------------
     # ReAct Step — single LLM call combining thought + action (1.1)
@@ -637,10 +751,9 @@ class OllamaBrain:
         model = model_override or self._model_override or Config.MODEL_CODE
         client, actual_model = self._get_client_for_model(model)
 
+        # Code agent uses same prompt-based approach for ChatGPT
         if actual_model.startswith("chatgpt:"):
-            model = Config.MODEL_CODE or "glm-5:cloud"
-            client, actual_model = self._get_client_for_model(model)
-            logger.debug(f"[BRAIN] ChatGPT can't do code agent, using {actual_model}")
+            return self._think_with_tools_chatgpt(messages, [], actual_model, client)
 
         llm_options = {"temperature": 0.2, "num_predict": 4096}
 
@@ -708,9 +821,8 @@ class OllamaBrain:
         client, actual_model = self._get_client_for_model(model)
 
         if actual_model.startswith("chatgpt:"):
-            model = Config.MODEL_CODE or "glm-5:cloud"
-            client, actual_model = self._get_client_for_model(model)
-            logger.debug(f"[BRAIN] ChatGPT can't do streaming tools, using {actual_model}")
+            yield from self._think_with_tools_stream_chatgpt(messages, tools, actual_model, client)
+            return
 
         llm_options = options or {"temperature": 0.2, "num_predict": 4096}
 

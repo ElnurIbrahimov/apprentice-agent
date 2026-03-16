@@ -86,6 +86,13 @@ def _messages_to_input(messages: list[dict]) -> list[dict]:
                 "role": "assistant",
                 "content": [{"type": "output_text", "text": content}],
             })
+        elif role == "tool":
+            # Tool results sent as user messages (Responses API has no tool role)
+            input_items.append({
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": content}],
+            })
     return input_items
 
 
