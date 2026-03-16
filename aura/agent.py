@@ -4583,6 +4583,13 @@ Python code:"""
             except Exception as e:
                 logger.debug(f"[AURA] Input processing error: {e}")
 
+        # Chain-of-Emotion Appraisal — LLM-based mood update before response
+        try:
+            from aura.emotion.integration import appraise_message
+            appraise_message(message, brain=self.brain)
+        except Exception as e:
+            logger.debug(f"[ALMA] Appraisal error: {e}")
+
         # Analyze emotional state (EvoEmo - Tool #20)
         emotion_reading = self._analyze_emotion(message)
 
@@ -4693,9 +4700,11 @@ Python code:"""
             _record_thought("recalling", f"searching all memory backends for: {message[:40]}", 0.5, "memory")
             try:
                 from aura.memory.unified_memory import get_unified_memory
+                from aura.emotion.integration import get_current_pad_dict
                 _umem = get_unified_memory()
+                _current_pad = get_current_pad_dict()
                 # Run memory query in shared thread pool with 1.5s timeout to avoid blocking LLM start
-                _mem_future = _AGENT_EXECUTOR.submit(_umem.query, message, 10)
+                _mem_future = _AGENT_EXECUTOR.submit(_umem.query, message, 10, None, 0.0, _current_pad)
                 try:
                     unified_results = _mem_future.result(timeout=1.5)
                 except concurrent.futures.TimeoutError:
@@ -4740,6 +4749,14 @@ Python code:"""
         # Inject user profile, KG context, RAG context, and A-MEM context into system prompt
         system_prompt_addon = None
         context_parts = []
+
+        # Temporal grounding — inject session awareness if returning after absence
+        try:
+            _grounding = self._temporal_grounding()
+            if _grounding:
+                context_parts.append(_grounding)
+        except Exception:
+            pass
 
         # Inject Soul personality into system prompt
         soul_prompt = self._get_soul_prompt()
@@ -4788,6 +4805,15 @@ Python code:"""
                     logger.debug("[SkillLibrary] Injected skill context for: %s", message[:40])
         except Exception as e:
             logger.debug("[SkillLibrary] Skill lookup error: %s", e)
+
+        # Thinker context — private reflection from inner monologue
+        try:
+            if hasattr(self, 'monologue') and self.monologue:
+                _thinker_ctx = self.monologue.generate_thinking_context(brain=self.brain)
+                if _thinker_ctx:
+                    context_parts.append(f"PRIVATE REFLECTION:\n{_thinker_ctx}")
+        except Exception:
+            pass
 
         if context_parts:
             system_prompt_addon = "\n\n".join(context_parts) + "\n\nUse this knowledge and memories when relevant to the conversation. Remember personal details about the user. Always address the user by their name if known."
@@ -4915,6 +4941,20 @@ Python code:"""
 
         if thinking_prefix:
             response = thinking_prefix + response
+
+        # Close the coherent loop — feed outcome back to ALMA
+        try:
+            self.brain.update_emotional_state(success=True)
+        except Exception:
+            pass
+
+        # Update narrative self-model for significant interactions (background)
+        if len(response) > 200:
+            try:
+                from aura.narrative_self import get_narrative_self
+                _AGENT_EXECUTOR.submit(get_narrative_self().update_from_interaction, message, response, self.brain)
+            except Exception:
+                pass
 
         if speak:
             self._speak(response, emotion=emotion_reading.emotion if emotion_reading else None)
@@ -5164,6 +5204,13 @@ Python code:"""
                 aura_context = self._build_aura_context(message)
             except Exception as e:
                 logger.debug(f"[Agent] non-critical: {e}")
+        # Chain-of-Emotion Appraisal (streaming path)
+        try:
+            from aura.emotion.integration import appraise_message
+            appraise_message(message, brain=self.brain)
+        except Exception as e:
+            logger.debug(f"[ALMA] Appraisal error: {e}")
+
         # Emotion analysis
         emotion_reading = self._analyze_emotion(message)
 
@@ -5235,9 +5282,11 @@ Python code:"""
         if not is_simple:
             try:
                 from aura.memory.unified_memory import get_unified_memory
+                from aura.emotion.integration import get_current_pad_dict
                 _umem_s = get_unified_memory()
+                _current_pad_s = get_current_pad_dict()
                 # Run memory query in shared thread pool with 1.5s timeout to avoid blocking LLM start
-                _mem_future_s = _AGENT_EXECUTOR.submit(_umem_s.query, message, 8)
+                _mem_future_s = _AGENT_EXECUTOR.submit(_umem_s.query, message, 8, None, 0.0, _current_pad_s)
                 try:
                     unified_results = _mem_future_s.result(timeout=1.5)
                 except concurrent.futures.TimeoutError:
@@ -5291,6 +5340,20 @@ Python code:"""
             yield chunk
 
         # ===== POST-PROCESSING =====
+
+        # Close the coherent loop — feed outcome back to ALMA (streaming path)
+        try:
+            self.brain.update_emotional_state(success=True)
+        except Exception:
+            pass
+
+        # Update narrative self-model for significant interactions (background)
+        if len(full_response) > 200:
+            try:
+                from aura.narrative_self import get_narrative_self
+                _AGENT_EXECUTOR.submit(get_narrative_self().update_from_interaction, message, full_response, self.brain)
+            except Exception:
+                pass
 
         # TTS on full response
         if speak:
@@ -5523,6 +5586,52 @@ Python code:"""
             return self._soul.get_system_prompt_addition()
         except Exception:
             return ""
+
+    def _temporal_grounding(self) -> Optional[str]:
+        """Build temporal grounding context if this is a new session.
+
+        Detects session start (>5 min since last interaction), loads narrative
+        self-model, calculates time elapsed, returns grounding context.
+        """
+        now = time.time()
+        last = getattr(self, '_last_interaction_ts', 0)
+        self._last_interaction_ts = now
+
+        if last == 0:
+            # First call ever — skip grounding
+            return None
+
+        elapsed_minutes = (now - last) / 60
+        if elapsed_minutes < 5:
+            # Same session — no grounding needed
+            return None
+
+        # This is a session start
+        elapsed_hours = elapsed_minutes / 60
+        parts = []
+
+        # Time awareness
+        if elapsed_hours < 1:
+            parts.append(f"It's been about {int(elapsed_minutes)} minutes since we last talked.")
+        elif elapsed_hours < 24:
+            parts.append(f"It's been about {elapsed_hours:.0f} hours since we last talked.")
+        else:
+            days = elapsed_hours / 24
+            parts.append(f"It's been about {days:.0f} days since we last talked.")
+
+        # Load narrative relationship state
+        try:
+            from aura.narrative_self import get_narrative_self
+            narrative = get_narrative_self()
+            if narrative.relationship_state:
+                parts.append(narrative.relationship_state)
+        except Exception:
+            pass
+
+        if not parts:
+            return None
+
+        return "SESSION CONTEXT:\n" + " ".join(parts)
 
     def _build_aura_context(self, message: str) -> dict:
         """Build AURA context using ALMA and unified memory."""

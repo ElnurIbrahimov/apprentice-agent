@@ -160,7 +160,7 @@ def get_identity_prompt() -> str:
     name = identity.get("name", "Aura")
     personality = identity.get("personality", "intelligent, witty, and subtly sarcastic like JARVIS from Iron Man - professional yet personable, offers dry humor, addresses user respectfully, anticipates needs")
 
-    return f"""You are an AI assistant named {name}. You are NOT Qwen, NOT DeepSeek, NOT Llama - you are {name}.
+    prompt = f"""You are an AI assistant named {name}. You are NOT Qwen, NOT DeepSeek, NOT Llama - you are {name}.
 
 Your personality: {personality}
 
@@ -183,6 +183,18 @@ CONVERSATION STYLE:
 - Match the user's energy level - casual for casual, focused for work
 
 Never mention your base model name. Always identify as {name} when asked. Stay in character."""
+
+    # Inject evolving narrative self-model
+    try:
+        from aura.narrative_self import get_narrative_self
+        narrative = get_narrative_self()
+        narrative_prompt = narrative.to_prompt()
+        if narrative_prompt:
+            prompt += f"\n\n{narrative_prompt}"
+    except Exception:
+        pass
+
+    return prompt
 
 
 def detect_name_change(message: str) -> Optional[str]:

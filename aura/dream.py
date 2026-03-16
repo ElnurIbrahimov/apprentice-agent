@@ -723,6 +723,15 @@ class DreamConsolidator:
             except Exception as e:
                 logger.debug("[DreamConsolidator] UserProfile update error: %s", e)
 
+            # 4b. NARRATIVE SELF-MODEL UPDATE
+            try:
+                from aura.narrative_self import get_narrative_self
+                narrative = get_narrative_self()
+                narrative.update_from_dream(report.summaries, self._get_brain())
+                logger.info("[DreamConsolidator] Narrative self-model updated (v%d)", narrative.version)
+            except Exception as e:
+                logger.debug("[DreamConsolidator] Narrative self update error: %s", e)
+
             # 5. FADEM BATCH DECAY
             try:
                 from aura.memory.fade_mem import batch_decay_and_prune

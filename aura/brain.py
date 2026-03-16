@@ -1398,39 +1398,18 @@ class OllamaBrain:
         except Exception:
             pass
 
-        # Apply emotional tone modifier - auto-generate from ALMA if not provided
+        # Apply emotional style prompt — behavioral directives from ALMA
+        # The style prompt already encodes verbosity/formality/enthusiasm as behavior
         if tone_modifier:
             full = f"{full}\n\n{tone_modifier}"
         elif self._alma_enabled and self._auto_emotional_tone:
             try:
-                alma_tone = get_emotional_tone_modifier()
-                if alma_tone:
-                    full = f"{full}\n\n{alma_tone}"
+                from aura.emotion.integration import get_emotional_style_prompt
+                alma_style = get_emotional_style_prompt()
+                if alma_style:
+                    full = f"{full}\n\n{alma_style}"
             except Exception as e:
-                logger.debug(f"[BRAIN] ALMA tone generation failed: {e}")
-
-        # ALMA response modulation: verbosity, formality, exploration hints
-        if self._alma_enabled:
-            try:
-                from aura.emotion.alma_engine import get_response_modulation
-                mod = get_response_modulation()
-                mod_parts = []
-                if mod.get("verbosity", 0.5) < 0.35:
-                    mod_parts.append("Keep response concise.")
-                elif mod.get("verbosity", 0.5) > 0.80:
-                    mod_parts.append("Feel free to elaborate.")
-                if mod.get("formality", 0.4) > 0.6:
-                    mod_parts.append("Use a formal tone.")
-                elif mod.get("formality", 0.4) < 0.25:
-                    mod_parts.append("Use a casual, conversational tone.")
-                if mod.get("enthusiasm", 0.5) > 0.7:
-                    mod_parts.append("Try creative or novel approaches.")
-                elif mod.get("enthusiasm", 0.5) < 0.3:
-                    mod_parts.append("Prefer proven, reliable approaches.")
-                if mod_parts:
-                    full = f"{full}\n\n[Style guidance: {' '.join(mod_parts)}]"
-            except Exception as e:
-                logger.debug(f"[Brain] non-critical: {e}")
+                logger.debug(f"[BRAIN] ALMA style prompt failed: {e}")
         # === EPISODIC MEMORY AUTO-RECALL ===
         # Surface relevant past context for non-trivial queries (best-effort, never blocks)
         # Skip if already near budget cap

@@ -383,6 +383,39 @@ class InnerMonologueTool:
         """Get n most recent thoughts from current session."""
         return self.stream.get_recent(n)
 
+    def generate_thinking_context(self, brain=None) -> str:
+        """Synthesize recent thoughts into a private directive for the next response.
+
+        The Thinker: reviews recent internal thoughts and generates a short
+        context string that shapes the next response. Not shown to user.
+
+        Args:
+            brain: OllamaBrain instance (uses _quick_generate for fast model)
+
+        Returns:
+            Short directive string, or empty string if no useful context.
+        """
+        recent = self.stream.get_recent(5)
+        if not recent or not brain or not hasattr(brain, '_quick_generate'):
+            return ""
+
+        # Only synthesize if there are substantive thoughts
+        substantive = [t for t in recent if t.type in ("reason", "reflect", "decide", "uncertain", "eureka")]
+        if not substantive:
+            return ""
+
+        thought_text = "\n".join(f"- [{t.type}] {t.content[:150]}" for t in substantive[-5:])
+        try:
+            result = brain._quick_generate(
+                f"Based on these recent internal thoughts:\n{thought_text}\n"
+                f"What should I keep in mind for my next response? Reply in 1-2 sentences only.",
+                timeout=10,
+            )
+            return result.strip()[:300] if result else ""
+        except Exception as e:
+            logger.debug("[Monologue] Thinking context generation error: %s", e)
+            return ""
+
     def set_verbosity(self, level: int) -> str:
         """
         Set verbosity level.

@@ -956,6 +956,24 @@ class ALMAEngine:
                     neuroticism=p.get("neuroticism", 0.25)
                 )
 
+            # Time-based mood decay toward baseline (Phase 3.7)
+            # Mood drifts toward personality baseline proportional to time elapsed
+            if "saved_at" in data:
+                try:
+                    saved_time = datetime.fromisoformat(data["saved_at"])
+                    hours_elapsed = (datetime.now() - saved_time).total_seconds() / 3600
+                    # 5% decay per hour, capped at 30% total
+                    decay_factor = min(0.3, hours_elapsed * 0.05)
+                    if decay_factor > 0.01:
+                        baseline = self.personality.get_baseline_mood()
+                        self.mood.pad = self.mood.pad.lerp(baseline, decay_factor)
+                        logger.info(
+                            "Applied %.1f%% mood decay toward baseline (%.1fh elapsed)",
+                            decay_factor * 100, hours_elapsed
+                        )
+                except (ValueError, TypeError) as e:
+                    logger.debug(f"[ALMA] Time decay error: {e}")
+
             logger.info("Restored emotional state from disk")
 
         except Exception as e:
