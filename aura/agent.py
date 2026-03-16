@@ -5633,7 +5633,8 @@ Python code:"""
 
         # Load dream insights from last sleep cycle (Phase 4)
         try:
-            dream_queue = Path("data/neurodream/dream_proactive_queue.json")
+            _project_root = Path(__file__).resolve().parent.parent
+            dream_queue = _project_root / "data" / "neurodream" / "dream_proactive_queue.json"
             if dream_queue.exists():
                 import json as _json
                 queue_data = _json.loads(dream_queue.read_text(encoding='utf-8'))

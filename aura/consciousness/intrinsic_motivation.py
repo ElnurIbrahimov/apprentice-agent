@@ -116,6 +116,9 @@ class IntrinsicMotivationEngine:
         # Pending drive-motivated actions
         self._pending_actions: List[DriveAction] = []
 
+        # Phase 4.3: Specific curiosity targets from KG gap scan
+        self._curiosity_targets: List[Dict[str, Any]] = []
+
         # Assessment interval
         self._assess_interval = 120.0  # Every 2 minutes
         self._last_full_assessment = 0.0
@@ -359,45 +362,58 @@ class IntrinsicMotivationEngine:
             from aura.tools.knowledge_graph import get_knowledge_graph
             kg = get_knowledge_graph()
 
-            # 1. Stale nodes (not accessed in 7+ days, access_count >= 3, important types)
             from datetime import datetime, timedelta
-            cutoff = (datetime.now() - timedelta(days=7)).isoformat()
+            now = datetime.now()
+            cutoff_dt = now - timedelta(days=7)
+
+            # Safely snapshot all nodes under the KG lock
+            all_nodes = []
             try:
-                all_nodes = list(kg._nodes.values()) if hasattr(kg, '_nodes') else []
-                for node in all_nodes:
-                    if (hasattr(node, 'last_accessed') and node.last_accessed < cutoff
-                            and getattr(node, 'access_count', 0) >= 3
-                            and getattr(node, 'type', '') in ("project", "concept", "person", "tool")):
-                        try:
-                            days_stale = (datetime.now() - datetime.fromisoformat(node.last_accessed)).days
-                        except (ValueError, TypeError):
-                            days_stale = 7
+                if hasattr(kg, '_lock') and hasattr(kg, '_nodes'):
+                    with kg._lock:
+                        all_nodes = list(kg._nodes.values())
+                else:
+                    # Fallback: use public API
+                    all_nodes = kg.get_recent_nodes(limit=200) if hasattr(kg, 'get_recent_nodes') else []
+            except Exception:
+                pass
+
+            # 1. Stale nodes (not accessed in 7+ days, access_count >= 3, important types)
+            for node in all_nodes:
+                try:
+                    la = getattr(node, 'last_accessed', '')
+                    if not la or getattr(node, 'access_count', 0) < 3:
+                        continue
+                    if getattr(node, 'type', '') not in ("project", "concept", "person", "tool"):
+                        continue
+                    node_dt = datetime.fromisoformat(str(la).replace('Z', '+00:00'))
+                    if node_dt.tzinfo is not None:
+                        node_dt = node_dt.replace(tzinfo=None)
+                    if node_dt < cutoff_dt:
+                        days_stale = (now - node_dt).days
                         targets.append({
                             "target": node.label,
                             "reason": f"stale_{days_stale}d",
                             "urgency": min(0.9, 0.4 + days_stale / 30),
                             "node_id": node.id,
                         })
-            except Exception:
-                pass
+                except (ValueError, TypeError, AttributeError):
+                    pass
 
             # 2. Low-confidence nodes (user-mentioned but uncertain)
-            try:
-                for node in all_nodes:
-                    if (getattr(node, 'confidence', 1.0) < 0.4
-                            and getattr(node, 'access_count', 0) >= 2):
-                        targets.append({
-                            "target": node.label,
-                            "reason": "low_confidence",
-                            "urgency": 0.5 + (0.4 - getattr(node, 'confidence', 0.4)),
-                            "node_id": node.id,
-                        })
-            except Exception:
-                pass
+            for node in all_nodes:
+                if (getattr(node, 'confidence', 1.0) < 0.4
+                        and getattr(node, 'access_count', 0) >= 2):
+                    targets.append({
+                        "target": getattr(node, 'label', str(node)),
+                        "reason": "low_confidence",
+                        "urgency": 0.5 + (0.4 - getattr(node, 'confidence', 0.4)),
+                        "node_id": getattr(node, 'id', ''),
+                    })
 
             # 3. Orphan nodes (few edges, actually mentioned by user)
-            try:
-                for node in all_nodes:
+            for node in all_nodes:
+                try:
                     if getattr(node, 'access_count', 0) > 0:
                         edges = kg.get_edges(node.id) if hasattr(kg, 'get_edges') else []
                         if len(edges) <= 1:
@@ -407,8 +423,8 @@ class IntrinsicMotivationEngine:
                                 "urgency": 0.6,
                                 "node_id": node.id,
                             })
-            except Exception:
-                pass
+                except Exception:
+                    pass
 
         except Exception as e:
             logger.debug(f"[IntrinsicMotivation] KG gap scan error: {e}")

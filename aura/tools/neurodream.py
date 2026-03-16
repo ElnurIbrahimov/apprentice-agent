@@ -12,7 +12,9 @@ and 17.6% increase in zero-shot transfer through latent replay synthesis.
 import json
 import logging
 import math
+import os
 import random
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field, asdict
@@ -669,6 +671,7 @@ class NeuroDreamEngine:
         }
 
         start_time = time.time()
+        self._last_consolidation_report = None  # Reset for this cycle
         temporal_patterns = []
         topical_patterns = []
         emotional_patterns = []
@@ -2036,7 +2039,8 @@ Rules:
 
         # Write queue file (atomic via temp + replace)
         queue_file = self.data_dir / "dream_proactive_queue.json"
-        import tempfile, os
+        tmp_path = None
+        tmp_fd = -1
         try:
             data = json.dumps({
                 "session_id": self.current_session.session_id if self.current_session else "unknown",
@@ -2046,10 +2050,23 @@ Rules:
             tmp_fd, tmp_path = tempfile.mkstemp(dir=str(self.data_dir), suffix=".tmp")
             os.write(tmp_fd, data.encode("utf-8"))
             os.close(tmp_fd)
+            tmp_fd = -1
             os.replace(tmp_path, str(queue_file))
+            tmp_path = None  # Successfully replaced, no cleanup needed
             logger.info(f"[NeuroDream] Queued {len(messages)} proactive messages for next session")
         except Exception as e:
             logger.debug(f"[NeuroDream] Queue file write error: {e}")
+            if tmp_fd != -1:
+                try:
+                    os.close(tmp_fd)
+                except OSError:
+                    pass
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
 
     def _save_consolidated_patterns(self, patterns: List[ConsolidatedPattern]):
         """Save consolidated patterns."""

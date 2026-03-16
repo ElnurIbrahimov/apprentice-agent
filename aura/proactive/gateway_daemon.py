@@ -139,6 +139,7 @@ class GatewayDaemon:
         self._messages_this_session = 0  # Track total messages to slow down over time
         self._engagement_history: list = []  # Rolling window for threshold adaptation
         self._max_engagement_window = 20
+        self._engagement_lock = threading.Lock()  # Protect engagement history writes
 
         # Statistics
         self._stats = {
@@ -1387,10 +1388,11 @@ class GatewayDaemon:
             })
 
         # Phase 4.2: Track engagement for threshold adaptation
-        self._engagement_history.append(engaged)
-        if len(self._engagement_history) > self._max_engagement_window:
-            self._engagement_history.pop(0)
-        self._adapt_message_threshold()
+        with self._engagement_lock:
+            self._engagement_history.append(engaged)
+            if len(self._engagement_history) > self._max_engagement_window:
+                self._engagement_history.pop(0)
+            self._adapt_message_threshold()
 
         logger.info(f"[GatewayDaemon] User response recorded: engaged={engaged}, type={response_type}")
 
@@ -1406,12 +1408,14 @@ class GatewayDaemon:
 
         rate = sum(self._engagement_history) / len(self._engagement_history)
 
+        # Always converge toward 300s default first (prevents runaway)
+        self._min_message_interval += (300.0 - self._min_message_interval) * 0.05
+
+        # Then apply directional nudge based on engagement rate
         if rate > 0.6:
             self._min_message_interval = max(120.0, self._min_message_interval * 0.95)
         elif rate < 0.3:
             self._min_message_interval = min(600.0, self._min_message_interval * 1.10)
-        else:
-            self._min_message_interval += (300.0 - self._min_message_interval) * 0.05
 
         logger.debug(
             "[GatewayDaemon] Threshold adapted: interval=%.0fs, engagement=%.0f%% (%d samples)",
