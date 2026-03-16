@@ -618,14 +618,21 @@ def _cluster_by_similarity(
 
 class DreamConsolidator:
     """
-    Real consolidation/compression pipeline.
+    Consolidation/compression pipeline backed by the unified SQLite store.
 
     Pipeline (per cycle):
-      CLUSTER → SUMMARIZE → EXTRACT_ROUTINES → PRUNE → CONTRADICTION_REPORT
-      → (optional) DENSIFY_GRAPH
+      1. FETCH         — read candidate/stable memories from SQLite store
+      2. CLUSTER       — group by embedding similarity
+      3. SUMMARIZE     — LLM compress clusters into DreamSummary
+      4. USER_PROFILE  — LLM extract preferences from recent memories
+      5. FADEM_DECAY   — batch exponential decay on all memories
+      6. PRUNE         — mark strength < 0.05 as 'forgotten'
+      7. MERGE_SIMILAR — deduplicate near-identical memories
+      8. EXTRACT_ROUTINES — detect repeated behavioral patterns
+      9. CONTRADICTION_REPORT — surface unresolved KG contradictions
+     10. DENSIFY_GRAPH — (experimental) propose new KG edges
 
     Never blocks the main request path — runs in a background thread.
-    Respects user scoping: never consolidates across user boundaries.
     """
 
     def __init__(self) -> None:
@@ -646,17 +653,14 @@ class DreamConsolidator:
         self._brain: Optional[Any] = None
         self._running   = False
         self._lock      = threading.Lock()
-        self._last_seen_ids: set = set()   # Track already-summarized memory IDs
+        self._last_seen_ids: set = set()
 
     # ------------------------------------------------------------------
     # Entry points
     # ------------------------------------------------------------------
 
     def run_cycle(self, user_id: str = "default_user") -> ConsolidationReport:
-        """
-        Run one full consolidation cycle for the given user.
-        Safe to call repeatedly — is a no-op if already running.
-        """
+        """Run one full consolidation cycle. No-op if already running."""
         with self._lock:
             if self._running:
                 logger.info("[DreamConsolidator] Already running, skipping cycle")
@@ -671,49 +675,79 @@ class DreamConsolidator:
         try:
             logger.info("[DreamConsolidator] Cycle %s start (user=%s)", cycle.cycle_id, user_id)
 
-            # 1. CLUSTER
-            memories = self._fetch_memories(user_id)
+            # Get the consolidated store
+            from aura.memory.store import get_memory_store
+            store = get_memory_store()
+
+            # 1. FETCH from SQLite
+            memories = self._fetch_memories(user_id, store)
             cycle.memories_processed = len(memories)
 
+            # 2. CLUSTER
             clusters = _cluster_by_similarity(memories)
             logger.info("[DreamConsolidator] %d memories → %d clusters", len(memories), len(clusters))
-
-            # Limit to batch size
             clusters = clusters[:self._batch_size]
 
-            # 2. SUMMARIZE (clusters ≥ min_cluster_size)
+            # 3. SUMMARIZE
             for cluster in clusters:
                 if len(cluster) < self._min_cluster:
                     continue
-                # Skip already-summarized clusters
                 ids = [m.get("id", "") for m in cluster]
                 if all(mid in self._last_seen_ids for mid in ids if mid):
                     continue
-
                 summary = self._summarize_cluster(cluster, user_id)
                 if summary:
                     report.summaries.append(summary)
                     cycle.summaries_written += 1
-                    self._write_summary_memory(summary, user_id)
+                    self._write_summary_memory(summary, user_id, store)
                     self._last_seen_ids.update(ids)
 
-            # 3. EXTRACT_ROUTINES
+            # 4. USER PROFILE UPDATE
+            try:
+                from aura.memory.user_profile import update_profile_from_memories
+                profile = update_profile_from_memories(
+                    user_id=user_id, store=store, brain=self._get_brain()
+                )
+                logger.info("[DreamConsolidator] UserProfile updated: name=%s", profile.name)
+            except Exception as e:
+                logger.debug("[DreamConsolidator] UserProfile update error: %s", e)
+
+            # 5. FADEM BATCH DECAY
+            try:
+                from aura.memory.fade_mem import batch_decay_and_prune
+                fade_result = batch_decay_and_prune(store=store)
+                cycle.pruned_count += fade_result.get("prune_count", 0)
+                logger.info(
+                    "[DreamConsolidator] FadeMem: %d decayed, %d pruned",
+                    fade_result.get("decay_count", 0), fade_result.get("prune_count", 0),
+                )
+            except Exception as e:
+                logger.debug("[DreamConsolidator] FadeMem error: %s", e)
+
+            # 6. MERGE SIMILAR (embedding-based dedup in SQLite)
+            try:
+                merged = self._merge_similar(store, user_id)
+                logger.info("[DreamConsolidator] Merged %d similar memories", merged)
+            except Exception as e:
+                logger.debug("[DreamConsolidator] Merge error: %s", e)
+
+            # 7. EXTRACT_ROUTINES
             if self._do_routines:
                 routines = self._extract_routines(memories)
                 report.routines = routines
                 cycle.routines_extracted = len(routines)
 
-            # 4. PRUNE
-            pruned = self._prune_stale(memories, user_id)
+            # 8. PRUNE stale from SQLite
+            pruned = self._prune_stale_sqlite(store, user_id)
             report.pruned_ids = pruned
-            cycle.pruned_count = len(pruned)
+            cycle.pruned_count += len(pruned)
 
-            # 5. CONTRADICTION_REPORT
+            # 9. CONTRADICTION_REPORT
             contradictions = self._contradiction_report()
             report.contradiction_ids = [c.get("contradiction_id", "") for c in contradictions]
             cycle.contradictions_found = len(contradictions)
 
-            # 6. DENSIFY_GRAPH (experimental, gated)
+            # 10. DENSIFY_GRAPH
             if self._do_densify:
                 proposals = self._densify_graph(memories)
                 report.graph_proposals = proposals
@@ -768,48 +802,46 @@ class DreamConsolidator:
     # Pipeline stages
     # ------------------------------------------------------------------
 
-    def _fetch_memories(self, user_id: str) -> List[Dict[str, Any]]:
-        """
-        Fetch candidate and stable memories from A-MEM and Episodic backends.
-        Returns a flat list of dicts: {id, content, source, tags, importance, ts}
-        """
+    def _fetch_memories(self, user_id: str, store=None) -> List[Dict[str, Any]]:
+        """Fetch candidate/stable memories from the consolidated SQLite store."""
         memories: List[Dict[str, Any]] = []
 
-        # A-MEM notes
-        try:
-            from aura.tools.amem import get_amem
-            amem = get_amem()
-            for note_id, note in list(amem._notes.items()):
-                memories.append({
-                    "id": note_id,
-                    "content": note.content,
-                    "source": "amem",
-                    "tags": list(getattr(note, "tags", [])),
-                    "importance": getattr(note, "importance", 0.5),
-                    "ts": time.time(),
-                })
-                if len(memories) >= self._batch_size * 3:
-                    break
-        except Exception as e:
-            logger.debug("[DreamConsolidator] A-MEM fetch error: %s", e)
+        if store is not None:
+            try:
+                records = store.get_recent(
+                    n=self._batch_size * 3,
+                    user_id=user_id,
+                )
+                for rec in records:
+                    memories.append({
+                        "id": rec.id,
+                        "content": rec.content,
+                        "source": rec.source,
+                        "tags": rec.tags.split(",") if rec.tags else [],
+                        "importance": rec.importance,
+                        "ts": rec.created_at,
+                    })
+            except Exception as e:
+                logger.debug("[DreamConsolidator] SQLite fetch error: %s", e)
 
-        # Episodic memories
-        try:
-            from aura.memory.unified_memory import get_unified_memory
-            um = get_unified_memory()
-            results = um.query("recent experiences preferences goals", k=self._batch_size * 2,
-                               sources=["episodic"])
-            for r in results:
-                memories.append({
-                    "id": r.source_id,
-                    "content": r.content,
-                    "source": "episodic",
-                    "tags": [],
-                    "importance": r.importance,
-                    "ts": time.time(),
-                })
-        except Exception as e:
-            logger.debug("[DreamConsolidator] Episodic fetch error: %s", e)
+        # Fallback: also try legacy A-MEM if store is empty
+        if not memories:
+            try:
+                from aura.tools.amem import get_amem
+                amem = get_amem()
+                for note_id, note in list(amem._notes.items()):
+                    memories.append({
+                        "id": note_id,
+                        "content": note.content,
+                        "source": "amem",
+                        "tags": list(getattr(note, "tags", [])),
+                        "importance": getattr(note, "importance", 0.5),
+                        "ts": time.time(),
+                    })
+                    if len(memories) >= self._batch_size * 3:
+                        break
+            except Exception as e:
+                logger.debug("[DreamConsolidator] A-MEM fallback fetch error: %s", e)
 
         return memories
 
@@ -818,11 +850,10 @@ class DreamConsolidator:
     ) -> Optional[DreamSummary]:
         """Produce a DreamSummary for a cluster using the LLM."""
         contents = [m["content"] for m in cluster]
-        combined = "\n---\n".join(contents[:10])  # cap to avoid huge prompts
+        combined = "\n---\n".join(contents[:10])
 
         cluster_id = hashlib.md5(combined[:200].encode()).hexdigest()[:10]
 
-        # Try LLM summarization; fall back to first sentence
         compressed = ""
         try:
             brain = self._get_brain()
@@ -840,7 +871,6 @@ class DreamConsolidator:
         if not compressed:
             return None
 
-        # Dominant tags
         all_tags: List[str] = []
         for m in cluster:
             all_tags.extend(m.get("tags", []))
@@ -857,21 +887,64 @@ class DreamConsolidator:
             confidence=0.8,
         )
 
+    def _merge_similar(self, store, user_id: str, threshold: float = 0.90) -> int:
+        """Merge near-duplicate memories in the SQLite store via embedding similarity."""
+        merged_count = 0
+        try:
+            import numpy as np
+            from aura.memory.store import _blob_to_float32
+
+            # Get all memories with embeddings
+            records = store.get_recent(n=200, user_id=user_id)
+            embeddings = {}
+            for rec in records:
+                emb = store.get_embedding(rec.id)
+                if emb is not None:
+                    embeddings[rec.id] = (rec, emb)
+
+            ids = list(embeddings.keys())
+            merged_ids = set()
+
+            for i in range(len(ids)):
+                if ids[i] in merged_ids:
+                    continue
+                rec_a, emb_a = embeddings[ids[i]]
+                norm_a = np.linalg.norm(emb_a)
+                if norm_a < 1e-8:
+                    continue
+
+                for j in range(i + 1, len(ids)):
+                    if ids[j] in merged_ids:
+                        continue
+                    rec_b, emb_b = embeddings[ids[j]]
+                    norm_b = np.linalg.norm(emb_b)
+                    if norm_b < 1e-8:
+                        continue
+
+                    sim = float(np.dot(emb_a / norm_a, emb_b / norm_b))
+                    if sim >= threshold:
+                        # Keep higher importance, archive the other
+                        if rec_a.importance >= rec_b.importance:
+                            store.update(ids[j], lifecycle_state="archived")
+                            merged_ids.add(ids[j])
+                        else:
+                            store.update(ids[i], lifecycle_state="archived")
+                            merged_ids.add(ids[i])
+                        merged_count += 1
+        except Exception as e:
+            logger.debug("[DreamConsolidator] Merge similar error: %s", e)
+        return merged_count
+
     def _extract_routines(
         self, memories: List[Dict[str, Any]]
     ) -> List[RoutinePattern]:
-        """
-        Detect repeated patterns: same-ish content appearing 3+ times.
-        Returns RoutinePattern list.
-        """
+        """Detect repeated patterns: same-ish content appearing 3+ times."""
         if len(memories) < self._min_cluster:
             return []
 
-        # Fingerprint each memory
         fp_count: Dict[str, List[str]] = {}
         for m in memories:
             words = _tokenize(m.get("content", ""))
-            # Use top-5 most distinctive words as fingerprint
             fp = " ".join(sorted(words)[:5])
             fp_count.setdefault(fp, []).append(m.get("id", ""))
 
@@ -885,39 +958,27 @@ class DreamConsolidator:
                 ))
         return routines
 
-    def _prune_stale(
-        self, memories: List[Dict[str, Any]], user_id: str
-    ) -> List[str]:
-        """
-        Flag memories with importance < 0.2 AND no access in stale_days as archived.
-        Does NOT delete — sets lifecycle_state to archived in A-MEM.
-        """
+    def _prune_stale_sqlite(self, store, user_id: str) -> List[str]:
+        """Flag low-importance, stale memories as archived in SQLite store."""
         pruned: List[str] = []
         stale_cutoff = time.time() - self._stale_days * 86400
 
         try:
-            from aura.tools.amem import get_amem
-            amem = get_amem()
-            from aura.memory.write_gate import MemoryLifecycleState
-
-            for note_id, note in list(amem._notes.items()):
-                imp = getattr(note, "importance", 0.5)
-                ac  = getattr(note, "access_count", 0)
-                # Approximate last access from timestamp if available
-                ts  = getattr(note, "timestamp", 0)
-                if isinstance(ts, str):
-                    try:
-                        ts = datetime.fromisoformat(ts).timestamp()
-                    except Exception:
-                        ts = 0
-                is_stale = (ts < stale_cutoff) if ts else False
-                if imp < 0.2 and ac == 0 and is_stale:
-                    # Tag as archived (don't delete)
-                    setattr(note, "lifecycle_state", MemoryLifecycleState.ARCHIVED.value)
-                    pruned.append(note_id)
+            records = store.get_recent(n=500, user_id=user_id)
+            for rec in records:
+                if rec.lifecycle_state in ("archived", "forgotten"):
+                    continue
+                if rec.importance >= 0.2 or rec.access_count > 0:
+                    continue
+                try:
+                    ts = datetime.fromisoformat(rec.created_at).timestamp()
+                except (ValueError, TypeError):
+                    ts = time.time()
+                if ts < stale_cutoff:
+                    store.update(rec.id, lifecycle_state="archived")
+                    pruned.append(rec.id)
         except Exception as e:
-            logger.debug("[DreamConsolidator] Prune error: %s", e)
-
+            logger.debug("[DreamConsolidator] SQLite prune error: %s", e)
         return pruned
 
     def _contradiction_report(self) -> List[Dict[str, Any]]:
@@ -935,20 +996,14 @@ class DreamConsolidator:
     def _densify_graph(
         self, memories: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
-        """
-        (Experimental) Propose new KG edges between related memories
-        that don't have an explicit connection yet.
-        Returns list of proposed edge dicts (not applied automatically).
-        """
+        """(Experimental) Propose new KG edges between related memories."""
         proposals: List[Dict[str, Any]] = []
         try:
             from aura.tools.knowledge_graph import get_knowledge_graph
             kg = get_knowledge_graph()
             g  = kg.graph
 
-            # Simple heuristic: find memory pairs with high Jaccard similarity
-            # that don't share an existing edge
-            ids_in_graph = list(g.nodes())[:50]  # Limit scope
+            ids_in_graph = list(g.nodes())[:50]
             for i, id_a in enumerate(ids_in_graph):
                 for id_b in ids_in_graph[i + 1:]:
                     if g.has_edge(id_a, id_b):
@@ -982,18 +1037,29 @@ class DreamConsolidator:
             self._brain = OllamaBrain(warmup=False)
         return self._brain
 
-    def _write_summary_memory(self, summary: DreamSummary, user_id: str) -> None:
-        """Write a DreamSummary back into unified memory as a SUMMARY lifecycle entry."""
+    def _write_summary_memory(self, summary: DreamSummary, user_id: str, store=None) -> None:
+        """Write a DreamSummary back into the SQLite store as a SUMMARY lifecycle entry."""
         try:
-            from aura.memory.unified_memory import get_unified_memory
-            um = get_unified_memory()
-            um.store(
+            from aura.memory.store import MemoryRecord
+            if store is None:
+                from aura.memory.store import get_memory_store
+                store = get_memory_store()
+
+            record = MemoryRecord(
                 content=summary.compressed_text,
+                title=summary.compressed_text[:80],
                 source="dream_consolidation",
+                memory_type="insight",
                 importance=0.75,
-                tags=["dream_summary"] + summary.dominant_tags[:3],
-                episode_type="insight",
+                tags=",".join(["dream_summary"] + summary.dominant_tags[:3]),
+                lifecycle_state="summary",
+                user_id=user_id,
+                metadata=json.dumps({
+                    "cluster_id": summary.cluster_id,
+                    "source_count": len(summary.source_memory_ids),
+                }),
             )
+            store.insert(record)
         except Exception as e:
             logger.debug("[DreamConsolidator] Write summary error: %s", e)
 

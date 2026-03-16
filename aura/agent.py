@@ -1862,11 +1862,22 @@ Guidelines:
         if ace_context:
             parts.append(ace_context)
 
-        # Memory recall (parallel)
+        # UserProfile injection
+        try:
+            from aura.memory.user_profile import load_profile
+            _profile = load_profile()
+            _profile_str = _profile.to_system_prompt()
+            if _profile_str:
+                parts.append(_profile_str)
+        except Exception:
+            pass
+
+        # Memory recall (parallel) — unified store + KG
         try:
             _ctx_futures = {}
-            if self.memory:
-                _ctx_futures["memory"] = _AGENT_EXECUTOR.submit(self.memory.recall, goal, 3)
+            from aura.memory.unified_memory import get_unified_memory
+            _umem = get_unified_memory()
+            _ctx_futures["memory"] = _AGENT_EXECUTOR.submit(_umem.query, goal, 3)
             if self.kg_bridge is not None:
                 _ctx_futures["kg"] = _AGENT_EXECUTOR.submit(self.kg_bridge.get_context_for_query, goal, 5)
 
@@ -1874,7 +1885,7 @@ Guidelines:
                 try:
                     _result = _fut.result(timeout=2.0)
                     if _key == "memory" and _result:
-                        mem_text = "\n".join(m["content"][:150] for m in _result[:3])
+                        mem_text = "\n".join(r.content[:150] for r in _result[:3])
                         parts.append(f"[Relevant memories]\n{mem_text}")
                     elif _key == "kg" and _result:
                         parts.append(f"[Knowledge context]\n{str(_result)[:300]}")
@@ -4737,11 +4748,18 @@ Python code:"""
 
         # Always load user profile so AURA knows who it's talking to
         try:
-            profile_path = Path("data/memory/user_profile.md")
-            if profile_path.exists():
-                profile_text = profile_path.read_text(encoding='utf-8').strip()
-                if profile_text:
-                    context_parts.append(f"USER PROFILE:\n{profile_text}")
+            from aura.memory.user_profile import load_profile
+            _profile = load_profile()
+            _profile_str = _profile.to_system_prompt()
+            if _profile_str:
+                context_parts.append(_profile_str)
+            else:
+                # Fallback to legacy file-based profile
+                profile_path = Path("data/memory/user_profile.md")
+                if profile_path.exists():
+                    profile_text = profile_path.read_text(encoding='utf-8').strip()
+                    if profile_text:
+                        context_parts.append(f"USER PROFILE:\n{profile_text}")
         except Exception as e:
             logger.debug(f"[Agent] non-critical: {e}")
         if amem_context:
@@ -5248,11 +5266,17 @@ Python code:"""
 
         # Always load user profile so AURA knows who it's talking to
         try:
-            profile_path = Path("data/memory/user_profile.md")
-            if profile_path.exists():
-                profile_text = profile_path.read_text(encoding='utf-8').strip()
-                if profile_text:
-                    context_parts.append(f"USER PROFILE:\n{profile_text}")
+            from aura.memory.user_profile import load_profile
+            _profile = load_profile()
+            _profile_str = _profile.to_system_prompt()
+            if _profile_str:
+                context_parts.append(_profile_str)
+            else:
+                profile_path = Path("data/memory/user_profile.md")
+                if profile_path.exists():
+                    profile_text = profile_path.read_text(encoding='utf-8').strip()
+                    if profile_text:
+                        context_parts.append(f"USER PROFILE:\n{profile_text}")
         except Exception as e:
             logger.debug(f"[Agent] non-critical: {e}")
         if unified_context:

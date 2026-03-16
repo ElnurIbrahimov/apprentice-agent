@@ -6,28 +6,40 @@ AURA is a personal AI agent that feels alive. Persistent memory across sessions,
 
 ---
 
-## v5.0 — The Great Consolidation (March 2026)
+## v5.1 — Memory Consolidation (March 2026)
+
+Consolidated 5 fragmented memory backends (MemorySystem/SQLite, A-MEM/Qdrant, KG/NetworkX+Kuzu, Episodic/Qdrant, RAG/ChromaDB) into 2 clean backends with proper retrieval. Same facts no longer live in multiple stores.
+
+**Before:** 5 backends, noisy fan-out retrieval, no keyword search, no decay, duplicate memories everywhere.
+**After:** Single SQLite DB with FTS5 + vector embeddings, multi-channel retrieval (BM25 + semantic + graph) fused via Reciprocal Rank Fusion, cross-encoder reranking, exponential memory decay with spaced repetition, persistent user profiles.
+
+### What's New in v5.1
+
+| System | Description |
+|--------|-------------|
+| **Unified SQLite Store** | Single `aura_memory.db` with FTS5 full-text search + embedding BLOBs — replaces 4 backends |
+| **Multi-Channel Retrieval** | BM25 keyword + semantic cosine + Kuzu graph traversal, fused via RRF |
+| **Cross-Encoder Reranking** | ms-marco-MiniLM-L-6-v2 reranks top-20 candidates to top-5 |
+| **FadeMem Decay** | `strength = s0 * exp(-decay_rate * hours)` with 2-week half-life, spaced repetition reinforcement |
+| **User Profile** | Persistent user model auto-updated during Dream, injected into every conversation |
+| **Write Gate** | Scores write-worthiness before storing (noise filter, dedup, merge/supersede detection) |
+| **Dream Consolidation** | Now runs batch decay, prunes forgotten memories, merges near-duplicates, updates user profile |
+
+### v5.0 — The Great Consolidation
 
 Stripped 13 dead modules and ~15,000 lines of complexity. Replaced the old 5-phase agent loop (4-5 LLM calls per step) with a single-call ReAct pattern. Added Tool RAG for dynamic tool selection and smart model routing.
-
-**Before:** Agent hung on every non-trivial request. 83K lines, 13 modules second-guessing the brain.
-**After:** Completes real tasks in 5-25 seconds. 2 iterations, 1 LLM call per step. Clean architecture.
 
 ### What Survived (The Soul)
 
 | System | Purpose |
 |--------|---------|
 | **ALMA Emotions** | Neuromodulator-based mood in PAD space — shapes how Aura responds |
-| **Memory** | A-MEM + Episodic + Knowledge Graph + Unified retrieval |
+| **Memory** | Consolidated SQLite store + Kuzu KG with multi-channel retrieval |
 | **Inner Monologue** | Internal thought stream that persists across sessions |
 | **Identity/Soul** | Personality, values, voice style — loaded every session |
-| **NeuroDream** | Sleep/dream memory consolidation during idle periods |
+| **NeuroDream** | Sleep/dream memory consolidation with FadeMem decay |
 | **Knowledge Graph** | Typed entities and relationships with Kuzu backend |
 | **Proactive Awareness** | Notices things on its own, initiates when relevant |
-
-### What Was Removed
-
-MetacognitiveGuardian, FluxMind, MirrorMind, CognitiveTheater, Parliament, Reflexion, SynapseForge, WorldSim, Proto-AGI Core, ResponseHumanizer, State Machine, Global Workspace Theory, Gradio UI. These added layers of reasoning between the brain and the user without improving task completion.
 
 ---
 
@@ -163,7 +175,11 @@ User Input
 | `aura/core/router.py` | Model routing with fallback chains |
 | `aura/core/tool_schemas.py` | 11 Ollama tool-calling JSON schemas |
 | `aura/emotion/alma_engine.py` | Neuromodulator simulation (PAD space) |
-| `aura/memory/unified_memory.py` | Fan-out queries across all backends |
+| `aura/memory/store.py` | Unified SQLite + FTS5 memory store |
+| `aura/memory/retrieval.py` | BM25 + semantic + graph retrieval with RRF fusion |
+| `aura/memory/unified_memory.py` | Public API routing through consolidated store |
+| `aura/memory/fade_mem.py` | Exponential memory decay with spaced repetition |
+| `aura/memory/user_profile.py` | Persistent user model for personalization |
 | `aura/tools/neurodream.py` | Sleep/dream memory consolidation |
 | `aura/consciousness/metacognition.py` | Self-assessment and learning goals |
 
@@ -249,17 +265,57 @@ AURA_API_KEY=your-secret-key
 
 ## Memory
 
+### Architecture (v5.1)
+
+```
+Query → Retrieval Pipeline
+         ├── Channel 1: Semantic (cosine on embedding BLOBs)
+         ├── Channel 2: BM25 (FTS5 keyword search)
+         └── Channel 3: Kuzu graph traversal
+                │
+                v
+         Reciprocal Rank Fusion (RRF)
+                │
+                v
+         Cross-Encoder Reranking (ms-marco-MiniLM)
+                │
+                v
+         FadeMem Strength Multiplier
+                │
+                v
+         Top-K Results (with spaced repetition touch)
+```
+
 | Layer | Backend | Purpose |
 |-------|---------|---------|
-| Short-term | Sliding window | Current conversation context |
-| Mid-term (A-MEM) | SQLite + embeddings | Associative notes with semantic search |
-| Episodic | Qdrant | Timeline-aware event memory |
-| Knowledge Graph | NetworkX + Kuzu | Entity relationships |
-| Unified | Fan-out | Queries all backends, merges results |
+| **Primary** | SQLite + FTS5 + BLOB embeddings | All memories in one DB with full-text and vector search |
+| **Secondary** | Kuzu temporal KG | Entity relationships with bi-temporal validity |
+| **Decay** | FadeMem | Exponential strength decay, 2-week half-life, spaced repetition |
+| **Gating** | Write Gate | Scores write-worthiness, dedup, merge/supersede detection |
+| **Profile** | UserProfile | Persistent user model injected into every conversation |
 
-### NeuroDream
+### NeuroDream + Dream Consolidation
 
-Sleep-like memory consolidation: reverse-chronological replay, importance decay, clustering, pattern extraction. Runs as background daemon or manually via `--dream`.
+Sleep-like memory consolidation pipeline:
+1. Cluster similar memories by embedding similarity
+2. LLM-compress clusters into summaries
+3. Update UserProfile from recent memories
+4. Batch exponential decay on all memories
+5. Prune forgotten memories (strength < 0.05)
+6. Merge near-duplicate memories
+7. Extract routine patterns
+8. Surface KG contradictions
+
+Runs as background daemon or manually via `--dream`.
+
+### Migration
+
+To migrate from v5.0's fragmented backends to the consolidated store:
+
+```bash
+python scripts/migrate_memory.py             # Migrate all data
+python scripts/migrate_memory.py --re-embed  # Also re-embed with nomic-embed-text
+```
 
 ---
 
@@ -279,7 +335,7 @@ Sleep-like memory consolidation: reverse-chronological replay, importance decay,
 See [NEW_AURA_ROADMAP.md](NEW_AURA_ROADMAP.md) for the full plan:
 
 - **Phase 1** (done): Fix the engine — ReAct loop, Tool RAG, model routing
-- **Phase 2**: Memory consolidation — 2 backends, BM25 + reranking, FadeMem decay
+- **Phase 2** (done): Memory consolidation — 2 backends, BM25 + reranking, FadeMem decay, UserProfile
 - **Phase 3**: Make it alive — coherent emotion→behavior loop, narrative self-model
 - **Phase 4**: Dreams that matter + natural proactive awareness
 - **Phase 5**: Code agents, sandboxing, adaptive planning

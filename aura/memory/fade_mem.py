@@ -1,0 +1,123 @@
+"""FadeMem — Biologically-inspired memory strength decay.
+
+Implements spaced-repetition-aware exponential decay:
+  strength(t) = s0 * exp(-decay_rate * hours_since_last_access)
+
+Default half-life: 2 weeks → decay_rate ≈ 0.00206 / hour
+Each access reinforces: +0.05 strength, -10% decay_rate (slower forgetting).
+Memories with strength < 0.05 are marked 'forgotten'.
+
+Author: Aura Development Team
+Created: 2026-03-16
+"""
+
+import logging
+import math
+from datetime import datetime
+from typing import Optional
+
+from .store import MemoryStore, get_memory_store
+
+logger = logging.getLogger(__name__)
+
+# ln(2) / (14 days * 24 hours) ≈ 0.00206
+DEFAULT_HALF_LIFE_HOURS = 14 * 24  # 336 hours = 2 weeks
+DEFAULT_DECAY_RATE = math.log(2) / DEFAULT_HALF_LIFE_HOURS  # ≈ 0.00206
+
+REINFORCE_STRENGTH_DELTA = 0.05
+REINFORCE_DECAY_REDUCTION = 0.10  # 10% reduction in decay_rate per access
+PRUNE_THRESHOLD = 0.05
+MIN_DECAY_RATE = 0.0001  # Floor — memories can't become fully permanent
+
+
+def compute_strength(
+    s0: float,
+    decay_rate: float,
+    hours_since_access: float,
+) -> float:
+    """Compute current memory strength after time elapsed.
+
+    Args:
+        s0: Initial/stored strength (0-1)
+        decay_rate: Per-hour decay rate
+        hours_since_access: Hours since last access
+
+    Returns:
+        Current strength clamped to [0, 1]
+    """
+    strength = s0 * math.exp(-decay_rate * max(0, hours_since_access))
+    return max(0.0, min(1.0, strength))
+
+
+def reinforce(
+    store: MemoryStore,
+    memory_id: str,
+) -> Optional[float]:
+    """Touch a memory: increase strength, reduce decay rate (spaced repetition).
+
+    Returns new strength, or None if memory not found.
+    """
+    record = store.get(memory_id)
+    if not record:
+        return None
+
+    new_strength = min(1.0, record.strength + REINFORCE_STRENGTH_DELTA)
+    new_decay = max(MIN_DECAY_RATE, record.decay_rate * (1.0 - REINFORCE_DECAY_REDUCTION))
+
+    store.update(
+        memory_id,
+        strength=new_strength,
+        decay_rate=new_decay,
+    )
+    store.touch(memory_id)
+    return new_strength
+
+
+def get_current_strength(
+    store: MemoryStore,
+    memory_id: str,
+) -> Optional[float]:
+    """Get the real-time strength of a memory (applying time decay)."""
+    record = store.get(memory_id)
+    if not record:
+        return None
+
+    try:
+        la_ts = datetime.fromisoformat(record.last_accessed).timestamp()
+    except (ValueError, TypeError):
+        la_ts = datetime.now().timestamp()
+
+    hours = max(0, (datetime.now().timestamp() - la_ts) / 3600)
+    return compute_strength(record.strength, record.decay_rate, hours)
+
+
+def batch_decay_and_prune(
+    store: Optional[MemoryStore] = None,
+    prune_threshold: float = PRUNE_THRESHOLD,
+) -> dict:
+    """Run batch decay on all memories, then prune forgotten ones.
+
+    Returns dict with decay_count and prune_count.
+    """
+    if store is None:
+        store = get_memory_store()
+
+    decay_count = store.batch_decay()
+    prune_count = store.prune_forgotten(threshold=prune_threshold)
+
+    logger.info(
+        "[FadeMem] Batch decay: %d memories decayed, %d pruned (threshold=%.3f)",
+        decay_count, prune_count, prune_threshold,
+    )
+    return {"decay_count": decay_count, "prune_count": prune_count}
+
+
+__all__ = [
+    "compute_strength",
+    "reinforce",
+    "get_current_strength",
+    "batch_decay_and_prune",
+    "DEFAULT_DECAY_RATE",
+    "DEFAULT_HALF_LIFE_HOURS",
+    "PRUNE_THRESHOLD",
+]
