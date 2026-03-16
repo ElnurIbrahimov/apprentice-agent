@@ -183,13 +183,8 @@ except Exception as _e:
     _safe_import_error("GitTool", _e)
 
 # ---------------------------------------------------------------------------
-#  PersonaPlex
-# ---------------------------------------------------------------------------
-try:
-    from .personaplex import PersonaPlexTool
-except Exception as _e:
-    PersonaPlexTool = None
-    _safe_import_error("PersonaPlexTool", _e)
+# PersonaPlex removed — using external voice provider
+PersonaPlexTool = None
 
 # ---------------------------------------------------------------------------
 #  Tool Contract (ToolResult, ToolSpec, etc.)
@@ -205,15 +200,9 @@ except Exception as _e:
     get_tool_registry = None
     _safe_import_error("ToolResult/ToolSpec/ToolRegistry", _e)
 
-# ---------------------------------------------------------------------------
-#  SesameTTS (already guarded - requires torch)
-# ---------------------------------------------------------------------------
-try:
-    from .sesame_tts import SesameTTS
-    SESAME_AVAILABLE = True
-except ImportError:
-    SesameTTS = None
-    SESAME_AVAILABLE = False
+# SesameTTS removed — using external voice provider
+SesameTTS = None
+SESAME_AVAILABLE = False
 
 # ---------------------------------------------------------------------------
 #  Voice Manager

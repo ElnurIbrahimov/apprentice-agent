@@ -140,7 +140,7 @@ from .identity import load_identity, get_identity_prompt, detect_name_change, de
 from .memory import MemorySystem
 from .metacognition import MetacognitionLogger
 from .config import Config
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, RegexBuilderTool, GitTool, PersonaPlexTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, get_monologue, KnowledgeGraphTool, get_knowledge_graph, NeuroDreamEngine, SleepPhase, CalendarTool, SpacedRepetitionTool, TaskManagerTool, ClipboardHistoryTool, APITesterTool, DatabaseTool, AudioTranscriberTool, ResearchTool, BraveSearchTool, TavilyTool, FirecrawlTool, ClipboardMemoryTool, ObsidianTool, GitHubTool, LogAnalystTool, DocumentGeneratorTool, WindowsControlTool, HomeAssistantTool, TaskSchedulerTool, DiscordTool, SlackTool, LocalImageGenTool, AmbientAudioTool, PredictiveTaskTool, MeetingIntelTool, VoiceSynthTool, LifeLoggerTool, CodeSearchTool, CodeEditTool
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, RegexBuilderTool, GitTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, get_monologue, KnowledgeGraphTool, get_knowledge_graph, NeuroDreamEngine, SleepPhase, CalendarTool, SpacedRepetitionTool, TaskManagerTool, ClipboardHistoryTool, APITesterTool, DatabaseTool, AudioTranscriberTool, ResearchTool, BraveSearchTool, TavilyTool, FirecrawlTool, ClipboardMemoryTool, ObsidianTool, GitHubTool, LogAnalystTool, DocumentGeneratorTool, WindowsControlTool, HomeAssistantTool, TaskSchedulerTool, DiscordTool, SlackTool, LocalImageGenTool, AmbientAudioTool, PredictiveTaskTool, MeetingIntelTool, VoiceSynthTool, LifeLoggerTool, CodeSearchTool, CodeEditTool
 from .tools.crypto_price import CryptoPriceTool
 
 from .memory_retriever import MemoryRetriever
@@ -641,14 +641,6 @@ class ApprenticeAgent:
             except Exception as e:
                 logger.warning(f"hybrid_memory not loaded: {e}")
 
-            # sesame_tts
-            try:
-                from .tools.sesame_tts import SesameTTS
-                self.tools['sesame_tts'] = SesameTTS()
-                logger.info("[LOADED] sesame_tts")
-            except Exception as e:
-                logger.warning(f"sesame_tts not loaded: {e}")
-
             # voice
             try:
                 from .tools.voice import VoiceTool
@@ -788,10 +780,6 @@ class ApprenticeAgent:
         self.monologue = self.tools["inner_monologue"]
         if "evoemo" in self.tools:
             self.monologue.connect_evoemo(self.tools["evoemo"])
-        # Add PersonaPlex if enabled (Tool #17)
-        if Config.PERSONAPLEX_ENABLED:
-            self.tools["personaplex"] = PersonaPlexTool()
-            logger.debug("[LOADED] PersonaPlex - Real-time full-duplex voice (requires HF_TOKEN)")
         self.state = AgentState()
         self.max_iterations = 10
         self.metacognition = MetacognitionLogger()
@@ -1769,6 +1757,11 @@ Guidelines:
                     final_response = step_result["response"]
                     done = True
                     break
+                elif status == "fallback_to_tools":
+                    # Code agent failed repeatedly — switch to standard tool calling
+                    use_code_agent = False
+                    logger.warning("[AGENT] Code agent failed, falling back to standard tool mode")
+                    consecutive_failures = 0
                 elif status == "incomplete":
                     pass  # LLM gave too-short answer, nudge injected
                 # else: "continue" -- tools executed, loop continues
@@ -2391,11 +2384,13 @@ Guidelines:
         if has_error:
             consecutive_failures += 1
             if consecutive_failures >= 3:
-                messages.append({
-                    "role": "user",
-                    "content": "Multiple code execution failures. Try a simpler approach or give your best answer now.",
-                })
-                consecutive_failures = 0
+                logger.warning("[REACT-CODE] 3 consecutive failures, falling back to standard tools")
+                return {
+                    "status": "fallback_to_tools",
+                    "response": "",
+                    "tool_calls_count": 0,
+                    "consecutive_failures": 0,
+                }
         else:
             consecutive_failures = 0
 
@@ -2414,7 +2409,7 @@ Guidelines:
         return {
             "status": "continue",
             "response": "",
-            "tool_calls_count": 1,  # Count each code execution as 1 "tool call"
+            "tool_calls_count": 1,
             "consecutive_failures": consecutive_failures,
         }
 
@@ -3388,7 +3383,7 @@ Guidelines:
                 return tool.recall(action)
             return tool.run(action)
 
-        elif tool_name == "voice" or tool_name == "sesame_tts":
+        elif tool_name == "voice":
             # Handle voice/TTS actions
             return tool.speak(action)
 
@@ -3399,40 +3394,6 @@ Guidelines:
         elif tool_name == "git":
             # Handle git operations
             return tool.execute(action)
-
-        elif tool_name == "personaplex":
-            # Handle PersonaPlex real-time voice actions (Tool #17)
-            if "status" in action_lower or "running" in action_lower or "check" in action_lower:
-                return tool.status()
-            elif "start" in action_lower or "launch" in action_lower:
-                # Extract optional voice from action
-                voice = None
-                for v in tool.VOICES.keys():
-                    if v.lower() in action_lower:
-                        voice = v
-                        break
-                return tool.start_server(voice=voice)
-            elif "stop" in action_lower or "shutdown" in action_lower or "kill" in action_lower:
-                return tool.stop_server()
-            elif "list" in action_lower and "voice" in action_lower:
-                return tool.list_voices()
-            elif "set" in action_lower and "voice" in action_lower:
-                # Extract voice ID from action
-                for v in tool.VOICES.keys():
-                    if v.lower() in action_lower:
-                        return tool.set_voice(v)
-                return {"success": False, "error": "No voice ID found. Use list_voices to see options."}
-            elif "set" in action_lower and "persona" in action_lower:
-                # Extract persona text (everything after "persona")
-                import re
-                match = re.search(r'persona[:\s]+["\']?(.+?)["\']?$', action, re.I)
-                if match:
-                    return tool.set_persona(match.group(1).strip())
-                return {"success": False, "error": "No persona text provided."}
-            elif "reset" in action_lower or "default" in action_lower:
-                return tool.reset_to_defaults()
-            else:
-                return tool.execute(action)
 
         elif tool_name == "clawdbot":
             # Handle Clawdbot messaging (Tool #19)
@@ -6894,7 +6855,7 @@ Python code:"""
 
         # 4. Unload voice/TTS models
         try:
-            for tool_name in ["sesame_tts", "voice", "voice_manager"]:
+            for tool_name in ["voice", "voice_manager"]:
                 if tool_name in self.tools:
                     tool = self.tools[tool_name]
                     if hasattr(tool, 'unload'):
@@ -6906,16 +6867,7 @@ Python code:"""
         except Exception as e:
             results["errors"].append(f"Voice unload: {e}")
 
-        # 5. Stop PersonaPlex server if running
-        try:
-            if "personaplex" in self.tools:
-                if hasattr(self.tools["personaplex"], 'stop_server'):
-                    self.tools["personaplex"].stop_server()
-                    results["freed_resources"].append("personaplex_server")
-        except Exception as e:
-            results["errors"].append(f"PersonaPlex stop: {e}")
-
-        # 6. Save knowledge graph
+        # 5. Save knowledge graph
         try:
             if "knowledge_graph" in self.tools:
                 self.tools["knowledge_graph"].save()

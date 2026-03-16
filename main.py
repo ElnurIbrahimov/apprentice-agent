@@ -569,6 +569,9 @@ def handle_command(agent, command: str, speak: bool = False):
     if cmd == "/quit" or cmd == "/exit":
         print("Goodbye!")
         sys.exit(0)
+    elif cmd == "/help" or cmd == "?":
+        show_help()
+        return
     elif cmd == "/goal":
         if arg:
             result = agent.run(arg)
