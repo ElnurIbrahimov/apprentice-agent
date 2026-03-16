@@ -82,9 +82,13 @@ def _build_model_list(current_model: str) -> list:
     for m in all_models:
         if m not in seen:
             seen.add(m)
-            is_cloud = ":cloud" in m or "-cloud" in m
-            tag = "cloud" if is_cloud else "local"
-            items.append((m, tag, ""))
+            if m.startswith("chatgpt:"):
+                tag, ctx = "chatgpt", "$0"
+            elif ":cloud" in m or "-cloud" in m:
+                tag, ctx = "cloud", ""
+            else:
+                tag, ctx = "local", ""
+            items.append((m, tag, ctx))
 
     return items
 

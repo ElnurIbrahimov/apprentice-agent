@@ -2004,7 +2004,15 @@ Guidelines:
     _REACT_REASON_MODEL = "kimi-k2.5:cloud"    # Best for complex reasoning
 
     def _pick_react_model(self, messages: list, iteration: int) -> str:
-        """Pick model for this ReAct iteration. Always returns a known-good model."""
+        """Pick model for this ReAct iteration.
+
+        User's explicit model override always wins. Otherwise auto-route
+        based on whether the conversation involves code edits.
+        """
+        # User explicitly selected a model — respect it
+        if self.brain._model_override:
+            return self.brain._model_override
+
         has_edits = False
         for msg in messages:
             for tc in msg.get("tool_calls", []) or []:
