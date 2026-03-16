@@ -1614,7 +1614,6 @@ Guidelines:
         if neurodream_response:
             return self._make_response(goal, neurodream_response, fast_path=True, metadata={"neurodream_direct": True})
 
-        self._current_query_tier = "standard"
         # Check for fast-path eligibility (reuse fastpath_enabled from above)
         if fastpath_enabled and self._is_simple_query(goal):
             return self._fast_path_response(goal)

@@ -607,6 +607,7 @@ class AgenticLoop:
 
         while self.iteration < self.max_iterations:
             self.iteration += 1
+            self._edits_this_turn = 0  # Reset per iteration to avoid redundant auto-test
 
             # Budget check
             if self.budget_usd is not None:

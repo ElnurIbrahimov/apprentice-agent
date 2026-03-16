@@ -231,12 +231,13 @@ class ShellExecutorTool:
         if not is_valid:
             return {"success": False, "error": f"Security: {reason}"}
 
+        # Shell injection check — run BEFORE sandbox routing so all commands are checked
+        if _contains_shell_injection(command):
+            return {"success": False, "output": "", "error": "Command contains disallowed characters or flags", "exit_code": 1}
+
         # Route sandbox-required commands (python, curl, wget, etc.)
         if reason == "SANDBOX_REQUIRED":
             return self.run_sandboxed(command=command, cwd=cwd, timeout=timeout)
-
-        if _contains_shell_injection(command):
-            return {"success": False, "output": "", "error": "Command contains disallowed characters or flags", "exit_code": 1}
 
         # Clamp timeout
         timeout = min(max(1, timeout), MAX_TIMEOUT)
@@ -431,12 +432,12 @@ class ShellExecutorTool:
         if not is_valid:
             return {"success": False, "error": f"Security: {reason}"}
 
+        if _contains_shell_injection(command):
+            return {"success": False, "output": "", "error": "Command contains disallowed characters or flags", "exit_code": 1}
+
         # Route sandbox-required commands (python, curl, wget, etc.)
         if reason == "SANDBOX_REQUIRED":
             return self.run_sandboxed(command=command, cwd=cwd, timeout=timeout)
-
-        if _contains_shell_injection(command):
-            return {"success": False, "output": "", "error": "Command contains disallowed characters or flags", "exit_code": 1}
 
         timeout = min(max(1, timeout), MAX_TIMEOUT)
 

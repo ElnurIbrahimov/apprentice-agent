@@ -636,9 +636,6 @@ _ALL_SYMBOLS = [
     "MarketplaceTool",
     "RegexBuilderTool",
     "GitTool",
-    "PersonaPlexTool",
-    "SesameTTS",
-    "SESAME_AVAILABLE",
     "VoiceManager",
     "get_voice_manager",
     "ClawdbotTool",
@@ -756,7 +753,7 @@ _ALL_SYMBOLS = [
 
 # Filter out symbols that failed to import (are None) — but keep
 # SESAME_AVAILABLE which is intentionally bool.
-_ALWAYS_EXPORT = {"SESAME_AVAILABLE"}
+_ALWAYS_EXPORT = set()  # No forced exports for removed modules
 _ns = vars()
 __all__ = [
     s for s in _ALL_SYMBOLS

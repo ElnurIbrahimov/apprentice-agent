@@ -450,7 +450,7 @@ async def switch_conversation(conversation_id: str):
 
 @router.post("/conversations/{conversation_id}/save-to-memory", response_model=SaveToMemoryResponse)
 async def save_conversation_to_memory(conversation_id: str):
-    """Save a conversation to AURA's long-term memory (A-MEM)."""
+    """Save a conversation to AURA's long-term memory."""
     try:
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(

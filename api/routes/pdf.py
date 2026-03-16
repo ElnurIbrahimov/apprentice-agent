@@ -97,7 +97,7 @@ async def extract_url(body: dict):
     _MAX_PDF_SIZE = 50 * 1024 * 1024  # 50MB
     try:
         async with httpx.AsyncClient(timeout=30) as c:
-            r = await c.get(url, follow_redirects=True)
+            r = await c.get(url, follow_redirects=False)
         r.raise_for_status()
         if len(r.content) > _MAX_PDF_SIZE:
             raise HTTPException(413, f"PDF too large ({len(r.content)} bytes, max {_MAX_PDF_SIZE})")

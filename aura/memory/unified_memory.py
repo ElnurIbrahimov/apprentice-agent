@@ -3,7 +3,7 @@
 Single query routes through the consolidated retrieval pipeline:
   SQLite + FTS5 store  →  BM25 + Semantic + Graph  →  RRF  →  Reranker  →  FadeMem
 
-Same public API as Phase 4C for backward compatibility:
+Public API:
   query(), store(), store_gated(), get_available_sources(), get_stats(), close()
 
 Author: Aura Development Team

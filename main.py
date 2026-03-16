@@ -418,14 +418,14 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
         max_iterations=aura_config.get("max_iterations", 25),
         budget_usd=aura_config.get("budget"),
         context=project_context,
-        session=session,
+        session=agentic_session,
         aura_config=aura_config,
         router=chat_router,
     )
     # Store on agent so /clear and /trust can access it
     agent._agentic_loop = agentic
     agent._agentic_permissions = permissions
-    agent._agentic_session = session
+    agent._agentic_session = agentic_session
 
     # Resume agentic session if requested
     resume_id = getattr(agent, '_resume_session_id', None)
