@@ -608,15 +608,23 @@ def handle_command(agent, command: str, speak: bool = False):
             if choice is not None:
                 if choice == "auto":
                     agent.brain.set_model_override(None)
+                    if hasattr(agent, '_agentic_loop'):
+                        agent._agentic_loop.model_override = None
                     show_info("Model override cleared. Using auto-selection.")
                 else:
                     agent.brain.set_model_override(choice)
+                    if hasattr(agent, '_agentic_loop'):
+                        agent._agentic_loop.model_override = choice
                     show_info(f"Model locked to: {choice}")
         elif arg.lower() == "auto":
             agent.brain.set_model_override(None)
+            if hasattr(agent, '_agentic_loop'):
+                agent._agentic_loop.model_override = None
             print("Model override cleared. Using auto-selection.")
         else:
             agent.brain.set_model_override(arg)
+            if hasattr(agent, '_agentic_loop'):
+                agent._agentic_loop.model_override = arg
             print(f"Model locked to: {arg}")
     elif cmd == "/compact":
         focus = arg if arg else None

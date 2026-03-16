@@ -452,20 +452,35 @@ class ToolExecutor:
         max_results = args.get("max_results", 8)
 
         # Try Tavily first, fall back to Brave
+        # Note: Tavily returns {"error": ...} dict on failure (doesn't raise), so check result
         try:
             if self._tavily is None:
                 from aura.tools.tavily_tool import TavilyTool
                 self._tavily = TavilyTool()
-            return self._tavily.search(query=query, max_results=max_results)
+            result = self._tavily.search(query=query, max_results=max_results)
+            if "error" not in result:
+                return result
+            logger.debug(f"[AgenticLoop] Tavily error: {result.get('error')}, trying Brave")
         except Exception as e:
-            logger.debug(f"[AgenticLoop] non-critical: {e}")
+            logger.debug(f"[AgenticLoop] Tavily exception: {e}")
         try:
             if self._brave is None:
                 from aura.tools.brave_search import BraveSearchTool
                 self._brave = BraveSearchTool()
-            return self._brave.run(query=query, count=max_results)
+            result = self._brave.run(query=query, count=max_results)
+            if isinstance(result, dict) and "error" not in result:
+                return result
+            if isinstance(result, dict):
+                logger.debug(f"[AgenticLoop] Brave error: {result.get('error')}, trying SearXNG")
         except Exception as e:
-            return {"error": f"Web search unavailable: {e}"}
+            logger.debug(f"[AgenticLoop] Brave exception: {e}")
+        # Final fallback: SearXNG
+        try:
+            from aura.tools.web_search import WebSearchTool
+            ws = WebSearchTool()
+            return ws.search(query=query, num_results=max_results)
+        except Exception as e:
+            return {"error": f"All search providers failed: {e}"}
 
 
 class AgenticLoop:
