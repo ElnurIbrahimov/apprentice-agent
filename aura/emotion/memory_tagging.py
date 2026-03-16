@@ -86,12 +86,21 @@ def rerank_with_mood_congruence(
     reranked = []
 
     for memory, score in results:
-        # Extract stored PAD from memory metadata
+        # Extract stored PAD from memory metadata (may be JSON string or dict)
         memory_pad = {}
+        raw_meta = None
         if hasattr(memory, "metadata"):
-            memory_pad = memory.metadata.get("emotion_pad", {})
+            raw_meta = memory.metadata
         elif isinstance(memory, dict):
-            memory_pad = memory.get("metadata", {}).get("emotion_pad", {})
+            raw_meta = memory.get("metadata", {})
+        if isinstance(raw_meta, str):
+            try:
+                import json
+                raw_meta = json.loads(raw_meta)
+            except (json.JSONDecodeError, TypeError):
+                raw_meta = {}
+        if isinstance(raw_meta, dict):
+            memory_pad = raw_meta.get("emotion_pad", {})
 
         congruence = compute_mood_congruence(memory_pad, current_pad)
         adjusted = score * (1 - weight) + congruence * weight
@@ -119,7 +128,15 @@ def strengthen_mood_congruent_memories(
     strengthened = []
 
     for mem in memories:
-        mem_pad = mem.get("metadata", {}).get("emotion_pad", {})
+        raw_meta = mem.get("metadata", {})
+        # metadata may be a JSON string from the store
+        if isinstance(raw_meta, str):
+            try:
+                import json
+                raw_meta = json.loads(raw_meta)
+            except (json.JSONDecodeError, TypeError):
+                raw_meta = {}
+        mem_pad = raw_meta.get("emotion_pad", {})
         if not mem_pad:
             continue
 
@@ -128,11 +145,11 @@ def strengthen_mood_congruent_memories(
             mem_id = mem.get("id", "")
             if mem_id:
                 try:
-                    from aura.memory.fade_mem import get_fade_mem
-                    fm = get_fade_mem()
-                    if hasattr(fm, "reinforce"):
-                        fm.reinforce(mem_id, boost_factor * congruence)
-                        strengthened.append(mem_id)
+                    from aura.memory.fade_mem import reinforce as fade_reinforce
+                    from aura.memory.store import get_memory_store
+                    store = get_memory_store()
+                    fade_reinforce(store, mem_id)
+                    strengthened.append(mem_id)
                 except Exception as e:
                     logger.debug(f"[MemoryTagging] Reinforce error: {e}")
 

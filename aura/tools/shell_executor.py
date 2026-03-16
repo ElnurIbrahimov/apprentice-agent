@@ -599,8 +599,25 @@ class ShellExecutorTool:
                     workspace=cwd or str(Path.cwd()),
                 )
             except ImportError:
-                # sandbox module not available — fall through to normal run
-                return self.run(command=command, cwd=cwd, timeout=timeout)
+                # sandbox module not available — execute directly via subprocess
+                # (do NOT call self.run() here — it routes back to run_sandboxed, causing recursion)
+                import subprocess
+                try:
+                    result = subprocess.run(
+                        command, shell=True, capture_output=True, text=True,
+                        timeout=min(timeout, MAX_TIMEOUT), cwd=cwd,
+                    )
+                    return {
+                        "success": result.returncode == 0,
+                        "stdout": result.stdout,
+                        "stderr": result.stderr,
+                        "exit_code": result.returncode,
+                        "response": result.stdout.strip() or result.stderr.strip() or f"Exit code {result.returncode}",
+                    }
+                except subprocess.TimeoutExpired:
+                    return {"success": False, "error": f"Command timed out after {timeout}s"}
+                except Exception as e:
+                    return {"success": False, "error": str(e)}
 
         result = self._sandbox.run_shell(command, cwd=cwd)
         return {

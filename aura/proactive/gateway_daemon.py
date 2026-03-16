@@ -36,7 +36,10 @@ from .active_inference import (
     ProactiveDecision,
     BeliefState
 )
-from aura.emotion.action_bridge import EmotionActionBridge
+try:
+    from aura.emotion.action_bridge import EmotionActionBridge
+except ImportError:
+    EmotionActionBridge = None
 
 logger = logging.getLogger(__name__)
 

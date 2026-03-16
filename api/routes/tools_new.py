@@ -720,10 +720,20 @@ async def audio_transcribe(request: TranscribeRequest):
 
 
 def _audio_transcribe_sync(request: TranscribeRequest) -> dict:
+    # Validate file path — block system directories
+    from pathlib import Path as _Path
+    fp = _Path(request.file_path).resolve()
+    blocked_prefixes = ["/etc", "/proc", "/sys", "/dev", "C:\\Windows", "C:\\Program Files"]
+    for prefix in blocked_prefixes:
+        if str(fp).startswith(prefix):
+            return {"success": False, "error": f"Access denied: {prefix} is blocked"}
+    if not fp.exists():
+        return {"success": False, "error": f"File not found: {request.file_path}"}
+
     agent = _get_agent_service().agent
     if "audio_transcriber" in agent.tools:
         return agent.tools["audio_transcriber"].transcribe(
-            file_path=request.file_path,
+            file_path=str(fp),
             language=request.language,
             model_size=request.model_size,
         )

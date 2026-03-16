@@ -323,23 +323,20 @@ class CodeAgentMode:
             {"stdout": str, "stderr": str, "return_value": Any, "error": str, "timed_out": bool}
         """
         # Restricted globals: standard builtins minus dangerous ones + tool functions
+        # Always use the builtins module directly to avoid __builtins__ dict/module ambiguity
+        import builtins as _builtins_mod
+        _blocked = {
+            "eval", "exec", "compile", "__import__", "open",
+            "input", "breakpoint", "exit", "quit",
+            "globals", "locals", "vars",
+            "memoryview", "delattr", "setattr",
+            # Block introspection tools that enable sandbox escape
+            "__loader__", "__spec__", "__package__", "__build_class__",
+        }
         safe_builtins = {
-            k: v for k, v in __builtins__.items()
-            if k not in {
-                "eval", "exec", "compile", "__import__", "open",
-                "input", "breakpoint", "exit", "quit",
-                "globals", "locals", "vars",
-                "memoryview", "delattr", "setattr",
-            }
-        } if isinstance(__builtins__, dict) else {
-            k: getattr(__builtins__, k)
-            for k in dir(__builtins__)
-            if not k.startswith("_") and k not in {
-                "eval", "exec", "compile", "__import__", "open",
-                "input", "breakpoint", "exit", "quit",
-                "globals", "locals", "vars",
-                "memoryview", "delattr", "setattr",
-            }
+            k: getattr(_builtins_mod, k)
+            for k in dir(_builtins_mod)
+            if not k.startswith("_") and k not in _blocked
         }
 
         # Allow safe standard library imports

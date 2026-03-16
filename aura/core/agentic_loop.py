@@ -34,6 +34,8 @@ console = Console()
 MAX_ITERATIONS = 50
 MAX_TOOL_OUTPUT_CHARS = 15000
 _TOOL_POOL = ThreadPoolExecutor(max_workers=4)
+import atexit as _atexit
+_atexit.register(_TOOL_POOL.shutdown, wait=False)
 
 
 AGENTIC_SYSTEM_PROMPT = """You are Aura, an AI coding agent with persistent memory. You help users with software engineering tasks by reading files, writing code, running commands, and iterating until the task is complete.

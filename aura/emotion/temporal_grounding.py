@@ -115,7 +115,7 @@ def _compute_mood_adjustments(elapsed_hours: float) -> Dict[str, float]:
 
     # Pleasure gently rises on reconnection (glad to see you)
     if elapsed_hours > 2:
-        adjustments["pleasure_boost"] = min(0.15, 0.05)
+        adjustments["pleasure_boost"] = min(0.15, elapsed_hours * 0.02)
 
     return adjustments
 
@@ -155,27 +155,24 @@ def apply_mood_adjustments(adjustments: Dict[str, float]) -> None:
 
     try:
         from aura.emotion.alma_engine import alma_engine
-        pad = alma_engine.get_emotional_state().get("pad", {})
 
-        arousal = pad.get("arousal", 0.0)
-        pleasure = pad.get("pleasure", 0.0)
+        with alma_engine._lock:
+            pad = alma_engine.mood.pad
 
-        decay = adjustments.get("arousal_decay", 0)
-        if decay:
-            new_arousal = max(-1.0, min(1.0, arousal + decay))
-            alma_engine._pad.arousal = new_arousal
+            decay = adjustments.get("arousal_decay", 0)
+            if decay:
+                pad.arousal = max(-1.0, min(1.0, pad.arousal + decay))
 
-        p_boost = adjustments.get("pleasure_boost", 0)
-        if p_boost:
-            new_pleasure = max(-1.0, min(1.0, pleasure + p_boost))
-            alma_engine._pad.pleasure = new_pleasure
+            p_boost = adjustments.get("pleasure_boost", 0)
+            if p_boost:
+                pad.pleasure = max(-1.0, min(1.0, pad.pleasure + p_boost))
 
-        # Boost curiosity via dopamine
-        c_boost = adjustments.get("curiosity_boost", 0)
-        if c_boost:
-            alma_engine._neuromodulators["dopamine"] = min(
-                1.0, alma_engine._neuromodulators.get("dopamine", 0.5) + c_boost
-            )
+            # Boost curiosity via dopamine
+            c_boost = adjustments.get("curiosity_boost", 0)
+            if c_boost:
+                alma_engine.neuromodulators.dopamine = min(
+                    1.0, alma_engine.neuromodulators.dopamine + c_boost
+                )
 
         logger.info(f"[TemporalGrounding] Applied mood adjustments: {adjustments}")
     except Exception as e:
