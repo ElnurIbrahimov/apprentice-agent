@@ -6,6 +6,8 @@ os.environ["TQDM_DISABLE"] = "1"
 
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", message="urllib3.*charset_normalizer")
+warnings.filterwarnings("ignore", message="Revert to STA COM")
 
 import argparse
 import sys
