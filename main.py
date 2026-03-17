@@ -35,6 +35,12 @@ def main():
     sub_exec.add_argument("prompt", nargs="?", default=None, help="Prompt to execute")
     sub_ide = subparsers.add_parser("ide", help="IDE integration setup")
     sub_ide.add_argument("action", nargs="?", default="setup", choices=["setup"], help="Action (default: setup)")
+    sub_log = subparsers.add_parser("log", help="Query interaction history")
+    sub_log.add_argument("action", choices=["search", "export", "stats", "recent"], nargs="?", default="recent")
+    sub_log.add_argument("query", nargs="*", default=[])
+    sub_log.add_argument("--session", default="")
+    sub_log.add_argument("--format", dest="log_format", choices=["markdown", "json"], default="markdown")
+    sub_log.add_argument("--limit", type=int, default=20)
 
     # Positional prompt for one-shot agentic mode
     parser.add_argument(
@@ -170,6 +176,28 @@ def main():
     if args.command == "mcp-serve":
         from aura.core.mcp_server import main as mcp_main
         mcp_main()
+        sys.exit(0)
+
+    # Handle log subcommand (lightweight, no agent needed)
+    if args.command == "log":
+        from aura.cli.activity_log import ActivityLog
+        log = ActivityLog()
+        if args.action == "search":
+            query = " ".join(args.query)
+            results = log.search(query, limit=args.limit)
+            for r in results:
+                print(f"[{r['model']}] {r['prompt'][:80]}")
+                print(f"  -> {r['response'][:120]}")
+        elif args.action == "stats":
+            stats = log.get_stats()
+            for k, v in stats.items():
+                print(f"  {k}: {v}")
+        elif args.action == "export":
+            md = log.export_session(args.session, format=args.log_format)
+            print(md)
+        else:  # recent
+            for r in log.get_recent(args.limit):
+                print(f"  {r['prompt'][:80]}")
         sys.exit(0)
 
     # Handle exec subcommand — non-interactive agent execution
@@ -565,6 +593,13 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
     from aura.cli.steering import SteeringQueue
     steering = SteeringQueue()
 
+    # Initialize activity log
+    try:
+        from aura.cli.activity_log import ActivityLog
+        activity_log = ActivityLog()
+    except Exception:
+        activity_log = None
+
     # Store on agent so /clear and /trust can access it
     agent._agentic_loop = agentic
     agent._agentic_permissions = permissions
@@ -605,15 +640,22 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
                 pass
         if _mood_cache["state"]:
             _mood_ind = create_mood_indicator(_mood_cache["state"])
-        return _bg_ind, _res_ind, _mood_ind
+        # Watch mode indicator
+        _watch_ind = ""
+        _file_watcher = getattr(agent, '_file_watcher', None)
+        if _file_watcher:
+            from aura.cli.watch_mode import create_watch_indicator
+            _watch_ind = create_watch_indicator(_file_watcher)
+        return _bg_ind, _res_ind, _mood_ind, _watch_ind
 
     def _show_bar(**kwargs):
-        """Show status bar with Phase 3 indicators."""
-        bg_ind, res_ind, mood_ind = _phase3_indicators()
+        """Show status bar with Phase 3/4 indicators."""
+        bg_ind, res_ind, mood_ind, watch_ind = _phase3_indicators()
         show_status_bar(
             bg_indicator=bg_ind,
             research_indicator=res_ind,
             mood_indicator=mood_ind,
+            watch_indicator=watch_ind,
             **kwargs,
         )
 
@@ -679,8 +721,16 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
             )
             continue
         elif user_input == SIGNAL_COMMAND_PALETTE:
-            console.print("[dim]Command palette — type / for commands[/dim]")
-            continue
+            from aura.cli.command_palette import open_palette, build_palette, record_usage
+            from aura.cli.input import SLASH_COMMANDS as _palette_cmds
+            items = build_palette(_palette_cmds)
+            selected = open_palette(items, console)
+            if selected:
+                record_usage(selected)
+                user_input = selected  # Feed the selected command back as input
+                # Fall through to command processing below
+            else:
+                continue
         elif user_input == SIGNAL_OPEN_EDITOR:
             import tempfile, subprocess as _sp
             editor = os.environ.get("EDITOR", "notepad" if os.name == "nt" else "nano")
@@ -848,6 +898,19 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
         model_used = result.get("model", _current_model)
 
         show_response(response_text, model=model_used)
+
+        # Log interaction to activity log
+        if activity_log:
+            try:
+                activity_log.log(
+                    prompt=user_input,
+                    response=response_text[:5000] if response_text else "",
+                    model=result.get("model", ""),
+                    session_id=getattr(agentic_session, 'session_id', ''),
+                    tool_calls=result.get("tool_calls", 0),
+                )
+            except Exception:
+                pass
 
         # Check for queued follow-up from steering
         follow_up = steering.pop_follow_up()
@@ -1351,6 +1414,154 @@ def handle_command(agent, command: str, speak: bool = False):
                 print(output[:5000] if output else "  (no output)")
             except Exception as e:
                 print(f"  Error: {e}")
+    elif cmd == "/pr":
+        from aura.cli.git_tools import create_pr, get_staged_diff, get_recent_log, get_current_branch, PR_DESCRIPTION_PROMPT
+        from aura.cli.display import console as _pr_console
+        branch = get_current_branch()
+        diff = get_staged_diff()
+        log = get_recent_log()
+        # Generate PR description via LLM
+        prompt = PR_DESCRIPTION_PROMPT.format(branch=branch, diff=diff, log=log)
+        response = agent.brain.think(prompt)
+        if isinstance(response, dict):
+            response = response.get("response", response.get("content", str(response)))
+        # Parse TITLE: and BODY: from response
+        title = branch
+        body = response or ""
+        for line in (response or "").splitlines():
+            if line.startswith("TITLE:"):
+                title = line[6:].strip()[:70]
+                break
+        body_start = (response or "").find("BODY:")
+        if body_start >= 0:
+            body = response[body_start + 5:].strip()
+        result = create_pr(title, body)
+        if result["success"]:
+            _pr_console.print(f"[green]PR created: {result['url']}[/green]")
+        else:
+            _pr_console.print(f"[red]{result['error']}[/red]")
+        return
+
+    elif cmd == "/branch":
+        from aura.cli.git_tools import create_branch
+        from aura.cli.display import console as _br_console
+        name = arg.strip()
+        if not name:
+            _br_console.print("[dim]Usage: /branch <name>[/dim]")
+            return
+        result = create_branch(name)
+        if result["success"]:
+            _br_console.print(f"[green]Created branch: {result['branch']}[/green]")
+        else:
+            _br_console.print(f"[red]{result['message']}[/red]")
+        return
+
+    elif cmd == "/stash":
+        from aura.cli.git_tools import smart_stash
+        from aura.cli.display import console as _st_console
+        desc = arg.strip() or "Aura stash"
+        result = smart_stash(desc)
+        if result["success"]:
+            _st_console.print(f"[green]Stashed: {desc}[/green]")
+        else:
+            _st_console.print(f"[red]{result.get('stderr', 'Stash failed')}[/red]")
+        return
+
+    elif cmd == "/blame":
+        from aura.cli.git_tools import get_blame
+        from aura.cli.display import console as _bl_console
+        parts_b = arg.strip().rsplit(":", 1)
+        if len(parts_b) != 2 or not parts_b[1].isdigit():
+            _bl_console.print("[dim]Usage: /blame <file>:<line>[/dim]")
+            return
+        result = get_blame(parts_b[0], int(parts_b[1]))
+        if result.get("success"):
+            _bl_console.print(f"  Author: [cyan]{result.get('author', '?')}[/cyan]")
+            _bl_console.print(f"  Date:   {result.get('date', '?')}")
+            _bl_console.print(f"  Commit: [dim]{result.get('commit_message', '?')}[/dim]")
+            _bl_console.print(f"  Line:   {result.get('content', '?')}")
+        else:
+            _bl_console.print(f"[red]{result.get('error', result.get('stderr', 'Blame failed'))}[/red]")
+        return
+
+    elif cmd == "/test":
+        from aura.cli.test_runner import run_tests, render_test_results
+        from aura.cli.display import console as _test_console, show_response as _test_show, show_info as _test_info, show_tool_call as _test_tool
+        # Get test command from argument or AURA.md config
+        test_cmd = arg.strip()
+        if not test_cmd:
+            try:
+                from aura.core.context import get_aura_md_config as _get_test_cfg
+                _test_cfg = _get_test_cfg(os.getcwd())
+                test_cmd = _test_cfg.get("test_cmd", "") if _test_cfg else ""
+            except Exception:
+                test_cmd = ""
+        if not test_cmd:
+            _test_console.print("[dim]No test command configured. Usage: /test <command> or set test_cmd in AURA.md[/dim]")
+            return
+        _test_console.print(f"[dim]Running: {test_cmd}[/dim]")
+        result = run_tests(test_cmd)
+        render_test_results(_test_console, result)
+        # If failed, offer to fix
+        if not result.success and result.failures:
+            _test_console.print("[dim]Auto-fix failures? (y/n)[/dim]")
+            try:
+                choice = input("> ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                return
+            if choice in ("y", "yes"):
+                _agentic = getattr(agent, '_agentic_loop', None)
+                if _agentic:
+                    fix_prompt = f"These tests failed:\n{result.output[-2000:]}\n\nFix the failing tests."
+                    def _on_test_tool(name, args_t, _result):
+                        desc = args_t.get("path") or args_t.get("pattern") or args_t.get("query") or ""
+                        if not desc and "command" in args_t:
+                            desc = args_t["command"][:60]
+                        _test_tool(name, str(desc))
+                    fix_result = _agentic.run(fix_prompt, on_tool_call=_on_test_tool)
+                    _test_show(fix_result.get("response", ""), agent.brain._model_override or "auto")
+        return
+
+    elif cmd == "/watch":
+        from aura.cli.watch_mode import FileWatcher, create_watch_indicator, remove_ai_comment
+        from aura.cli.display import console as _watch_console
+        watcher = getattr(agent, '_file_watcher', None)
+        if not watcher:
+            watcher = FileWatcher()
+            agent._file_watcher = watcher
+
+        if arg.strip() == "stop":
+            watcher.stop()
+            _watch_console.print("[dim]Watch mode stopped.[/dim]")
+            return
+
+        if watcher.is_running:
+            # Show current hits
+            hits = watcher.get_unresolved()
+            if hits:
+                _watch_console.print(f"[magenta]Watching -- {len(hits)} unresolved comments:[/magenta]")
+                for h in hits[:10]:
+                    fname = Path(h.file_path).name
+                    _watch_console.print(f"  [cyan]{fname}:{h.line_number}[/cyan] {h.instruction}")
+            else:
+                _watch_console.print("[dim]Watching -- no AI comments detected.[/dim]")
+            return
+
+        # Start watching
+        def _on_watch_hit(hit):
+            _watch_console.print(f"[magenta]Detected:[/magenta] [cyan]{Path(hit.file_path).name}:{hit.line_number}[/cyan] {hit.instruction}")
+
+        watcher.set_callback(_on_watch_hit)
+        # Initial scan
+        hits = watcher.scan_all()
+        if hits:
+            _watch_console.print(f"[magenta]Found {len(hits)} AI comments:[/magenta]")
+            for h in hits[:5]:
+                _watch_console.print(f"  [cyan]{Path(h.file_path).name}:{h.line_number}[/cyan] {h.instruction}")
+        watcher.start()
+        _watch_console.print("[dim]Watch mode started. Monitoring for AURA: and AI: comments.[/dim]")
+        return
+
     elif cmd == "/mcp":
         if hasattr(agent, '_agentic_loop') and hasattr(agent._agentic_loop, '_mcp_client'):
             mgr = agent._agentic_loop._mcp_client

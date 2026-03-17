@@ -53,6 +53,12 @@ SLASH_COMMANDS = [
     ("/sources", "Show research sources"),
     ("/export", "Export research to Markdown"),
     ("/mood", "Show emotional state"),
+    ("/pr", "Create pull request"),
+    ("/branch", "Create git branch"),
+    ("/stash", "Smart git stash"),
+    ("/blame", "Git blame with context"),
+    ("/test", "Run tests"),
+    ("/watch", "Watch files for AI comments"),
 ]
 
 # Subcommand completions for commands that accept them

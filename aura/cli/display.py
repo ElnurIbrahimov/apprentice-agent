@@ -83,6 +83,7 @@ def show_status_bar(
     bg_indicator: str = "",
     research_indicator: str = "",
     mood_indicator: str = "",
+    watch_indicator: str = "",
 ):
     """Print the status bar line."""
     from .status_bar import build_status_bar
@@ -97,6 +98,7 @@ def show_status_bar(
         bg_indicator=bg_indicator,
         research_indicator=research_indicator,
         mood_indicator=mood_indicator,
+        watch_indicator=watch_indicator,
     )
     console.print(bar, style="on grey11", end="\n")
 
@@ -285,7 +287,7 @@ def show_help():
     table.add_row("Alt+M", "Model picker (interactive)")
     table.add_row("Ctrl+L", "Clear screen")
     table.add_row("Ctrl+N", "New session")
-    table.add_row("Ctrl+K", "Command palette")
+    table.add_row("Ctrl+K", "Command palette (fuzzy search)")
     table.add_row("Ctrl+G", "Open editor for long prompt")
     table.add_row("Shift+Tab", "Cycle permission mode (Plan / Careful / Auto-Edit / Full Auto)")
     table.add_row("Esc Esc", "Rewind to checkpoint")
@@ -335,6 +337,20 @@ def show_help():
     # --- Emotional & hooks ---
     table.add_row("/mood", "Show current emotional state")
     table.add_row("/hook [list|add|remove]", "Manage automation hooks")
+
+    table.add_row("", "")
+
+    # --- Git power tools ---
+    table.add_row("/pr", "Create pull request with AI-generated description")
+    table.add_row("/branch <name>", "Create and switch to a new git branch")
+    table.add_row("/stash [desc]", "Smart stash with description")
+    table.add_row("/blame file:N", "Explain why a line exists using git history")
+
+    table.add_row("", "")
+
+    # --- Testing & watch ---
+    table.add_row("/test [cmd]", "Run tests with formatted output")
+    table.add_row("/watch", "Monitor files for AURA:/AI: comments")
 
     table.add_row("", "")
 
