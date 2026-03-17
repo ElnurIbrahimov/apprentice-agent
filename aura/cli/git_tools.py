@@ -100,7 +100,10 @@ def get_blame(file_path: str, line_num: int) -> Dict:
             info["author"] = line[7:]
         elif line.startswith("author-time "):
             import time
-            info["date"] = time.strftime("%Y-%m-%d", time.localtime(int(line[12:])))
+            try:
+                info["date"] = time.strftime("%Y-%m-%d", time.localtime(int(line[12:])))
+            except (ValueError, OSError):
+                info["date"] = "unknown"
         elif line.startswith("summary "):
             info["commit_message"] = line[8:]
         elif line.startswith("\t"):

@@ -112,15 +112,16 @@ class FileWatcher:
                 line_num = content[:match.start()].count("\n") + 1
                 fingerprint = f"{file_path}:{line_num}:{instruction}"
 
-                if fingerprint not in self._seen:
-                    hit = WatchHit(
-                        file_path=str(file_path),
-                        line_number=line_num,
-                        instruction=instruction,
-                        pattern_type="AURA" if "AURA" in pattern.pattern else "AI",
-                    )
-                    hits.append(hit)
-                    self._seen.add(fingerprint)
+                with self._lock:
+                    if fingerprint not in self._seen:
+                        hit = WatchHit(
+                            file_path=str(file_path),
+                            line_number=line_num,
+                            instruction=instruction,
+                            pattern_type="AURA" if "AURA" in pattern.pattern else "AI",
+                        )
+                        hits.append(hit)
+                        self._seen.add(fingerprint)
         return hits
 
     def scan_all(self) -> List[WatchHit]:
@@ -169,10 +170,14 @@ class FileWatcher:
                     continue
 
                 fpath_str = str(fpath)
-                if fpath_str in self._file_mtimes and mtime <= self._file_mtimes[fpath_str]:
+                with self._lock:
+                    if fpath_str in self._file_mtimes and mtime <= self._file_mtimes[fpath_str]:
+                        skip = True
+                    else:
+                        self._file_mtimes[fpath_str] = mtime
+                        skip = False
+                if skip:
                     continue
-
-                self._file_mtimes[fpath_str] = mtime
                 hits = self.scan_file(fpath)
                 if hits:
                     with self._lock:
@@ -200,7 +205,10 @@ def remove_ai_comment(file_path: str, line_number: int) -> bool:
         if 0 < line_number <= len(lines):
             line = lines[line_number - 1]
             # Remove the AI comment but keep the rest of the line
+            # Skip DOTALL block-comment patterns — only apply line-level patterns
             for pattern in WATCH_PATTERNS:
+                if pattern.flags & re.DOTALL:
+                    continue
                 cleaned = pattern.sub("", line).rstrip()
                 if cleaned != line.rstrip():
                     if cleaned.strip():

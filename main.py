@@ -193,6 +193,9 @@ def main():
             for k, v in stats.items():
                 print(f"  {k}: {v}")
         elif args.action == "export":
+            if not args.session:
+                print("Usage: aura log export --session <session_id>")
+                sys.exit(1)
             md = log.export_session(args.session, format=args.log_format)
             print(md)
         else:  # recent
@@ -656,6 +659,7 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
             research_indicator=res_ind,
             mood_indicator=mood_ind,
             watch_indicator=watch_ind,
+            steering_queue=steering,
             **kwargs,
         )
 
@@ -836,7 +840,10 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
             continue
 
         if user_input.startswith("/"):
-            handle_command(agent, user_input, speak=speak)
+            try:
+                handle_command(agent, user_input, speak=speak)
+            except Exception as exc:
+                show_error(f"Command failed: {exc}")
             _current_model = agent.brain._model_override or "auto"
             _token_used = estimate_messages_tokens(agentic._conversation_history)
             _token_limit = get_context_limit(_current_model)
@@ -904,7 +911,7 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
             try:
                 activity_log.log(
                     prompt=user_input,
-                    response=response_text[:5000] if response_text else "",
+                    response=response_text[:20000] if response_text else "",
                     model=result.get("model", ""),
                     session_id=getattr(agentic_session, 'session_id', ''),
                     tool_calls=result.get("tool_calls", 0),

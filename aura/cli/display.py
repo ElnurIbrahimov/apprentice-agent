@@ -84,6 +84,7 @@ def show_status_bar(
     research_indicator: str = "",
     mood_indicator: str = "",
     watch_indicator: str = "",
+    steering_queue=None,
 ):
     """Print the status bar line."""
     from .status_bar import build_status_bar
@@ -99,6 +100,7 @@ def show_status_bar(
         research_indicator=research_indicator,
         mood_indicator=mood_indicator,
         watch_indicator=watch_indicator,
+        steering_queue=steering_queue,
     )
     console.print(bar, style="on grey11", end="\n")
 

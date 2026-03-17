@@ -156,12 +156,13 @@ def build_status_bar(
     # Calculate remaining space for right-alignment of hint
     used = bar.cell_len + hint.cell_len
     gap = width - used
-    if gap > 0:
-        bar.append(" " * gap)
-    elif gap < 0:
-        # Terminal too narrow — just add one space
-        bar.append(" ")
-
-    bar.append_text(hint)
+    if gap < 0:
+        # Terminal too narrow — drop hint to save space
+        # No hint appended
+        pass
+    else:
+        if gap > 0:
+            bar.append(" " * gap)
+        bar.append_text(hint)
 
     return bar

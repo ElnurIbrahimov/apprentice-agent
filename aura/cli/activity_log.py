@@ -2,11 +2,15 @@
 """Activity log — SQLite-backed queryable interaction history."""
 from __future__ import annotations
 import json
+import logging
+import re
 import sqlite3
 import time
 from pathlib import Path
 from typing import List, Dict, Optional
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 
 _LOG_DB_PATH = Path.home() / ".aura" / "logs.db"
@@ -36,7 +40,7 @@ class ActivityLog:
         self._init_db()
 
     def _init_db(self) -> None:
-        conn = sqlite3.connect(str(self._db_path))
+        conn = sqlite3.connect(str(self._db_path), timeout=10)
         try:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS interactions (
@@ -57,7 +61,7 @@ class ActivityLog:
             """)
             conn.execute("""
                 CREATE VIRTUAL TABLE IF NOT EXISTS interactions_fts
-                USING fts5(prompt, response, content=interactions, content_rowid=id)
+                USING fts5(prompt, response)
             """)
             conn.commit()
         finally:
@@ -67,7 +71,7 @@ class ActivityLog:
             session_id: str = "", tokens_in: int = 0, tokens_out: int = 0,
             cost: float = 0.0, tool_calls: int = 0) -> int:
         """Log an interaction. Returns the row ID."""
-        conn = sqlite3.connect(str(self._db_path))
+        conn = sqlite3.connect(str(self._db_path), timeout=10)
         try:
             cursor = conn.execute(
                 """INSERT INTO interactions
@@ -84,7 +88,8 @@ class ActivityLog:
             )
             conn.commit()
             return row_id
-        except Exception:
+        except Exception as e:
+            logger.warning("[ActivityLog] Failed to log interaction: %s", e)
             conn.rollback()
             return -1
         finally:
@@ -92,11 +97,11 @@ class ActivityLog:
 
     def search(self, query: str, limit: int = 20) -> List[Dict]:
         """Full-text search across prompts and responses."""
-        conn = sqlite3.connect(str(self._db_path))
+        conn = sqlite3.connect(str(self._db_path), timeout=10)
         conn.row_factory = sqlite3.Row
         try:
             # Sanitize FTS query
-            safe_query = " ".join(w for w in query.split() if w.isalnum())
+            safe_query = " ".join(re.sub(r'[^\w\s]', '', query).split())
             if not safe_query:
                 return []
             rows = conn.execute(
@@ -114,7 +119,7 @@ class ActivityLog:
 
     def get_recent(self, limit: int = 20) -> List[Dict]:
         """Get recent interactions."""
-        conn = sqlite3.connect(str(self._db_path))
+        conn = sqlite3.connect(str(self._db_path), timeout=10)
         conn.row_factory = sqlite3.Row
         try:
             rows = conn.execute(
@@ -129,7 +134,7 @@ class ActivityLog:
 
     def get_stats(self) -> Dict:
         """Get aggregate statistics."""
-        conn = sqlite3.connect(str(self._db_path))
+        conn = sqlite3.connect(str(self._db_path), timeout=10)
         try:
             row = conn.execute("""
                 SELECT COUNT(*) as total,
@@ -153,7 +158,7 @@ class ActivityLog:
 
     def export_session(self, session_id: str, format: str = "markdown") -> str:
         """Export a session's interactions."""
-        conn = sqlite3.connect(str(self._db_path))
+        conn = sqlite3.connect(str(self._db_path), timeout=10)
         conn.row_factory = sqlite3.Row
         try:
             rows = conn.execute(

@@ -43,10 +43,15 @@ class TestResult:
 def run_tests(test_cmd: str, cwd: str = ".", timeout: int = 300) -> TestResult:
     """Run tests and return parsed results."""
     import shlex
+    import os
     start = time.time()
     try:
+        if os.name == "nt":
+            cmd_args = shlex.split(test_cmd, posix=False)
+        else:
+            cmd_args = shlex.split(test_cmd)
         proc = subprocess.run(
-            shlex.split(test_cmd),
+            cmd_args,
             capture_output=True, text=True, timeout=timeout,
             cwd=cwd, shell=False,
         )
