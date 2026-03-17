@@ -675,6 +675,9 @@ class AgenticLoop:
                         tool_calls = data
                     elif chunk_type == "done":
                         model_used = data.get("model", "")
+                        # Use cleaned content from adapter (strips <tool_call> tags)
+                        if data.get("content"):
+                            content = data["content"]
                     elif chunk_type == "error":
                         stream_error = data.get("error", "Unknown stream error")
                         break
@@ -711,7 +714,12 @@ class AgenticLoop:
                     tool_calls = getattr(msg, "tool_calls", None)
                     content = getattr(msg, "content", "") or ""
             else:
-                content = accumulated
+                content = content or accumulated  # prefer cleaned content from "done" event
+
+            # Strip any lingering tool XML from content
+            import re as _re
+            content = _re.sub(r'</?tool_call>|</?tool_result[^>]*>', '', content).strip()
+            content = _re.sub(r'\n{3,}', '\n\n', content)
 
             if not tool_calls:
                 # No tool calls — LLM is done

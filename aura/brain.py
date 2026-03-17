@@ -581,13 +581,40 @@ class OllamaBrain:
 
         aug_messages = self._inject_tool_prompt(messages, tools)
         accumulated = ""
+        display_buffer = ""
+        in_tool_call = False  # Stop displaying once <tool_call> detected
 
         try:
             for chunk in client.chat(model=model, messages=aug_messages, stream=True):
                 delta = _resp_content(chunk) if chunk else ""
-                if delta:
-                    accumulated += delta
-                    yield ("content", delta)
+                if not delta:
+                    continue
+                accumulated += delta
+
+                if in_tool_call:
+                    continue  # Silently accumulate, don't display
+
+                # Check if this chunk or the buffer contains <tool_call>
+                display_buffer += delta
+                if "<tool_call>" in display_buffer or "<tool_call" in display_buffer:
+                    # Flush everything before the tag, then stop displaying
+                    before = display_buffer.split("<tool_call")[0].rstrip()
+                    if before:
+                        yield ("content", before)
+                    in_tool_call = True
+                    continue
+
+                # No tag detected — safe to yield for display
+                # But hold back last 12 chars in case tag spans chunks
+                if len(display_buffer) > 12:
+                    safe = display_buffer[:-12]
+                    display_buffer = display_buffer[-12:]
+                    yield ("content", safe)
+
+            # Flush remaining buffer if no tool call was detected
+            if not in_tool_call and display_buffer:
+                yield ("content", display_buffer)
+
         except Exception as e:
             logger.error(f"[BRAIN] ChatGPT stream error: {e}")
             yield ("error", {"error": str(e)})
