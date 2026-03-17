@@ -9,6 +9,15 @@ HISTORY_FILE = Path.home() / ".aura_history"
 
 _session_ok = True
 
+# Signal constants for keybindings — returned as pseudo-input from prompt_toolkit
+SIGNAL_MODEL_PICK = "__MODEL_PICK__"
+SIGNAL_CLEAR_SCREEN = "__CLEAR_SCREEN__"
+SIGNAL_NEW_SESSION = "__NEW_SESSION__"
+SIGNAL_COMMAND_PALETTE = "__CMD_PALETTE__"
+SIGNAL_OPEN_EDITOR = "__OPEN_EDITOR__"
+SIGNAL_REWIND = "__REWIND__"
+SIGNAL_CYCLE_PERMS = "__CYCLE_PERMS__"
+
 # All slash commands with descriptions (for autocomplete)
 SLASH_COMMANDS = [
     ("/quit", "Exit AURA"),
@@ -35,6 +44,8 @@ SLASH_COMMANDS = [
     ("/goal", "Run a goal"),
     ("/trust", "Enable trust mode (auto-approve all tools)"),
     ("/cost", "Show session cost breakdown"),
+    ("/context", "Show context window usage"),
+    ("/rewind", "Rewind file changes to a checkpoint"),
 ]
 
 # Subcommand completions for commands that accept them
@@ -144,7 +155,37 @@ def create_session():
 
         @kb.add("escape", "m")  # Alt+M or Esc then M
         def _model_pick(event):
-            event.app.exit(result="__MODEL_PICK__")
+            event.app.exit(result=SIGNAL_MODEL_PICK)
+
+        @kb.add('c-l')
+        def _clear(event):
+            event.app.current_buffer.text = SIGNAL_CLEAR_SCREEN
+            event.app.current_buffer.validate_and_handle()
+
+        @kb.add('c-n')
+        def _new_session(event):
+            event.app.current_buffer.text = SIGNAL_NEW_SESSION
+            event.app.current_buffer.validate_and_handle()
+
+        @kb.add('c-k')
+        def _palette(event):
+            event.app.current_buffer.text = SIGNAL_COMMAND_PALETTE
+            event.app.current_buffer.validate_and_handle()
+
+        @kb.add('c-g')
+        def _editor(event):
+            event.app.current_buffer.text = SIGNAL_OPEN_EDITOR
+            event.app.current_buffer.validate_and_handle()
+
+        @kb.add('s-tab')
+        def _cycle_perms(event):
+            event.app.current_buffer.text = SIGNAL_CYCLE_PERMS
+            event.app.current_buffer.validate_and_handle()
+
+        @kb.add('escape', 'escape')
+        def _rewind(event):
+            event.app.current_buffer.text = SIGNAL_REWIND
+            event.app.current_buffer.validate_and_handle()
 
         session = PromptSession(
             history=FileHistory(str(HISTORY_FILE)),
@@ -164,7 +205,7 @@ def create_session():
 
 
 def get_input(session) -> "str | None":
-    """Get user input. Returns None on exit, '__MODEL_PICK__' for Alt+M."""
+    """Get user input. Returns None on exit, or a SIGNAL_* constant for keybindings."""
     try:
         if session is not None and _session_ok:
             result = session.prompt([("class:prompt", "\n  > ")]).strip()

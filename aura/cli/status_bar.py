@@ -32,6 +32,9 @@ def build_status_bar(
     tool_count: int = 0,
     cost_usd: float = 0.0,
     tier: str = "",
+    token_used: int = 0,
+    token_limit: int = 128000,
+    permission_mode: str = "careful",
 ) -> Text:
     """Build a single-line status bar that spans the full terminal width."""
 
@@ -78,6 +81,19 @@ def build_status_bar(
 
     if cost_usd > 0:
         center.append(f" | ${cost_usd:.3f}", style="dim green")
+
+    # Context gauge
+    if token_limit > 0:
+        from aura.cli.context_bar import build_context_gauge
+        gauge_markup = build_context_gauge(token_used, token_limit)
+        center.append(" | ", style="dim")
+        center.append_text(Text.from_markup(gauge_markup))
+
+    # Permission mode indicator
+    from aura.cli.permissions_ui import get_mode_short
+    mode_markup = get_mode_short(permission_mode)
+    center.append(" | ", style="dim")
+    center.append_text(Text.from_markup(mode_markup))
 
     # -- Right section: session info --
     right_info = Text()

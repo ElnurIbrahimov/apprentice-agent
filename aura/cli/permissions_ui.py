@@ -1,0 +1,85 @@
+"""Permission tier UI — mode cycling and status display."""
+from __future__ import annotations
+from enum import Enum
+from typing import Optional
+
+
+class PermissionMode(str, Enum):
+    PLAN = "plan"
+    CAREFUL = "careful"
+    AUTO_EDIT = "auto_edit"
+    FULL_AUTO = "full_auto"
+
+
+_MODE_ORDER = [
+    PermissionMode.PLAN,
+    PermissionMode.CAREFUL,
+    PermissionMode.AUTO_EDIT,
+    PermissionMode.FULL_AUTO,
+]
+
+_MODE_DESCRIPTIONS = {
+    PermissionMode.PLAN: "Plan Mode — read-only, no file edits or commands",
+    PermissionMode.CAREFUL: "Careful — approve every edit and shell command",
+    PermissionMode.AUTO_EDIT: "Auto-Edit — file edits auto-apply, commands ask",
+    PermissionMode.FULL_AUTO: "Full Auto — everything runs autonomously",
+}
+
+_MODE_INDICATORS = {
+    PermissionMode.PLAN: "[blue]◎ PLAN[/blue]",
+    PermissionMode.CAREFUL: "[yellow]◉ CAREFUL[/yellow]",
+    PermissionMode.AUTO_EDIT: "[green]◉ AUTO-EDIT[/green]",
+    PermissionMode.FULL_AUTO: "[red]● FULL-AUTO[/red]",
+}
+
+_MODE_SHORT = {
+    PermissionMode.PLAN: "[blue]PLAN[/blue]",
+    PermissionMode.CAREFUL: "[yellow]CARE[/yellow]",
+    PermissionMode.AUTO_EDIT: "[green]AUTO[/green]",
+    PermissionMode.FULL_AUTO: "[red]FULL[/red]",
+}
+
+
+def cycle_permission_mode(current: str) -> str:
+    """Cycle to the next permission mode."""
+    try:
+        current_mode = PermissionMode(current)
+    except ValueError:
+        return PermissionMode.CAREFUL.value
+    idx = _MODE_ORDER.index(current_mode)
+    next_idx = (idx + 1) % len(_MODE_ORDER)
+    return _MODE_ORDER[next_idx].value
+
+
+def get_mode_description(mode: str) -> str:
+    """Get human-readable description of a permission mode."""
+    try:
+        return _MODE_DESCRIPTIONS[PermissionMode(mode)]
+    except (ValueError, KeyError):
+        return "Unknown mode"
+
+
+def get_mode_indicator(mode: str) -> str:
+    """Get full indicator string with icon."""
+    try:
+        return _MODE_INDICATORS[PermissionMode(mode)]
+    except (ValueError, KeyError):
+        return "[dim]???[/dim]"
+
+
+def get_mode_short(mode: str) -> str:
+    """Get short indicator for status bar."""
+    try:
+        return _MODE_SHORT[PermissionMode(mode)]
+    except (ValueError, KeyError):
+        return "[dim]???[/dim]"
+
+
+def should_auto_approve_edit(mode: str) -> bool:
+    return mode in (PermissionMode.AUTO_EDIT.value, PermissionMode.FULL_AUTO.value)
+
+def should_auto_approve_command(mode: str) -> bool:
+    return mode == PermissionMode.FULL_AUTO.value
+
+def should_block_mutations(mode: str) -> bool:
+    return mode == PermissionMode.PLAN.value

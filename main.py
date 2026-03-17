@@ -13,6 +13,7 @@ warnings.filterwarnings("ignore", message="Revert to STA COM")
 
 import argparse
 import sys
+from pathlib import Path
 
 def main():
     parser = argparse.ArgumentParser(
@@ -348,8 +349,15 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
         show_error, show_info, show_status_bar, show_help,
         show_welcome_info, show_tool_call,
     )
-    from aura.cli.input import create_session, get_input
+    from aura.cli.input import (
+        create_session, get_input,
+        SIGNAL_MODEL_PICK, SIGNAL_CLEAR_SCREEN, SIGNAL_NEW_SESSION,
+        SIGNAL_COMMAND_PALETTE, SIGNAL_OPEN_EDITOR, SIGNAL_REWIND, SIGNAL_CYCLE_PERMS,
+    )
     from aura.cli.model_picker import pick_model, update_model_roles_from_config
+    from aura.cli.context_bar import estimate_messages_tokens, get_context_limit, build_context_breakdown, estimate_tokens
+    from aura.cli.permissions_ui import cycle_permission_mode, get_mode_description, PermissionMode
+    from aura.cli.checkpoint import CheckpointManager
     from aura.core.agentic_loop import AgenticLoop
     from aura.core.session import AgenticSession
     from aura.core.permissions import PermissionManager
@@ -426,6 +434,16 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
         aura_config=aura_config,
         router=chat_router,
     )
+    # Initialize checkpoint manager
+    checkpoint_mgr = CheckpointManager()
+    agentic._checkpoint_mgr = checkpoint_mgr
+    agentic.executor._checkpoint_mgr = checkpoint_mgr
+
+    # Initialize permission mode
+    current_perm_mode = "careful"
+    if trust:
+        current_perm_mode = "full_auto"
+
     # Store on agent so /clear and /trust can access it
     agent._agentic_loop = agentic
     agent._agentic_permissions = permissions
@@ -443,9 +461,13 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
     _current_model = explicit_model or "auto"
     _session_title = ""
     _msg_count = 0
+    _token_used = 0
+    _token_limit = get_context_limit(_current_model)
     show_status_bar(
         model=_current_model, project_type=_project_type,
         session_title=_session_title, message_count=_msg_count,
+        token_used=_token_used, token_limit=_token_limit,
+        permission_mode=current_perm_mode,
     )
 
     if speak:
@@ -463,8 +485,91 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
             console.print("\n[dim]Goodbye.[/dim]\n")
             break
 
+        # Handle keybinding signals
+        if user_input == SIGNAL_CLEAR_SCREEN:
+            console.clear()
+            show_status_bar(
+                model=_current_model, project_type=_project_type,
+                session_title=_session_title, message_count=_msg_count,
+                token_used=_token_used, token_limit=_token_limit,
+                permission_mode=current_perm_mode,
+            )
+            continue
+        elif user_input == SIGNAL_NEW_SESSION:
+            agentic._conversation_history.clear()
+            checkpoint_mgr.clear()
+            _msg_count = 0
+            _token_used = 0
+            console.print("[dim]New session started[/dim]")
+            show_status_bar(
+                model=_current_model, project_type=_project_type,
+                session_title=_session_title, message_count=_msg_count,
+                token_used=_token_used, token_limit=_token_limit,
+                permission_mode=current_perm_mode,
+            )
+            continue
+        elif user_input == SIGNAL_COMMAND_PALETTE:
+            console.print("[dim]Command palette — type / for commands[/dim]")
+            continue
+        elif user_input == SIGNAL_OPEN_EDITOR:
+            import tempfile, subprocess as _sp
+            editor = os.environ.get("EDITOR", "notepad" if os.name == "nt" else "nano")
+            with tempfile.NamedTemporaryFile(suffix=".md", delete=False, mode="w") as f:
+                f.write("")
+                tmp_path = f.name
+            _sp.call([editor, tmp_path])
+            user_input = Path(tmp_path).read_text().strip()
+            Path(tmp_path).unlink(missing_ok=True)
+            if not user_input:
+                continue
+            # Fall through to normal processing with the editor content
+        elif user_input == SIGNAL_CYCLE_PERMS:
+            current_perm_mode = cycle_permission_mode(current_perm_mode)
+            console.print(f"[dim]{get_mode_description(current_perm_mode)}[/dim]")
+            if current_perm_mode == "full_auto":
+                permissions.set_trust_mode(True)
+            elif current_perm_mode == "plan":
+                permissions.set_trust_mode(False)
+            else:
+                permissions.set_trust_mode(False)
+            show_status_bar(
+                model=_current_model, project_type=_project_type,
+                session_title=_session_title, message_count=_msg_count,
+                token_used=_token_used, token_limit=_token_limit,
+                permission_mode=current_perm_mode,
+            )
+            continue
+        elif user_input == SIGNAL_REWIND:
+            cps = checkpoint_mgr.list_checkpoints()
+            if not cps:
+                console.print("[dim]No checkpoints available[/dim]")
+                continue
+            console.print("\n[bold]Rewind to checkpoint:[/bold]")
+            import time as _time
+            for i, cp in enumerate(cps[:10]):
+                ts = _time.strftime("%H:%M:%S", _time.localtime(cp["timestamp"]))
+                files = ", ".join(
+                    f["original_path"].split("/")[-1].split("\\")[-1]
+                    for f in cp["files"]
+                )
+                console.print(f"  {i+1}. [{ts}] {cp['label']} ({files})")
+            console.print("  0. Cancel")
+            try:
+                choice = input("\nSelect checkpoint: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                continue
+            if choice.isdigit() and 0 < int(choice) <= min(10, len(cps)):
+                selected = cps[int(choice) - 1]
+                checkpoint_mgr.restore(selected["id"])
+                files = ", ".join(
+                    f["original_path"].split("/")[-1].split("\\")[-1]
+                    for f in selected["files"]
+                )
+                console.print(f"[green]Restored: {files}[/green]")
+            continue
+
         # Handle Alt+M model picker
-        if user_input == "__MODEL_PICK__":
+        if user_input == SIGNAL_MODEL_PICK:
             _current_model = agent.brain._model_override or "auto"
             choice = pick_model(console, _current_model)
             if choice:
@@ -478,9 +583,12 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
                     _current_model = choice
                     agentic.model_override = choice
                     show_info(f"Model set to {choice}")
+            _token_limit = get_context_limit(_current_model)
             show_status_bar(
                 model=_current_model, project_type=_project_type,
                 session_title=_session_title, message_count=_msg_count,
+                token_used=_token_used, token_limit=_token_limit,
+                permission_mode=current_perm_mode,
             )
             continue
 
@@ -505,9 +613,13 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
         if user_input.startswith("/"):
             handle_command(agent, user_input, speak=speak)
             _current_model = agent.brain._model_override or "auto"
+            _token_used = estimate_messages_tokens(agentic._conversation_history)
+            _token_limit = get_context_limit(_current_model)
             show_status_bar(
                 model=_current_model, project_type=_project_type,
                 session_title=_session_title, message_count=_msg_count,
+                token_used=_token_used, token_limit=_token_limit,
+                permission_mode=current_perm_mode,
             )
             continue
 
@@ -545,6 +657,8 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
         # Update status bar
         _msg_count += 1
         _current_model = agent.brain._model_override or "auto"
+        _token_used = estimate_messages_tokens(agentic._conversation_history)
+        _token_limit = get_context_limit(_current_model)
         cost_usd = 0.0
         try:
             stats = agent.brain.get_session_stats()
@@ -555,6 +669,8 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
             model=_current_model, project_type=_project_type,
             session_title=_session_title, message_count=_msg_count,
             cost_usd=cost_usd,
+            token_used=_token_used, token_limit=_token_limit,
+            permission_mode=current_perm_mode,
         )
 
         if speak and response_text:
@@ -736,17 +852,57 @@ def handle_command(agent, command: str, speak: bool = False):
             agent._agentic_permissions.set_trust_mode(True)
         print("  Trust mode enabled — all tool calls auto-approved.")
     elif cmd == "/context":
-        if hasattr(agent, '_agentic_loop') and agent._agentic_loop.context_mgr:
-            mgr = agent._agentic_loop.context_mgr
-            report = mgr.usage_report(agent._agentic_loop._conversation_history)
-            print(f"\n  Context Window:")
-            print(f"    Model: {report['model'] or 'auto'}")
-            print(f"    Used: ~{report['used_tokens']:,} / {report['budget']:,} tokens ({report['pct_used']}%)")
-            print(f"    Max context: {report['max_tokens']:,}")
-            print(f"    Compactions: {report['compactions']}")
-            print()
+        if hasattr(agent, '_agentic_loop'):
+            from aura.cli.display import console as _ctx_console
+            from aura.cli.context_bar import estimate_messages_tokens as _est_msgs, get_context_limit as _get_lim, build_context_breakdown as _build_bd, estimate_tokens as _est_tok
+            from rich.panel import Panel as _CtxPanel
+            _al = agent._agentic_loop
+            _tok_used = _est_msgs(_al._conversation_history)
+            _tok_limit = _get_lim(agent.brain.current_model if hasattr(agent.brain, 'current_model') else "default")
+            _sys_tokens = 0
+            try:
+                _sys_tokens = _est_tok(_al._build_system_prompt(""))
+            except Exception:
+                pass
+            _ctx_console.print(_CtxPanel(
+                _build_bd(_sys_tokens, _tok_used, 0, _tok_limit),
+                title="[bold cyan]Context Window[/bold cyan]",
+                border_style="cyan",
+            ))
         else:
             print("  Context tracking not available.")
+    elif cmd == "/rewind":
+        if hasattr(agent, '_agentic_loop') and hasattr(agent._agentic_loop, '_checkpoint_mgr'):
+            from aura.cli.display import console as _rw_console
+            _cp_mgr = agent._agentic_loop._checkpoint_mgr
+            _cps = _cp_mgr.list_checkpoints()
+            if not _cps:
+                print("  No checkpoints available.")
+                return
+            _rw_console.print("\n[bold]Rewind to checkpoint:[/bold]")
+            import time as _rw_time
+            for _i, _cp in enumerate(_cps[:10]):
+                _ts = _rw_time.strftime("%H:%M:%S", _rw_time.localtime(_cp["timestamp"]))
+                _files = ", ".join(
+                    f["original_path"].split("/")[-1].split("\\")[-1]
+                    for f in _cp["files"]
+                )
+                _rw_console.print(f"  {_i+1}. [{_ts}] {_cp['label']} ({_files})")
+            _rw_console.print("  0. Cancel")
+            try:
+                _rw_choice = input("\nSelect checkpoint: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                return
+            if _rw_choice.isdigit() and 0 < int(_rw_choice) <= min(10, len(_cps)):
+                _sel = _cps[int(_rw_choice) - 1]
+                _cp_mgr.restore(_sel["id"])
+                _files = ", ".join(
+                    f["original_path"].split("/")[-1].split("\\")[-1]
+                    for f in _sel["files"]
+                )
+                _rw_console.print(f"[green]Restored: {_files}[/green]")
+        else:
+            print("  No checkpoint manager available.")
     elif cmd == "/cost":
         stats = agent.brain.get_session_stats()
         print(f"\n  Session Cost:")

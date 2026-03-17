@@ -66,6 +66,9 @@ def show_status_bar(
     elapsed: float = 0.0,
     cost_usd: float = 0.0,
     tier: str = "",
+    token_used: int = 0,
+    token_limit: int = 128000,
+    permission_mode: str = "careful",
 ):
     """Print the status bar line."""
     from .status_bar import build_status_bar
@@ -75,6 +78,8 @@ def show_status_bar(
         session_title=session_title, message_count=message_count,
         width=width, thinking=thinking, elapsed=elapsed,
         cost_usd=cost_usd, tier=tier,
+        token_used=token_used, token_limit=token_limit,
+        permission_mode=permission_mode,
     )
     console.print(bar, style="on grey11", end="\n")
 
@@ -89,8 +94,26 @@ def show_thinking(label: str = "Working..."):
     )
 
 
-def show_tool_call(tool_name: str, description: str = ""):
-    """Print a tool call in a compact styled format."""
+def show_tool_call(tool_name: str, description: str = "", result=None):
+    """Print a tool call in a compact styled format.
+
+    If result is provided and contains diff info for edit/write, show a compact diff summary.
+    """
+    if tool_name in ("edit_file", "write_file") and result and isinstance(result, dict) and result.get("diff"):
+        try:
+            from aura.cli.diff_viewer import render_diff_compact
+            filename = result.get("path", "file")
+            filename = filename.split("/")[-1].split("\\")[-1]
+            summary = render_diff_compact(
+                result.get("old_content", ""),
+                result.get("new_content", ""),
+                filename=filename,
+            )
+            console.print(f"  {summary}")
+            return
+        except Exception:
+            pass  # Fall through to default display
+
     line = Text()
     line.append("  ▸ ", style="dim yellow")
     line.append(tool_name, style="bold yellow")
@@ -203,6 +226,12 @@ def show_help():
 
     # --- Keyboard shortcuts ---
     table.add_row("Alt+M", "Model picker (interactive)")
+    table.add_row("Ctrl+L", "Clear screen")
+    table.add_row("Ctrl+N", "New session")
+    table.add_row("Ctrl+K", "Command palette")
+    table.add_row("Ctrl+G", "Open editor for long prompt")
+    table.add_row("Shift+Tab", "Cycle permission mode (Plan / Careful / Auto-Edit / Full Auto)")
+    table.add_row("Esc Esc", "Rewind to checkpoint")
     table.add_row("Ctrl+C / Ctrl+D", "Exit")
     table.add_row("?", "Show this help")
 
@@ -237,6 +266,8 @@ def show_help():
     table.add_row("/hook [list|add|remove]", "Manage event hooks")
     table.add_row("/speak <text>", "Text-to-speech")
     table.add_row("/recall <query>", "Search memories")
+    table.add_row("/context", "Show context window usage")
+    table.add_row("/rewind", "Rewind file changes to a checkpoint")
 
     table.add_row("", "")
 

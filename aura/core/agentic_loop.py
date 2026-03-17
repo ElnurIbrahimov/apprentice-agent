@@ -390,6 +390,14 @@ class ToolExecutor:
         """Edit file with diff preview and approval. Uses CodeEditTool for fuzzy matching."""
         path = self._resolve_path(args["path"])
 
+        # Checkpoint: snapshot file before editing
+        _cp = getattr(self, '_checkpoint_mgr', None)
+        if _cp:
+            try:
+                _cp.snapshot(path, label=f"before edit: {Path(path).name}")
+            except Exception:
+                pass  # Don't fail the edit if checkpoint fails
+
         # Step 1: dry-run to preview
         preview = self.code_edit.edit(
             path=path,
@@ -423,6 +431,13 @@ class ToolExecutor:
 
     def _write_file(self, args: dict) -> dict:
         path = self._resolve_path(args["path"])
+        # Checkpoint: snapshot existing file before overwriting
+        _cp = getattr(self, '_checkpoint_mgr', None)
+        if _cp and os.path.exists(path):
+            try:
+                _cp.snapshot(path, label=f"before write: {Path(path).name}")
+            except Exception:
+                pass
         return self.fs.write_file(path=path, content=args["content"], overwrite=True)
 
     def _git_dispatch(self, args: dict) -> dict:
