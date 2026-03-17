@@ -80,6 +80,9 @@ def show_status_bar(
     token_used: int = 0,
     token_limit: int = 128000,
     permission_mode: str = "careful",
+    bg_indicator: str = "",
+    research_indicator: str = "",
+    mood_indicator: str = "",
 ):
     """Print the status bar line."""
     from .status_bar import build_status_bar
@@ -91,6 +94,9 @@ def show_status_bar(
         cost_usd=cost_usd, tier=tier,
         token_used=token_used, token_limit=token_limit,
         permission_mode=permission_mode,
+        bg_indicator=bg_indicator,
+        research_indicator=research_indicator,
+        mood_indicator=mood_indicator,
     )
     console.print(bar, style="on grey11", end="\n")
 
@@ -312,9 +318,28 @@ def show_help():
 
     table.add_row("", "")
 
+    # --- Parallel & background ---
+    table.add_row("/fleet <task>", "Run parallel sub-agents on decomposed task")
+    table.add_row("& <prompt>", "Run prompt as background task")
+    table.add_row("/tasks", "Show background tasks")
+
+    table.add_row("", "")
+
+    # --- Research ---
+    table.add_row("/research <topic>", "Start research mode with citation tracking")
+    table.add_row("/sources", "Show collected research sources")
+    table.add_row("/export research", "Export research session to Markdown")
+
+    table.add_row("", "")
+
+    # --- Emotional & hooks ---
+    table.add_row("/mood", "Show current emotional state")
+    table.add_row("/hook [list|add|remove]", "Manage automation hooks")
+
+    table.add_row("", "")
+
     # --- Utilities ---
     table.add_row("/browse <url>", "Browse web pages")
-    table.add_row("/hook [list|add|remove]", "Manage event hooks")
     table.add_row("/speak <text>", "Text-to-speech")
     table.add_row("/recall <query>", "Search memories")
     table.add_row("/context", "Show context window usage")

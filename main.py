@@ -140,6 +140,11 @@ def main():
         default="text",
         help="Output format for non-interactive mode (default: text)"
     )
+    parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Verbose mode: expand all tool output sections"
+    )
 
     args = parser.parse_args()
 
@@ -280,7 +285,7 @@ def main():
         run_agentic_oneshot(agent, prompt, args)
     else:
         # Default: interactive chat mode (just type 'aura' to start)
-        run_chat_mode(agent, speak=args.speak, trust=args.trust, model=args.model)
+        run_chat_mode(agent, speak=args.speak, trust=args.trust, model=args.model, verbose=args.verbose)
 
 
 def run_voice_mode(agent, enable_barge_in: bool = True):
@@ -396,7 +401,7 @@ def _rewind_picker(cp_mgr, console):
     return False
 
 
-def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = None):
+def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = None, verbose: bool = False):
     """Interactive CLI — agentic loop with status bar, model picker, tool calling."""
     from aura.cli.display import (
         console, show_banner, show_response,
@@ -507,6 +512,34 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
     if trust:
         current_perm_mode = "full_auto"
 
+    # Initialize Phase 3 modules: background manager, research context, hooks
+    from aura.cli.background import BackgroundManager, notify_completion, create_background_indicator
+    from aura.cli.research_mode import ResearchContext, create_research_indicator
+    from aura.cli.hooks import HookManager, HookEvent
+    from aura.cli.mood_display import create_mood_indicator
+
+    bg_manager = BackgroundManager()
+    bg_manager.set_completion_callback(notify_completion)
+    agent._bg_manager = bg_manager
+
+    research_ctx = ResearchContext()
+    agent._research_ctx = research_ctx
+
+    hook_mgr = HookManager()
+    agent._hook_manager = hook_mgr
+    if aura_config:
+        hook_mgr.load_from_config(aura_config)
+        hook_mgr.load_builtin_hooks(aura_config)
+
+    # Initialize disclosure manager for progressive tool output
+    if verbose:
+        from aura.cli.disclosure import DisclosureManager
+        from aura.cli import display as _display_mod
+        _display_mod._disclosure = DisclosureManager(default_expanded=True)
+
+    # Fire session_start hooks
+    hook_mgr.fire(HookEvent.SESSION_START, {"project_root": project_root})
+
     # Initialize mid-turn steering queue
     from aura.cli.steering import SteeringQueue
     steering = SteeringQueue()
@@ -530,7 +563,33 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
     _msg_count = 0
     _token_used = 0
     _token_limit = get_context_limit(_current_model)
-    show_status_bar(
+
+    def _phase3_indicators():
+        """Build Phase 3 status bar indicators."""
+        _bg_ind = create_background_indicator(bg_manager)
+        _res_ind = create_research_indicator(research_ctx)
+        _mood_ind = ""
+        try:
+            from aura.emotion.alma_engine import get_alma_engine
+            _engine = get_alma_engine()
+            _state = _engine.get_emotional_state() if _engine else {}
+            if _state:
+                _mood_ind = create_mood_indicator(_state)
+        except Exception:
+            pass
+        return _bg_ind, _res_ind, _mood_ind
+
+    def _show_bar(**kwargs):
+        """Show status bar with Phase 3 indicators."""
+        bg_ind, res_ind, mood_ind = _phase3_indicators()
+        show_status_bar(
+            bg_indicator=bg_ind,
+            research_indicator=res_ind,
+            mood_indicator=mood_ind,
+            **kwargs,
+        )
+
+    _show_bar(
         model=_current_model, project_type=_project_type,
         session_title=_session_title, message_count=_msg_count,
         token_used=_token_used, token_limit=_token_limit,
@@ -565,7 +624,7 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
         # Handle keybinding signals
         if user_input == SIGNAL_CLEAR_SCREEN:
             console.clear()
-            show_status_bar(
+            _show_bar(
                 model=_current_model, project_type=_project_type,
                 session_title=_session_title, message_count=_msg_count,
                 token_used=_token_used, token_limit=_token_limit,
@@ -582,7 +641,7 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
             _msg_count = 0
             _token_used = 0
             console.print("[dim]New session started[/dim]")
-            show_status_bar(
+            _show_bar(
                 model=_current_model, project_type=_project_type,
                 session_title=_session_title, message_count=_msg_count,
                 token_used=_token_used, token_limit=_token_limit,
@@ -618,7 +677,7 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
                 permissions.set_trust_mode(False)
             else:
                 permissions.set_trust_mode(False)
-            show_status_bar(
+            _show_bar(
                 model=_current_model, project_type=_project_type,
                 session_title=_session_title, message_count=_msg_count,
                 token_used=_token_used, token_limit=_token_limit,
@@ -648,7 +707,7 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
                     agentic.model_override = choice
                     show_info(f"Model set to {choice}")
             _token_limit = get_context_limit(_current_model)
-            show_status_bar(
+            _show_bar(
                 model=_current_model, project_type=_project_type,
                 session_title=_session_title, message_count=_msg_count,
                 token_used=_token_used, token_limit=_token_limit,
@@ -657,6 +716,17 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
             continue
 
         if not user_input:
+            continue
+
+        # Background mode: & prefix submits task to background
+        if user_input.startswith("& ") or (user_input.startswith("&") and len(user_input) > 1 and user_input[1] != " "):
+            bg_prompt = user_input.lstrip("& ").strip()
+            if bg_prompt:
+                task = bg_manager.submit(bg_prompt, lambda p: agentic.run(p))
+                if task:
+                    console.print(f"[cyan]Background task started: {task.id}[/cyan]")
+                else:
+                    console.print("[red]Too many background tasks running.[/red]")
             continue
 
         # Signal activity to daemon (if running)
@@ -679,7 +749,7 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
             _current_model = agent.brain._model_override or "auto"
             _token_used = estimate_messages_tokens(agentic._conversation_history)
             _token_limit = get_context_limit(_current_model)
-            show_status_bar(
+            _show_bar(
                 model=_current_model, project_type=_project_type,
                 session_title=_session_title, message_count=_msg_count,
                 token_used=_token_used, token_limit=_token_limit,
@@ -697,6 +767,17 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
                 if not desc and "command" in args:
                     desc = args["command"][:60]
                 show_tool_call(name, str(desc))
+                # Fire post_tool_call hooks
+                hook_mgr.fire(HookEvent.POST_TOOL_CALL, {
+                    "tool_name": name,
+                    "tool_args": str(args)[:500],
+                })
+                # Fire post_edit hooks for edit/write tools
+                if name in ("edit_file", "write_file"):
+                    hook_mgr.fire(HookEvent.POST_EDIT, {
+                        "tool_name": name,
+                        "file_path": args.get("path", args.get("file_path", "")),
+                    })
 
             result = agentic.run(
                 user_input,
@@ -740,13 +821,19 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
             cost_usd = stats.get("cost_usd", 0.0)
         except Exception:
             pass
-        show_status_bar(
+        _show_bar(
             model=_current_model, project_type=_project_type,
             session_title=_session_title, message_count=_msg_count,
             cost_usd=cost_usd,
             token_used=_token_used, token_limit=_token_limit,
             permission_mode=current_perm_mode,
         )
+
+        # Fire post_response hooks
+        hook_mgr.fire(HookEvent.POST_RESPONSE, {
+            "response": response_text[:500] if response_text else "",
+            "model": model_used,
+        })
 
         if speak and response_text:
             try:
@@ -912,8 +999,138 @@ def handle_command(agent, command: str, speak: bool = False):
         _handle_agent_command(agent, arg)
     elif cmd == "/evolve":
         _handle_evolve_command(agent, arg)
+    elif cmd == "/fleet":
+        task = arg.strip()
+        if not task:
+            from aura.cli.display import console as _fleet_console
+            _fleet_console.print("[dim]Usage: /fleet <task description>[/dim]")
+            return
+        from aura.cli.fleet import (
+            FleetRun, FleetExecutor, parse_decomposition,
+            render_fleet_dashboard, DECOMPOSITION_PROMPT,
+        )
+        from aura.cli.display import console as _fleet_console
+        # Decompose the task
+        prompt = DECOMPOSITION_PROMPT.format(task=task)
+        response = agent.brain.think(prompt)
+        if isinstance(response, dict):
+            response = response.get("response", response.get("content", str(response)))
+        subtasks = parse_decomposition(response)
+        if not subtasks:
+            _fleet_console.print("[red]Could not decompose task into sub-tasks.[/red]")
+            return
+        fleet = FleetRun(goal=task, tasks=subtasks)
+        render_fleet_dashboard(_fleet_console, fleet)
+        _fleet_console.print(f"\n[dim]Execute {len(subtasks)} tasks in parallel? (y/n)[/dim]")
+        try:
+            choice = input("> ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return
+        if choice not in ("y", "yes"):
+            return
+        _agentic = getattr(agent, '_agentic_loop', None)
+        if _agentic:
+            executor = FleetExecutor(max_workers=3)
+            executor.run(fleet, lambda prompt: _agentic.run(prompt), on_update=lambda f: render_fleet_dashboard(_fleet_console, f))
+        else:
+            _fleet_console.print("[red]No agentic loop available for fleet execution.[/red]")
+            return
+        render_fleet_dashboard(_fleet_console, fleet)
+        return
+
+    elif cmd == "/tasks":
+        from aura.cli.display import console as _tasks_console
+        _bg_mgr = getattr(agent, '_bg_manager', None)
+        if _bg_mgr:
+            from aura.cli.background import render_tasks_table
+            render_tasks_table(_tasks_console, _bg_mgr.list_tasks())
+        else:
+            _tasks_console.print("[dim]No background tasks.[/dim]")
+        return
+
+    elif cmd == "/research":
+        from aura.cli.display import console as _res_console
+        _research_ctx = getattr(agent, '_research_ctx', None)
+        if _research_ctx is None:
+            from aura.cli.research_mode import ResearchContext
+            _research_ctx = ResearchContext()
+            agent._research_ctx = _research_ctx
+        topic = arg.strip()
+        if not topic:
+            if _research_ctx.is_active:
+                _research_ctx.stop()
+                _res_console.print("[dim]Research mode ended.[/dim]")
+            else:
+                _res_console.print("[dim]Usage: /research <topic>[/dim]")
+            return
+        _research_ctx.start(topic)
+        _res_console.print(f"[magenta]Research mode: {topic}[/magenta]")
+        return
+
+    elif cmd == "/sources":
+        from aura.cli.display import console as _src_console
+        _research_ctx = getattr(agent, '_research_ctx', None)
+        if _research_ctx:
+            from aura.cli.research_mode import render_sources
+            render_sources(_src_console, _research_ctx)
+        else:
+            _src_console.print("[dim]No research session active.[/dim]")
+        return
+
+    elif cmd == "/export" and arg.strip().startswith("research"):
+        from aura.cli.display import console as _exp_console
+        _research_ctx = getattr(agent, '_research_ctx', None)
+        if _research_ctx and _research_ctx.is_active:
+            md = _research_ctx.export_markdown()
+            out_path = Path(f"research_{_research_ctx.topic.replace(' ', '_')[:30]}.md")
+            out_path.write_text(md)
+            _exp_console.print(f"[green]Exported to {out_path}[/green]")
+        else:
+            _exp_console.print("[dim]No active research session to export.[/dim]")
+        return
+
+    elif cmd == "/mood":
+        from aura.cli.display import console as _mood_console
+        from aura.cli.mood_display import render_mood_detail
+        try:
+            from aura.emotion.alma_engine import get_alma_engine
+            engine = get_alma_engine()
+            state = engine.get_emotional_state() if engine else {}
+        except Exception:
+            state = {}
+        if state:
+            render_mood_detail(_mood_console, state)
+        else:
+            _mood_console.print("[dim]Emotional state not available.[/dim]")
+        return
+
     elif cmd == "/hook":
-        _handle_hook_command(agent, arg)
+        from aura.cli.display import console as _hook_console
+        _hook_mgr = getattr(agent, '_hook_manager', None)
+        if _hook_mgr is None:
+            from aura.cli.hooks import HookManager
+            _hook_mgr = HookManager()
+            agent._hook_manager = _hook_mgr
+        from aura.cli.hooks import render_hooks_table, HookEvent
+        sub = arg.strip().split(None, 1)
+        if not sub or sub[0] == "list":
+            render_hooks_table(_hook_console, _hook_mgr.list_hooks())
+        elif sub[0] == "add" and len(sub) > 1:
+            parts_h = sub[1].split(None, 1)
+            if len(parts_h) == 2:
+                try:
+                    _hook_mgr.add(parts_h[0], parts_h[1])
+                    _hook_console.print(f"[green]Hook added: {parts_h[0]} -> {parts_h[1]}[/green]")
+                except ValueError as e:
+                    _hook_console.print(f"[red]{e}[/red]")
+            else:
+                _hook_console.print("[dim]Usage: /hook add <event> <command>[/dim]")
+        elif sub[0] == "remove" and len(sub) > 1:
+            if _hook_mgr.remove(sub[1]):
+                _hook_console.print(f"[green]Hook removed: {sub[1]}[/green]")
+            else:
+                _hook_console.print(f"[red]Hook not found: {sub[1]}[/red]")
+        return
     elif cmd == "/sessions":
         # Show agentic sessions (full tool-call history) + legacy brain conversations
         from aura.core.session import AgenticSession as _SesCmd

@@ -39,6 +39,9 @@ def build_status_bar(
     token_limit: int = 128000,
     permission_mode: str = "careful",
     steering_queue=None,
+    bg_indicator: str = "",
+    research_indicator: str = "",
+    mood_indicator: str = "",
 ) -> Text:
     """Build a single-line status bar that spans the full terminal width."""
 
@@ -106,6 +109,16 @@ def build_status_bar(
             right_info.append(f" ({message_count} msgs)", style="dim")
     elif message_count:
         right_info.append(f"{message_count} msgs", style="dim")
+
+    # -- Phase 3 indicators: background, research, mood --
+    if bg_indicator:
+        right_info.append(" ")
+        right_info.append_text(Text.from_markup(bg_indicator))
+    if research_indicator:
+        right_info.append(" ")
+        right_info.append_text(Text.from_markup(research_indicator))
+    if mood_indicator:
+        right_info.append(f" {mood_indicator}")
 
     # -- Steering indicators --
     if steering_queue is not None:

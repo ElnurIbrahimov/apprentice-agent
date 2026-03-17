@@ -47,6 +47,12 @@ SLASH_COMMANDS = [
     ("/context", "Show context window usage"),
     ("/rewind", "Rewind file changes to a checkpoint"),
     ("/theme", "Switch color theme"),
+    ("/fleet", "Run parallel sub-agents"),
+    ("/tasks", "Show background tasks"),
+    ("/research", "Start research mode"),
+    ("/sources", "Show research sources"),
+    ("/export", "Export research to Markdown"),
+    ("/mood", "Show emotional state"),
 ]
 
 # Subcommand completions for commands that accept them
@@ -93,6 +99,14 @@ SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
         ("dracula", "Dracula color scheme"),
         ("solarized", "Solarized dark theme"),
         ("nord", "Nord color scheme"),
+    ],
+    "/hook": [
+        ("list", "Show registered hooks"),
+        ("add", "Add a new hook (event command)"),
+        ("remove", "Remove a hook by name"),
+    ],
+    "/export": [
+        ("research", "Export research session to Markdown"),
     ],
 }
 
