@@ -52,7 +52,7 @@ def test_format_injection_single():
     q.push("focus on security")
     result = q.format_injection()
     assert "focus on security" in result
-    assert "User note" in result
+    assert "SYSTEM NOTE" in result
 
 def test_format_injection_multiple():
     q = SteeringQueue()
@@ -61,7 +61,7 @@ def test_format_injection_multiple():
     result = q.format_injection()
     assert "do A" in result
     assert "also B" in result
-    assert "notes" in result.lower()
+    assert "SYSTEM NOTE" in result
 
 def test_format_injection_empty():
     q = SteeringQueue()

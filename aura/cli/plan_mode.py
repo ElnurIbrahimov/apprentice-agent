@@ -2,7 +2,7 @@
 """Editable plan mode — generate, display, edit, and track plan execution."""
 from __future__ import annotations
 import re
-from typing import List, Optional, Dict, Callable
+from typing import List, Optional, Dict
 from dataclasses import dataclass, field
 from enum import Enum
 from rich.console import Console
@@ -91,6 +91,7 @@ def parse_plan_from_llm(response: str) -> ExecutionPlan:
         # Extract goal from first heading or "Goal:" line
         if not goal and (line_stripped.startswith("# ") or line_stripped.lower().startswith("goal:")):
             goal = re.sub(r'^#\s*|^goal:\s*', '', line_stripped, flags=re.IGNORECASE).strip()
+            goal = re.sub(r'\*\*(.*?)\*\*', r'\1', goal)  # strip bold markdown
             continue
 
         # Extract approach

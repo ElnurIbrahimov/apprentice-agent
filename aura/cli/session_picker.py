@@ -55,7 +55,6 @@ def _pick_session_interactive(sessions: List[Dict], current_session_id: str) -> 
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.styles import Style
 
-    selected_idx = 0
     filter_text = [""]  # mutable container for closure
     result = [None]  # mutable container for closure
     state = {"idx": 0, "scroll_offset": 0}

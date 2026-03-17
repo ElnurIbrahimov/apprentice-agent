@@ -641,18 +641,19 @@ class AgenticLoop:
             self.iteration += 1
             self._edits_this_turn = 0  # Reset per iteration to avoid redundant auto-test
 
-            # Mid-turn steering: inject queued user messages
-            if steering_queue:
-                injection = steering_queue.format_injection()
-                if injection:
-                    messages.append({"role": "user", "content": injection})
-
-            # Budget check
+            # Budget check (before any injection or model call)
             if self.budget_usd is not None:
                 stats = self.brain.get_session_stats()
                 if stats["cost_usd"] >= self.budget_usd:
                     final_response = f"Budget limit reached (${self.budget_usd:.2f}). Stopping."
                     break
+
+            # Mid-turn steering: inject queued user messages (after budget check,
+            # and only after the first iteration so the original prompt runs clean)
+            if steering_queue and self.iteration > 1:
+                injection = steering_queue.format_injection()
+                if injection:
+                    messages.append({"role": "user", "content": injection})
 
             # Context window management — compact if approaching limit
             messages = self.context_mgr.check_and_compact(messages, self.brain)

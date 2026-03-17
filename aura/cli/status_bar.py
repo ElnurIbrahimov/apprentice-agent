@@ -38,6 +38,7 @@ def build_status_bar(
     token_used: int = 0,
     token_limit: int = 128000,
     permission_mode: str = "careful",
+    steering_queue=None,
 ) -> Text:
     """Build a single-line status bar that spans the full terminal width."""
 
@@ -105,6 +106,18 @@ def build_status_bar(
             right_info.append(f" ({message_count} msgs)", style="dim")
     elif message_count:
         right_info.append(f"{message_count} msgs", style="dim")
+
+    # -- Steering indicators --
+    if steering_queue is not None:
+        from aura.cli.steering import create_steering_indicator, create_follow_up_indicator
+        steer_ind = create_steering_indicator(steering_queue)
+        follow_ind = create_follow_up_indicator(steering_queue)
+        if steer_ind:
+            right_info.append(" ")
+            right_info.append_text(Text.from_markup(steer_ind))
+        if follow_ind:
+            right_info.append(" ")
+            right_info.append_text(Text.from_markup(follow_ind))
 
     # -- Hint (always rightmost) --
     hint = Text()

@@ -48,7 +48,9 @@ def test_is_pipe_mode_tty():
         assert not is_pipe_mode()
 
 def test_is_pipe_mode_piped():
-    with patch("sys.stdin") as mock_in, patch("sys.stdout") as mock_out:
+    # Ensure TERM is unset so the MSYS2 heuristic doesn't activate
+    with patch("sys.stdin") as mock_in, patch("sys.stdout") as mock_out, \
+         patch.dict("os.environ", {}, clear=True):
         mock_in.isatty.return_value = False
         mock_out.isatty.return_value = True
         assert is_pipe_mode()

@@ -20,6 +20,7 @@ class SteeringQueue:
 
     def push(self, message: str) -> None:
         """Queue a message to inject on the next agentic iteration."""
+        message = message[:500]  # length cap to limit injection size
         with self._lock:
             self._queue.append(message)
 
@@ -65,14 +66,18 @@ class SteeringQueue:
             self._follow_up = None
 
     def format_injection(self) -> Optional[str]:
-        """Format all queued messages as a single injection string."""
+        """Format all queued messages as a single injection string.
+
+        Messages are clearly framed as system-level notes, not raw user instructions,
+        to reduce prompt injection risk.
+        """
         messages = self.pop_all()
         if not messages:
             return None
         if len(messages) == 1:
-            return f"[User note while you were working: {messages[0]}]"
+            return f"[SYSTEM NOTE — mid-turn user comment (not a new instruction): {messages[0]}]"
         parts = "\n".join(f"  - {m}" for m in messages)
-        return f"[User notes while you were working:\n{parts}]"
+        return f"[SYSTEM NOTE — mid-turn user comments (not new instructions):\n{parts}]"
 
 
 def create_steering_indicator(queue: SteeringQueue) -> str:

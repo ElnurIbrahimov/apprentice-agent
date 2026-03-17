@@ -42,7 +42,15 @@ class PipeOutput:
 
 
 def is_pipe_mode() -> bool:
-    """Detect if stdin or stdout is a pipe (non-interactive)."""
+    """Detect if stdin or stdout is a pipe (non-interactive).
+
+    On Windows/MSYS2, isatty() on stdin can be unreliable when a TERM
+    environment variable is set (e.g. inside mintty).  Fall back to
+    checking stdout only in that case.
+    """
+    import os
+    if os.name == "nt" and os.environ.get("TERM"):
+        return not sys.stdout.isatty()
     return not sys.stdin.isatty() or not sys.stdout.isatty()
 
 

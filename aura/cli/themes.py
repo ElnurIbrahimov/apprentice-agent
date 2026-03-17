@@ -1,6 +1,7 @@
 """Theme system for AURA CLI — customizable color schemes."""
 from __future__ import annotations
 import json
+import threading
 from pathlib import Path
 from typing import Dict, Optional
 from dataclasses import dataclass, field, asdict
@@ -112,12 +113,14 @@ THEMES: Dict[str, AuraTheme] = {
 
 # Default theme
 _current_theme: AuraTheme = THEMES["dark"]
+_theme_lock = threading.Lock()
 _THEMES_DIR = Path.home() / ".aura" / "themes"
 
 
 def get_theme() -> AuraTheme:
     """Get the current active theme."""
-    return _current_theme
+    with _theme_lock:
+        return _current_theme
 
 
 def set_theme(name: str) -> bool:
@@ -126,13 +129,15 @@ def set_theme(name: str) -> bool:
 
     # Check built-in themes
     if name in THEMES:
-        _current_theme = THEMES[name]
+        with _theme_lock:
+            _current_theme = THEMES[name]
         return True
 
     # Check custom themes
     custom = _load_custom_theme(name)
     if custom:
-        _current_theme = custom
+        with _theme_lock:
+            _current_theme = custom
         return True
 
     return False
@@ -152,7 +157,14 @@ def list_themes() -> list:
 
 def _load_custom_theme(name: str) -> Optional[AuraTheme]:
     """Load a custom theme from ~/.aura/themes/."""
+    # Reject path traversal attempts
+    if "/" in name or "\\" in name or ".." in name:
+        return None
     theme_file = _THEMES_DIR / f"{name}.json"
+    try:
+        theme_file.resolve().relative_to(_THEMES_DIR.resolve())
+    except ValueError:
+        return None
     if not theme_file.exists():
         return None
     try:

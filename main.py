@@ -31,7 +31,8 @@ def main():
     sub_commit.add_argument("--all", "-a", action="store_true", help="Stage all changes")
     subparsers.add_parser("cost", help="Show session cost breakdown")
     subparsers.add_parser("mcp-serve", help="Run as MCP server (JSON-RPC over stdio)")
-    subparsers.add_parser("exec", help="Non-interactive agent execution")
+    sub_exec = subparsers.add_parser("exec", help="Non-interactive agent execution")
+    sub_exec.add_argument("prompt", nargs="?", default=None, help="Prompt to execute")
     sub_ide = subparsers.add_parser("ide", help="IDE integration setup")
     sub_ide.add_argument("action", nargs="?", default="setup", choices=["setup"], help="Action (default: setup)")
 
@@ -166,8 +167,17 @@ def main():
         mcp_main()
         sys.exit(0)
 
+    # Handle exec subcommand — non-interactive agent execution
+    if args.command == "exec":
+        exec_prompt = getattr(args, "prompt", None)
+        if not exec_prompt:
+            print("Usage: aura exec 'your prompt here'")
+            sys.exit(1)
+        args.prompt = exec_prompt
+        # Fall through to the non-interactive --prompt path below
+
     # Handle subcommands that don't need the full agent
-    if args.command:
+    elif args.command:
         from aura.core.commands import handle_subcommand
         sys.exit(handle_subcommand(args.command, args))
 
@@ -535,8 +545,18 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
 
     session = create_session()
 
+    _pending_follow_up = None
+    _follow_up_depth = 0
+    _MAX_FOLLOW_UP_DEPTH = 3
+
     while True:
-        user_input = get_input(session)
+        if _pending_follow_up:
+            user_input = _pending_follow_up
+            _pending_follow_up = None
+            show_info(f"Follow-up: {user_input[:60]}...")
+        else:
+            _follow_up_depth = 0  # reset depth on manual input
+            user_input = get_input(session)
 
         if user_input is None:
             console.print("\n[dim]Goodbye.[/dim]\n")
@@ -702,12 +722,12 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
 
         # Check for queued follow-up from steering
         follow_up = steering.pop_follow_up()
-        if follow_up:
-            user_input = follow_up
-            # Fall through to next iteration — will be caught by the while loop
-            # We skip continue so it processes again
-            show_info(f"Follow-up: {follow_up[:60]}...")
-            continue  # Will re-enter the loop and hit the agentic.run() call
+        if follow_up and _follow_up_depth < _MAX_FOLLOW_UP_DEPTH:
+            _pending_follow_up = follow_up
+            _follow_up_depth += 1
+            # Don't continue — the top of the loop will pick up _pending_follow_up
+        elif follow_up:
+            show_info("Max auto-follow-up depth reached, dropping follow-up.")
 
         # Update status bar
         _msg_count += 1
@@ -825,7 +845,8 @@ def handle_command(agent, command: str, speak: bool = False):
             plan = parse_plan_from_llm(response)
             render_plan(_plan_console, plan)
 
-            _plan_console.print("\n[dim]Execute this plan? (y/n/edit)[/dim]")
+            # TODO: implement plan editing (deferred)
+            _plan_console.print("\n[dim]Execute this plan? (y/n)[/dim]")
             try:
                 choice = input("> ").strip().lower()
             except (EOFError, KeyboardInterrupt):
