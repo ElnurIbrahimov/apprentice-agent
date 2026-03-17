@@ -13,9 +13,9 @@ def test_permission_modes_exist():
     assert PermissionMode.FULL_AUTO == "full_auto"
 
 def test_cycle_forward():
+    # auto_edit is deferred from the cycle (enforcement not wired up yet)
     assert cycle_permission_mode("plan") == "careful"
-    assert cycle_permission_mode("careful") == "auto_edit"
-    assert cycle_permission_mode("auto_edit") == "full_auto"
+    assert cycle_permission_mode("careful") == "full_auto"
     assert cycle_permission_mode("full_auto") == "plan"
 
 def test_cycle_invalid_defaults_to_careful():

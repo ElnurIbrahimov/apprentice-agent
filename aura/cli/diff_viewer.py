@@ -7,14 +7,17 @@ from rich.panel import Panel
 from rich.text import Text
 
 
-def generate_diff(old: str, new: str, filename: str = "file") -> str:
+def generate_diff(old: str, new: str, filename: str = "file", context_lines: int = 3) -> str:
     """Generate unified diff string between old and new content."""
+    if '\x00' in old or '\x00' in new:
+        return f"(binary file: {filename})"
     old_lines = old.splitlines(keepends=True)
     new_lines = new.splitlines(keepends=True)
     diff_lines = list(difflib.unified_diff(
         old_lines, new_lines,
         fromfile=f"a/{filename}", tofile=f"b/{filename}",
         lineterm="",
+        n=context_lines,
     ))
     if not diff_lines:
         return ""
@@ -38,7 +41,7 @@ def diff_summary(old: str, new: str, filename: str = "file") -> str:
 
 def render_diff(old: str, new: str, filename: str = "file", context_lines: int = 3) -> Optional[Panel]:
     """Render a syntax-highlighted diff as a Rich Panel."""
-    diff_text = generate_diff(old, new, filename)
+    diff_text = generate_diff(old, new, filename, context_lines=context_lines)
     if not diff_text:
         return None
 

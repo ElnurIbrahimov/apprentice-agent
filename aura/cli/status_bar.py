@@ -5,6 +5,9 @@ import subprocess
 from pathlib import Path
 from rich.text import Text
 
+from aura.cli.context_bar import build_context_gauge
+from aura.cli.permissions_ui import get_mode_short
+
 
 def _get_git_branch() -> str:
     """Get current git branch name, or empty string if not in a git repo."""
@@ -84,13 +87,11 @@ def build_status_bar(
 
     # Context gauge
     if token_limit > 0:
-        from aura.cli.context_bar import build_context_gauge
         gauge_markup = build_context_gauge(token_used, token_limit)
         center.append(" | ", style="dim")
         center.append_text(Text.from_markup(gauge_markup))
 
     # Permission mode indicator
-    from aura.cli.permissions_ui import get_mode_short
     mode_markup = get_mode_short(permission_mode)
     center.append(" | ", style="dim")
     center.append_text(Text.from_markup(mode_markup))

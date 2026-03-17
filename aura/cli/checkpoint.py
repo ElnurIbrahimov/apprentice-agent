@@ -1,7 +1,11 @@
 """File checkpoint system for rewind/undo support."""
 from __future__ import annotations
 import json
+import os
+import re
 import shutil
+import tempfile
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -16,6 +20,7 @@ class CheckpointManager:
         self._dir.mkdir(parents=True, exist_ok=True)
         self._max = max_checkpoints
         self._index_path = self._dir / "index.json"
+        self._lock = threading.Lock()
         self._index: List[Dict] = self._load_index()
 
     def _load_index(self) -> List[Dict]:
@@ -27,7 +32,17 @@ class CheckpointManager:
         return []
 
     def _save_index(self):
-        self._index_path.write_text(json.dumps(self._index, indent=2))
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=str(self._dir), suffix=".tmp")
+        try:
+            with os.fdopen(tmp_fd, 'w') as f:
+                json.dump(self._index, f, indent=2)
+            os.replace(tmp_path, str(self._index_path))
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     def snapshot(self, file_path: str, label: str = "") -> str:
         """Snapshot a single file. Returns checkpoint ID."""
@@ -35,61 +50,73 @@ class CheckpointManager:
 
     def snapshot_multi(self, file_paths: List[str], label: str = "") -> str:
         """Snapshot multiple files. Returns checkpoint ID."""
-        cp_id = f"cp_{int(time.time())}_{uuid.uuid4().hex[:8]}"
-        cp_dir = self._dir / cp_id
-        cp_dir.mkdir(parents=True, exist_ok=True)
+        with self._lock:
+            cp_id = f"cp_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+            cp_dir = self._dir / cp_id
+            cp_dir.mkdir(parents=True, exist_ok=True)
 
-        files_info = []
-        for fp in file_paths:
-            src = Path(fp)
-            if src.exists():
-                dest = cp_dir / src.name
-                counter = 0
-                while dest.exists():
-                    counter += 1
-                    dest = cp_dir / f"{src.stem}_{counter}{src.suffix}"
-                shutil.copy2(str(src), str(dest))
-                files_info.append({
-                    "original_path": str(src.resolve()),
-                    "backup_name": dest.name,
-                })
+            files_info = []
+            for fp in file_paths:
+                src = Path(fp)
+                if src.is_symlink():
+                    continue  # don't snapshot symlinks
+                if src.exists():
+                    dest = cp_dir / src.name
+                    counter = 0
+                    while dest.exists():
+                        counter += 1
+                        dest = cp_dir / f"{src.stem}_{counter}{src.suffix}"
+                    shutil.copy2(str(src), str(dest))
+                    files_info.append({
+                        "original_path": str(src.resolve()),
+                        "backup_name": dest.name,
+                    })
 
-        entry = {
-            "id": cp_id,
-            "timestamp": time.time(),
-            "label": label,
-            "files": files_info,
-        }
-        self._index.insert(0, entry)
+            entry = {
+                "id": cp_id,
+                "timestamp": time.time(),
+                "label": label,
+                "files": files_info,
+            }
+            self._index.insert(0, entry)
 
-        while len(self._index) > self._max:
-            old = self._index.pop()
-            old_dir = self._dir / old["id"]
-            if old_dir.exists():
-                shutil.rmtree(old_dir, ignore_errors=True)
+            while len(self._index) > self._max:
+                old = self._index.pop()
+                old_dir = self._dir / old["id"]
+                if old_dir.exists():
+                    shutil.rmtree(old_dir, ignore_errors=True)
 
-        self._save_index()
-        return cp_id
+            self._save_index()
+            return cp_id
 
     def restore(self, checkpoint_id: str) -> bool:
         """Restore files from a checkpoint."""
-        entry = next((e for e in self._index if e["id"] == checkpoint_id), None)
-        if not entry:
+        # Validate checkpoint_id format to prevent path traversal
+        if not re.match(r'^cp_\d+_[a-f0-9]{8}$', checkpoint_id):
             return False
-        cp_dir = self._dir / checkpoint_id
-        if not cp_dir.exists():
-            return False
-        for f_info in entry["files"]:
-            src = cp_dir / f_info["backup_name"]
-            dest = Path(f_info["original_path"])
-            if src.exists():
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(str(src), str(dest))
-        return True
+        with self._lock:
+            entry = next((e for e in self._index if e["id"] == checkpoint_id), None)
+            if not entry:
+                return False
+            cp_dir = self._dir / checkpoint_id
+            if not cp_dir.exists():
+                return False
+            for f_info in entry["files"]:
+                backup_name = os.path.basename(f_info["backup_name"])  # strip path components
+                src = cp_dir / backup_name
+                dest = Path(f_info["original_path"]).resolve()
+                # Reject paths with traversal components
+                if ".." in dest.parts:
+                    continue
+                if src.exists():
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(str(src), str(dest))
+            return True
 
     def list_checkpoints(self) -> List[Dict]:
         """Return all checkpoints, most recent first."""
-        return list(self._index)
+        with self._lock:
+            return list(self._index)
 
     def get_checkpoint(self, checkpoint_id: str) -> Optional[Dict]:
         """Get a specific checkpoint's metadata."""
@@ -97,9 +124,10 @@ class CheckpointManager:
 
     def clear(self):
         """Remove all checkpoints."""
-        for entry in self._index:
-            cp_dir = self._dir / entry["id"]
-            if cp_dir.exists():
-                shutil.rmtree(cp_dir, ignore_errors=True)
-        self._index.clear()
-        self._save_index()
+        with self._lock:
+            for entry in self._index:
+                cp_dir = self._dir / entry["id"]
+                if cp_dir.exists():
+                    shutil.rmtree(cp_dir, ignore_errors=True)
+            self._index.clear()
+            self._save_index()

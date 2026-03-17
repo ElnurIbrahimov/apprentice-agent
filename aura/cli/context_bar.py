@@ -19,6 +19,12 @@ def estimate_messages_tokens(messages: List[Dict]) -> int:
         content = msg.get("content", "")
         if isinstance(content, str):
             total += estimate_tokens(content)
+        elif isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict):
+                    total += estimate_tokens(block.get("text", "") or json.dumps(block))
+                elif isinstance(block, str):
+                    total += estimate_tokens(block)
         total += 4  # overhead per message
         tool_calls = msg.get("tool_calls", [])
         if tool_calls:

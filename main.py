@@ -342,6 +342,41 @@ def run_agentic_oneshot(agent, prompt: str, args):
     sys.exit(0 if result.get("success") else 1)
 
 
+def _rewind_picker(cp_mgr, console):
+    """Show checkpoint picker and restore selected checkpoint. Returns True if restored."""
+    import time as _time
+    cps = cp_mgr.list_checkpoints()
+    if not cps:
+        console.print("[dim]No checkpoints available[/dim]")
+        return False
+    console.print("\n[bold]Rewind to checkpoint:[/bold]")
+    for i, cp in enumerate(cps[:10]):
+        ts = _time.strftime("%H:%M:%S", _time.localtime(cp["timestamp"]))
+        files = ", ".join(
+            f["original_path"].split("/")[-1].split("\\")[-1]
+            for f in cp["files"]
+        )
+        console.print(f"  {i+1}. [{ts}] {cp['label']} ({files})")
+    console.print("  0. Cancel")
+    try:
+        choice = input("\nSelect checkpoint: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        return False
+    if choice.isdigit() and 0 < int(choice) <= min(10, len(cps)):
+        selected = cps[int(choice) - 1]
+        if cp_mgr.restore(selected["id"]):
+            files = ", ".join(
+                f["original_path"].split("/")[-1].split("\\")[-1]
+                for f in selected["files"]
+            )
+            console.print(f"[green]Restored: {files}[/green]")
+            return True
+        else:
+            console.print("[red]Restore failed.[/red]")
+            return False
+    return False
+
+
 def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = None):
     """Interactive CLI — agentic loop with status bar, model picker, tool calling."""
     from aura.cli.display import (
@@ -435,9 +470,13 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
         router=chat_router,
     )
     # Initialize checkpoint manager
-    checkpoint_mgr = CheckpointManager()
-    agentic._checkpoint_mgr = checkpoint_mgr
-    agentic.executor._checkpoint_mgr = checkpoint_mgr
+    try:
+        checkpoint_mgr = CheckpointManager()
+    except (OSError, PermissionError):
+        checkpoint_mgr = None
+    if checkpoint_mgr:
+        agentic._checkpoint_mgr = checkpoint_mgr
+        agentic.executor._checkpoint_mgr = checkpoint_mgr
 
     # Initialize permission mode
     current_perm_mode = "careful"
@@ -496,8 +535,12 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
             )
             continue
         elif user_input == SIGNAL_NEW_SESSION:
+            # Save current session first
+            if hasattr(agentic, 'session') and agentic.session:
+                agentic.session.save()
             agentic._conversation_history.clear()
-            checkpoint_mgr.clear()
+            if checkpoint_mgr:
+                checkpoint_mgr.clear()
             _msg_count = 0
             _token_used = 0
             console.print("[dim]New session started[/dim]")
@@ -517,9 +560,14 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
             with tempfile.NamedTemporaryFile(suffix=".md", delete=False, mode="w") as f:
                 f.write("")
                 tmp_path = f.name
-            _sp.call([editor, tmp_path])
-            user_input = Path(tmp_path).read_text().strip()
-            Path(tmp_path).unlink(missing_ok=True)
+            try:
+                _sp.call([editor, tmp_path])
+                user_input = Path(tmp_path).read_text().strip()
+            except (FileNotFoundError, OSError) as e:
+                console.print(f"[red]Editor failed: {e}[/red]")
+                user_input = ""
+            finally:
+                Path(tmp_path).unlink(missing_ok=True)
             if not user_input:
                 continue
             # Fall through to normal processing with the editor content
@@ -540,32 +588,10 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
             )
             continue
         elif user_input == SIGNAL_REWIND:
-            cps = checkpoint_mgr.list_checkpoints()
-            if not cps:
-                console.print("[dim]No checkpoints available[/dim]")
-                continue
-            console.print("\n[bold]Rewind to checkpoint:[/bold]")
-            import time as _time
-            for i, cp in enumerate(cps[:10]):
-                ts = _time.strftime("%H:%M:%S", _time.localtime(cp["timestamp"]))
-                files = ", ".join(
-                    f["original_path"].split("/")[-1].split("\\")[-1]
-                    for f in cp["files"]
-                )
-                console.print(f"  {i+1}. [{ts}] {cp['label']} ({files})")
-            console.print("  0. Cancel")
-            try:
-                choice = input("\nSelect checkpoint: ").strip()
-            except (EOFError, KeyboardInterrupt):
-                continue
-            if choice.isdigit() and 0 < int(choice) <= min(10, len(cps)):
-                selected = cps[int(choice) - 1]
-                checkpoint_mgr.restore(selected["id"])
-                files = ", ".join(
-                    f["original_path"].split("/")[-1].split("\\")[-1]
-                    for f in selected["files"]
-                )
-                console.print(f"[green]Restored: {files}[/green]")
+            if checkpoint_mgr:
+                _rewind_picker(checkpoint_mgr, console)
+            else:
+                console.print("[dim]No checkpoint manager available[/dim]")
             continue
 
         # Handle Alt+M model picker
@@ -682,6 +708,7 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
 
 def handle_command(agent, command: str, speak: bool = False):
     """Handle special commands in chat mode."""
+    from aura.cli.display import show_help
     parts = command.split(maxsplit=1)
     cmd = parts[0].lower()
     arg = parts[1] if len(parts) > 1 else ""
@@ -858,7 +885,7 @@ def handle_command(agent, command: str, speak: bool = False):
             from rich.panel import Panel as _CtxPanel
             _al = agent._agentic_loop
             _tok_used = _est_msgs(_al._conversation_history)
-            _tok_limit = _get_lim(agent.brain.current_model if hasattr(agent.brain, 'current_model') else "default")
+            _tok_limit = _get_lim(agent.brain._model_override or "default")
             _sys_tokens = 0
             try:
                 _sys_tokens = _est_tok(_al._build_system_prompt(""))
@@ -874,33 +901,7 @@ def handle_command(agent, command: str, speak: bool = False):
     elif cmd == "/rewind":
         if hasattr(agent, '_agentic_loop') and hasattr(agent._agentic_loop, '_checkpoint_mgr'):
             from aura.cli.display import console as _rw_console
-            _cp_mgr = agent._agentic_loop._checkpoint_mgr
-            _cps = _cp_mgr.list_checkpoints()
-            if not _cps:
-                print("  No checkpoints available.")
-                return
-            _rw_console.print("\n[bold]Rewind to checkpoint:[/bold]")
-            import time as _rw_time
-            for _i, _cp in enumerate(_cps[:10]):
-                _ts = _rw_time.strftime("%H:%M:%S", _rw_time.localtime(_cp["timestamp"]))
-                _files = ", ".join(
-                    f["original_path"].split("/")[-1].split("\\")[-1]
-                    for f in _cp["files"]
-                )
-                _rw_console.print(f"  {_i+1}. [{_ts}] {_cp['label']} ({_files})")
-            _rw_console.print("  0. Cancel")
-            try:
-                _rw_choice = input("\nSelect checkpoint: ").strip()
-            except (EOFError, KeyboardInterrupt):
-                return
-            if _rw_choice.isdigit() and 0 < int(_rw_choice) <= min(10, len(_cps)):
-                _sel = _cps[int(_rw_choice) - 1]
-                _cp_mgr.restore(_sel["id"])
-                _files = ", ".join(
-                    f["original_path"].split("/")[-1].split("\\")[-1]
-                    for f in _sel["files"]
-                )
-                _rw_console.print(f"[green]Restored: {_files}[/green]")
+            _rewind_picker(agent._agentic_loop._checkpoint_mgr, _rw_console)
         else:
             print("  No checkpoint manager available.")
     elif cmd == "/cost":
