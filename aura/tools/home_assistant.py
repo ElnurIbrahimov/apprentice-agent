@@ -233,6 +233,12 @@ class HomeAssistantTool:
             return {"success": False, "error": err}
         return {"success": True, "action": "toggle", "entity_id": entity_id}
 
+    # Domains that could execute arbitrary code or damage HA
+    _BLOCKED_HA_DOMAINS = frozenset({
+        "shell_command", "python_script", "recorder",
+        "homeassistant", "persistent_notification",
+    })
+
     def call_service(self, domain: str, service: str, data: Optional[Dict] = None) -> Dict:
         """Call any Home Assistant service.
 
@@ -241,6 +247,8 @@ class HomeAssistantTool:
             service: Service name e.g. 'turn_on', 'set_temperature', 'turn'
             data: Service data / parameters
         """
+        if domain.lower() in self._BLOCKED_HA_DOMAINS:
+            return {"success": False, "error": f"Domain '{domain}' is blocked for security reasons"}
         result, err = self._post(f"/services/{domain}/{service}", data or {})
         if err:
             return {"success": False, "error": err}

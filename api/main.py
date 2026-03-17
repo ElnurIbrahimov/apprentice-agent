@@ -210,6 +210,20 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("[API] Shutting down AURA Web API...")
 
+    # Cancel proactive startup task if still running
+    try:
+        if hasattr(app.state, 'proactive_startup_task') and app.state.proactive_startup_task:
+            task = app.state.proactive_startup_task
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                logger.info("[API] Proactive startup task cancelled")
+    except Exception as e:
+        logger.warning(f"[API] Error cancelling startup task: {e}")
+
     # Stop proactive system
     try:
         if hasattr(app.state, 'proactive_daemon') and app.state.proactive_daemon:
@@ -320,14 +334,8 @@ if _cors_origins != ["*"]:
 # Chrome extension origins are dynamic (chrome-extension://<id>) — use regex
 _cors_origin_regex = r"^chrome-extension://.*$" if _cors_origins != ["*"] else None
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_cors_origins,
-    allow_origin_regex=_cors_origin_regex,
-    allow_credentials=_cors_origins != ["*"],
-    allow_methods=["*"],
-    allow_headers=["*", "X-API-Key"],
-)
+# Request ID middleware — adds X-Request-ID header to every response
+app.add_middleware(RequestIDMiddleware)
 
 # API key authentication middleware (disabled by default, enable via env vars)
 try:
@@ -347,8 +355,16 @@ try:
 except Exception as e:
     logger.warning(f"[API] Auth middleware setup skipped: {e}")
 
-# Request ID middleware — adds X-Request-ID header to every response
-app.add_middleware(RequestIDMiddleware)
+# CORS must be added LAST — Starlette runs last-added middleware first (outermost),
+# and CORS must wrap everything to handle preflight requests before auth rejects them.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_origin_regex=_cors_origin_regex,
+    allow_credentials=_cors_origins != ["*"],
+    allow_methods=["*"],
+    allow_headers=["*", "X-API-Key"],
+)
 
 # Include all routers - frontend uses 2s stagger + 30s intervals to prevent thread pool exhaustion
 app.include_router(chat.router)

@@ -4,6 +4,7 @@ Allows the LLM to spawn parallel sub-agents for tasks like
 researching docs, reading multiple files, or independent analysis.
 """
 
+import atexit
 import concurrent.futures
 import json
 import logging
@@ -13,6 +14,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 _POOL = concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="sub-agent")
+atexit.register(_POOL.shutdown, wait=False)
 _active_coder = threading.Lock()  # Ensures only 1 coder sub-agent at a time
 
 # Read-only tool subset for restricted roles

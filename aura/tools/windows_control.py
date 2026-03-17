@@ -12,6 +12,7 @@ Config: No tokens needed — works with any running Windows app.
 
 import logging
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -44,6 +45,30 @@ class WindowsControlTool:
 
     name = "windows_control"
     description = "Control Windows apps via UI Automation — click buttons, fill forms, type text in any app"
+
+    # Strict allowlist of executables that run_app() can launch
+    APP_ALLOWLIST = {
+        "notepad": "notepad.exe",
+        "notepad.exe": "notepad.exe",
+        "calculator": "calc.exe",
+        "calc.exe": "calc.exe",
+        "explorer": "explorer.exe",
+        "explorer.exe": "explorer.exe",
+        "code": "code",
+        "vscode": "code",
+        "chrome": "chrome",
+        "firefox": "firefox",
+        "msedge": "msedge",
+        "edge": "msedge",
+        "terminal": "wt.exe",
+        "wt.exe": "wt.exe",
+        "mspaint": "mspaint.exe",
+        "mspaint.exe": "mspaint.exe",
+        "wordpad": "wordpad.exe",
+        "snippingtool": "SnippingTool.exe",
+        "taskmgr": "taskmgr.exe",
+        "control": "control.exe",
+    }
 
     # ------------------------------------------------------------------ #
     # Window Management
@@ -98,7 +123,7 @@ class WindowsControlTool:
             if exact:
                 windows = desktop.windows(title=title)
             else:
-                windows = desktop.windows(title_re=f".*{title}.*")
+                windows = desktop.windows(title_re=f".*{re.escape(title)}.*")
             if not windows:
                 return {"success": False, "error": f"No window found matching '{title}'"}
             w = windows[0]
@@ -127,7 +152,7 @@ class WindowsControlTool:
             return _not_available()
         try:
             app = Application(backend="uia")
-            app.connect(title_re=f".*{title}.*")
+            app.connect(title_re=f".*{re.escape(title)}.*")
             dlg = app.top_window()
             elements = []
             for ctrl in dlg.descendants():
@@ -169,7 +194,7 @@ class WindowsControlTool:
             return _not_available()
         try:
             app = Application(backend="uia")
-            app.connect(title_re=f".*{window_title}.*")
+            app.connect(title_re=f".*{re.escape(window_title)}.*")
             dlg = app.top_window()
             dlg.set_focus()
             time.sleep(0.2)
@@ -225,7 +250,7 @@ class WindowsControlTool:
             return _not_available()
         try:
             app = Application(backend="uia")
-            app.connect(title_re=f".*{window_title}.*")
+            app.connect(title_re=f".*{re.escape(window_title)}.*")
             dlg = app.top_window()
             dlg.set_focus()
             time.sleep(0.2)
@@ -273,7 +298,7 @@ class WindowsControlTool:
             return _not_available()
         try:
             app = Application(backend="uia")
-            app.connect(title_re=f".*{window_title}.*")
+            app.connect(title_re=f".*{re.escape(window_title)}.*")
             dlg = app.top_window()
 
             if element_identifier:
@@ -314,7 +339,7 @@ class WindowsControlTool:
             return _not_available()
         try:
             app = Application(backend="uia")
-            app.connect(title_re=f".*{window_title}.*")
+            app.connect(title_re=f".*{re.escape(window_title)}.*")
             dlg = app.top_window()
             dlg.set_focus()
             time.sleep(0.2)
@@ -324,18 +349,29 @@ class WindowsControlTool:
             return {"success": False, "error": str(e)}
 
     def run_app(self, executable: str, args: Optional[str] = None, wait_ready: bool = True) -> Dict:
-        """Launch a Windows application.
+        """Launch a Windows application from the allowlist.
 
         Args:
-            executable: Path to executable or app name (e.g. 'notepad.exe', 'calc.exe')
+            executable: App name from allowlist (e.g. 'notepad', 'calc.exe', 'chrome')
             args: Command-line arguments (optional)
             wait_ready: Wait for app to be ready before returning
         """
         if not PYWINAUTO_AVAILABLE:
             return _not_available()
+
+        # SECURITY: Only allow apps from the allowlist
+        exe_lower = executable.lower().strip()
+        if exe_lower not in self.APP_ALLOWLIST:
+            allowed = ", ".join(sorted(set(self.APP_ALLOWLIST.values())))
+            return {
+                "success": False,
+                "error": f"App '{executable}' not in allowlist. Allowed: {allowed}"
+            }
+        safe_executable = self.APP_ALLOWLIST[exe_lower]
+
         try:
             import subprocess
-            cmd_parts = [executable]
+            cmd_parts = [safe_executable]
             if args:
                 cmd_parts.extend(args.split())
             # Use subprocess.list2cmdline for safe Windows command quoting
@@ -421,7 +457,7 @@ class WindowsControlTool:
 
         if "list" in a and "window" in a:
             return self.list_windows(kwargs.get("visible_only", True))
-        if "find" in a or "search" in a and "window" in a:
+        if ("find" in a or "search" in a) and "window" in a:
             return self.find_window(kwargs.get("title") or kwargs.get("window") or "", kwargs.get("exact", False))
         if "element" in a and ("list" in a or "get" in a):
             return self.get_window_elements(kwargs.get("title") or kwargs.get("window") or "")

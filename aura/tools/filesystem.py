@@ -368,7 +368,9 @@ class FileSystemTool:
         """Restore file from .bak backup."""
         import shutil
         try:
-            bak = Path(backup_path)
+            bak, error = self._resolve_path(backup_path)
+            if error:
+                return {"success": False, "error": error, "blocked_by": "sandbox_policy"}
             if not bak.exists():
                 return {"success": False, "error": f"Backup not found: {backup_path}"}
             if bak.suffix != ".bak":

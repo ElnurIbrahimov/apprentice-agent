@@ -163,6 +163,10 @@ class UnifiedMemory:
         except Exception as e:
             logger.warning("[UnifiedMemory] Retrieval pipeline error: %s", e, exc_info=True)
 
+        # Blend emotional congruence into score (15% weight)
+        for r in results:
+            r.score = r.score * (0.85 + 0.15 * r.emotional_congruence)
+
         # Deduplicate
         best: dict = {}
         for r in results:
@@ -261,6 +265,8 @@ class UnifiedMemory:
 
         Returns dict with store id, decision kind, score, lifecycle state.
         """
+        self._ensure_store()
+
         from aura.memory.write_gate import (
             MemoryCandidate, MemoryDecisionKind, get_write_gate
         )
@@ -269,7 +275,7 @@ class UnifiedMemory:
         try:
             nearby_results = self.query(content, k=5)
             nearby = [
-                {"content": r.content, "score": r.relevance,
+                {"content": r.content, "score": r.score,
                  "source_id": r.source_id, "source": r.source}
                 for r in nearby_results
             ]
@@ -422,6 +428,7 @@ class UnifiedMemory:
         c_a = _clamp(current_pad.get("arousal", 0.0))
         c_d = _clamp(current_pad.get("dominance", 0.0))
         dist = math.sqrt((m_p - c_p)**2 + (m_a - c_a)**2 + (m_d - c_d)**2)
+        # max_dist = sqrt(12): maximum Euclidean distance in 3D PAD space where each dimension is [-1, 1]
         max_dist = math.sqrt(12)
         return max(0.0, min(1.0, 1.0 - (dist / max_dist)))
 

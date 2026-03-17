@@ -364,15 +364,15 @@ class MarketplaceTool:
                 self._log("INSTALL_FAILED", plugin_id, f"Download failed: {e}")
                 return {"success": False, "error": f"Failed to download plugin: {e}"}
 
-            # SHA-256 integrity check
+            # SHA-256 integrity check (mandatory)
             expected_hash = plugin.get("sha256", "")
-            if expected_hash:
-                actual_hash = hashlib.sha256(plugin_code.encode()).hexdigest()
-                if actual_hash != expected_hash:
-                    self._log("INSTALL_BLOCKED", plugin_id, f"Hash mismatch: expected {expected_hash}, got {actual_hash}")
-                    return {"success": False, "error": f"Plugin integrity check failed: hash mismatch"}
-            else:
-                logger.warning(f"[Marketplace] Plugin '{plugin_id}' has no sha256 in registry; skipping integrity check")
+            if not expected_hash:
+                self._log("INSTALL_BLOCKED", plugin_id, "No sha256 hash in registry")
+                return {"success": False, "error": "Plugin rejected: no integrity hash provided"}
+            actual_hash = hashlib.sha256(plugin_code.encode()).hexdigest()
+            if actual_hash != expected_hash:
+                self._log("INSTALL_BLOCKED", plugin_id, f"Hash mismatch: expected {expected_hash}, got {actual_hash}")
+                return {"success": False, "error": f"Plugin integrity check failed: hash mismatch"}
 
             # Safety scan (regex + basic AST)
             dangerous_patterns = self._scan_for_dangerous_code(plugin_code)
@@ -756,7 +756,7 @@ marketplace install {tool_name}
             if not uninstall_result.get("success"):
                 return uninstall_result
 
-            install_result = self.install(plugin_id)
+            install_result = self.install(plugin_id, dry_run=False)
             if not install_result.get("success"):
                 return install_result
 

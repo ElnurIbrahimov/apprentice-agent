@@ -47,7 +47,10 @@ def load_custom_tools(custom_dir: Path | None = None) -> dict:
             continue
 
         validator = _get_validator()
-        if validator and validator is not False:
+        if validator is False:
+            logger.error(f"[CustomLoader] REFUSED to load {tool_file.name}: security validator unavailable")
+            continue
+        if validator:
             is_valid, validation_msg = validator(code, str(tool_file))
             if not is_valid:
                 logger.warning(f"[CustomLoader] BLOCKED {tool_file.name}: {validation_msg}")

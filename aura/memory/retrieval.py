@@ -259,6 +259,19 @@ def retrieve(
                 logger.debug("[Retrieval] Cross-encoder rerank error: %s", e)
 
     # ------------------------------------------------------------------
+    # Normalize rerank scores to [0, 1] (min-max over batch)
+    # ------------------------------------------------------------------
+    if reranked:
+        raw_scores = [c.rerank_score for c in top_candidates
+                      if c.rerank_score != _RERANK_NOT_SET]
+        if raw_scores:
+            lo, hi = min(raw_scores), max(raw_scores)
+            span = hi - lo if hi > lo else 1.0
+            for c in top_candidates:
+                if c.rerank_score != _RERANK_NOT_SET:
+                    c.rerank_score = (c.rerank_score - lo) / span
+
+    # ------------------------------------------------------------------
     # FadeMem strength multiplier
     # ------------------------------------------------------------------
     now_ts = datetime.now().timestamp()

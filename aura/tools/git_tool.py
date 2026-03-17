@@ -457,9 +457,9 @@ class GitTool:
             >>> result['success']
             True
         """
-        # Handle multiple files
+        # Handle files: if string, treat as single path (spaces may be part of filename)
         if isinstance(files, str):
-            file_list = files.split() if " " in files else [files]
+            file_list = [files]
         else:
             file_list = list(files)
 
@@ -624,7 +624,7 @@ class GitTool:
         if not _re.match(r'^(https?://|git@|git://|ssh://)', url):
             return {"success": False, "error": f"Unsupported URL scheme in: {url}"}
 
-        args = ["clone", url]
+        args = ["clone", "--", url]
         if destination:
             args.append(destination)
 

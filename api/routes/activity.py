@@ -2,7 +2,7 @@
 import asyncio
 import logging
 from typing import Optional
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from api.auth import require_api_key
 
@@ -17,7 +17,7 @@ def _get_persistence():
 
 @router.get("/events")
 async def get_activity_events(
-    limit: int = 100,
+    limit: int = Query(100, ge=1, le=500),
     after: float = 0.0,
     before: Optional[float] = None,
     categories: Optional[str] = None,

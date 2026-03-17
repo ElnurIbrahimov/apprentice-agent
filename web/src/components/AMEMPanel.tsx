@@ -64,8 +64,9 @@ export function AMEMPanel() {
       }
     } catch (e) {
       console.error('Failed to fetch A-MEM notes:', e);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const searchNotes = async () => {
@@ -83,8 +84,9 @@ export function AMEMPanel() {
       }
     } catch (e) {
       console.error('Failed to search A-MEM:', e);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const addMemory = async () => {
@@ -110,8 +112,9 @@ export function AMEMPanel() {
       }
     } catch (e) {
       console.error('Failed to add memory:', e);
+    } finally {
+      setAddLoading(false);
     }
-    setAddLoading(false);
   };
 
   const consolidate = async () => {
@@ -122,8 +125,9 @@ export function AMEMPanel() {
       await fetchNotes();
     } catch (e) {
       console.error('Failed to consolidate:', e);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   useEffect(() => {

@@ -59,6 +59,7 @@ export function MessageInput({
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
+  const mountedRef = useRef(true);
 
   const { selectedModel, availableModels, setSelectedModel } = useChatStore();
 
@@ -116,7 +117,11 @@ export function MessageInput({
 
   // Cleanup speech recognition on unmount
   useEffect(() => {
-    return () => { recognitionRef.current?.abort(); };
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      recognitionRef.current?.abort();
+    };
   }, []);
 
   const handleVoiceToggle = () => {
@@ -135,8 +140,10 @@ export function MessageInput({
     recognition.lang = 'en-US';
     recognition.onresult = (event: any) => {
       const transcript = event.results[0][0].transcript;
-      setMessage(prev => prev ? `${prev} ${transcript}` : transcript);
-      setIsListening(false);
+      if (mountedRef.current) {
+        setMessage(prev => prev ? `${prev} ${transcript}` : transcript);
+        setIsListening(false);
+      }
     };
     recognition.onerror = () => { setIsListening(false); recognitionRef.current = null; };
     recognition.onend = () => { setIsListening(false); recognitionRef.current = null; };

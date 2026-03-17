@@ -147,6 +147,8 @@ def update_profile_from_memories(
     for rec in recent:
         memory_texts.append(rec.content[:300])
     context = "\n---\n".join(memory_texts[:20])
+    # Escape curly braces to prevent prompt injection via f-string interpolation
+    context = context.replace("{", "{{").replace("}", "}}")
 
     if not brain:
         try:

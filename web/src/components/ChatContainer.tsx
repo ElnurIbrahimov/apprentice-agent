@@ -112,6 +112,7 @@ export function ChatContainer() {
           isLoading: false,
         }));
       }
+      store.setToolStatus(null);
       return;
     }
     // Pass actionMode for auto-model selection (null = use user's selected model)
@@ -195,6 +196,7 @@ export function ChatContainer() {
                     key={action.text}
                     onClick={() => handleSend(action.text)}
                     disabled={isDisabled}
+                    aria-label={action.text}
                     className={`
                       group flex flex-col gap-3 p-5 text-left
                       disabled:opacity-50 disabled:cursor-not-allowed

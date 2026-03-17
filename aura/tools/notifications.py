@@ -16,6 +16,8 @@ class NotificationTool:
 
     def __init__(self, user_id: str = "default"):
         """Initialize notification tool."""
+        if not re.match(r'^[a-zA-Z0-9_-]+$', user_id):
+            raise ValueError(f"Invalid user_id: {user_id!r}. Only alphanumeric, underscore, and hyphen allowed.")
         self.user_id = user_id
         data_dir = Path(__file__).parent.parent.parent / "data" / "users" / user_id
         data_dir.mkdir(parents=True, exist_ok=True)

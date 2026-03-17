@@ -25,6 +25,10 @@ from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
 
 from api.auth import require_api_key
+from api.utils import safe_error_detail
+
+# Session ID validation: alphanumeric + hyphens, max 64 chars
+_SESSION_ID_RE = re.compile(r'^[a-zA-Z0-9\-]{0,64}$')
 
 logger = logging.getLogger(__name__)
 
@@ -53,13 +57,23 @@ async def agent_action(body: dict):
         raise HTTPException(400, "prompt exceeds maximum length of 32000 characters")
 
     session_id = body.get("session_id", "")
+    if session_id and not _SESSION_ID_RE.match(session_id):
+        raise HTTPException(400, "Invalid session_id: must be alphanumeric/hyphens, max 64 chars")
     model = body.get("model") or os.getenv("AURA_AGENT_MODEL", "gemini-3-flash-preview:cloud")
 
     t0 = time.monotonic()
 
     # Loop guard check
     try:
-        from aura.reliability.loop_guard import get_guard
+        from aura.reliability.loop_guard import get_guard, purge_old_guards
+        # Cap guard dict at 1000 entries — purge stale first, then evict oldest
+        purge_old_guards(max_age_s=600.0)
+        from aura.reliability.loop_guard import _guards, _guards_lock
+        with _guards_lock:
+            if len(_guards) >= 1000:
+                oldest_keys = sorted(_guards, key=lambda k: _guards[k]._history[-1].ts if _guards[k]._history else 0)
+                for k in oldest_keys[:len(_guards) - 999]:
+                    del _guards[k]
         if session_id:
             guard = get_guard(session_id)
             guard_result = guard.record("llm_plan_call", prompt[:80])
@@ -83,7 +97,7 @@ async def agent_action(body: dict):
         response_text = r.json().get("response", "")
     except Exception as e:
         logger.error("[AgentAction] LLM call failed: %s", e)
-        raise HTTPException(500, f"LLM call failed: {e}")
+        raise HTTPException(500, detail=safe_error_detail(e))
 
     latency_ms = (time.monotonic() - t0) * 1000
 
@@ -155,7 +169,7 @@ async def verify_action(req: VerifyRequest):
             "description": planned.description,
         }
     except Exception as e:
-        raise HTTPException(500, f"Planner error: {e}")
+        raise HTTPException(500, detail=safe_error_detail(e))
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +179,8 @@ async def verify_action(req: VerifyRequest):
 @router.get("/session/{session_id}/status")
 async def session_status(session_id: str):
     """Return loop guard status and action count for a session."""
+    if not _SESSION_ID_RE.match(session_id):
+        raise HTTPException(400, "Invalid session_id: must be alphanumeric/hyphens, max 64 chars")
     try:
         from aura.reliability.loop_guard import get_guard
         guard = get_guard(session_id)
@@ -175,15 +191,17 @@ async def session_status(session_id: str):
             "trigger_reason": guard._trigger_reason,
         }
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, detail=safe_error_detail(e))
 
 
 @router.post("/session/{session_id}/reset")
 async def reset_session(session_id: str):
     """Reset loop guard state for a session (call at start of new task)."""
+    if not _SESSION_ID_RE.match(session_id):
+        raise HTTPException(400, "Invalid session_id: must be alphanumeric/hyphens, max 64 chars")
     try:
         from aura.reliability.loop_guard import reset_guard
         reset_guard(session_id)
         return {"ok": True, "session_id": session_id}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, detail=safe_error_detail(e))

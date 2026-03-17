@@ -37,8 +37,9 @@ export function AuraPanel() {
       }
     } catch (e) {
       console.error('Failed to fetch AURA status:', e);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   usePolling(fetchStatus, 15000);

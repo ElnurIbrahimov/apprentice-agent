@@ -131,9 +131,10 @@ class ThinkingModeManager:
         with self._lock:
             old = self._mode
             self._mode = new_mode
+            cbs = list(self._callbacks)
         if old != new_mode:
             logger.info(f"[ThinkingMode] Changed: {old.value} -> {new_mode.value}")
-            for cb in self._callbacks:
+            for cb in cbs:
                 try:
                     cb(old, new_mode)
                 except Exception:

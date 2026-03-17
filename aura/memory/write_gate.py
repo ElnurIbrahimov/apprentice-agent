@@ -159,8 +159,8 @@ class MemoryWriteGate:
 
     # Default thresholds (can be overridden by Config)
     DEFAULT_WRITE_THRESHOLD      = 0.35
-    DEFAULT_MERGE_THRESHOLD      = 0.88
-    DEFAULT_SUPERSEDE_THRESHOLD  = 0.80
+    DEFAULT_MERGE_THRESHOLD      = 0.55
+    DEFAULT_SUPERSEDE_THRESHOLD  = 0.45
 
     def __init__(self) -> None:
         try:
@@ -333,7 +333,7 @@ class MemoryWriteGate:
         user_markers = {
             "i prefer", "i like", "i want", "i need", "i use",
             "my project", "my setup", "my name", "i am", "i work",
-            "remember that i", "elnur", "my ",
+            "remember that i", "my ",
         }
         lower = c.content.lower()
         hits = sum(1 for m in user_markers if m in lower)

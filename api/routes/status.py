@@ -6,8 +6,11 @@ import random
 import time
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel
+
+from api.auth import require_api_key
+from api.utils import safe_error_detail
 
 from api.models.schemas import StatusResponse, HealthResponse, MoodState
 
@@ -220,10 +223,10 @@ async def get_status() -> StatusResponse:
         )
     except Exception as e:
         logger.error(f"[Status] Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e))
 
 
-@router.post("/mood/trigger")
+@router.post("/mood/trigger", dependencies=[Depends(require_api_key)])
 async def trigger_mood(emotion: str, intensity: float = 0.7) -> MoodState:
     """Trigger an emotion in ALMA for testing.
 
@@ -254,7 +257,7 @@ async def trigger_mood(emotion: str, intensity: float = 0.7) -> MoodState:
         raise HTTPException(status_code=500, detail="Failed to trigger emotion")
 
 
-@router.get("/alma/state")
+@router.get("/alma/state", dependencies=[Depends(require_api_key)])
 async def get_alma_state():
     """Get full ALMA emotional state including neuromodulators and active emotions.
 
@@ -320,7 +323,7 @@ async def get_alma_state():
     }
 
 
-@router.get("/aura/consideration")
+@router.get("/aura/consideration", dependencies=[Depends(require_api_key)])
 async def get_consideration_state():
     """Get AURA's current consideration state.
 
@@ -349,7 +352,7 @@ async def get_consideration_state():
     return state
 
 
-@router.post("/aura/consideration/trigger")
+@router.post("/aura/consideration/trigger", dependencies=[Depends(require_api_key)])
 async def trigger_consideration(topic: Optional[str] = None):
     """Manually trigger a consideration (for testing).
 
@@ -380,7 +383,7 @@ class PersonalityUpdate(BaseModel):
     neuroticism: Optional[float] = None
 
 
-@router.get("/alma/personality")
+@router.get("/alma/personality", dependencies=[Depends(require_api_key)])
 async def get_personality():
     """Get AURA's current personality traits (OCEAN model).
 
@@ -447,7 +450,7 @@ async def get_personality():
     }
 
 
-@router.post("/alma/personality")
+@router.post("/alma/personality", dependencies=[Depends(require_api_key)])
 async def update_personality(update: PersonalityUpdate):
     """Update AURA's personality traits.
 
@@ -500,12 +503,12 @@ async def update_personality(update: PersonalityUpdate):
         pass
     except Exception as e:
         logger.error(f"[Personality Update] Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e))
 
     raise HTTPException(status_code=503, detail="ALMA not available")
 
 
-@router.post("/alma/personality/reset")
+@router.post("/alma/personality/reset", dependencies=[Depends(require_api_key)])
 async def reset_personality():
     """Reset AURA's personality to default values."""
     try:
@@ -563,4 +566,4 @@ async def get_models() -> ModelsResponse:
         return ModelsResponse(local_models=[], cloud_models=[], current_model="loading...")
     except Exception as e:
         logger.error(f"[Models] Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e))

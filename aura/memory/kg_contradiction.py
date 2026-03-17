@@ -175,6 +175,11 @@ class KGContradictionDetector:
                 if contradiction:
                     found.append(contradiction)
                     self._contradictions.append(contradiction)
+                    # Cap list to prevent unbounded growth
+                    if len(self._contradictions) > 500:
+                        self._contradictions = [
+                            c for c in self._contradictions if not c.resolved
+                        ][:400]
                     self._mark_contested(new_node_id, candidate_id)
                     self._add_contradiction_edge(new_node_id, candidate_id, contradiction)
                     logger.warning(

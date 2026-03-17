@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field
 
 from api.auth import require_api_key
+from api.utils import safe_error_detail
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ class MultiAgentChatResponse(BaseModel):
 
 
 class RoutePreviewRequest(BaseModel):
-    query: str
+    query: str = Field(..., max_length=32_000)
 
 
 class RoutePreviewResponse(BaseModel):
@@ -193,7 +194,7 @@ async def multi_agent_chat(request: MultiAgentChatRequest, session_id: str = Que
 
     except Exception as e:
         logger.error(f"[MultiAgent] Chat error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e))
 
 
 def _execute_chat(orchestrator, message: str, context: Optional[Dict] = None) -> dict:
@@ -235,19 +236,22 @@ async def preview_routing(request: RoutePreviewRequest, session_id: str = Query(
 
     except Exception as e:
         logger.error(f"[MultiAgent] Route preview error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e))
 
 
 @router.post("/clear")
 async def clear_history(session_id: str = Query(default="default")):
     """Clear multi-agent conversation history."""
     try:
-        with _orch_lock:
-            if session_id in _orchestrators:
-                del _orchestrators[session_id]
+        loop = asyncio.get_running_loop()
+        def _clear():
+            with _orch_lock:
+                if session_id in _orchestrators:
+                    del _orchestrators[session_id]
+        await loop.run_in_executor(None, _clear)
         return {"status": "cleared", "session_id": session_id}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": safe_error_detail(e)}
 
 
 @router.get("/history")

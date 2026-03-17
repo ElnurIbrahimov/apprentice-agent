@@ -188,7 +188,7 @@ class MetacognitiveEngine:
 
         # Gather signals from each source
         reflexion_signals = self._gather_reflexion_signals()
-        guardian_signals = {}
+        guardian_signals = self._gather_guardian_signals()
         skill_signals = self._gather_skill_signals()
         outcome_signals = self._gather_outcome_signals()
 
@@ -449,11 +449,13 @@ class MetacognitiveEngine:
     def _run_strategy(
         self, strategy: ImprovementStrategy, goal: LearningGoal
     ) -> tuple:
-        """Run a specific improvement strategy. Returns (action_description, success)."""
-        if strategy == ImprovementStrategy.LEARN_PATTERN:
-            return self._strategy_learn_pattern(goal)
-        elif strategy == ImprovementStrategy.SYNTHESIZE_TOOL:
-            return self._strategy_synthesize_tool(goal)
+        """Run a specific improvement strategy. Returns (action_description, success).
+
+        LEARN_PATTERN and SYNTHESIZE_TOOL are handled by SelfImprovementEngine
+        when it patches this method; the base implementation skips them.
+        """
+        if strategy in (ImprovementStrategy.LEARN_PATTERN, ImprovementStrategy.SYNTHESIZE_TOOL):
+            return ("unavailable (requires SelfImprovementEngine)", False)
         elif strategy == ImprovementStrategy.REFINE_SKILL:
             return self._strategy_refine_skill(goal)
         elif strategy == ImprovementStrategy.PRACTICE:
@@ -461,14 +463,6 @@ class MetacognitiveEngine:
         elif strategy == ImprovementStrategy.ADJUST_PARAMS:
             return self._strategy_adjust_params(goal)
         return ("unknown strategy", False)
-
-    def _strategy_learn_pattern(self, goal: LearningGoal) -> tuple:
-        """Reflexion removed -- pattern learning unavailable."""
-        return ("unavailable", False)
-
-    def _strategy_synthesize_tool(self, goal: LearningGoal) -> tuple:
-        """SynapseForge removed -- tool synthesis unavailable."""
-        return ("unavailable", False)
 
     def _strategy_refine_skill(self, goal: LearningGoal) -> tuple:
         """Refine existing skills using Skill Library."""
@@ -830,17 +824,23 @@ class MetacognitiveEngine:
         try:
             data = json.loads(state_file.read_text(encoding="utf-8"))
 
-            # Load capabilities
+            # Load capabilities (filter to known fields for schema resilience)
             for d, cap_data in data.get("capabilities", {}).items():
-                self._capabilities[d] = CapabilityScore(**cap_data)
+                self._capabilities[d] = CapabilityScore(
+                    **{k: v for k, v in cap_data.items() if k in CapabilityScore.__dataclass_fields__}
+                )
 
-            # Load goals
+            # Load goals (filter to known fields for schema resilience)
             for g_data in data.get("goals", []):
-                self._goals.append(LearningGoal(**g_data))
+                self._goals.append(LearningGoal(
+                    **{k: v for k, v in g_data.items() if k in LearningGoal.__dataclass_fields__}
+                ))
 
-            # Load improvements
+            # Load improvements (filter to known fields for schema resilience)
             for r_data in data.get("improvements", []):
-                self._improvements.append(ImprovementRecord(**r_data))
+                self._improvements.append(ImprovementRecord(
+                    **{k: v for k, v in r_data.items() if k in ImprovementRecord.__dataclass_fields__}
+                ))
 
             # Load outcomes
             self._outcomes = data.get("outcomes", [])

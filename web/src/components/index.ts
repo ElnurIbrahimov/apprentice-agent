@@ -6,7 +6,6 @@ export { Sidebar } from './Sidebar';
 export { MoodIndicator } from './MoodIndicator';
 export { ThoughtStream } from './ThoughtStream';
 export { AuraPanel } from './AuraPanel';
-export { GuardianPanel } from './GuardianPanel';
 export { NeuroDreamPanel } from './NeuroDreamPanel';
 export { ToolsPanel } from './ToolsPanel';
 export { AMEMPanel } from './AMEMPanel';

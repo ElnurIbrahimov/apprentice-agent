@@ -124,6 +124,11 @@
     const toast = document.createElement("div");
     toast.id = "toast";
     shadow.appendChild(toast);
+    const dockShadowHost = document.createElement("div");
+    dockShadowHost.id = "aura-dock-shadow";
+    Object.assign(dockShadowHost.style, { position: "fixed", right: "0", top: "0", zIndex: "2147483647", pointerEvents: "none" });
+    document.body.appendChild(dockShadowHost);
+    const dockShadow = dockShadowHost.attachShadow({ mode: "closed" });
     const dockHost = document.createElement("div");
     dockHost.id = "aura-dock-host";
     Object.assign(dockHost.style, {
@@ -149,7 +154,7 @@
       boxSizing: "border-box",
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
     });
-    document.body.appendChild(dockHost);
+    dockShadow.appendChild(dockHost);
     const dockLogo = document.createElement("div");
     Object.assign(dockLogo.style, {
       width: "32px",
@@ -522,6 +527,13 @@ ${url}`;
         sendResponse({ ok: true, x, y, w, h, dpr });
       });
       document.addEventListener("keydown", onEsc);
+      const ocrCleanupObserver = new MutationObserver(() => {
+        if (!document.body.contains(overlay)) {
+          document.removeEventListener("keydown", onEsc);
+          ocrCleanupObserver.disconnect();
+        }
+      });
+      ocrCleanupObserver.observe(document.body, { childList: true });
     }
     ext.runtime.onMessage.addListener(
       (msg, _sender, sendResponse) => {

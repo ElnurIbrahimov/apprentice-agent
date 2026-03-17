@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 
 from api.auth import require_api_key
+from api.utils import safe_error_detail
 
 router = APIRouter(prefix="/api/reasoning-tree", tags=["reasoning-tree"], dependencies=[Depends(require_api_key)])
 
@@ -120,7 +121,7 @@ async def think_deeply(request: ReasoningRequest):
         return ReasoningResponse(
             success=False,
             session_id=session_id,
-            error=str(e),
+            error=safe_error_detail(e),
         )
 
 
@@ -175,7 +176,7 @@ async def explore_options(request: ExploreRequest):
         return ReasoningResponse(
             success=False,
             session_id=session_id,
-            error=str(e),
+            error=safe_error_detail(e),
         )
 
 
@@ -205,7 +206,7 @@ async def get_tree_visualization(session_id: str):
         logger.error(f"Error getting tree visualization: {e}", exc_info=True)
         return TreeVisualization(
             success=False,
-            error=str(e),
+            error=safe_error_detail(e),
         )
 
 
@@ -225,7 +226,7 @@ async def get_reasoning_path(session_id: str):
 
     except Exception as e:
         logger.error(f"Error getting reasoning path: {e}", exc_info=True)
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": safe_error_detail(e)}
 
 
 @router.get("/reflections/{session_id}")
@@ -244,7 +245,7 @@ async def get_reflections(session_id: str):
 
     except Exception as e:
         logger.error(f"Error getting reflections: {e}", exc_info=True)
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": safe_error_detail(e)}
 
 
 @router.get("/status")
@@ -276,7 +277,7 @@ async def get_reasoning_status():
         return {
             "success": False,
             "enabled": False,
-            "error": str(e),
+            "error": safe_error_detail(e),
         }
 
 

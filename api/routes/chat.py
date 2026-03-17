@@ -32,7 +32,7 @@ def _get_agent_service():
 UPLOAD_DIR = Path(__file__).parent.parent / "data" / "uploads"
 UPLOAD_DIR_RESOLVED = Path(UPLOAD_DIR).resolve()
 
-router = APIRouter(prefix="/api/chat", tags=["chat"])
+router = APIRouter(prefix="/api/chat", tags=["chat"], dependencies=[Depends(require_api_key)])
 
 # ---------------------------------------------------------------------------
 # WebSocket connection registry for server-push (proactive messages, etc.)
@@ -209,7 +209,7 @@ def cleanup_attachment_files(attachments: List[dict]):
             logger.warning(f"[Attachments] Failed to cleanup {file_path}: {e}")
 
 
-@router.post("", response_model=ChatResponse, dependencies=[Depends(require_api_key)])
+@router.post("", response_model=ChatResponse)
 async def chat(request: ChatRequest) -> ChatResponse:
     """Non-streaming chat endpoint.
 
@@ -259,7 +259,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
         raise HTTPException(status_code=500, detail=safe_error_detail(e))
 
 
-@router.post("/run", response_model=RunResponse, dependencies=[Depends(require_api_key)])
+@router.post("/run", response_model=RunResponse)
 async def run(request: RunRequest) -> RunResponse:
     """Run agent with a goal (full agent loop).
 
@@ -271,15 +271,21 @@ async def run(request: RunRequest) -> RunResponse:
     """
     try:
         loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(
-            None,
-            lambda: _get_agent_service().run(
-                goal=request.goal,
-                context=request.context,
-                use_fastpath=request.use_fastpath,
-                max_iterations=request.max_iterations
+        try:
+            result = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: _get_agent_service().run(
+                        goal=request.goal,
+                        context=request.context,
+                        use_fastpath=request.use_fastpath,
+                        max_iterations=request.max_iterations
+                    )
+                ),
+                timeout=300.0
             )
-        )
+        except asyncio.TimeoutError:
+            raise HTTPException(status_code=504, detail="Request timed out after 300 seconds")
 
         # === Track goal as user message in ContextHeatmap ===
         try:
@@ -339,25 +345,36 @@ async def search_messages(q: str, limit: int = 20):
         svc = _get_agent_service()
         if not svc.is_ready:
             return {"results": [], "query": q}
-        results = []
-        for conv in (svc.list_conversations() or []):
-            msgs = svc._agent.brain.get_conversation_messages(conv['id']) if svc._agent else []
-            for msg in (msgs or []):
-                content = msg.get('content', '')
-                if q.lower() in content.lower():
-                    idx = content.lower().find(q.lower())
-                    s = max(0, idx - 60)
-                    e = min(len(content), idx + len(q) + 60)
-                    snippet = ('...' if s > 0 else '') + content[s:e] + ('...' if e < len(content) else '')
-                    results.append({
-                        "conversation_id": conv['id'],
-                        "conversation_title": conv.get('title', 'Untitled'),
-                        "role": msg.get('role', 'unknown'),
-                        "snippet": snippet,
-                        "timestamp": msg.get('timestamp', 0),
-                    })
-        results.sort(key=lambda r: r.get('timestamp', 0), reverse=True)
-        return {"results": results[:limit], "query": q}
+
+        def _search_sync():
+            results = []
+            q_lower = q.lower()
+            for conv in (svc.list_conversations() or []):
+                msgs = svc._agent.brain.get_conversation_messages(conv['id']) if svc._agent else []
+                for msg in (msgs or []):
+                    content = msg.get('content', '')
+                    if q_lower in content.lower():
+                        idx = content.lower().find(q_lower)
+                        s = max(0, idx - 60)
+                        e = min(len(content), idx + len(q) + 60)
+                        snippet = ('...' if s > 0 else '') + content[s:e] + ('...' if e < len(content) else '')
+                        results.append({
+                            "conversation_id": conv['id'],
+                            "conversation_title": conv.get('title', 'Untitled'),
+                            "role": msg.get('role', 'unknown'),
+                            "snippet": snippet,
+                            "timestamp": msg.get('timestamp', 0),
+                        })
+                        if len(results) >= limit:
+                            break
+                if len(results) >= limit:
+                    break
+            results.sort(key=lambda r: r.get('timestamp', 0), reverse=True)
+            return results[:limit]
+
+        loop = asyncio.get_running_loop()
+        results = await loop.run_in_executor(None, _search_sync)
+        return {"results": results, "query": q}
     except Exception as e:
         logger.error(f"[SearchMessages] {e}")
         return {"results": [], "query": q, "error": safe_error_detail(e)}
@@ -479,6 +496,12 @@ async def websocket_chat(websocket: WebSocket):
         await websocket.close(code=1008)
         return
 
+    # Reject if too many concurrent WebSocket connections
+    with _ws_lock:
+        if len(_active_websockets) >= 50:
+            await websocket.close(code=1013)
+            return
+
     await websocket.accept()
     register_websocket(websocket)
     logger.info("[WebSocket] Client connected")
@@ -508,16 +531,6 @@ async def websocket_chat(websocket: WebSocket):
                 })
                 continue
 
-            # Per-connection rate limiting
-            _ws_msg_count += 1
-            now = time.monotonic()
-            if now - _ws_window_start > WS_RATE_WINDOW:
-                _ws_msg_count = 1
-                _ws_window_start = now
-            elif _ws_msg_count > WS_RATE_LIMIT:
-                await websocket.send_json({"type": "error", "error": "Rate limit exceeded. Please slow down."})
-                continue
-
             # Handle ping/pong for keepalive
             if msg.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
@@ -541,6 +554,16 @@ async def websocket_chat(websocket: WebSocket):
                     "type": "error",
                     "error": "Invalid message format. Expected: {type: 'chat', message: '...'} or attachments"
                 })
+                continue
+
+            # Per-connection rate limiting (only for chat messages)
+            _ws_msg_count += 1
+            now = time.monotonic()
+            if now - _ws_window_start > WS_RATE_WINDOW:
+                _ws_msg_count = 1
+                _ws_window_start = now
+            elif _ws_msg_count > WS_RATE_LIMIT:
+                await websocket.send_json({"type": "error", "error": "Rate limit exceeded. Please slow down."})
                 continue
 
             message = msg.get("message", "")

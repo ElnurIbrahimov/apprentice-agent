@@ -23,12 +23,16 @@ async def extract_upload(file: UploadFile = File(...)):
     except ImportError:
         raise HTTPException(503, "pdfplumber not installed. Run: pip install pdfplumber")
 
-    data = await file.read()
-
-    # 50 MB limit on uploaded PDFs
+    # 50 MB limit on uploaded PDFs — stream to avoid buffering entire file
     _MAX_UPLOAD_SIZE = 50 * 1024 * 1024
-    if len(data) > _MAX_UPLOAD_SIZE:
-        raise HTTPException(413, f"PDF too large ({len(data)} bytes, max {_MAX_UPLOAD_SIZE})")
+    chunks = []
+    total = 0
+    async for chunk in file.stream():
+        total += len(chunk)
+        if total > _MAX_UPLOAD_SIZE:
+            raise HTTPException(413, f"PDF too large (>{_MAX_UPLOAD_SIZE} bytes)")
+        chunks.append(chunk)
+    data = b"".join(chunks)
 
     def _extract(raw: bytes):
         with pdfplumber.open(io.BytesIO(raw)) as pdf:
@@ -97,10 +101,16 @@ async def extract_url(body: dict):
     _MAX_PDF_SIZE = 50 * 1024 * 1024  # 50MB
     try:
         async with httpx.AsyncClient(timeout=30) as c:
-            r = await c.get(url, follow_redirects=False)
-        r.raise_for_status()
-        if len(r.content) > _MAX_PDF_SIZE:
-            raise HTTPException(413, f"PDF too large ({len(r.content)} bytes, max {_MAX_PDF_SIZE})")
+            chunks = []
+            total = 0
+            async with c.stream("GET", url, follow_redirects=False) as resp:
+                resp.raise_for_status()
+                async for chunk in resp.aiter_bytes():
+                    total += len(chunk)
+                    if total > _MAX_PDF_SIZE:
+                        raise HTTPException(413, f"PDF too large (>{_MAX_PDF_SIZE} bytes)")
+                    chunks.append(chunk)
+            pdf_bytes = b"".join(chunks)
     except HTTPException:
         raise
     except Exception as e:
@@ -112,7 +122,7 @@ async def extract_url(body: dict):
 
     try:
         loop = asyncio.get_running_loop()
-        pages = await loop.run_in_executor(None, _extract_bytes, r.content)
+        pages = await loop.run_in_executor(None, _extract_bytes, pdf_bytes)
     except Exception as e:
         raise HTTPException(500, f"PDF extraction failed: {e}")
 
@@ -121,4 +131,5 @@ async def extract_url(body: dict):
         "page_count": len(pages),
         "word_count": len(text.split()),
         "text": text[:80000],
+        "url": url,
     }

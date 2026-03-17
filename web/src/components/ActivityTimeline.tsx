@@ -109,7 +109,7 @@ export function ActivityTimeline() {
 
   // 3s live poll: only fetch events newer than cursor
   const fetchNew = useCallback(async () => {
-    if (lastTimestamp === 0 && events.length === 0) {
+    if (lastTimestamp === 0) {
       // Initial poll before first load completes — skip
       return;
     }
@@ -127,7 +127,7 @@ export function ActivityTimeline() {
       setLastTimestamp(newEvts[0].timestamp);
       setLiveCount(c => c + newEvts.length);
     }
-  }, [lastTimestamp, filter, events.length]);
+  }, [lastTimestamp, filter]);
 
   usePolling(fetchNew, 3000);
 

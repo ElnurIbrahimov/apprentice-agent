@@ -16,6 +16,8 @@ Config:
 
 import logging
 import os
+import time
+from collections import defaultdict
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
@@ -43,9 +45,14 @@ class SlackTool:
     name = "slack"
     description = "Read Slack channels/messages, search conversations, post messages — team awareness from AURA"
 
+    # Rate limit: max 5 messages per 5 seconds per channel
+    _SEND_RATE_LIMIT = 5
+    _SEND_RATE_WINDOW = 5.0
+
     def __init__(self):
         self._token = os.getenv("SLACK_BOT_TOKEN", "")
         self._client = None
+        self._send_timestamps: Dict[str, list] = defaultdict(list)
         if SLACK_SDK_AVAILABLE and self._token:
             self._client = WebClient(token=self._token)
             logger.info("[Slack] Client initialized")
@@ -200,6 +207,15 @@ class SlackTool:
         err = self._check()
         if err:
             return err
+
+        # Per-channel rate limiting
+        now = time.monotonic()
+        timestamps = self._send_timestamps[channel]
+        self._send_timestamps[channel] = [t for t in timestamps if now - t < self._SEND_RATE_WINDOW]
+        if len(self._send_timestamps[channel]) >= self._SEND_RATE_LIMIT:
+            return {"success": False, "error": "Rate limit: max 5 messages per 5 seconds per channel"}
+        self._send_timestamps[channel].append(now)
+
         if channel.startswith("#"):
             channel_id = self._resolve_channel_name(channel[1:])
             if not channel_id:

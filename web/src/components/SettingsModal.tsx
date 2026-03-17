@@ -306,7 +306,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             <h3 className="text-sm font-medium text-chat-text mb-3">About</h3>
             <div className="text-sm text-chat-text-secondary space-y-1">
               <p>AURA - Autonomous Universal Reasoning Agent</p>
-              <p className="text-xs">Version 3.0 with Multi-Agent System</p>
+              <p className="text-xs">Version 4.3.0 with Multi-Agent System</p>
             </div>
           </div>
         </div>

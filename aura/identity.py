@@ -162,7 +162,8 @@ def get_identity_prompt() -> str:
     Returns:
         String describing the agent's identity for use in prompts
     """
-    identity = load_identity()
+    with _identity_lock:
+        identity = load_identity()
     name = identity.get("name", "Aura")
     personality = identity.get("personality", "intelligent, witty, and subtly sarcastic like JARVIS from Iron Man - professional yet personable, offers dry humor, addresses user respectfully, anticipates needs")
 

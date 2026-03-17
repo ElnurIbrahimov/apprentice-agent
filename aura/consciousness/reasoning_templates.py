@@ -372,18 +372,22 @@ class ReasoningTemplateLibrary:
                 )
                 conn.commit()
                 self._trace_count_since_abstraction += 1
+                stored = True
                 logger.info(
                     f"[TemplateLib] Collected trace {trace_id} "
                     f"(reward={reward:.3f}, category={category})"
                 )
-                # Check if we should run batch abstraction
-                self._maybe_run_abstraction()
-                return True
             except Exception as e:
                 logger.error(f"[TemplateLib] Trace collection error: {e}")
-                return False
+                stored = False
             finally:
                 conn.close()
+
+        # Check if we should run batch abstraction (outside lock to avoid deadlock)
+        if stored:
+            self._maybe_run_abstraction()
+
+        return stored
 
     # ----------------------------------------------------------------
     # Template Retrieval
@@ -418,18 +422,20 @@ class ReasoningTemplateLibrary:
         # Load active templates
         try:
             conn = sqlite3.connect(self._db_path)
-            query = """SELECT template_id, name, description, abstract_steps,
-                              applicable_categories, source_trace_ids, embedding,
-                              times_used, avg_reward_when_used, avg_reward_baseline,
-                              status, created_at, last_used
-                       FROM reasoning_templates
-                       WHERE status = 'active' AND embedding IS NOT NULL"""
-            params = []
-            if granularity is not None:
-                query += " AND granularity = ?"
-                params.append(granularity)
-            rows = conn.execute(query, params).fetchall()
-            conn.close()
+            try:
+                query = """SELECT template_id, name, description, abstract_steps,
+                                  applicable_categories, source_trace_ids, embedding,
+                                  times_used, avg_reward_when_used, avg_reward_baseline,
+                                  status, created_at, last_used
+                           FROM reasoning_templates
+                           WHERE status = 'active' AND embedding IS NOT NULL"""
+                params = []
+                if granularity is not None:
+                    query += " AND granularity = ?"
+                    params.append(granularity)
+                rows = conn.execute(query, params).fetchall()
+            finally:
+                conn.close()
         except Exception as e:
             logger.error(f"[TemplateLib] Template retrieval DB error: {e}")
             return []
@@ -538,9 +544,8 @@ class ReasoningTemplateLibrary:
         now = time.strftime("%Y-%m-%dT%H:%M:%S")
 
         with self._lock:
+            conn = sqlite3.connect(self._db_path)
             try:
-                conn = sqlite3.connect(self._db_path)
-
                 # Get current stats
                 row = conn.execute(
                     "SELECT times_used, avg_reward_when_used FROM reasoning_templates "
@@ -549,7 +554,6 @@ class ReasoningTemplateLibrary:
                 ).fetchone()
 
                 if row is None:
-                    conn.close()
                     return
 
                 old_count, old_avg = row
@@ -564,7 +568,6 @@ class ReasoningTemplateLibrary:
                     (new_count, new_avg, now, template_id),
                 )
                 conn.commit()
-                conn.close()
 
                 logger.debug(
                     f"[TemplateLib] Template {template_id} used "
@@ -576,6 +579,8 @@ class ReasoningTemplateLibrary:
 
             except Exception as e:
                 logger.error(f"[TemplateLib] Usage recording error: {e}")
+            finally:
+                conn.close()
 
     # ----------------------------------------------------------------
     # Batch Abstraction
@@ -789,32 +794,32 @@ class ReasoningTemplateLibrary:
         """Deprecate a template if its performance falls below baseline."""
         try:
             conn = sqlite3.connect(self._db_path)
-            row = conn.execute(
-                "SELECT times_used, avg_reward_when_used, avg_reward_baseline "
-                "FROM reasoning_templates WHERE template_id = ?",
-                (template_id,),
-            ).fetchone()
+            try:
+                row = conn.execute(
+                    "SELECT times_used, avg_reward_when_used, avg_reward_baseline "
+                    "FROM reasoning_templates WHERE template_id = ?",
+                    (template_id,),
+                ).fetchone()
 
-            if row is None:
+                if row is None:
+                    return
+
+                times_used, avg_reward, baseline = row
+
+                if times_used >= self.DEPRECATION_MIN_USES:
+                    if avg_reward <= baseline + self.DEPRECATION_REWARD_GAP:
+                        conn.execute(
+                            "UPDATE reasoning_templates SET status = 'deprecated' "
+                            "WHERE template_id = ?",
+                            (template_id,),
+                        )
+                        conn.commit()
+                        logger.info(
+                            f"[TemplateLib] Deprecated template {template_id} "
+                            f"(avg_reward={avg_reward:.3f} <= baseline={baseline:.3f})"
+                        )
+            finally:
                 conn.close()
-                return
-
-            times_used, avg_reward, baseline = row
-
-            if times_used >= self.DEPRECATION_MIN_USES:
-                if avg_reward <= baseline + self.DEPRECATION_REWARD_GAP:
-                    conn.execute(
-                        "UPDATE reasoning_templates SET status = 'deprecated' "
-                        "WHERE template_id = ?",
-                        (template_id,),
-                    )
-                    conn.commit()
-                    logger.info(
-                        f"[TemplateLib] Deprecated template {template_id} "
-                        f"(avg_reward={avg_reward:.3f} <= baseline={baseline:.3f})"
-                    )
-
-            conn.close()
         except Exception as e:
             logger.error(f"[TemplateLib] Deprecation check error: {e}")
 

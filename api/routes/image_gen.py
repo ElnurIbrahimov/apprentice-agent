@@ -7,6 +7,7 @@ import asyncio
 import base64
 import logging
 import os
+import random
 from typing import Optional
 
 import httpx
@@ -35,7 +36,7 @@ def build_sdxl_workflow(prompt: str, negative_prompt: str, steps: int) -> dict:
         "3": {
             "class_type": "KSampler",
             "inputs": {
-                "seed": 42, "steps": steps, "cfg": 7,
+                "seed": random.randint(0, 2**32 - 1), "steps": steps, "cfg": 7,
                 "sampler_name": "euler", "scheduler": "normal", "denoise": 1,
                 "model": ["4", 0], "positive": ["6", 0],
                 "negative": ["7", 0], "latent_image": ["5", 0],

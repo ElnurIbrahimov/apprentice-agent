@@ -5,7 +5,9 @@ import os
 os.environ["TQDM_DISABLE"] = "1"
 
 import warnings
-warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="urllib3")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="comtypes")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="pycaw")
 warnings.filterwarnings("ignore", message="urllib3.*charset_normalizer")
 warnings.filterwarnings("ignore", message="Revert to STA COM")
 

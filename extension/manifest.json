@@ -1,16 +1,16 @@
 {
   "manifest_version": 3,
   "name": "AURA",
-  "version": "1.0.0",
+  "version": "4.3.0",
   "description": "Your private AI assistant — always present, never clouds.",
   "permissions": ["sidePanel", "contextMenus", "storage", "activeTab", "tabs", "scripting"],
-  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*", "<all_urls>"],
+  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*", "https://localhost/*", "https://127.0.0.1/*"],
   "background": { "service_worker": "background.js" },
   "side_panel": { "default_path": "sidebar.html" },
   "action": { "default_title": "Open AURA" },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": ["http://localhost/*", "http://127.0.0.1/*", "https://localhost/*", "https://127.0.0.1/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
     }

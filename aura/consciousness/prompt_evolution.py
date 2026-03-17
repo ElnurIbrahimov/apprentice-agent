@@ -276,10 +276,15 @@ class PromptEvolutionEngine:
                     return False
 
             # Data sufficiency check — need MIN_HELD_OUT traces
-            trace_count = conn.execute(
-                "SELECT COUNT(*) as cnt FROM reasoning_traces "
-                "WHERE composite_reward IS NOT NULL",
-            ).fetchone()["cnt"]
+            try:
+                trace_count = conn.execute(
+                    "SELECT COUNT(*) as cnt FROM reasoning_traces "
+                    "WHERE composite_reward IS NOT NULL",
+                ).fetchone()["cnt"]
+            except sqlite3.OperationalError:
+                # reasoning_traces table may not exist yet
+                logger.info(f"[PromptEvolution] reasoning_traces table not found, skipping")
+                return False
 
             if trace_count < self.MIN_HELD_OUT:
                 logger.info(

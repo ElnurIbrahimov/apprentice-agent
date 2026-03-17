@@ -16,7 +16,12 @@ from pathlib import Path
 from typing import Any, Optional
 
 _BLOCKED_BUILTINS = {"eval", "exec", "compile", "__import__", "open", "breakpoint"}
-_BLOCKED_MODULES = {"subprocess", "os", "sys", "shutil", "socket", "ctypes", "importlib", "pickle"}
+# Use the authoritative blocked-modules list from code_executor
+try:
+    from .code_executor import CodeExecutorTool
+    _BLOCKED_MODULES = set(CodeExecutorTool.BLOCKED_MODULES)
+except ImportError:
+    _BLOCKED_MODULES = {"subprocess", "os", "sys", "shutil", "socket", "ctypes", "importlib", "pickle"}
 
 from .tool_contract import ToolResult
 from .tool_template import (

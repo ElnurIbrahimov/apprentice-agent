@@ -1,6 +1,7 @@
 """Shell Executor tool for running shell commands with persistent sessions and security sandboxing."""
 
 import logging
+import os
 import re
 import subprocess
 import sys
@@ -64,7 +65,7 @@ ALLOWED_COMMANDS_PREFIX = [
     "mv", "touch", "git",
     "docker", "tar", "zip", "unzip",
     "type", "where", "whoami", "hostname", "ping", "nslookup",
-    "tree", "more", "less", "awk", "sed", "cut", "tr", "env",
+    "tree", "more", "less", "awk", "sed", "cut", "tr",
     "export", "which", "man", "help", "cls", "clear",
     "cargo", "rustc", "go", "java", "javac", "dotnet", "cmake",
     "make", "gcc", "g++", "clang",
@@ -76,7 +77,7 @@ ALLOWED_COMMANDS_PREFIX = [
     "date", "cal", "uptime", "uname", "arch", "df", "du", "free",
     "id", "groups", "printenv", "file", "stat", "realpath", "basename",
     "dirname", "md5sum", "sha256sum", "sha1sum", "wc", "yes", "true",
-    "false", "tee", "xargs", "time", "timeout", "nproc", "lscpu",
+    "false", "time", "timeout", "nproc", "lscpu",
     "ver", "systeminfo",
 ]
 
@@ -605,10 +606,21 @@ class ShellExecutorTool:
                     import subprocess
                     import shlex
                     try:
+                        # Sanitize environment: only pass safe keys to avoid
+                        # leaking secrets (API keys, tokens, etc.)
+                        _SAFE_ENV_KEYS = {
+                            "PATH", "TEMP", "TMP", "HOME", "SYSTEMROOT",
+                            "COMSPEC", "PATHEXT", "LANG", "USERPROFILE",
+                        }
+                        sanitized_env = {
+                            k: v for k, v in os.environ.items()
+                            if k.upper() in _SAFE_ENV_KEYS
+                        }
                         cmd_args = shlex.split(command)
                         result = subprocess.run(
                             cmd_args, shell=False, capture_output=True, text=True,
                             timeout=min(timeout, MAX_TIMEOUT), cwd=cwd,
+                            env=sanitized_env,
                         )
                         return {
                             "success": result.returncode == 0,

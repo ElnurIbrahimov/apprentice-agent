@@ -13,6 +13,7 @@ Features wired in:
 import json
 import logging
 import os
+import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -35,7 +36,7 @@ MAX_ITERATIONS = 50
 MAX_TOOL_OUTPUT_CHARS = 15000
 _TOOL_POOL = ThreadPoolExecutor(max_workers=4)
 import atexit as _atexit
-_atexit.register(_TOOL_POOL.shutdown, wait=False)
+_atexit.register(_TOOL_POOL.shutdown, wait=True)
 
 
 AGENTIC_SYSTEM_PROMPT = """You are Aura, an AI coding agent with persistent memory. You help users with software engineering tasks by reading files, writing code, running commands, and iterating until the task is complete.
@@ -717,9 +718,8 @@ class AgenticLoop:
                 content = content or accumulated  # prefer cleaned content from "done" event
 
             # Strip any lingering tool XML from content
-            import re as _re
-            content = _re.sub(r'</?tool_call>|</?tool_result[^>]*>', '', content).strip()
-            content = _re.sub(r'\n{3,}', '\n\n', content)
+            content = re.sub(r'</?tool_call>|</?tool_result[^>]*>', '', content).strip()
+            content = re.sub(r'\n{3,}', '\n\n', content)
 
             if not tool_calls:
                 # No tool calls — LLM is done

@@ -418,6 +418,9 @@ class StrategyBandit:
         if not strategies:
             strategies = [ReasoningStrategy.CHAIN_OF_THOUGHT]
 
+        # Load arms outside lock to avoid holding lock during DB I/O
+        arms = self._get_arms(cat.value)
+
         with self._lock:
             # Epsilon-greedy exploration
             if random.random() < self.epsilon:
@@ -443,7 +446,6 @@ class StrategyBandit:
                 )
 
             # Thompson Sampling
-            arms = self._get_arms(cat.value)
             arm_map = {a.strategy: a for a in arms}
 
             sampled_values = {}

@@ -51,7 +51,7 @@ NEURO_MIN_MULTIPLIER = 0.7   # Never reduce below 70% of default
 NEURO_MAX_MULTIPLIER = 1.4   # Never increase above 140% of default
 
 
-_wm_extraction_running = threading.Event()  # Rate limiter: skip if previous extraction still running
+_wm_extraction_lock = threading.Lock()  # Rate limiter: skip if previous extraction still running
 _wm_consecutive_failures = 0  # Circuit breaker: disable after repeated failures
 _WM_CIRCUIT_BREAKER_THRESHOLD = 3  # Disable after N consecutive failures
 _WM_CIRCUIT_BREAKER_RESET_AFTER = 300  # Re-enable after 5 minutes
@@ -97,16 +97,16 @@ def _run_world_model_extraction(conversation_id, messages):
                 logger.info("[BRAIN] World model extraction circuit breaker RESET — retrying")
                 _wm_consecutive_failures = 0
 
-    if _wm_extraction_running.is_set():
+    if not _wm_extraction_lock.acquire(blocking=False):
         logger.debug("[BRAIN] Skipping world model extraction — previous still running")
         return
-    _wm_extraction_running.set()
     try:
         from aura.consciousness.world_model import get_world_model
         wm = get_world_model()
         wm.process_conversation(conversation_id, messages)
         with _wm_lock:
             _wm_consecutive_failures = 0
+            _wm_circuit_broken_at = 0.0
     except Exception as e:
         with _wm_lock:
             _wm_consecutive_failures += 1
@@ -125,7 +125,7 @@ def _run_world_model_extraction(conversation_id, messages):
     except Exception as e:
         logger.debug(f"[BRAIN] Proactive awareness quick analysis failed: {e}")
     finally:
-        _wm_extraction_running.clear()
+        _wm_extraction_lock.release()
 
 
 def _get_neuromodulator_levels() -> dict:
@@ -184,7 +184,7 @@ _BG_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=8, thread_name_
 def _cleanup_executor():
     """Cleanup shared executor on exit."""
     _SHARED_EXECUTOR.shutdown(wait=False, cancel_futures=True)
-    _BG_EXECUTOR.shutdown(wait=False, cancel_futures=True)
+    _BG_EXECUTOR.shutdown(wait=True)
 
 atexit.register(_cleanup_executor)
 
@@ -281,7 +281,7 @@ class OllamaBrain:
         self.model = Config.MODEL_NAME
         self._max_history: int = Config.HISTORY_LIMIT
         self.conversation_history: list[dict] = []
-        self._history_lock = threading.Lock()
+        self._history_lock = threading.RLock()
         self._last_model_used: str = self.model  # Track for metacognition
         self._query_count: int = 0  # Track queries for auto-reset (resets every 15)
         self._total_query_count: int = 0  # Total queries (never resets)
@@ -957,9 +957,16 @@ class OllamaBrain:
 
     def _save_history_unlocked(self) -> None:
         """Save conversation history to disk — caller MUST hold _history_lock."""
+        # Snapshot metadata while holding the lock so the index update
+        # is consistent with the serialized data, even if the history
+        # list is mutated before the background write completes.
+        snap_count = len(self.conversation_history)
+        snap_last = (self.conversation_history[-1].get("content", "")
+                     if self.conversation_history else None)
+        snap_history = list(self.conversation_history)
         data_str = json.dumps(
             {
-                "history": self.conversation_history,
+                "history": snap_history,
                 "query_count": self._query_count,
                 "total_query_count": self._total_query_count,
             },
@@ -970,22 +977,33 @@ class OllamaBrain:
         # cannot cause us to write to the wrong file in the background.
         path = self._history_file
         _BG_EXECUTOR.submit(lambda p=path, d=data_str: p.write_text(d, encoding="utf-8"))
-        self._update_conversation_index_entry()
+        self._update_conversation_index_entry(
+            snap_message_count=snap_count, snap_last_content=snap_last,
+            snap_history=snap_history,
+        )
 
-    def _save_history_snapshot(self, history: list, query_count: int, total_query_count: int) -> None:
+    def _save_history_snapshot(self, history: list, query_count: int, total_query_count: int, history_path=None) -> None:
         """Save a pre-copied history list to disk (called OUTSIDE _history_lock).
 
         Serializes JSON on the calling thread (fast), then writes to disk
         in the background pool to avoid blocking request threads on I/O.
+
+        Args:
+            history_path: Path captured inside _history_lock by the caller.
+                          Falls back to self._history_file if not provided.
         """
         try:
             data_str = json.dumps(
                 {"history": history, "query_count": query_count, "total_query_count": total_query_count},
                 indent=2, ensure_ascii=False,
             )
-            path = self._history_file
+            path = history_path or self._history_file
             _BG_EXECUTOR.submit(lambda p=path, d=data_str: p.write_text(d, encoding="utf-8"))
-            self._update_conversation_index_entry()
+            self._update_conversation_index_entry(
+                snap_message_count=len(history),
+                snap_last_content=history[-1].get("content", "") if history else None,
+                snap_history=history,
+            )
         except (IOError, RuntimeError) as e:
             logger.warning(f"[BRAIN] Could not save history snapshot: {e}")
 
@@ -1112,7 +1130,7 @@ class OllamaBrain:
     def _load_conversations_index(self) -> list:
         """Load the conversations index."""
         if self._conversations_index_cache is not None:
-            return self._conversations_index_cache
+            return list(self._conversations_index_cache)
         try:
             if self._conversations_index_file.exists():
                 data = json.loads(self._conversations_index_file.read_text(encoding="utf-8"))
@@ -1142,21 +1160,35 @@ class OllamaBrain:
         except IOError as e:
             logger.warning(f"[BRAIN] Could not save conversations index: {e}")
 
-    def _update_conversation_index_entry(self) -> None:
-        """Update the current conversation's index entry with latest metadata."""
+    def _update_conversation_index_entry(
+        self,
+        snap_message_count: int | None = None,
+        snap_last_content: str | None = None,
+        snap_history: list | None = None,
+    ) -> None:
+        """Update the current conversation's index entry with latest metadata.
+
+        When called from _save_history_unlocked, snapshot values are passed so
+        the index stays consistent with the serialised data even if the live
+        history list changes between serialisation and this call.
+        """
         if not self._current_conversation_id:
             return
+        msg_count = snap_message_count if snap_message_count is not None else len(self.conversation_history)
+        last_content = snap_last_content if snap_last_content is not None else (
+            self.conversation_history[-1].get("content", "") if self.conversation_history else None
+        )
+        history_for_title = snap_history if snap_history is not None else self.conversation_history
         index = self._load_conversations_index()
         for entry in index:
             if entry["id"] == self._current_conversation_id:
                 entry["updated_at"] = int(time.time())
-                entry["message_count"] = len(self.conversation_history)
-                if self.conversation_history:
-                    last_msg = self.conversation_history[-1].get("content", "")
-                    entry["preview"] = last_msg[:100]
+                entry["message_count"] = msg_count
+                if last_content is not None:
+                    entry["preview"] = last_content[:100]
                 # Update title if still "New Chat" and we have messages
-                if entry["title"] == "New Chat" and self.conversation_history:
-                    entry["title"] = self._auto_title(self.conversation_history)
+                if entry["title"] == "New Chat" and msg_count > 0:
+                    entry["title"] = self._auto_title(history_for_title)
                 break
         self._save_conversations_index(index)
 
@@ -1261,13 +1293,21 @@ class OllamaBrain:
         # If we deleted the active conversation, switch to another or create new
         if conversation_id == self._current_conversation_id:
             if index:
+                # Sort by most recently updated so we switch to the latest conversation
+                index.sort(key=lambda c: c.get("updated_at", 0), reverse=True)
+                with self._history_lock:
+                    # Point _history_file away from the deleted dir before switch_conversation
+                    # tries to save history via _save_history_unlocked
+                    target_dir = self._conversations_dir / index[0]["id"]
+                    self._history_file = target_dir / "history.json"
                 self.switch_conversation(index[0]["id"])
             else:
                 conv_id = self._create_conversation_dir("New Chat")
-                self._current_conversation_id = conv_id
-                self._history_file = self._conversations_dir / conv_id / "history.json"
-                self.conversation_history = []
-                self._query_count = 0
+                with self._history_lock:
+                    self._current_conversation_id = conv_id
+                    self._history_file = self._conversations_dir / conv_id / "history.json"
+                    self.conversation_history = []
+                    self._query_count = 0
 
         logger.info(f"[BRAIN] Deleted conversation: {conversation_id}")
         return True
@@ -1503,7 +1543,7 @@ class OllamaBrain:
 
         # Build summary prompt
         conversation_text = "\n".join(
-            f"{msg['role'].upper()}: {msg['content'][:300]}"
+            f"{msg['role'].upper()}: {msg['content'][:1000]}"
             for msg in old_messages
         )
 
@@ -1789,7 +1829,12 @@ class OllamaBrain:
         # for conversation history and response in the model's context window.
         if len(full) > MAX_SYSTEM_PROMPT_CHARS:
             logger.warning(f"[BRAIN] System prompt too large ({len(full)} chars), truncating to {MAX_SYSTEM_PROMPT_CHARS}")
-            full = full[:MAX_SYSTEM_PROMPT_CHARS] + "\n\n[System context truncated for length]"
+            cut = full[:MAX_SYSTEM_PROMPT_CHARS].rfind('\n\n')
+            if cut > MAX_SYSTEM_PROMPT_CHARS // 2:
+                full = full[:cut]
+            else:
+                full = full[:MAX_SYSTEM_PROMPT_CHARS]
+            full += "\n\n[System context truncated for length]"
 
         return full
 
@@ -2002,8 +2047,9 @@ class OllamaBrain:
                 _history_snapshot = list(self.conversation_history)
                 _qc = self._query_count
                 _tqc = self._total_query_count
+                _hpath = self._history_file
             # Disk I/O outside the lock to avoid serializing concurrent requests
-            self._save_history_snapshot(_history_snapshot, _qc, _tqc)
+            self._save_history_snapshot(_history_snapshot, _qc, _tqc, history_path=_hpath)
         else:
             recent = [
                 {"role": "user", "content": prompt},
@@ -2209,8 +2255,9 @@ class OllamaBrain:
                 _history_snapshot = list(self.conversation_history)
                 _qc = self._query_count
                 _tqc = self._total_query_count
+                _hpath = self._history_file
             # Disk I/O outside the lock to avoid serializing concurrent requests
-            self._save_history_snapshot(_history_snapshot, _qc, _tqc)
+            self._save_history_snapshot(_history_snapshot, _qc, _tqc, history_path=_hpath)
         else:
             recent = [
                 {"role": "user", "content": prompt},
@@ -2235,7 +2282,7 @@ class OllamaBrain:
             wm = get_world_model()
             if not wm.enabled:
                 return
-            conv_id = self.get_current_conversation_id()
+            conv_id = self.get_current_conversation_id() or "unknown"
             if executor is not None:
                 try:
                     executor.submit(_run_world_model_extraction, conv_id, recent)

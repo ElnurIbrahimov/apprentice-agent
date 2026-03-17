@@ -71,7 +71,8 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
             )
 
         if not secrets.compare_digest(api_key, self.api_key):
-            logger.warning(f"[Auth] Invalid API key from {request.client.host}")
+            client_host = request.client.host if request.client else "unknown"
+            logger.warning(f"[Auth] Invalid API key from {client_host}")
             return JSONResponse(
                 status_code=403,
                 content={"detail": "Invalid API key."}

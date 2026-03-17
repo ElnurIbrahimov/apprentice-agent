@@ -243,11 +243,16 @@ class MemoryStore:
             record.metadata, emb_blob,
         ]
         placeholders = ",".join(["?"] * len(_COLUMNS))
-        sql = f"INSERT OR REPLACE INTO memories({','.join(_COLUMNS)}) VALUES({placeholders})"
+        sql = f"INSERT OR IGNORE INTO memories({','.join(_COLUMNS)}) VALUES({placeholders})"
 
         with self._lock:
-            self._get_conn().execute(sql, values)
-            self._get_conn().commit()
+            conn = self._get_conn()
+            try:
+                conn.execute(sql, values)
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
         return record.id
 
     def get(self, memory_id: str) -> Optional[MemoryRecord]:
@@ -290,26 +295,41 @@ class MemoryStore:
         vals = list(kwargs.values()) + [memory_id]
         sql = f"UPDATE memories SET {sets} WHERE id=?"
         with self._lock:
-            cur = self._get_conn().execute(sql, vals)
-            self._get_conn().commit()
+            conn = self._get_conn()
+            try:
+                cur = conn.execute(sql, vals)
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
         return cur.rowcount > 0
 
     def update_embedding(self, memory_id: str, embedding: np.ndarray) -> bool:
         """Update just the embedding BLOB for a memory."""
         blob = _float32_to_blob(embedding)
         with self._lock:
-            cur = self._get_conn().execute(
-                "UPDATE memories SET embedding=?, updated_at=? WHERE id=?",
-                (blob, datetime.now().isoformat(), memory_id),
-            )
-            self._get_conn().commit()
+            conn = self._get_conn()
+            try:
+                cur = conn.execute(
+                    "UPDATE memories SET embedding=?, updated_at=? WHERE id=?",
+                    (blob, datetime.now().isoformat(), memory_id),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
         return cur.rowcount > 0
 
     def delete(self, memory_id: str) -> bool:
         """Hard-delete a memory."""
         with self._lock:
-            cur = self._get_conn().execute("DELETE FROM memories WHERE id=?", (memory_id,))
-            self._get_conn().commit()
+            conn = self._get_conn()
+            try:
+                cur = conn.execute("DELETE FROM memories WHERE id=?", (memory_id,))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
         return cur.rowcount > 0
 
     def touch(self, memory_id: str) -> None:
@@ -397,8 +417,8 @@ class MemoryStore:
         # FTS5 match query — strip special FTS5 characters from each word
         words = []
         for w in query.split():
-            fts_safe = re.sub(r'[*"(){}^]', '', w.strip())
-            if fts_safe:
+            fts_safe = re.sub(r'[*"(){}^\-:.+~\\]', '', w.strip()).lower()
+            if fts_safe and fts_safe not in ("not", "and", "or"):
                 words.append(fts_safe)
         if not words:
             return []
@@ -500,7 +520,7 @@ class MemoryStore:
         if not records:
             return 0
         placeholders = ",".join(["?"] * len(_COLUMNS))
-        sql = f"INSERT OR REPLACE INTO memories({','.join(_COLUMNS)}) VALUES({placeholders})"
+        sql = f"INSERT OR IGNORE INTO memories({','.join(_COLUMNS)}) VALUES({placeholders})"
 
         rows_data = []
         for i, rec in enumerate(records):
@@ -521,8 +541,12 @@ class MemoryStore:
 
         with self._lock:
             conn = self._get_conn()
-            conn.executemany(sql, rows_data)
-            conn.commit()
+            try:
+                conn.executemany(sql, rows_data)
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
         return len(rows_data)
 
     def batch_decay(self) -> int:
@@ -555,11 +579,15 @@ class MemoryStore:
                 new_strength = max(0.0, min(1.0, new_strength))
                 updates.append((new_strength, now, mem_id))
 
-            conn.executemany(
-                "UPDATE memories SET strength=?, updated_at=? WHERE id=?",
-                updates,
-            )
-            conn.commit()
+            try:
+                conn.executemany(
+                    "UPDATE memories SET strength=?, updated_at=? WHERE id=?",
+                    updates,
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
         return len(updates)
 
     def prune_forgotten(self, threshold: float = 0.05) -> int:

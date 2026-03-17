@@ -1,6 +1,5 @@
 """
 Knowledge clip API — save and search web selections from the AURA Chrome extension.
-No auth required (localhost-only, extension origin).
 """
 
 import logging
@@ -11,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel, Field
 
 from api.auth import require_api_key
+from api.utils import safe_error_detail
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +102,7 @@ async def save_knowledge(body: SaveRequest):
         )
     except Exception as e:
         logger.error("[Knowledge] Save failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e))
 
 
 @router.get("/list")
@@ -149,7 +149,7 @@ async def list_knowledge(
 
     except Exception as e:
         logger.error("[Knowledge] List failed: %s", e)
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, safe_error_detail(e))
 
 
 @router.delete("/{episode_id}")
@@ -168,7 +168,7 @@ async def delete_knowledge(episode_id: str):
         raise
     except Exception as e:
         logger.error("[Knowledge] Delete failed: %s", e)
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, safe_error_detail(e))
 
 
 @router.get("/search", response_model=SearchResponse)
@@ -212,4 +212,4 @@ async def search_knowledge(
         return SearchResponse(query=q, results=results, count=len(results))
     except Exception as e:
         logger.error("[Knowledge] Search failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e))

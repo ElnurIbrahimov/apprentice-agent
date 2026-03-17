@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 
 from api.auth import require_api_key
+from api.utils import safe_error_detail
 
 router = APIRouter(prefix="/api/self-improvement", tags=["self-improvement"], dependencies=[Depends(require_api_key)])
 
@@ -39,7 +40,7 @@ async def get_status():
         }
     except Exception as e:
         logger.error(f"[SelfImprovement API] status error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e))
 
 
 @router.get("/report")
@@ -56,7 +57,7 @@ async def get_report():
         }
     except Exception as e:
         logger.error(f"[SelfImprovement API] report error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e))
 
 
 @router.get("/params")
@@ -73,7 +74,7 @@ async def get_params():
         }
     except Exception as e:
         logger.error(f"[SelfImprovement API] params error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e))
 
 
 @router.post("/cycle")
@@ -100,7 +101,7 @@ async def trigger_cycle():
             }
     except Exception as e:
         logger.error(f"[SelfImprovement API] cycle error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e))
 
 
 @router.post("/tune")
@@ -121,4 +122,4 @@ async def tune_param(req: TuneParamRequest):
         raise
     except Exception as e:
         logger.error(f"[SelfImprovement API] tune error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e))

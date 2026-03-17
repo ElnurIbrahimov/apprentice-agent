@@ -101,6 +101,7 @@ class APITesterTool:
 
         # SECURITY: Block SSRF targets — private/loopback ranges and metadata endpoints
         import ipaddress
+        import socket as _socket
         _parsed = urlparse(url)
         _hostname = _parsed.hostname or ""
         _ssrf_blocked = [
@@ -110,12 +111,27 @@ class APITesterTool:
         ]
         if _hostname in _ssrf_blocked:
             return {"success": False, "error": "Blocked: metadata endpoint"}
+
+        # Block localhost and IPv6 loopback by name before DNS resolution
+        _hostname_lower = _hostname.lower()
+        if _hostname_lower in ("localhost", "[::1]", "::1"):
+            return {"success": False, "error": "Blocked: localhost/loopback addresses not allowed"}
+
+        # Check if hostname resolves to a private/loopback IP
         try:
             _ip = ipaddress.ip_address(_hostname)
             if _ip.is_private or _ip.is_loopback or _ip.is_link_local:
                 return {"success": False, "error": "Blocked: private/loopback IP addresses not allowed"}
         except ValueError:
-            pass  # hostname is a DNS name, not an IP — allow
+            # hostname is a DNS name — resolve and check
+            try:
+                _resolved = _socket.getaddrinfo(_hostname, None, _socket.AF_UNSPEC, _socket.SOCK_STREAM)
+                for _family, _type, _proto, _canonname, _sockaddr in _resolved:
+                    _resolved_ip = ipaddress.ip_address(_sockaddr[0])
+                    if _resolved_ip.is_private or _resolved_ip.is_loopback or _resolved_ip.is_link_local:
+                        return {"success": False, "error": "Blocked: hostname resolves to private/loopback IP"}
+            except (_socket.gaierror, OSError):
+                pass  # DNS resolution failed — let requests handle the error
 
         req_headers = dict(headers or {})
         req_body = None

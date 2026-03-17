@@ -13,6 +13,7 @@ Based on:
 - Neuromodulator research (Doya, 2002)
 """
 
+import atexit
 import json
 import math
 import time
@@ -467,6 +468,12 @@ class ALMAEngine:
         # Thread safety (RLock for reentrant method calls)
         self._lock = threading.RLock()
 
+        # Buffered emotion history writer
+        self._log_buffer: List[dict] = []
+        self._log_buffer_lock = threading.Lock()
+        self._log_file_handle: Optional[Any] = None
+        self._LOG_FLUSH_THRESHOLD = 10
+
         # Instance vars (formerly class-level, now per-instance for thread safety)
         self._weather_cache = None
         self._weather_cache_time: float = 0.0
@@ -475,9 +482,16 @@ class ALMAEngine:
         self._last_drift_time: float = 0.0
         self._session_interaction_count: int = 0
 
+        # Rate-limit _save_state(): track interaction count and last save time
+        self._save_interaction_count: int = 0
+        self._last_save_time: float = time.time()
+        self._SAVE_EVERY_N: int = 5
+        self._SAVE_INTERVAL_SECS: float = 30.0
+
         # Load persisted state (restores emotional continuity across sessions)
         self._load_state()
 
+        atexit.register(self.close)
         logger.info("ALMA Engine initialized")
 
     # -------------------------------------------------------------------------
@@ -527,6 +541,12 @@ class ALMAEngine:
 
             # Add to active emotions
             self.active_emotions.append(emotion)
+
+            # Cap active_emotions to prevent unbounded growth
+            if len(self.active_emotions) > 50:
+                # Sort by current intensity, keep top 40
+                self.active_emotions.sort(key=lambda e: e.current_intensity(), reverse=True)
+                self.active_emotions = self.active_emotions[:40]
 
             # Update mood
             self.mood.accumulate_emotion(emotion)
@@ -840,8 +860,14 @@ class ALMAEngine:
                 trigger="interesting_topic"
             )
 
-        # Save state periodically
-        self._save_state()
+        # Save state periodically (rate-limited to avoid excessive disk writes)
+        self._save_interaction_count += 1
+        now = time.time()
+        if (self._save_interaction_count >= self._SAVE_EVERY_N
+                or (now - self._last_save_time) >= self._SAVE_INTERVAL_SECS):
+            self._save_state()
+            self._save_interaction_count = 0
+            self._last_save_time = now
 
     def _respond_to_user_emotion(self, user_emotion: str):
         """Generate empathetic emotional response to user's emotion."""
@@ -875,6 +901,9 @@ class ALMAEngine:
         """Save current emotional state to disk (with full continuity data)."""
         import os
         import tempfile
+        # Flush any buffered emotion log entries
+        with self._log_buffer_lock:
+            self._flush_emotion_log()
         try:
             # Collect state data under lock to prevent concurrent mutation
             with self._lock:
@@ -1009,20 +1038,55 @@ class ALMAEngine:
             logger.error(f"[ALMA] Failed to load state: {e}")
 
     def _log_emotion(self, emotion: EmotionState):
-        """Log emotion to history file."""
+        """Buffer emotion log entries and flush periodically."""
+        entry = {
+            "emotion": emotion.name,
+            "intensity": emotion.intensity,
+            "trigger": emotion.trigger,
+            "timestamp": datetime.now().isoformat(),
+            "pad": emotion.pad.to_dict(),
+        }
+        with self._log_buffer_lock:
+            self._log_buffer.append(entry)
+            if len(self._log_buffer) >= self._LOG_FLUSH_THRESHOLD:
+                self._flush_emotion_log()
+
+    def _flush_emotion_log(self):
+        """Flush buffered emotion log entries to disk. Caller must hold _log_buffer_lock."""
+        if not self._log_buffer:
+            return
         try:
             rotate_jsonl_if_needed(self.history_file)
-            with open(self.history_file, "a", encoding="utf-8") as f:
-                entry = {
-                    "emotion": emotion.name,
-                    "intensity": emotion.intensity,
-                    "trigger": emotion.trigger,
-                    "timestamp": datetime.now().isoformat(),
-                    "pad": emotion.pad.to_dict(),
-                }
-                f.write(json.dumps(entry) + "\n")
+            if self._log_file_handle is None or self._log_file_handle.closed:
+                self._log_file_handle = open(self.history_file, "a", encoding="utf-8")
+            for entry in self._log_buffer:
+                self._log_file_handle.write(json.dumps(entry) + "\n")
+            self._log_file_handle.flush()
+            self._log_buffer.clear()
         except Exception as e:
-            logger.error(f"Failed to log emotion: {e}")
+            logger.error(f"Failed to flush emotion log: {e}")
+            # Re-open on next flush attempt
+            try:
+                if self._log_file_handle and not self._log_file_handle.closed:
+                    self._log_file_handle.close()
+            except Exception:
+                pass
+            self._log_file_handle = None
+
+    def close(self):
+        """Save state, flush log buffer and close the log file handle."""
+        try:
+            self._save_state()
+        except Exception as e:
+            logger.debug(f"[ALMA] close save_state error: {e}")
+        try:
+            with self._log_buffer_lock:
+                self._flush_emotion_log()
+            if self._log_file_handle and not self._log_file_handle.closed:
+                self._log_file_handle.close()
+                self._log_file_handle = None
+        except Exception as e:
+            logger.debug(f"[ALMA] close error: {e}")
 
     # -------------------------------------------------------------------------
     # Environmental Context (Weather)
@@ -1135,6 +1199,9 @@ class ALMAEngine:
         """
         now = time.time()
 
+        # Fetch weather BEFORE acquiring the lock (makes HTTP requests with timeouts)
+        weather = self._get_weather_context()
+
         with self._lock:
             # Rate limit: at most once per 30 seconds
             if now - self._last_drift_time < 30:
@@ -1220,7 +1287,7 @@ class ALMAEngine:
             self.mood.decay_toward_baseline()
 
             # 5. Weather influence — very gentle PAD nudge from environment
-            weather = self._get_weather_context()
+            # (weather was fetched before acquiring the lock)
             if weather:
                 weather_nudges = {
                     "clear": PADState(pleasure=0.1, arousal=0.0, dominance=0.0),

@@ -177,7 +177,7 @@ class AdaptivePlanner:
             plan = planner.generate_plan(goal)
             # ... inject plan.to_prompt_context() into LLM messages
             # After N ReAct steps:
-            if planner.should_replan(iteration):
+            if planner.should_replan():
                 plan = planner.replan(plan, iteration_results)
     """
 
@@ -271,7 +271,7 @@ class AdaptivePlanner:
         """
         self._steps_since_last_plan += 1
 
-    def should_replan(self, react_iteration: int = 0) -> bool:
+    def should_replan(self) -> bool:
         """Check if it's time to re-plan based on the planning interval.
 
         Pure check -- does NOT increment any counter. Call tick() first.

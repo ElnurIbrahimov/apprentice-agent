@@ -24,6 +24,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from collections import OrderedDict
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -286,6 +287,9 @@ Format each insight as a single clear sentence starting with a verb (Use, Prefer
             use_history=False
         )
 
+        if not response:
+            return []
+
         # Parse insights from response
         for line in response.split("\n"):
             line = line.strip()
@@ -309,22 +313,37 @@ Format each insight as a single clear sentence starting with a verb (Use, Prefer
         return insights[:5]  # Limit to 5 insights
 
     def _store_insights(self, insights: list[str], date: Optional[str] = None) -> list[str]:
-        """Store insights in long-term memory."""
+        """Store insights in the unified memory store."""
         if date is None:
             date = datetime.now().strftime("%Y-%m-%d")
 
         stored_ids = []
-        for insight in insights:
-            memory_id = self.memory.remember(
-                content=insight,
-                memory_type="dream_insight",
-                metadata={
-                    "source": "dream_mode",
-                    "date_analyzed": date,
-                    "generated_at": datetime.now().isoformat()
-                }
-            )
-            stored_ids.append(memory_id)
+        try:
+            from aura.memory.unified_memory import get_unified_memory
+            umem = get_unified_memory()
+            for insight in insights:
+                ids = umem.store(
+                    content=insight,
+                    source="dream",
+                    importance=0.6,
+                    tags=["dream_insight", f"date:{date}"],
+                    episode_type="insight",
+                )
+                stored_ids.append(ids.get("store", ""))
+        except Exception as e:
+            logger.warning(f"[DreamMode] Failed to store insights via unified memory: {e}")
+            # Fallback to deprecated MemorySystem for resilience
+            for insight in insights:
+                memory_id = self.memory.remember(
+                    content=insight,
+                    memory_type="dream_insight",
+                    metadata={
+                        "source": "dream_mode",
+                        "date_analyzed": date,
+                        "generated_at": datetime.now().isoformat()
+                    }
+                )
+                stored_ids.append(memory_id)
 
         return stored_ids
 
@@ -343,106 +362,6 @@ Format each insight as a single clear sentence starting with a verb (Use, Prefer
     def get_all_insights(self) -> list[dict]:
         """Get all stored insights."""
         return [m for m in self.memory.memories if m.get("type") == "dream_insight"]
-
-
-def _consolidate_amem_notes(amem_system, similarity_threshold: float = 0.85) -> dict:
-    """DEPRECATED: Use DreamConsolidator._merge_similar() instead.
-
-    Legacy function — Merge A-MEM notes with high cosine similarity and prune low-importance notes.
-
-    Args:
-        amem_system: An initialized AMEMSystem instance
-        similarity_threshold: Cosine similarity above which notes are merged (default 0.85)
-
-    Returns:
-        dict with keys: merged (int), pruned (int)
-    """
-    if not amem_system:
-        return {"merged": 0, "pruned": 0}
-
-    notes = list(amem_system._notes.values())
-    merged_count = 0
-    pruned_count = 0
-    merged_ids = set()
-
-    # Collect embeddings that exist for notes (numpy arrays)
-    embeddings = {}
-    for note in notes:
-        note_id = note.id
-        if note_id and hasattr(amem_system, '_embeddings'):
-            emb = amem_system._embeddings.get(note_id)
-            if emb is not None:
-                embeddings[note_id] = emb
-
-    # Find pairs with high cosine similarity and merge note_b into note_a
-    for i, note_a in enumerate(notes):
-        note_a_id = note_a.id
-        if not note_a_id or note_a_id in merged_ids:
-            continue
-
-        for note_b in notes[i + 1:]:
-            note_b_id = note_b.id
-            if not note_b_id or note_b_id in merged_ids:
-                continue
-            if note_a_id not in embeddings or note_b_id not in embeddings:
-                continue
-
-            ea = embeddings[note_a_id]
-            eb = embeddings[note_b_id]
-
-            # Cosine similarity using numpy
-            try:
-                import numpy as np
-                dot = float(np.dot(ea, eb))
-                mag_a = float(np.linalg.norm(ea))
-                mag_b = float(np.linalg.norm(eb))
-            except Exception:
-                dot = sum(float(a) * float(b) for a, b in zip(ea, eb))
-                mag_a = sum(float(a) ** 2 for a in ea) ** 0.5
-                mag_b = sum(float(b) ** 2 for b in eb) ** 0.5
-
-            if mag_a < 1e-8 or mag_b < 1e-8:
-                continue
-            similarity = dot / (mag_a * mag_b)
-
-            if similarity >= similarity_threshold:
-                # Keep higher importance, combine keywords and context
-                note_a.importance = max(note_a.importance, note_b.importance)
-
-                kw_a = list(note_a.keywords)
-                kw_b = list(note_b.keywords)
-                note_a.keywords = list(set(kw_a + kw_b))[:20]
-
-                ctx_b = note_b.context
-                if ctx_b and ctx_b not in note_a.context:
-                    note_a.context = f"{note_a.context} | {ctx_b}"[:500]
-
-                merged_ids.add(note_b_id)
-                merged_count += 1
-
-    # Remove merged notes from memory and embeddings
-    for note_id in merged_ids:
-        amem_system._notes.pop(note_id, None)
-        if hasattr(amem_system, '_embeddings'):
-            amem_system._embeddings.pop(note_id, None)
-
-    # Prune notes that are low-importance and have never been accessed
-    low_importance_ids = [
-        note_id
-        for note_id, note in amem_system._notes.items()
-        if note.importance < 0.2 and note.access_count == 0
-    ]
-    for note_id in low_importance_ids:
-        amem_system._notes.pop(note_id, None)
-        pruned_count += 1
-
-    # Persist the consolidated state
-    try:
-        amem_system.save()
-    except Exception as e:
-        logger.warning(f"[Dream] Failed to save after consolidation: {e}")
-
-    return {"merged": merged_count, "pruned": pruned_count}
 
 
 def run_dream_mode(date: Optional[str] = None) -> dict:
@@ -545,11 +464,25 @@ def _jaccard(a: set, b: set) -> float:
     return len(a & b) / len(a | b)
 
 
+_sentence_model = None
+_sentence_model_lock = threading.Lock()
+
+
+def _get_sentence_model():
+    """Lazy singleton for the SentenceTransformer model."""
+    global _sentence_model
+    if _sentence_model is None:
+        with _sentence_model_lock:
+            if _sentence_model is None:
+                from sentence_transformers import SentenceTransformer
+                _sentence_model = SentenceTransformer("all-MiniLM-L6-v2")
+    return _sentence_model
+
+
 def _get_embeddings(texts: List[str]) -> Optional[List[List[float]]]:
     """Try to compute embeddings via sentence-transformers. Returns None on failure."""
     try:
-        from sentence_transformers import SentenceTransformer
-        model = SentenceTransformer("all-MiniLM-L6-v2")
+        model = _get_sentence_model()
         embeddings = model.encode(texts, show_progress_bar=False)
         return [e.tolist() for e in embeddings]
     except Exception:
@@ -576,6 +509,10 @@ def _cluster_by_similarity(
     Uses sentence-transformer embeddings (cosine similarity) when available,
     falls back to Jaccard text similarity otherwise.
 
+    When numpy is available and embeddings exist, computes the full NxN
+    similarity matrix in one vectorized operation instead of O(N²) pure-Python
+    calls.
+
     items: list of dicts with at least a "content" key.
     Returns list of clusters (each cluster is a list of items).
     """
@@ -594,6 +531,22 @@ def _cluster_by_similarity(
     # Embedding-based clustering uses a higher threshold (cosine vs Jaccard)
     effective_threshold = 0.65 if use_embeddings else threshold
 
+    # --- Fast path: numpy matrix similarity ---
+    sim_matrix = None
+    if use_embeddings:
+        try:
+            import numpy as np
+            # Validate all embeddings have the same dimension
+            dim0 = len(embeddings[0])
+            if all(len(e) == dim0 for e in embeddings):
+                emb_matrix = np.array(embeddings, dtype=np.float32)
+                norms = np.linalg.norm(emb_matrix, axis=1, keepdims=True)
+                norms = np.where(norms < 1e-8, 1.0, norms)
+                normed = emb_matrix / norms
+                sim_matrix = normed @ normed.T  # (N, N) cosine similarity
+        except Exception:
+            sim_matrix = None  # fall back to per-pair computation
+
     clusters: List[List[int]] = []
     assigned = [False] * len(items)
 
@@ -605,7 +558,9 @@ def _cluster_by_similarity(
         for j in range(i + 1, len(items)):
             if assigned[j]:
                 continue
-            if use_embeddings:
+            if sim_matrix is not None:
+                sim = float(sim_matrix[i, j])
+            elif use_embeddings:
                 sim = _cosine_similarity(embeddings[i], embeddings[j])
             else:
                 sim = _jaccard(token_sets[i], token_sets[j])
@@ -658,7 +613,7 @@ class DreamConsolidator:
         self._brain: Optional[Any] = None
         self._running   = False
         self._lock      = threading.Lock()
-        self._last_seen_ids: set = set()
+        self._last_seen_ids: OrderedDict = OrderedDict()
         self._MAX_SEEN_IDS = 500
 
     # ------------------------------------------------------------------
@@ -689,10 +644,11 @@ class DreamConsolidator:
             memories = self._fetch_memories(user_id, store)
             cycle.memories_processed = len(memories)
 
-            # 2. CLUSTER
-            clusters = _cluster_by_similarity(memories)
-            logger.info("[DreamConsolidator] %d memories → %d clusters", len(memories), len(clusters))
-            clusters = clusters[:self._batch_size]
+            # 2. CLUSTER — cap input to _batch_size to bound O(N²) similarity
+            cluster_input = memories[:self._batch_size]
+            clusters = _cluster_by_similarity(cluster_input)
+            logger.info("[DreamConsolidator] %d memories (capped %d) → %d clusters",
+                        len(memories), len(cluster_input), len(clusters))
 
             # 3. SUMMARIZE
             for cluster in clusters:
@@ -706,12 +662,11 @@ class DreamConsolidator:
                     report.summaries.append(summary)
                     cycle.summaries_written += 1
                     self._write_summary_memory(summary, user_id, store)
-                    self._last_seen_ids.update(ids)
-                    # Evict oldest IDs to prevent unbounded growth
-                    if len(self._last_seen_ids) > self._MAX_SEEN_IDS:
-                        excess = len(self._last_seen_ids) - self._MAX_SEEN_IDS
-                        for _ in range(excess):
-                            self._last_seen_ids.pop()
+                    for mid in ids:
+                        self._last_seen_ids[mid] = None
+                    # Evict oldest IDs (FIFO) to prevent unbounded growth
+                    while len(self._last_seen_ids) > self._MAX_SEEN_IDS:
+                        self._last_seen_ids.popitem(last=False)
 
             # 4. USER PROFILE UPDATE
             try:
@@ -908,41 +863,75 @@ class DreamConsolidator:
         )
 
     def _merge_similar(self, store, user_id: str, threshold: float = 0.90) -> int:
-        """Merge near-duplicate memories in the SQLite store via embedding similarity."""
+        """Merge near-duplicate memories in the SQLite store via embedding similarity.
+
+        Uses a single batch SQL query to fetch all embeddings at once instead of
+        N individual queries, then computes a vectorized NxN similarity matrix.
+        """
         merged_count = 0
         try:
             import numpy as np
             from aura.memory.store import _blob_to_float32
 
-            # Get all memories with embeddings
+            # Get all candidate memories
             records = store.get_recent(n=200, user_id=user_id)
+            if not records:
+                return 0
+
+            # --- Batch fetch all embeddings in one SQL query ---
+            rec_ids = [rec.id for rec in records]
+            placeholders = ",".join("?" * len(rec_ids))
+            with store._lock:
+                rows = store._get_conn().execute(
+                    f"SELECT id, embedding FROM memories WHERE id IN ({placeholders})",
+                    rec_ids,
+                ).fetchall()
+
+            # Build id → (record, numpy_array) mapping
+            rec_by_id = {rec.id: rec for rec in records}
             embeddings = {}
-            for rec in records:
-                emb = store.get_embedding(rec.id)
-                if emb is not None:
-                    embeddings[rec.id] = (rec, emb)
+            for row_id, emb_blob in rows:
+                if emb_blob is not None and row_id in rec_by_id:
+                    embeddings[row_id] = (rec_by_id[row_id], _blob_to_float32(emb_blob))
+
+            if not embeddings:
+                return 0
 
             ids = list(embeddings.keys())
+            n = len(ids)
+
+            # --- Vectorized NxN similarity matrix ---
+            emb_list = [embeddings[mid][1] for mid in ids]
+            # Guard: all embeddings must have the same dimension
+            dim0 = emb_list[0].shape[0]
+            if not all(e.shape[0] == dim0 for e in emb_list):
+                logger.debug("[DreamConsolidator] Mixed embedding dims, skipping merge")
+                return 0
+
+            emb_matrix = np.stack(emb_list).astype(np.float32)  # (N, D)
+            norms = np.linalg.norm(emb_matrix, axis=1, keepdims=True)
+            norms = np.where(norms < 1e-8, 1.0, norms)
+            normed = emb_matrix / norms
+            sim_matrix = normed @ normed.T  # (N, N)
+
             merged_ids = set()
 
-            for i in range(len(ids)):
+            for i in range(n):
                 if ids[i] in merged_ids:
                     continue
-                rec_a, emb_a = embeddings[ids[i]]
-                norm_a = np.linalg.norm(emb_a)
-                if norm_a < 1e-8:
+                rec_a = embeddings[ids[i]][0]
+                if norms[i, 0] < 1e-8:
                     continue
 
-                for j in range(i + 1, len(ids)):
+                for j in range(i + 1, n):
                     if ids[j] in merged_ids:
                         continue
-                    rec_b, emb_b = embeddings[ids[j]]
-                    norm_b = np.linalg.norm(emb_b)
-                    if norm_b < 1e-8:
+                    if norms[j, 0] < 1e-8:
                         continue
 
-                    sim = float(np.dot(emb_a / norm_a, emb_b / norm_b))
+                    sim = float(sim_matrix[i, j])
                     if sim >= threshold:
+                        rec_b = embeddings[ids[j]][0]
                         # Keep higher importance, archive the other
                         if rec_a.importance >= rec_b.importance:
                             store.update(ids[j], lifecycle_state="archived")

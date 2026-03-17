@@ -117,5 +117,9 @@ class TavilyTool:
     def run(self, query: str, deep: bool = False) -> Dict:
         return self.search(query, search_depth="advanced" if deep else "basic")
 
+    def execute(self, query: str, **kwargs) -> Dict:
+        """Execute a search (dispatches to run for tool-interface consistency)."""
+        return self.run(query, **kwargs)
+
     def __call__(self, query: str, deep: bool = False) -> Dict:
         return self.run(query, deep)

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useChatStore } from '../store/chatStore';
 import { useSettingsStore } from '../store/settingsStore';
+import { hasSeenProactive, markProactiveSeen } from './proactiveDedup';
 import type { WebSocketMessage, FileAttachment } from '../types';
 
 const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/chat/stream`;
@@ -9,13 +10,6 @@ const INITIAL_RECONNECT_DELAY = 1000;
 const MAX_RECONNECT_DELAY = 30000;
 const MAX_RECONNECT_ATTEMPTS = 10;
 const HEARTBEAT_INTERVAL = 30000;
-const MAX_SEEN_PROACTIVE = 500;
-
-function pruneSet(set: Set<string>, max: number): void {
-  if (set.size <= max) return;
-  const iter = set.values();
-  for (let i = 0, n = set.size - max; i < n; i++) set.delete(iter.next().value!);
-}
 
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
@@ -26,7 +20,6 @@ export function useWebSocket() {
   const isManualDisconnect = useRef(false);
   const mountedRef = useRef(true);
   const responseTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const seenProactiveIds = useRef<Set<string>>(new Set());
 
   const {
     addMessage,
@@ -174,9 +167,8 @@ export function useWebSocket() {
         const proactiveId = data.id
           ? String(data.id)
           : `${data.action}:${(data.content || '').slice(0, 40)}`;
-        if (seenProactiveIds.current.has(proactiveId)) break;
-        seenProactiveIds.current.add(proactiveId);
-        pruneSet(seenProactiveIds.current, MAX_SEEN_PROACTIVE);
+        if (hasSeenProactive(proactiveId)) break;
+        markProactiveSeen(proactiveId);
 
         const actionLabels: Record<string, string> = {
           notify: 'noticed something',
@@ -276,10 +268,11 @@ export function useWebSocket() {
 
         // Reconnect with backoff
         if (reconnectAttempts.current < MAX_RECONNECT_ATTEMPTS) {
-          const delay = getReconnectDelay();
           reconnectAttempts.current++;
+          const delay = getReconnectDelay();
           reconnectTimeout.current = setTimeout(connect, delay);
         } else {
+          setConnectionStatus('disconnected');
           setError('Connection lost. Click to reconnect.');
         }
       };

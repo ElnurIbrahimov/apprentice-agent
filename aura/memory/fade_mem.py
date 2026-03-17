@@ -61,35 +61,36 @@ def reinforce(
 ) -> Optional[float]:
     """Touch a memory: increase strength, reduce decay rate (spaced repetition).
 
-    Computes real-time decayed strength before adding the reinforcement delta,
-    preventing inflated strength from stale stored values.
-    Returns new strength, or None if memory not found.
+    Uses a single atomic UPDATE to avoid TOCTOU races.
+    Returns approximate new strength, or None if memory not found.
     """
-    record = store.get(memory_id)
-    if not record:
-        return None
-
-    # Compute real-time strength (apply elapsed decay first)
-    try:
-        la_ts = datetime.fromisoformat(record.last_accessed).timestamp()
-    except (ValueError, TypeError):
-        la_ts = datetime.now().timestamp()
-    hours = max(0, (datetime.now().timestamp() - la_ts) / 3600)
-    current_strength = compute_strength(record.strength, record.decay_rate, hours)
-
-    new_strength = min(1.0, current_strength + REINFORCE_STRENGTH_DELTA)
-    new_decay = max(MIN_DECAY_RATE, record.decay_rate * (1.0 - REINFORCE_DECAY_REDUCTION))
     now = datetime.now().isoformat()
 
-    # Atomic: update strength, decay_rate, last_accessed, and access_count in one call
-    store.update(
+    # Atomic single-statement update — no separate read step
+    sql = """UPDATE memories
+             SET strength = MIN(1.0, strength + ?),
+                 decay_rate = MAX(?, decay_rate * ?),
+                 last_accessed = ?,
+                 access_count = access_count + 1,
+                 updated_at = ?
+             WHERE id = ?"""
+    params = (
+        REINFORCE_STRENGTH_DELTA,
+        MIN_DECAY_RATE,
+        1.0 - REINFORCE_DECAY_REDUCTION,
+        now,
+        now,
         memory_id,
-        strength=new_strength,
-        decay_rate=new_decay,
-        last_accessed=now,
-        access_count=record.access_count + 1,
     )
-    return new_strength
+    with store._lock:
+        cur = store._get_conn().execute(sql, params)
+        store._get_conn().commit()
+    if cur.rowcount == 0:
+        return None
+
+    # Read back the new strength for the return value
+    record = store.get(memory_id)
+    return record.strength if record else None
 
 
 def get_current_strength(

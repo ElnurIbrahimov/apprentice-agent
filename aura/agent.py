@@ -477,15 +477,9 @@ _TOOL_KEYWORDS = frozenset([
 class AgentPhase(Enum):
     """Phases of the agent loop.
 
-    The main loop uses REACT (single step). The old OBSERVE/PLAN/ACT/EVALUATE
-    methods have been removed but enum values are kept to avoid breaking
-    serialized data or logged references.
+    The main loop uses REACT (single step).
     """
     REACT = "react"       # Single ReAct step (thought + action + deterministic eval)
-    OBSERVE = "observe"   # DEPRECATED — OPAE loop removed, value kept for serialization compat
-    PLAN = "plan"         # DEPRECATED — OPAE loop removed, value kept for serialization compat
-    ACT = "act"           # DEPRECATED — OPAE loop removed, value kept for serialization compat
-    EVALUATE = "evaluate" # DEPRECATED — OPAE loop removed, value kept for serialization compat
     REMEMBER = "remember"
 
 
@@ -1271,7 +1265,7 @@ class ApprenticeAgent:
 
                 tool_name = tool_entry["name"]
                 # SECURITY: Resolve path and verify it stays within the project tools directory
-                tools_base = Path(__file__).parent.resolve()
+                tools_base = (Path(__file__).parent / "tools").resolve()
                 tool_file = Path(tool_entry.get("file", ""))
                 try:
                     tool_file_resolved = tool_file.resolve()
@@ -1385,7 +1379,7 @@ class ApprenticeAgent:
             return False
 
         # NEVER fast-path if any tool keyword matches
-        if any(kw in goal_lower for kw in _TOOL_KEYWORDS):
+        if any(re.search(r'\b' + re.escape(kw) + r'\b', goal_lower) for kw in _TOOL_KEYWORDS):
             return False
         for kw in self.custom_tool_keywords:
             if kw in goal_lower:
@@ -1423,7 +1417,7 @@ class ApprenticeAgent:
             'got it', 'understood', 'never mind', 'nevermind',
         ]
         for pattern in conversational_patterns:
-            if pattern in goal_lower:
+            if re.search(r'\b' + re.escape(pattern) + r'\b', goal_lower):
                 return True
 
         # Default: NOT simple — use full agent loop with tools
@@ -1745,7 +1739,7 @@ Guidelines:
                             )
                         # Tick the planner step counter, then check if re-planning is due
                         self.adaptive_planner.tick()
-                        if self.adaptive_planner.should_replan(iteration):
+                        if self.adaptive_planner.should_replan():
                             recent_results = ""
                             for msg in messages[-4:]:
                                 if msg.get("role") == "tool":
@@ -3412,7 +3406,7 @@ Python code:"""
                     unified_results = _mem_future.result(timeout=1.5)
                 except concurrent.futures.TimeoutError:
                     unified_results = []
-                    logger.debug("[UnifiedMemory] Query timed out after 1.5s, proceeding without memory context")
+                    logger.warning("[UnifiedMemory] Query timed out after 1.5s, proceeding without memory context")
                 if unified_results:
                     from .memory.context_budget import ContextBudget
                     _ctx_budget = ContextBudget(total_tokens=3000)

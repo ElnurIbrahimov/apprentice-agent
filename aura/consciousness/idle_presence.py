@@ -282,20 +282,13 @@ class IdlePresenceEngine:
                 load.metacognition_load = min(1.0, len(active_goals) / 5.0 * 0.3)
         except Exception as e:
             logger.debug(f"[IdlePresence] non-critical: {e}")
-        # 6. Global Workspace load
-        try:
-            from aura.consciousness.global_workspace import get_global_workspace
-            load.workspace_load = get_global_workspace().get_cognitive_load_contribution()
-        except Exception as e:
-            logger.debug(f"[IdlePresence] non-critical: {e}")
-        # Weighted aggregate
+        # Weighted aggregate (5 components, weights sum to 1.0)
         load.total_load = min(1.0, (
-            load.thinking_load * 0.20 +
-            load.dream_load * 0.25 +
-            load.daemon_load * 0.12 +
-            load.inner_thoughts_load * 0.12 +
-            load.metacognition_load * 0.12 +
-            load.workspace_load * 0.19
+            load.thinking_load * 0.25 +
+            load.dream_load * 0.31 +
+            load.daemon_load * 0.15 +
+            load.inner_thoughts_load * 0.15 +
+            load.metacognition_load * 0.14
         ))
 
         with self._lock:
@@ -309,13 +302,14 @@ class IdlePresenceEngine:
     # Breath Rate from Cognitive Load
     # ====================================================================
 
-    def get_breath_rate_from_load(self) -> float:
+    def get_breath_rate_from_load(self, load: Optional[CognitiveLoadState] = None) -> float:
         """Compute avatar breath rate modifier from actual cognitive load.
 
         Returns:
             Breath rate modifier (0.6 = very slow/deep sleep, 1.4 = intense processing)
         """
-        load = self.compute_cognitive_load()
+        if load is None:
+            load = self.compute_cognitive_load()
 
         # Map cognitive load to breath rate:
         # 0.0 load -> 0.6x (deep relaxation)
@@ -326,13 +320,14 @@ class IdlePresenceEngine:
         rate = 0.6 + load.total_load * 0.8
         return round(rate, 3)
 
-    def get_glow_from_load(self) -> float:
+    def get_glow_from_load(self, load: Optional[CognitiveLoadState] = None) -> float:
         """Compute avatar glow intensity from cognitive load.
 
         Returns:
             Glow intensity 0.2 (dim, resting) to 0.9 (bright, active)
         """
-        load = self.compute_cognitive_load()
+        if load is None:
+            load = self.compute_cognitive_load()
         return round(0.2 + load.total_load * 0.7, 3)
 
     # ====================================================================
@@ -353,7 +348,7 @@ class IdlePresenceEngine:
                 self._recent_activities = self._recent_activities[-self._max_activities:]
             self._stats["activities_recorded"] += 1
 
-    def get_current_activity_status(self) -> Optional[str]:
+    def get_current_activity_status(self, load: Optional[CognitiveLoadState] = None) -> Optional[str]:
         """Get a human-readable description of what AURA is actually doing right now.
 
         Returns the most recent genuine activity, or a computed status
@@ -380,7 +375,8 @@ class IdlePresenceEngine:
                 return latest.description
 
         # Compute from cognitive load
-        load = self.compute_cognitive_load()
+        if load is None:
+            load = self.compute_cognitive_load()
         if load.total_load > 0.6:
             return f"processing actively (cognitive load: {load.total_load:.0%})"
         elif load.total_load > 0.3:
@@ -627,9 +623,9 @@ class IdlePresenceEngine:
         with self._lock:
             return {
                 "cognitive_load": load.to_dict(),
-                "breath_rate_from_load": self.get_breath_rate_from_load(),
-                "glow_from_load": self.get_glow_from_load(),
-                "current_activity": self.get_current_activity_status(),
+                "breath_rate_from_load": self.get_breath_rate_from_load(load),
+                "glow_from_load": self.get_glow_from_load(load),
+                "current_activity": self.get_current_activity_status(load),
                 "recent_activities": self.get_recent_activities(limit=5),
                 "dream_state": {
                     "active": self._dream_session_active,
@@ -658,8 +654,8 @@ class IdlePresenceEngine:
         return {
             "active": True,
             "cognitive_load": round(load.total_load, 3),
-            "breath_rate": self.get_breath_rate_from_load(),
-            "current_activity": self.get_current_activity_status(),
+            "breath_rate": self.get_breath_rate_from_load(load),
+            "current_activity": self.get_current_activity_status(load),
             "dream_active": self._dream_session_active,
             "dream_phase": self._current_dream_phase,
             "activities_recorded": self._stats["activities_recorded"],

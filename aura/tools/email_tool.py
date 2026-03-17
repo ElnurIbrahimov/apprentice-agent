@@ -473,13 +473,21 @@ class EmailTool:
 
         orig_email = original["email"]
         to = orig_email.get("sender", "")
+
+        # Validate the extracted sender address
+        # Strip display name if present: "Name <addr>" -> "addr"
+        addr_match = re.search(r'<([^>]+)>', to)
+        to_addr = addr_match.group(1).strip() if addr_match else to.strip()
+        if not re.match(r'^[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+$', to_addr):
+            return {"success": False, "error": f"Invalid reply-to address extracted from sender: {to!r}"}
+
         subject = orig_email.get("subject", "")
         if not subject.lower().startswith("re:"):
             subject = f"Re: {subject}"
 
         reply_body = f"{body}\n\n---\nOn {orig_email.get('date', '')}, {to} wrote:\n{orig_email.get('body_text', '')[:500]}"
 
-        return self.send_email(to=to, subject=subject, body=reply_body)
+        return self.send_email(to=to_addr, subject=subject, body=reply_body)
 
     def search_emails(self, query: str, folder: str = "INBOX") -> dict:
         """Search emails using IMAP search."""

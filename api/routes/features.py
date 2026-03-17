@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Response, Depends
 from pydantic import BaseModel
 
 from api.auth import require_api_key
+from api.utils import safe_error_detail
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,7 @@ async def get_mood_history():
         result = await loop.run_in_executor(None, _get_mood_history_sync)
         return result
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": safe_error_detail(e)}
 
 
 def _get_mood_history_sync() -> dict:
@@ -162,7 +163,7 @@ async def aura_remember(request: RememberRequest):
         )
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": safe_error_detail(e)}
 
 
 def _aura_remember_sync(fact: str) -> dict:
@@ -254,7 +255,7 @@ async def clear_thoughts():
             agent.tools["inner_monologue"].stream.clear()
         return {"success": True}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": safe_error_detail(e)}
 
 
 # ============================================================================
@@ -410,7 +411,7 @@ def _trigger_sleep_sync() -> dict:
         return {"success": True, "result": result}
     except Exception as e:
         logger.error(f"[NeuroDream] enter_sleep error: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": safe_error_detail(e)}
 
 
 @router.post("/neurodream/sleep")
@@ -429,7 +430,7 @@ async def trigger_sleep():
                 return {"success": False, "error": "Operation timed out - enter_sleep is blocking"}
     except Exception as e:
         logger.error(f"[NeuroDream] Sleep trigger exception: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": safe_error_detail(e)}
 
 
 def _trigger_wake_sync() -> dict:
@@ -449,7 +450,7 @@ async def trigger_wake():
         result = await loop.run_in_executor(None, _trigger_wake_sync)
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": safe_error_detail(e)}
 
 
 @router.get("/neurodream/learned-context")
@@ -468,7 +469,7 @@ async def get_learned_context():
                 }
         return {"available": False, "message": "No learned context generated yet"}
     except Exception as e:
-        return {"available": False, "error": str(e)}
+        return {"available": False, "error": safe_error_detail(e)}
 
 
 def _generate_learned_context_sync() -> dict:
@@ -487,7 +488,7 @@ async def generate_learned_context():
         result = await loop.run_in_executor(None, _generate_learned_context_sync)
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": safe_error_detail(e)}
 
 
 # ============================================================================
@@ -508,7 +509,7 @@ async def get_voice_status():
         return vps.get_status()
     except Exception as e:
         logger.error(f"[Voice] Error: {e}")
-        return {"available": False, "engine": "none", "enabled": False, "error": str(e)}
+        return {"available": False, "engine": "none", "enabled": False, "error": safe_error_detail(e)}
 
 
 class SynthesizeRequest(BaseModel):
@@ -603,7 +604,7 @@ async def get_available_tools():
         categories = sorted(set(t["category"] for t in tools))
         return {"tools": tools, "count": len(tools), "categories": categories}
     except Exception as e:
-        return {"tools": [], "count": 0, "categories": [], "error": str(e)}
+        return {"tools": [], "count": 0, "categories": [], "error": safe_error_detail(e)}
 
 
 # ============================================================================
@@ -619,7 +620,7 @@ async def get_costs_summary():
         return {"success": True, **stats}
     except Exception as e:
         return {
-            "success": False, "error": str(e),
+            "success": False, "error": safe_error_detail(e),
             "input_tokens": 0, "output_tokens": 0,
             "total_tokens": 0, "cost_usd": 0.0, "queries": 0,
         }
@@ -644,7 +645,7 @@ async def reload_plugins():
             "new_tools": after - before,
         }
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": safe_error_detail(e)}
 
 
 @router.get("/plugins")
@@ -661,7 +662,7 @@ async def list_plugins():
         plugins = registry.get("tools", [])
         return {"success": True, "plugins": plugins, "count": len(plugins)}
     except Exception as e:
-        return {"success": False, "error": str(e), "plugins": []}
+        return {"success": False, "error": safe_error_detail(e), "plugins": []}
 
 
 # ============================================================================
@@ -676,7 +677,7 @@ async def get_metacognition_stats():
         stats = MetacognitionLogger.get_stats()
         return stats
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": safe_error_detail(e)}
 
 
 # ============================================================================
@@ -729,7 +730,7 @@ async def get_rag_files():
         files = rag_tool.rag.list_indexed_files()
         return {"files": files, "count": len(files)}
     except Exception as e:
-        return {"files": [], "error": str(e)}
+        return {"files": [], "error": safe_error_detail(e)}
 
 
 @router.post("/rag/index", dependencies=[Depends(require_api_key)])
@@ -742,7 +743,7 @@ async def index_documents(request: RAGIndexRequest):
         )
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": safe_error_detail(e)}
 
 
 def _index_documents_sync(path: str, recursive: bool) -> dict:
@@ -775,7 +776,7 @@ async def search_documents(request: RAGSearchRequest):
         )
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": safe_error_detail(e)}
 
 
 def _search_documents_sync(query: str, top_k: int) -> dict:
@@ -812,7 +813,7 @@ async def clear_rag_index():
         result = rag_tool.rag.clear_index()
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": safe_error_detail(e)}
 
 
 # ============================================================================
@@ -890,7 +891,7 @@ async def get_amem_notes(limit: int = 20, category: Optional[str] = None):
         return result
     except Exception as e:
         logger.error(f"[A-MEM] Notes error: {e}")
-        return {"notes": [], "error": str(e)}
+        return {"notes": [], "error": safe_error_detail(e)}
 
 
 def _get_amem_notes_sync(limit: int, category: Optional[str]) -> dict:
@@ -951,7 +952,7 @@ async def get_amem_note(note_id: str):
         )
         return result
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": safe_error_detail(e)}
 
 
 def _get_amem_note_sync(note_id: str) -> dict:
@@ -1012,7 +1013,7 @@ async def search_amem(request: AMEMSearchRequest):
         )
         return result
     except Exception as e:
-        return {"error": str(e), "results": []}
+        return {"error": safe_error_detail(e), "results": []}
 
 
 def _search_amem_sync(query: str, k: int, follow_links: bool) -> dict:
@@ -1063,7 +1064,7 @@ async def amem_remember(request: AMEMRememberRequest):
         )
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": safe_error_detail(e)}
 
 
 def _amem_remember_sync(
@@ -1128,7 +1129,7 @@ async def get_amem_boxes():
 
         return {"boxes": amem.list_boxes()}
     except Exception as e:
-        return {"boxes": {}, "error": str(e)}
+        return {"boxes": {}, "error": safe_error_detail(e)}
 
 
 @router.post("/amem/consolidate")
@@ -1139,7 +1140,7 @@ async def consolidate_amem():
         result = await loop.run_in_executor(None, _consolidate_amem_sync)
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": safe_error_detail(e)}
 
 
 def _consolidate_amem_sync() -> dict:
@@ -1178,7 +1179,7 @@ async def get_hybrid_memory_stats():
             return hybrid_mem.get_stats()
         return {"error": "Hybrid memory not available"}
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": safe_error_detail(e)}
 
 
 @router.post("/hybrid-memory/search")
@@ -1191,7 +1192,7 @@ async def search_hybrid_memory(request: AMEMSearchRequest):
         )
         return result
     except Exception as e:
-        return {"error": str(e), "results": []}
+        return {"error": safe_error_detail(e), "results": []}
 
 
 def _search_hybrid_sync(query: str, k: int) -> dict:
@@ -1234,7 +1235,7 @@ async def get_memory_context(query: str, max_tokens: int = 500):
             return {"context": context, "query": query}
         return {"context": "", "error": "Hybrid memory not available"}
     except Exception as e:
-        return {"context": "", "error": str(e)}
+        return {"context": "", "error": safe_error_detail(e)}
 
 
 # ============================================================================
@@ -1249,7 +1250,7 @@ async def get_metacognition_status():
         mc = get_metacognitive_engine()
         return mc.get_status()
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": safe_error_detail(e)}
 
 
 @router.get("/metacognition/capabilities")
@@ -1267,7 +1268,7 @@ async def get_capabilities():
             }
         }
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": safe_error_detail(e)}
 
 
 @router.get("/metacognition/evaluation")
@@ -1278,7 +1279,7 @@ async def get_evaluation():
         mc = get_metacognitive_engine()
         return mc.evaluate_progress()
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": safe_error_detail(e)}
 
 
 @router.post("/metacognition/cycle", dependencies=[Depends(require_api_key)])
@@ -1291,7 +1292,7 @@ async def run_metacognitive_cycle():
         result = await loop.run_in_executor(None, mc.run_metacognitive_cycle)
         return result
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": safe_error_detail(e)}
 
 
 @router.get("/metacognition/self-model")
@@ -1315,7 +1316,7 @@ async def get_self_model():
             "system_prompt_preview": model.to_system_prompt(),
         }
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": safe_error_detail(e)}
 
 
 # ============================================================================
@@ -1331,7 +1332,7 @@ async def get_tom_status():
         status = tom.get_status()
         return {"active": True, **status}
     except Exception as e:
-        return {"active": False, "error": str(e)}
+        return {"active": False, "error": safe_error_detail(e)}
 
 
 @router.get("/theory-of-mind/model")
@@ -1346,7 +1347,7 @@ async def get_user_model():
             "observations_for_inference": tom.get_observations_for_inference(),
         }
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": safe_error_detail(e)}
 
 
 @router.get("/theory-of-mind/topics")
@@ -1359,7 +1360,7 @@ async def get_topic_knowledge():
             "topics": tom.get_knowledge_summary(top_n=20),
         }
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": safe_error_detail(e)}
 
 
 @router.post("/theory-of-mind/observe", dependencies=[Depends(require_api_key)])
@@ -1379,7 +1380,7 @@ async def observe_message(request: dict):
             "style": tom.get_communication_style().to_dict(),
         }
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": safe_error_detail(e)}
 
 
 # ============================================================================
@@ -1394,7 +1395,7 @@ async def get_idle_presence_status():
         ipe = get_idle_presence_engine()
         return ipe.get_status()
     except Exception as e:
-        return {"active": False, "error": str(e)}
+        return {"active": False, "error": safe_error_detail(e)}
 
 
 @router.get("/idle-presence/state")
@@ -1405,7 +1406,7 @@ async def get_idle_presence_state():
         ipe = get_idle_presence_engine()
         return ipe.get_state()
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": safe_error_detail(e)}
 
 
 @router.get("/idle-presence/cognitive-load")
@@ -1421,7 +1422,7 @@ async def get_cognitive_load():
             "glow_intensity": ipe.get_glow_from_load(),
         }
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": safe_error_detail(e)}
 
 
 @router.get("/idle-presence/activities")
@@ -1432,7 +1433,7 @@ async def get_idle_activities():
         ipe = get_idle_presence_engine()
         return {"activities": ipe.get_recent_activities(limit=20)}
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": safe_error_detail(e)}
 
 
 # ============================================================================
@@ -1447,7 +1448,7 @@ async def get_motivation_status():
         im = get_intrinsic_motivation()
         return im.get_status()
     except Exception as e:
-        return {"active": False, "error": str(e)}
+        return {"active": False, "error": safe_error_detail(e)}
 
 
 @router.get("/motivation/drives")
@@ -1458,7 +1459,7 @@ async def get_drives():
         im = get_intrinsic_motivation()
         return {"drives": im.get_drives_summary()}
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": safe_error_detail(e)}
 
 
 @router.post("/motivation/cycle")
@@ -1471,7 +1472,7 @@ async def run_motivation_cycle():
         result = await loop.run_in_executor(None, im.run_motivation_cycle)
         return result
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": safe_error_detail(e)}
 
 
 @router.get("/motivation/actions")
@@ -1489,7 +1490,7 @@ async def get_motivation_actions():
             ]
         }
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": safe_error_detail(e)}
 
 
 @router.get("/motivation/prompt")
@@ -1500,4 +1501,4 @@ async def get_motivation_prompt():
         im = get_intrinsic_motivation()
         return {"prompt": im.get_context_for_prompt()}
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": safe_error_detail(e)}

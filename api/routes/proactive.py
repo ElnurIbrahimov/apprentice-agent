@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Query
 from pydantic import BaseModel
 
 from api.auth import require_api_key
+from api.utils import safe_error_detail
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,7 @@ router = APIRouter(prefix="/api/proactive", tags=["proactive"], dependencies=[De
 _daemons: dict[str, object] = {}
 _daemon_lock = threading.Lock()
 
-_start_lock: asyncio.Lock = asyncio.Lock()
+_start_lock: asyncio.Lock | None = None
 
 
 def _get_daemon_for_session(session_id: str):
@@ -125,6 +126,10 @@ async def get_daemon_status(session_id: str = Query(default="default")):
 @router.post("/start")
 async def start_daemon(background_tasks: BackgroundTasks, session_id: str = Query(default="default")):
     """Start the Gateway Daemon."""
+    global _start_lock
+    if _start_lock is None:
+        _start_lock = asyncio.Lock()
+
     daemon = _get_daemon_for_session(session_id)
 
     async with _start_lock:
@@ -145,7 +150,7 @@ async def start_daemon(background_tasks: BackgroundTasks, session_id: str = Quer
             }
         except Exception as e:
             logger.error(f"[Proactive API] Start error: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail=safe_error_detail(e))
 
 
 @router.post("/stop")
@@ -165,7 +170,7 @@ async def stop_daemon(session_id: str = Query(default="default")):
         }
     except Exception as e:
         logger.error(f"[Proactive API] Stop error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e))
 
 
 @router.post("/pause")
@@ -362,7 +367,7 @@ async def create_test_message(request: TestMessageRequest, session_id: str = Que
 
     except Exception as e:
         logger.error(f"[Proactive API] Test message error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e))
 
 
 # ============================================================================
@@ -400,7 +405,7 @@ async def publish_event(
         }
     except Exception as e:
         logger.error(f"[Proactive API] Event publish error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e))
 
 
 # ============================================================================

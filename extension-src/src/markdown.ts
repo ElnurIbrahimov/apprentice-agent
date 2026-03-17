@@ -1,3 +1,5 @@
+import DOMPurify from 'dompurify';
+
 function esc(s: string): string {
   return s
     .replace(/&/g, '&amp;')
@@ -8,6 +10,12 @@ function esc(s: string): string {
 }
 
 function safeUrl(url: string): string {
+  // Block javascript: protocol URLs (check decoded form to catch &#106;avascript: etc.)
+  const decoded = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+  if (/^\s*javascript\s*:/i.test(decoded)) {
+    return '';
+  }
+
   // After esc(), &quot; could break out of href="…" in the HTML parser.
   // Re-encode HTML entities that are dangerous inside attribute values.
   return url
@@ -59,7 +67,7 @@ export function md(raw: string): string {
         i++;
       }
       const cid = 'c' + Math.random().toString(36).slice(2, 8);
-      out += `<pre><div class="chdr"><span>${esc(lang)}</span><button class="ccopy" onclick="window.cpCode('${cid}')">Copy</button></div><code id="${cid}">${esc(code.replace(/\n$/, ''))}</code></pre>`;
+      out += `<pre><div class="chdr"><span>${esc(lang)}</span><button class="ccopy" data-code-id="${cid}">Copy</button></div><code id="${cid}">${esc(code.replace(/\n$/, ''))}</code></pre>`;
       i++;
       continue;
     }
@@ -122,18 +130,24 @@ export function md(raw: string): string {
   }
 
   flush();
-  return out.replace(/(<p><\/p>){2,}/g, '<p></p>');
+  const raw_html = out.replace(/(<p><\/p>){2,}/g, '<p></p>');
+  return DOMPurify.sanitize(raw_html, {
+    ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'code', 'pre', 'a', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'blockquote', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'span', 'div', 'img', 'hr', 'sup', 'sub', 'del', 'button'],
+    ALLOWED_ATTR: ['href', 'target', 'rel', 'class', 'src', 'alt', 'title', 'colspan', 'rowspan', 'id', 'data-code-id'],
+    ALLOW_DATA_ATTR: false,
+  });
 }
 
-// Global copy function for code blocks
-(window as any).cpCode = function (id: string) {
-  const el = document.getElementById(id);
+// Event-delegated copy handler for code blocks (no inline onclick needed)
+document.addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest('.ccopy') as HTMLButtonElement | null;
+  if (!btn) return;
+  const codeId = btn.getAttribute('data-code-id');
+  if (!codeId) return;
+  const el = document.getElementById(codeId);
   if (!el) return;
   navigator.clipboard.writeText(el.textContent || '').then(() => {
-    const btn = el.closest('pre')?.querySelector('.ccopy') as HTMLButtonElement | null;
-    if (btn) {
-      btn.textContent = 'Copied!';
-      setTimeout(() => (btn.textContent = 'Copy'), 1500);
-    }
+    btn.textContent = 'Copied!';
+    setTimeout(() => (btn.textContent = 'Copy'), 1500);
   }).catch(e => console.warn('[Copy] Failed:', e));
-};
+});

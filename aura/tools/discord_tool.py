@@ -14,6 +14,8 @@ Config:
 
 import logging
 import os
+import time
+from collections import defaultdict
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
@@ -35,12 +37,17 @@ class DiscordTool:
     name = "discord"
     description = "Read Discord servers/channels/messages and send messages — team awareness and communication"
 
+    # Rate limit: max 5 messages per 5 seconds per channel
+    _SEND_RATE_LIMIT = 5
+    _SEND_RATE_WINDOW = 5.0
+
     def __init__(self):
         self._token = os.getenv("DISCORD_BOT_TOKEN", "")
         self._headers = {
             "Authorization": f"Bot {self._token}",
             "Content-Type": "application/json",
         }
+        self._send_timestamps: Dict[str, list] = defaultdict(list)
         if self._token:
             logger.info("[Discord] Bot token configured")
         else:
@@ -152,6 +159,14 @@ class DiscordTool:
             channel_id: Discord channel ID
             content: Message text to send
         """
+        # Per-channel rate limiting
+        now = time.monotonic()
+        timestamps = self._send_timestamps[channel_id]
+        self._send_timestamps[channel_id] = [t for t in timestamps if now - t < self._SEND_RATE_WINDOW]
+        if len(self._send_timestamps[channel_id]) >= self._SEND_RATE_LIMIT:
+            return {"success": False, "error": "Rate limit: max 5 messages per 5 seconds per channel"}
+        self._send_timestamps[channel_id].append(now)
+
         if len(content) > 2000:
             content = content[:1997] + "..."
         data, err = self._post(f"/channels/{channel_id}/messages", {"content": content})

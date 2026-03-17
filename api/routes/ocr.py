@@ -4,6 +4,7 @@ Requires: pip install pytesseract pillow
           + winget install UB-Mannheim.TesseractOCR  (binary)
 """
 
+import asyncio
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 
@@ -39,9 +40,13 @@ async def ocr_image(body: dict):
         import io
         from PIL import Image
 
-        img_data = base64.b64decode(image_b64.split(",")[-1])
-        img = Image.open(io.BytesIO(img_data))
-        text = pytesseract.image_to_string(img, lang=body.get("lang", "eng")).strip()
+        def _decode_and_ocr():
+            img_data = base64.b64decode(image_b64.split(",")[-1])
+            img = Image.open(io.BytesIO(img_data))
+            return pytesseract.image_to_string(img, lang=body.get("lang", "eng")).strip()
+
+        loop = asyncio.get_running_loop()
+        text = await loop.run_in_executor(None, _decode_and_ocr)
         return {"text": text}
     except Exception as e:
         raise HTTPException(500, f"OCR failed: {e}")

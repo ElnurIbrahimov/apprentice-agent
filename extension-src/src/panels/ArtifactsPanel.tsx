@@ -3,6 +3,7 @@ import { Copy, Download } from 'lucide-react';
 import { useStore } from '../store';
 import ModelPill from '../components/ModelPill';
 import { HTTP } from '../api';
+import DOMPurify from 'dompurify';
 import { md } from '../markdown';
 
 export default function ArtifactsPanel() {
@@ -51,12 +52,20 @@ export default function ArtifactsPanel() {
       result = result.replace(/^```[\w\-\.]*\r?\n?/, '').replace(/\r?\n?```[\w\-\.]*\s*$/, '').trim();
       setCode(result);
 
+      // Adjust sandbox: SVG needs no scripts, HTML needs allow-scripts
+      if (iframeRef.current) {
+        iframeRef.current.sandbox.value = lang === 'html' ? 'allow-scripts' : '';
+      }
+
       if (lang === 'svg') {
-        iframeRef.current!.srcdoc = `<html><body style="margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#fff">${result}</body></html>`;
+        const cleanSvg = DOMPurify.sanitize(result, { USE_PROFILES: { svg: true } });
+        iframeRef.current!.srcdoc = `<html><body style="margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#fff">${cleanSvg}</body></html>`;
       } else if (lang === 'markdown') {
         iframeRef.current!.srcdoc = `<html><head><style>body{font-family:system-ui,sans-serif;padding:16px;line-height:1.6;max-width:700px;margin:0 auto}</style></head><body>${md(result)}</body></html>`;
       } else {
-        iframeRef.current!.srcdoc = result;
+        // HTML in sandboxed iframe — sandbox restricts it, but still sanitize to prevent iframe escape attempts
+        const cleanHtml = DOMPurify.sanitize(result, { WHOLE_DOCUMENT: true });
+        iframeRef.current!.srcdoc = cleanHtml;
       }
 
       setStatus('');

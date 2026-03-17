@@ -131,7 +131,7 @@ def _load_dream_insights() -> List[str]:
 
 
 def _build_since_last(elapsed_hours: float) -> str:
-    """Build a brief summary of what happened since last interaction."""
+    """Build a brief memory-count summary for the greeting context."""
     if elapsed_hours < 1:
         return ""
 

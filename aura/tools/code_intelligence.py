@@ -96,6 +96,16 @@ class CodeIntelligenceTool:
         if not root.exists():
             return {"success": False, "error": f"Path not found: {root_path}"}
 
+        # Block indexing system directories to prevent accidental traversal
+        _BLOCKED_ROOTS = {
+            "/", "/bin", "/sbin", "/usr", "/etc", "/var", "/proc", "/sys",
+            "C:\\Windows", "C:\\Program Files", "C:\\Program Files (x86)",
+        }
+        root_str = str(root)
+        for blocked in _BLOCKED_ROOTS:
+            if root_str == blocked or root_str.lower() == blocked.lower():
+                return {"success": False, "error": f"Indexing system directory '{root_str}' is not allowed"}
+
         self._symbols = []
         self._indexed_root = str(root)
 

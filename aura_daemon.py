@@ -74,6 +74,10 @@ class AuraDaemon:
         self._last_idle_tick = 0.0
         self._last_dream_date = None
 
+        # Persist dream state across restarts
+        self._state_file = Path(os.getenv("AURA_DATA_DIR", "data")) / "daemon_state.json"
+        self._load_daemon_state()
+
     def start(self):
         """Start the daemon."""
         self._write_pid()
@@ -97,6 +101,7 @@ class AuraDaemon:
 
     def stop(self):
         self._running = False
+        self._event_bus.shutdown()
         self._screen_pool.shutdown(wait=False)
         self._ipc.stop()
         self._remove_pid()
@@ -194,6 +199,7 @@ class AuraDaemon:
                 self._last_dream_date != today and
                 self._agent is not None):
             self._last_dream_date = today
+            self._save_daemon_state()
             logger.info("3 AM — starting full dream cycle")
             self._event_bus.emit("daemon:dream_start", {})
             threading.Thread(target=self._run_full_dream, daemon=True).start()
@@ -242,6 +248,31 @@ class AuraDaemon:
         self._last_activity = time.monotonic()
         if self._agent and hasattr(self._agent, 'neurodream') and self._agent.neurodream:
             self._agent.neurodream.record_activity()
+
+    # ── Daemon state persistence ─────────────────────────────────────────────
+
+    def _load_daemon_state(self):
+        """Load persisted daemon state (e.g. last dream date)."""
+        try:
+            if self._state_file.exists():
+                data = json.loads(self._state_file.read_text(encoding="utf-8"))
+                last_dream = data.get("last_dream_date")
+                if last_dream:
+                    from datetime import date as date_cls
+                    self._last_dream_date = date_cls.fromisoformat(last_dream)
+        except Exception as e:
+            logger.debug(f"Failed to load daemon state: {e}")
+
+    def _save_daemon_state(self):
+        """Persist daemon state to disk."""
+        try:
+            self._state_file.parent.mkdir(parents=True, exist_ok=True)
+            data = {
+                "last_dream_date": self._last_dream_date.isoformat() if self._last_dream_date else None,
+            }
+            self._state_file.write_text(json.dumps(data), encoding="utf-8")
+        except Exception as e:
+            logger.debug(f"Failed to save daemon state: {e}")
 
     # ── PID management ──────────────────────────────────────────────────────
 
@@ -299,12 +330,7 @@ class EventBus:
     def __init__(self):
         self._handlers: dict = {}
         self._lock = threading.Lock()
-
-    def subscribe(self, pattern: str, handler):
-        with self._lock:
-            if pattern not in self._handlers:
-                self._handlers[pattern] = []
-            self._handlers[pattern].append(handler)
+        self._pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="eventbus")
 
     def emit(self, event_type: str, data: dict = None):
         data = data or {}
@@ -316,11 +342,19 @@ class EventBus:
 
         for handler in handlers:
             try:
-                threading.Thread(
-                    target=handler, args=(event_type, data), daemon=True
-                ).start()
+                self._pool.submit(handler, event_type, data)
             except Exception as e:
                 logger.debug(f"EventBus handler error: {e}")
+
+    def subscribe(self, pattern: str, handler):
+        with self._lock:
+            if pattern not in self._handlers:
+                self._handlers[pattern] = []
+            self._handlers[pattern].append(handler)
+
+    def shutdown(self):
+        """Shut down the thread pool used for event dispatch."""
+        self._pool.shutdown(wait=False)
 
 
 class ProactiveEngine:
@@ -414,6 +448,12 @@ class IPCServer:
                 except socket.timeout:
                     continue
 
+    # Allowlist of valid IPC command types
+    ALLOWED_IPC_TYPES = {
+        "message", "chat", "query", "ping", "status",
+        "activity", "stop", "dream", "config",
+    }
+
     def _handle_client(self, conn):
         try:
             chunks = []
@@ -427,7 +467,12 @@ class IPCServer:
             data = b"".join(chunks).decode("utf-8").strip()
             if data:
                 msg = json.loads(data)
-                self._event_bus.emit(f"ipc:{msg.get('type', 'message')}", msg)
+                msg_type = msg.get("type", "message")
+                if msg_type not in self.ALLOWED_IPC_TYPES:
+                    logger.warning(f"IPC rejected unknown type: {msg_type}")
+                    conn.send(json.dumps({"status": "error", "reason": "unknown command type"}).encode())
+                    return
+                self._event_bus.emit(f"ipc:{msg_type}", msg)
                 conn.send(json.dumps({"status": "ok"}).encode())
         except Exception as e:
             logger.debug(f"IPC client error: {e}")

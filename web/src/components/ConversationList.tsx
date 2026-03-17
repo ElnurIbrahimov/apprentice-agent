@@ -88,7 +88,7 @@ export function ConversationList() {
     } catch (e) {
       console.error('[ConversationList] Fetch error:', e);
     }
-  }, [setConversations, setCurrentConversationId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [setConversations, setCurrentConversationId, currentConversationId]);
 
   // Load messages for a conversation from the switch endpoint
   const loadConversationMessages = useCallback(async (id: string) => {
@@ -120,12 +120,15 @@ export function ConversationList() {
     fetchConversations();
   }, [fetchConversations]);
 
+  // Ref to avoid stale closure on handleNewChat in the event listener
+  const handleNewChatRef = useRef<() => Promise<void>>();
+
   // Keyboard shortcut: Ctrl+N new chat
   useEffect(() => {
-    const handler = () => handleNewChat();
+    const handler = () => handleNewChatRef.current?.();
     document.addEventListener('aura:new-chat', handler);
     return () => document.removeEventListener('aura:new-chat', handler);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // Message-level search with 300ms debounce
   useEffect(() => {
@@ -186,7 +189,7 @@ export function ConversationList() {
     }
   }, [editingId]);
 
-  // New Chat
+  // New Chat — also update ref so the event listener always sees the latest version
   const handleNewChat = async () => {
     try {
       const res = await fetch(`${API_BASE}/conversations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
@@ -200,6 +203,7 @@ export function ConversationList() {
       console.error('[ConversationList] Create error:', e);
     }
   };
+  handleNewChatRef.current = handleNewChat;
 
   // Switch conversation
   const handleSwitch = async (id: string) => {
@@ -482,7 +486,7 @@ export function ConversationList() {
         <div
           ref={contextMenuRef}
           className="fixed z-[100] bg-chat-sidebar border border-chat-border rounded-lg shadow-xl py-1 min-w-[160px]"
-          style={{ left: contextMenuPos.x, top: contextMenuPos.y }}
+          style={{ left: Math.min(contextMenuPos.x, window.innerWidth - 180), top: Math.min(contextMenuPos.y, window.innerHeight - 150) }}
         >
           <button
             onClick={() => {

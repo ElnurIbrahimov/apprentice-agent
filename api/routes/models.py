@@ -121,7 +121,10 @@ class ModelsBulkPatch(BaseModel):
 async def set_models_bulk(body: ModelsBulkPatch):
     """Set multiple role→model assignments at once."""
     from aura.config import Config
+    valid_roles = ["fast", "reason", "code", "vision", "think", "longctx"]
     results = {}
     for role, model in body.models.items():
+        if role not in valid_roles:
+            continue
         results[role] = Config.set_model(role, model)
     return {"results": results, "ok": all(results.values())}

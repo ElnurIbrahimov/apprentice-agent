@@ -18,7 +18,6 @@ For development:
 import os
 import sys
 import argparse
-import subprocess
 import signal
 
 # Add project root to path
@@ -110,6 +109,10 @@ Examples:
     )
 
     args = parser.parse_args()
+
+    # Set AURA_ENV for production mode before importing app
+    if args.prod:
+        os.environ["AURA_ENV"] = "production"
 
     # Check dependencies
     check_dependencies()

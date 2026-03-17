@@ -67,7 +67,7 @@ def _run_evolution_sync(request: EvolutionRequest):
 async def start_evolution(request: EvolutionRequest, background_tasks: BackgroundTasks):
     """Start a GEPA skill evolution run (runs in background)."""
     with _run_lock:
-        if _current_run["status"] == "running":
+        if _current_run["status"] in ("running", "starting"):
             raise HTTPException(status_code=409, detail="Evolution already running")
         _current_run["status"] = "starting"
         _current_run["result"] = None
@@ -88,15 +88,20 @@ async def preview_evolution(request: EvolutionRequest):
     """Preview what would be evolved without running."""
     try:
         from aura.evolution.runner import run_evolution
-        result = run_evolution(
-            skill_ids=request.skill_ids,
-            config_overrides={
-                "max_iterations": request.max_iterations,
-                "reflection_model": request.reflection_model,
-                "eval_model": request.eval_model,
-            },
-            dry_run=True,
-        )
+
+        def _preview():
+            return run_evolution(
+                skill_ids=request.skill_ids,
+                config_overrides={
+                    "max_iterations": request.max_iterations,
+                    "reflection_model": request.reflection_model,
+                    "eval_model": request.eval_model,
+                },
+                dry_run=True,
+            )
+
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(None, _preview)
         return {"status": "ok", "preview": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

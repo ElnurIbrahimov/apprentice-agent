@@ -26,6 +26,7 @@ interface SidebarProps {
 export function Sidebar({ onClose }: SidebarProps) {
   const [showSettings, setShowSettings] = useState(false);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
+  const [modelFilter, setModelFilter] = useState('');
 
   const {
     status,
@@ -96,7 +97,7 @@ export function Sidebar({ onClose }: SidebarProps) {
             />
             <div>
               <span className="text-chat-text font-bold text-lg">AURA</span>
-              <div className="text-xs text-chat-text-secondary">v3.0 ALIVE</div>
+              <div className="text-xs text-chat-text-secondary">v4.3.0 ALIVE</div>
               <AuraStatusLine
                 status={isLoading ? 'Thinking...' : null}
                 isVisible={connectionStatus === 'connected'}
@@ -167,7 +168,7 @@ export function Sidebar({ onClose }: SidebarProps) {
             </h3>
             <div className="relative">
               <button
-                onClick={() => setShowModelDropdown(!showModelDropdown)}
+                onClick={() => { setShowModelDropdown(!showModelDropdown); if (showModelDropdown) setModelFilter(''); }}
                 className="w-full flex items-center justify-between p-3 rounded-lg bg-chat-assistant/30 hover:bg-chat-assistant/50 transition-colors duration-200 border border-chat-border/50"
               >
                 <span className="text-chat-text text-sm font-medium truncate">
@@ -186,92 +187,98 @@ export function Sidebar({ onClose }: SidebarProps) {
                       type="text"
                       placeholder="Search models..."
                       autoFocus
+                      value={modelFilter}
                       className="w-full px-2 py-1.5 text-xs bg-chat-bg border border-chat-border/50 rounded text-chat-text placeholder:text-chat-text-secondary/50 outline-none focus:border-purple-500/50"
-                      onChange={(e) => {
-                        const filter = e.target.value.toLowerCase();
-                        document.querySelectorAll('[data-model-item]').forEach((el) => {
-                          const name = el.getAttribute('data-model-item') || '';
-                          (el as HTMLElement).style.display = name.includes(filter) ? '' : 'none';
-                        });
-                      }}
+                      onChange={(e) => setModelFilter(e.target.value.toLowerCase())}
                     />
                   </div>
                   <div className="overflow-y-auto flex-1" style={{ maxHeight: '240px' }}>
-                    <button
-                      data-model-item="auto"
-                      onClick={() => {
-                        setSelectedModel(null);
-                        setShowModelDropdown(false);
-                      }}
-                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-chat-assistant/50 transition-colors ${
-                        !selectedModel ? 'bg-purple-600/20 text-purple-400' : 'text-chat-text'
-                      }`}
-                    >
-                      🤖 Auto (AURA decides)
-                    </button>
+                    {(() => {
+                      const filtered = modelFilter
+                        ? availableModels.filter(m => m.toLowerCase().includes(modelFilter))
+                        : availableModels;
+                      const chatgptModels = filtered.filter(m => m.startsWith('chatgpt:'));
+                      const cloudModels = filtered.filter(m => !m.startsWith('chatgpt:') && (m.includes(':cloud') || m.includes('-cloud')));
+                      const localModels = filtered.filter(m => !m.startsWith('chatgpt:') && !m.includes(':cloud') && !m.includes('-cloud'));
+                      return (
+                        <>
+                          {'auto'.includes(modelFilter) && (
+                            <button
+                              onClick={() => {
+                                setSelectedModel(null);
+                                setShowModelDropdown(false);
+                                setModelFilter('');
+                              }}
+                              className={`w-full text-left px-3 py-1.5 text-xs hover:bg-chat-assistant/50 transition-colors ${
+                                !selectedModel ? 'bg-purple-600/20 text-purple-400' : 'text-chat-text'
+                              }`}
+                            >
+                              🤖 Auto (AURA decides)
+                            </button>
+                          )}
 
-                    {/* ChatGPT models */}
-                    {availableModels.some(m => m.startsWith('chatgpt:')) && (
-                      <>
-                        <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-green-400/70 font-semibold bg-green-500/5 border-t border-chat-border/30">
-                          ChatGPT (subscription)
-                        </div>
-                        {availableModels.filter(m => m.startsWith('chatgpt:')).map((model) => (
-                          <button
-                            key={model}
-                            data-model-item={model}
-                            onClick={() => { setSelectedModel(model); setShowModelDropdown(false); }}
-                            className={`w-full text-left px-3 py-1.5 text-xs hover:bg-chat-assistant/50 transition-colors truncate ${
-                              selectedModel === model ? 'bg-purple-600/20 text-purple-400' : 'text-chat-text'
-                            }`}
-                          >
-                            🟢 {model.replace('chatgpt:', '')}
-                          </button>
-                        ))}
-                      </>
-                    )}
+                          {/* ChatGPT models */}
+                          {chatgptModels.length > 0 && (
+                            <>
+                              <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-green-400/70 font-semibold bg-green-500/5 border-t border-chat-border/30">
+                                ChatGPT (subscription)
+                              </div>
+                              {chatgptModels.map((model) => (
+                                <button
+                                  key={model}
+                                  onClick={() => { setSelectedModel(model); setShowModelDropdown(false); setModelFilter(''); }}
+                                  className={`w-full text-left px-3 py-1.5 text-xs hover:bg-chat-assistant/50 transition-colors truncate ${
+                                    selectedModel === model ? 'bg-purple-600/20 text-purple-400' : 'text-chat-text'
+                                  }`}
+                                >
+                                  🟢 {model.replace('chatgpt:', '')}
+                                </button>
+                              ))}
+                            </>
+                          )}
 
-                    {/* Cloud models */}
-                    {availableModels.some(m => m.includes(':cloud') || m.includes('-cloud')) && (
-                      <>
-                        <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-blue-400/70 font-semibold bg-blue-500/5 border-t border-chat-border/30">
-                          Cloud (Ollama)
-                        </div>
-                        {availableModels.filter(m => !m.startsWith('chatgpt:') && (m.includes(':cloud') || m.includes('-cloud'))).map((model) => (
-                          <button
-                            key={model}
-                            data-model-item={model}
-                            onClick={() => { setSelectedModel(model); setShowModelDropdown(false); }}
-                            className={`w-full text-left px-3 py-1.5 text-xs hover:bg-chat-assistant/50 transition-colors truncate ${
-                              selectedModel === model ? 'bg-purple-600/20 text-purple-400' : 'text-chat-text'
-                            }`}
-                          >
-                            ☁️ {model.replace(/:cloud$/, '')}
-                          </button>
-                        ))}
-                      </>
-                    )}
+                          {/* Cloud models */}
+                          {cloudModels.length > 0 && (
+                            <>
+                              <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-blue-400/70 font-semibold bg-blue-500/5 border-t border-chat-border/30">
+                                Cloud (Ollama)
+                              </div>
+                              {cloudModels.map((model) => (
+                                <button
+                                  key={model}
+                                  onClick={() => { setSelectedModel(model); setShowModelDropdown(false); setModelFilter(''); }}
+                                  className={`w-full text-left px-3 py-1.5 text-xs hover:bg-chat-assistant/50 transition-colors truncate ${
+                                    selectedModel === model ? 'bg-purple-600/20 text-purple-400' : 'text-chat-text'
+                                  }`}
+                                >
+                                  ☁️ {model.replace(/:cloud$/, '')}
+                                </button>
+                              ))}
+                            </>
+                          )}
 
-                    {/* Local models */}
-                    {availableModels.some(m => !m.startsWith('chatgpt:') && !m.includes(':cloud') && !m.includes('-cloud')) && (
-                      <>
-                        <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-orange-400/70 font-semibold bg-orange-500/5 border-t border-chat-border/30">
-                          Local
-                        </div>
-                        {availableModels.filter(m => !m.startsWith('chatgpt:') && !m.includes(':cloud') && !m.includes('-cloud')).map((model) => (
-                          <button
-                            key={model}
-                            data-model-item={model}
-                            onClick={() => { setSelectedModel(model); setShowModelDropdown(false); }}
-                            className={`w-full text-left px-3 py-1.5 text-xs hover:bg-chat-assistant/50 transition-colors truncate ${
-                              selectedModel === model ? 'bg-purple-600/20 text-purple-400' : 'text-chat-text'
-                            }`}
-                          >
-                            💻 {model}
-                          </button>
-                        ))}
-                      </>
-                    )}
+                          {/* Local models */}
+                          {localModels.length > 0 && (
+                            <>
+                              <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-orange-400/70 font-semibold bg-orange-500/5 border-t border-chat-border/30">
+                                Local
+                              </div>
+                              {localModels.map((model) => (
+                                <button
+                                  key={model}
+                                  onClick={() => { setSelectedModel(model); setShowModelDropdown(false); setModelFilter(''); }}
+                                  className={`w-full text-left px-3 py-1.5 text-xs hover:bg-chat-assistant/50 transition-colors truncate ${
+                                    selectedModel === model ? 'bg-purple-600/20 text-purple-400' : 'text-chat-text'
+                                  }`}
+                                >
+                                  💻 {model}
+                                </button>
+                              ))}
+                            </>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
               )}

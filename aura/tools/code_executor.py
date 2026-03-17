@@ -25,6 +25,7 @@ class CodeExecutorTool:
         'pty', 'fcntl', 'termios', 'tty',
         'signal', 'resource', 'sysconfig',
         'asyncio', 'aiohttp', 'httpx',
+        'hashlib', 'base64', 'binascii', 'codecs',
     }
 
     # Blocked built-in functions

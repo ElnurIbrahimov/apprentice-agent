@@ -2,6 +2,10 @@
 Self-Improvement Engine
 =======================
 
+# TODO: Consider delegating to MetacognitiveEngine to reduce duplication
+# (self_improvement.py and metacognition.py share capability scoring,
+#  strategy selection, and domain classification logic)
+
 Closes the metacognition loop so AURA genuinely self-improves by:
 1. Recording real interaction outcomes from brain.py chat responses
 2. Executing meaningful improvement strategies (not stubs)

@@ -10,7 +10,8 @@ import { ReasoningTreePanel } from './components/ReasoningTreePanel';
 import { ToastContainer, useToastStore } from './components/Toast';
 import { ActivityTimeline } from './components/ActivityTimeline';
 import { useChatStore } from './store/chatStore';
-import { useSettingsStore, applyFontSize } from './store/settingsStore';
+import { useSettingsStore, applyFontSize, applyTheme } from './store/settingsStore';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import {
   Bars3Icon,
   ChatBubbleLeftRightIcon,
@@ -40,6 +41,11 @@ function App() {
   useEffect(() => {
     applyFontSize(settings.fontSize);
   }, [settings.fontSize]);
+
+  // Apply theme setting
+  useEffect(() => {
+    applyTheme(settings.theme);
+  }, [settings.theme]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -145,7 +151,9 @@ function App() {
           ${isMobile && sidebarOpen ? 'shadow-2xl' : ''}
         `}
       >
-        <Sidebar onClose={() => setSidebarOpen(false)} />
+        <ErrorBoundary>
+          <Sidebar onClose={() => setSidebarOpen(false)} />
+        </ErrorBoundary>
       </aside>
 
       {/* Mobile overlay backdrop */}
@@ -198,11 +206,15 @@ function App() {
         {/* Tab content — ChatContainer is always mounted to keep WebSocket alive */}
         <div className="flex-1 overflow-hidden relative">
           <div style={{ display: activeTab === 'chat' ? 'flex' : 'none' }} className="h-full flex-col">
-            <ChatContainer />
+            <ErrorBoundary>
+              <ChatContainer />
+            </ErrorBoundary>
           </div>
           {activeTab !== 'chat' && (
             <div className="h-full overflow-hidden">
-              {renderTabContent()}
+              <ErrorBoundary>
+                {renderTabContent()}
+              </ErrorBoundary>
             </div>
           )}
         </div>

@@ -305,7 +305,10 @@ class ProactiveAwarenessEngine:
                 "client", "customer",
             }
 
-            for rel in self._world_model._relationships.values():
+            with self._world_model._lock:
+                relationships = list(self._world_model._relationships.values())
+
+            for rel in relationships:
                 # Important if role matches or mention_count >= 3
                 role_lower = (rel.role or "").lower()
                 is_important = (
@@ -768,7 +771,9 @@ class ProactiveAwarenessEngine:
 
             # Relationship gaps increase social drive
             gap_count = 0
-            for rel in self._world_model._relationships.values():
+            with self._world_model._lock:
+                rels_snapshot = list(self._world_model._relationships.values())
+            for rel in rels_snapshot:
                 days = self._world_model._days_since(rel.last_mentioned)
                 if days is not None and days >= 14 and rel.mention_count >= 3:
                     gap_count += 1

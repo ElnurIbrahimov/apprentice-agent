@@ -41,12 +41,15 @@ class DatabaseTool:
 
     def _check_sql_safety(self, sql: str) -> tuple:
         """Return (valid, error_msg) tuple. Does not raise."""
-        first_word = sql.strip().split()[0].upper() if sql.strip() else ""
+        # Strip SQL comments before checking the first word
+        stripped = re.sub(r'--[^\n]*', '', sql)       # line comments
+        stripped = re.sub(r'/\*.*?\*/', '', stripped, flags=re.DOTALL)  # block comments
+        first_word = stripped.strip().split()[0].upper() if stripped.strip() else ""
         if first_word in self.BLOCKED_SQL_VERBS:
             return False, f"SQL verb '{first_word}' is not allowed. Only SELECT and PRAGMA are permitted."
         if first_word == "PRAGMA":
             # Extract pragma name: PRAGMA pragma_name or PRAGMA pragma_name(args)
-            pragma_rest = sql.strip()[len("PRAGMA"):].strip()
+            pragma_rest = stripped.strip()[len("PRAGMA"):].strip()
             pragma_name = re.split(r'[\s(=]', pragma_rest, maxsplit=1)[0].lower() if pragma_rest else ""
             if pragma_name not in self.ALLOWED_PRAGMAS:
                 return False, (
@@ -54,6 +57,27 @@ class DatabaseTool:
                     f"Allowed PRAGMAs: {', '.join(sorted(self.ALLOWED_PRAGMAS))}"
                 )
         return True, None
+
+    @staticmethod
+    def _read_only_authorizer(action, arg1, arg2, db_name, trigger_name):
+        """SQLite authorizer that allows only SELECT and safe PRAGMA operations."""
+        # sqlite3.SQLITE_OK = 0, sqlite3.SQLITE_DENY = 1, sqlite3.SQLITE_IGNORE = 2
+        _OK = 0
+        _DENY = 1
+        # Action codes: SQLITE_SELECT=21, SQLITE_READ=20, SQLITE_FUNCTION=31,
+        # SQLITE_PRAGMA=19
+        _SELECT = 21
+        _READ = 20
+        _FUNCTION = 31
+        _PRAGMA = 19
+        if action in (_SELECT, _READ, _FUNCTION):
+            return _OK
+        if action == _PRAGMA:
+            # arg1 is the pragma name
+            if arg1 and arg1.lower() in {"table_info", "index_list", "foreign_key_list", "table_xinfo"}:
+                return _OK
+            return _DENY
+        return _DENY
 
     def __init__(self):
         DB_DIR.mkdir(parents=True, exist_ok=True)
@@ -77,8 +101,13 @@ class DatabaseTool:
 
     def _execute_query(self, db_path: str, query: str, params: tuple = ()) -> dict:
         """Execute a SQL query and return results."""
+        conn = None
         try:
             conn = sqlite3.connect(db_path)
+            # Apply authorizer as second defense for read-only queries
+            is_read_only = query.strip().upper().startswith(("SELECT", "PRAGMA", "EXPLAIN"))
+            if is_read_only:
+                conn.set_authorizer(self._read_only_authorizer)
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute(query, params)
@@ -94,7 +123,6 @@ class DatabaseTool:
                 columns = [desc[0] for desc in cursor.description] if cursor.description else []
                 data = [dict(row) for row in rows]
 
-                conn.close()
                 return {
                     "success": True,
                     "columns": columns,
@@ -105,7 +133,6 @@ class DatabaseTool:
             else:
                 conn.commit()
                 affected = cursor.rowcount
-                conn.close()
                 return {
                     "success": True,
                     "affected_rows": affected,
@@ -116,6 +143,9 @@ class DatabaseTool:
             return {"success": False, "error": f"SQL error: {e}"}
         except Exception as e:
             return {"success": False, "error": f"Database error: {e}"}
+        finally:
+            if conn is not None:
+                conn.close()
 
     def query(self, sql: str, db: str = "default") -> dict:
         """Execute a SQL query."""

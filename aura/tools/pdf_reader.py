@@ -86,7 +86,8 @@ class PDFReaderTool:
         if not FITZ_AVAILABLE:
             return {"success": False, "error": "PyMuPDF (fitz) not installed. Run: pip install PyMuPDF"}
 
-        pdf_path = Path(path)
+        # SECURITY: Use the resolved path for all operations to prevent TOCTOU
+        pdf_path = resolved
 
         if not pdf_path.exists():
             return {
@@ -145,7 +146,8 @@ class PDFReaderTool:
         if not (str(resolved).startswith(str(docs_dir_resolved) + os.sep) or str(resolved) == str(docs_dir_resolved)):
             return {"success": False, "error": "Path not within allowed data directory"}
 
-        pdf_path = Path(path)
+        # SECURITY: Use the resolved path for all operations to prevent TOCTOU
+        pdf_path = resolved
 
         if not pdf_path.exists():
             return {
@@ -231,7 +233,8 @@ class PDFReaderTool:
         if not (str(resolved).startswith(str(docs_dir_resolved) + os.sep) or str(resolved) == str(docs_dir_resolved)):
             return {"success": False, "error": "Path not within allowed data directory"}
 
-        pdf_path = Path(path)
+        # SECURITY: Use the resolved path for all operations to prevent TOCTOU
+        pdf_path = resolved
 
         if not pdf_path.exists():
             return {

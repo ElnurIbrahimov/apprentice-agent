@@ -1,16 +1,11 @@
 import { XMarkIcon, DocumentIcon, CodeBracketIcon, PhotoIcon, ArchiveBoxIcon } from '@heroicons/react/24/solid';
 import type { FileAttachment } from '../types';
+import { formatFileSize } from '../hooks/useFileUpload';
 
 interface AttachmentPreviewProps {
   attachment: FileAttachment;
   onRemove?: (id: string) => void;
   compact?: boolean;  // For display in messages (no remove button)
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function getFileIcon(type: string) {

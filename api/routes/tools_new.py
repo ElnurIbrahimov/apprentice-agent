@@ -332,10 +332,10 @@ def _screen_active_window_sync() -> dict:
 # ============================================================================
 
 class ShellRunRequest(BaseModel):
-    command: str
+    command: str = Field(..., max_length=8192)
     session_id: Optional[str] = None
-    timeout: int = 60
-    cwd: Optional[str] = None
+    timeout: int = Field(60, ge=1, le=600)
+    cwd: Optional[str] = Field(None, max_length=512)
 
 
 @router.post("/shell/run")

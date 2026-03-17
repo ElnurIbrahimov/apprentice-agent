@@ -96,7 +96,11 @@ class BrowserTool:
             self._ensure_browser()
 
             if filename:
-                filepath = self.output_dir / f"{filename}.png"
+                # SECURITY: Strip directory components to prevent path traversal
+                safe_name = Path(filename).stem
+                if not safe_name or '/' in filename or '\\' in filename or '..' in filename:
+                    return {"success": False, "error": "Invalid filename: must not contain path separators"}
+                filepath = self.output_dir / f"{safe_name}.png"
             else:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 filepath = self.output_dir / f"browser_{timestamp}.png"

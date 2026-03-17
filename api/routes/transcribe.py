@@ -43,10 +43,16 @@ async def transcribe(file: UploadFile = File(...)):
             "(also requires ffmpeg on PATH)",
         )
 
-    data = await file.read()
-    # 100 MB limit — Whisper base handles up to ~2h audio; reject anything bigger
-    if len(data) > 100 * 1024 * 1024:
-        raise HTTPException(413, "Audio file too large. Maximum size is 100 MB.")
+    # 100 MB limit — stream to avoid buffering entire file in memory
+    _MAX_AUDIO_SIZE = 100 * 1024 * 1024
+    chunks = []
+    total = 0
+    async for chunk in file.stream():
+        total += len(chunk)
+        if total > _MAX_AUDIO_SIZE:
+            raise HTTPException(413, "Audio file too large. Maximum size is 100 MB.")
+        chunks.append(chunk)
+    data = b"".join(chunks)
     suffix = os.path.splitext(file.filename or ".webm")[1] or ".webm"
 
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:

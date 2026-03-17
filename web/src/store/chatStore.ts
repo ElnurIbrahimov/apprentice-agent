@@ -68,9 +68,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       id,
       timestamp: Date.now(),
     };
-    set((state) => ({
-      messages: [...state.messages, newMessage],
-    }));
+    set((state) => {
+      const updated = [...state.messages, newMessage];
+      // Cap at 500 messages to prevent unbounded memory growth
+      const trimmed = updated.length > 500 ? updated.slice(updated.length - 500) : updated;
+      return { messages: trimmed };
+    });
     return id;
   },
 
