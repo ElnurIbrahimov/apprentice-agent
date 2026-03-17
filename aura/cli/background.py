@@ -30,6 +30,7 @@ class BackgroundTask:
     end_time: float = 0.0
     iterations: int = 0
     thread: Optional[threading.Thread] = field(default=None, repr=False)
+    _cancelled: bool = field(default=False, repr=False)
 
     @property
     def elapsed(self) -> float:
@@ -78,6 +79,8 @@ class BackgroundManager:
         def _worker():
             try:
                 result = execute_fn(prompt)
+                if task._cancelled:
+                    return  # Cancelled while running; don't overwrite state
                 task.end_time = time.time()
                 task.iterations = result.get("iterations", 0)
                 if result.get("success"):
@@ -87,6 +90,8 @@ class BackgroundManager:
                     task.state = TaskState.FAILED
                     task.error = result.get("error", "Unknown error")[:500]
             except Exception as e:
+                if task._cancelled:
+                    return
                 task.end_time = time.time()
                 task.state = TaskState.FAILED
                 task.error = str(e)[:500]
@@ -121,6 +126,7 @@ class BackgroundManager:
         with self._lock:
             task = self._tasks.get(task_id)
             if task and task.state == TaskState.RUNNING:
+                task._cancelled = True  # Prevent worker from overwriting state
                 task.state = TaskState.FAILED
                 task.error = "Cancelled by user"
                 task.end_time = time.time()

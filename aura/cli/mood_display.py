@@ -114,9 +114,10 @@ def render_mood_detail(console: Console, emotional_state: Dict) -> None:
     if neuro:
         text.append("\n  Neuromodulators:\n", style="bold")
         for name, value in neuro.items():
-            filled = int(value * 10) if isinstance(value, (int, float)) else 5
+            filled = max(0, min(10, int(value * 10))) if isinstance(value, (int, float)) else 5
+            value_display = value if isinstance(value, (int, float)) else 0.0
             bar = "\u2588" * filled + "\u2591" * (10 - filled)
-            text.append(f"  {name:<16} [{bar}] {value:.2f}\n", style="dim")
+            text.append(f"  {name:<16} [{bar}] {value_display:.2f}\n", style="dim")
 
     # Active emotions
     emotions = emotional_state.get("active_emotions", [])

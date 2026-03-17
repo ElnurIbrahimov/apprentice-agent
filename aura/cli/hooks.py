@@ -1,6 +1,7 @@
 # aura/cli/hooks.py
 """Programmable hooks — event-driven automation for the CLI."""
 from __future__ import annotations
+import shlex
 import subprocess
 import logging
 import time
@@ -81,6 +82,9 @@ class HookManager:
         """Execute a single hook command."""
         import os
 
+        # Clamp timeout to [1, 300] seconds
+        timeout = max(1, min(300, hook.timeout))
+
         # Set context as environment variables
         env = os.environ.copy()
         env["AURA_HOOK_EVENT"] = hook.event
@@ -89,12 +93,13 @@ class HookManager:
                 env[f"AURA_{key.upper()}"] = value[:1000]
 
         try:
+            cmd_args = shlex.split(hook.command)
             result = subprocess.run(
-                hook.command,
-                shell=True,
+                cmd_args,
+                shell=False,  # SECURITY: no shell injection
                 capture_output=True,
                 text=True,
-                timeout=hook.timeout,
+                timeout=timeout,
                 env=env,
                 cwd=os.getcwd(),
             )

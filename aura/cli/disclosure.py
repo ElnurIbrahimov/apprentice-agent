@@ -1,6 +1,7 @@
 # aura/cli/disclosure.py
 """Progressive disclosure — collapsible tool output with expand/collapse."""
 from __future__ import annotations
+import threading
 from dataclasses import dataclass, field
 from typing import List, Optional
 from rich.console import Console
@@ -31,6 +32,7 @@ class DisclosureManager:
         self._sections: List[CollapsibleSection] = []
         self._default_expanded = default_expanded
         self._verbose = False
+        self._lock = threading.Lock()
 
     def set_verbose(self, verbose: bool) -> None:
         """Set verbose mode — all sections expanded by default."""
@@ -54,45 +56,53 @@ class DisclosureManager:
             tool_name=tool_name,
             elapsed=elapsed,
         )
-        self._sections.append(section)
-        # Keep only last 50 sections to prevent memory growth
-        if len(self._sections) > 50:
-            self._sections = self._sections[-50:]
+        with self._lock:
+            self._sections.append(section)
+            # Keep only last 50 sections to prevent memory growth
+            if len(self._sections) > 50:
+                self._sections = self._sections[-50:]
         return section
 
     def toggle(self, section_id: str) -> bool:
         """Toggle a section's expanded state. Returns new state."""
-        for s in self._sections:
-            if s.id == section_id:
-                s.expanded = not s.expanded
-                return s.expanded
+        with self._lock:
+            for s in self._sections:
+                if s.id == section_id:
+                    s.expanded = not s.expanded
+                    return s.expanded
         return False
 
     def expand_all(self) -> None:
         """Expand all sections."""
-        for s in self._sections:
-            s.expanded = True
+        with self._lock:
+            for s in self._sections:
+                s.expanded = True
 
     def collapse_all(self) -> None:
         """Collapse all sections."""
-        for s in self._sections:
-            s.expanded = False
+        with self._lock:
+            for s in self._sections:
+                s.expanded = False
 
     def get_section(self, section_id: str) -> Optional[CollapsibleSection]:
         """Get a section by ID."""
-        return next((s for s in self._sections if s.id == section_id), None)
+        with self._lock:
+            return next((s for s in self._sections if s.id == section_id), None)
 
     def get_recent(self, n: int = 10) -> List[CollapsibleSection]:
         """Get the N most recent sections."""
-        return self._sections[-n:]
+        with self._lock:
+            return list(self._sections[-n:])
 
     @property
     def section_count(self) -> int:
-        return len(self._sections)
+        with self._lock:
+            return len(self._sections)
 
     def clear(self) -> None:
         """Clear all sections."""
-        self._sections.clear()
+        with self._lock:
+            self._sections.clear()
 
 
 def render_collapsed(console: Console, section: CollapsibleSection) -> None:

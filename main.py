@@ -513,21 +513,41 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
         current_perm_mode = "full_auto"
 
     # Initialize Phase 3 modules: background manager, research context, hooks
-    from aura.cli.background import BackgroundManager, notify_completion, create_background_indicator
-    from aura.cli.research_mode import ResearchContext, create_research_indicator
-    from aura.cli.hooks import HookManager, HookEvent
-    from aura.cli.mood_display import create_mood_indicator
+    try:
+        from aura.cli.background import BackgroundManager, notify_completion, create_background_indicator
+    except ImportError:
+        BackgroundManager = None
+        notify_completion = None
+        create_background_indicator = lambda *a, **k: ""
 
-    bg_manager = BackgroundManager()
-    bg_manager.set_completion_callback(notify_completion)
+    try:
+        from aura.cli.research_mode import ResearchContext, create_research_indicator
+    except ImportError:
+        ResearchContext = None
+        create_research_indicator = lambda *a, **k: ""
+
+    try:
+        from aura.cli.hooks import HookManager, HookEvent
+    except ImportError:
+        HookManager = None
+        HookEvent = None
+
+    try:
+        from aura.cli.mood_display import create_mood_indicator
+    except ImportError:
+        create_mood_indicator = lambda *a, **k: ""
+
+    bg_manager = BackgroundManager() if BackgroundManager else None
+    if bg_manager and notify_completion:
+        bg_manager.set_completion_callback(notify_completion)
     agent._bg_manager = bg_manager
 
-    research_ctx = ResearchContext()
+    research_ctx = ResearchContext() if ResearchContext else None
     agent._research_ctx = research_ctx
 
-    hook_mgr = HookManager()
+    hook_mgr = HookManager() if HookManager else None
     agent._hook_manager = hook_mgr
-    if aura_config:
+    if hook_mgr and aura_config:
         hook_mgr.load_from_config(aura_config)
         hook_mgr.load_builtin_hooks(aura_config)
 
@@ -538,7 +558,8 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
         _display_mod._disclosure = DisclosureManager(default_expanded=True)
 
     # Fire session_start hooks
-    hook_mgr.fire(HookEvent.SESSION_START, {"project_root": project_root})
+    if hook_mgr:
+        hook_mgr.fire(HookEvent.SESSION_START, {"project_root": project_root})
 
     # Initialize mid-turn steering queue
     from aura.cli.steering import SteeringQueue
@@ -564,19 +585,26 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
     _token_used = 0
     _token_limit = get_context_limit(_current_model)
 
+    _mood_cache = {"state": {}, "ts": 0.0}
+
     def _phase3_indicators():
         """Build Phase 3 status bar indicators."""
-        _bg_ind = create_background_indicator(bg_manager)
-        _res_ind = create_research_indicator(research_ctx)
+        import time as _t
+        _bg_ind = create_background_indicator(bg_manager) if bg_manager else ""
+        _res_ind = create_research_indicator(research_ctx) if research_ctx else ""
         _mood_ind = ""
-        try:
-            from aura.emotion.alma_engine import get_alma_engine
-            _engine = get_alma_engine()
-            _state = _engine.get_emotional_state() if _engine else {}
-            if _state:
-                _mood_ind = create_mood_indicator(_state)
-        except Exception:
-            pass
+        now = _t.time()
+        if now - _mood_cache["ts"] > 5.0:
+            try:
+                from aura.emotion.alma_engine import get_alma_engine
+                _engine = get_alma_engine()
+                _state = _engine.get_emotional_state() if _engine else {}
+                _mood_cache["state"] = _state
+                _mood_cache["ts"] = now
+            except Exception:
+                pass
+        if _mood_cache["state"]:
+            _mood_ind = create_mood_indicator(_mood_cache["state"])
         return _bg_ind, _res_ind, _mood_ind
 
     def _show_bar(**kwargs):
@@ -618,6 +646,8 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
             user_input = get_input(session)
 
         if user_input is None:
+            if hook_mgr:
+                hook_mgr.fire(HookEvent.SESSION_END, {"reason": "user_exit"})
             console.print("\n[dim]Goodbye.[/dim]\n")
             break
 
@@ -720,13 +750,24 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
 
         # Background mode: & prefix submits task to background
         if user_input.startswith("& ") or (user_input.startswith("&") and len(user_input) > 1 and user_input[1] != " "):
-            bg_prompt = user_input.lstrip("& ").strip()
-            if bg_prompt:
-                task = bg_manager.submit(bg_prompt, lambda p: agentic.run(p))
-                if task:
-                    console.print(f"[cyan]Background task started: {task.id}[/cyan]")
-                else:
-                    console.print("[red]Too many background tasks running.[/red]")
+            bg_prompt = user_input[2:].strip() if user_input.startswith("& ") else user_input[1:].strip()
+            if not bg_prompt:
+                console.print("[dim]Usage: & <prompt>[/dim]")
+                continue
+            # NOTE: Use brain.think() for background tasks — agentic.run() is not thread-safe
+            def _bg_task_fn(prompt):
+                try:
+                    response = agent.brain.think(prompt)
+                    if isinstance(response, dict):
+                        response = response.get("response", response.get("content", str(response)))
+                    return {"success": True, "response": response or "", "iterations": 1}
+                except Exception as e:
+                    return {"success": False, "error": str(e)}
+            task = bg_manager.submit(bg_prompt, _bg_task_fn)
+            if task:
+                console.print(f"[cyan]Background task started: {task.id}[/cyan]")
+            else:
+                console.print("[red]Too many background tasks running.[/red]")
             continue
 
         # Signal activity to daemon (if running)
@@ -763,17 +804,24 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
         show_info("Thinking...")
         try:
             def _on_tool(name, args, _result):
+                # Fire pre_tool_call hooks before display
+                if hook_mgr:
+                    hook_mgr.fire(HookEvent.PRE_TOOL_CALL, {
+                        "tool_name": name,
+                        "tool_args": str(args)[:500],
+                    })
                 desc = args.get("path") or args.get("pattern") or args.get("query") or ""
                 if not desc and "command" in args:
                     desc = args["command"][:60]
                 show_tool_call(name, str(desc))
                 # Fire post_tool_call hooks
-                hook_mgr.fire(HookEvent.POST_TOOL_CALL, {
-                    "tool_name": name,
-                    "tool_args": str(args)[:500],
-                })
+                if hook_mgr:
+                    hook_mgr.fire(HookEvent.POST_TOOL_CALL, {
+                        "tool_name": name,
+                        "tool_args": str(args)[:500],
+                    })
                 # Fire post_edit hooks for edit/write tools
-                if name in ("edit_file", "write_file"):
+                if hook_mgr and name in ("edit_file", "write_file"):
                     hook_mgr.fire(HookEvent.POST_EDIT, {
                         "tool_name": name,
                         "file_path": args.get("path", args.get("file_path", "")),
@@ -830,10 +878,11 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
         )
 
         # Fire post_response hooks
-        hook_mgr.fire(HookEvent.POST_RESPONSE, {
-            "response": response_text[:500] if response_text else "",
-            "model": model_used,
-        })
+        if hook_mgr:
+            hook_mgr.fire(HookEvent.POST_RESPONSE, {
+                "response": response_text[:500] if response_text else "",
+                "model": model_used,
+            })
 
         if speak and response_text:
             try:
@@ -850,6 +899,10 @@ def handle_command(agent, command: str, speak: bool = False):
     arg = parts[1] if len(parts) > 1 else ""
 
     if cmd == "/quit" or cmd == "/exit":
+        _hook_mgr = getattr(agent, '_hook_manager', None)
+        if _hook_mgr:
+            from aura.cli.hooks import HookEvent as _HE
+            _hook_mgr.fire(_HE.SESSION_END, {"reason": "quit_command"})
         print("Goodbye!")
         sys.exit(0)
     elif cmd == "/help" or cmd == "?":
@@ -1028,13 +1081,17 @@ def handle_command(agent, command: str, speak: bool = False):
             return
         if choice not in ("y", "yes"):
             return
-        _agentic = getattr(agent, '_agentic_loop', None)
-        if _agentic:
-            executor = FleetExecutor(max_workers=3)
-            executor.run(fleet, lambda prompt: _agentic.run(prompt), on_update=lambda f: render_fleet_dashboard(_fleet_console, f))
-        else:
-            _fleet_console.print("[red]No agentic loop available for fleet execution.[/red]")
-            return
+        # NOTE: Use brain.think() for fleet sub-tasks — agentic.run() is not thread-safe
+        def _fleet_task_fn(prompt):
+            try:
+                response = agent.brain.think(prompt)
+                if isinstance(response, dict):
+                    response = response.get("response", response.get("content", str(response)))
+                return {"success": True, "response": response or "", "iterations": 1}
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+        executor = FleetExecutor(max_workers=3)
+        executor.run(fleet, _fleet_task_fn, on_update=lambda f: render_fleet_dashboard(_fleet_console, f))
         render_fleet_dashboard(_fleet_console, fleet)
         return
 
@@ -1070,7 +1127,7 @@ def handle_command(agent, command: str, speak: bool = False):
     elif cmd == "/sources":
         from aura.cli.display import console as _src_console
         _research_ctx = getattr(agent, '_research_ctx', None)
-        if _research_ctx:
+        if _research_ctx and _research_ctx.is_active:
             from aura.cli.research_mode import render_sources
             render_sources(_src_console, _research_ctx)
         else:
@@ -1079,10 +1136,12 @@ def handle_command(agent, command: str, speak: bool = False):
 
     elif cmd == "/export" and arg.strip().startswith("research"):
         from aura.cli.display import console as _exp_console
+        import re as _re_export
         _research_ctx = getattr(agent, '_research_ctx', None)
         if _research_ctx and _research_ctx.is_active:
             md = _research_ctx.export_markdown()
-            out_path = Path(f"research_{_research_ctx.topic.replace(' ', '_')[:30]}.md")
+            safe_topic = _re_export.sub(r'[^\w\-]', '_', _research_ctx.topic)[:30]
+            out_path = Path(f"research_{safe_topic}.md")
             out_path.write_text(md)
             _exp_console.print(f"[green]Exported to {out_path}[/green]")
         else:
@@ -1781,61 +1840,6 @@ def _handle_agent_command(agent, arg: str):
     else:
         print(f"  Unknown specialist: {specialist}")
         print(f"  Available: {', '.join(specialists)}, parallel")
-
-
-def _handle_hook_command(agent, arg: str):
-    """Handle /hook subcommands."""
-    if not hasattr(agent, 'hooks') or agent.hooks is None:
-        try:
-            from aura.hooks import HooksManager
-            agent.hooks = HooksManager(tools=agent.tools)
-            agent.hooks.start_background(interval=15)
-        except Exception as e:
-            print(f"Hooks system not available: {e}")
-            return
-
-    if not arg:
-        print("Usage: /hook list | /hook add <event> <condition> <action> <args> | /hook remove <id>")
-        return
-
-    parts = arg.split(maxsplit=1)
-    subcmd = parts[0].lower()
-    subarg = parts[1] if len(parts) > 1 else ""
-
-    if subcmd == "list":
-        hooks = agent.hooks.list_hooks()
-        if not hooks:
-            print("  No hooks registered.")
-        else:
-            print(f"\n  Registered hooks ({len(hooks)}):")
-            for h in hooks:
-                print(f"    [{h['id']}] {h['event']}:{h['condition']} -> {h['action']} {h.get('action_args', '')}")
-    elif subcmd == "add":
-        # Parse: /hook add schedule 09:00 notify "Good morning"
-        add_parts = subarg.split(maxsplit=3)
-        if len(add_parts) < 3:
-            print("Usage: /hook add <event> <condition> <action> [args]")
-            print("  Events:  schedule, file_modified, system_alert, clipboard_changed")
-            print("  Actions: notify, speak, run_tool, log")
-            print("  Example: /hook add schedule 09:00 notify Good morning!")
-            return
-        event = add_parts[0]
-        condition = add_parts[1]
-        action = add_parts[2]
-        action_args = add_parts[3] if len(add_parts) > 3 else ""
-        hook_id = agent.hooks.register(event, condition, action, action_args)
-        print(f"  Hook registered with ID: {hook_id}")
-    elif subcmd == "remove":
-        if not subarg:
-            print("Usage: /hook remove <id>")
-            return
-        success = agent.hooks.unregister(subarg)
-        if success:
-            print(f"  Hook {subarg} removed.")
-        else:
-            print(f"  Hook {subarg} not found.")
-    else:
-        print(f"  Unknown hook command: {subcmd}")
 
 
 def print_result(result, is_fastpath: bool = False):
