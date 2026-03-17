@@ -46,6 +46,7 @@ SLASH_COMMANDS = [
     ("/cost", "Show session cost breakdown"),
     ("/context", "Show context window usage"),
     ("/rewind", "Rewind file changes to a checkpoint"),
+    ("/theme", "Switch color theme"),
 ]
 
 # Subcommand completions for commands that accept them
@@ -84,6 +85,14 @@ SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
         ("screenshot", "Take page screenshot"),
         ("click", "Click an element"),
         ("links", "List page links"),
+    ],
+    "/theme": [
+        ("dark", "Default dark theme"),
+        ("light", "Light background theme"),
+        ("monokai", "Monokai color scheme"),
+        ("dracula", "Dracula color scheme"),
+        ("solarized", "Solarized dark theme"),
+        ("nord", "Nord color scheme"),
     ],
 }
 

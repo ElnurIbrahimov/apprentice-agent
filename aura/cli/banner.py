@@ -29,18 +29,35 @@ _BANNER_LINES = [
 ]
 
 
+def _get_row_colors() -> list:
+    """Get banner row colors from the active theme, falling back to defaults."""
+    try:
+        from aura.cli.themes import get_theme
+        gradient = get_theme().banner_gradient
+        if gradient and len(gradient) >= 2:
+            # Expand gradient to 6 rows by cycling
+            colors = []
+            for i in range(6):
+                colors.append(f"bold {gradient[i % len(gradient)]}")
+            return colors
+    except Exception:
+        pass
+    return _ROW_COLORS
+
+
 def get_banner(width: int = 80) -> Text:
     """Return a Rich Text banner sized for the given terminal width."""
     text = Text()
     text.append("\n")
 
     banner_width = len(_BANNER_LINES[0])
+    row_colors = _get_row_colors()
 
     if width >= banner_width + 4:
         # Full block-character banner with per-row gradient
         pad = " " * max(0, (width - banner_width) // 2 - 1)
         for i, line in enumerate(_BANNER_LINES):
-            color = _ROW_COLORS[i % len(_ROW_COLORS)]
+            color = row_colors[i % len(row_colors)]
             text.append(pad)
             text.append(line, style=color)
             text.append("\n")

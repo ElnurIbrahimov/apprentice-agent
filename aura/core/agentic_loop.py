@@ -597,13 +597,14 @@ class AgenticLoop:
             memories=memories or "(No relevant memories found)",
         )
 
-    def run(self, prompt: str, on_tool_call=None, on_response=None) -> dict:
+    def run(self, prompt: str, on_tool_call=None, on_response=None, steering_queue=None) -> dict:
         """Run the agentic loop until completion.
 
         Args:
             prompt: User's task/prompt
             on_tool_call: Callback(tool_name, args, result) for UI updates
             on_response: Callback(text, iteration) for streaming text
+            steering_queue: Optional SteeringQueue for mid-turn user messages
 
         Returns:
             {success, response, iterations, tool_calls, model}
@@ -639,6 +640,12 @@ class AgenticLoop:
         while self.iteration < self.max_iterations:
             self.iteration += 1
             self._edits_this_turn = 0  # Reset per iteration to avoid redundant auto-test
+
+            # Mid-turn steering: inject queued user messages
+            if steering_queue:
+                injection = steering_queue.format_injection()
+                if injection:
+                    messages.append({"role": "user", "content": injection})
 
             # Budget check
             if self.budget_usd is not None:

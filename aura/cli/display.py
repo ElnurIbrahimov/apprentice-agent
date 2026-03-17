@@ -8,7 +8,18 @@ from rich.spinner import Spinner
 from rich.live import Live
 from rich.text import Text
 
+from aura.cli.tool_output import ToolOutputRenderer, format_elapsed
+
 console = Console(highlight=True, soft_wrap=True)
+
+# Module-level tool output renderer (lazy init)
+_tool_renderer = None
+
+def _get_tool_renderer():
+    global _tool_renderer
+    if _tool_renderer is None:
+        _tool_renderer = ToolOutputRenderer(console=console)
+    return _tool_renderer
 
 
 def show_banner():
@@ -98,6 +109,7 @@ def show_tool_call(tool_name: str, description: str = "", result=None):
     """Print a tool call in a compact styled format.
 
     If result is provided and contains diff info for edit/write, show a compact diff summary.
+    If result is provided with substantial output, render via ToolOutputRenderer.
     """
     if tool_name in ("edit_file", "write_file") and result and isinstance(result, dict) and result.get("diff"):
         try:
@@ -114,12 +126,34 @@ def show_tool_call(tool_name: str, description: str = "", result=None):
         except Exception:
             pass  # Fall through to default display
 
+    # Get theme-aware tool color
+    try:
+        from aura.cli.themes import get_theme
+        tool_color = get_theme().tool_color
+    except Exception:
+        tool_color = "yellow"
+
     line = Text()
-    line.append("  ▸ ", style="dim yellow")
-    line.append(tool_name, style="bold yellow")
+    line.append("  ▸ ", style=f"dim {tool_color}")
+    line.append(tool_name, style=f"bold {tool_color}")
     if description:
-        line.append(f"  {description}", style="dim yellow")
+        line.append(f"  {description}", style=f"dim {tool_color}")
     console.print(line)
+
+    # Render substantial tool output via ToolOutputRenderer
+    if result and isinstance(result, (dict, str)):
+        try:
+            import json
+            if isinstance(result, str):
+                parsed = json.loads(result)
+            else:
+                parsed = result
+            if isinstance(parsed, dict) and not parsed.get("error"):
+                output = parsed.get("output", parsed.get("content", parsed.get("result", "")))
+                if isinstance(output, str) and len(output) > 50:
+                    _get_tool_renderer().render_tool_result(tool_name, parsed)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            pass
 
 
 def show_response(text: str, model: str = "", stream: bool = True):
@@ -130,12 +164,24 @@ def show_response(text: str, model: str = "", stream: bool = True):
         model: Model name to display
         stream: If True, simulate streaming with Live display
     """
+    # Get theme colors
+    try:
+        from aura.cli.themes import get_theme
+        theme = get_theme()
+        border_style = f"dim {theme.response_border}"
+        header_style = theme.response_header
+        code_theme = theme.code_theme
+    except Exception:
+        border_style = "dim cyan"
+        header_style = "bold cyan"
+        code_theme = "monokai"
+
     console.print()
 
     # Header: label + model name
     label = Text()
-    label.append(" ◆ ", style="bold cyan")
-    label.append("AURA", style="bold cyan")
+    label.append(" ◆ ", style=header_style)
+    label.append("AURA", style=header_style)
     if model:
         label.append(f"  ({model})", style="dim")
 
@@ -148,19 +194,19 @@ def show_response(text: str, model: str = "", stream: bool = True):
             for chunk in chunks:
                 accumulated += chunk
                 try:
-                    md = Markdown(accumulated, code_theme="monokai")
+                    md = Markdown(accumulated, code_theme=code_theme)
                 except Exception:
                     md = Text(accumulated)
                 panel = Panel(
                     md, title=label, title_align="left",
-                    border_style="dim cyan", padding=(0, 2), expand=True,
+                    border_style=border_style, padding=(0, 2), expand=True,
                 )
                 live.update(Padding(panel, (0, 2)))
                 time.sleep(0.015)
 
     # Final render (clean, complete)
     try:
-        md = Markdown(text, code_theme="monokai")
+        md = Markdown(text, code_theme=code_theme)
     except Exception:
         md = Text(text)
 
@@ -168,7 +214,7 @@ def show_response(text: str, model: str = "", stream: bool = True):
         md,
         title=label,
         title_align="left",
-        border_style="dim cyan",
+        border_style=border_style,
         padding=(0, 2),
         expand=True,
     )
@@ -198,9 +244,14 @@ def _split_for_streaming(text: str) -> list[str]:
 
 def show_error(message: str):
     """Display error in a styled format."""
+    try:
+        from aura.cli.themes import get_theme
+        error_color = get_theme().error_color
+    except Exception:
+        error_color = "red"
     err = Text()
-    err.append("  ✗ ", style="bold red")
-    err.append(message, style="red")
+    err.append("  ✗ ", style=f"bold {error_color}")
+    err.append(message, style=error_color)
     console.print(err)
 
 
@@ -268,6 +319,7 @@ def show_help():
     table.add_row("/recall <query>", "Search memories")
     table.add_row("/context", "Show context window usage")
     table.add_row("/rewind", "Rewind file changes to a checkpoint")
+    table.add_row("/theme [name]", "Switch color theme (dark, light, monokai, dracula, solarized, nord)")
 
     table.add_row("", "")
 

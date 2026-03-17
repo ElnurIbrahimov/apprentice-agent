@@ -31,6 +31,7 @@ def main():
     sub_commit.add_argument("--all", "-a", action="store_true", help="Stage all changes")
     subparsers.add_parser("cost", help="Show session cost breakdown")
     subparsers.add_parser("mcp-serve", help="Run as MCP server (JSON-RPC over stdio)")
+    subparsers.add_parser("exec", help="Non-interactive agent execution")
     sub_ide = subparsers.add_parser("ide", help="IDE integration setup")
     sub_ide.add_argument("action", nargs="?", default="setup", choices=["setup"], help="Action (default: setup)")
 
@@ -131,6 +132,12 @@ def main():
         type=str,
         default=None,
         help="Use a specific model (e.g., --model deepseek-r1:8b)"
+    )
+    parser.add_argument(
+        "--format",
+        choices=["text", "json", "markdown"],
+        default="text",
+        help="Output format for non-interactive mode (default: text)"
     )
 
     args = parser.parse_args()
@@ -236,22 +243,24 @@ def main():
                 except (ValueError, EOFError, KeyboardInterrupt):
                     print("  Starting new session.")
 
+    # Read piped stdin if available (for composability)
+    from aura.cli.pipe_mode import PipeOutput, is_pipe_mode, read_piped_input, EXIT_SUCCESS, EXIT_ERROR
+
+    if not args.prompt and not sys.stdin.isatty():
+        piped = read_piped_input()
+        if piped:
+            args.prompt = piped
+
     # Non-interactive mode: run prompt, print response, exit
     if args.prompt:
+        pipe = PipeOutput(format=args.format)
         prompt = args.prompt
-        # Read stdin if piped
-        if not sys.stdin.isatty():
-            try:
-                stdin_text = sys.stdin.read()[:50000]
-                if stdin_text.strip():
-                    prompt = f"{stdin_text}\n\n{prompt}"
-            except Exception:
-                pass
         result = agent.run(prompt)
         response = result.get("response", "")
+        model_used = result.get("model", "")
         if response:
-            print(response)
-        sys.exit(0 if result.get("success", True) else 1)
+            pipe.result({"response": response, "model": model_used})
+        sys.exit(EXIT_SUCCESS if result.get("success", True) else EXIT_ERROR)
 
     if args.voice:
         run_voice_mode(agent, enable_barge_in=not args.no_barge_in)
@@ -398,6 +407,11 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
     from aura.core.permissions import PermissionManager
     from aura.core.context import gather_context, get_aura_md_config
 
+    # Load saved theme on startup
+    from aura.cli.themes import load_theme_preference, set_theme, get_theme, list_themes, save_theme_preference
+    saved_theme = load_theme_preference()
+    set_theme(saved_theme)
+
     show_banner()
     show_welcome_info(agent)
 
@@ -482,6 +496,10 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
     current_perm_mode = "careful"
     if trust:
         current_perm_mode = "full_auto"
+
+    # Initialize mid-turn steering queue
+    from aura.cli.steering import SteeringQueue
+    steering = SteeringQueue()
 
     # Store on agent so /clear and /trust can access it
     agent._agentic_loop = agentic
@@ -663,8 +681,10 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
             result = agentic.run(
                 user_input,
                 on_tool_call=_on_tool,
+                steering_queue=steering,
             )
         except KeyboardInterrupt:
+            steering.clear()
             show_info("Interrupted.")
             continue
         except Exception as exc:
@@ -679,6 +699,15 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
         model_used = result.get("model", _current_model)
 
         show_response(response_text, model=model_used)
+
+        # Check for queued follow-up from steering
+        follow_up = steering.pop_follow_up()
+        if follow_up:
+            user_input = follow_up
+            # Fall through to next iteration — will be caught by the while loop
+            # We skip continue so it processes again
+            show_info(f"Follow-up: {follow_up[:60]}...")
+            continue  # Will re-enter the loop and hit the agentic.run() call
 
         # Update status bar
         _msg_count += 1
@@ -781,26 +810,66 @@ def handle_command(agent, command: str, speak: bool = False):
             print("Nothing to compact (history too short).")
     elif cmd == "/plan":
         if arg:
-            print("\nCreating execution plan...")
-            plan = agent.create_plan(arg)
-            print(f"\n  Task: {plan.get('task', arg)}")
-            print(f"  Complexity: {plan.get('complexity', 'unknown')}")
-            print(f"  Steps:")
-            for i, step in enumerate(plan.get('steps', []), 1):
-                print(f"    {i}. {step}")
-            if plan.get('tools'):
-                print(f"  Tools needed: {', '.join(plan['tools'])}")
-            print()
+            from aura.cli.plan_mode import parse_plan_from_llm, render_plan, PLAN_GENERATION_PROMPT, StepStatus
+            from aura.cli.display import console as _plan_console, show_thinking, show_info as _plan_info, show_tool_call as _plan_tool
+            _plan_info("Generating plan...")
+            prompt = PLAN_GENERATION_PROMPT.format(task=arg)
             try:
-                confirm = input("  Execute this plan? (yes/no): ").strip().lower()
+                response = agent.brain.think(prompt)
+                if isinstance(response, dict):
+                    response = response.get("response", response.get("content", str(response)))
+            except Exception as e:
+                print(f"  Error generating plan: {e}")
+                return
+
+            plan = parse_plan_from_llm(response)
+            render_plan(_plan_console, plan)
+
+            _plan_console.print("\n[dim]Execute this plan? (y/n/edit)[/dim]")
+            try:
+                choice = input("> ").strip().lower()
             except (EOFError, KeyboardInterrupt):
-                confirm = "no"
-            if confirm in ("yes", "y"):
-                print("\n  Executing plan...")
-                result = agent.run(arg)
-                print_result(result, is_fastpath=result.get("fast_path", False))
-            else:
-                print("  Plan cancelled.")
+                return
+
+            if choice in ("y", "yes"):
+                # Execute step by step via agentic loop
+                _agentic = getattr(agent, '_agentic_loop', None)
+                for step in plan.steps:
+                    step.status = StepStatus.RUNNING
+                    render_plan(_plan_console, plan)
+                    try:
+                        if _agentic:
+                            def _on_plan_tool(name, args, _result):
+                                desc = args.get("path") or args.get("pattern") or args.get("query") or ""
+                                if not desc and "command" in args:
+                                    desc = args["command"][:60]
+                                _plan_tool(name, str(desc))
+                            result = _agentic.run(step.description, on_tool_call=_on_plan_tool)
+                        else:
+                            result = agent.run(step.description)
+                        if result.get("success"):
+                            step.status = StepStatus.DONE
+                            step.result = result.get("response", "")[:200]
+                        else:
+                            step.status = StepStatus.FAILED
+                            step.error = result.get("error", result.get("response", "Step failed"))[:200]
+                    except Exception as e:
+                        step.status = StepStatus.FAILED
+                        step.error = str(e)[:200]
+
+                    if step.status == StepStatus.FAILED:
+                        render_plan(_plan_console, plan)
+                        _plan_console.print("[yellow]Step failed. Continue? (y/n)[/yellow]")
+                        try:
+                            cont = input("> ").strip().lower()
+                        except (EOFError, KeyboardInterrupt):
+                            break
+                        if cont not in ("y", "yes"):
+                            break
+
+                render_plan(_plan_console, plan)
+                _plan_console.print("[green]Plan execution complete.[/green]")
+            return
         else:
             print("Usage: /plan <task description>")
     elif cmd == "/browse":
@@ -854,22 +923,45 @@ def handle_command(agent, command: str, speak: bool = False):
             if not agentic_sessions and not brain_conversations:
                 print("  No sessions found.")
                 return
-            print("\n  Agentic Sessions:\n")
-            if agentic_sessions:
-                for i, s in enumerate(agentic_sessions[:10], 1):
-                    title = s.get("title", "Untitled")[:50]
-                    msgs = s.get("message_count", 0)
-                    model = s.get("model", "?")
-                    print(f"    {i}. {title} ({msgs} msgs) [{model}]")
+            # Use smart session picker if available
+            from aura.cli.session_picker import pick_session
+            from aura.cli.display import console as _ses_console
+            current_sid = ""
+            if hasattr(agent, '_agentic_session') and agent._agentic_session:
+                current_sid = getattr(agent._agentic_session, 'session_id', "") or ""
+            all_sessions = agentic_sessions + brain_conversations
+            result = pick_session(_ses_console, all_sessions, current_sid)
+            if result and "__action__" not in result:
+                # Load selected session
+                sid = result.get("id", "")
+                if sid and hasattr(agent, '_agentic_loop'):
+                    if agent._agentic_loop.load_session(sid):
+                        print(f"  Switched to session: {result.get('title', 'Untitled')}")
+                    else:
+                        print(f"  Failed to load session: {sid}")
+            elif result and result.get("__action__") == "delete":
+                target_session = result.get("session", {})
+                target_id = target_session.get("id", "")
+                if target_id and _ses.delete(target_id):
+                    print(f"  Deleted session: {target_session.get('title', target_id)}")
+                else:
+                    print(f"  Failed to delete session.")
+    elif cmd == "/theme":
+        from aura.cli.themes import set_theme as _set_theme, get_theme as _get_theme, list_themes as _list_themes, save_theme_preference as _save_pref
+        from aura.cli.display import console as _theme_console
+        if arg:
+            if _set_theme(arg.strip()):
+                _save_pref(arg.strip())
+                _theme_console.print(f"[green]Theme set to: {arg.strip()}[/green]")
             else:
-                print("    (none)")
-            if brain_conversations:
-                print("\n  Legacy Sessions:\n")
-                for i, c in enumerate(brain_conversations[:5], 1):
-                    title = c.get("title", "Untitled")[:50]
-                    msgs = c.get("message_count", 0)
-                    print(f"    {i}. {title} ({msgs} msgs)")
-            print(f"\n  Usage: /sessions new | /sessions delete <id>")
+                _theme_console.print(f"[red]Unknown theme: {arg.strip()}[/red]")
+                _theme_console.print(f"[dim]Available: {', '.join(_list_themes())}[/dim]")
+        else:
+            current = _get_theme().name
+            available = _list_themes()
+            _theme_console.print(f"[bold]Current theme:[/bold] {current}")
+            _theme_console.print(f"[bold]Available:[/bold] {', '.join(available)}")
+        return
     elif cmd == "/trust":
         if hasattr(agent, '_agentic_permissions'):
             agent._agentic_permissions.set_trust_mode(True)
