@@ -316,7 +316,17 @@ class CodeAgentMode:
             if tool:
                 try:
                     result = tool.write_file(path, content)
-                    return result if isinstance(result, dict) else {"success": True, "path": path}
+                    res = result if isinstance(result, dict) else {"success": True, "path": path}
+                    # Broadcast to Artifacts live-preview
+                    if res.get("success", True):
+                        try:
+                            from api.routes.artifacts import is_previewable, broadcast_artifact
+                            if is_previewable(path):
+                                import os
+                                broadcast_artifact(os.path.basename(path), content)
+                        except Exception:
+                            pass
+                    return res
                 except Exception as e:
                     return {"success": False, "error": str(e)}
             return {"success": False, "error": "filesystem tool not available"}
@@ -355,23 +365,36 @@ class CodeAgentMode:
         # --- edit_file ---
         def edit_file(path: str, old_text: str, new_text: str) -> dict:
             tool = agent.tools.get("code_edit")
+            result = None
             if tool and hasattr(tool, "execute"):
                 try:
                     action = json.dumps({"path": path, "old_text": old_text, "new_text": new_text})
                     result = tool.execute(action)
-                    return result if isinstance(result, dict) else {"success": True}
+                    result = result if isinstance(result, dict) else {"success": True}
                 except Exception as e:
                     return {"success": False, "error": str(e)}
-            # Fallback to ToolExecutor
-            if hasattr(agent, "_tool_executor") and agent._tool_executor:
+            elif hasattr(agent, "_tool_executor") and agent._tool_executor:
+                # Fallback to ToolExecutor
                 r = agent._tool_executor.execute("edit_file", {
                     "path": path, "old_string": old_text, "new_string": new_text
                 })
                 try:
-                    return json.loads(r) if isinstance(r, str) else {"result": str(r)}
+                    result = json.loads(r) if isinstance(r, str) else {"result": str(r)}
                 except (json.JSONDecodeError, ValueError):
-                    return {"result": str(r)[:2000]}
-            return {"success": False, "error": "code_edit tool not available"}
+                    result = {"result": str(r)[:2000]}
+            else:
+                return {"success": False, "error": "code_edit tool not available"}
+            # Broadcast to Artifacts live-preview
+            if result and result.get("success", True):
+                try:
+                    from api.routes.artifacts import is_previewable, broadcast_artifact
+                    import os
+                    if is_previewable(path):
+                        with open(path, "r", encoding="utf-8", errors="replace") as f:
+                            broadcast_artifact(os.path.basename(path), f.read())
+                except Exception:
+                    pass
+            return result
         ns["edit_file"] = edit_file
 
         # --- execute_code ---
