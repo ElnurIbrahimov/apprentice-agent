@@ -2,7 +2,7 @@
   "use strict";
   const ext = typeof browser !== "undefined" ? browser : chrome;
   function safeSend(msg, cb) {
-    var _a, _b, _c, _d, _e, _f, _g;
+    var _a, _b, _c, _d, _e, _f, _g, _h;
     try {
       if (cb) {
         ext.runtime.sendMessage(msg, cb);
@@ -17,6 +17,7 @@
         (_e = document.getElementById("aura-quick-action-host")) == null ? void 0 : _e.remove();
         (_f = document.getElementById("aura-highlight-host")) == null ? void 0 : _f.remove();
         (_g = document.getElementById("aura-img-toolbar-host")) == null ? void 0 : _g.remove();
+        (_h = document.getElementById("aura-capture-host")) == null ? void 0 : _h.remove();
         window.__auraToolbarMounted = false;
       }
     }
@@ -3311,6 +3312,335 @@ ${description}
         }
       }
     }, { passive: true });
+    const captureHost = document.createElement("div");
+    captureHost.id = "aura-capture-host";
+    Object.assign(captureHost.style, {
+      position: "fixed",
+      top: "0",
+      left: "0",
+      width: "0",
+      height: "0",
+      zIndex: "2147483647",
+      pointerEvents: "none"
+    });
+    document.documentElement.appendChild(captureHost);
+    const captureShadow = captureHost.attachShadow({ mode: "closed" });
+    const captureStyle = document.createElement("style");
+    captureStyle.textContent = `
+    @keyframes capture-pulse {
+      0%, 100% { opacity: 0.6; }
+      50% { opacity: 1; }
+    }
+    .capture-overlay {
+      position: fixed;
+      pointer-events: none;
+      border: 2px solid rgba(124, 58, 237, 0.8);
+      background: rgba(124, 58, 237, 0.08);
+      border-radius: 3px;
+      transition: top 0.05s ease, left 0.05s ease, width 0.05s ease, height 0.05s ease;
+      box-shadow: 0 0 0 1px rgba(124, 58, 237, 0.2),
+                  0 0 20px rgba(124, 58, 237, 0.15),
+                  inset 0 0 20px rgba(124, 58, 237, 0.05);
+      z-index: 2147483647;
+    }
+    .capture-tooltip {
+      position: fixed;
+      background: rgba(10, 8, 24, 0.92);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(124, 58, 237, 0.35);
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', system-ui, sans-serif;
+      font-size: 11px;
+      color: rgba(226, 232, 240, 0.9);
+      white-space: nowrap;
+      pointer-events: none;
+      z-index: 2147483647;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .capture-tooltip .tag {
+      color: #a78bfa;
+      font-weight: 600;
+    }
+    .capture-tooltip .cls {
+      color: rgba(167, 139, 250, 0.6);
+      max-width: 200px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .capture-tooltip .dims {
+      color: rgba(226, 232, 240, 0.5);
+      font-size: 10px;
+    }
+    .capture-banner {
+      position: fixed;
+      top: 8px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(10, 8, 24, 0.92);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(124, 58, 237, 0.4);
+      border-radius: 10px;
+      padding: 8px 16px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', system-ui, sans-serif;
+      font-size: 12px;
+      color: rgba(226, 232, 240, 0.9);
+      z-index: 2147483647;
+      pointer-events: none;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      animation: capture-pulse 2s ease-in-out infinite;
+    }
+    .capture-banner .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #a78bfa;
+      box-shadow: 0 0 8px rgba(124, 58, 237, 0.6);
+    }
+  `;
+    captureShadow.appendChild(captureStyle);
+    const captureContainer = document.createElement("div");
+    captureShadow.appendChild(captureContainer);
+    let _captureActive = false;
+    let _captureOverlay = null;
+    let _captureTooltip = null;
+    let _captureBanner = null;
+    let _captureHoveredEl = null;
+    const CAPTURE_CSS_PROPS = [
+      "display",
+      "position",
+      "flex-direction",
+      "align-items",
+      "justify-content",
+      "gap",
+      "flex-wrap",
+      "flex",
+      "flex-grow",
+      "flex-shrink",
+      "width",
+      "height",
+      "min-width",
+      "min-height",
+      "max-width",
+      "max-height",
+      "padding",
+      "padding-top",
+      "padding-right",
+      "padding-bottom",
+      "padding-left",
+      "margin",
+      "margin-top",
+      "margin-right",
+      "margin-bottom",
+      "margin-left",
+      "border",
+      "border-radius",
+      "border-color",
+      "border-width",
+      "border-style",
+      "background",
+      "background-color",
+      "background-image",
+      "background-size",
+      "color",
+      "font-size",
+      "font-weight",
+      "font-family",
+      "line-height",
+      "letter-spacing",
+      "text-align",
+      "text-decoration",
+      "text-transform",
+      "box-shadow",
+      "opacity",
+      "overflow",
+      "z-index",
+      "grid-template-columns",
+      "grid-template-rows",
+      "grid-gap",
+      "transform",
+      "transition"
+    ];
+    function extractComputedStyles(el) {
+      const styles = window.getComputedStyle(el);
+      const result = {};
+      for (const prop of CAPTURE_CSS_PROPS) {
+        const val = styles.getPropertyValue(prop);
+        if (val && val !== "none" && val !== "normal" && val !== "auto" && val !== "0px" && val !== "rgba(0, 0, 0, 0)") {
+          result[prop] = val;
+        }
+      }
+      return result;
+    }
+    function buildCssSelector(el) {
+      const tag = el.tagName.toLowerCase();
+      const cls = el.className && typeof el.className === "string" ? "." + el.className.trim().split(/\s+/).slice(0, 2).join(".") : "";
+      return tag + cls;
+    }
+    function captureElementData(el) {
+      const rect = el.getBoundingClientRect();
+      const styles = window.getComputedStyle(el);
+      const html = el.outerHTML;
+      const cssMap = {};
+      cssMap[buildCssSelector(el)] = extractComputedStyles(el);
+      const children = el.querySelectorAll("*");
+      let count = 0;
+      for (const child of children) {
+        if (count >= 50) break;
+        const childStyles = extractComputedStyles(child);
+        if (Object.keys(childStyles).length > 0) {
+          const selector = buildCssSelector(child);
+          const key = cssMap[selector] ? `${selector}:nth(${count})` : selector;
+          cssMap[key] = childStyles;
+        }
+        count++;
+      }
+      return {
+        html,
+        css: cssMap,
+        dimensions: {
+          width: rect.width,
+          height: rect.height,
+          padding: `${styles.paddingTop} ${styles.paddingRight} ${styles.paddingBottom} ${styles.paddingLeft}`,
+          margin: `${styles.marginTop} ${styles.marginRight} ${styles.marginBottom} ${styles.marginLeft}`
+        },
+        textContent: (el.textContent || "").slice(0, 2e3).trim(),
+        tagName: el.tagName.toLowerCase(),
+        className: (typeof el.className === "string" ? el.className : "").trim()
+      };
+    }
+    function startCaptureMode() {
+      if (_captureActive) return;
+      _captureActive = true;
+      _captureBanner = document.createElement("div");
+      _captureBanner.className = "capture-banner";
+      _captureBanner.innerHTML = '<span class="dot"></span> AURA Capture Mode — Click any element • Esc to exit';
+      captureContainer.appendChild(_captureBanner);
+      _captureOverlay = document.createElement("div");
+      _captureOverlay.className = "capture-overlay";
+      _captureOverlay.style.display = "none";
+      captureContainer.appendChild(_captureOverlay);
+      _captureTooltip = document.createElement("div");
+      _captureTooltip.className = "capture-tooltip";
+      _captureTooltip.style.display = "none";
+      captureContainer.appendChild(_captureTooltip);
+      captureHost.style.width = "100vw";
+      captureHost.style.height = "100vh";
+      document.addEventListener("mousemove", onCaptureMouseMove, true);
+      document.addEventListener("click", onCaptureClick, true);
+      document.addEventListener("keydown", onCaptureKeydown, true);
+    }
+    function stopCaptureMode() {
+      if (!_captureActive) return;
+      _captureActive = false;
+      _captureHoveredEl = null;
+      if (_captureOverlay) {
+        _captureOverlay.remove();
+        _captureOverlay = null;
+      }
+      if (_captureTooltip) {
+        _captureTooltip.remove();
+        _captureTooltip = null;
+      }
+      if (_captureBanner) {
+        _captureBanner.remove();
+        _captureBanner = null;
+      }
+      captureHost.style.width = "0";
+      captureHost.style.height = "0";
+      document.removeEventListener("mousemove", onCaptureMouseMove, true);
+      document.removeEventListener("click", onCaptureClick, true);
+      document.removeEventListener("keydown", onCaptureKeydown, true);
+      safeSend({ type: "OPEN_PANEL", panel: "capture" });
+    }
+    function onCaptureMouseMove(e) {
+      if (!_captureActive) return;
+      const elements = document.elementsFromPoint(e.clientX, e.clientY);
+      let target = null;
+      for (const el of elements) {
+        if (el === captureHost || captureHost.contains(el)) continue;
+        if (el.id === "aura-host" || el.id === "aura-dock-shadow" || el.id === "aura-quick-action-host" || el.id === "aura-highlight-host" || el.id === "aura-img-toolbar-host" || el.id === "aura-capture-host") continue;
+        if (el === document.documentElement || el === document.body) continue;
+        target = el;
+        break;
+      }
+      if (!target) {
+        if (_captureOverlay) _captureOverlay.style.display = "none";
+        if (_captureTooltip) _captureTooltip.style.display = "none";
+        _captureHoveredEl = null;
+        return;
+      }
+      _captureHoveredEl = target;
+      const rect = target.getBoundingClientRect();
+      if (_captureOverlay) {
+        _captureOverlay.style.display = "block";
+        _captureOverlay.style.top = rect.top + "px";
+        _captureOverlay.style.left = rect.left + "px";
+        _captureOverlay.style.width = rect.width + "px";
+        _captureOverlay.style.height = rect.height + "px";
+      }
+      if (_captureTooltip) {
+        const tag = target.tagName.toLowerCase();
+        const cls = target.className && typeof target.className === "string" ? target.className.trim().split(/\s+/).slice(0, 3).join(" ") : "";
+        const w = Math.round(rect.width);
+        const h = Math.round(rect.height);
+        _captureTooltip.innerHTML = `<span class="tag">&lt;${tag}&gt;</span>` + (cls ? `<span class="cls">.${cls.split(" ").join(".")}</span>` : "") + `<span class="dims">${w}x${h}</span>`;
+        let tooltipTop = rect.top - 30;
+        if (tooltipTop < 4) tooltipTop = rect.bottom + 6;
+        let tooltipLeft = rect.left;
+        if (tooltipLeft < 4) tooltipLeft = 4;
+        _captureTooltip.style.display = "flex";
+        _captureTooltip.style.top = tooltipTop + "px";
+        _captureTooltip.style.left = tooltipLeft + "px";
+      }
+    }
+    function onCaptureClick(e) {
+      if (!_captureActive || !_captureHoveredEl) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      const el = _captureHoveredEl;
+      const rect = el.getBoundingClientRect();
+      const data = captureElementData(el);
+      try {
+        ext.runtime.sendMessage(
+          {
+            type: "CAPTURE_ELEMENT",
+            rect: {
+              x: Math.round(rect.left),
+              y: Math.round(rect.top),
+              w: Math.round(rect.width),
+              h: Math.round(rect.height)
+            },
+            elementData: data
+          },
+          (_response) => {
+          }
+        );
+      } catch (_e) {
+      }
+      stopCaptureMode();
+    }
+    function onCaptureKeydown(e) {
+      if (e.key === "Escape" && _captureActive) {
+        e.preventDefault();
+        e.stopPropagation();
+        stopCaptureMode();
+        try {
+          ext.runtime.sendMessage({ type: "CAPTURE_MODE_EXITED" }).catch(() => {
+          });
+        } catch (_e) {
+        }
+      }
+    }
     ext.runtime.onMessage.addListener(
       (msg, _sender, sendResponse) => {
         if (msg.type === "EXTRACT_PAGE") {
@@ -3368,6 +3698,16 @@ ${description}
         }
         if (msg.type === "SHOW_DOCK") {
           showDock();
+          sendResponse({ ok: true });
+          return false;
+        }
+        if (msg.type === "START_CAPTURE_MODE") {
+          startCaptureMode();
+          sendResponse({ ok: true });
+          return false;
+        }
+        if (msg.type === "STOP_CAPTURE_MODE") {
+          stopCaptureMode();
           sendResponse({ ok: true });
           return false;
         }

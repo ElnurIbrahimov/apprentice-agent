@@ -51,6 +51,7 @@ export type PanelId =
   | 'artifacts'
   | 'image'
   | 'compare'
+  | 'capture'
   | 'agent'
   | 'models'
   | 'settings';
@@ -84,5 +85,6 @@ export const FEATURE_DEFS: FeatureDef[] = [
   { key: 'ocr', label: 'OCR', icon: '👁️', desc: 'Extract text from images' },
   { key: 'image', label: 'Image', icon: '🖼️', desc: 'Image generation & editing' },
   { key: 'compare', label: 'Compare', icon: '⚖️', desc: 'Compare model responses' },
+  { key: 'capture', label: 'Capture', icon: '🎯', desc: 'Capture & recreate UI components' },
   { key: 'models', label: 'Models', icon: '🧠', desc: 'Model selection & management' },
 ];

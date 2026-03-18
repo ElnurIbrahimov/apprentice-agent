@@ -427,6 +427,11 @@ class ToolExecutor:
             old_string=args["old_string"],
             new_string=args["new_string"],
         )
+
+        # Broadcast to Artifacts live-preview if file is previewable
+        if result.get("success"):
+            self._maybe_broadcast_artifact(path)
+
         return result
 
     def _write_file(self, args: dict) -> dict:
@@ -438,7 +443,35 @@ class ToolExecutor:
                 _cp.snapshot(path, label=f"before write: {Path(path).name}")
             except Exception:
                 pass
-        return self.fs.write_file(path=path, content=args["content"], overwrite=True)
+        result = self.fs.write_file(path=path, content=args["content"], overwrite=True)
+
+        # Broadcast to Artifacts live-preview if file is previewable
+        if result.get("success"):
+            self._maybe_broadcast_artifact(path, content=args.get("content"))
+
+        return result
+
+    def _maybe_broadcast_artifact(self, path: str, content: str = None) -> None:
+        """Broadcast file content to the Artifacts live-preview panel if previewable."""
+        try:
+            from api.routes.artifacts import is_previewable, broadcast_artifact
+            if not is_previewable(path):
+                return
+            # Read file content if not provided (edit_file case)
+            if content is None:
+                try:
+                    with open(path, "r", encoding="utf-8", errors="replace") as f:
+                        content = f.read()
+                except Exception:
+                    return
+            if content:
+                filename = Path(path).name
+                broadcast_artifact(filename, content)
+                logger.debug(f"[AgenticLoop] Artifact broadcast: {filename} ({len(content)} chars)")
+        except ImportError:
+            pass  # API routes not available (CLI-only mode)
+        except Exception as e:
+            logger.debug(f"[AgenticLoop] Artifact broadcast failed (non-fatal): {e}")
 
     def _git_dispatch(self, args: dict) -> dict:
         action = args.get("action", "status")

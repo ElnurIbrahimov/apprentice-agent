@@ -290,7 +290,51 @@ type ExtensionMessage =
   | LinkPreviewMessage
   | ImageEditOpenMessage
   | ImageDescribeMessage
-  | ImageSaveMessage;
+  | ImageSaveMessage
+  | CaptureElementMessage
+  | StartCaptureModeMessage
+  | StopCaptureModeMessage
+  | CaptureExitedMessage;
+
+// ── Component capture message types ──────────────────────────────────────────
+
+interface CaptureElementMessage {
+  type: 'CAPTURE_ELEMENT';
+  rect: { x: number; y: number; w: number; h: number };
+  elementData: {
+    html: string;
+    css: Record<string, Record<string, string>>;
+    dimensions: { width: number; height: number; padding: string; margin: string };
+    textContent: string;
+    tagName: string;
+    className: string;
+  };
+}
+
+interface StartCaptureModeMessage {
+  type: 'START_CAPTURE_MODE';
+}
+
+interface StopCaptureModeMessage {
+  type: 'STOP_CAPTURE_MODE';
+}
+
+interface CaptureExitedMessage {
+  type: 'CAPTURE_MODE_EXITED';
+}
+
+interface ComponentCapturedMessage {
+  type: 'COMPONENT_CAPTURED';
+  data: {
+    html: string;
+    css: Record<string, Record<string, string>>;
+    screenshot_b64: string;
+    dimensions: { width: number; height: number; padding: string; margin: string };
+    textContent: string;
+    tagName: string;
+    className: string;
+  };
+}
 
 // ── Outbound / internal message types ────────────────────────────────────────
 
@@ -924,6 +968,93 @@ ext.runtime.onMessage.addListener(
           }
         );
         return false;
+      }
+
+      // Component Capture: relay START/STOP to active tab's content script
+      case 'START_CAPTURE_MODE': {
+        ext.tabs.query(
+          { active: true, currentWindow: true },
+          ([tab]: chrome.tabs.Tab[]): void => {
+            if (!tab?.id) return;
+            ext.tabs.sendMessage(tab.id, { type: 'START_CAPTURE_MODE' });
+          }
+        );
+        return false;
+      }
+
+      case 'STOP_CAPTURE_MODE': {
+        ext.tabs.query(
+          { active: true, currentWindow: true },
+          ([tab]: chrome.tabs.Tab[]): void => {
+            if (!tab?.id) return;
+            ext.tabs.sendMessage(tab.id, { type: 'STOP_CAPTURE_MODE' });
+          }
+        );
+        return false;
+      }
+
+      // Content script signals capture mode was exited (Esc key)
+      case 'CAPTURE_MODE_EXITED': {
+        ext.runtime.sendMessage({ type: 'CAPTURE_MODE_EXITED' }).catch(() => {});
+        return false;
+      }
+
+      // Content script captured an element — take screenshot, crop, relay to sidebar
+      case 'CAPTURE_ELEMENT': {
+        const captureRect = msg.rect;
+        const elementData = msg.elementData;
+
+        chrome.tabs.captureVisibleTab(
+          null as unknown as number,
+          { format: 'png' },
+          async (dataUrl: string): Promise<void> => {
+            let screenshot_b64 = '';
+
+            if (!chrome.runtime.lastError && dataUrl) {
+              try {
+                const dpr = 1; // captureVisibleTab already uses device pixels on most systems
+                const imgBlob: Blob = await fetch(dataUrl).then((r) => r.blob());
+                const bmp: ImageBitmap = await createImageBitmap(imgBlob);
+
+                // Calculate crop coordinates — captureVisibleTab may return at device pixel ratio
+                const scaleX = bmp.width / (typeof screen !== 'undefined' ? screen.width : bmp.width);
+                const scaleY = bmp.height / (typeof screen !== 'undefined' ? screen.height : bmp.height);
+                const scale = Math.max(scaleX, scaleY, 1);
+
+                const cx = Math.max(0, Math.round(captureRect.x * scale));
+                const cy = Math.max(0, Math.round(captureRect.y * scale));
+                const cw = Math.max(1, Math.min(Math.round(captureRect.w * scale), bmp.width - cx));
+                const ch = Math.max(1, Math.min(Math.round(captureRect.h * scale), bmp.height - cy));
+
+                const oc = new OffscreenCanvas(cw, ch);
+                const ctx = oc.getContext('2d')!;
+                ctx.drawImage(bmp, cx, cy, cw, ch, 0, 0, cw, ch);
+                bmp.close();
+
+                const blob: Blob = await oc.convertToBlob({ type: 'image/png' });
+                const arrayBuf = await blob.arrayBuffer();
+                screenshot_b64 = btoa(
+                  String.fromCharCode(...new Uint8Array(arrayBuf))
+                );
+              } catch (_e) {
+                // Proceed without screenshot
+              }
+            }
+
+            // Relay captured component data to sidebar
+            const captured: ComponentCapturedMessage = {
+              type: 'COMPONENT_CAPTURED',
+              data: {
+                ...elementData,
+                screenshot_b64,
+              },
+            };
+
+            ext.runtime.sendMessage(captured).catch(() => {});
+            sendResponse({ ok: true });
+          }
+        );
+        return true; // async
       }
 
       // Quick-action: content script asks background to call LLM for inline text edits

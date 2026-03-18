@@ -22,6 +22,7 @@ import CodePanel from './panels/CodePanel';
 import ArtifactsPanel from './panels/ArtifactsPanel';
 import ImagePanel from './panels/ImagePanel';
 import ComparePanel from './panels/ComparePanel';
+import CapturePanel from './panels/CapturePanel';
 import AgentPanel from './panels/AgentPanel';
 import ModelsPanel from './panels/ModelsPanel';
 import SettingsPanel from './panels/SettingsPanel';
@@ -49,6 +50,7 @@ const PANEL_ENTRIES: { id: PanelId; Component: React.FC }[] = [
   { id: 'artifacts', Component: ArtifactsPanel },
   { id: 'image', Component: ImagePanel },
   { id: 'compare', Component: ComparePanel },
+  { id: 'capture', Component: CapturePanel },
   { id: 'agent', Component: AgentPanel },
   { id: 'models', Component: ModelsPanel },
   { id: 'settings', Component: SettingsPanel },
@@ -125,6 +127,14 @@ export default function App() {
       }
       if (msg.type === 'SWITCH_PANEL' && msg.panel) {
         setPanel(msg.panel);
+      }
+      if (msg.type === 'COMPONENT_CAPTURED') {
+        setPanel('capture');
+        // Forward to CapturePanel via custom event
+        window.dispatchEvent(new CustomEvent('component-captured', { detail: msg }));
+      }
+      if (msg.type === 'CAPTURE_MODE_EXITED') {
+        window.dispatchEvent(new CustomEvent('capture-mode-exited'));
       }
       if (msg.type === 'IMAGE_EDIT_LOAD' && msg.dataUrl) {
         setPanel('image');

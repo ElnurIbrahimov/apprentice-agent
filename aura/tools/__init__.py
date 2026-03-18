@@ -164,14 +164,8 @@ except Exception as _e:
     MarketplaceTool = None
     _safe_import_error("MarketplaceTool", _e)
 
-# ---------------------------------------------------------------------------
-#  Regex Builder
-# ---------------------------------------------------------------------------
-try:
-    from .regex_builder import RegexBuilderTool
-except Exception as _e:
-    RegexBuilderTool = None
-    _safe_import_error("RegexBuilderTool", _e)
+# RegexBuilderTool removed — LLMs handle regex natively (2026-03-18)
+RegexBuilderTool = None
 
 # ---------------------------------------------------------------------------
 #  Git
@@ -214,16 +208,10 @@ except Exception as _e:
     get_voice_manager = None
     _safe_import_error("VoiceManager/get_voice_manager", _e)
 
-# ---------------------------------------------------------------------------
-#  Clawdbot
-# ---------------------------------------------------------------------------
-try:
-    from .clawdbot import ClawdbotTool, clawdbot, send_message as clawdbot_send
-except Exception as _e:
-    ClawdbotTool = None
-    clawdbot = None
-    clawdbot_send = None
-    _safe_import_error("ClawdbotTool/clawdbot/clawdbot_send", _e)
+# ClawdbotTool removed — vaporware CLI, channels/ system replaced it (2026-03-18)
+ClawdbotTool = None
+clawdbot = None
+clawdbot_send = None
 
 # ---------------------------------------------------------------------------
 #  EvoEmo
@@ -520,11 +508,8 @@ except Exception as _e:
     WindowsControlTool = None
     _safe_import_error("WindowsControlTool", _e)
 
-try:
-    from .home_assistant import HomeAssistantTool
-except Exception as _e:
-    HomeAssistantTool = None
-    _safe_import_error("HomeAssistantTool", _e)
+# HomeAssistantTool removed — no HASS instance configured (2026-03-18)
+HomeAssistantTool = None
 
 try:
     from .task_scheduler import TaskSchedulerTool
@@ -532,32 +517,20 @@ except Exception as _e:
     TaskSchedulerTool = None
     _safe_import_error("TaskSchedulerTool", _e)
 
-try:
-    from .discord_tool import DiscordTool
-except Exception as _e:
-    DiscordTool = None
-    _safe_import_error("DiscordTool", _e)
+# DiscordTool removed — no bot token configured, unused (2026-03-18)
+DiscordTool = None
 
-try:
-    from .slack_tool import SlackTool
-except Exception as _e:
-    SlackTool = None
-    _safe_import_error("SlackTool", _e)
+# SlackTool removed — no bot token configured, unused (2026-03-18)
+SlackTool = None
 
-try:
-    from .local_image_gen import LocalImageGenTool
-except Exception as _e:
-    LocalImageGenTool = None
-    _safe_import_error("LocalImageGenTool", _e)
+# LocalImageGenTool removed — duplicate of image_gen.py (2026-03-18)
+LocalImageGenTool = None
 
 # ---------------------------------------------------------------------------
 #  Tier 3 Moonshot
 # ---------------------------------------------------------------------------
-try:
-    from .ambient_audio import AmbientAudioTool
-except Exception as _e:
-    AmbientAudioTool = None
-    _safe_import_error("AmbientAudioTool", _e)
+# AmbientAudioTool removed — experimental stub, never called (2026-03-18)
+AmbientAudioTool = None
 
 try:
     from .predictive_tasks import PredictiveTaskTool
@@ -582,6 +555,25 @@ try:
 except Exception as _e:
     LifeLoggerTool = None
     _safe_import_error("LifeLoggerTool", _e)
+
+# ---------------------------------------------------------------------------
+#  Deploy
+# ---------------------------------------------------------------------------
+try:
+    from .deploy_tool import DeployTool, get_deploy_tool
+except Exception as _e:
+    DeployTool = None
+    get_deploy_tool = None
+    _safe_import_error("DeployTool/get_deploy_tool", _e)
+
+# ---------------------------------------------------------------------------
+#  Scaffold (project generator)
+# ---------------------------------------------------------------------------
+try:
+    from .scaffold import ScaffoldTool
+except Exception as _e:
+    ScaffoldTool = None
+    _safe_import_error("ScaffoldTool", _e)
 
 
 # ---------------------------------------------------------------------------
@@ -608,13 +600,9 @@ _ALL_SYMBOLS = [
     "NotificationTool",
     "ToolBuilderTool",
     "MarketplaceTool",
-    "RegexBuilderTool",
     "GitTool",
     "VoiceManager",
     "get_voice_manager",
-    "ClawdbotTool",
-    "clawdbot",
-    "clawdbot_send",
     "EvoEmoTool",
     "evoemo",
     "analyze_emotion",
@@ -706,17 +694,17 @@ _ALL_SYMBOLS = [
     "DocumentGeneratorTool",
     # Tier 2 High-Impact
     "WindowsControlTool",
-    "HomeAssistantTool",
     "TaskSchedulerTool",
-    "DiscordTool",
-    "SlackTool",
-    "LocalImageGenTool",
     # Tier 3 Moonshot
-    "AmbientAudioTool",
     "PredictiveTaskTool",
     "MeetingIntelTool",
     "VoiceSynthTool",
     "LifeLoggerTool",
+    # Deploy
+    "DeployTool",
+    "get_deploy_tool",
+    # Scaffold
+    "ScaffoldTool",
 ]
 
 # Filter out symbols that failed to import (are None) — but keep

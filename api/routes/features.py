@@ -557,26 +557,23 @@ _TOOL_CATEGORIES: dict = {
     "clipboard": "Memory", "obsidian": "Memory", "amem": "Memory",
     "hybrid_amem": "Memory", "knowledge_graph": "Memory",
     # Communication
-    "slack": "Communication", "discord": "Communication", "email": "Communication",
-    "notifications": "Communication",
+    "email": "Communication", "notifications": "Communication",
     # Productivity
     "task_manager": "Productivity", "calendar": "Productivity",
     "task_scheduler": "Productivity", "document_generator": "Productivity",
     "spaced_repetition": "Productivity",
-    # Smart Home
-    "home_assistant": "Smart Home",
     # Media
-    "local_image_gen": "Media", "voice_synth": "Media", "image_gen": "Media",
+    "voice_synth": "Media", "image_gen": "Media",
     "audio_transcriber": "Media", "voice": "Media",
     # Development
     "git": "Development", "github": "Development", "log_analyst": "Development",
     "api_tester": "Development", "database": "Development", "shell_executor": "Development",
-    "regex_builder": "Development", "tool_builder": "Development",
+    "tool_builder": "Development",
     # AI / Research
     "research": "AI", "arxiv_search": "AI", "mcts_reasoning": "AI",
     "reasoning_tree": "AI",
     # Monitoring
-    "ambient_audio": "Monitoring", "meeting_intel": "Monitoring",
+    "meeting_intel": "Monitoring",
     "screen_reader": "Monitoring", "screenshot": "Monitoring", "browser": "Monitoring",
     # System
     "windows_control": "System", "system_control": "System",

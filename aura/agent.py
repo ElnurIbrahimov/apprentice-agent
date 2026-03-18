@@ -155,7 +155,7 @@ from .identity import load_identity, get_identity_prompt, detect_name_change, de
 from .memory.unified_memory import get_unified_memory
 from .metacognition import MetacognitionLogger
 from .config import Config
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, RegexBuilderTool, GitTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, get_monologue, KnowledgeGraphTool, get_knowledge_graph, NeuroDreamEngine, SleepPhase, CalendarTool, SpacedRepetitionTool, TaskManagerTool, APITesterTool, DatabaseTool, AudioTranscriberTool, ResearchTool, BraveSearchTool, TavilyTool, FirecrawlTool, ObsidianTool, GitHubTool, LogAnalystTool, DocumentGeneratorTool, WindowsControlTool, HomeAssistantTool, TaskSchedulerTool, DiscordTool, SlackTool, LocalImageGenTool, AmbientAudioTool, PredictiveTaskTool, MeetingIntelTool, VoiceSynthTool, LifeLoggerTool, CodeSearchTool, CodeEditTool
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, GitTool, EvoEmoTool, get_tone_modifier, get_monologue, KnowledgeGraphTool, get_knowledge_graph, NeuroDreamEngine, SleepPhase, CalendarTool, SpacedRepetitionTool, TaskManagerTool, APITesterTool, DatabaseTool, AudioTranscriberTool, ResearchTool, BraveSearchTool, TavilyTool, FirecrawlTool, ObsidianTool, GitHubTool, LogAnalystTool, DocumentGeneratorTool, WindowsControlTool, TaskSchedulerTool, PredictiveTaskTool, MeetingIntelTool, VoiceSynthTool, LifeLoggerTool, CodeSearchTool, CodeEditTool
 from .tools.crypto_price import CryptoPriceTool
 
 from .memory_retriever import MemoryRetriever
@@ -469,10 +469,6 @@ _TOOL_KEYWORDS = frozenset([
     'inner monologue', 'show thoughts', 'your thoughts', 'think aloud',
     'reasoning chain', 'what were you thinking', 'export thoughts',
 
-    # --- Tool: Clawdbot (messaging) ---
-    'clawdbot', 'send message', 'send whatsapp', 'send telegram',
-    'text message', 'discord message', 'message to',
-
     # --- Tool: deep_research ---
     'deep research', 'research thoroughly', 'thorough research',
     'in-depth research', 'comprehensive research', 'research topic',
@@ -567,11 +563,9 @@ class ApprenticeAgent:
             "code_executor": CodeExecutorTool(),
             "clipboard": ClipboardTool(),
             "notifications": NotificationTool(),
-            "regex_builder": RegexBuilderTool(),
             "git": GitTool(),
             "evoemo": EvoEmoTool(),
             "inner_monologue": get_monologue(),
-            "clawdbot": ClawdbotTool(),
             "calendar": CalendarTool(),
             "spaced_repetition": SpacedRepetitionTool(),
             "task_manager": TaskManagerTool(),
@@ -582,13 +576,8 @@ class ApprenticeAgent:
             "document_generator": DocumentGeneratorTool(),
             # Tier 2 High-Impact Tools
             "windows_control": WindowsControlTool(),
-            "home_assistant": HomeAssistantTool(),
             "task_scheduler": TaskSchedulerTool(),
-            "discord": DiscordTool(),
-            "slack": SlackTool(),
-            "local_image_gen": LocalImageGenTool(),
             # Tier 3 Moonshot Tools
-            "ambient_audio": AmbientAudioTool(),
             "predictive_tasks": PredictiveTaskTool(),
             "meeting_intel": MeetingIntelTool(),
             "voice_synth": VoiceSynthTool(),
@@ -1216,8 +1205,6 @@ class ApprenticeAgent:
             self.tools["tool_builder"] = ToolBuilderTool()
         elif tool_name == "marketplace":
             self.tools["marketplace"] = MarketplaceTool()
-        elif tool_name == "clawdbot":
-            self.tools["clawdbot"] = ClawdbotTool()
         elif tool_name == "shell_executor":
             from .tools.shell_executor import ShellExecutorTool
             self.tools["shell_executor"] = ShellExecutorTool()
