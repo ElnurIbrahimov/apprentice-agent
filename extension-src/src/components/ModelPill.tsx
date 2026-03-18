@@ -113,9 +113,12 @@ export default function ModelPill({ featureKey }: Props) {
   const toggle = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (open) { setOpen(false); setSearch(''); return; }
-    setLoading(true);
-    await loadModels();
-    setLoading(false);
+    // If lists are empty, force load. Otherwise open immediately (lists refresh in background).
+    if (!mdlCloudList.length && !mdlLocalList.length && !mdlChatgptList.length) {
+      setLoading(true);
+      await loadModels();
+      setLoading(false);
+    }
     setOpen(true);
   };
 
@@ -131,10 +134,13 @@ export default function ModelPill({ featureKey }: Props) {
     if (!open || !btnRef.current || !dropRef.current) return;
     const pRect = btnRef.current.getBoundingClientRect();
     const drop = dropRef.current;
-    drop.style.right = Math.max(4, window.innerWidth - pRect.right) + 'px';
-    drop.style.left = 'auto';
+    const sidebarW = window.innerWidth;
+    // Fill sidebar width with 4px margins on each side
+    drop.style.left = '4px';
+    drop.style.right = '4px';
     drop.style.top = (pRect.bottom + 6) + 'px';
     drop.style.bottom = 'auto';
+    drop.style.width = 'auto'; // let left+right control width
     // Flip upward if needed
     requestAnimationFrame(() => {
       const dropRect = drop.getBoundingClientRect();
@@ -202,8 +208,6 @@ export default function ModelPill({ featureKey }: Props) {
           ref={dropRef}
           style={{
             position: 'fixed',
-            minWidth: 220,
-            maxWidth: 280,
             maxHeight: 320,
             overflowY: 'auto',
             background: 'var(--glass)',
