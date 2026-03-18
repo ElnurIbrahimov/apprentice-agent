@@ -3755,18 +3755,18 @@ ${description}
       if (stored.aura_serp_hidden) return;
       const query = getSearchQuery();
       if (!query) return;
-      const searchContainer = document.getElementById("search") || document.getElementById("rso") || document.querySelector("#center_col");
-      if (!searchContainer) return;
       const serpHost = document.createElement("div");
       serpHost.id = "aura-serp-host";
       Object.assign(serpHost.style, {
-        display: "block",
-        width: "100%",
-        margin: "0 0 16px 0",
-        position: "relative",
-        zIndex: "100"
+        position: "fixed",
+        top: "80px",
+        right: "16px",
+        width: "340px",
+        maxHeight: "calc(100vh - 100px)",
+        zIndex: "2147483640",
+        pointerEvents: "auto"
       });
-      searchContainer.parentNode.insertBefore(serpHost, searchContainer);
+      document.documentElement.appendChild(serpHost);
       const serpShadow = serpHost.attachShadow({ mode: "closed" });
       const theme = detectGoogleTheme();
       const isDark = theme === "dark";
@@ -3789,9 +3789,13 @@ ${description}
       }
 
       .serp-card {
-        background: ${isDark ? "rgba(30, 27, 48, 0.75)" : "rgba(255, 255, 255, 0.82)"};
+        background: ${isDark ? "rgba(30, 27, 48, 0.92)" : "rgba(255, 255, 255, 0.95)"};
         backdrop-filter: blur(24px) saturate(1.4);
         -webkit-backdrop-filter: blur(24px) saturate(1.4);
+        border-radius: 16px;
+        overflow-y: auto;
+        max-height: calc(100vh - 120px);
+        box-shadow: ${isDark ? "0 8px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06)" : "0 8px 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.06)"};
         border: 1px solid ${isDark ? "rgba(124, 58, 237, 0.2)" : "rgba(124, 58, 237, 0.15)"};
         border-radius: 16px;
         padding: 20px 24px 16px;
