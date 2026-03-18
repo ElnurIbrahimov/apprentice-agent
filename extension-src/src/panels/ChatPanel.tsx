@@ -7,6 +7,7 @@ import InputBar from '../components/InputBar';
 import { PAGE_KEYWORDS } from '../ws';
 import { getPageContentCached, getCurrentTab } from '../ext';
 import type { StreamState } from '../types';
+import { speak } from '../tts';
 
 export default function ChatPanel() {
   const { messages, addMessage, activeStream, setActiveStream, setPendingCtx } = useStore();
@@ -79,6 +80,9 @@ export default function ChatPanel() {
           messages: s.messages.map(m => m.id === aiId ? { ...m, text: rawText } : m),
         }));
         streamingMsgId.current = null;
+        if (useStore.getState().autoSpeak) {
+          speak(rawText);
+        }
       },
     };
 
@@ -137,7 +141,7 @@ export default function ChatPanel() {
                     </div>
                   );
                 }
-                return <MessageBubble key={msg.id} message={liveMsg} />;
+                return <MessageBubble key={msg.id} message={liveMsg} isLatest />;
               }
               return <MessageBubble key={msg.id} message={msg} />;
             })}

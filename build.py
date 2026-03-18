@@ -26,7 +26,16 @@ ext_dir = os.path.join(SCRIPT_DIR, 'extension')
 shutil.copytree(ext_dir, dst, dirs_exist_ok=True)
 
 if target == 'firefox':
+    # Use the Firefox-specific manifest as the deployed manifest.json
     shutil.copy(os.path.join(ext_dir, 'manifest.firefox.json'), os.path.join(dst, 'manifest.json'))
+    # Remove the leftover manifest.firefox.json from the dist output
+    leftover = os.path.join(dst, 'manifest.firefox.json')
+    if os.path.exists(leftover):
+        os.remove(leftover)
     print(f'Built firefox -> {dst}/ (Firefox manifest applied)')
 else:
+    # Chrome build: remove the Firefox manifest if it was copied over
+    leftover = os.path.join(dst, 'manifest.firefox.json')
+    if os.path.exists(leftover):
+        os.remove(leftover)
     print(f'Built chrome -> {dst}/')

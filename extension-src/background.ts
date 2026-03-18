@@ -151,6 +151,11 @@ interface PageContentResponse {
   text?: string;
   url?: string;
   title?: string;
+  wordCount?: number;
+  isPdf?: boolean;
+  isYouTube?: boolean;
+  videoTitle?: string;
+  transcript?: string;
   error?: string;
 }
 
@@ -158,6 +163,11 @@ interface ExtractPageResponse {
   text: string;
   url: string;
   title: string;
+  wordCount: number;
+  isPdf?: boolean;
+  isYouTube?: boolean;
+  videoTitle?: string;
+  transcript?: string;
 }
 
 // ── Startup ──────────────────────────────────────────────────────────────────

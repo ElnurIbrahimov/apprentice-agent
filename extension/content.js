@@ -251,7 +251,6 @@
       dockHost.style.boxShadow = "-3px 0 20px rgba(0,0,0,0.5)";
     });
     dockHost.addEventListener("click", (e) => {
-      var _a, _b;
       const target = e.target;
       const btn = target.closest("[data-action]");
       if (!btn) return;
@@ -265,8 +264,8 @@
       } else if (action === "dock-translate") {
         safeSend({ type: "OPEN_PANEL", panel: "translate" });
       } else if (action === "dock-thispage") {
-        const pageText = ((_b = (_a = document.body) == null ? void 0 : _a.innerText) == null ? void 0 : _b.slice(0, 25e3)) || "";
-        safeSend({ type: "OPEN_WITH_TEXT", action: "ask", text: pageText, url, title });
+        const extracted = extractMainContent();
+        safeSend({ type: "OPEN_WITH_TEXT", action: "ask", text: extracted.text, url, title });
       } else if (action === "dock-save") {
         const selText = getSelectionText();
         const textToSave = selText || `${title}
@@ -535,15 +534,283 @@ ${url}`;
       });
       ocrCleanupObserver.observe(document.body, { childList: true });
     }
+    const MAX_TEXT_BYTES = 5e4;
+    const CONTENT_SELECTORS = [
+      "article",
+      "main",
+      '[role="main"]',
+      ".post-content",
+      ".article-body",
+      ".entry-content",
+      ".post-body",
+      ".article-content",
+      ".story-body",
+      ".content-body",
+      "#article-body",
+      "#content",
+      ".markdown-body",
+      // GitHub
+      ".wiki-content"
+    ];
+    const JUNK_SELECTORS = [
+      "nav",
+      "header",
+      "footer",
+      "aside",
+      "script",
+      "style",
+      "noscript",
+      "iframe",
+      ".sidebar",
+      ".menu",
+      ".nav",
+      ".navigation",
+      ".cookie",
+      ".cookie-banner",
+      ".cookie-consent",
+      ".popup",
+      ".modal",
+      ".overlay",
+      ".ad",
+      ".ads",
+      ".advert",
+      ".advertisement",
+      ".social-share",
+      ".share-buttons",
+      ".social-buttons",
+      ".comments",
+      ".comment-section",
+      "#comments",
+      ".related-posts",
+      ".recommended",
+      ".newsletter",
+      ".subscribe",
+      '[role="navigation"]',
+      '[role="banner"]',
+      '[role="contentinfo"]',
+      '[role="complementary"]',
+      '[aria-hidden="true"]',
+      ".sr-only",
+      ".visually-hidden"
+    ];
+    function findContentRoot() {
+      for (const sel of CONTENT_SELECTORS) {
+        const el = document.querySelector(sel);
+        if (el && el.textContent && el.textContent.trim().length > 200) {
+          return el;
+        }
+      }
+      return document.body;
+    }
+    function cleanClone(root) {
+      const clone = root.cloneNode(true);
+      for (const sel of JUNK_SELECTORS) {
+        clone.querySelectorAll(sel).forEach((el) => el.remove());
+      }
+      return clone;
+    }
+    function domToStructuredText(root) {
+      const parts = [];
+      const BLOCK_TAGS = /* @__PURE__ */ new Set([
+        "P",
+        "DIV",
+        "SECTION",
+        "ARTICLE",
+        "BLOCKQUOTE",
+        "PRE",
+        "H1",
+        "H2",
+        "H3",
+        "H4",
+        "H5",
+        "H6",
+        "UL",
+        "OL",
+        "LI",
+        "TABLE",
+        "TR",
+        "DT",
+        "DD",
+        "FIGURE",
+        "FIGCAPTION",
+        "HR",
+        "BR"
+      ]);
+      function walk(node) {
+        var _a;
+        if (node.nodeType === Node.TEXT_NODE) {
+          const text = (node.textContent || "").replace(/\s+/g, " ");
+          if (text.trim()) parts.push(text);
+          return;
+        }
+        if (node.nodeType !== Node.ELEMENT_NODE) return;
+        const el = node;
+        const tag = el.tagName;
+        if (el.hasAttribute("hidden") || ((_a = el.style) == null ? void 0 : _a.display) === "none") return;
+        if (/^H[1-6]$/.test(tag)) {
+          const level = parseInt(tag[1]);
+          const prefix = "#".repeat(Math.min(level, 3)) + " ";
+          const headingText = (el.textContent || "").trim();
+          if (headingText) {
+            parts.push("\n\n" + prefix + headingText + "\n");
+          }
+          return;
+        }
+        if (tag === "LI") {
+          const text = (el.textContent || "").trim();
+          if (text) {
+            parts.push("\n- " + text);
+          }
+          return;
+        }
+        if (tag === "A") {
+          const href = el.href;
+          const text = (el.textContent || "").trim();
+          if (text && href && !href.startsWith("javascript:")) {
+            parts.push(text + " (" + href + ")");
+          } else if (text) {
+            parts.push(text);
+          }
+          return;
+        }
+        if (tag === "HR") {
+          parts.push("\n\n---\n\n");
+          return;
+        }
+        if (tag === "BR") {
+          parts.push("\n");
+          return;
+        }
+        if (tag === "PRE") {
+          const text = (el.textContent || "").trim();
+          if (text) parts.push("\n\n```\n" + text + "\n```\n\n");
+          return;
+        }
+        const isBlock = BLOCK_TAGS.has(tag);
+        if (isBlock) parts.push("\n\n");
+        for (const child of el.childNodes) {
+          walk(child);
+        }
+        if (isBlock) parts.push("\n");
+      }
+      walk(root);
+      return parts.join("").replace(/\n{3,}/g, "\n\n").replace(/[ \t]+/g, " ").trim();
+    }
+    function extractMainContent() {
+      var _a, _b, _c, _d;
+      try {
+        const url = window.location.href;
+        const title = document.title;
+        if (url.match(/\.pdf($|\?|#)/i) || document.contentType === "application/pdf") {
+          return {
+            text: ((_b = (_a = document.body) == null ? void 0 : _a.innerText) == null ? void 0 : _b.slice(0, MAX_TEXT_BYTES)) || "[PDF document]",
+            title,
+            url,
+            wordCount: 0,
+            isPdf: true
+          };
+        }
+        if (url.includes("youtube.com/watch") || url.includes("youtu.be/")) {
+          return extractYouTubeContent();
+        }
+        const root = findContentRoot();
+        const cleaned = cleanClone(root);
+        let text = domToStructuredText(cleaned);
+        if (text.length < 100) {
+          text = ((_c = document.body) == null ? void 0 : _c.innerText) || "";
+        }
+        if (text.length > MAX_TEXT_BYTES) {
+          text = text.slice(0, MAX_TEXT_BYTES) + "\n\n[...truncated]";
+        }
+        const wordCount = text.split(/\s+/).filter(Boolean).length;
+        return { text, title, url, wordCount };
+      } catch (_e) {
+        const fallbackText = (((_d = document.body) == null ? void 0 : _d.innerText) || "").slice(0, MAX_TEXT_BYTES);
+        return {
+          text: fallbackText,
+          title: document.title,
+          url: window.location.href,
+          wordCount: fallbackText.split(/\s+/).filter(Boolean).length
+        };
+      }
+    }
+    function extractYouTubeContent() {
+      var _a, _b;
+      const url = window.location.href;
+      const titleEl = document.querySelector(
+        "h1.ytd-watch-metadata, h1.ytd-video-primary-info-renderer, #title h1"
+      );
+      const videoTitle = ((_a = titleEl == null ? void 0 : titleEl.textContent) == null ? void 0 : _a.trim()) || document.title.replace(/ - YouTube$/, "").trim();
+      let transcript = "";
+      const transcriptSegments = document.querySelectorAll(
+        "ytd-transcript-segment-renderer .segment-text, yt-formatted-string.ytd-transcript-segment-renderer, #segments-container ytd-transcript-segment-renderer"
+      );
+      if (transcriptSegments.length > 0) {
+        const lines = [];
+        transcriptSegments.forEach((seg) => {
+          var _a2;
+          const text2 = (_a2 = seg.textContent) == null ? void 0 : _a2.trim();
+          if (text2) lines.push(text2);
+        });
+        transcript = lines.join(" ");
+      }
+      let description = "";
+      const descEl = document.querySelector(
+        "ytd-text-inline-expander #plain-snippet-text, #description-inline-expander, ytd-expander .content, #description .content"
+      );
+      if (descEl) {
+        description = ((_b = descEl.textContent) == null ? void 0 : _b.trim()) || "";
+      }
+      const commentEls = document.querySelectorAll(
+        "ytd-comment-thread-renderer #content-text"
+      );
+      let comments = "";
+      if (commentEls.length > 0) {
+        const commentLines = [];
+        commentEls.forEach((el, i) => {
+          var _a2;
+          if (i >= 10) return;
+          const text2 = (_a2 = el.textContent) == null ? void 0 : _a2.trim();
+          if (text2) commentLines.push("- " + text2);
+        });
+        if (commentLines.length > 0) {
+          comments = "\n\n## Top Comments\n" + commentLines.join("\n");
+        }
+      }
+      let text = `# ${videoTitle}
+
+`;
+      if (transcript) {
+        text += `## Transcript
+${transcript}
+
+`;
+      }
+      if (description) {
+        text += `## Description
+${description}
+
+`;
+      }
+      text += comments;
+      if (text.length > MAX_TEXT_BYTES) {
+        text = text.slice(0, MAX_TEXT_BYTES) + "\n\n[...truncated]";
+      }
+      const wordCount = text.split(/\s+/).filter(Boolean).length;
+      return {
+        text,
+        title: videoTitle,
+        url,
+        wordCount,
+        isYouTube: true,
+        videoTitle,
+        transcript: transcript || void 0
+      };
+    }
     ext.runtime.onMessage.addListener(
       (msg, _sender, sendResponse) => {
-        var _a, _b;
         if (msg.type === "EXTRACT_PAGE") {
-          sendResponse({
-            text: ((_b = (_a = document.body) == null ? void 0 : _a.innerText) == null ? void 0 : _b.slice(0, 5e4)) || "",
-            url: window.location.href,
-            title: document.title
-          });
+          sendResponse(extractMainContent());
           return false;
         }
         if (msg.type === "GET_DOM") {

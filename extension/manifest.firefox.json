@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "AURA",
-  "version": "1.0.0",
-  "description": "Your private, self-hosted AI assistant — always on.",
+  "version": "4.3.0",
+  "description": "Your private AI assistant — always present, never clouds.",
   "browser_specific_settings": {
     "gecko": {
       "id": "aura@localhost",
@@ -30,11 +30,17 @@
   "host_permissions": [
     "http://localhost/*",
     "http://127.0.0.1/*",
-    "<all_urls>"
+    "https://localhost/*",
+    "https://127.0.0.1/*"
   ],
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": [
+        "http://localhost/*",
+        "http://127.0.0.1/*",
+        "https://localhost/*",
+        "https://127.0.0.1/*"
+      ],
       "js": ["content.js"],
       "run_at": "document_idle"
     }

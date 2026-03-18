@@ -2,8 +2,29 @@ import { WS_URL, HTTP } from './api';
 import { useStore } from './store';
 
 let _wsRetryDelay = 1000;
+let _wsConsecutiveFailures = 0;
 let _chunkBuf = '';
 let _rafId: number | null = null;
+let _connTimer: ReturnType<typeof setTimeout> | null = null;
+let _staleTimer: ReturnType<typeof setTimeout> | null = null;
+const WS_CONNECT_TIMEOUT = 5_000;
+const WS_STALE_TIMEOUT = 90_000;
+
+function clearWsTimers() {
+  if (_connTimer) { clearTimeout(_connTimer); _connTimer = null; }
+  if (_staleTimer) { clearTimeout(_staleTimer); _staleTimer = null; }
+}
+
+function resetStaleTimer(socket: WebSocket) {
+  if (_staleTimer) clearTimeout(_staleTimer);
+  const { activeStream } = useStore.getState();
+  if (activeStream && activeStream !== true) {
+    _staleTimer = setTimeout(() => {
+      console.warn('[Aura] WebSocket stale (no message for 90s during stream), reconnecting');
+      socket.close();
+    }, WS_STALE_TIMEOUT);
+  }
+}
 
 function flushChunks(): void {
   _rafId = null;
@@ -23,15 +44,35 @@ export function connectWS() {
 
   const socket = new WebSocket(WS_URL);
 
+  // 5s connection timeout — if not open by then, close and let onclose retry
+  _connTimer = setTimeout(() => {
+    _connTimer = null;
+    if (socket.readyState !== WebSocket.OPEN) {
+      console.warn('[Aura] WebSocket connection timeout (5s), retrying');
+      socket.close();
+    }
+  }, WS_CONNECT_TIMEOUT);
+
   socket.onopen = () => {
+    if (_connTimer) { clearTimeout(_connTimer); _connTimer = null; }
     useStore.getState().setWsReady(true);
     useStore.getState().setWs(socket);
+    useStore.getState().setBackendStatus('online');
     _wsRetryDelay = 1000;
+    _wsConsecutiveFailures = 0;
   };
 
   socket.onclose = () => {
+    clearWsTimers();
     useStore.getState().setWsReady(false);
     useStore.getState().setWs(null);
+    _wsConsecutiveFailures++;
+    // Set 'connecting' initially — only go 'offline' after 3 consecutive failures
+    if (_wsConsecutiveFailures >= 3) {
+      useStore.getState().setBackendStatus('offline');
+    } else {
+      useStore.getState().setBackendStatus('connecting');
+    }
     // Flush any pending chunk buffer before finalization
     if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; }
     if (_chunkBuf) { flushChunks(); }
@@ -55,6 +96,8 @@ export function connectWS() {
   };
 
   socket.onmessage = (ev) => {
+    resetStaleTimer(socket);
+
     let d: any;
     try { d = JSON.parse(ev.data); } catch { return; }
 
@@ -75,6 +118,8 @@ export function connectWS() {
       // No separate scheduleMdRender — the setState above already triggers re-renders
 
     } else if (d.type === 'done') {
+      // Stream complete — clear stale timer
+      if (_staleTimer) { clearTimeout(_staleTimer); _staleTimer = null; }
       // Flush any pending chunks before finalizing
       if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; }
       if (_chunkBuf) { flushChunks(); }
@@ -85,6 +130,8 @@ export function connectWS() {
       useStore.getState().setActiveStream(null);
 
     } else if (d.type === 'error') {
+      // Stream error — clear stale timer
+      if (_staleTimer) { clearTimeout(_staleTimer); _staleTimer = null; }
       // Flush pending chunks before error handling
       if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; }
       _chunkBuf = '';
@@ -107,15 +154,31 @@ export function connectWS() {
 
 export async function fetchStatus() {
   try {
-    const r = await fetch(`${HTTP}/api/status`, { signal: AbortSignal.timeout(4000) });
-    if (!r.ok) { useStore.getState().setWsReady(false); return; }
-    const d = await r.json();
-    if (!useStore.getState().wsReady) connectWS();
-    const m = (d.last_model_used || d.model || '').replace(/:cloud$/, '');
-    useStore.getState().setModelName(m.length > 22 ? m.slice(-22) : m);
-    if (d.mood?.emoji) useStore.getState().setMood(d.mood.emoji);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 30_000);
+    try {
+      const r = await fetch(`${HTTP}/api/status`, { signal: ctrl.signal });
+      if (!r.ok) {
+        useStore.getState().setWsReady(false);
+        useStore.getState().setBackendStatus('offline');
+        return;
+      }
+      const d = await r.json();
+      const store = useStore.getState();
+      // Recovered from offline/connecting — mark online
+      if (store.backendStatus !== 'online') {
+        store.setBackendStatus('online');
+      }
+      if (!store.wsReady) connectWS();
+      const m = (d.last_model_used || d.model || '').replace(/:cloud$/, '');
+      store.setModelName(m.length > 22 ? m.slice(-22) : m);
+      if (d.mood?.emoji) store.setMood(d.mood.emoji);
+    } finally {
+      clearTimeout(timer);
+    }
   } catch {
     useStore.getState().setWsReady(false);
+    useStore.getState().setBackendStatus('offline');
   }
 }
 

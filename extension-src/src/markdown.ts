@@ -132,9 +132,23 @@ export function md(raw: string): string {
   flush();
   const raw_html = out.replace(/(<p><\/p>){2,}/g, '<p></p>');
   return DOMPurify.sanitize(raw_html, {
-    ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'code', 'pre', 'a', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'blockquote', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'span', 'div', 'img', 'hr', 'sup', 'sub', 'del', 'button'],
-    ALLOWED_ATTR: ['href', 'target', 'rel', 'class', 'src', 'alt', 'title', 'colspan', 'rowspan', 'id', 'data-code-id'],
-    ALLOW_DATA_ATTR: false,
+    ALLOWED_TAGS: [
+      'table', 'thead', 'tbody', 'tr', 'th', 'td',
+      'img', 'button', 'pre', 'code',
+      'h1', 'h2', 'h3', 'h4',
+      'ul', 'ol', 'li', 'blockquote',
+      'p', 'br', 'strong', 'em', 'a',
+      'span', 'div', 'hr', 'sup', 'sub', 'del',
+    ],
+    ALLOWED_ATTR: [
+      'class', 'href', 'target', 'rel',
+      'src', 'alt', 'style',
+      'data-lang', 'data-code-id',
+      'id', 'title', 'colspan', 'rowspan',
+    ],
+    ALLOW_DATA_ATTR: false,        // block arbitrary data-* attributes
+    FORBID_ATTR: ['onerror', 'onload', 'onfocus', 'onmouseover'],  // block event handlers
+    ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i,  // blocks javascript: URIs explicitly
   });
 }
 

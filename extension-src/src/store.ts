@@ -12,10 +12,13 @@ interface AuraStore {
   // Status
   mood: string;
   modelName: string;
+  backendStatus: 'online' | 'offline' | 'connecting';
+  lastBackendCheck: number;
 
   // UI
   activePanel: PanelId;
   moreOpen: boolean;
+  theme: 'dark' | 'light';
 
   // Chat
   messages: Message[];
@@ -25,6 +28,7 @@ interface AuraStore {
   // Modes
   thinkingMode: boolean;
   deepResearch: boolean;
+  autoSpeak: boolean;
 
   // Models
   featureModels: Record<string, string>;
@@ -37,8 +41,10 @@ interface AuraStore {
   setConversationId: (id: string | null) => void;
   setMood: (mood: string) => void;
   setModelName: (name: string) => void;
+  setBackendStatus: (status: 'online' | 'offline' | 'connecting') => void;
   setPanel: (panel: PanelId) => void;
   setMoreOpen: (open: boolean) => void;
+  toggleTheme: () => void;
   addMessage: (msg: Message) => void;
   setMessages: (msgs: Message[]) => void;
   setActiveStream: (stream: StreamState | true | null) => void;
@@ -46,6 +52,7 @@ interface AuraStore {
   setPendingCtx: (ctx: Context | null) => void;
   setThinkingMode: (on: boolean) => void;
   setDeepResearch: (on: boolean) => void;
+  setAutoSpeak: (on: boolean) => void;
   setModel: (feature: string, model: string | null) => void;
   setMdlLists: (cloud: string[], local: string[]) => void;
   clearAll: () => void;
@@ -58,19 +65,35 @@ export const useStore = create<AuraStore>((set, get) => {
     set({ featureModels: d?.featureModels || {} });
   });
 
+  // Load saved autoSpeak pref
+  ext?.storage?.local?.get(['autoSpeak'], (d: any) => {
+    set({ autoSpeak: !!d?.autoSpeak });
+  });
+
+  // Load saved theme
+  ext?.storage?.local?.get(['theme'], (d: any) => {
+    const saved = d?.theme === 'light' ? 'light' : 'dark';
+    set({ theme: saved });
+    document.documentElement.classList.toggle('light', saved === 'light');
+  });
+
   return {
     ws: null,
     wsReady: false,
     conversationId: null,
     mood: '',
     modelName: '',
+    backendStatus: 'connecting' as 'online' | 'offline' | 'connecting',
+    lastBackendCheck: 0,
     activePanel: 'chat',
     moreOpen: false,
+    theme: 'dark' as 'dark' | 'light',
     messages: [],
     activeStream: null,
     pendingCtx: null,
     thinkingMode: false,
     deepResearch: false,
+    autoSpeak: false,
     featureModels: {},
     mdlCloudList: [],
     mdlLocalList: [],
@@ -80,8 +103,15 @@ export const useStore = create<AuraStore>((set, get) => {
     setConversationId: (conversationId) => set({ conversationId }),
     setMood: (mood) => set({ mood }),
     setModelName: (modelName) => set({ modelName }),
+    setBackendStatus: (backendStatus) => set({ backendStatus, lastBackendCheck: Date.now() }),
     setPanel: (activePanel) => set({ activePanel }),
     setMoreOpen: (moreOpen) => set({ moreOpen }),
+    toggleTheme: () => {
+      const next = get().theme === 'dark' ? 'light' : 'dark';
+      set({ theme: next });
+      document.documentElement.classList.toggle('light', next === 'light');
+      ext?.storage?.local?.set({ theme: next });
+    },
     addMessage: (msg) => set(s => {
       const msgs = [...s.messages, msg];
       // Cap at 500 messages to prevent unbounded growth
@@ -98,6 +128,10 @@ export const useStore = create<AuraStore>((set, get) => {
     setPendingCtx: (pendingCtx) => set({ pendingCtx }),
     setThinkingMode: (thinkingMode) => set({ thinkingMode }),
     setDeepResearch: (deepResearch) => set({ deepResearch }),
+    setAutoSpeak: (autoSpeak) => {
+      set({ autoSpeak });
+      ext?.storage?.local?.set({ autoSpeak });
+    },
 
     setModel: (feature, model) => {
       const featureModels = { ...get().featureModels };

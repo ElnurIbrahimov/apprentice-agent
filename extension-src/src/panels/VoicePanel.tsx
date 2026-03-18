@@ -1,12 +1,13 @@
 import React, { useState, useRef } from 'react';
-import { Mic, MicOff, Upload, BookOpen } from 'lucide-react';
+import { Mic, MicOff, Upload, BookOpen, Volume2 } from 'lucide-react';
 import { useStore } from '../store';
 import ModelPill from '../components/ModelPill';
 import { HTTP, apiFetch } from '../api';
 import { md } from '../markdown';
+import { speak } from '../tts';
 
 export default function VoicePanel() {
-  const { ws, wsReady, activeStream, setActiveStream, getModel } = useStore();
+  const { ws, wsReady, activeStream, setActiveStream, getModel, autoSpeak, setAutoSpeak } = useStore();
   const [recording, setRecording] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [status, setStatus] = useState('');
@@ -14,6 +15,7 @@ export default function VoicePanel() {
   const mediaRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+  const prevNotesRef = useRef('');
 
   const startRec = async () => {
     try {
@@ -67,7 +69,12 @@ export default function VoicePanel() {
       type: 'write',
       rawText: '',
       onFirstChunk: () => setNotesHtml(''),
-      onDone: (rawText) => setNotesHtml(md(rawText)),
+      onDone: (rawText) => {
+        setNotesHtml(md(rawText));
+        if (useStore.getState().autoSpeak) {
+          speak(rawText);
+        }
+      },
     });
 
     ws!.send(JSON.stringify({ type: 'chat', message: prompt, model: getModel('voice'), conversation_id: null }));
@@ -140,6 +147,49 @@ export default function VoicePanel() {
           <Upload size={14} /> Upload
         </button>
       </div>
+
+      {/* Auto-speak toggle */}
+      <label
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          fontSize: '11.5px',
+          color: 'var(--mu)',
+          cursor: 'pointer',
+          userSelect: 'none',
+        }}
+      >
+        <Volume2 size={13} style={{ opacity: autoSpeak ? 1 : 0.5 }} />
+        <span>Auto-speak responses</span>
+        <div
+          onClick={() => setAutoSpeak(!autoSpeak)}
+          style={{
+            marginLeft: 'auto',
+            width: 32,
+            height: 18,
+            borderRadius: 9,
+            background: autoSpeak ? 'var(--p)' : 'var(--s3)',
+            position: 'relative',
+            transition: 'background 0.2s',
+            cursor: 'pointer',
+            flexShrink: 0,
+          }}
+        >
+          <div
+            style={{
+              position: 'absolute',
+              top: 2,
+              left: autoSpeak ? 16 : 2,
+              width: 14,
+              height: 14,
+              borderRadius: '50%',
+              background: 'white',
+              transition: 'left 0.2s',
+            }}
+          />
+        </div>
+      </label>
 
       <input
         ref={fileRef}
