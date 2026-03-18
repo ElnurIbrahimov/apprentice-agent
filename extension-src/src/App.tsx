@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from './store';
 import Header from './components/Header';
 import Rail from './components/Rail';
@@ -23,9 +23,70 @@ import ComparePanel from './panels/ComparePanel';
 import AgentPanel from './panels/AgentPanel';
 import ModelsPanel from './panels/ModelsPanel';
 import ext from './ext';
+import type { PanelId } from './types';
+
+const PANEL_ENTRIES: { id: PanelId; Component: React.FC }[] = [
+  { id: 'chat', Component: ChatPanel },
+  { id: 'search', Component: SearchPanel },
+  { id: 'translate', Component: TranslatePanel },
+  { id: 'write', Component: WritePanel },
+  { id: 'grammar', Component: GrammarPanel },
+  { id: 'wisebase', Component: WisebasePanel },
+  { id: 'ask', Component: AskPanel },
+  { id: 'summary', Component: SummaryPanel },
+  { id: 'tools', Component: ToolsPanel },
+  { id: 'pdf', Component: PdfPanel },
+  { id: 'voice', Component: VoicePanel },
+  { id: 'ocr', Component: OcrPanel },
+  { id: 'youtube', Component: YoutubePanel },
+  { id: 'research', Component: ResearchPanel },
+  { id: 'math', Component: MathPanel },
+  { id: 'artifacts', Component: ArtifactsPanel },
+  { id: 'image', Component: ImagePanel },
+  { id: 'compare', Component: ComparePanel },
+  { id: 'agent', Component: AgentPanel },
+  { id: 'models', Component: ModelsPanel },
+];
 
 export default function App() {
   const { activePanel, setPanel, setPendingCtx } = useStore();
+  const [visiblePanel, setVisiblePanel] = useState<PanelId>(activePanel);
+  const [transitioning, setTransitioning] = useState(false);
+  const prevPanelRef = useRef<PanelId>(activePanel);
+  const scrollPositions = useRef<Map<string, number>>(new Map());
+
+  // Cross-fade transition when activePanel changes
+  useEffect(() => {
+    if (activePanel === prevPanelRef.current) return;
+
+    // Save scroll position of outgoing panel
+    const outgoing = prevPanelRef.current;
+    const outEl = document.getElementById(`panel-${outgoing}`);
+    if (outEl) {
+      const scrollable = outEl.querySelector('.panel-scroll-root') || outEl;
+      scrollPositions.current.set(outgoing, scrollable.scrollTop);
+    }
+
+    setTransitioning(true);
+
+    // Short delay for out-fade, then swap
+    const timer = setTimeout(() => {
+      setVisiblePanel(activePanel);
+      prevPanelRef.current = activePanel;
+      // Restore scroll position of incoming panel
+      requestAnimationFrame(() => {
+        const inEl = document.getElementById(`panel-${activePanel}`);
+        if (inEl) {
+          const scrollable = inEl.querySelector('.panel-scroll-root') || inEl;
+          const saved = scrollPositions.current.get(activePanel);
+          if (saved != null) scrollable.scrollTop = saved;
+        }
+        setTransitioning(false);
+      });
+    }, 150); // matches out-fade duration
+
+    return () => clearTimeout(timer);
+  }, [activePanel]);
 
   // Listen for background messages
   useEffect(() => {
@@ -42,7 +103,6 @@ export default function App() {
       if (msg.type === 'YT_TAB_DETECTED') {
         (window as any).__ytAutoUrl = msg.url;
         (window as any).__ytAutoTitle = msg.title;
-        // Dispatch to YoutubePanel
         window.dispatchEvent(new CustomEvent('yt-detected', { detail: msg }));
       }
       if (msg.type === 'PDF_TAB_DETECTED') {
@@ -60,29 +120,6 @@ export default function App() {
     return () => ext?.runtime?.onMessage?.removeListener(handler);
   }, [setPanel, setPendingCtx]);
 
-  const panels: Record<string, React.ReactNode> = {
-    chat: <ChatPanel />,
-    search: <SearchPanel />,
-    translate: <TranslatePanel />,
-    write: <WritePanel />,
-    grammar: <GrammarPanel />,
-    wisebase: <WisebasePanel />,
-    ask: <AskPanel />,
-    summary: <SummaryPanel />,
-    tools: <ToolsPanel />,
-    pdf: <PdfPanel />,
-    voice: <VoicePanel />,
-    ocr: <OcrPanel />,
-    youtube: <YoutubePanel />,
-    research: <ResearchPanel />,
-    math: <MathPanel />,
-    artifacts: <ArtifactsPanel />,
-    image: <ImagePanel />,
-    compare: <ComparePanel />,
-    agent: <AgentPanel />,
-    models: <ModelsPanel />,
-  };
-
   return (
     <>
     <div className="grain" aria-hidden="true" />
@@ -90,18 +127,27 @@ export default function App() {
       {/* Main content area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
         <Header />
-        <div className="flex-1 relative overflow-hidden">
-          {Object.entries(panels).map(([id, panel]) => (
-            <div
-              key={id}
-              className={`absolute inset-0 flex flex-col ${
-                activePanel === id ? 'opacity-100 animate-[panelIn_.18s_ease_forwards]' : 'opacity-0 pointer-events-none'
-              }`}
-              style={{ display: activePanel === id ? 'flex' : 'none' }}
-            >
-              {panel}
-            </div>
-          ))}
+        <div className={`flex-1 relative panel-container ${transitioning ? 'panel-transitioning' : ''}`}>
+          {PANEL_ENTRIES.map(({ id, Component }) => {
+            const isVisible = id === visiblePanel;
+            const isActive = id === activePanel;
+            let cls = 'panel-hidden';
+            if (transitioning) {
+              if (isVisible) cls = 'panel-fade-out';
+              else if (isActive) cls = 'panel-fade-in';
+            } else {
+              if (isActive) cls = 'panel-visible';
+            }
+            return (
+              <div
+                key={id}
+                id={`panel-${id}`}
+                className={`panel-wrapper ${cls}`}
+              >
+                <Component />
+              </div>
+            );
+          })}
         </div>
       </div>
       {/* Right rail */}

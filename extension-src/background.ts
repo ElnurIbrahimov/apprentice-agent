@@ -67,6 +67,19 @@ interface AgentNavMessage {
   url: string;
 }
 
+interface QuickActionMessage {
+  type: 'QUICK_ACTION';
+  action: 'improve' | 'expand' | 'shorten' | 'fix_grammar' | 'translate';
+  text: string;
+  language?: string;
+}
+
+interface QuickActionResponse {
+  ok: boolean;
+  result?: string;
+  error?: string;
+}
+
 type ExtensionMessage =
   | SidebarReadyMessage
   | SaveKnowledgeMessage
@@ -77,7 +90,8 @@ type ExtensionMessage =
   | OcrStartMessage
   | AgentDomMessage
   | AgentExecMessage
-  | AgentNavMessage;
+  | AgentNavMessage
+  | QuickActionMessage;
 
 // ── Outbound / internal message types ────────────────────────────────────────
 
@@ -170,6 +184,39 @@ interface ExtractPageResponse {
   transcript?: string;
 }
 
+// ── Context Menu IDs ─────────────────────────────────────────────────────────
+
+const MENU_IDS = {
+  parent: 'aura-menu',
+  ask: 'aura-ask',
+  explain: 'aura-explain',
+  summarize: 'aura-summarize',
+  translate: 'aura-translate',
+  translateEn: 'aura-translate-en',
+  translateEs: 'aura-translate-es',
+  translateFr: 'aura-translate-fr',
+  translateDe: 'aura-translate-de',
+  translateZh: 'aura-translate-zh',
+  improve: 'aura-improve',
+  saveMemory: 'aura-save-memory',
+} as const;
+
+type MenuId = (typeof MENU_IDS)[keyof typeof MENU_IDS];
+
+/** Maps a menu ID to the action string sent to the sidebar */
+const MENU_ACTION_MAP: Record<string, { action: string; prefix?: string }> = {
+  [MENU_IDS.ask]: { action: 'ask' },
+  [MENU_IDS.explain]: { action: 'explain', prefix: 'Explain this:\n\n' },
+  [MENU_IDS.summarize]: { action: 'summarize', prefix: 'Summarize this:\n\n' },
+  [MENU_IDS.improve]: { action: 'improve', prefix: 'Improve this writing:\n\n' },
+  [MENU_IDS.translateEn]: { action: 'translate', prefix: 'Translate to English:\n\n' },
+  [MENU_IDS.translateEs]: { action: 'translate', prefix: 'Translate to Spanish:\n\n' },
+  [MENU_IDS.translateFr]: { action: 'translate', prefix: 'Translate to French:\n\n' },
+  [MENU_IDS.translateDe]: { action: 'translate', prefix: 'Translate to German:\n\n' },
+  [MENU_IDS.translateZh]: { action: 'translate', prefix: 'Translate to Chinese:\n\n' },
+  [MENU_IDS.saveMemory]: { action: 'save' },
+};
+
 // ── Startup ──────────────────────────────────────────────────────────────────
 
 ext.runtime.onInstalled.addListener((): void => {
@@ -178,27 +225,145 @@ ext.runtime.onInstalled.addListener((): void => {
     chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
   }
 
-  // Right-click context menu for selected text
-  ext.contextMenus.create({
-    id: 'ask-aura',
-    title: 'Ask AURA about "%s"',
-    contexts: ['selection'],
+  // ── Build context menu tree ───────────────────────────────────────────────
+  // Remove any stale menus first (handles extension updates cleanly)
+  ext.contextMenus.removeAll(() => {
+    // Parent menu
+    ext.contextMenus.create({
+      id: MENU_IDS.parent,
+      title: 'AURA',
+      contexts: ['selection'],
+    });
+
+    // Ask AURA about "%s"
+    ext.contextMenus.create({
+      id: MENU_IDS.ask,
+      parentId: MENU_IDS.parent,
+      title: 'Ask AURA about "%s"',
+      contexts: ['selection'],
+    });
+
+    // Explain this
+    ext.contextMenus.create({
+      id: MENU_IDS.explain,
+      parentId: MENU_IDS.parent,
+      title: 'Explain this',
+      contexts: ['selection'],
+    });
+
+    // Summarize this
+    ext.contextMenus.create({
+      id: MENU_IDS.summarize,
+      parentId: MENU_IDS.parent,
+      title: 'Summarize this',
+      contexts: ['selection'],
+    });
+
+    // Translate to... (sub-menu)
+    ext.contextMenus.create({
+      id: MENU_IDS.translate,
+      parentId: MENU_IDS.parent,
+      title: 'Translate to...',
+      contexts: ['selection'],
+    });
+
+    ext.contextMenus.create({
+      id: MENU_IDS.translateEn,
+      parentId: MENU_IDS.translate,
+      title: 'English',
+      contexts: ['selection'],
+    });
+
+    ext.contextMenus.create({
+      id: MENU_IDS.translateEs,
+      parentId: MENU_IDS.translate,
+      title: 'Spanish',
+      contexts: ['selection'],
+    });
+
+    ext.contextMenus.create({
+      id: MENU_IDS.translateFr,
+      parentId: MENU_IDS.translate,
+      title: 'French',
+      contexts: ['selection'],
+    });
+
+    ext.contextMenus.create({
+      id: MENU_IDS.translateDe,
+      parentId: MENU_IDS.translate,
+      title: 'German',
+      contexts: ['selection'],
+    });
+
+    ext.contextMenus.create({
+      id: MENU_IDS.translateZh,
+      parentId: MENU_IDS.translate,
+      title: 'Chinese',
+      contexts: ['selection'],
+    });
+
+    // Separator before utility actions
+    ext.contextMenus.create({
+      id: 'aura-sep-1',
+      parentId: MENU_IDS.parent,
+      type: 'separator',
+      contexts: ['selection'],
+    });
+
+    // Improve writing
+    ext.contextMenus.create({
+      id: MENU_IDS.improve,
+      parentId: MENU_IDS.parent,
+      title: 'Improve writing',
+      contexts: ['selection'],
+    });
+
+    // Save to memory
+    ext.contextMenus.create({
+      id: MENU_IDS.saveMemory,
+      parentId: MENU_IDS.parent,
+      title: 'Save to memory',
+      contexts: ['selection'],
+    });
   });
 });
 
-// ── Context Menu ──────────────────────────────────────────────────────────────
+// ── Context Menu Click Handler ────────────────────────────────────────────────
 
 ext.contextMenus.onClicked.addListener(
   (info: chrome.contextMenus.OnClickData, tab?: chrome.tabs.Tab): void => {
-    if (info.menuItemId !== 'ask-aura') return;
+    const menuId = info.menuItemId as string;
+    const mapping = MENU_ACTION_MAP[menuId];
+    if (!mapping) return; // Clicked the parent or separator — ignore
 
     const selectedText: string = info.selectionText || '';
     const pageUrl: string = tab?.url || '';
     const pageTitle: string = tab?.title || '';
 
+    // "Save to memory" goes directly to the backend, no sidebar needed
+    if (menuId === MENU_IDS.saveMemory) {
+      fetch(`${BACKEND}/api/knowledge/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: selectedText,
+          url: pageUrl,
+          title: pageTitle,
+          tags: [],
+          source_type: 'selection',
+        }),
+      }).catch(() => {}); // fire-and-forget
+      return;
+    }
+
+    // For all other actions, open sidebar with pre-filled text
+    const queryText: string = mapping.prefix
+      ? mapping.prefix + selectedText
+      : selectedText;
+
     ext.storage.local.set({
-      pendingQuery: selectedText,
-      pendingAction: 'ask',
+      pendingQuery: queryText,
+      pendingAction: mapping.action,
       pendingUrl: pageUrl,
       pendingTitle: pageTitle,
     });
@@ -526,6 +691,49 @@ ext.runtime.onMessage.addListener(
           }
         );
         return false;
+      }
+
+      // Quick-action: content script asks background to call LLM for inline text edits
+      case 'QUICK_ACTION': {
+        const PROMPT_MAP: Record<string, string> = {
+          improve: 'Improve this text. Return ONLY the improved text, no explanation:\n\n',
+          expand: 'Expand this text to be longer and more detailed. Return ONLY the expanded text, no explanation:\n\n',
+          shorten: 'Make this text more concise. Return ONLY the shortened text, no explanation:\n\n',
+          fix_grammar: 'Fix all grammar and spelling errors. Return ONLY the corrected text, no explanation:\n\n',
+          translate: 'Translate to {lang}. Return ONLY the translation, no explanation:\n\n',
+        };
+
+        let prompt = PROMPT_MAP[msg.action] || PROMPT_MAP.improve;
+        if (msg.action === 'translate' && msg.language) {
+          prompt = prompt.replace('{lang}', msg.language);
+        } else if (msg.action === 'translate') {
+          prompt = prompt.replace('{lang}', 'English');
+        }
+        prompt += msg.text;
+
+        fetch(`${BACKEND}/api/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: prompt,
+            conversation_id: '__quick_action__',
+            stream: false,
+          }),
+        })
+          .then((r) => r.json())
+          .then((data: { response?: string; message?: string }) => {
+            sendResponse({
+              ok: true,
+              result: data.response || data.message || '',
+            } satisfies QuickActionResponse);
+          })
+          .catch((err: Error) => {
+            sendResponse({
+              ok: false,
+              error: err.message,
+            } satisfies QuickActionResponse);
+          });
+        return true; // async
       }
 
       // Browser Agent relay handlers

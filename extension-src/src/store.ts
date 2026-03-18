@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { FEATURE_DEFS } from './types';
 import type { Message, StreamState, Context, PanelId } from './types';
 import { HTTP } from './api';
 import ext from './ext';
@@ -34,6 +35,8 @@ interface AuraStore {
   featureModels: Record<string, string>;
   mdlCloudList: string[];
   mdlLocalList: string[];
+  mdlChatgptList: string[];
+  mdlListsLoaded: boolean;
 
   // Actions
   setWs: (ws: WebSocket | null) => void;
@@ -54,15 +57,40 @@ interface AuraStore {
   setDeepResearch: (on: boolean) => void;
   setAutoSpeak: (on: boolean) => void;
   setModel: (feature: string, model: string | null) => void;
-  setMdlLists: (cloud: string[], local: string[]) => void;
+  setMdlLists: (cloud: string[], local: string[], chatgpt?: string[]) => void;
+  setAllModels: (model: string) => void;
+  loadModels: () => Promise<void>;
   clearAll: () => void;
   getModel: (feature: string) => string | null;
 }
 
 export const useStore = create<AuraStore>((set, get) => {
-  // Load saved model prefs
-  ext?.storage?.local?.get(['featureModels'], (d: any) => {
-    set({ featureModels: d?.featureModels || {} });
+  // Load saved model prefs + cached model lists
+  ext?.storage?.local?.get(['featureModels', 'cachedModelLists'], (d: any) => {
+    const cached = d?.cachedModelLists;
+    const savedFeatureModels = d?.featureModels || {};
+    // If cached lists exist, pre-populate so UI doesn't flash empty
+    if (cached) {
+      const allAvailable = [...(cached.cloud || []), ...(cached.local || []), ...(cached.chatgpt || [])];
+      // Prune stale feature assignments — remove models no longer available
+      const pruned: Record<string, string> = {};
+      for (const [k, v] of Object.entries(savedFeatureModels)) {
+        if (allAvailable.includes(v as string)) pruned[k] = v as string;
+      }
+      set({
+        featureModels: pruned,
+        mdlCloudList: cached.cloud || [],
+        mdlLocalList: cached.local || [],
+        mdlChatgptList: cached.chatgpt || [],
+        mdlListsLoaded: true,
+      });
+      // Persist pruned if different
+      if (Object.keys(pruned).length !== Object.keys(savedFeatureModels).length) {
+        ext?.storage?.local?.set({ featureModels: pruned });
+      }
+    } else {
+      set({ featureModels: savedFeatureModels });
+    }
   });
 
   // Load saved autoSpeak pref
@@ -97,6 +125,8 @@ export const useStore = create<AuraStore>((set, get) => {
     featureModels: {},
     mdlCloudList: [],
     mdlLocalList: [],
+    mdlChatgptList: [],
+    mdlListsLoaded: false,
 
     setWs: (ws) => set({ ws }),
     setWsReady: (wsReady) => set({ wsReady }),
@@ -141,7 +171,68 @@ export const useStore = create<AuraStore>((set, get) => {
       set({ featureModels });
     },
 
-    setMdlLists: (mdlCloudList, mdlLocalList) => set({ mdlCloudList, mdlLocalList }),
+    setMdlLists: (mdlCloudList, mdlLocalList, mdlChatgptList = []) => {
+      set({ mdlCloudList, mdlLocalList, mdlChatgptList, mdlListsLoaded: true });
+      // Cache to storage for fast restore on next open
+      ext?.storage?.local?.set({
+        cachedModelLists: { cloud: mdlCloudList, local: mdlLocalList, chatgpt: mdlChatgptList },
+      });
+      // Prune stale feature model assignments
+      const allAvailable = [...mdlCloudList, ...mdlLocalList, ...mdlChatgptList];
+      const fm = { ...get().featureModels };
+      let changed = false;
+      for (const [k, v] of Object.entries(fm)) {
+        if (!allAvailable.includes(v)) {
+          delete fm[k];
+          changed = true;
+        }
+      }
+      if (changed) {
+        set({ featureModels: fm });
+        ext?.storage?.local?.set({ featureModels: fm });
+      }
+    },
+
+    setAllModels: (model: string) => {
+      const fm: Record<string, string> = {};
+      for (const def of FEATURE_DEFS) {
+        if (model) fm[def.key] = model;
+      }
+      set({ featureModels: fm });
+      ext?.storage?.local?.set({ featureModels: fm });
+    },
+
+    loadModels: async () => {
+      const s = get();
+      if (s.mdlListsLoaded && (s.mdlCloudList.length || s.mdlLocalList.length || s.mdlChatgptList.length)) return;
+      let cloud: string[] = [];
+      let local: string[] = [];
+      let chatgpt: string[] = [];
+      try {
+        const d = await fetch('http://localhost:11434/api/tags').then(r => r.json());
+        const all: string[] = (d.models || []).map((m: any) => m.name);
+        cloud = all.filter(n => n.includes(':cloud'));
+        local = all.filter(n => !n.includes(':cloud'));
+      } catch {
+        try {
+          const d = await fetch(`${HTTP}/api/models/available`).then(r => r.json());
+          cloud = (d.cloud || []).map((m: any) => m.name || m);
+          local = (d.local || []).map((m: any) => m.name || m);
+          chatgpt = (d.chatgpt || []).map((m: any) => m.name || m);
+        } catch { /* leave empty */ }
+      }
+      // Try fetching ChatGPT models separately if not already loaded
+      if (chatgpt.length === 0) {
+        try {
+          const authStatus = await fetch(`${HTTP}/api/auth/chatgpt/status`).then(r => r.json());
+          if (authStatus.authenticated) {
+            const modelsResp = await fetch(`${HTTP}/api/models/available`).then(r => r.json());
+            chatgpt = (modelsResp.chatgpt || []).map((m: any) => m.name || m);
+          }
+        } catch { /* no chatgpt */ }
+      }
+      get().setMdlLists(cloud, local, chatgpt);
+    },
 
     clearAll: () => {
       const s = get();

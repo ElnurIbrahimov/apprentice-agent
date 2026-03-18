@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { Send, Brain, Globe, FileText } from 'lucide-react';
+import { Brain, Globe, FileText, X, Paperclip } from 'lucide-react';
 import { useStore } from '../store';
 import { getPageContentCached } from '../ext';
 import ModelPill from './ModelPill';
@@ -19,6 +19,10 @@ const PLACEHOLDER_SUGGESTIONS = [
   'Find key points...',
 ];
 
+const MAX_VISIBLE_LINES = 6;
+const LINE_HEIGHT_PX = 20.25; // 13.5px * 1.5
+const MAX_TEXTAREA_HEIGHT = Math.ceil(MAX_VISIBLE_LINES * LINE_HEIGHT_PX) + 20; // + padding
+
 export default function InputBar({ onSend, featureKey = 'chat', placeholder, disabled }: Props) {
   const { thinkingMode, setThinkingMode, deepResearch, setDeepResearch, activeStream, setPendingCtx, pendingCtx } = useStore();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -28,18 +32,19 @@ export default function InputBar({ onSend, featureKey = 'chat', placeholder, dis
   const [charCount, setCharCount] = useState(0);
   const [placeholderIdx, setPlaceholderIdx] = useState(0);
   const [placeholderFade, setPlaceholderFade] = useState(true);
+  const [attachments, setAttachments] = useState<{ name: string; id: string }[]>([]);
 
   const isStreaming = !!activeStream;
 
-  // Cycle placeholder suggestions
+  // Cycle placeholder suggestions with crossfade
   useEffect(() => {
-    if (placeholder) return; // skip cycling if explicit placeholder given
+    if (placeholder) return;
     const interval = setInterval(() => {
       setPlaceholderFade(false);
       setTimeout(() => {
         setPlaceholderIdx(prev => (prev + 1) % PLACEHOLDER_SUGGESTIONS.length);
         setPlaceholderFade(true);
-      }, 200);
+      }, 250);
     }, 3500);
     return () => clearInterval(interval);
   }, [placeholder]);
@@ -70,25 +75,31 @@ export default function InputBar({ onSend, featureKey = 'chat', placeholder, dis
     }
   };
 
-  const autoResize = () => {
+  const autoResize = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, 140) + 'px';
-  };
+    const next = Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT);
+    el.style.height = next + 'px';
+    el.style.overflowY = el.scrollHeight > MAX_TEXTAREA_HEIGHT ? 'auto' : 'hidden';
+  }, []);
 
   const handleInput = useCallback(() => {
     autoResize();
     const val = textareaRef.current?.value || '';
     setHasText(val.trim().length > 0);
     setCharCount(val.length);
-  }, []);
+  }, [autoResize]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
+  };
+
+  const removeAttachment = (id: string) => {
+    setAttachments(prev => prev.filter(a => a.id !== id));
   };
 
   const canSend = hasText && !isStreaming && !disabled;
@@ -98,7 +109,7 @@ export default function InputBar({ onSend, featureKey = 'chat', placeholder, dis
     ? (() => {
         try {
           const u = new URL(pendingCtx.url);
-          return `${u.origin}/favicon.ico`;
+          return `https://www.google.com/s2/favicons?domain=${u.hostname}&sz=32`;
         } catch {
           return null;
         }
@@ -106,115 +117,55 @@ export default function InputBar({ onSend, featureKey = 'chat', placeholder, dis
     : null;
 
   return (
-    <div
-      className="flex flex-col flex-shrink-0"
-      style={{ padding: '6px 8px 10px', background: 'transparent' }}
-    >
-      {/* Context bar - prominent with favicon */}
+    <div className="input-bar-root">
+      {/* Attachments area */}
+      {attachments.length > 0 && (
+        <div className="input-attachments">
+          {attachments.map(att => (
+            <div key={att.id} className="input-attachment-pill">
+              <Paperclip size={10} />
+              <span className="input-attachment-name">{att.name}</span>
+              <button
+                className="input-attachment-remove"
+                onClick={() => removeAttachment(att.id)}
+                aria-label="Remove attachment"
+              >
+                <X size={10} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Context bar */}
       {pendingCtx && (
-        <div
-          className="input-ctx-bar flex items-center gap-2 mb-2 px-3 py-2"
-          style={{
-            background: 'rgba(124, 58, 237, 0.1)',
-            border: '1px solid rgba(124, 58, 237, 0.2)',
-            borderRadius: 12,
-            fontSize: '11px',
-          }}
-        >
+        <div className="input-ctx-bar">
           {faviconUrl && (
             <img
               src={faviconUrl}
               alt=""
               width={14}
               height={14}
-              style={{ borderRadius: 2, flexShrink: 0 }}
+              className="input-ctx-favicon"
               onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
             />
           )}
-          <FileText size={12} style={{ color: 'var(--pl)', flexShrink: 0 }} />
-          <span className="truncate flex-1" style={{ color: 'var(--pl)' }}>
+          <FileText size={12} className="input-ctx-icon" />
+          <span className="input-ctx-title">
             {pendingCtx.title || pendingCtx.url || 'Page context'}
           </span>
           <button
             onClick={() => setPendingCtx(null)}
-            style={{ background: 'none', border: 'none', color: 'var(--mu)', cursor: 'pointer', padding: 0, fontSize: '14px', lineHeight: 1 }}
+            className="input-ctx-remove"
+            aria-label="Remove context"
           >
-            &times;
+            <X size={12} />
           </button>
         </div>
       )}
 
-      {/* Mode pills row */}
-      <div className="flex items-center gap-1.5 mb-2">
-        <button
-          onClick={() => setThinkingMode(!thinkingMode)}
-          className="flex items-center gap-1 px-2 py-1 mode-pill"
-          style={{
-            background: thinkingMode ? 'var(--pg2)' : 'var(--s2)',
-            border: `1px solid ${thinkingMode ? 'var(--p)' : 'var(--b1)'}`,
-            borderRadius: 'var(--r-pill)',
-            color: thinkingMode ? 'var(--pl)' : 'var(--mu)',
-            fontSize: '11px',
-            cursor: 'pointer',
-            fontFamily: 'inherit',
-          }}
-        >
-          <Brain size={11} />
-          <span>Think</span>
-        </button>
-        <button
-          onClick={() => setDeepResearch(!deepResearch)}
-          className="flex items-center gap-1 px-2 py-1 mode-pill"
-          style={{
-            background: deepResearch ? 'var(--pg2)' : 'var(--s2)',
-            border: `1px solid ${deepResearch ? 'var(--p)' : 'var(--b1)'}`,
-            borderRadius: 'var(--r-pill)',
-            color: deepResearch ? 'var(--pl)' : 'var(--mu)',
-            fontSize: '11px',
-            cursor: 'pointer',
-            fontFamily: 'inherit',
-          }}
-        >
-          <Globe size={11} />
-          <span>Research</span>
-        </button>
-        <button
-          onClick={addPageCtx}
-          disabled={pageLoading}
-          className="flex items-center gap-1 px-2 py-1 mode-pill"
-          style={{
-            background: pendingCtx ? 'var(--pg2)' : 'var(--s2)',
-            border: `1px solid ${pendingCtx ? 'var(--p)' : 'var(--b1)'}`,
-            borderRadius: 'var(--r-pill)',
-            color: pendingCtx ? 'var(--pl)' : 'var(--mu)',
-            fontSize: '11px',
-            cursor: pageLoading ? 'not-allowed' : 'pointer',
-            fontFamily: 'inherit',
-            opacity: pageLoading ? 0.6 : 1,
-          }}
-          title="Add page content as context"
-        >
-          <FileText size={11} />
-          <span>{pageLoading ? '...' : 'Page'}</span>
-        </button>
-        <div className="flex-1" />
-        <ModelPill featureKey={featureKey} />
-      </div>
-
       {/* Glass input wrapper */}
-      <div
-        className={`input-glass-wrap ${isFocused ? 'input-focused' : ''}`}
-        style={{
-          position: 'relative',
-          display: 'flex',
-          flexDirection: 'column',
-          background: 'rgba(20, 20, 24, 0.55)',
-          border: '1px solid rgba(255,255,255,0.07)',
-          borderRadius: 18,
-          backdropFilter: 'blur(20px)',
-          WebkitBackdropFilter: 'blur(20px)',
-        }}
-      >
+      <div className={`input-glass-wrap ${isFocused ? 'input-focused' : ''} ${hasText ? 'has-text' : ''}`}>
         <textarea
           ref={textareaRef}
           rows={1}
@@ -222,61 +173,74 @@ export default function InputBar({ onSend, featureKey = 'chat', placeholder, dis
           onInput={handleInput}
           onKeyDown={handleKeyDown}
           disabled={disabled || isStreaming}
-          className={placeholderFade ? 'placeholder-visible' : 'placeholder-hidden'}
-          style={{
-            background: 'transparent',
-            border: 'none',
-            color: 'var(--tx)',
-            fontSize: '12.5px',
-            lineHeight: 1.55,
-            padding: '10px 42px 8px 14px',
-            resize: 'none',
-            minHeight: 40,
-            maxHeight: 140,
-            outline: 'none',
-            fontFamily: 'inherit',
-            width: '100%',
-          }}
+          className={`input-textarea ${placeholderFade ? 'placeholder-visible' : 'placeholder-hidden'}`}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
         />
 
-        {/* Character count */}
-        {charCount > 500 && (
-          <span
-            className="char-count"
-            style={{
-              position: 'absolute',
-              right: 44,
-              bottom: 12,
-              fontSize: '9px',
-              color: charCount > 4000 ? 'var(--rd)' : 'var(--mu)',
-              opacity: 0.7,
-              fontVariantNumeric: 'tabular-nums',
-            }}
-          >
-            {charCount.toLocaleString()}
-          </span>
-        )}
+        {/* Action row */}
+        <div className="input-action-row">
+          {/* Left side: pills */}
+          <div className="input-action-left">
+            <button
+              onClick={() => setThinkingMode(!thinkingMode)}
+              className={`input-pill ${thinkingMode ? 'input-pill-active' : ''}`}
+              title="Thinking mode"
+            >
+              <Brain size={11} />
+              <span>Think</span>
+            </button>
+            <button
+              onClick={() => setDeepResearch(!deepResearch)}
+              className={`input-pill ${deepResearch ? 'input-pill-active' : ''}`}
+              title="Deep research mode"
+            >
+              <Globe size={11} />
+              <span>Research</span>
+            </button>
+            <button
+              onClick={addPageCtx}
+              disabled={pageLoading}
+              className={`input-pill ${pendingCtx ? 'input-pill-active' : ''}`}
+              title="Add page content as context"
+              style={{ opacity: pageLoading ? 0.5 : 1 }}
+            >
+              <FileText size={11} />
+              <span>{pageLoading ? '...' : 'Page'}</span>
+            </button>
+          </div>
 
-        {/* Send button */}
-        <button
-          onClick={handleSend}
-          disabled={!canSend}
-          className={`send-btn ${canSend ? 'send-btn-ready' : ''}`}
-          style={{
-            position: 'absolute', right: 8, bottom: 8,
-            width: 30, height: 30, borderRadius: 9,
-            background: canSend ? '#fff' : 'rgba(255,255,255,0.08)',
-            border: 'none',
-            color: canSend ? '#000' : '#555',
-            cursor: canSend ? 'pointer' : 'not-allowed',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            flexShrink: 0,
-          }}
-        >
-          <Send size={14} />
-        </button>
+          {/* Right side: char count, kbd hint, model, send */}
+          <div className="input-action-right">
+            {charCount > 500 && (
+              <span className={`input-char-count ${charCount > 4000 ? 'input-char-warn' : ''}`}>
+                {charCount.toLocaleString()}
+              </span>
+            )}
+            <ModelPill featureKey={featureKey} />
+            {!hasText && (
+              <kbd className="input-kbd-hint">
+                <span style={{ fontSize: '10px' }}>&#8984;</span>K
+              </kbd>
+            )}
+            <button
+              onClick={handleSend}
+              disabled={!canSend}
+              className={`input-send-btn ${canSend ? 'input-send-ready' : ''}`}
+              aria-label="Send message"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path
+                  d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

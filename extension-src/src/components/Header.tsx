@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Plus, Sun, Moon, RefreshCw } from 'lucide-react';
 import { useStore } from '../store';
 import { fetchStatus } from '../ws';
@@ -12,6 +12,24 @@ const STATUS_DOT: Record<string, string> = {
 export default function Header() {
   const { wsReady, modelName, mood, clearAll, theme, toggleTheme, backendStatus } = useStore();
   const status = backendStatus || (wsReady ? 'online' : 'offline');
+  const [scrolled, setScrolled] = useState(false);
+  const headerRef = useRef<HTMLElement>(null);
+
+  // Track scroll position to add shadow
+  useEffect(() => {
+    const panel = headerRef.current?.parentElement?.querySelector('[data-scroll-panel]')
+      || headerRef.current?.nextElementSibling?.nextElementSibling // message panel after offline banner
+      || headerRef.current?.nextElementSibling; // message panel directly
+
+    if (!panel) return;
+
+    const handleScroll = () => {
+      setScrolled(panel.scrollTop > 4);
+    };
+
+    panel.addEventListener('scroll', handleScroll, { passive: true });
+    return () => panel.removeEventListener('scroll', handleScroll);
+  }, []);
 
   const handleRetry = () => {
     useStore.getState().setBackendStatus('connecting');
@@ -19,7 +37,7 @@ export default function Header() {
   };
 
   const pillLabel = status === 'online'
-    ? (modelName || 'connected')
+    ? 'connected'
     : status === 'connecting'
       ? 'reconnecting'
       : 'offline';
@@ -27,21 +45,16 @@ export default function Header() {
   return (
     <>
       <header
-        className="flex items-center justify-between px-3 h-12 flex-shrink-0 relative z-10"
-        style={{
-          background: 'var(--glass)',
-          borderBottom: status === 'offline' ? 'none' : '1px solid var(--b1)',
-          backdropFilter: 'blur(24px)',
-          WebkitBackdropFilter: 'blur(24px)',
-        }}
+        ref={headerRef}
+        className={`header-bar flex items-center justify-between px-3 h-12 flex-shrink-0 relative z-10${scrolled ? ' header-scrolled' : ''}`}
       >
+        {/* Gradient accent line at bottom */}
+        <div className="header-gradient-line" />
+
         {/* Logo */}
-        <div
-          className="flex items-center gap-2 select-none"
-          style={{ fontSize: '12.5px', fontWeight: 700, letterSpacing: '0.14em', color: 'var(--logo-text)' }}
-        >
+        <div className="header-logo select-none">
           <span
-            className="w-[7px] h-[7px] rounded-full flex-shrink-0"
+            className="header-logo-dot"
             style={{
               background: status === 'online'
                 ? 'radial-gradient(circle, #6ee7b7, #10b981)'
@@ -51,10 +64,10 @@ export default function Header() {
                 : 'var(--logo-dot-shadow)',
               animation: status === 'connecting'
                 ? 'pulse 1s ease-in-out infinite'
-                : 'pulse 2.5s ease-in-out infinite',
+                : 'breatheGlow 2.5s ease-in-out infinite',
             }}
           />
-          AURA
+          <span className="header-logo-text">AURA</span>
         </div>
 
         {/* Right side */}
@@ -64,27 +77,23 @@ export default function Header() {
             <span className="text-sm leading-none mr-0.5">{mood}</span>
           )}
 
+          {/* Model name pill (when connected) */}
+          {status === 'online' && modelName && (
+            <div className="header-model-pill">
+              <span className="truncate">{modelName}</span>
+            </div>
+          )}
+
           {/* Connection pill */}
-          <div
-            className="flex items-center gap-1.5 px-2.5 py-1 cursor-default overflow-hidden"
-            style={{
-              background: 'var(--s2)',
-              border: '1px solid var(--b1)',
-              borderRadius: 'var(--r-pill)',
-              maxWidth: 140,
-            }}
-          >
+          <div className="header-conn-pill">
             <span
-              className="w-1.5 h-1.5 rounded-full flex-shrink-0 transition-colors duration-300"
+              className={`header-conn-dot${status === 'online' ? ' header-conn-dot-pulse' : ''}`}
               style={{
                 background: STATUS_DOT[status] || '#ef4444',
                 animation: status === 'connecting' ? 'pulse 1s ease-in-out infinite' : undefined,
               }}
             />
-            <span
-              className="text-[11px] truncate"
-              style={{ color: 'var(--mu)' }}
-            >
+            <span className="header-conn-label">
               {pillLabel}
             </span>
           </div>
@@ -94,8 +103,12 @@ export default function Header() {
             onClick={toggleTheme}
             className="theme-toggle"
             title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+            aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
           >
-            {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
+            <span className={`theme-icon-wrap${theme === 'dark' ? ' theme-show-sun' : ' theme-show-moon'}`}>
+              <Sun size={13} className="theme-icon-sun" />
+              <Moon size={13} className="theme-icon-moon" />
+            </span>
           </button>
 
           {/* New button */}

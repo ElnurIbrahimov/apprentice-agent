@@ -16,6 +16,12 @@ interface RailItem {
   group?: 'chat' | 'tools' | 'ai';
 }
 
+const GROUP_LABELS: Record<string, string> = {
+  chat: 'CHAT',
+  tools: 'TOOLS',
+  ai: 'AI',
+};
+
 const PRIMARY_ITEMS: RailItem[] = [
   { id: 'chat', label: 'Chat', Icon: MessageSquare, group: 'chat' },
   { id: 'search', label: 'Search', Icon: Search, group: 'chat' },
@@ -42,16 +48,12 @@ const EXTRA_ITEMS: RailItem[] = [
   { id: 'models', label: 'Models', Icon: Cpu },
 ];
 
-// Group separator between different groups
-function GroupSeparator() {
+// Group label rendered between groups
+function GroupLabel({ text }: { text: string }) {
   return (
-    <div
-      style={{
-        height: 1,
-        margin: '4px 10px',
-        background: 'linear-gradient(90deg, transparent, var(--b1), transparent)',
-      }}
-    />
+    <div className="rail-group-label">
+      {text}
+    </div>
   );
 }
 
@@ -77,117 +79,60 @@ export default function Rail() {
         onClick={() => setPanel(item.id)}
         onMouseEnter={(e) => { setHoveredId(item.id); showTooltip(item.label, e); }}
         onMouseLeave={() => { setHoveredId(null); hideTooltip(); }}
-        className="rail-btn flex flex-col items-center justify-center w-full py-2 gap-0.5 relative"
-        style={{
-          background: isActive
-            ? 'var(--pg)'
-            : isHovered
-              ? 'rgba(124, 58, 237, 0.06)'
-              : 'transparent',
-          borderLeft: isActive
-            ? '2px solid var(--p)'
-            : '2px solid transparent',
-          color: isActive ? 'var(--pl)' : isHovered ? 'var(--pl2)' : 'var(--mu)',
-          cursor: 'pointer',
-          fontFamily: 'inherit',
-          minHeight: 48,
-          border: 'none',
-          borderRight: 'none',
-          transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-          transform: isHovered && !isActive ? 'scale(1.04)' : 'scale(1)',
-        }}
+        className={`rail-btn rail-icon-btn ${isActive ? 'rail-active' : ''}`}
       >
-        {/* Active indicator bar */}
-        <span
-          className="absolute left-0 top-1/2"
+        <item.Icon
+          size={18}
+          strokeWidth={isActive ? 2.2 : 1.5}
           style={{
-            width: 2,
-            height: isActive ? '60%' : '0%',
-            background: 'var(--p)',
-            borderRadius: '0 2px 2px 0',
-            transform: 'translateY(-50%)',
-            transition: 'height 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
-            boxShadow: isActive ? '0 0 8px rgba(124, 58, 237, 0.5)' : 'none',
+            transition: 'transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), color 0.2s',
+            transform: isHovered && !isActive ? 'scale(1.1)' : 'scale(1)',
           }}
         />
-        {/* Hover glow */}
-        {isHovered && !isActive && (
-          <span
-            className="absolute inset-0 pointer-events-none"
-            style={{
-              background: 'radial-gradient(circle at center, rgba(124,58,237,0.08) 0%, transparent 70%)',
-            }}
-          />
-        )}
-        <item.Icon
-          size={16}
-          strokeWidth={isActive ? 2 : 1.5}
-          style={{ transition: 'transform 0.2s', transform: isHovered ? 'scale(1.1)' : 'scale(1)' }}
-        />
-        <span style={{ fontSize: '9px', letterSpacing: '0.02em', marginTop: 1, transition: 'color 0.2s' }}>
-          {item.label}
-        </span>
       </button>
     );
   };
 
-  // Build primary items with group separators
-  const primaryWithSeparators: React.ReactNode[] = [];
+  // Build primary items with group labels
+  const primaryWithLabels: React.ReactNode[] = [];
   let lastGroup: string | undefined;
   for (const item of PRIMARY_ITEMS) {
-    if (lastGroup && item.group !== lastGroup) {
-      primaryWithSeparators.push(<GroupSeparator key={`sep-${lastGroup}-${item.group}`} />);
+    if (item.group && item.group !== lastGroup) {
+      primaryWithLabels.push(
+        <GroupLabel key={`lbl-${item.group}`} text={GROUP_LABELS[item.group] || item.group} />
+      );
     }
-    primaryWithSeparators.push(btn(item));
+    primaryWithLabels.push(btn(item));
     lastGroup = item.group;
   }
 
   return (
-    <nav
-      className="flex flex-col flex-shrink-0 overflow-y-auto overflow-x-hidden rail-nav"
-      style={{
-        width: 54,
-        background: 'var(--s1)',
-        borderLeft: '1px solid var(--b1)',
-        scrollbarWidth: 'thin',
-      }}
-    >
-      {/* Primary items with group separators */}
-      {primaryWithSeparators}
-
-      {/* Separator before More */}
-      <GroupSeparator />
+    <nav className="rail-nav">
+      {/* Primary items with group labels */}
+      <div className="rail-section">
+        {primaryWithLabels}
+      </div>
 
       {/* More toggle */}
-      <button
-        onClick={() => setMoreOpen(!moreOpen)}
-        onMouseEnter={() => setHoveredId('__more')}
-        onMouseLeave={() => setHoveredId(null)}
-        className="rail-btn flex flex-col items-center justify-center w-full py-2 gap-0.5 relative"
-        style={{
-          background: hoveredId === '__more' ? 'rgba(124, 58, 237, 0.06)' : 'transparent',
-          borderLeft: '2px solid transparent',
-          color: moreOpen ? 'var(--pl)' : 'var(--mu)',
-          cursor: 'pointer',
-          fontFamily: 'inherit',
-          minHeight: 48,
-          border: 'none',
-          transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-        }}
-        title="More"
-      >
-        <ChevronDown
-          size={16}
-          strokeWidth={1.5}
-          style={{
-            transform: moreOpen ? 'rotate(180deg)' : 'rotate(0deg)',
-            transition: 'transform 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
-          }}
-        />
-        <span style={{ fontSize: '9px', letterSpacing: '0.02em', marginTop: 1 }}>
-          More
-        </span>
-      </button>
+      <div className="rail-section">
+        <GroupLabel text="MORE" />
+        <button
+          onClick={() => setMoreOpen(!moreOpen)}
+          onMouseEnter={() => setHoveredId('__more')}
+          onMouseLeave={() => setHoveredId(null)}
+          className={`rail-btn rail-icon-btn ${moreOpen ? 'rail-active' : ''}`}
+          title="More"
+        >
+          <ChevronDown
+            size={18}
+            strokeWidth={1.5}
+            style={{
+              transform: moreOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+              transition: 'transform 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+            }}
+          />
+        </button>
+      </div>
 
       {/* Extra items with slide-in */}
       {moreOpen && (
@@ -197,7 +142,7 @@ export default function Rail() {
       )}
 
       {/* Spacer */}
-      <div className="flex-1" />
+      <div style={{ flex: 1 }} />
 
       {/* Tooltip */}
       {tooltip && (
@@ -205,7 +150,7 @@ export default function Rail() {
           className="rail-tooltip"
           style={{
             position: 'fixed',
-            left: 58,
+            left: 62,
             top: tooltip.top,
             transform: 'translateY(-50%)',
             zIndex: 9999,

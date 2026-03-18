@@ -76,7 +76,14 @@ interface SaveKnowledgeMessage {
   title: string;
 }
 
-type OutboundMessage = OpenPanelMessage | OpenWithTextMessage | SaveKnowledgeMessage;
+interface QuickActionOutMessage {
+  type: 'QUICK_ACTION';
+  action: string;
+  text: string;
+  language?: string;
+}
+
+type OutboundMessage = OpenPanelMessage | OpenWithTextMessage | SaveKnowledgeMessage | QuickActionOutMessage;
 
 // Messages received from background → content
 interface ExtractPageMsg {
@@ -111,7 +118,21 @@ interface DockItemDef {
 
 interface ToolbarButtonDef {
   label: string;
+  icon: string;
   action: string;
+}
+
+interface QuickActionResponse {
+  ok: boolean;
+  result?: string;
+  error?: string;
+}
+
+interface QuickActionDef {
+  label: string;
+  icon: string;
+  action: string;
+  language?: string;
 }
 
 // Extend Window for our global guard flag
@@ -135,7 +156,7 @@ const ext: typeof chrome =
  * when the extension is reloaded while this content script is still running on a tab).
  * On invalidation, removes orphaned AURA UI elements from the page.
  */
-function safeSend(msg: OutboundMessage, cb?: (response: SaveKnowledgeResponse) => void): void {
+function safeSend(msg: OutboundMessage, cb?: (response: any) => void): void {
   try {
     if (cb) {
       ext.runtime.sendMessage(msg, cb);
@@ -150,6 +171,7 @@ function safeSend(msg: OutboundMessage, cb?: (response: SaveKnowledgeResponse) =
     ) {
       document.getElementById('aura-dock-host')?.remove();
       document.getElementById('aura-host')?.remove();
+      document.getElementById('aura-quick-action-host')?.remove();
       window.__auraToolbarMounted = false;
     }
   }
@@ -187,55 +209,107 @@ function safeSend(msg: OutboundMessage, cb?: (response: SaveKnowledgeResponse) =
 
   const style: HTMLStyleElement = document.createElement('style');
   style.textContent = `
+    /* ── Toolbar appear/disappear animations ── */
+    @keyframes aura-toolbar-in {
+      from {
+        opacity: 0;
+        transform: scale(0.92) translateY(-4px);
+      }
+      to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+      }
+    }
+    @keyframes aura-toolbar-out {
+      from {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+      }
+      to {
+        opacity: 0;
+        transform: scale(0.92) translateY(-4px);
+      }
+    }
+
     #toolbar {
       display: none;
       position: fixed;
-      background: #1a1a2e;
-      border: 1px solid #7c3aed;
-      border-radius: 8px;
-      padding: 4px 6px;
-      gap: 4px;
-      box-shadow: 0 4px 20px rgba(124, 58, 237, 0.4);
+      background: rgba(10, 8, 24, 0.88);
+      backdrop-filter: blur(20px) saturate(1.5);
+      -webkit-backdrop-filter: blur(20px) saturate(1.5);
+      border: 1px solid rgba(124, 58, 237, 0.25);
+      border-radius: 12px;
+      padding: 5px 8px;
+      gap: 3px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255,255,255,0.05) inset;
       pointer-events: auto;
       z-index: 2147483647;
       align-items: center;
+      transform-origin: center bottom;
     }
     #toolbar.visible {
       display: flex;
+      animation: aura-toolbar-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
     }
+    #toolbar.hiding {
+      display: flex;
+      animation: aura-toolbar-out 0.15s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+    #toolbar.below {
+      transform-origin: center top;
+    }
+
     .aura-btn {
       background: transparent;
       border: none;
-      color: #e2e8f0;
-      font-size: 12px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      padding: 4px 8px;
-      border-radius: 5px;
+      color: rgba(226, 232, 240, 0.9);
+      font-size: 12.5px;
+      font-weight: 500;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', system-ui, sans-serif;
+      padding: 5px 10px;
+      border-radius: 8px;
       cursor: pointer;
       white-space: nowrap;
-      transition: background 0.15s;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      transition: background 0.15s ease, transform 0.15s ease, color 0.15s ease;
+      line-height: 1;
     }
     .aura-btn:hover {
-      background: #7c3aed;
+      background: rgba(124, 58, 237, 0.3);
       color: #fff;
+      transform: scale(1.02);
     }
+    .aura-btn:active {
+      transform: scale(0.98);
+    }
+    .aura-btn svg {
+      flex-shrink: 0;
+    }
+
     .aura-divider {
       width: 1px;
-      height: 16px;
-      background: #3d3d5c;
+      height: 14px;
+      background: rgba(255, 255, 255, 0.08);
+      flex-shrink: 0;
     }
+
     #toast {
       display: none;
       position: fixed;
-      background: #059669;
+      background: rgba(5, 150, 105, 0.92);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
       color: #fff;
       font-size: 12px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      padding: 6px 12px;
-      border-radius: 6px;
+      font-weight: 500;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', system-ui, sans-serif;
+      padding: 6px 14px;
+      border-radius: 8px;
       pointer-events: none;
       z-index: 2147483647;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.3);
     }
     #toast.visible {
       display: block;
@@ -248,35 +322,31 @@ function safeSend(msg: OutboundMessage, cb?: (response: SaveKnowledgeResponse) =
   const toolbar: HTMLDivElement = document.createElement('div');
   toolbar.id = 'toolbar';
 
+  // SVG icons (16x16 viewBox)
+  const ICON_SPARKLES = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.5 5.5L19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5L12 3z"/><path d="M19 1l.5 1.5L21 3l-1.5.5L19 5l-.5-1.5L17 3l1.5-.5L19 1z"/><path d="M5 19l.5 1.5L7 21l-1.5.5L5 23l-.5-1.5L3 21l1.5-.5L5 19z"/></svg>`;
+  const ICON_LAYERS = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>`;
+  const ICON_MESSAGE = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg>`;
+  const ICON_BOOKMARK = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg>`;
+
   const buttons: ToolbarButtonDef[] = [
-    { label: '✦ Explain', action: 'explain' },
-    { label: '◈ Summarize', action: 'summarize' },
-    { label: '◉ Ask AURA', action: 'ask' },
+    { label: 'Explain', icon: ICON_SPARKLES, action: 'explain' },
+    { label: 'Summarize', icon: ICON_LAYERS, action: 'summarize' },
+    { label: 'Ask AURA', icon: ICON_MESSAGE, action: 'ask' },
+    { label: 'Save', icon: ICON_BOOKMARK, action: 'save' },
   ];
 
   buttons.forEach((btn, i) => {
-    const el: HTMLButtonElement = document.createElement('button');
-    el.className = 'aura-btn';
-    el.textContent = btn.label;
-    el.dataset.action = btn.action;
-    toolbar.appendChild(el);
-    if (i < buttons.length - 1) {
+    if (i > 0) {
       const div: HTMLDivElement = document.createElement('div');
       div.className = 'aura-divider';
       toolbar.appendChild(div);
     }
+    const el: HTMLButtonElement = document.createElement('button');
+    el.className = 'aura-btn';
+    el.innerHTML = btn.icon + `<span>${btn.label}</span>`;
+    el.dataset.action = btn.action;
+    toolbar.appendChild(el);
   });
-
-  // Save button with divider
-  const divSave: HTMLDivElement = document.createElement('div');
-  divSave.className = 'aura-divider';
-  toolbar.appendChild(divSave);
-
-  const saveBtn: HTMLButtonElement = document.createElement('button');
-  saveBtn.className = 'aura-btn';
-  saveBtn.textContent = '⊕ Save';
-  saveBtn.dataset.action = 'save';
-  toolbar.appendChild(saveBtn);
 
   shadow.appendChild(toolbar);
 
@@ -294,61 +364,155 @@ function safeSend(msg: OutboundMessage, cb?: (response: SaveKnowledgeResponse) =
   document.body.appendChild(dockShadowHost);
   const dockShadow = dockShadowHost.attachShadow({ mode: 'closed' });
 
+  // Dock styles inside its own shadow DOM
+  const dockStyle: HTMLStyleElement = document.createElement('style');
+  dockStyle.textContent = `
+    @keyframes aura-breathe {
+      0%, 100% { box-shadow: 0 0 4px rgba(124, 58, 237, 0.2), 0 0 8px rgba(124, 58, 237, 0.1); }
+      50% { box-shadow: 0 0 8px rgba(124, 58, 237, 0.45), 0 0 16px rgba(124, 58, 237, 0.2); }
+    }
+
+    #aura-dock-host {
+      position: fixed;
+      right: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      z-index: 2147483647;
+      pointer-events: auto;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0;
+      padding: 7px 4px;
+      background: rgba(10, 8, 24, 0.88);
+      backdrop-filter: blur(20px) saturate(1.5);
+      -webkit-backdrop-filter: blur(20px) saturate(1.5);
+      border: 1px solid rgba(124, 58, 237, 0.25);
+      border-right: none;
+      border-radius: 12px 0 0 12px;
+      box-shadow: -3px 0 20px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05) inset;
+      transition: border-color 0.25s ease, box-shadow 0.25s ease;
+      box-sizing: border-box;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', system-ui, sans-serif;
+    }
+    #aura-dock-host:hover {
+      border-color: rgba(124, 58, 237, 0.5);
+      box-shadow: -4px 0 28px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.08) inset;
+    }
+
+    .dock-logo-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      cursor: default;
+      flex-shrink: 0;
+    }
+    .dock-logo-icon {
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: rgba(160, 148, 210, 0.9);
+      border-radius: 8px;
+      animation: aura-breathe 3s ease-in-out infinite;
+    }
+    .dock-logo-label {
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      color: rgba(160, 148, 210, 0.5);
+      text-transform: uppercase;
+      line-height: 1;
+      opacity: 1;
+      transition: opacity 0.2s ease;
+    }
+    #aura-dock-host:hover .dock-logo-label {
+      opacity: 0;
+    }
+
+    .dock-actions {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      overflow: hidden;
+      max-height: 0;
+      opacity: 0;
+      padding-top: 0;
+      transition: max-height 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+                  opacity 0.2s ease,
+                  padding-top 0.25s ease;
+    }
+    #aura-dock-host:hover .dock-actions {
+      max-height: 320px;
+      opacity: 1;
+      padding-top: 5px;
+    }
+
+    .dock-sep {
+      width: 18px;
+      height: 1px;
+      background: rgba(255, 255, 255, 0.08);
+      margin: 2px 0;
+      flex-shrink: 0;
+    }
+
+    .dock-btn {
+      width: 32px;
+      height: 32px;
+      min-width: 32px;
+      min-height: 32px;
+      border-radius: 8px;
+      background: transparent;
+      border: none;
+      padding: 0;
+      margin: 0;
+      color: rgba(160, 148, 210, 0.6);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      box-sizing: border-box;
+      outline: none;
+      transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+    }
+    .dock-btn:hover {
+      background: rgba(124, 58, 237, 0.25);
+      color: rgba(224, 214, 255, 1);
+      transform: scale(1.05);
+    }
+    .dock-btn:active {
+      transform: scale(0.95);
+    }
+  `;
+  dockShadow.appendChild(dockStyle);
+
   const dockHost: HTMLDivElement = document.createElement('div');
   dockHost.id = 'aura-dock-host';
-  Object.assign(dockHost.style, {
-    position: 'fixed',
-    right: '0',
-    top: '50%',
-    transform: 'translateY(-50%)',
-    zIndex: '2147483647',
-    pointerEvents: 'auto',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: '0',
-    padding: '7px 4px',
-    background: 'rgba(7, 5, 18, 0.92)',
-    backdropFilter: 'blur(16px)',
-    WebkitBackdropFilter: 'blur(16px)',
-    border: '1px solid rgba(124, 58, 237, 0.3)',
-    borderRight: 'none',
-    borderRadius: '12px 0 0 12px',
-    boxShadow: '-3px 0 20px rgba(0,0,0,0.5)',
-    transition: 'border-color 0.2s',
-    boxSizing: 'border-box',
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-  });
   dockShadow.appendChild(dockHost);
 
-  // Logo — always visible
-  const dockLogo: HTMLDivElement = document.createElement('div');
-  Object.assign(dockLogo.style, {
-    width: '32px',
-    height: '32px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    color: 'rgba(160, 148, 210, 0.9)',
-    cursor: 'default',
-    flexShrink: '0',
-  });
-  dockLogo.innerHTML = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3L2 21M12 3L22 21M5.8 14.2L18.2 14.2"/></svg>`;
-  dockHost.appendChild(dockLogo);
+  // Logo wrapper with breathing icon + "A" label
+  const dockLogoWrap: HTMLDivElement = document.createElement('div');
+  dockLogoWrap.className = 'dock-logo-wrap';
 
-  // Action buttons container — hidden until hover
+  const dockLogoIcon: HTMLDivElement = document.createElement('div');
+  dockLogoIcon.className = 'dock-logo-icon';
+  dockLogoIcon.innerHTML = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3L2 21M12 3L22 21M5.8 14.2L18.2 14.2"/></svg>`;
+  dockLogoWrap.appendChild(dockLogoIcon);
+
+  const dockLogoLabel: HTMLDivElement = document.createElement('div');
+  dockLogoLabel.className = 'dock-logo-label';
+  dockLogoLabel.textContent = 'A';
+  dockLogoWrap.appendChild(dockLogoLabel);
+
+  dockHost.appendChild(dockLogoWrap);
+
+  // Action buttons container — expands on hover via CSS
   const dockActions: HTMLDivElement = document.createElement('div');
-  Object.assign(dockActions.style, {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: '3px',
-    overflow: 'hidden',
-    maxHeight: '0',
-    opacity: '0',
-    transition: 'max-height 0.25s ease, opacity 0.2s ease, padding-top 0.2s ease',
-    paddingTop: '0',
-  });
+  dockActions.className = 'dock-actions';
   dockHost.appendChild(dockActions);
 
   const _dockItems: (DockItemDef | null)[] = [
@@ -364,64 +528,16 @@ function safeSend(msg: OutboundMessage, cb?: (response: SaveKnowledgeResponse) =
   _dockItems.forEach((item: DockItemDef | null) => {
     if (!item) {
       const sep: HTMLDivElement = document.createElement('div');
-      Object.assign(sep.style, {
-        width: '18px',
-        height: '1px',
-        background: 'rgba(255,255,255,0.08)',
-        margin: '2px 0',
-        flexShrink: '0',
-      });
+      sep.className = 'dock-sep';
       dockActions.appendChild(sep);
       return;
     }
     const btn: HTMLButtonElement = document.createElement('button');
+    btn.className = 'dock-btn';
     btn.dataset.action = item.action;
     btn.title = item.tip;
-    Object.assign(btn.style, {
-      width: '32px',
-      height: '32px',
-      minWidth: '32px',
-      minHeight: '32px',
-      borderRadius: '8px',
-      background: 'transparent',
-      border: 'none',
-      padding: '0',
-      margin: '0',
-      color: 'rgba(160, 148, 210, 0.6)',
-      cursor: 'pointer',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      flexShrink: '0',
-      boxSizing: 'border-box',
-      outline: 'none',
-    });
     btn.innerHTML = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${item.svg}</svg>`;
-    btn.addEventListener('mouseenter', () => {
-      btn.style.background = 'rgba(124, 58, 237, 0.2)';
-      btn.style.color = 'rgba(224, 214, 255, 1)';
-    });
-    btn.addEventListener('mouseleave', () => {
-      btn.style.background = 'transparent';
-      btn.style.color = 'rgba(160, 148, 210, 0.6)';
-    });
     dockActions.appendChild(btn);
-  });
-
-  // Expand/collapse on hover via JS (more reliable than CSS :hover on injected elements)
-  dockHost.addEventListener('mouseenter', () => {
-    dockActions.style.maxHeight = '320px';
-    dockActions.style.opacity = '1';
-    dockActions.style.paddingTop = '5px';
-    dockHost.style.borderColor = 'rgba(124, 58, 237, 0.5)';
-    dockHost.style.boxShadow = '-4px 0 28px rgba(0,0,0,0.55)';
-  });
-  dockHost.addEventListener('mouseleave', () => {
-    dockActions.style.maxHeight = '0';
-    dockActions.style.opacity = '0';
-    dockActions.style.paddingTop = '0';
-    dockHost.style.borderColor = 'rgba(124, 58, 237, 0.3)';
-    dockHost.style.boxShadow = '-3px 0 20px rgba(0,0,0,0.5)';
   });
 
   // Click handler
@@ -480,29 +596,60 @@ function safeSend(msg: OutboundMessage, cb?: (response: SaveKnowledgeResponse) =
     return sel.toString().trim();
   }
 
+  let _hideAnimTimer: ReturnType<typeof setTimeout> | null = null;
+
   function positionToolbar(): void {
     const sel: Selection | null = window.getSelection();
     if (!sel || sel.rangeCount === 0) return;
     const range: Range = sel.getRangeAt(0);
     const rect: DOMRect = range.getBoundingClientRect();
-    const TOOLBAR_HEIGHT = 38;
-    const MARGIN = 8;
-    let left: number = rect.left + (rect.width / 2) - 100;
-    if (left < 4) left = 4;
-    if (left + 200 > window.innerWidth) left = window.innerWidth - 204;
-    toolbar.style.top = `${Math.round(rect.top - TOOLBAR_HEIGHT - MARGIN)}px`;
+    const TOOLBAR_HEIGHT = 42;
+    const GAP = 10;
+    const vw: number = window.innerWidth;
+
+    // Measure toolbar width (temporarily make visible offscreen if needed)
+    toolbar.style.visibility = 'hidden';
+    toolbar.style.display = 'flex';
+    const tbRect: DOMRect = toolbar.getBoundingClientRect();
+    const tbWidth: number = tbRect.width || 320;
+    toolbar.style.visibility = '';
+    toolbar.style.display = '';
+
+    // Horizontal: center above selection, clamp to edges
+    let left: number = rect.left + (rect.width / 2) - (tbWidth / 2);
+    if (left < 8) left = 8;
+    if (left + tbWidth > vw - 8) left = vw - tbWidth - 8;
+
+    // Vertical: prefer above selection, fall below if near top
+    const showBelow: boolean = rect.top < TOOLBAR_HEIGHT + GAP + 10;
+    toolbar.classList.toggle('below', showBelow);
+
+    if (showBelow) {
+      toolbar.style.top = `${Math.round(rect.bottom + GAP)}px`;
+    } else {
+      toolbar.style.top = `${Math.round(rect.top - TOOLBAR_HEIGHT - GAP)}px`;
+    }
     toolbar.style.left = `${Math.round(left)}px`;
   }
 
   function showToolbar(): void {
+    if (_hideAnimTimer) { clearTimeout(_hideAnimTimer); _hideAnimTimer = null; }
+    toolbar.classList.remove('hiding');
     toolbar.classList.add('visible');
     positionToolbar();
     host.style.pointerEvents = 'auto';
   }
 
   function hideToolbar(): void {
+    if (!toolbar.classList.contains('visible')) return;
     toolbar.classList.remove('visible');
-    host.style.pointerEvents = 'none';
+    toolbar.classList.add('hiding');
+    if (_hideAnimTimer) clearTimeout(_hideAnimTimer);
+    _hideAnimTimer = setTimeout(() => {
+      toolbar.classList.remove('hiding');
+      host.style.pointerEvents = 'none';
+      _hideAnimTimer = null;
+    }, 150);
   }
 
   document.addEventListener('mouseup', () => {
@@ -1034,6 +1181,384 @@ function safeSend(msg: OutboundMessage, cb?: (response: SaveKnowledgeResponse) =
       transcript: transcript || undefined,
     };
   }
+
+  // ── Quick Actions on Input Fields ────────────────────────────────────
+
+  const QUICK_ACTIONS: QuickActionDef[] = [
+    { label: 'Improve', icon: '<path d="M12 3l1.5 5.5L19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5L12 3z"/>', action: 'improve' },
+    { label: 'Expand', icon: '<polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>', action: 'expand' },
+    { label: 'Shorten', icon: '<polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/>', action: 'shorten' },
+    { label: 'Fix grammar', icon: '<polyline points="20 6 9 17 4 12"/>', action: 'fix_grammar' },
+    { label: 'Translate', icon: '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/>', action: 'translate' },
+  ];
+
+  // Shadow DOM host for all quick-action UI
+  const qaHost: HTMLDivElement = document.createElement('div');
+  qaHost.id = 'aura-quick-action-host';
+  Object.assign(qaHost.style, {
+    position: 'fixed',
+    top: '0',
+    left: '0',
+    zIndex: '2147483646',
+    pointerEvents: 'none',
+  });
+  document.documentElement.appendChild(qaHost);
+  const qaShadow: ShadowRoot = qaHost.attachShadow({ mode: 'closed' });
+
+  const qaStyle: HTMLStyleElement = document.createElement('style');
+  qaStyle.textContent = `
+    @keyframes qa-icon-in {
+      from { opacity: 0; transform: scale(0.7); }
+      to   { opacity: 1; transform: scale(1); }
+    }
+    @keyframes qa-menu-in {
+      from { opacity: 0; transform: translateY(4px) scale(0.95); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    @keyframes qa-spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .qa-trigger {
+      position: fixed;
+      width: 20px;
+      height: 20px;
+      border-radius: 5px;
+      background: rgba(10, 8, 24, 0.75);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(124, 58, 237, 0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      pointer-events: auto;
+      animation: qa-icon-in 0.2s ease forwards;
+      transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    .qa-trigger:hover {
+      border-color: rgba(124, 58, 237, 0.6);
+      background: rgba(124, 58, 237, 0.18);
+      box-shadow: 0 0 10px rgba(124, 58, 237, 0.25);
+    }
+    .qa-trigger svg {
+      width: 12px;
+      height: 12px;
+      color: rgba(160, 148, 210, 0.8);
+    }
+
+    .qa-menu {
+      position: fixed;
+      background: rgba(10, 8, 24, 0.92);
+      backdrop-filter: blur(20px) saturate(1.5);
+      -webkit-backdrop-filter: blur(20px) saturate(1.5);
+      border: 1px solid rgba(124, 58, 237, 0.25);
+      border-radius: 10px;
+      padding: 4px;
+      pointer-events: auto;
+      animation: qa-menu-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05) inset;
+      min-width: 140px;
+    }
+    .qa-menu-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 12px;
+      border-radius: 7px;
+      background: transparent;
+      border: none;
+      color: rgba(226, 232, 240, 0.9);
+      font-size: 12px;
+      font-weight: 500;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', system-ui, sans-serif;
+      cursor: pointer;
+      white-space: nowrap;
+      width: 100%;
+      text-align: left;
+      transition: background 0.12s, color 0.12s;
+      line-height: 1;
+      box-sizing: border-box;
+    }
+    .qa-menu-item:hover {
+      background: rgba(124, 58, 237, 0.25);
+      color: #fff;
+    }
+    .qa-menu-item:active {
+      background: rgba(124, 58, 237, 0.4);
+    }
+    .qa-menu-item svg {
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+      color: rgba(160, 148, 210, 0.7);
+    }
+    .qa-menu-item:hover svg {
+      color: rgba(200, 180, 255, 1);
+    }
+    .qa-menu-item.loading {
+      opacity: 0.6;
+      pointer-events: none;
+    }
+    .qa-menu-item .qa-spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(124, 58, 237, 0.3);
+      border-top-color: rgba(160, 148, 210, 0.9);
+      border-radius: 50%;
+      animation: qa-spin 0.6s linear infinite;
+      flex-shrink: 0;
+    }
+
+    .qa-translate-sub {
+      padding: 2px 4px 4px 4px;
+    }
+    .qa-translate-sub .qa-menu-item {
+      font-size: 11.5px;
+      padding: 5px 10px 5px 22px;
+    }
+  `;
+  qaShadow.appendChild(qaStyle);
+
+  // Container inside the shadow for dynamic elements
+  const qaContainer: HTMLDivElement = document.createElement('div');
+  qaShadow.appendChild(qaContainer);
+
+  // Track currently attached input and UI elements
+  let _qaActiveInput: HTMLInputElement | HTMLTextAreaElement | null = null;
+  let _qaTriggerEl: HTMLDivElement | null = null;
+  let _qaMenuEl: HTMLDivElement | null = null;
+  let _qaTranslateSub: HTMLDivElement | null = null;
+
+  // Input types to skip
+  const SKIP_INPUT_TYPES = new Set(['password', 'hidden', 'file', 'checkbox', 'radio', 'range', 'color', 'date', 'datetime-local', 'month', 'week', 'time', 'submit', 'reset', 'button', 'image']);
+  const MIN_INPUT_WIDTH = 200;
+
+  function isEligibleInput(el: Element): el is HTMLInputElement | HTMLTextAreaElement {
+    if (el.tagName === 'TEXTAREA') return true;
+    if (el.tagName === 'INPUT') {
+      const inputEl = el as HTMLInputElement;
+      const inputType = (inputEl.type || 'text').toLowerCase();
+      if (SKIP_INPUT_TYPES.has(inputType)) return false;
+      return true;
+    }
+    // contenteditable
+    if ((el as HTMLElement).isContentEditable && el.getAttribute('contenteditable') === 'true') return true;
+    return false;
+  }
+
+  function removeQaTrigger(): void {
+    if (_qaTriggerEl) { _qaTriggerEl.remove(); _qaTriggerEl = null; }
+    removeQaMenu();
+    _qaActiveInput = null;
+  }
+
+  function removeQaMenu(): void {
+    if (_qaMenuEl) { _qaMenuEl.remove(); _qaMenuEl = null; }
+    if (_qaTranslateSub) { _qaTranslateSub.remove(); _qaTranslateSub = null; }
+  }
+
+  function positionTrigger(field: HTMLElement): void {
+    const rect = field.getBoundingClientRect();
+    if (rect.width < MIN_INPUT_WIDTH) { removeQaTrigger(); return; }
+
+    if (!_qaTriggerEl) {
+      _qaTriggerEl = document.createElement('div');
+      _qaTriggerEl.className = 'qa-trigger';
+      _qaTriggerEl.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.5 5.5L19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5L12 3z"/></svg>`;
+      _qaTriggerEl.addEventListener('click', (e: MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (_qaMenuEl) { removeQaMenu(); return; }
+        showQaMenu();
+      });
+      qaContainer.appendChild(_qaTriggerEl);
+    }
+
+    // Position at the right edge of the field, vertically centered
+    const trigSize = 20;
+    const pad = 6;
+    _qaTriggerEl.style.top = `${Math.round(rect.top + (rect.height - trigSize) / 2)}px`;
+    _qaTriggerEl.style.left = `${Math.round(rect.right - trigSize - pad)}px`;
+  }
+
+  function showQaMenu(): void {
+    if (!_qaTriggerEl || !_qaActiveInput) return;
+    removeQaMenu();
+
+    _qaMenuEl = document.createElement('div');
+    _qaMenuEl.className = 'qa-menu';
+
+    QUICK_ACTIONS.forEach((qa) => {
+      const item = document.createElement('button');
+      item.className = 'qa-menu-item';
+      item.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${qa.icon}</svg><span>${qa.label}</span>`;
+      item.addEventListener('click', (e: MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (qa.action === 'translate') {
+          toggleTranslateSub(item);
+        } else {
+          executeQuickAction(qa.action);
+        }
+      });
+      _qaMenuEl!.appendChild(item);
+    });
+
+    qaContainer.appendChild(_qaMenuEl);
+
+    // Position below the trigger
+    const trigRect = _qaTriggerEl.getBoundingClientRect();
+    const menuGap = 6;
+    _qaMenuEl.style.top = `${Math.round(trigRect.bottom + menuGap)}px`;
+    _qaMenuEl.style.left = `${Math.round(trigRect.right - 150)}px`; // right-align roughly
+
+    // Clamp to viewport
+    requestAnimationFrame(() => {
+      if (!_qaMenuEl) return;
+      const mRect = _qaMenuEl.getBoundingClientRect();
+      if (mRect.right > window.innerWidth - 8) {
+        _qaMenuEl.style.left = `${Math.round(window.innerWidth - mRect.width - 8)}px`;
+      }
+      if (mRect.left < 8) {
+        _qaMenuEl.style.left = '8px';
+      }
+      if (mRect.bottom > window.innerHeight - 8) {
+        // Show above trigger instead
+        _qaMenuEl.style.top = `${Math.round(trigRect.top - mRect.height - menuGap)}px`;
+      }
+    });
+  }
+
+  function toggleTranslateSub(anchor: HTMLButtonElement): void {
+    if (_qaTranslateSub) { _qaTranslateSub.remove(); _qaTranslateSub = null; return; }
+
+    const LANGUAGES = ['English', 'Spanish', 'French', 'German', 'Chinese', 'Russian', 'Japanese', 'Arabic', 'Portuguese', 'Azerbaijani'];
+
+    _qaTranslateSub = document.createElement('div');
+    _qaTranslateSub.className = 'qa-translate-sub';
+
+    LANGUAGES.forEach((lang) => {
+      const item = document.createElement('button');
+      item.className = 'qa-menu-item';
+      item.textContent = lang;
+      item.addEventListener('click', (e: MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        executeQuickAction('translate', lang);
+      });
+      _qaTranslateSub!.appendChild(item);
+    });
+
+    // Insert after the translate button inside the menu
+    if (_qaMenuEl && anchor.parentNode === _qaMenuEl) {
+      anchor.after(_qaTranslateSub);
+    }
+  }
+
+  function getInputValue(el: HTMLInputElement | HTMLTextAreaElement): string {
+    if ((el as HTMLElement).isContentEditable) {
+      return (el as HTMLElement).innerText || '';
+    }
+    return el.value || '';
+  }
+
+  function setInputValue(el: HTMLInputElement | HTMLTextAreaElement, value: string): void {
+    if ((el as HTMLElement).isContentEditable) {
+      (el as HTMLElement).innerText = value;
+    } else {
+      el.value = value;
+    }
+    // Fire events so frameworks pick up the change
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  function executeQuickAction(action: string, language?: string): void {
+    if (!_qaActiveInput) return;
+    const text = getInputValue(_qaActiveInput);
+    if (!text.trim()) { removeQaMenu(); return; }
+
+    // Show loading state on all menu items
+    if (_qaMenuEl) {
+      _qaMenuEl.querySelectorAll('.qa-menu-item').forEach((item) => {
+        item.classList.add('loading');
+      });
+    }
+
+    // Replace the clicked item's icon with a spinner (visual feedback)
+    const targetField = _qaActiveInput;
+
+    safeSend(
+      { type: 'QUICK_ACTION', action, text, language },
+      (response: QuickActionResponse) => {
+        if (response && response.ok && response.result) {
+          setInputValue(targetField, response.result);
+          showToast('Text updated by AURA');
+        } else {
+          showToast(response?.error || 'Quick action failed', 3000);
+        }
+        removeQaMenu();
+      }
+    );
+  }
+
+  // Attach trigger on focus
+  function onFieldFocus(e: FocusEvent): void {
+    const target = e.target as Element;
+    if (!target || !isEligibleInput(target)) return;
+    const rect = target.getBoundingClientRect();
+    if (rect.width < MIN_INPUT_WIDTH) return;
+
+    _qaActiveInput = target as HTMLInputElement | HTMLTextAreaElement;
+    positionTrigger(target as HTMLElement);
+  }
+
+  // Remove trigger on blur (with small delay so menu clicks register)
+  function onFieldBlur(_e: FocusEvent): void {
+    setTimeout(() => {
+      // If focus moved to our menu, don't remove
+      if (_qaMenuEl || _qaTranslateSub) return;
+      // Check if the new active element is the same input
+      const active = document.activeElement;
+      if (active && active === _qaActiveInput) return;
+      removeQaTrigger();
+    }, 200);
+  }
+
+  // Reposition trigger on scroll/resize
+  function repositionQaTrigger(): void {
+    if (_qaActiveInput) {
+      positionTrigger(_qaActiveInput as HTMLElement);
+    }
+  }
+
+  // Close menu when clicking outside
+  document.addEventListener('mousedown', (e: MouseEvent) => {
+    if (!_qaMenuEl && !_qaTriggerEl) return;
+    // Check if click is inside our shadow DOM
+    const path = e.composedPath();
+    if (path.includes(qaHost)) return;
+    removeQaMenu();
+  }, true);
+
+  // Listen for focus/blur on the document (delegation)
+  document.addEventListener('focusin', onFieldFocus, true);
+  document.addEventListener('focusout', onFieldBlur, true);
+  window.addEventListener('scroll', repositionQaTrigger, { passive: true });
+  window.addEventListener('resize', repositionQaTrigger, { passive: true });
+
+  // MutationObserver: detect dynamically added input fields and attach
+  // We don't need to do anything special per-element — we use focusin delegation.
+  // But we DO need to reposition if the DOM shifts while our trigger is visible.
+  const qaObserver = new MutationObserver(() => {
+    if (_qaActiveInput && !document.body.contains(_qaActiveInput)) {
+      removeQaTrigger();
+    }
+  });
+  qaObserver.observe(document.body, { childList: true, subtree: true });
 
   // ── Message Listener ──────────────────────────────────────────────────
 

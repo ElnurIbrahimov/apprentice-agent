@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useCallback } from 'react';
+import React, { useRef, useEffect, useCallback, useState } from 'react';
 import { useStore } from '../store';
 import MessageBubble from '../components/MessageBubble';
 import HomeScreen from '../components/HomeScreen';
@@ -8,15 +8,68 @@ import { PAGE_KEYWORDS } from '../ws';
 import { getPageContentCached, getCurrentTab } from '../ext';
 import type { StreamState } from '../types';
 import { speak } from '../tts';
+import { ChevronDown } from 'lucide-react';
 
 export default function ChatPanel() {
   const { messages, addMessage, activeStream, setActiveStream, setPendingCtx } = useStore();
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const streamingMsgId = useRef<string | null>(null);
+  const [userScrolledUp, setUserScrolledUp] = useState(false);
+  const [newMsgCount, setNewMsgCount] = useState(0);
+  const [scrollProgress, setScrollProgress] = useState(0);
+  const isAutoScrolling = useRef(false);
 
-  useEffect(() => {
+  // Check if user is near the bottom
+  const isNearBottom = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }, []);
+
+  // Scroll to bottom smoothly
+  const scrollToBottom = useCallback((force = false) => {
+    if (!force && userScrolledUp) return;
+    isAutoScrolling.current = true;
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, activeStream]);
+    setTimeout(() => { isAutoScrolling.current = false; }, 500);
+  }, [userScrolledUp]);
+
+  // Auto-scroll on new messages / stream updates
+  useEffect(() => {
+    if (!userScrolledUp) {
+      scrollToBottom();
+    } else {
+      // Count new messages while user is scrolled up
+      setNewMsgCount(prev => prev + 1);
+    }
+  }, [messages, activeStream, userScrolledUp, scrollToBottom]);
+
+  // Scroll event handler — track user scroll position + progress
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const handleScroll = () => {
+      if (isAutoScrolling.current) return;
+      const nearBottom = isNearBottom();
+      setUserScrolledUp(!nearBottom);
+      if (nearBottom) setNewMsgCount(0);
+
+      // Update scroll progress
+      const scrollable = el.scrollHeight - el.clientHeight;
+      setScrollProgress(scrollable > 0 ? el.scrollTop / scrollable : 0);
+    };
+    el.addEventListener('scroll', handleScroll, { passive: true });
+    return () => el.removeEventListener('scroll', handleScroll);
+  }, [isNearBottom]);
+
+  const handleJumpToBottom = useCallback(() => {
+    setUserScrolledUp(false);
+    setNewMsgCount(0);
+    isAutoScrolling.current = true;
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    setTimeout(() => { isAutoScrolling.current = false; }, 500);
+  }, []);
 
   const sysmsg = useCallback((text: string) => {
     useStore.getState().addMessage({ id: crypto.randomUUID(), role: 'ai', text, timestamp: Date.now() });
@@ -66,6 +119,10 @@ export default function ChatPanel() {
     if (thinkingMode) full = '[Think step by step before answering]\n' + full;
     if (deepResearch) full = '[Do deep research on this, search the web if needed]\n' + full;
 
+    // Reset scroll state for new conversation turn
+    setUserScrolledUp(false);
+    setNewMsgCount(0);
+
     // Add user + AI placeholder messages
     addMessage({ id: crypto.randomUUID(), role: 'user', text, timestamp: Date.now() });
     const aiId = crypto.randomUUID();
@@ -113,11 +170,15 @@ export default function ChatPanel() {
   const isEmpty = messages.length === 0 && !activeStream;
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full overflow-hidden" style={{ position: 'relative' }}>
       <ContextBar />
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-3 py-3" style={{ scrollBehavior: 'smooth' }}>
+      <div
+        ref={scrollContainerRef}
+        className="flex-1 overflow-y-auto px-3 py-3"
+        style={{ scrollBehavior: 'smooth', position: 'relative' }}
+      >
         {isEmpty ? (
           <HomeScreen onChip={sendMessage} />
         ) : (
@@ -135,7 +196,8 @@ export default function ChatPanel() {
                       >
                         A
                       </div>
-                      <div className="dots mt-1.5">
+                      {/* Branded thinking indicator */}
+                      <div className="aura-thinking mt-1.5">
                         <span /><span /><span />
                       </div>
                     </div>
@@ -149,6 +211,70 @@ export default function ChatPanel() {
           </>
         )}
       </div>
+
+      {/* Scroll progress indicator — thin bar on right edge */}
+      {!isEmpty && scrollProgress > 0 && scrollProgress < 0.98 && (
+        <div
+          className="scroll-progress-track"
+          style={{
+            position: 'absolute',
+            top: 0,
+            right: 0,
+            width: 3,
+            height: '100%',
+            pointerEvents: 'none',
+            zIndex: 10,
+          }}
+        >
+          <div
+            className="scroll-progress-thumb"
+            style={{
+              position: 'absolute',
+              top: 0,
+              right: 0,
+              width: '100%',
+              height: `${scrollProgress * 100}%`,
+              background: 'linear-gradient(to bottom, transparent, var(--pl))',
+              opacity: 0.5,
+              borderRadius: '0 0 2px 2px',
+              transition: 'height 0.1s ease-out, opacity 0.3s ease',
+            }}
+          />
+        </div>
+      )}
+
+      {/* New message indicator — shown when user has scrolled up */}
+      {userScrolledUp && newMsgCount > 0 && (
+        <button
+          onClick={handleJumpToBottom}
+          className="new-msg-indicator"
+          style={{
+            position: 'absolute',
+            bottom: 72,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 20,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '6px 14px',
+            borderRadius: 20,
+            background: 'var(--glass)',
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+            border: '1px solid rgba(124, 58, 237, 0.3)',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.4), 0 0 12px rgba(124, 58, 237, 0.15)',
+            color: 'var(--pl)',
+            fontSize: 11,
+            fontWeight: 500,
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+          }}
+        >
+          <ChevronDown size={14} />
+          <span>{newMsgCount} new message{newMsgCount > 1 ? 's' : ''}</span>
+        </button>
+      )}
 
       {/* Input */}
       <InputBar onSend={sendMessage} featureKey="chat" />

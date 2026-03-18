@@ -55,28 +55,55 @@ export default function MessageBubble({ message, isLatest }: Props) {
     }
   };
 
+  /* ───── User message: right-aligned glass bubble ───── */
   if (isUser) {
     return (
-      <div className="flex mb-3 justify-end msg-slide-in">
-        <div style={{
-          background: '#fff',
-          color: '#000',
-          padding: '9px 16px',
-          borderRadius: '18px 18px 3px 18px',
+      <div
+        className="flex mb-3 justify-end msg-slide-in"
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+      >
+        <div className="user-bubble" style={{
+          background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(245,243,255,0.92) 100%)',
+          color: '#1a1a2e',
+          padding: '10px 16px',
+          borderRadius: '18px 18px 4px 18px',
           fontSize: '12.5px',
           fontWeight: 500,
           maxWidth: '82%',
           lineHeight: 1.55,
-          boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+          boxShadow: '0 4px 20px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.6)',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
+          position: 'relative',
         }}>
           {message.text}
+
+          {/* Hover timestamp */}
+          <div
+            className="user-msg-time"
+            style={{
+              position: 'absolute',
+              bottom: -18,
+              right: 4,
+              fontSize: '9px',
+              color: 'var(--mu)',
+              opacity: hovered ? 1 : 0,
+              transition: 'opacity 0.2s ease',
+              pointerEvents: 'none',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </div>
         </div>
       </div>
     );
   }
 
+  /* ───── AI message: full-width with left accent border ───── */
   return (
     <div
       className="flex gap-2.5 mb-4 msg-slide-in"
@@ -97,7 +124,14 @@ export default function MessageBubble({ message, isLatest }: Props) {
         A
       </div>
 
-      <div className="flex-1 min-w-0">
+      <div
+        className="flex-1 min-w-0"
+        style={{
+          borderLeft: '2px solid transparent',
+          borderImage: 'linear-gradient(to bottom, var(--pl), var(--p3)) 1',
+          paddingLeft: 10,
+        }}
+      >
         {/* Model badge */}
         {modelDisplay && (
           <span
@@ -125,21 +159,26 @@ export default function MessageBubble({ message, isLatest }: Props) {
           dangerouslySetInnerHTML={{ __html: md(message.text) }}
         />
 
-        {/* Streaming typing indicator */}
-        {isStreaming && (
-          <div className="dots" style={{ marginTop: 2 }}>
-            <span />
-            <span />
-            <span />
+        {/* Streaming cursor — blinking purple block */}
+        {isStreaming && message.text && (
+          <span className="streaming-cursor" />
+        )}
+
+        {/* Branded thinking indicator — three staggered gradient circles */}
+        {isStreaming && !message.text && (
+          <div className="aura-thinking">
+            <span /><span /><span />
           </div>
         )}
 
-        {/* Footer: timestamp + actions */}
+        {/* Footer: timestamp + actions — fade in on hover */}
         <div
           className="flex items-center gap-2 mt-1"
           style={{
-            opacity: hovered ? 1 : 0.5,
-            transition: 'opacity 0.2s ease',
+            opacity: hovered ? 1 : 0,
+            transition: 'opacity 0.25s ease',
+            height: hovered ? 'auto' : 0,
+            overflow: 'hidden',
           }}
         >
           <span style={{ fontSize: '10px', color: 'var(--di)' }}>
