@@ -172,11 +172,12 @@ body::before {
   width: 60%; height: 60%;
   background: var(--mesh-1);
   border-radius: 50%;
-  filter: blur(80px);
+  filter: blur(60px);
   opacity: var(--mesh-opacity-1);
   pointer-events: none;
   z-index: 0;
   animation: ext-float 18s infinite ease-in-out alternate;
+  will-change: transform;
 }
 
 body::after {
@@ -186,11 +187,20 @@ body::after {
   width: 70%; height: 70%;
   background: var(--mesh-2);
   border-radius: 50%;
-  filter: blur(90px);
+  filter: blur(70px);
   opacity: var(--mesh-opacity-2);
   pointer-events: none;
   z-index: 0;
   animation: ext-float 24s infinite ease-in-out alternate-reverse;
+  will-change: transform;
+}
+
+/* Respect reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition-duration: 0s !important;
+  }
 }
 
 @keyframes ext-float {
@@ -408,8 +418,6 @@ body::after {
   color: var(--pl);
   font-weight: 500;
   letter-spacing: 0.02em;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
 }
 :root.light .header-model-pill {
   border-color: rgba(37, 99, 235, 0.15);

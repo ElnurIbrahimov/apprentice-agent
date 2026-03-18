@@ -1449,6 +1449,7 @@ ${description}
         removeQaTrigger();
         return;
       }
+      const offscreen = rect.bottom < 0 || rect.top > window.innerHeight || rect.right < 0 || rect.left > window.innerWidth;
       if (!_qaTriggerEl) {
         _qaTriggerEl = document.createElement("div");
         _qaTriggerEl.className = "qa-trigger";
@@ -1463,6 +1464,11 @@ ${description}
           showQaMenu();
         });
         qaContainer.appendChild(_qaTriggerEl);
+      }
+      _qaTriggerEl.style.display = offscreen ? "none" : "";
+      if (offscreen) {
+        removeQaMenu();
+        return;
       }
       const trigSize = 20;
       const pad = 6;
@@ -1910,9 +1916,46 @@ ${description}
       return parts.join("\n\n---\n\n").slice(0, 2e4);
     }
     function getComposeBody(composeEl) {
-      return composeEl.querySelector(
-        'div[aria-label="Message Body"], div[aria-label="Nachrichtentext"], div[aria-label="Corps du message"], div[g_editable="true"][contenteditable="true"], div.editable[contenteditable="true"], div[contenteditable="true"][role="textbox"]'
+      const ariaLabels = [
+        "Message Body",
+        // English
+        "Nachrichtentext",
+        // German
+        "Corps du message",
+        // French
+        "Cuerpo del mensaje",
+        // Spanish
+        "Corpo da mensagem",
+        // Portuguese
+        "Corpo del messaggio",
+        // Italian
+        "Текст сообщения",
+        // Russian
+        "Mesaj Metni",
+        // Turkish
+        "メッセージ本文",
+        // Japanese
+        "메시지 본문",
+        // Korean
+        "邮件正文",
+        // Chinese Simplified
+        "نص الرسالة",
+        // Arabic
+        "Berichttekst",
+        // Dutch
+        "Treść wiadomości",
+        // Polish
+        "संदेश का मुख्य भाग",
+        // Hindi
+        "Mesaj mətni"
+        // Azerbaijani
+      ];
+      const ariaSelector = ariaLabels.map((l) => `div[aria-label="${l}"]`).join(", ");
+      const result = composeEl.querySelector(
+        ariaSelector + ', div[g_editable="true"][contenteditable="true"], div.editable[contenteditable="true"]'
       );
+      if (result) return result;
+      return composeEl.querySelector('div[contenteditable="true"][role="textbox"]');
     }
     function getComposeText(composeEl) {
       var _a;

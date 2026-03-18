@@ -1847,6 +1847,10 @@ function safeSend(msg: OutboundMessage, cb?: (response: any) => void): void {
     const rect = field.getBoundingClientRect();
     if (rect.width < MIN_INPUT_WIDTH) { removeQaTrigger(); return; }
 
+    // Hide trigger when the input is scrolled offscreen
+    const offscreen = rect.bottom < 0 || rect.top > window.innerHeight ||
+                      rect.right < 0 || rect.left > window.innerWidth;
+
     if (!_qaTriggerEl) {
       _qaTriggerEl = document.createElement('div');
       _qaTriggerEl.className = 'qa-trigger';
@@ -1858,6 +1862,14 @@ function safeSend(msg: OutboundMessage, cb?: (response: any) => void): void {
         showQaMenu();
       });
       qaContainer.appendChild(_qaTriggerEl);
+    }
+
+    // Toggle visibility based on whether the field is in the viewport
+    _qaTriggerEl.style.display = offscreen ? 'none' : '';
+
+    if (offscreen) {
+      removeQaMenu(); // also hide the menu if open
+      return;
     }
 
     // Position at the right edge of the field, vertically centered
@@ -2393,11 +2405,37 @@ function safeSend(msg: OutboundMessage, cb?: (response: any) => void): void {
    * Gets the compose body's contenteditable div within a compose window.
    */
   function getComposeBody(composeEl: HTMLElement): HTMLElement | null {
-    return composeEl.querySelector<HTMLElement>(
-      'div[aria-label="Message Body"], div[aria-label="Nachrichtentext"], ' +
-      'div[aria-label="Corps du message"], div[g_editable="true"][contenteditable="true"], ' +
-      'div.editable[contenteditable="true"], div[contenteditable="true"][role="textbox"]'
+    // Locale-specific aria-labels for Gmail compose body
+    const ariaLabels = [
+      'Message Body',           // English
+      'Nachrichtentext',        // German
+      'Corps du message',       // French
+      'Cuerpo del mensaje',     // Spanish
+      'Corpo da mensagem',      // Portuguese
+      'Corpo del messaggio',    // Italian
+      '\u0422\u0435\u043a\u0441\u0442 \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u044f',          // Russian
+      'Mesaj Metni',            // Turkish
+      '\u30e1\u30c3\u30bb\u30fc\u30b8\u672c\u6587',            // Japanese
+      '\uba54\uc2dc\uc9c0 \ubcf8\ubb38',              // Korean
+      '\u90ae\u4ef6\u6b63\u6587',                // Chinese Simplified
+      '\u0646\u0635 \u0627\u0644\u0631\u0633\u0627\u0644\u0629',            // Arabic
+      'Berichttekst',           // Dutch
+      'Tre\u015b\u0107 wiadomo\u015bci',      // Polish
+      '\u0938\u0902\u0926\u0947\u0936 \u0915\u093e \u092e\u0941\u0916\u094d\u092f \u092d\u093e\u0917',    // Hindi
+      'Mesaj m\u0259tni',           // Azerbaijani
+    ];
+    const ariaSelector = ariaLabels.map(l => `div[aria-label="${l}"]`).join(', ');
+
+    // Try aria-label matches first, then generic Gmail selectors
+    const result = composeEl.querySelector<HTMLElement>(
+      ariaSelector + ', ' +
+      'div[g_editable="true"][contenteditable="true"], ' +
+      'div.editable[contenteditable="true"]'
     );
+    if (result) return result;
+
+    // Fallback: contenteditable textbox inside the compose dialog (covers unlisted locales)
+    return composeEl.querySelector<HTMLElement>('div[contenteditable="true"][role="textbox"]');
   }
 
   /**

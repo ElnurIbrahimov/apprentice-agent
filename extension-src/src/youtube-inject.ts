@@ -194,17 +194,14 @@
   // Run scan after a small delay to let YouTube hydrate
   setTimeout(scanInitialData, 1500);
 
-  // Also watch for SPA navigation (YouTube is a SPA)
-  let lastUrl = location.href;
-  const navObserver = new MutationObserver(() => {
-    if (location.href !== lastUrl) {
-      lastUrl = location.href;
-      if (location.href.includes('youtube.com/watch')) {
-        setTimeout(scanInitialData, 2000);
-      }
+  // Listen for YouTube's native SPA navigation event instead of expensive MutationObserver
+  function onSpaNavigate(): void {
+    if (location.href.includes('youtube.com/watch')) {
+      setTimeout(scanInitialData, 2000);
     }
-  });
-  navObserver.observe(document.body, { childList: true, subtree: true });
+  }
+  document.addEventListener('yt-navigate-finish', onSpaNavigate);
+  window.addEventListener('popstate', onSpaNavigate);
 
   // ── Monkey-patch XMLHttpRequest ────────────────────────────────────────
 
