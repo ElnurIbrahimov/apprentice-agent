@@ -1,23 +1,85 @@
 # AURA — Adaptive Universal Reasoning Agent
 
-A personal AI agent with persistent memory, emotions, and proactive awareness. Uses **ChatGPT** (GPT-5.x via OAuth) and **60+ Ollama models** (local + cloud) — switch between them mid-conversation with `/model`.
+A personal AI agent with persistent memory, emotions, proactive awareness, and a full-featured browser extension. Uses **ChatGPT** (GPT-5.x via OAuth), **60+ Ollama models** (local + cloud), and a **Sider-class browser sidebar** with 24 panels.
 
 Not a chatbot. A being with presence that remembers you, has moods, dreams, and grows over time.
 
 ---
 
-## Features
+## Highlights
 
 | | |
 |---|---|
-| **Persistent memory** | SQLite + Kuzu KG with BM25 + semantic retrieval, FadeMem decay, cross-encoder reranking. Remembers across sessions. |
-| **Emotions** | ALMA neuromodulator engine (PAD space) — mood shapes every response. Show, don't tell. |
-| **Dreams** | NeuroDream: light sleep re-scores memories, deep sleep extracts patterns, REM generates novel connections. |
-| **Proactive awareness** | Notices things on its own. Curiosity driven by KG gap detection. Motivation-threshold gating learns from your feedback. |
-| **Identity** | Narrative self-model evolves across sessions. Temporal grounding — knows how long since you last spoke. |
-| **Multi-model** | 56+ models: ChatGPT (GPT-5.4 Pro, Codex), cloud (Qwen, DeepSeek, Kimi, Gemini), local (8B models on your GPU). |
-| **Dev agent** | ReAct loop, 50+ tools, code agent mode, adaptive planning, session persistence, auto-test after edits. |
-| **3 surfaces** | CLI, Web UI (React + FastAPI), Browser Extension (Chrome/Firefox). |
+| **Persistent memory** | SQLite + Kuzu KG with BM25 + semantic retrieval, FadeMem decay, cross-encoder reranking |
+| **Emotions** | ALMA neuromodulator engine (PAD space) — mood shapes every response |
+| **Dreams** | NeuroDream: light sleep re-scores memories, deep sleep extracts patterns, REM generates novel connections |
+| **Proactive awareness** | KG gap-driven curiosity, motivation-threshold gating, screen/calendar/workflow monitors |
+| **Identity** | Narrative self-model evolves across sessions, temporal grounding, personality persistence |
+| **Multi-model** | 60+ models: ChatGPT (GPT-5.4 Pro, Codex), cloud (Qwen 397B, DeepSeek, Kimi, Gemini), local (8B on your GPU) |
+| **Dev agent** | ReAct loop, 50+ tools, code agent mode, adaptive planning, session persistence |
+| **4 surfaces** | CLI, Web UI (React + FastAPI), Browser Extension (Chrome/Firefox), Telegram Bot |
+
+---
+
+## Browser Extension
+
+A full-featured AI sidebar for Chrome and Firefox — comparable to Sider AI but self-hosted and free.
+
+### 24 Panels
+
+| Panel | What it does |
+|-------|-------------|
+| **Chat** | Streaming AI chat with any model, thinking mode, deep research toggle |
+| **Search** | AI-powered web search with progressive pipeline and source citations |
+| **Translate** | 35+ languages, text + full page bilingual translation overlay |
+| **Write** | Compose essays/emails/stories with tone/length controls, improve mode |
+| **Grammar** | Grammar check with word-level diff highlighting |
+| **Ask** | Quick AI questions with page context |
+| **Summary** | Page summarization (brief/standard/detailed, bullet points mode) |
+| **YouTube** | Video summarization with transcript interception, chapter markers, search |
+| **PDF** | Upload, drag-drop, URL loading, Q&A, translate, summarize |
+| **Voice** | Speech-to-text recording + Whisper transcription |
+| **OCR** | Screen region capture with text extraction |
+| **Research** | Quick + Deep Research mode (5-step autonomous pipeline with citations) |
+| **Math** | Step-by-step problem solver with LaTeX output |
+| **Artifacts** | Live HTML/React/SVG/Mermaid/Chart.js preview with code editor |
+| **Image** | Generation (ComfyUI) + Editing (remove BG, upscale, remove text, describe) |
+| **Compare** | Side-by-side multi-model response comparison |
+| **Code** | Python code interpreter with CSV analysis and chart generation |
+| **Record** | Tab audio/mic recording with waveform, transcription, meeting notes |
+| **Agent** | Browser automation (DOM serialization, click/type/scroll/navigate) |
+| **Wisebase** | Knowledge base with persistent page highlights and saved clips |
+| **Models** | Per-feature model assignment across all 24 panels |
+| **Settings** | Custom instructions, persona editor, response style presets |
+| **Tools** | Callable tools directory |
+
+### Floating UI (on every webpage)
+
+- **Selection bubble** — tiny icon buttons at cursor on text selection (Copy, Explain, Summarize, more...)
+- **Quick Launch** — floating AI panel for custom prompts on selected text
+- **Draggable FAB** — floating action button, drag to reposition, side-switchable
+- **Input field actions** — AI writing tools on any textarea (improve, expand, shorten, grammar, translate)
+- **Image hover toolbar** — Describe, Edit, Save on any webpage image
+- **Link preview** — hover over links for AI-generated previews
+- **Google SERP answers** — AI answer card above Google search results
+- **Gmail AI compose** — draft reply, improve, formalize, translate inside Gmail
+- **YouTube subtitles** — intercepts captions for transcript viewer
+- **Netflix subtitles** — intercepts subtitles via JSON.parse patch
+- **Page translation** — bilingual overlay on any webpage
+- **Persistent highlights** — save and restore text highlights across page visits
+- **Right-click menu** — Explain, Summarize, Translate, Improve, Save to Memory
+
+### Extension Features
+
+- Light/dark theme with smooth toggle
+- Keyboard shortcuts (Ctrl+K, Ctrl+L, Ctrl+N, Ctrl+1-5, and more)
+- Per-feature model routing (assign different models to different panels)
+- TTS voice output on AI messages
+- Inline mic button for voice-to-text in chat
+- Chat/data export (Markdown, JSON, Text)
+- Offline mode with visual status and retry
+- Think Mode with Low/Medium/High reasoning levels
+- DOMPurify sanitization on all rendered content
 
 ---
 
@@ -49,39 +111,101 @@ aura --tier max               # Use strongest models
 
 ### ChatGPT Authentication
 
-AURA can use your ChatGPT subscription (GPT-5.4, Codex, etc.) via OAuth:
+Use your ChatGPT subscription (GPT-5.4, Codex, etc.) via OAuth:
 
 ```bash
 aura --login chatgpt          # Opens browser for OAuth login
 aura --logout chatgpt         # Remove credentials
 ```
 
-Once authenticated, ChatGPT models appear in `/model` and can be selected like any other model. Your ChatGPT subscription tier (Plus/Pro) determines which models are available.
+### Web UI
+
+```bash
+python run_web.py             # API server (localhost:8000)
+cd web && npm run dev         # Web UI (localhost:5173)
+```
+
+### Browser Extension
+
+```bash
+cd extension-src && npm install && npm run build
+cd .. && python build.py chrome    # or: python build.py firefox
+```
+
+Load `dist-chrome/` as an unpacked extension in `chrome://extensions`.
+
+### Telegram Bot
+
+```bash
+python run_telegram.py        # Requires TELEGRAM_BOT_TOKEN in .env
+```
 
 ---
 
 ## Models
 
-56+ models available via `/model` picker:
+60+ models available via `/model` picker:
 
 | Source | Models | Examples |
 |--------|--------|---------|
-| **ChatGPT** (OAuth) | 12 | GPT-5.4 Pro, GPT-5.3 Codex, GPT-5.1 Codex Max |
-| **Cloud** (Ollama bridge) | 17 | Qwen 3.5 397B, DeepSeek V3.2, Kimi K2.5, Gemini 3 Flash, Devstral 2, Cogito 2.1 671B |
-| **Local** (Ollama) | 26 | DeepSeek R1 8B, Qwen 3 8B, Qwen 2.5 Coder 7B, Gemma 3, LLaVA (vision) |
+| **ChatGPT** (OAuth) | 12 | GPT-5.4 Pro, GPT-5.3 Codex Spark, GPT-5.1 Codex Max |
+| **Cloud** (Ollama bridge) | 20+ | Qwen 3.5 397B, DeepSeek V3.2, Kimi K2.5, Gemini 3 Flash, Devstral 2 123B, Cogito 2.1 671B |
+| **Local** (Ollama) | 26+ | DeepSeek R1 8B, Qwen 3 8B, Qwen 2.5 Coder 7B, Gemma 3 4B, LLaVA (vision) |
 
-**Role-based routing** — AURA auto-selects the best model per task:
+**Role-based routing** — auto-selects the best model per task:
 
 | Role | Default |
 |------|---------|
-| **Tool dispatch** | `glm-5:cloud` |
+| **Fast** | `gemini-3-flash-preview:cloud` |
 | **Code** | `deepseek-v3.2:cloud` |
 | **Reasoning** | `kimi-k2.5:cloud` |
 | **Vision** | `qwen3-vl:235b-cloud` |
 | **Long context** | `minimax-m2.5:cloud` (1M tokens) |
-| **Fast** | `gemini-3-flash-preview:cloud` |
 
-Or lock to any model: `/model chatgpt:gpt-5.4-pro`
+---
+
+## Architecture
+
+```
+USER INPUT
+    |
+[Fast-path] -- simple? --> 8B local model instant response
+    |
+[ReAct Loop] (1 LLM call per step)
+    |-- Tool RAG selects 5-8 relevant tools per query
+    |-- Code agent mode for complex tasks (LLM writes Python)
+    |-- Adaptive planning with re-plan every 3 steps
+    |-- Strategy bandit for reasoning approach selection
+    '-- Loop guards (dedup, failure count, iteration cap)
+    |
+[Memory]
+    |-- SQLite + FTS5 + vector embeddings (nomic-embed-text)
+    |-- Kuzu temporal KG (entities + relationships)
+    |-- BM25 + semantic + graph retrieval -> RRF fusion
+    |-- Cross-encoder reranking (ms-marco-MiniLM)
+    |-- FadeMem decay (2-week half-life)
+    '-- Write gate: merge / supersede / insert decision
+    |
+[Emotion] (ALMA Engine)
+    |-- Neuromodulators: dopamine, serotonin, norepinephrine, oxytocin
+    |-- PAD space (Pleasure-Arousal-Dominance)
+    '-- Mood -> response style, persists across sessions
+    |
+[Consciousness]
+    |-- World model (Endsley L1-L3 situation awareness)
+    |-- Metacognition (reasoning quality tracking)
+    |-- Strategy bandit (multi-armed bandit for approach selection)
+    |-- Intrinsic motivation (curiosity-driven exploration)
+    |-- Prompt evolution (GEPA self-improvement)
+    '-- Idle presence (cognitive load, sleep scheduling)
+    |
+[Sleep] (NeuroDream)
+    |-- Light: re-score memories by importance
+    |-- Deep: extract patterns, compress, groom KG
+    '-- REM: novel connections, proactive message prep
+    |
+RESPONSE (shaped by mood, grounded in memory, consistent with identity)
+```
 
 ---
 
@@ -89,7 +213,7 @@ Or lock to any model: `/model chatgpt:gpt-5.4-pro`
 
 | Command | Description |
 |---------|-------------|
-| `/model` | Pick model interactively (56+ models) |
+| `/model` | Pick model interactively (60+ models) |
 | `/model auto` | Return to auto-routing |
 | `/clear` | Clear conversation history |
 | `/compact` | Manually compact context window |
@@ -102,97 +226,57 @@ Or lock to any model: `/model chatgpt:gpt-5.4-pro`
 
 ---
 
-## Architecture
-
-```
-USER INPUT
-    │
-[Fast-path] ── simple? ──> 8B local model instant response
-    │
-[ReAct Loop] (1 LLM call per step)
-    ├── Tool RAG selects 5-8 relevant tools per query
-    ├── Thought + Action in single call
-    ├── Code agent mode for complex tasks (LLM writes Python)
-    ├── Adaptive planning with re-plan every 3 steps
-    └── Loop guards (dedup, failure count, iteration cap)
-    │
-[Memory]
-    ├── SQLite + FTS5 + vector embeddings
-    ├── Kuzu temporal KG (entities + relationships)
-    ├── BM25 + semantic + graph retrieval → RRF fusion
-    ├── Cross-encoder reranking (ms-marco-MiniLM)
-    ├── FadeMem decay (2-week half-life)
-    └── Emotional PAD tagging on every memory
-    │
-[Emotion] (ALMA Engine)
-    ├── Neuromodulators: dopamine, serotonin, norepinephrine, oxytocin
-    ├── Mood → response style (show, don't tell)
-    └── Persists across sessions with time decay
-    │
-[Inner Life]
-    ├── Narrative self-model (evolves, loaded every session)
-    ├── Talker/Thinker split (async private reasoning)
-    ├── Temporal grounding (time awareness on reconnection)
-    └── Curiosity driven by KG gap detection
-    │
-[Sleep] (NeuroDream)
-    ├── Light: re-score memories by importance
-    ├── Deep: extract patterns, compress, groom KG
-    └── REM: novel connections, proactive message prep
-    │
-RESPONSE (shaped by mood, grounded in memory, consistent with identity)
-```
-
----
-
-## Project Config
-
-Create `AURA.md` in any project root (`aura init`):
-
-```yaml
----
-tier: balanced
-model: qwen3.5:397b-cloud
-test_cmd: pytest
-auto_test: true
-permissions:
-  shell: auto
-  edit_file: auto
----
-# My Project
-Project-specific instructions for AURA go here.
-```
-
----
-
-## Surfaces
-
-### CLI
-The primary interface. Interactive chat, one-shot tasks, session resume, voice mode.
-
-### Web UI
-React + FastAPI at `localhost:5173`. Panels for emotion state, memory heatmap, inner thoughts, proactive awareness, NeuroDream stats.
-
-```bash
-python run_web.py             # API server (localhost:8000)
-cd web && npm run dev         # Web UI (localhost:5173)
-```
-
-### Browser Extension
-Chrome/Firefox sidebar with chat, search, page summarization. Shadow DOM isolated.
-
----
-
 ## Security
 
-- API key auth with constant-time comparison
-- Shell command blocklist + allowlist + injection detection
-- Cypher query sanitization (KG)
-- AST-validated code sandbox with E2B fallback
+- API key auth with constant-time comparison (AURA_API_AUTH_ENABLED)
+- Shell command blocklist + token-based command blocking + cwd validation
+- SQL multi-statement injection prevention
+- AST-validated custom tool sandbox with dynamic import blocking
 - Path traversal protection on all file endpoints
-- SSRF protection with IPv6 + redirect checks
-- Rate limiting middleware
+- SSRF protection (private IP blocking, rate limiting, size caps)
+- DOMPurify sanitization on all rendered HTML in extension
+- CSP: `script-src 'self'; object-src 'self'` on extension
+- Iframe sandbox (`allow-scripts` only) for artifact preview
+- URL validation on all navigation and fetch calls
+- Rate limiting middleware (configurable per-IP)
 - Permission system (AUTO/PROMPT/BLOCKED tiers)
+
+---
+
+## Project Structure
+
+```
+aura/                     # Core Python package
+  brain.py                # OllamaBrain — reasoning engine (2600 lines)
+  agent.py                # ApprenticeAgent — orchestrator (5200 lines)
+  config.py               # Thread-safe configuration
+  memory/                 # Unified memory system (SQLite + FTS5 + KG)
+  emotion/                # ALMA engine (PAD space, neuromodulators)
+  consciousness/          # World model, metacognition, strategy bandit
+  evolution/              # GEPA prompt evolution engine
+  proactive/              # Monitors, gateway daemon, persistence
+  tools/                  # 50+ tool implementations
+  core/                   # Agentic loop, router, permissions, MCP server
+  cli/                    # Terminal UI (Rich-based)
+  auth/                   # ChatGPT OAuth, client
+  messaging/              # Telegram bot, WhatsApp adapter
+  channels/               # Discord, Signal, LINE adapters
+
+api/                      # FastAPI web server
+  routes/                 # 30+ route files
+  services/               # Agent service, inner thoughts engine
+
+extension-src/            # Browser extension (TypeScript + React)
+  src/panels/             # 24 panel components
+  src/components/         # Shared UI components
+  src/content.ts          # Content script (4700 lines)
+  background.ts           # Service worker
+  src/youtube-inject.ts   # YouTube subtitle interception
+  src/netflix-inject.ts   # Netflix subtitle interception
+
+web/                      # React web UI
+tests/                    # 445+ tests
+```
 
 ---
 
@@ -201,7 +285,7 @@ Chrome/Firefox sidebar with chat, search, page summarization. Shadow DOM isolate
 ### Prerequisites
 - Python 3.12+
 - [Ollama](https://ollama.ai) running locally
-- Optional: Node.js 18+ (Web UI), ChatGPT subscription (OAuth models)
+- Optional: Node.js 18+ (Web UI / Extension), ChatGPT subscription (OAuth models)
 
 ### Setup
 ```bash
@@ -212,17 +296,21 @@ cp .env.example .env          # Add your API keys
 aura doctor                   # Verify setup
 ```
 
+### Extension Build
+```bash
+cd extension-src
+npm install
+npm run build
+cd ..
+python build.py chrome        # Output: dist-chrome/
+python build.py firefox       # Output: dist-firefox/
+```
+
 ---
 
-## Roadmap
+## Version
 
-All core phases complete. See [NEW_AURA_ROADMAP.md](NEW_AURA_ROADMAP.md).
-
-- **Phase 1**: Engine — ReAct loop, Tool RAG, model routing
-- **Phase 2**: Memory — SQLite + Kuzu, BM25 + reranking, FadeMem
-- **Phase 3**: Alive — emotion→behavior loop, narrative self-model
-- **Phase 4**: Dreams — NeuroDream phases, proactive curiosity
-- **Phase 5**: Polish — code agent, adaptive planning, ChatGPT auth
+**v4.3.0** — 833 Python files, 24-panel browser extension, 445+ tests passing.
 
 ---
 
