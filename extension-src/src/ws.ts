@@ -1,4 +1,4 @@
-import { WS_URL, HTTP } from './api';
+import { WS_URL, HTTP, API_KEY } from './api';
 import { useStore } from './store';
 
 let _wsRetryDelay = 1000;
@@ -46,7 +46,9 @@ export function connectWS() {
   const { ws } = useStore.getState();
   if (ws && ws.readyState <= 1) return;
 
-  const socket = new WebSocket(WS_URL);
+  // Pass API key via query param (browsers cannot send custom headers on WebSocket)
+  const wsUrl = API_KEY ? `${WS_URL}?api_key=${encodeURIComponent(API_KEY)}` : WS_URL;
+  const socket = new WebSocket(wsUrl);
 
   // 5s connection timeout — if not open by then, close and let onclose retry
   _connTimer = setTimeout(() => {
@@ -189,7 +191,9 @@ export async function fetchStatus() {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 30_000);
     try {
-      const r = await fetch(`${HTTP}/api/status`, { signal: ctrl.signal });
+      const headers: Record<string, string> = {};
+      if (API_KEY) headers['X-API-Key'] = API_KEY;
+      const r = await fetch(`${HTTP}/api/status`, { signal: ctrl.signal, headers });
       if (!r.ok) {
         useStore.getState().setWsReady(false);
         useStore.getState().setBackendStatus('offline');

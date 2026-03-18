@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { useStore } from '../store';
-import { HTTP, apiFetch } from '../api';
+import { HTTP, apiFetch, getAuthHeaders } from '../api';
 import { md } from '../markdown';
 
 const COMPARE_DEFAULTS = ['gemini-3-flash-preview:cloud', 'minimax-m2.7:cloud', 'kimi-k2-thinking:cloud'];
@@ -24,7 +24,7 @@ export default function ComparePanel() {
         setMdlLists(all.filter(n => n.includes(':cloud')), all.filter(n => !n.includes(':cloud')));
       } catch {
         try {
-          const d = await fetch(`${HTTP}/api/models/available`).then(r => r.json());
+          const d = await fetch(`${HTTP}/api/models/available`, { headers: getAuthHeaders() }).then(r => r.json());
           setMdlLists((d.cloud || []).map((m: any) => m.name), (d.local || []).map((m: any) => m.name));
         } catch {}
       }

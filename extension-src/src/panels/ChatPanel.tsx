@@ -4,14 +4,15 @@ import MessageBubble from '../components/MessageBubble';
 import HomeScreen from '../components/HomeScreen';
 import ContextBar from '../components/ContextBar';
 import InputBar from '../components/InputBar';
+import DropZone from '../components/DropZone';
 import { PAGE_KEYWORDS } from '../ws';
 import { getPageContentCached, getCurrentTab } from '../ext';
-import type { StreamState } from '../types';
+import type { StreamState, FileAttachment } from '../types';
 import { speak } from '../tts';
 import { ChevronDown, Brain, Pen } from 'lucide-react';
 
 export default function ChatPanel() {
-  const { messages, addMessage, activeStream, setActiveStream, setPendingCtx } = useStore();
+  const { messages, addMessage, activeStream, setActiveStream, setPendingCtx, saveCurrentConversation } = useStore();
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const streamingMsgId = useRef<string | null>(null);
@@ -19,6 +20,8 @@ export default function ChatPanel() {
   const [newMsgCount, setNewMsgCount] = useState(0);
   const [scrollProgress, setScrollProgress] = useState(0);
   const isAutoScrolling = useRef(false);
+  const [fileAttachments, setFileAttachments] = useState<FileAttachment[]>([]);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Check if user is near the bottom
   const isNearBottom = useCallback(() => {
@@ -75,7 +78,7 @@ export default function ChatPanel() {
     useStore.getState().addMessage({ id: crypto.randomUUID(), role: 'ai', text, timestamp: Date.now() });
   }, []);
 
-  const sendMessage = useCallback(async (text: string) => {
+  const sendMessage = useCallback(async (text: string, overrideModel?: string) => {
     if (!text.trim()) return;
     const st = useStore.getState();
     if (!st.wsReady) { sysmsg('AURA is offline — start the backend server.'); return; }
@@ -114,6 +117,24 @@ export default function ChatPanel() {
     if (ctx) {
       full = `[Context: ${ctx.title || ctx.url || 'selection'}]\n${ctx.text}\n\n---\n${text}`;
       setPendingCtx(null);
+    }
+
+    // Prepend file attachment context
+    if (fileAttachments.length > 0) {
+      const fileContextParts: string[] = [];
+      for (const att of fileAttachments) {
+        if (att.type === 'text' || att.type === 'code') {
+          fileContextParts.push(`[File: ${att.name}]\n${att.textContent || '(empty file)'}`);
+        } else if (att.type === 'pdf') {
+          fileContextParts.push(`[PDF: ${att.name}]`);
+        } else if (att.type === 'image') {
+          fileContextParts.push(`[Image: ${att.name}]`);
+        }
+      }
+      if (fileContextParts.length > 0) {
+        full = fileContextParts.join('\n\n') + '\n\n---\n' + full;
+      }
+      setFileAttachments([]);
     }
 
     if (thinkingMode) full = '[Think step by step before answering]\n' + full;
@@ -155,7 +176,7 @@ export default function ChatPanel() {
       type: 'chat',
       message: full,
       conversation_id: conversationId,
-      model: getModel('chat'),
+      model: overrideModel || getModel('chat'),
     };
     if (customInstructions) payload.custom_instructions = customInstructions;
     if (userName) payload.user_name = userName;
@@ -164,7 +185,7 @@ export default function ChatPanel() {
       payload.thinking_level = thinkingLevel;
     }
     socket!.send(JSON.stringify(payload));
-  }, [sysmsg, addMessage, setActiveStream, setPendingCtx]);
+  }, [sysmsg, addMessage, setActiveStream, setPendingCtx, fileAttachments]);
 
   // Handle aura-send events dispatched by AskPanel / ToolsPanel
   const sendMessageRef = useRef(sendMessage);
@@ -197,9 +218,41 @@ export default function ChatPanel() {
     return () => clearInterval(interval);
   }, [isThinkingPhase, thinkingStartTime]);
 
+  // Auto-save conversation when streaming finishes (activeStream goes from truthy to null)
+  const prevStreamRef = useRef(activeStream);
+  useEffect(() => {
+    const wasStreaming = prevStreamRef.current !== null;
+    const nowIdle = activeStream === null;
+    prevStreamRef.current = activeStream;
+    if (wasStreaming && nowIdle && messages.length > 0) {
+      // Debounce — wait 500ms for final state to settle
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => {
+        saveCurrentConversation();
+      }, 500);
+    }
+  }, [activeStream, messages.length, saveCurrentConversation]);
+
+  // Cleanup save timer
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, []);
+
+  // Handle files dropped or pasted
+  const handleFilesAdded = useCallback((files: FileAttachment[]) => {
+    setFileAttachments(prev => [...prev, ...files]);
+  }, []);
+
+  const handleRemoveAttachment = useCallback((id: string) => {
+    setFileAttachments(prev => prev.filter(f => f.id !== id));
+  }, []);
+
   const isEmpty = messages.length === 0 && !activeStream;
 
   return (
+    <DropZone onFilesAdded={handleFilesAdded}>
     <div className="flex flex-col h-full overflow-hidden" style={{ position: 'relative' }}>
       <ContextBar />
 
@@ -339,7 +392,14 @@ export default function ChatPanel() {
       )}
 
       {/* Input */}
-      <InputBar onSend={sendMessage} featureKey="chat" />
+      <InputBar
+        onSend={sendMessage}
+        featureKey="chat"
+        fileAttachments={fileAttachments}
+        onRemoveAttachment={handleRemoveAttachment}
+        onFilesAdded={handleFilesAdded}
+      />
     </div>
+    </DropZone>
   );
 }

@@ -1,7 +1,31 @@
 import { create } from 'zustand';
-import type { Message, StreamState, Context, PanelId, ThinkingLevel } from './types';
-import { HTTP } from './api';
+import type { Message, StreamState, Context, PanelId, ThinkingLevel, ConversationMeta } from './types';
+import { HTTP, API_KEY } from './api';
 import ext from './ext';
+
+// --- Conversation history constants ---
+const MAX_CONVERSATIONS = 50;
+const MAX_MESSAGES_PER_CONVERSATION = 100;
+const CONV_LIST_KEY = 'aura_conversations';
+const ACTIVE_CONV_KEY = 'aura_active_conversation';
+const convStorageKey = (id: string) => `aura_chat_${id}`;
+
+// --- Storage helpers (chrome.storage.local) ---
+function storageGet(keys: string[]): Promise<Record<string, any>> {
+  return new Promise((resolve) => {
+    ext?.storage?.local?.get(keys, (d: any) => resolve(d || {}));
+  });
+}
+function storageSet(data: Record<string, any>): Promise<void> {
+  return new Promise((resolve) => {
+    ext?.storage?.local?.set(data, () => resolve());
+  });
+}
+function storageRemove(keys: string[]): Promise<void> {
+  return new Promise((resolve) => {
+    ext?.storage?.local?.remove(keys, () => resolve());
+  });
+}
 
 interface AuraStore {
   // WebSocket
@@ -23,6 +47,11 @@ interface AuraStore {
   messages: Message[];
   activeStream: StreamState | true | null;
   pendingCtx: Context | null;
+
+  // Conversation History
+  conversations: ConversationMeta[];
+  activeConversationId: string | null;
+  historyLoaded: boolean;
 
   // Modes
   thinkingMode: boolean;
@@ -65,6 +94,14 @@ interface AuraStore {
   loadModels: () => Promise<void>;
   clearAll: () => void;
   getModel: (feature: string) => string | null;
+
+  // Conversation History Actions
+  loadConversationList: () => Promise<void>;
+  saveCurrentConversation: () => Promise<void>;
+  loadConversation: (id: string) => Promise<void>;
+  deleteConversation: (id: string) => Promise<void>;
+  clearAllHistory: () => Promise<void>;
+  newConversation: () => Promise<void>;
 }
 
 export const useStore = create<AuraStore>((set, get) => {
@@ -129,6 +166,9 @@ export const useStore = create<AuraStore>((set, get) => {
     messages: [],
     activeStream: null,
     pendingCtx: null,
+    conversations: [],
+    activeConversationId: null,
+    historyLoaded: false,
     thinkingMode: false,
     thinkingLevel: 'medium' as ThinkingLevel,
     deepResearch: false,
@@ -155,11 +195,23 @@ export const useStore = create<AuraStore>((set, get) => {
       document.documentElement.classList.toggle('light', next === 'light');
       ext?.storage?.local?.set({ theme: next });
     },
-    addMessage: (msg) => set(s => {
-      const msgs = [...s.messages, msg];
-      // Cap at 500 messages to prevent unbounded growth
-      return { messages: msgs.length > 500 ? msgs.slice(-500) : msgs };
-    }),
+    addMessage: (msg) => {
+      set(s => {
+        const msgs = [...s.messages, msg];
+        // Cap at 500 messages to prevent unbounded growth
+        return { messages: msgs.length > 500 ? msgs.slice(-500) : msgs };
+      });
+      // Debounced auto-save: save after each user+ai pair settles
+      // We do it on a microtask so streaming doesn't hammer storage
+      if (msg.role === 'user') {
+        const s = get();
+        // Create conversation on first user message if none active
+        if (!s.activeConversationId) {
+          const newId = crypto.randomUUID();
+          set({ activeConversationId: newId });
+        }
+      }
+    },
     setActiveStream: (activeStream) => set({ activeStream }),
     setPendingCtx: (pendingCtx) => set({ pendingCtx }),
     setThinkingMode: (thinkingMode) => set({ thinkingMode }),
@@ -226,7 +278,7 @@ export const useStore = create<AuraStore>((set, get) => {
 
       // 2. Try backend for models (also gets ChatGPT list)
       try {
-        const d = await fetch(`${HTTP}/api/models/available`, { signal: AbortSignal.timeout(3000) }).then(r => r.json());
+        const d = await fetch(`${HTTP}/api/models/available`, { signal: AbortSignal.timeout(3000), headers: API_KEY ? { 'X-API-Key': API_KEY } : {} }).then(r => r.json());
         // Merge backend models with Ollama models (Ollama may have more)
         const backendCloud = (d.cloud || []).map((m: any) => m.name || m);
         const backendLocal = (d.local || []).map((m: any) => m.name || m);
@@ -267,10 +319,141 @@ export const useStore = create<AuraStore>((set, get) => {
       });
       // Tell backend to clear
       if (s.wsReady && s.ws?.readyState === WebSocket.OPEN) {
-        fetch(`${HTTP}/api/chat/clear`, { method: 'POST' }).catch(() => {});
+        fetch(`${HTTP}/api/chat/clear`, { method: 'POST', headers: API_KEY ? { 'X-API-Key': API_KEY } : {} }).catch(() => {});
       }
     },
 
     getModel: (feature) => get().featureModels[feature] || null,
+
+    // --- Conversation History ---
+
+    loadConversationList: async () => {
+      const data = await storageGet([CONV_LIST_KEY, ACTIVE_CONV_KEY]);
+      const convs: ConversationMeta[] = data[CONV_LIST_KEY] || [];
+      const activeId: string | null = data[ACTIVE_CONV_KEY] || null;
+      set({ conversations: convs, historyLoaded: true });
+
+      // Restore last active conversation
+      if (activeId && convs.some(c => c.id === activeId)) {
+        await get().loadConversation(activeId);
+      }
+    },
+
+    saveCurrentConversation: async () => {
+      const s = get();
+      if (s.messages.length === 0) return;
+
+      const convId = s.activeConversationId || crypto.randomUUID();
+      if (!s.activeConversationId) set({ activeConversationId: convId });
+
+      // Build title from first user message, truncated
+      const firstUserMsg = s.messages.find(m => m.role === 'user');
+      const title = firstUserMsg
+        ? firstUserMsg.text.slice(0, 60) + (firstUserMsg.text.length > 60 ? '...' : '')
+        : 'New conversation';
+
+      // Strip base64 image data from messages before persisting
+      const messagesToSave = s.messages.slice(-MAX_MESSAGES_PER_CONVERSATION).map(m => ({
+        id: m.id,
+        role: m.role,
+        text: m.text,
+        timestamp: m.timestamp,
+        thinkingContent: m.thinkingContent,
+      }));
+
+      const meta: ConversationMeta = {
+        id: convId,
+        title,
+        timestamp: Date.now(),
+        messageCount: s.messages.length,
+      };
+
+      // Update conversations list
+      let convs = [...s.conversations];
+      const existingIdx = convs.findIndex(c => c.id === convId);
+      if (existingIdx >= 0) {
+        convs[existingIdx] = meta;
+      } else {
+        convs.unshift(meta);
+      }
+      // Cap at MAX_CONVERSATIONS — remove oldest
+      if (convs.length > MAX_CONVERSATIONS) {
+        const removed = convs.splice(MAX_CONVERSATIONS);
+        // Clean up storage for removed conversations
+        const keysToRemove = removed.map(c => convStorageKey(c.id));
+        storageRemove(keysToRemove).catch(() => {});
+      }
+      // Sort by timestamp descending
+      convs.sort((a, b) => b.timestamp - a.timestamp);
+
+      set({ conversations: convs });
+      await storageSet({
+        [CONV_LIST_KEY]: convs,
+        [ACTIVE_CONV_KEY]: convId,
+        [convStorageKey(convId)]: messagesToSave,
+      });
+    },
+
+    loadConversation: async (id: string) => {
+      const data = await storageGet([convStorageKey(id)]);
+      const messages: Message[] = data[convStorageKey(id)] || [];
+      set({
+        messages,
+        activeConversationId: id,
+        activeStream: null,
+        conversationId: null,
+        pendingCtx: null,
+      });
+      await storageSet({ [ACTIVE_CONV_KEY]: id });
+      // Tell backend to clear since we're loading a different conversation
+      const s = get();
+      if (s.wsReady && s.ws?.readyState === WebSocket.OPEN) {
+        fetch(`${HTTP}/api/chat/clear`, { method: 'POST', headers: API_KEY ? { 'X-API-Key': API_KEY } : {} }).catch(() => {});
+      }
+    },
+
+    deleteConversation: async (id: string) => {
+      const s = get();
+      const convs = s.conversations.filter(c => c.id !== id);
+      set({ conversations: convs });
+      await storageSet({ [CONV_LIST_KEY]: convs });
+      await storageRemove([convStorageKey(id)]);
+      // If we deleted the active one, clear chat
+      if (s.activeConversationId === id) {
+        set({ messages: [], activeConversationId: null, conversationId: null });
+        await storageRemove([ACTIVE_CONV_KEY]);
+      }
+    },
+
+    clearAllHistory: async () => {
+      const s = get();
+      const keysToRemove = s.conversations.map(c => convStorageKey(c.id));
+      keysToRemove.push(CONV_LIST_KEY, ACTIVE_CONV_KEY);
+      set({ conversations: [], activeConversationId: null });
+      await storageRemove(keysToRemove);
+    },
+
+    newConversation: async () => {
+      const s = get();
+      // Save current conversation first if it has messages
+      if (s.messages.length > 0) {
+        await s.saveCurrentConversation();
+      }
+      // Clear for a new conversation
+      set({
+        messages: [],
+        activeStream: null,
+        conversationId: null,
+        activeConversationId: null,
+        pendingCtx: null,
+        thinkingMode: false,
+        deepResearch: false,
+      });
+      await storageRemove([ACTIVE_CONV_KEY]);
+      // Tell backend to clear
+      if (s.wsReady && s.ws?.readyState === WebSocket.OPEN) {
+        fetch(`${HTTP}/api/chat/clear`, { method: 'POST', headers: API_KEY ? { 'X-API-Key': API_KEY } : {} }).catch(() => {});
+      }
+    },
   };
 });

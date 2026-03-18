@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Download, Upload, Scissors, ArrowUpCircle, Type, Eye, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
-import { HTTP } from '../api';
+import { HTTP, getAuthHeaders } from '../api';
 
 // ── Generate Tab Constants ──────────────────────────────────────────────────
 
@@ -347,7 +347,7 @@ function EditTab() {
         // Send to chat endpoint with image attachment
         const res = await fetch(`${HTTP}/api/chat`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           body: JSON.stringify({
             message: 'Describe this image in detail. What do you see?',
             conversation_id: '__image_describe__',
@@ -372,7 +372,7 @@ function EditTab() {
 
         const res = await fetch(`${HTTP}${tool.endpoint}`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           body: JSON.stringify(body),
           signal: ctrl.signal,
         });
@@ -622,7 +622,7 @@ function GenerateTab() {
     try {
       const res = await fetch(`${HTTP}/api/image/generate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ prompt: fullPrompt, negative_prompt: neg, steps: 20 }),
         signal: ctrl.signal,
       });

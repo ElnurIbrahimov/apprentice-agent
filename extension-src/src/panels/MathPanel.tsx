@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store';
 import ModelPill from '../components/ModelPill';
-import { HTTP } from '../api';
+import { HTTP, getAuthHeaders } from '../api';
 
 export default function MathPanel() {
   const { getModel } = useStore();
@@ -31,7 +31,7 @@ export default function MathPanel() {
     try {
       const resp = await fetch(`${HTTP}/api/math/solve`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ problem, mode, model: getModel('math') }),
         signal: ctrl.signal,
       });

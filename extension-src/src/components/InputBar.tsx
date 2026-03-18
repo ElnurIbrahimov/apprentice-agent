@@ -1,9 +1,10 @@
-import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { Brain, Globe, FileText, X, Paperclip, Mic } from 'lucide-react';
+import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
+import { Brain, Globe, FileText, X, Paperclip, Mic, Hash, Zap, Image as ImageIcon, FileCode } from 'lucide-react';
 import { useStore } from '../store';
 import { getPageContentCached } from '../ext';
 import ModelPill from './ModelPill';
-import type { ThinkingLevel } from '../types';
+import { processFile } from './DropZone';
+import type { ThinkingLevel, FileAttachment } from '../types';
 
 // Web Speech API types
 interface SpeechRecognitionEvent {
@@ -48,11 +49,43 @@ const THINKING_TOOLTIPS: Record<ThinkingLevel, string> = {
 
 const THINKING_CYCLE: ThinkingLevel[] = ['low', 'medium', 'high'];
 
+/* ── Slash command presets ── */
+interface SlashCommand {
+  command: string;
+  label: string;
+  template: string;
+  icon: string;
+}
+
+const SLASH_PRESETS: SlashCommand[] = [
+  { command: 'explain', label: 'Explain', template: 'Explain this in simple terms: ', icon: '💡' },
+  { command: 'summarize', label: 'Summarize', template: 'Summarize the following: ', icon: '📋' },
+  { command: 'translate', label: 'Translate', template: 'Translate to English: ', icon: '🌐' },
+  { command: 'code', label: 'Code', template: 'Write code for: ', icon: '💻' },
+  { command: 'fix', label: 'Fix', template: 'Fix this code: ', icon: '🔧' },
+  { command: 'improve', label: 'Improve', template: 'Improve this text: ', icon: '✨' },
+  { command: 'email', label: 'Email', template: 'Draft a professional email about: ', icon: '📧' },
+  { command: 'review', label: 'Review', template: 'Review this code for bugs and improvements: ', icon: '🔍' },
+];
+
+/* ── Autocomplete item type ── */
+interface AutocompleteItem {
+  id: string;
+  label: string;
+  sublabel?: string;
+  icon?: string;
+  type: 'model' | 'slash';
+  value: string; // model name or template text
+}
+
 interface Props {
-  onSend: (text: string) => void;
+  onSend: (text: string, overrideModel?: string) => void;
   featureKey?: string;
   placeholder?: string;
   disabled?: boolean;
+  fileAttachments?: FileAttachment[];
+  onRemoveAttachment?: (id: string) => void;
+  onFilesAdded?: (files: FileAttachment[]) => void;
 }
 
 const PLACEHOLDER_SUGGESTIONS = [
@@ -66,8 +99,9 @@ const PLACEHOLDER_SUGGESTIONS = [
 const MAX_VISIBLE_LINES = 6;
 const LINE_HEIGHT_PX = 20.25; // 13.5px * 1.5
 const MAX_TEXTAREA_HEIGHT = Math.ceil(MAX_VISIBLE_LINES * LINE_HEIGHT_PX) + 20; // + padding
+const MAX_POPUP_ITEMS = 6;
 
-export default function InputBar({ onSend, featureKey = 'chat', placeholder, disabled }: Props) {
+export default function InputBar({ onSend, featureKey = 'chat', placeholder, disabled, fileAttachments = [], onRemoveAttachment, onFilesAdded }: Props) {
   const { thinkingMode, setThinkingMode, thinkingLevel, setThinkingLevel, deepResearch, setDeepResearch, activeStream, setPendingCtx, pendingCtx } = useStore();
   const [showThinkTooltip, setShowThinkTooltip] = useState(false);
   const thinkLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -78,9 +112,85 @@ export default function InputBar({ onSend, featureKey = 'chat', placeholder, dis
   const [charCount, setCharCount] = useState(0);
   const [placeholderIdx, setPlaceholderIdx] = useState(0);
   const [placeholderFade, setPlaceholderFade] = useState(true);
-  const [attachments, setAttachments] = useState<{ name: string; id: string }[]>([]);
+
+  // Autocomplete state
+  const [acOpen, setAcOpen] = useState(false);
+  const [acType, setAcType] = useState<'model' | 'slash' | null>(null);
+  const [acQuery, setAcQuery] = useState('');
+  const [acIndex, setAcIndex] = useState(0);
+  const [acTriggerPos, setAcTriggerPos] = useState(0); // char index where @ or / was typed
+  const [mentionedModel, setMentionedModel] = useState<string | null>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
 
   const isStreaming = !!activeStream;
+
+  // Build model list from store for @ mentions
+  const { mdlCloudList, mdlLocalList, mdlChatgptList, loadModels } = useStore();
+
+  const allModelItems = useMemo<AutocompleteItem[]>(() => {
+    const items: AutocompleteItem[] = [];
+    for (const m of mdlChatgptList) {
+      items.push({
+        id: m,
+        label: m.replace(/^chatgpt:/, ''),
+        sublabel: 'chatgpt',
+        type: 'model',
+        value: m,
+      });
+    }
+    for (const m of mdlCloudList) {
+      items.push({
+        id: m,
+        label: m.replace(/:cloud$/, ''),
+        sublabel: 'cloud',
+        type: 'model',
+        value: m,
+      });
+    }
+    for (const m of mdlLocalList) {
+      items.push({
+        id: m,
+        label: m,
+        sublabel: 'local',
+        type: 'model',
+        value: m,
+      });
+    }
+    return items;
+  }, [mdlCloudList, mdlLocalList, mdlChatgptList]);
+
+  // Build slash command items
+  const slashItems = useMemo<AutocompleteItem[]>(() => {
+    return SLASH_PRESETS.map(s => ({
+      id: `slash-${s.command}`,
+      label: `/${s.command}`,
+      sublabel: s.template.slice(0, 40),
+      icon: s.icon,
+      type: 'slash' as const,
+      value: s.template,
+    }));
+  }, []);
+
+  // Filtered items based on query
+  const acItems = useMemo<AutocompleteItem[]>(() => {
+    if (!acOpen || !acType) return [];
+    const q = acQuery.toLowerCase();
+    let source = acType === 'model' ? allModelItems : slashItems;
+    if (q) {
+      source = source.filter(item =>
+        item.label.toLowerCase().includes(q) ||
+        (item.sublabel && item.sublabel.toLowerCase().includes(q))
+      );
+    }
+    return source.slice(0, MAX_POPUP_ITEMS);
+  }, [acOpen, acType, acQuery, allModelItems, slashItems]);
+
+  // Keep acIndex in bounds
+  useEffect(() => {
+    if (acIndex >= acItems.length) {
+      setAcIndex(Math.max(0, acItems.length - 1));
+    }
+  }, [acItems.length, acIndex]);
 
   const autoResize = useCallback(() => {
     const el = textareaRef.current;
@@ -91,12 +201,114 @@ export default function InputBar({ onSend, featureKey = 'chat', placeholder, dis
     el.style.overflowY = el.scrollHeight > MAX_TEXTAREA_HEIGHT ? 'auto' : 'hidden';
   }, []);
 
+  // Detect @ and / triggers in textarea value
+  const detectAutocomplete = useCallback((val: string, cursorPos: number) => {
+    // Check for @ mention trigger
+    // Look backwards from cursor for an unfinished @mention
+    const beforeCursor = val.slice(0, cursorPos);
+
+    // @ trigger: find last @ that is at start or preceded by whitespace, with no space after it
+    const atMatch = beforeCursor.match(/(^|[\s])@([^\s]*)$/);
+    if (atMatch) {
+      const query = atMatch[2]; // text after @
+      const triggerPos = beforeCursor.length - query.length - 1; // position of @
+      // Ensure models are loaded
+      if (!allModelItems.length) loadModels();
+      setAcType('model');
+      setAcQuery(query);
+      setAcTriggerPos(triggerPos);
+      setAcOpen(true);
+      setAcIndex(0);
+      return;
+    }
+
+    // / trigger: only at the very start of input or after a newline
+    const slashMatch = beforeCursor.match(/(^|\n)\/([^\s]*)$/);
+    if (slashMatch) {
+      const query = slashMatch[2];
+      const triggerPos = beforeCursor.length - query.length - 1;
+      setAcType('slash');
+      setAcQuery(query);
+      setAcTriggerPos(triggerPos);
+      setAcOpen(true);
+      setAcIndex(0);
+      return;
+    }
+
+    // No trigger found — close popup
+    if (acOpen) {
+      setAcOpen(false);
+      setAcType(null);
+      setAcQuery('');
+    }
+  }, [acOpen, allModelItems.length, loadModels]);
+
   const handleInput = useCallback(() => {
     autoResize();
-    const val = textareaRef.current?.value || '';
+    const el = textareaRef.current;
+    if (!el) return;
+    const val = el.value;
     setHasText(val.trim().length > 0);
     setCharCount(val.length);
-  }, [autoResize]);
+    detectAutocomplete(val, el.selectionStart ?? val.length);
+  }, [autoResize, detectAutocomplete]);
+
+  // Select an autocomplete item
+  const selectAcItem = useCallback((item: AutocompleteItem) => {
+    const el = textareaRef.current;
+    if (!el) return;
+
+    const val = el.value;
+    const before = val.slice(0, acTriggerPos); // text before the @ or /
+    const after = val.slice(el.selectionStart ?? val.length); // text after cursor
+
+    if (item.type === 'model') {
+      // Replace @query with @displayName, store model for send
+      const displayName = item.label;
+      el.value = before + '@' + displayName + ' ' + after;
+      setMentionedModel(item.value);
+      // Move cursor after the inserted text
+      const newPos = before.length + 1 + displayName.length + 1;
+      el.setSelectionRange(newPos, newPos);
+    } else {
+      // Slash: replace /command with the template
+      el.value = before + item.value + after;
+      const newPos = before.length + item.value.length;
+      el.setSelectionRange(newPos, newPos);
+    }
+
+    setAcOpen(false);
+    setAcType(null);
+    setAcQuery('');
+    setHasText(el.value.trim().length > 0);
+    setCharCount(el.value.length);
+    autoResize();
+    el.focus();
+  }, [acTriggerPos, autoResize]);
+
+  const dismissAc = useCallback(() => {
+    setAcOpen(false);
+    setAcType(null);
+    setAcQuery('');
+  }, []);
+
+  // --- Clipboard paste handler for images ---
+  const handlePaste = useCallback(async (e: React.ClipboardEvent) => {
+    const items = Array.from(e.clipboardData.items);
+    const imageItems = items.filter(item => item.type.startsWith('image/'));
+
+    if (imageItems.length === 0 || !onFilesAdded) return;
+
+    e.preventDefault();
+    const files: FileAttachment[] = [];
+    for (const item of imageItems) {
+      const file = item.getAsFile();
+      if (!file) continue;
+      const attachment = await processFile(file);
+      if (attachment) files.push(attachment);
+    }
+    if (files.length > 0) onFilesAdded(files);
+  }, [onFilesAdded]);
 
   // --- Speech recognition ---
   const [isRecording, setIsRecording] = useState(false);
@@ -213,26 +425,79 @@ export default function InputBar({ onSend, featureKey = 'chat', placeholder, dis
   };
 
   const handleSend = () => {
-    const text = textareaRef.current?.value.trim();
-    if (!text || isStreaming || disabled) return;
-    onSend(text);
+    const raw = textareaRef.current?.value.trim();
+    if (!raw || isStreaming || disabled) return;
+
+    // Strip @mention from the sent text (clean user message)
+    let text = raw;
+    let modelOverride = mentionedModel;
+
+    // Find and remove @modelName patterns from the text
+    if (modelOverride) {
+      // Remove the @displayName from text (find the mention and strip it)
+      const matchingItem = allModelItems.find(m => m.value === modelOverride);
+      if (matchingItem) {
+        const pattern = '@' + matchingItem.label;
+        text = text.replace(pattern, '').replace(/\s{2,}/g, ' ').trim();
+      }
+    }
+
+    onSend(text, modelOverride || undefined);
+
     if (textareaRef.current) {
       textareaRef.current.value = '';
       setHasText(false);
       setCharCount(0);
+      setMentionedModel(null);
       autoResize();
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // If autocomplete is open, intercept keyboard navigation
+    if (acOpen && acItems.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setAcIndex(prev => (prev + 1) % acItems.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setAcIndex(prev => (prev - 1 + acItems.length) % acItems.length);
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        selectAcItem(acItems[acIndex]);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        dismissAc();
+        return;
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
   };
 
-  const removeAttachment = (id: string) => {
-    setAttachments(prev => prev.filter(a => a.id !== id));
+  const clearMentionedModel = () => {
+    setMentionedModel(null);
+    // Also remove @mention text from textarea if present
+    const el = textareaRef.current;
+    if (el) {
+      const matchingItem = allModelItems.find(m => m.value === mentionedModel);
+      if (matchingItem) {
+        const pattern = '@' + matchingItem.label;
+        el.value = el.value.replace(pattern, '').replace(/\s{2,}/g, ' ').trim();
+        setHasText(el.value.trim().length > 0);
+        setCharCount(el.value.length);
+        autoResize();
+      }
+    }
   };
 
   const canSend = hasText && !isStreaming && !disabled;
@@ -251,22 +516,58 @@ export default function InputBar({ onSend, featureKey = 'chat', placeholder, dis
 
   return (
     <div className="input-bar-root">
-      {/* Attachments area */}
-      {attachments.length > 0 && (
+      {/* File attachments area */}
+      {fileAttachments.length > 0 && (
         <div className="input-attachments">
-          {attachments.map(att => (
+          {fileAttachments.map(att => (
             <div key={att.id} className="input-attachment-pill">
-              <Paperclip size={10} />
+              {att.type === 'image' ? (
+                att.data ? (
+                  <img
+                    src={`data:${att.mimeType};base64,${att.data}`}
+                    alt={att.name}
+                    className="input-attachment-thumb"
+                  />
+                ) : (
+                  <ImageIcon size={10} />
+                )
+              ) : att.type === 'pdf' ? (
+                <FileText size={10} />
+              ) : (
+                <FileCode size={10} />
+              )}
               <span className="input-attachment-name">{att.name}</span>
-              <button
-                className="input-attachment-remove"
-                onClick={() => removeAttachment(att.id)}
-                aria-label="Remove attachment"
-              >
-                <X size={10} />
-              </button>
+              <span className="input-attachment-size">
+                {att.size < 1024 ? `${att.size}B` : `${(att.size / 1024).toFixed(0)}KB`}
+              </span>
+              {onRemoveAttachment && (
+                <button
+                  className="input-attachment-remove"
+                  onClick={() => onRemoveAttachment(att.id)}
+                  aria-label="Remove attachment"
+                >
+                  <X size={10} />
+                </button>
+              )}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Mentioned model indicator */}
+      {mentionedModel && (
+        <div className="input-mention-bar">
+          <Zap size={11} />
+          <span className="input-mention-label">
+            Using <strong>{mentionedModel.replace(/:cloud$/, '').replace(/^chatgpt:/, '')}</strong> for this message
+          </span>
+          <button
+            onClick={clearMentionedModel}
+            className="input-mention-remove"
+            aria-label="Remove model override"
+          >
+            <X size={11} />
+          </button>
         </div>
       )}
 
@@ -299,16 +600,70 @@ export default function InputBar({ onSend, featureKey = 'chat', placeholder, dis
 
       {/* Glass input wrapper */}
       <div className={`input-glass-wrap ${isFocused ? 'input-focused' : ''} ${hasText ? 'has-text' : ''} ${isRecording ? 'input-recording' : ''}`}>
+
+        {/* Autocomplete popup — positioned above textarea */}
+        {acOpen && acItems.length > 0 && (
+          <div ref={popupRef} className="ac-popup">
+            {acItems.map((item, i) => (
+              <div
+                key={item.id}
+                className={`ac-popup-item ${i === acIndex ? 'ac-popup-item-active' : ''}`}
+                onMouseEnter={() => setAcIndex(i)}
+                onMouseDown={(e) => {
+                  e.preventDefault(); // prevent textarea blur
+                  selectAcItem(item);
+                }}
+              >
+                {item.type === 'model' ? (
+                  <>
+                    <Hash size={11} className="ac-popup-icon" />
+                    <span className="ac-popup-label">{item.label}</span>
+                    {item.sublabel && (
+                      <span className={`ac-popup-badge ac-badge-${item.sublabel}`}>
+                        {item.sublabel}
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <span className="ac-popup-emoji">{item.icon}</span>
+                    <span className="ac-popup-label">{item.label}</span>
+                    {item.sublabel && (
+                      <span className="ac-popup-sublabel">{item.sublabel}</span>
+                    )}
+                  </>
+                )}
+              </div>
+            ))}
+            <div className="ac-popup-hint">
+              {acType === 'model' ? (
+                <><kbd>↑↓</kbd> navigate <kbd>↵</kbd> select <kbd>esc</kbd> dismiss</>
+              ) : (
+                <><kbd>↑↓</kbd> navigate <kbd>↵</kbd> insert <kbd>esc</kbd> dismiss</>
+              )}
+            </div>
+          </div>
+        )}
+
         <textarea
           ref={textareaRef}
           rows={1}
           placeholder={currentPlaceholder}
           onInput={handleInput}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           disabled={disabled || isStreaming}
           className={`input-textarea ${placeholderFade ? 'placeholder-visible' : 'placeholder-hidden'}`}
           onFocus={() => setIsFocused(true)}
-          onBlur={() => setIsFocused(false)}
+          onBlur={() => {
+            setIsFocused(false);
+            // Delay dismissing AC so click events on popup items fire first
+            setTimeout(() => {
+              if (!popupRef.current?.contains(document.activeElement)) {
+                dismissAc();
+              }
+            }, 150);
+          }}
         />
 
         {/* Action row */}

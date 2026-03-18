@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Search, Brain, Globe, Layers, Sparkles, Check, X, ExternalLink, Clock, Trash2 } from 'lucide-react';
 import { useStore } from '../store';
 import ModelPill from '../components/ModelPill';
-import { HTTP } from '../api';
+import { HTTP, getAuthHeaders } from '../api';
 import { md } from '../markdown';
 
 /* ------------------------------------------------------------------ */
@@ -495,6 +495,7 @@ export default function SearchPanel() {
       const url = `${HTTP}/api/search?${params}`;
       const r = await fetch(url, {
         method: 'GET',
+        headers: getAuthHeaders(),
         signal: ctrl.signal,
       });
 
@@ -600,7 +601,7 @@ export default function SearchPanel() {
         abortRef.current = ctrl;
         const r = await fetch(`${HTTP}/api/chat`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           body: JSON.stringify({
             message: `Search the web for: ${query}`,
             model: model || undefined,

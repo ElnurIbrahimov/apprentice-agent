@@ -7,7 +7,7 @@ import {
 import DOMPurify from 'dompurify';
 import { useStore } from '../store';
 import ModelPill from '../components/ModelPill';
-import { HTTP } from '../api';
+import { HTTP, getAuthHeaders } from '../api';
 
 /* ─── Types ─── */
 type ArtifactType = 'html' | 'react' | 'svg' | 'mermaid' | 'chart' | 'markdown' | 'css';
@@ -422,7 +422,7 @@ export default function ArtifactsPanel() {
     try {
       const resp = await fetch(`${HTTP}/api/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
           message: `${systemPrompt}\n\nTask: ${text}`,
           model: getModel('artifacts') || undefined,

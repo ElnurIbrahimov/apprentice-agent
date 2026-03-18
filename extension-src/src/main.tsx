@@ -3,16 +3,21 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import './styles/globals.css';
 import { connectWS, fetchStatus } from './ws';
+import { initBackendUrl } from './api';
 import ext from './ext';
 import { useStore } from './store';
 import { initShortcuts } from './shortcuts';
 
-// Init
-ext?.runtime?.sendMessage({ type: 'SIDEBAR_READY' });
-fetchStatus();
-setInterval(fetchStatus, 30_000);
-connectWS();
-initShortcuts(useStore);
+// Init — load saved backend URL before connecting
+async function init() {
+  ext?.runtime?.sendMessage({ type: 'SIDEBAR_READY' });
+  await initBackendUrl();
+  fetchStatus();
+  setInterval(fetchStatus, 30_000);
+  connectWS();
+  initShortcuts(useStore);
+}
+init();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

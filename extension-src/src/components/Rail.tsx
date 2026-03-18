@@ -5,6 +5,7 @@ import {
   Database, Zap, FileText, Wrench, File, Mic, Radio,
   Camera, Youtube, FlaskConical, Calculator, Terminal, Code2,
   Image, BarChart2, Bot, Cpu, ChevronDown, Settings, Crosshair,
+  Presentation, Globe,
 } from 'lucide-react';
 import { useStore } from '../store';
 import type { PanelId } from '../types';
@@ -47,6 +48,8 @@ const EXTRA_ITEMS: RailItem[] = [
   { id: 'image', label: 'Image', Icon: Image },
   { id: 'compare', label: 'Compare', Icon: BarChart2 },
   { id: 'capture', label: 'Capture', Icon: Crosshair },
+  { id: 'slides', label: 'Slides', Icon: Presentation },
+  { id: 'webcreator', label: 'Web Creator', Icon: Globe },
   { id: 'agent', label: 'Agent', Icon: Bot },
   { id: 'models', label: 'Models', Icon: Cpu },
   { id: 'settings', label: 'Settings', Icon: Settings },

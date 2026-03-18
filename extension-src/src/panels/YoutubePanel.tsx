@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useStore } from '../store';
 import ModelPill from '../components/ModelPill';
-import { HTTP } from '../api';
+import { HTTP, getAuthHeaders } from '../api';
 import { md } from '../markdown';
 
 interface Segment {
@@ -131,7 +131,7 @@ export default function YoutubePanel() {
       const timeoutId = setTimeout(() => ctrl.abort(), 90000);
       const resp = await fetch(`${HTTP}/api/youtube/summarize`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ url: target }),
         signal: ctrl.signal,
       });

@@ -3517,6 +3517,232 @@ ${description}
         className: (typeof el.className === "string" ? el.className : "").trim()
       };
     }
+    function extractFullPageData() {
+      const clone = document.documentElement.cloneNode(true);
+      const removeSelectors = [
+        "script",
+        "noscript",
+        'iframe[src*="ads"]',
+        'iframe[src*="track"]',
+        'iframe[src*="pixel"]',
+        'iframe[width="0"]',
+        'iframe[height="0"]',
+        'img[src*="pixel"]',
+        'img[src*="track"]',
+        'img[width="1"]',
+        'img[height="1"]',
+        '[id*="cookie"]',
+        '[class*="cookie"]',
+        '[id*="consent"]',
+        '[class*="consent"]',
+        '[id*="gdpr"]',
+        '[class*="gdpr"]',
+        '[id*="onetrust"]',
+        '[class*="onetrust"]',
+        '[id*="CybotCookiebot"]',
+        '[data-testid*="cookie"]',
+        '[id*="ad-"]',
+        '[class*="ad-container"]',
+        '[class*="ad-wrapper"]',
+        'link[rel="preconnect"]',
+        'link[rel="dns-prefetch"]',
+        'meta[http-equiv="Content-Security-Policy"]',
+        "style[data-emotion]"
+        // runtime CSS-in-JS noise
+      ];
+      for (const sel of removeSelectors) {
+        try {
+          clone.querySelectorAll(sel).forEach((el) => el.remove());
+        } catch (_e) {
+        }
+      }
+      clone.querySelectorAll("*").forEach((el) => {
+        const attrs = el.getAttributeNames();
+        for (const attr of attrs) {
+          if (attr.startsWith("on") || attr === "data-analytics" || attr === "data-tracking") {
+            el.removeAttribute(attr);
+          }
+        }
+      });
+      const cleanHtml = clone.outerHTML;
+      const cssMap = {};
+      const keySelectors = [
+        "body",
+        "header",
+        "nav",
+        "main",
+        "footer",
+        "aside",
+        "section",
+        "article",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "p",
+        "a",
+        "button",
+        "input",
+        "textarea",
+        "ul",
+        "ol",
+        "li",
+        "img",
+        "form",
+        "table",
+        "th",
+        "td",
+        '[class*="hero"]',
+        '[class*="card"]',
+        '[class*="btn"]',
+        '[class*="nav"]',
+        '[class*="header"]',
+        '[class*="footer"]',
+        '[class*="sidebar"]',
+        '[class*="container"]',
+        '[class*="wrapper"]',
+        '[class*="grid"]',
+        '[class*="flex"]',
+        '[class*="modal"]',
+        '[class*="banner"]'
+      ];
+      let styleCount = 0;
+      for (const sel of keySelectors) {
+        if (styleCount >= 200) break;
+        try {
+          const els = document.querySelectorAll(sel);
+          for (const el of els) {
+            if (styleCount >= 200) break;
+            const styles = extractComputedStyles(el);
+            if (Object.keys(styles).length > 0) {
+              const key = buildCssSelector(el);
+              const finalKey = cssMap[key] ? `${key}:nth(${styleCount})` : key;
+              cssMap[finalKey] = styles;
+              styleCount++;
+            }
+          }
+        } catch (_e) {
+        }
+      }
+      const cssLines = [];
+      for (const [selector, props] of Object.entries(cssMap)) {
+        cssLines.push(`${selector} {`);
+        for (const [prop, val] of Object.entries(props)) {
+          cssLines.push(`  ${prop}: ${val};`);
+        }
+        cssLines.push("}");
+        cssLines.push("");
+      }
+      const cssString = cssLines.join("\n");
+      const colorSet = /* @__PURE__ */ new Set();
+      const colorProps = ["color", "background-color", "border-color", "outline-color"];
+      const sampleEls = document.querySelectorAll("*");
+      let sampleCount = 0;
+      for (const el of sampleEls) {
+        if (sampleCount >= 500) break;
+        const cs = window.getComputedStyle(el);
+        for (const cp of colorProps) {
+          const val = cs.getPropertyValue(cp);
+          if (val && val !== "rgba(0, 0, 0, 0)" && val !== "transparent" && val !== "inherit" && val !== "initial") {
+            colorSet.add(val);
+          }
+        }
+        sampleCount++;
+      }
+      const colors = Array.from(colorSet).slice(0, 50);
+      const fontSet = /* @__PURE__ */ new Set();
+      for (const el of sampleEls) {
+        if (fontSet.size >= 20) break;
+        const cs = window.getComputedStyle(el);
+        const ff = cs.getPropertyValue("font-family");
+        if (ff) {
+          const fonts2 = ff.split(",").map((f) => f.trim().replace(/^["']|["']$/g, ""));
+          for (const font of fonts2) {
+            if (font && !font.includes("inherit") && !font.includes("initial") && font.length < 50) {
+              fontSet.add(font);
+            }
+          }
+        }
+      }
+      const fonts = Array.from(fontSet).slice(0, 20);
+      const getMeta = (name) => {
+        const el = document.querySelector(`meta[property="${name}"], meta[name="${name}"]`);
+        return (el == null ? void 0 : el.getAttribute("content")) || "";
+      };
+      const faviconEl = document.querySelector('link[rel="icon"], link[rel="shortcut icon"]');
+      const metadata = {
+        title: document.title || "",
+        description: getMeta("description"),
+        og_image: getMeta("og:image"),
+        og_title: getMeta("og:title"),
+        og_description: getMeta("og:description"),
+        og_type: getMeta("og:type"),
+        og_site_name: getMeta("og:site_name"),
+        favicon: (faviconEl == null ? void 0 : faviconEl.getAttribute("href")) || ""
+      };
+      const viewport = {
+        width: window.innerWidth,
+        height: window.innerHeight
+      };
+      const mediaQueries = [];
+      try {
+        for (const sheet of document.styleSheets) {
+          try {
+            const rules = sheet.cssRules || sheet.rules;
+            if (!rules) continue;
+            for (const rule of rules) {
+              if (rule instanceof CSSMediaRule && rule.conditionText) {
+                if (!mediaQueries.includes(rule.conditionText)) {
+                  mediaQueries.push(rule.conditionText);
+                }
+                if (mediaQueries.length >= 20) break;
+              }
+            }
+          } catch (_e) {
+          }
+          if (mediaQueries.length >= 20) break;
+        }
+      } catch (_e) {
+      }
+      const images = [];
+      document.querySelectorAll("img[src]").forEach((img) => {
+        const src = img.getAttribute("src");
+        if (src && !src.startsWith("data:") && images.length < 50) {
+          try {
+            images.push(new URL(src, location.href).href);
+          } catch (_e) {
+            images.push(src);
+          }
+        }
+      });
+      const stylesheets = [];
+      document.querySelectorAll('link[rel="stylesheet"][href]').forEach((link) => {
+        const href = link.getAttribute("href");
+        if (href && stylesheets.length < 20) {
+          try {
+            stylesheets.push(new URL(href, location.href).href);
+          } catch (_e) {
+            stylesheets.push(href);
+          }
+        }
+      });
+      const elementCount = document.querySelectorAll("*").length;
+      return {
+        html: cleanHtml,
+        css: cssString,
+        css_map: cssMap,
+        colors,
+        fonts,
+        metadata,
+        source_url: location.href,
+        viewport,
+        asset_urls: { images, stylesheets },
+        responsive_info: { viewport_width: viewport.width, media_queries: mediaQueries },
+        element_count: elementCount
+      };
+    }
     function startCaptureMode() {
       if (_captureActive) return;
       _captureActive = true;
@@ -3709,6 +3935,15 @@ ${description}
         if (msg.type === "STOP_CAPTURE_MODE") {
           stopCaptureMode();
           sendResponse({ ok: true });
+          return false;
+        }
+        if (msg.type === "EXTRACT_FULL_PAGE") {
+          try {
+            const data = extractFullPageData();
+            sendResponse({ ok: true, data });
+          } catch (err) {
+            sendResponse({ ok: false, error: err.message || "Extraction failed" });
+          }
           return false;
         }
         return void 0;

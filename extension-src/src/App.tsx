@@ -20,10 +20,12 @@ import ResearchPanel from './panels/ResearchPanel';
 import MathPanel from './panels/MathPanel';
 import CodePanel from './panels/CodePanel';
 import ArtifactsPanel from './panels/ArtifactsPanel';
+import WebCreatorPanel from './panels/WebCreatorPanel';
 import ImagePanel from './panels/ImagePanel';
 import ComparePanel from './panels/ComparePanel';
 import CapturePanel from './panels/CapturePanel';
 import AgentPanel from './panels/AgentPanel';
+import SlidesPanel from './panels/SlidesPanel';
 import ModelsPanel from './panels/ModelsPanel';
 import SettingsPanel from './panels/SettingsPanel';
 import ext from './ext';
@@ -48,10 +50,12 @@ const PANEL_ENTRIES: { id: PanelId; Component: React.FC }[] = [
   { id: 'math', Component: MathPanel },
   { id: 'code', Component: CodePanel },
   { id: 'artifacts', Component: ArtifactsPanel },
+  { id: 'webcreator', Component: WebCreatorPanel },
   { id: 'image', Component: ImagePanel },
   { id: 'compare', Component: ComparePanel },
   { id: 'capture', Component: CapturePanel },
   { id: 'agent', Component: AgentPanel },
+  { id: 'slides', Component: SlidesPanel },
   { id: 'models', Component: ModelsPanel },
   { id: 'settings', Component: SettingsPanel },
 ];

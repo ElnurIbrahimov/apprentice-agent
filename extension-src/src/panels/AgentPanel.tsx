@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store';
 import ModelPill from '../components/ModelPill';
-import { HTTP } from '../api';
+import { HTTP, getAuthHeaders } from '../api';
 import { sendMsg } from '../ext';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -63,7 +63,7 @@ export default function AgentPanel() {
         abortRef.current = ctrl;
         const action = await fetch(`${HTTP}/api/agent/action`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           body: JSON.stringify({ prompt, model: getModel('agent') }),
           signal: ctrl.signal,
         }).then(r => r.json());

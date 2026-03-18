@@ -1,5 +1,25 @@
 export type ThinkingLevel = 'low' | 'medium' | 'high';
 
+export interface ConversationMeta {
+  id: string;
+  title: string;
+  timestamp: number;
+  messageCount: number;
+}
+
+export interface FileAttachment {
+  id: string;
+  name: string;
+  type: 'image' | 'pdf' | 'text' | 'code';
+  mimeType: string;
+  /** base64 data for images (NOT persisted to history) */
+  data?: string;
+  /** text content for text/code files */
+  textContent?: string;
+  /** file size in bytes */
+  size: number;
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'ai';
@@ -49,10 +69,12 @@ export type PanelId =
   | 'math'
   | 'code'
   | 'artifacts'
+  | 'webcreator'
   | 'image'
   | 'compare'
   | 'capture'
   | 'agent'
+  | 'slides'
   | 'models'
   | 'settings';
 
@@ -80,11 +102,13 @@ export const FEATURE_DEFS: FeatureDef[] = [
   { key: 'math', label: 'Math Solver', icon: '➗', desc: 'Step-by-step math solving' },
   { key: 'code', label: 'Code Interpreter', icon: '🖥️', desc: 'Run Python code & analyze data' },
   { key: 'artifacts', label: 'Artifacts', icon: '⌨️', desc: 'Generate runnable code/HTML/SVG' },
+  { key: 'webcreator', label: 'Web Creator', icon: '🌐', desc: 'Build websites with AI chat' },
   { key: 'wisebase', label: 'Wisebase', icon: '📚', desc: 'Highlights & knowledge base' },
   { key: 'tools', label: 'Tools', icon: '🔧', desc: 'Utility tools & actions' },
   { key: 'ocr', label: 'OCR', icon: '👁️', desc: 'Extract text from images' },
   { key: 'image', label: 'Image', icon: '🖼️', desc: 'Image generation & editing' },
   { key: 'compare', label: 'Compare', icon: '⚖️', desc: 'Compare model responses' },
   { key: 'capture', label: 'Capture', icon: '🎯', desc: 'Capture & recreate UI components' },
+  { key: 'slides', label: 'Slides', icon: '📊', desc: 'AI-powered slide deck generator' },
   { key: 'models', label: 'Models', icon: '🧠', desc: 'Model selection & management' },
 ];

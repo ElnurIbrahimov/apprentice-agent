@@ -575,6 +575,16 @@ except Exception as _e:
     ScaffoldTool = None
     _safe_import_error("ScaffoldTool", _e)
 
+# ---------------------------------------------------------------------------
+#  Extension Feed (captured website designs)
+# ---------------------------------------------------------------------------
+try:
+    from .extension_feed import ExtensionFeedTool, get_feed_tool
+except Exception as _e:
+    ExtensionFeedTool = None
+    get_feed_tool = None
+    _safe_import_error("ExtensionFeedTool/get_feed_tool", _e)
+
 
 # ---------------------------------------------------------------------------
 #  __all__ — only export symbols that actually imported successfully
@@ -705,6 +715,9 @@ _ALL_SYMBOLS = [
     "get_deploy_tool",
     # Scaffold
     "ScaffoldTool",
+    # Extension Feed
+    "ExtensionFeedTool",
+    "get_feed_tool",
 ]
 
 # Filter out symbols that failed to import (are None) — but keep

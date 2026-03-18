@@ -1,16 +1,116 @@
-const ALLOWED_ORIGINS = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/;
+import ext from './ext';
 
-export let HTTP = 'http://localhost:8000';
-export let WS_URL = 'ws://localhost:8000/api/chat/stream';
+// ---------------------------------------------------------------------------
+// Backend URL configuration
+//
+// Defaults to localhost for local development. Users can configure a remote
+// server URL via the Settings panel, which persists to chrome.storage.local.
+// On startup, initBackendUrl() loads the saved URL and updates HTTP + WS_URL.
+// ---------------------------------------------------------------------------
+
+const DEFAULT_HTTP = 'http://localhost:8000';
+const DEFAULT_WS = 'ws://localhost:8000/api/chat/stream';
+
+export let HTTP = DEFAULT_HTTP;
+export let WS_URL = DEFAULT_WS;
+export let API_KEY = '';
+
+/** Derive the WebSocket URL from an HTTP base URL. */
+function deriveWsUrl(httpUrl: string): string {
+  let base = httpUrl.replace(/\/+$/, '');
+  if (base.startsWith('https://')) {
+    base = 'wss://' + base.slice('https://'.length);
+  } else if (base.startsWith('http://')) {
+    base = 'ws://' + base.slice('http://'.length);
+  }
+  return base + '/api/chat/stream';
+}
+
+/**
+ * Load saved backend URL and API key from chrome.storage.local.
+ * Call this once at extension startup (before connecting WebSocket).
+ * Returns a promise that resolves when HTTP/WS_URL/API_KEY are set.
+ */
+export function initBackendUrl(): Promise<void> {
+  return new Promise((resolve) => {
+    if (!ext?.storage?.local) {
+      resolve();
+      return;
+    }
+    ext.storage.local.get(['backendUrl', 'apiKey'], (d: any) => {
+      if (d?.backendUrl) {
+        setBackendUrl(d.backendUrl);
+      }
+      if (d?.apiKey) {
+        API_KEY = d.apiKey;
+      }
+      resolve();
+    });
+  });
+}
+
+/**
+ * Update the backend URL at runtime. Persists to storage.
+ * Pass empty string to reset to localhost default.
+ */
+export function setBackendUrl(url: string): void {
+  const cleaned = url.trim().replace(/\/+$/, '');
+  if (!cleaned) {
+    HTTP = DEFAULT_HTTP;
+    WS_URL = DEFAULT_WS;
+    ext?.storage?.local?.remove(['backendUrl']);
+  } else {
+    HTTP = cleaned;
+    WS_URL = deriveWsUrl(cleaned);
+    ext?.storage?.local?.set({ backendUrl: cleaned });
+  }
+}
+
+/**
+ * Update the API key at runtime. Persists to storage.
+ */
+export function setApiKey(key: string): void {
+  API_KEY = key.trim();
+  if (API_KEY) {
+    ext?.storage?.local?.set({ apiKey: API_KEY });
+  } else {
+    ext?.storage?.local?.remove(['apiKey']);
+  }
+}
+
+/**
+ * Get the currently configured backend URL (for display in settings).
+ */
+export function getBackendUrl(): string {
+  return HTTP;
+}
+
+/**
+ * Returns headers object with API key included (if set).
+ * Use this when making raw fetch() calls instead of apiFetch.
+ * Example: fetch(url, { headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' } })
+ */
+export function getAuthHeaders(): Record<string, string> {
+  return API_KEY ? { 'X-API-Key': API_KEY } : {};
+}
 
 export async function apiFetch(url: string, opts: RequestInit = {}): Promise<any> {
-  if (!ALLOWED_ORIGINS.test(url)) {
-    throw new Error(`Blocked non-localhost request: ${url}`);
-  }
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 30_000);
   try {
-    const r = await fetch(url, { ...opts, signal: opts.signal ?? ctrl.signal });
+    // Inject API key header if configured
+    const headers: Record<string, string> = {};
+    if (API_KEY) {
+      headers['X-API-Key'] = API_KEY;
+    }
+    // Merge with any existing headers from opts
+    const mergedHeaders = { ...headers, ...(opts.headers as Record<string, string> || {}) };
+
+    const r = await fetch(url, {
+      ...opts,
+      headers: mergedHeaders,
+      signal: opts.signal ?? ctrl.signal,
+    });
     if (!r.ok) {
       const d = await r.json().catch(() => ({}));
       throw new Error((d as any).detail || `HTTP ${r.status}`);

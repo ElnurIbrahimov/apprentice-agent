@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Upload, File, ChevronLeft, ChevronRight, Languages, FileText, Copy, Check } from 'lucide-react';
+import { Upload, File, ChevronLeft, ChevronRight, Languages, FileText, Copy, Check, Download, X } from 'lucide-react';
 import { useStore } from '../store';
 import ModelPill from '../components/ModelPill';
 import { HTTP, apiFetch } from '../api';
@@ -7,8 +7,11 @@ import { md } from '../markdown';
 
 const TRANSLATE_LANGS = [
   'English', 'Spanish', 'French', 'German', 'Italian', 'Portuguese',
-  'Russian', 'Chinese (Simplified)', 'Japanese', 'Korean', 'Arabic', 'Hindi', 'Turkish',
-  'Dutch', 'Polish', 'Swedish', 'Azerbaijani',
+  'Russian', 'Chinese (Simplified)', 'Chinese (Traditional)', 'Japanese', 'Korean',
+  'Arabic', 'Hindi', 'Turkish', 'Vietnamese', 'Thai', 'Indonesian',
+  'Polish', 'Dutch', 'Swedish', 'Norwegian', 'Danish', 'Finnish',
+  'Greek', 'Czech', 'Romanian', 'Hungarian', 'Ukrainian', 'Hebrew', 'Bengali',
+  'Azerbaijani', 'Persian', 'Malay', 'Filipino', 'Swahili',
 ];
 
 interface PdfCtx {
@@ -21,12 +24,46 @@ interface PdfCtx {
   pages?: string[]; // text per page if available
 }
 
+interface TranslationParagraph {
+  original: string;
+  translated: string;
+}
+
 const PAGE_SIZE = 3000; // chars per "page" if backend doesn't split
+const BATCH_CHAR_LIMIT = 3000; // chars per translation batch
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return bytes + ' B';
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+/** Split text into paragraphs, preserving structure */
+function splitParagraphs(text: string): string[] {
+  // Split on double newlines or single newlines with enough gap
+  return text
+    .split(/\n{2,}/)
+    .map(p => p.trim())
+    .filter(p => p.length > 0);
+}
+
+/** Group paragraphs into batches under the char limit */
+function batchParagraphs(paragraphs: string[], limit: number): string[][] {
+  const batches: string[][] = [];
+  let current: string[] = [];
+  let currentLen = 0;
+
+  for (const p of paragraphs) {
+    if (currentLen + p.length > limit && current.length > 0) {
+      batches.push(current);
+      current = [];
+      currentLen = 0;
+    }
+    current.push(p);
+    currentLen += p.length;
+  }
+  if (current.length > 0) batches.push(current);
+  return batches;
 }
 
 export default function PdfPanel() {
@@ -42,6 +79,15 @@ export default function PdfPanel() {
   const [currentPage, setCurrentPage] = useState(0);
   const [translateLang, setTranslateLang] = useState('');
   const [copied, setCopied] = useState(false);
+
+  // Translation state
+  const [translateMode, setTranslateMode] = useState(false);
+  const [translating, setTranslating] = useState(false);
+  const [translateProgress, setTranslateProgress] = useState('');
+  const [translatedParagraphs, setTranslatedParagraphs] = useState<TranslationParagraph[]>([]);
+  const [translateError, setTranslateError] = useState('');
+  const translateAbortRef = useRef(false);
+
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -51,6 +97,7 @@ export default function PdfPanel() {
   useEffect(() => {
     return () => {
       if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+      translateAbortRef.current = true;
     };
   }, []);
 
@@ -68,7 +115,6 @@ export default function PdfPanel() {
   const getPages = useCallback((): string[] => {
     if (!pdfCtx) return [];
     if (pdfCtx.pages && pdfCtx.pages.length > 0) return pdfCtx.pages;
-    // Virtual pagination by character count
     const text = pdfCtx.text;
     const pages: string[] = [];
     for (let i = 0; i < text.length; i += PAGE_SIZE) {
@@ -86,6 +132,7 @@ export default function PdfPanel() {
     setResultRaw('');
     setCurrentPage(0);
     setUploading(true);
+    resetTranslation();
     const form = new FormData();
     form.append('file', file);
     try {
@@ -113,6 +160,7 @@ export default function PdfPanel() {
     setResultRaw('');
     setCurrentPage(0);
     setUploading(true);
+    resetTranslation();
     try {
       const data = await apiFetch(`${HTTP}/api/pdf/extract_url`, {
         method: 'POST',
@@ -198,10 +246,127 @@ export default function PdfPanel() {
     sendPrompt(prompt);
   };
 
-  const translatePdf = () => {
+  /* ─── Enhanced PDF Translation ─── */
+
+  const resetTranslation = () => {
+    setTranslateMode(false);
+    setTranslating(false);
+    setTranslateProgress('');
+    setTranslatedParagraphs([]);
+    setTranslateError('');
+    translateAbortRef.current = false;
+  };
+
+  /** Translate a single batch of paragraphs via /api/chat (REST, not WS) */
+  const translateBatch = async (paragraphs: string[], lang: string): Promise<string> => {
+    const text = paragraphs.join('\n\n');
+    const prompt = `Translate the following text to ${lang}. Maintain paragraph breaks exactly as they are. Output ONLY the translation, nothing else.\n\n${text}`;
+
+    const resp = await apiFetch(`${HTTP}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: prompt,
+        model: getModel('pdf') || null,
+        conversation_id: null,
+      }),
+    });
+    return resp.response || resp.text || resp.message || '';
+  };
+
+  /** Start the full PDF translation flow */
+  const startTranslation = async () => {
     if (!pdfCtx || !translateLang) return;
-    const prompt = `Translate the following PDF content to ${translateLang}. Maintain the original formatting, paragraph breaks, and structure as much as possible. Output only the translation.\n\nPDF Content:\n${pdfCtx.text.slice(0, 20000)}`;
-    sendPrompt(prompt);
+
+    setTranslateMode(true);
+    setTranslating(true);
+    setTranslateError('');
+    setTranslatedParagraphs([]);
+    translateAbortRef.current = false;
+
+    const paragraphs = splitParagraphs(pdfCtx.text);
+    if (paragraphs.length === 0) {
+      setTranslateError('No text to translate.');
+      setTranslating(false);
+      return;
+    }
+
+    const batches = batchParagraphs(paragraphs, BATCH_CHAR_LIMIT);
+    const results: TranslationParagraph[] = [];
+    let batchIdx = 0;
+
+    for (const batch of batches) {
+      if (translateAbortRef.current) break;
+
+      batchIdx++;
+      setTranslateProgress(`Translating batch ${batchIdx}/${batches.length}...`);
+
+      try {
+        const translated = await translateBatch(batch, translateLang);
+        // Split translated text back into paragraphs to align with originals
+        const translatedParts = translated.split(/\n{2,}/).map(p => p.trim()).filter(p => p.length > 0);
+
+        // Align: best effort — match 1:1, or merge remainder
+        for (let i = 0; i < batch.length; i++) {
+          results.push({
+            original: batch[i],
+            translated: translatedParts[i] || (i === batch.length - 1 ? translatedParts.slice(i).join('\n\n') : ''),
+          });
+        }
+        // If translated has more paragraphs than original batch, append extras to last
+        if (translatedParts.length > batch.length) {
+          const lastIdx = results.length - 1;
+          results[lastIdx].translated += '\n\n' + translatedParts.slice(batch.length).join('\n\n');
+        }
+
+        setTranslatedParagraphs([...results]);
+      } catch (err: any) {
+        if (translateAbortRef.current) break;
+        setTranslateError(`Error on batch ${batchIdx}: ${err.message}`);
+        break;
+      }
+    }
+
+    setTranslating(false);
+    if (!translateAbortRef.current && !results.length) {
+      setTranslateError('Translation returned no results.');
+    } else if (!translateAbortRef.current) {
+      setTranslateProgress(`Done — ${results.length} paragraph${results.length !== 1 ? 's' : ''} translated`);
+    }
+  };
+
+  const cancelTranslation = () => {
+    translateAbortRef.current = true;
+    setTranslating(false);
+    setTranslateProgress('Cancelled');
+  };
+
+  const getFullTranslatedText = (): string => {
+    return translatedParagraphs.map(p => p.translated).join('\n\n');
+  };
+
+  const copyTranslated = async () => {
+    const text = getFullTranslatedText();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = setTimeout(() => setCopied(false), 1500);
+    } catch { /* ignore */ }
+  };
+
+  const downloadTranslated = () => {
+    const text = getFullTranslatedText();
+    if (!text) return;
+    const filename = (pdfCtx?.filename || 'document').replace(/\.pdf$/i, '') + `_${translateLang}.txt`;
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const copyResult = async () => {
@@ -220,6 +385,162 @@ export default function PdfPanel() {
 
   const pages = pdfCtx ? getPages() : [];
 
+  /* ─── Render ─── */
+
+  // Translation view
+  if (translateMode && pdfCtx) {
+    return (
+      <div className="flex flex-col h-full overflow-hidden">
+        {/* Header */}
+        <div
+          className="flex items-center gap-2 px-3 py-2 flex-shrink-0"
+          style={{ borderBottom: '1px solid var(--b1)', background: 'rgba(124,58,237,0.06)' }}
+        >
+          <Languages size={14} style={{ color: 'var(--pl)' }} />
+          <span style={{ flex: 1, fontSize: '12px', color: 'var(--tx)', fontWeight: 500 }}>
+            PDF Translation — {translateLang}
+          </span>
+          <button
+            onClick={resetTranslation}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--mu)', padding: '2px', display: 'flex', alignItems: 'center' }}
+            title="Close translation"
+          >
+            <X size={14} />
+          </button>
+        </div>
+
+        {/* Progress bar */}
+        {translating && (
+          <div className="flex items-center gap-2 px-3 py-2 flex-shrink-0" style={{ borderBottom: '1px solid var(--b1)' }}>
+            <div className="dots" style={{ flexShrink: 0 }}><span /><span /><span /></div>
+            <span style={{ fontSize: '11px', color: 'var(--mu)', flex: 1 }}>{translateProgress}</span>
+            <button
+              onClick={cancelTranslation}
+              style={{
+                background: 'none',
+                border: '1px solid var(--b1)',
+                borderRadius: 'var(--r-sm)',
+                color: 'var(--rd, #ef4444)',
+                fontSize: '10px',
+                padding: '2px 8px',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+
+        {/* Error */}
+        {translateError && (
+          <div style={{ padding: '8px 12px', fontSize: '12px', color: 'var(--rd, #ef4444)', background: 'rgba(239, 68, 68, 0.08)', borderBottom: '1px solid var(--b1)' }}>
+            {translateError}
+          </div>
+        )}
+
+        {/* Done bar */}
+        {!translating && translatedParagraphs.length > 0 && (
+          <div className="flex items-center gap-2 px-3 py-2 flex-shrink-0" style={{ borderBottom: '1px solid var(--b1)' }}>
+            <span style={{ fontSize: '11px', color: 'var(--gr, #10b981)', flex: 1 }}>{translateProgress}</span>
+            <button
+              onClick={copyTranslated}
+              title="Copy translated text"
+              style={{
+                background: 'var(--s2)',
+                border: '1px solid var(--b1)',
+                borderRadius: 'var(--r-sm)',
+                color: copied ? 'var(--gr, #22c55e)' : 'var(--mu)',
+                cursor: 'pointer',
+                padding: '3px 8px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                fontSize: '11px',
+                fontFamily: 'inherit',
+              }}
+            >
+              {copied ? <Check size={11} /> : <Copy size={11} />}
+              Copy
+            </button>
+            <button
+              onClick={downloadTranslated}
+              title="Download as .txt"
+              style={{
+                background: 'var(--s2)',
+                border: '1px solid var(--b1)',
+                borderRadius: 'var(--r-sm)',
+                color: 'var(--mu)',
+                cursor: 'pointer',
+                padding: '3px 8px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                fontSize: '11px',
+                fontFamily: 'inherit',
+              }}
+            >
+              <Download size={11} />
+              .txt
+            </button>
+          </div>
+        )}
+
+        {/* Side-by-side paragraphs */}
+        <div className="flex-1 overflow-y-auto" style={{ padding: '8px' }}>
+          {translatedParagraphs.length === 0 && !translating && !translateError && (
+            <div style={{ fontSize: '12px', color: 'var(--di)', textAlign: 'center', padding: '24px' }}>
+              Starting translation...
+            </div>
+          )}
+
+          {translatedParagraphs.map((p, i) => (
+            <div
+              key={i}
+              style={{
+                display: 'flex',
+                gap: 8,
+                marginBottom: 8,
+                borderRadius: 'var(--r-md)',
+                border: '1px solid var(--b1)',
+                overflow: 'hidden',
+              }}
+            >
+              {/* Original */}
+              <div style={{
+                flex: 1,
+                padding: '8px 10px',
+                fontSize: '11.5px',
+                lineHeight: 1.6,
+                color: 'var(--mu)',
+                background: 'var(--s1)',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                borderRight: '1px solid var(--b1)',
+              }}>
+                {p.original}
+              </div>
+              {/* Translated */}
+              <div style={{
+                flex: 1,
+                padding: '8px 10px',
+                fontSize: '11.5px',
+                lineHeight: 1.6,
+                color: 'var(--tx)',
+                background: 'rgba(124, 58, 237, 0.03)',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}>
+                {p.translated || (translating ? '...' : '')}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // Normal PDF panel view
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Auto-detected */}
@@ -330,7 +651,7 @@ export default function PdfPanel() {
                 </div>
               </div>
               <button
-                onClick={() => { setPdfCtx(null); setStatus(''); setResultHtml(''); setResultRaw(''); setCurrentPage(0); setTranslateLang(''); }}
+                onClick={() => { setPdfCtx(null); setStatus(''); setResultHtml(''); setResultRaw(''); setCurrentPage(0); setTranslateLang(''); resetTranslation(); }}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--mu)', fontSize: '14px', fontFamily: 'inherit', padding: '2px 6px' }}
                 title="Close PDF"
               >
@@ -381,7 +702,7 @@ export default function PdfPanel() {
               </div>
             )}
 
-            {/* Page content preview (collapsible) */}
+            {/* Page content preview */}
             {pages[currentPage] && (
               <div
                 style={{
@@ -427,7 +748,7 @@ export default function PdfPanel() {
                 Summarize
               </button>
 
-              {/* Translate PDF dropdown */}
+              {/* Translate PDF dropdown + button */}
               <div style={{ flex: 1, display: 'flex', gap: 0 }}>
                 <select
                   value={translateLang}
@@ -448,8 +769,9 @@ export default function PdfPanel() {
                   {TRANSLATE_LANGS.map(l => <option key={l} value={l}>{l}</option>)}
                 </select>
                 <button
-                  onClick={translatePdf}
-                  disabled={!!activeStream || !translateLang}
+                  onClick={startTranslation}
+                  disabled={!!activeStream || !translateLang || translating}
+                  title={translateLang ? `Translate PDF to ${translateLang}` : 'Select a language first'}
                   style={{
                     background: (!translateLang || activeStream) ? 'var(--s3)' : 'var(--s2)',
                     border: '1px solid var(--b1)',

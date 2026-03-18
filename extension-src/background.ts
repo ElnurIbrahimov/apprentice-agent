@@ -263,6 +263,13 @@ interface ImageEditLoadMessage {
   dataUrl: string;
 }
 
+interface OpenSidebarMessage {
+  type: 'OPEN_SIDEBAR';
+  panel?: string;
+  message?: string;
+  conversationId?: string;
+}
+
 type ExtensionMessage =
   | SidebarReadyMessage
   | SaveKnowledgeMessage
@@ -291,10 +298,51 @@ type ExtensionMessage =
   | ImageEditOpenMessage
   | ImageDescribeMessage
   | ImageSaveMessage
+  | OpenSidebarMessage
   | CaptureElementMessage
   | StartCaptureModeMessage
   | StopCaptureModeMessage
-  | CaptureExitedMessage;
+  | CaptureExitedMessage
+  | FullPageCaptureMessage
+  | FullPageDataMessage
+  | SaveToCliFeedMessage;
+
+// ── Full page capture message types ─────────────────────────────────────────
+
+interface FullPageCaptureMessage {
+  type: 'FULL_PAGE_CAPTURE';
+}
+
+interface FullPageDataMessage {
+  type: 'FULL_PAGE_DATA';
+  data: {
+    html: string;
+    css: string;
+    css_map: Record<string, Record<string, string>>;
+    colors: string[];
+    fonts: string[];
+    metadata: {
+      title: string;
+      description: string;
+      og_image: string;
+      og_title: string;
+      og_description: string;
+      og_type: string;
+      og_site_name: string;
+      favicon: string;
+    };
+    source_url: string;
+    viewport: { width: number; height: number };
+    asset_urls: { images: string[]; stylesheets: string[] };
+    responsive_info: { viewport_width: number; media_queries: string[] };
+    element_count: number;
+  };
+}
+
+interface SaveToCliFeedMessage {
+  type: 'SAVE_TO_CLI_FEED';
+  payload: Record<string, unknown>;
+}
 
 // ── Component capture message types ──────────────────────────────────────────
 
@@ -869,6 +917,32 @@ ext.runtime.onMessage.addListener(
         return false;
       }
 
+      // New tab page: open sidebar with optional panel, message, or conversationId
+      case 'OPEN_SIDEBAR': {
+        // Open the sidebar in the current window
+        ext.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+          const tab = tabs?.[0];
+          if (tab?.windowId != null && chrome.sidePanel) {
+            chrome.sidePanel.open({ windowId: tab.windowId });
+          }
+        });
+
+        if (msg.message) {
+          // Pre-fill chat with the message
+          ext.storage.local.set({
+            pendingQuery: msg.message,
+            pendingAction: 'ask',
+          });
+        } else if (msg.panel) {
+          ext.runtime
+            .sendMessage({ type: 'SWITCH_PANEL', panel: msg.panel } satisfies SwitchPanelMessage)
+            .catch(() => {
+              ext.storage.local.set({ pendingPanelSwitch: msg.panel });
+            });
+        }
+        return false;
+      }
+
       // Toolbar button in content script: open sidebar with pre-filled action
       case 'OPEN_WITH_TEXT': {
         ext.storage.local.set({
@@ -1054,6 +1128,104 @@ ext.runtime.onMessage.addListener(
             sendResponse({ ok: true });
           }
         );
+        return true; // async
+      }
+
+      // Full Page Capture: tell content script to extract page data, take screenshot
+      case 'FULL_PAGE_CAPTURE': {
+        ext.tabs.query(
+          { active: true, currentWindow: true },
+          ([tab]: chrome.tabs.Tab[]): void => {
+            if (!tab?.id) {
+              ext.runtime.sendMessage({
+                type: 'FULL_PAGE_CAPTURE_ERROR',
+                error: 'No active tab found',
+              }).catch(() => {});
+              sendResponse({ ok: false });
+              return;
+            }
+            const tabId = tab.id;
+
+            // First take a screenshot of the visible tab
+            chrome.tabs.captureVisibleTab(
+              null as unknown as number,
+              { format: 'png' },
+              async (dataUrl: string): Promise<void> => {
+                let screenshot_b64 = '';
+
+                if (!chrome.runtime.lastError && dataUrl) {
+                  try {
+                    // Convert data URL to base64
+                    screenshot_b64 = dataUrl.replace(/^data:image\/png;base64,/, '');
+                  } catch (_e) {
+                    // Continue without screenshot
+                  }
+                }
+
+                // Now ask content script to extract full page data
+                try {
+                  ext.tabs.sendMessage(
+                    tabId,
+                    { type: 'EXTRACT_FULL_PAGE' },
+                    (response: any) => {
+                      if (chrome.runtime.lastError || !response?.ok) {
+                        ext.runtime.sendMessage({
+                          type: 'FULL_PAGE_CAPTURE_ERROR',
+                          error: chrome.runtime.lastError?.message || 'Page extraction failed',
+                        }).catch(() => {});
+                        return;
+                      }
+
+                      // Relay to sidebar with screenshot
+                      ext.runtime.sendMessage({
+                        type: 'FULL_PAGE_CAPTURED',
+                        data: {
+                          ...response.data,
+                          screenshot_b64,
+                          timestamp: Date.now() / 1000,
+                        },
+                      }).catch(() => {});
+                    }
+                  );
+                } catch (_e) {
+                  ext.runtime.sendMessage({
+                    type: 'FULL_PAGE_CAPTURE_ERROR',
+                    error: 'Failed to communicate with content script',
+                  }).catch(() => {});
+                }
+              }
+            );
+            sendResponse({ ok: true });
+          }
+        );
+        return true; // async
+      }
+
+      // Content script sends full page extracted data
+      case 'FULL_PAGE_DATA': {
+        ext.runtime.sendMessage({
+          type: 'FULL_PAGE_CAPTURED',
+          data: msg.data,
+        }).catch(() => {});
+        sendResponse({ ok: true });
+        return false;
+      }
+
+      // Save capture data to CLI feed via backend API
+      case 'SAVE_TO_CLI_FEED': {
+        const payload = (msg as SaveToCliFeedMessage).payload;
+        fetch(`${BACKEND}/api/feed/save`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+          .then((r) => r.json())
+          .then((data) => {
+            sendResponse({ ok: true, ...data });
+          })
+          .catch((err) => {
+            sendResponse({ ok: false, error: err.message });
+          });
         return true; // async
       }
 

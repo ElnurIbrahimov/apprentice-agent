@@ -1,8 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Plus, Sun, Moon, RefreshCw, Download } from 'lucide-react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { Plus, Sun, Moon, RefreshCw, Download, Clock } from 'lucide-react';
 import { useStore } from '../store';
 import { fetchStatus } from '../ws';
 import { exportChat } from '../exportChat';
+import ConversationHistory from './ConversationHistory';
 
 const STATUS_DOT: Record<string, string> = {
   online: '#10b981',
@@ -11,12 +12,29 @@ const STATUS_DOT: Record<string, string> = {
 };
 
 export default function Header() {
-  const { wsReady, modelName, mood, clearAll, theme, toggleTheme, backendStatus, messages, featureModels } = useStore();
+  const { wsReady, modelName, mood, theme, toggleTheme, backendStatus, messages, featureModels, newConversation, conversations, loadConversationList, historyLoaded } = useStore();
   const status = backendStatus || (wsReady ? 'online' : 'offline');
   const [scrolled, setScrolled] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const headerRef = useRef<HTMLElement>(null);
   const exportRef = useRef<HTMLDivElement>(null);
+
+  // Load conversation list on mount
+  useEffect(() => {
+    if (!historyLoaded) {
+      loadConversationList();
+    }
+  }, [historyLoaded, loadConversationList]);
+
+  const handleHistoryToggle = useCallback(() => {
+    setHistoryOpen(prev => !prev);
+    setExportOpen(false);
+  }, []);
+
+  const handleNewConversation = useCallback(() => {
+    newConversation();
+  }, [newConversation]);
 
   // Close export dropdown on outside click
   useEffect(() => {
@@ -200,9 +218,33 @@ export default function Header() {
             </div>
           )}
 
+          {/* History button */}
+          <div style={{ position: 'relative', display: 'inline-flex' }}>
+            <button
+              onClick={handleHistoryToggle}
+              className="flex items-center gap-1 px-2 py-1 transition-all duration-150"
+              style={{
+                background: historyOpen ? 'var(--pg)' : 'var(--s2)',
+                border: `1px solid ${historyOpen ? 'var(--pl)' : 'var(--b1)'}`,
+                borderRadius: 'var(--r-sm)',
+                color: historyOpen ? 'var(--pl)' : 'var(--mu)',
+                fontSize: '11px',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+              title="Chat history"
+            >
+              <Clock size={12} />
+              {conversations.length > 0 && (
+                <span style={{ fontSize: '9px', opacity: 0.7 }}>{conversations.length}</span>
+              )}
+            </button>
+            <ConversationHistory open={historyOpen} onClose={() => setHistoryOpen(false)} />
+          </div>
+
           {/* New button */}
           <button
-            onClick={clearAll}
+            onClick={handleNewConversation}
             className="flex items-center gap-1 px-2 py-1 transition-all duration-150"
             style={{
               background: 'var(--s2)',

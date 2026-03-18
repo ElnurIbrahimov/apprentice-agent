@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Terminal, ChevronRight, Copy, Play, Upload, X, Check, Pencil, Bug } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { useStore } from '../store';
-import { HTTP } from '../api';
+import { HTTP, getAuthHeaders } from '../api';
 import ModelPill from '../components/ModelPill';
 
 /* ── Types ── */
@@ -85,7 +85,7 @@ export default function CodePanel() {
     try {
       const resp = await fetch(`${HTTP}/api/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
           message: `${SYSTEM_PROMPT}\n\n${prompt}`,
           model: model || undefined,
@@ -123,7 +123,7 @@ export default function CodePanel() {
     try {
       const resp = await fetch(`${HTTP}/api/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
           message: `You are a Python code executor. Execute this Python code and return ONLY the output, nothing else. No explanations, no markdown fences, just the raw output as if running in a terminal.\n\n\`\`\`python\n${code}\n\`\`\``,
           model: model || undefined,
@@ -226,7 +226,7 @@ export default function CodePanel() {
       form.append('file', file);
       let filePath = file.name;
       try {
-        const upResp = await fetch(`${HTTP}/api/upload`, { method: 'POST', body: form });
+        const upResp = await fetch(`${HTTP}/api/upload`, { method: 'POST', body: form, headers: getAuthHeaders() });
         if (upResp.ok) {
           const upData = await upResp.json();
           filePath = upData.path || upData.filename || file.name;
