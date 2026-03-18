@@ -104,6 +104,7 @@ export default function RecordPanel() {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
+  const audioBlobUrlRef = useRef<string | null>(null);
 
   const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
 
@@ -120,7 +121,7 @@ export default function RecordPanel() {
       if (audioCtxRef.current?.state !== 'closed') {
         audioCtxRef.current?.close().catch(() => {});
       }
-      if (audioBlobUrl) URL.revokeObjectURL(audioBlobUrl);
+      if (audioBlobUrlRef.current) URL.revokeObjectURL(audioBlobUrlRef.current);
     };
   }, []);
 
@@ -131,6 +132,7 @@ export default function RecordPanel() {
     // Clean up previous recording
     if (audioBlobUrl) {
       URL.revokeObjectURL(audioBlobUrl);
+      audioBlobUrlRef.current = null;
       setAudioBlobUrl(null);
     }
     setAudioBlob(null);
@@ -201,6 +203,7 @@ export default function RecordPanel() {
       const blob = new Blob(chunksRef.current, { type: mimeType });
       const url = URL.createObjectURL(blob);
       setAudioBlob(blob);
+      audioBlobUrlRef.current = url;
       setAudioBlobUrl(url);
       setPhase('recorded');
 
@@ -594,6 +597,7 @@ export default function RecordPanel() {
                 setDuration(0);
                 setStatus('');
                 if (audioBlobUrl) URL.revokeObjectURL(audioBlobUrl);
+                audioBlobUrlRef.current = null;
                 setAudioBlobUrl(null);
                 setAudioBlob(null);
                 setTranscript('');

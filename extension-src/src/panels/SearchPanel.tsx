@@ -571,17 +571,15 @@ export default function SearchPanel() {
   /* ------ HTTP-based search (primary) ------ */
 
   const doSearchHTTP = useCallback(async (query: string) => {
-    const model = getModel('search');
     const ctrl = new AbortController();
     abortRef.current = ctrl;
 
     try {
-      // Try dedicated search endpoint first
-      const url = `${HTTP}/api/search`;
+      // Try dedicated search endpoint first (GET with query params)
+      const params = new URLSearchParams({ q: query, limit: '8' });
+      const url = `${HTTP}/api/search?${params}`;
       const r = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, model: model || undefined, limit: 8 }),
+        method: 'GET',
         signal: ctrl.signal,
       });
 
@@ -616,7 +614,7 @@ export default function SearchPanel() {
       if (err.name === 'AbortError') return true; // Cancelled, not an error
       throw err;
     }
-  }, [getModel]);
+  }, []);
 
   /* ------ Fallback: send as chat message ------ */
 
@@ -655,10 +653,12 @@ export default function SearchPanel() {
             };
             setResults(prev => [...prev, result]);
             setStreamingAnswer('');
+            useStore.getState().setActiveStream(null);
             resolve();
           } else if (d.type === 'error') {
             ws.removeEventListener('message', handleMsg);
             setError(d.content || d.error || 'Search error');
+            useStore.getState().setActiveStream(null);
             resolve();
           }
         };

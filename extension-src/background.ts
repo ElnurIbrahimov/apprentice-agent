@@ -14,6 +14,50 @@ const ext: typeof chrome =
 
 const BACKEND = 'http://localhost:8000' as const;
 
+// ── URL validation helpers ──────────────────────────────────────────────────
+
+/** Returns true if the URL uses a safe scheme (http/https only). */
+function isSafeScheme(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/** Returns true if hostname resolves to a private/internal IP range. */
+function isPrivateHost(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    if (
+      hostname === 'localhost' ||
+      hostname === '0.0.0.0' ||
+      hostname === '[::1]' ||
+      hostname === '::1'
+    ) return true;
+    // Check numeric IPv4 patterns
+    const parts = hostname.split('.');
+    if (parts.length === 4 && parts.every(p => /^\d{1,3}$/.test(p))) {
+      const [a, b] = parts.map(Number);
+      if (a === 127) return true;                        // 127.0.0.0/8
+      if (a === 10) return true;                         // 10.0.0.0/8
+      if (a === 172 && b >= 16 && b <= 31) return true;  // 172.16.0.0/12
+      if (a === 192 && b === 168) return true;           // 192.168.0.0/16
+      if (a === 169 && b === 254) return true;           // 169.254.0.0/16
+      if (a === 0) return true;                          // 0.0.0.0/8
+    }
+    return false;
+  } catch {
+    return true; // If we can't parse it, block it
+  }
+}
+
+/** Rate limiter for link preview fetches. */
+let _linkPreviewActive = 0;
+const LINK_PREVIEW_MAX_CONCURRENT = 5;
+const LINK_PREVIEW_MAX_BYTES = 500000; // 500 KB
+
 // ── Message type definitions ─────────────────────────────────────────────────
 
 interface SidebarReadyMessage {
@@ -536,13 +580,13 @@ ext.runtime.onMessage.addListener(
                 action: data.pendingAction || 'ask',
                 url: data.pendingUrl || '',
                 title: data.pendingTitle || '',
-              } satisfies PrefillTextMessage);
+              } satisfies PrefillTextMessage).catch(() => {});
               ext.storage.local.remove(['pendingQuery', 'pendingAction', 'pendingUrl', 'pendingTitle']);
             } else if (data.pendingPanelSwitch) {
               ext.runtime.sendMessage({
                 type: 'SWITCH_PANEL',
                 panel: data.pendingPanelSwitch,
-              } satisfies SwitchPanelMessage);
+              } satisfies SwitchPanelMessage).catch(() => {});
               ext.storage.local.remove(['pendingPanelSwitch']);
             }
           }
@@ -880,7 +924,11 @@ ext.runtime.onMessage.addListener(
                 (r: unknown) => sendResponse(r)
               );
             } else {
-              // AGENT_NAV
+              // AGENT_NAV — only allow http/https schemes
+              if (!isSafeScheme(msg.url)) {
+                sendResponse({ ok: false, error: 'Blocked URL scheme' });
+                return;
+              }
               ext.tabs.update(tab.id!, { url: msg.url }, () =>
                 sendResponse({ ok: true })
               );
@@ -1073,15 +1121,38 @@ ext.runtime.onMessage.addListener(
         let previewDomain = '';
         try { previewDomain = new URL(previewUrl).hostname; } catch { previewDomain = previewUrl; }
 
+        // Security: validate URL scheme and block private/internal hosts
+        if (!isSafeScheme(previewUrl) || isPrivateHost(previewUrl)) {
+          sendResponse({ ok: false, error: 'Blocked URL' } satisfies LinkPreviewResponse);
+          return true;
+        }
+
+        // Rate limit: max concurrent preview fetches
+        if (_linkPreviewActive >= LINK_PREVIEW_MAX_CONCURRENT) {
+          sendResponse({ ok: false, error: 'Too many concurrent previews' } satisfies LinkPreviewResponse);
+          return true;
+        }
+        _linkPreviewActive++;
+
         fetch(previewUrl, {
           signal: AbortSignal.timeout(3000),
           headers: { 'Accept': 'text/html' },
         })
           .then((r) => {
             if (!r.ok) throw new Error('HTTP ' + r.status);
+            // Check Content-Length to enforce size limit
+            const contentLength = r.headers.get('Content-Length');
+            if (contentLength && parseInt(contentLength, 10) > LINK_PREVIEW_MAX_BYTES) {
+              throw new Error('Response too large');
+            }
             return r.text();
           })
           .then((html: string) => {
+            // Enforce size limit on actual body (Content-Length may be absent)
+            if (html.length > LINK_PREVIEW_MAX_BYTES) {
+              html = html.slice(0, LINK_PREVIEW_MAX_BYTES);
+            }
+
             // Parse title
             let title = '';
             const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
@@ -1126,6 +1197,9 @@ ext.runtime.onMessage.addListener(
               description: '',
               domain: previewDomain,
             } satisfies LinkPreviewResponse);
+          })
+          .finally(() => {
+            _linkPreviewActive--;
           });
         return true; // async
       }

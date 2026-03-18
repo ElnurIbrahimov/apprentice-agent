@@ -52,7 +52,6 @@ interface AuraStore {
   addMessage: (msg: Message) => void;
   setMessages: (msgs: Message[]) => void;
   setActiveStream: (stream: StreamState | true | null) => void;
-  updateStreamText: (text: string) => void;
   setPendingCtx: (ctx: Context | null) => void;
   setThinkingMode: (on: boolean) => void;
   setThinkingLevel: (level: ThinkingLevel) => void;
@@ -152,12 +151,6 @@ export const useStore = create<AuraStore>((set, get) => {
     }),
     setMessages: (messages) => set({ messages }),
     setActiveStream: (activeStream) => set({ activeStream }),
-    updateStreamText: (text) =>
-      set(s => {
-        const stream = s.activeStream;
-        if (!stream || stream === true) return s;
-        return { activeStream: { ...stream, rawText: stream.rawText + text } };
-      }),
     setPendingCtx: (pendingCtx) => set({ pendingCtx }),
     setThinkingMode: (thinkingMode) => set({ thinkingMode }),
     setThinkingLevel: (thinkingLevel) => set({ thinkingLevel }),

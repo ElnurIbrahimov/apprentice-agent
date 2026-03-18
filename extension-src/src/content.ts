@@ -2208,6 +2208,7 @@ function safeSend(msg: OutboundMessage, cb?: (response: any) => void): void {
         if (!_translateActive) return;
 
         batch.forEach((pair, idx) => {
+          if (!_translateActive) return;
           fadeInTranslation(pair.translation, translations[idx] || '[No translation]');
           if (_translateMode === 'translated') {
             pair.original.style.display = 'none';
@@ -2408,6 +2409,11 @@ function safeSend(msg: OutboundMessage, cb?: (response: any) => void): void {
     return body.innerText?.trim() || '';
   }
 
+  /** Escape HTML special characters to prevent XSS in innerHTML contexts. */
+  function escapeHtml(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
   /**
    * Sets content in a Gmail compose body, undo-friendly.
    */
@@ -2429,9 +2435,9 @@ function safeSend(msg: OutboundMessage, cb?: (response: any) => void): void {
     // Try execCommand for undo-friendly insertion
     const success = document.execCommand('insertText', false, text);
     if (!success) {
-      // Fallback: set innerHTML with line breaks
+      // Fallback: set innerHTML with line breaks (escape each line to prevent XSS)
       body.innerHTML = text.split('\n').map((line) =>
-        `<div>${line || '<br>'}</div>`
+        `<div>${escapeHtml(line) || '<br>'}</div>`
       ).join('');
     }
 

@@ -1754,6 +1754,7 @@ ${description}
           const translations = await translateBatchRequest(texts, _translateTargetLang);
           if (!_translateActive) return;
           batch.forEach((pair, idx) => {
+            if (!_translateActive) return;
             fadeInTranslation(pair.translation, translations[idx] || "[No translation]");
             if (_translateMode === "translated") {
               pair.original.style.display = "none";
@@ -1919,6 +1920,9 @@ ${description}
       if (!body) return "";
       return ((_a = body.innerText) == null ? void 0 : _a.trim()) || "";
     }
+    function escapeHtml(s) {
+      return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
     function setComposeText(composeEl, text) {
       const body = getComposeBody(composeEl);
       if (!body) return;
@@ -1933,7 +1937,7 @@ ${description}
       const success = document.execCommand("insertText", false, text);
       if (!success) {
         body.innerHTML = text.split("\n").map(
-          (line) => `<div>${line || "<br>"}</div>`
+          (line) => `<div>${escapeHtml(line) || "<br>"}</div>`
         ).join("");
       }
       body.dispatchEvent(new Event("input", { bubbles: true }));

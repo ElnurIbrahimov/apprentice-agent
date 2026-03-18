@@ -78,4 +78,10 @@ export const FEATURE_DEFS: FeatureDef[] = [
   { key: 'math', label: 'Math Solver', icon: '➗', desc: 'Step-by-step math solving' },
   { key: 'code', label: 'Code Interpreter', icon: '🖥️', desc: 'Run Python code & analyze data' },
   { key: 'artifacts', label: 'Artifacts', icon: '⌨️', desc: 'Generate runnable code/HTML/SVG' },
+  { key: 'wisebase', label: 'Wisebase', icon: '📚', desc: 'Highlights & knowledge base' },
+  { key: 'tools', label: 'Tools', icon: '🔧', desc: 'Utility tools & actions' },
+  { key: 'ocr', label: 'OCR', icon: '👁️', desc: 'Extract text from images' },
+  { key: 'image', label: 'Image', icon: '🖼️', desc: 'Image generation & editing' },
+  { key: 'compare', label: 'Compare', icon: '⚖️', desc: 'Compare model responses' },
+  { key: 'models', label: 'Models', icon: '🧠', desc: 'Model selection & management' },
 ];

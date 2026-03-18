@@ -1,5 +1,6 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { Terminal, ChevronRight, Copy, Play, Upload, X, Check, Pencil, Bug } from 'lucide-react';
+import DOMPurify from 'dompurify';
 import { useStore } from '../store';
 import { HTTP } from '../api';
 import ModelPill from '../components/ModelPill';
@@ -72,8 +73,7 @@ export default function CodePanel() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: prompt,
-          system_prompt: SYSTEM_PROMPT,
+          message: `${SYSTEM_PROMPT}\n\n${prompt}`,
           model: model || undefined,
         }),
       });
@@ -99,32 +99,34 @@ export default function CodePanel() {
     }
   }, [getModel]);
 
-  /* ── Execute code ── */
+  /* ── Execute code via chat (simulated execution) ── */
   const executeCode = useCallback(async (code: string): Promise<CodeOutput[]> => {
+    const model = getModel('code');
     try {
-      const resp = await fetch(`${HTTP}/api/tools/code/execute`, {
+      const resp = await fetch(`${HTTP}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, session_id: sessionId }),
+        body: JSON.stringify({
+          message: `You are a Python code executor. Execute this Python code and return ONLY the output, nothing else. No explanations, no markdown fences, just the raw output as if running in a terminal.\n\n\`\`\`python\n${code}\n\`\`\``,
+          model: model || undefined,
+        }),
       });
       if (!resp.ok) {
         const d = await resp.json().catch(() => ({}));
         return [{ type: 'error', content: (d as any).detail || `Execution failed (HTTP ${resp.status})` }];
       }
       const data = await resp.json();
-      const outputs: CodeOutput[] = [];
-      if (data.stdout) outputs.push({ type: 'text', content: data.stdout });
-      if (data.image || data.plot) outputs.push({ type: 'image', content: data.image || data.plot });
-      if (data.table) outputs.push({ type: 'table', content: data.table });
-      if (data.error) outputs.push({ type: 'error', content: data.error });
-      if (outputs.length === 0 && data.result) outputs.push({ type: 'text', content: String(data.result) });
-      if (outputs.length === 0) outputs.push({ type: 'text', content: 'Code executed successfully (no output).' });
-      return outputs;
-    } catch {
-      // Backend endpoint doesn't exist — run via chat fallback
-      return [{ type: 'error', content: 'Code execution endpoint not available. Backend may need /api/tools/code/execute.' }];
+      const text = data.response || data.text || data.content || data.reply || '';
+      if (!text) return [{ type: 'text', content: 'Code executed successfully (no output).' }];
+      // Check if the response indicates an error
+      if (text.toLowerCase().includes('traceback') || text.toLowerCase().includes('error:')) {
+        return [{ type: 'error', content: text }];
+      }
+      return [{ type: 'text', content: text }];
+    } catch (err: any) {
+      return [{ type: 'error', content: 'Code execution failed: ' + (err.message || 'Unknown error') }];
     }
-  }, [sessionId]);
+  }, [getModel]);
 
   /* ── Main submit ── */
   const submit = useCallback(async (prompt: string) => {
@@ -269,7 +271,7 @@ export default function CodePanel() {
           key={idx}
           className="code-table-wrap"
           style={{ marginTop: 8, overflow: 'auto', maxHeight: 300 }}
-          dangerouslySetInnerHTML={{ __html: output.content }}
+          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(output.content) }}
         />
       );
     }

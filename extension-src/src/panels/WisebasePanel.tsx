@@ -356,9 +356,16 @@ function KnowledgeTab() {
     try {
       const url = q
         ? `${HTTP}/api/knowledge/search?q=${encodeURIComponent(q)}&limit=20`
-        : `${HTTP}/api/knowledge?limit=50`;
+        : `${HTTP}/api/knowledge/list?limit=50`;
       const data = await apiFetch(url);
-      setEntries(data.entries || data.results || []);
+      const rawItems = data.items || data.entries || data.results || [];
+      setEntries(rawItems.map((item: any) => ({
+        id: item.episode_id || item.id,
+        title: item.title,
+        text: item.content || item.text,
+        source_type: item.source_type,
+        created_at: item.saved_at || item.created_at,
+      })));
     } catch (err: any) {
       setError(err.message || 'Failed to load');
     } finally {

@@ -204,6 +204,7 @@ export default function ResearchPanel() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const fallbackTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   // Deep-specific
   const [steps, setSteps] = useState<PipelineStep[]>([]);
@@ -221,6 +222,13 @@ export default function ResearchPanel() {
     const iv = setInterval(() => setElapsed(Date.now() - startTime), 1000);
     return () => clearInterval(iv);
   }, [startTime, loading]);
+
+  // Cleanup fallback timers on unmount
+  useEffect(() => {
+    return () => {
+      fallbackTimersRef.current.forEach(t => clearTimeout(t));
+    };
+  }, []);
 
   // Auto-scroll during deep research
   useEffect(() => {
@@ -251,6 +259,8 @@ export default function ResearchPanel() {
   /* ---- Cancel ---- */
   const cancelResearch = useCallback(() => {
     abortRef.current?.abort();
+    fallbackTimersRef.current.forEach(t => clearTimeout(t));
+    fallbackTimersRef.current = [];
     setLoading(false);
     setStatus(mode === 'deep' ? 'Research cancelled' : '');
   }, [mode]);
@@ -397,9 +407,11 @@ export default function ResearchPanel() {
       if (!isDeepEndpoint) {
         setStatus('Using standard research endpoint (deep endpoint not available)');
         // Simulate step progression with timers
-        setTimeout(() => { advanceStep('understanding'); completeStep('understanding'); advanceStep('planning'); }, 800);
-        setTimeout(() => { completeStep('planning'); advanceStep('searching'); }, 2500);
-        setTimeout(() => { completeStep('searching'); advanceStep('synthesizing'); }, 5000);
+        fallbackTimersRef.current = [
+          setTimeout(() => { advanceStep('understanding'); completeStep('understanding'); advanceStep('planning'); }, 800),
+          setTimeout(() => { completeStep('planning'); advanceStep('searching'); }, 2500),
+          setTimeout(() => { completeStep('searching'); advanceStep('synthesizing'); }, 5000),
+        ];
       }
 
       while (true) {

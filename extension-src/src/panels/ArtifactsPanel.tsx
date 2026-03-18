@@ -210,6 +210,8 @@ export default function ArtifactsPanel() {
   /* ─── iframe error listener ─── */
   useEffect(() => {
     const handler = (e: MessageEvent) => {
+      // Only accept messages from our own iframe
+      if (e.source !== iframeRef.current?.contentWindow) return;
       if (e.data?.type === 'artifact-error') {
         const msg = e.data.msg || 'Unknown error';
         const line = e.data.line ? ` (line ${e.data.line})` : '';
@@ -254,7 +256,6 @@ export default function ArtifactsPanel() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: `${systemPrompt}\n\nTask: ${text}`,
-          stream: true,
           model: getModel('artifacts') || undefined,
         }),
         signal: ctrl.signal,
@@ -267,81 +268,11 @@ export default function ArtifactsPanel() {
         return;
       }
 
-      // Stream the response
-      const reader = resp.body?.getReader();
-      if (!reader) {
-        setStatus('No stream available');
-        setLoading(false);
-        return;
-      }
+      // Parse the JSON response (backend does not support streaming)
+      const data = await resp.json();
+      const responseText = data.response || data.text || data.content || data.reply || data.message || '';
 
-      const decoder = new TextDecoder();
-      let accumulated = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        // Parse SSE lines
-        const lines = chunk.split('\n');
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            if (data === '[DONE]') continue;
-            try {
-              const parsed = JSON.parse(data);
-              const token = parsed.token || parsed.delta || parsed.content || parsed.response || '';
-              if (token) accumulated += token;
-            } catch {
-              // Might be a plain text chunk
-              if (data.trim() && data !== '[DONE]') {
-                accumulated += data;
-              }
-            }
-          } else if (line.trim() && !line.startsWith(':') && !line.startsWith('event:')) {
-            // Might be a non-SSE streaming response (raw JSON chunks)
-            try {
-              const parsed = JSON.parse(line);
-              const token = parsed.token || parsed.delta || parsed.content || parsed.response || '';
-              if (token) accumulated += token;
-            } catch {
-              // Ignore unparseable lines
-            }
-          }
-        }
-
-        codeRef.current = accumulated;
-
-        // Debounced preview update every 500ms
-        if (!debounceRef.current) {
-          debounceRef.current = setTimeout(() => {
-            debounceRef.current = null;
-            const cleaned = stripFences(codeRef.current);
-            setCode(cleaned);
-            updatePreview(cleaned, type);
-          }, 500);
-        }
-      }
-
-      // Final update
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-        debounceRef.current = null;
-      }
-
-      // If no SSE data accumulated, response might be plain JSON
-      if (!accumulated) {
-        try {
-          const text2 = await resp.text();
-          const data = JSON.parse(text2);
-          accumulated = data.response || data.message || '';
-        } catch {
-          // Already consumed the body via reader
-        }
-      }
-
-      const finalCode = stripFences(accumulated);
+      const finalCode = stripFences(responseText);
       codeRef.current = finalCode;
       setCode(finalCode);
       updatePreview(finalCode, type);
