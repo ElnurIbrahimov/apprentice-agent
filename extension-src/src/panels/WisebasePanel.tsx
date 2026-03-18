@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Search, Trash2, ExternalLink, Download, Highlighter, BookOpen, ChevronDown, ChevronRight } from 'lucide-react';
 import { HTTP, apiFetch } from '../api';
 import { useStore } from '../store';
-import ext, { sendMsg } from '../ext';
+import { sendMsg } from '../ext';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -60,6 +60,13 @@ function HighlightsTab() {
   const [searchResults, setSearchResults] = useState<HighlightData[] | null>(null);
   const [expandedUrls, setExpandedUrls] = useState<Set<string>>(new Set());
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -376,6 +383,13 @@ function KnowledgeTab() {
   useEffect(() => {
     if (activePanel === 'wisebase') load();
   }, [activePanel]);
+
+  // Cleanup debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
 
   const handleSearch = (q: string) => {
     setQuery(q);

@@ -854,7 +854,7 @@ ext.runtime.onMessage.addListener(
               ext.runtime.sendMessage({
                 type: 'OCR_RESULT',
                 error: 'Screenshot failed',
-              } satisfies OcrResultMessage);
+              } satisfies OcrResultMessage).catch(() => {});
               return;
             }
             ext.tabs.query(
@@ -864,7 +864,7 @@ ext.runtime.onMessage.addListener(
                   ext.runtime.sendMessage({
                     type: 'OCR_RESULT',
                     error: 'No active tab',
-                  } satisfies OcrResultMessage);
+                  } satisfies OcrResultMessage).catch(() => {});
                   return;
                 }
                 ext.tabs.sendMessage(
@@ -875,7 +875,7 @@ ext.runtime.onMessage.addListener(
                       ext.runtime.sendMessage({
                         type: 'OCR_RESULT',
                         error: 'Cancelled',
-                      } satisfies OcrResultMessage);
+                      } satisfies OcrResultMessage).catch(() => {});
                       return;
                     }
                     try {
@@ -902,7 +902,7 @@ ext.runtime.onMessage.addListener(
                         ext.runtime.sendMessage({
                           type: 'OCR_RESULT',
                           error: `OCR server error ${resp.status}`,
-                        } satisfies OcrResultMessage);
+                        } satisfies OcrResultMessage).catch(() => {});
                         return;
                       }
                       const d: { text?: string; detail?: string } = await resp.json();
@@ -910,12 +910,12 @@ ext.runtime.onMessage.addListener(
                         type: 'OCR_RESULT',
                         text: d.text || '',
                         error: d.detail || '',
-                      } satisfies OcrResultMessage);
+                      } satisfies OcrResultMessage).catch(() => {});
                     } catch (e) {
                       ext.runtime.sendMessage({
                         type: 'OCR_RESULT',
                         error: String(e),
-                      } satisfies OcrResultMessage);
+                      } satisfies OcrResultMessage).catch(() => {});
                     }
                   }
                 );
@@ -1182,7 +1182,10 @@ ext.runtime.onMessage.addListener(
                 if (tabId === tab.id && info.status === 'complete') {
                   ext.tabs.onUpdated.removeListener(listener);
                   setTimeout(() => {
-                    ext.tabs.sendMessage(tab.id!, { type: 'SCROLL_TO_HIGHLIGHT', id });
+                    ext.tabs.sendMessage(tab.id!, { type: 'SCROLL_TO_HIGHLIGHT', id }, () => {
+                      // Ignore errors — content script may not be ready yet
+                      void chrome.runtime.lastError;
+                    });
                   }, 2000); // Wait for content script + highlights to restore
                   sendResponse({ ok: true });
                 }

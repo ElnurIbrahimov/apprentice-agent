@@ -33,6 +33,14 @@ export default function TranslatePanel() {
   const [pageTranslateActive, setPageTranslateActive] = useState(false);
   const [pageTranslateMode, setPageTranslateMode] = useState<'bilingual' | 'translated'>('bilingual');
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+    };
+  }, []);
 
   // Load saved language pair on mount
   useEffect(() => {
@@ -194,7 +202,8 @@ export default function TranslatePanel() {
     try {
       await navigator.clipboard.writeText(output);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = setTimeout(() => setCopied(false), 1500);
     } catch {
       // clipboard may fail in some contexts
     }

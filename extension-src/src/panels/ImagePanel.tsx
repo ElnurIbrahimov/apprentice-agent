@@ -279,6 +279,14 @@ function EditTab() {
   const [status, setStatus] = useState('');
   const [description, setDescription] = useState('');
   const [showCompare, setShowCompare] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+
+  // Cleanup abort on unmount
+  useEffect(() => {
+    return () => {
+      if (abortRef.current) abortRef.current.abort();
+    };
+  }, []);
 
   // Listen for IMAGE_EDIT_LOAD events from content script (hover toolbar)
   useEffect(() => {
@@ -330,6 +338,10 @@ function EditTab() {
     setDescription('');
     setShowCompare(false);
 
+    if (abortRef.current) abortRef.current.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+
     try {
       if (tool.id === 'describe') {
         // Send to chat endpoint with image attachment
@@ -342,6 +354,7 @@ function EditTab() {
             stream: false,
             images: [sourceB64],
           }),
+          signal: ctrl.signal,
         });
 
         if (!res.ok) {
@@ -361,6 +374,7 @@ function EditTab() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
+          signal: ctrl.signal,
         });
 
         if (res.status === 503 || res.status === 502) {
@@ -581,6 +595,14 @@ function GenerateTab() {
   const [comfyNote, setComfyNote] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const negRef = useRef<HTMLInputElement>(null);
+  const genAbortRef = useRef<AbortController | null>(null);
+
+  // Cleanup abort on unmount
+  useEffect(() => {
+    return () => {
+      if (genAbortRef.current) genAbortRef.current.abort();
+    };
+  }, []);
 
   const generate = async () => {
     const prompt = promptRef.current?.value.trim();
@@ -593,11 +615,16 @@ function GenerateTab() {
     setImgSrc('');
     setComfyNote(false);
 
+    if (genAbortRef.current) genAbortRef.current.abort();
+    const ctrl = new AbortController();
+    genAbortRef.current = ctrl;
+
     try {
       const res = await fetch(`${HTTP}/api/image/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: fullPrompt, negative_prompt: neg, steps: 20 }),
+        signal: ctrl.signal,
       });
 
       if (res.status === 503) {

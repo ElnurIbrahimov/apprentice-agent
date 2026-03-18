@@ -4,6 +4,7 @@ import {
   Sparkles, Wand2, Wrench, RotateCcw, Globe, BarChart3, GitBranch,
   Gamepad2, Presentation, FileCode, ChevronRight,
 } from 'lucide-react';
+import DOMPurify from 'dompurify';
 import { useStore } from '../store';
 import ModelPill from '../components/ModelPill';
 import { HTTP } from '../api';
@@ -207,6 +208,13 @@ export default function ArtifactsPanel() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
+  /* ─── Abort fetch on unmount ─── */
+  useEffect(() => {
+    return () => {
+      if (abortRef.current) abortRef.current.abort();
+    };
+  }, []);
+
   /* ─── iframe error listener ─── */
   useEffect(() => {
     const handler = (e: MessageEvent) => {
@@ -289,11 +297,21 @@ export default function ArtifactsPanel() {
   }, [prompt, artifactType, getModel, updatePreview]);
 
   /* ─── Actions ─── */
+  const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup status timer on unmount
+  useEffect(() => {
+    return () => {
+      if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+    };
+  }, []);
+
   const copyCode = useCallback(() => {
     if (!code) return;
     navigator.clipboard.writeText(code).then(() => {
       setStatus('Copied!');
-      setTimeout(() => setStatus(''), 1500);
+      if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+      statusTimerRef.current = setTimeout(() => setStatus(''), 1500);
     });
   }, [code]);
 
@@ -611,7 +629,7 @@ export default function ArtifactsPanel() {
                 fontSize: '11.5px', lineHeight: 1.6, color: '#e2e0f0',
                 whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflow: 'visible',
               }}
-              dangerouslySetInnerHTML={{ __html: highlightedCode }}
+              dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(highlightedCode) }}
             />
           </div>
         )}

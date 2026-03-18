@@ -56,6 +56,14 @@ export default function YoutubePanel() {
   const [transcriptOpen, setTranscriptOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const transcriptRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  // Cleanup abort on unmount
+  useEffect(() => {
+    return () => {
+      if (abortRef.current) abortRef.current.abort();
+    };
+  }, []);
 
   // Listen for YT tab detection
   useEffect(() => {
@@ -116,12 +124,18 @@ export default function YoutubePanel() {
     setStatus('Fetching transcript...');
     setResult(null);
     try {
+      if (abortRef.current) abortRef.current.abort();
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
+      // Abort after 90s timeout
+      const timeoutId = setTimeout(() => ctrl.abort(), 90000);
       const resp = await fetch(`${HTTP}/api/youtube/summarize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: target }),
-        signal: AbortSignal.timeout(90000),
+        signal: ctrl.signal,
       });
+      clearTimeout(timeoutId);
       if (!resp.ok) {
         const d = await resp.json().catch(() => ({}));
         setStatus('Error: ' + ((d as any).detail || `${resp.status}`));

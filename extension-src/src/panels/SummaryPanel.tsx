@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Copy, Check, ExternalLink } from 'lucide-react';
 import { useStore } from '../store';
 import ModelPill from '../components/ModelPill';
@@ -17,6 +17,14 @@ export default function SummaryPanel() {
   const [resultRaw, setResultRaw] = useState('');
   const [pageInfo, setPageInfo] = useState<{ title: string; url: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+    };
+  }, []);
 
   const summarize = async () => {
     if (!wsReady || ws?.readyState !== WebSocket.OPEN) { setStatus('AURA is offline.'); return; }
@@ -74,7 +82,8 @@ export default function SummaryPanel() {
     try {
       await navigator.clipboard.writeText(resultRaw);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = setTimeout(() => setCopied(false), 1500);
     } catch { /* ignore */ }
   };
 

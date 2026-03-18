@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store';
 import ModelPill from '../components/ModelPill';
 import { HTTP } from '../api';
@@ -14,6 +14,15 @@ export default function AgentPanel() {
   const taskRef = useRef<HTMLTextAreaElement>(null);
   const runningRef = useRef(false);
   const logRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  // Cleanup: stop agent loop and abort fetch on unmount
+  useEffect(() => {
+    return () => {
+      runningRef.current = false;
+      if (abortRef.current) abortRef.current.abort();
+    };
+  }, []);
 
   const addLog = (text: string) => {
     setLog(prev => {
@@ -49,10 +58,14 @@ export default function AgentPanel() {
         `{"action":"click"|"type"|"scroll"|"navigate"|"done","selector":"","text":"","url":"","amount":300,"description":""}`;
 
       try {
+        if (abortRef.current) abortRef.current.abort();
+        const ctrl = new AbortController();
+        abortRef.current = ctrl;
         const action = await fetch(`${HTTP}/api/agent/action`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ prompt, model: getModel('agent') }),
+          signal: ctrl.signal,
         }).then(r => r.json());
 
         addLog(`Step ${stepCount}: [${action.action}] ${action.description || ''}`);

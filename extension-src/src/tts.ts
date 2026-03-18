@@ -66,7 +66,7 @@ function pickVoice(preferred?: string): SpeechSynthesisVoice | null {
   return voices.find(v => v.lang.startsWith('en')) || voices[0];
 }
 
-export interface SpeakOptions {
+interface SpeakOptions {
   rate?: number;
   pitch?: number;
   voice?: string;

@@ -5,10 +5,6 @@ import { md } from '../markdown';
 
 const COMPARE_DEFAULTS = ['gemini-3-flash-preview:cloud', 'qwen3.5:397b-cloud', 'kimi-k2-thinking:cloud'];
 
-function esc(s: string) {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
 export default function ComparePanel() {
   const { mdlCloudList, mdlLocalList, setMdlLists, activePanel, setPendingCtx, setPanel } = useStore();
   const [selected, setSelected] = useState<Set<string>>(new Set(COMPARE_DEFAULTS));

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useStore } from '../store';
 import { User, FileText, Sparkles, RotateCcw, Save, Check } from 'lucide-react';
 
@@ -44,6 +44,14 @@ export default function SettingsPanel() {
   const [localInstructions, setLocalInstructions] = useState(customInstructions);
   const [saved, setSaved] = useState(false);
   const [activePreset, setActivePreset] = useState<string | null>(null);
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    };
+  }, []);
 
   // Sync from store when it loads from storage (async)
   useEffect(() => {
@@ -64,7 +72,8 @@ export default function SettingsPanel() {
     setUserName(localName.trim());
     setCustomInstructions(localInstructions.trim());
     setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    savedTimerRef.current = setTimeout(() => setSaved(false), 2000);
   };
 
   const handleReset = () => {

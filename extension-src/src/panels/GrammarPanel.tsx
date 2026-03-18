@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import DOMPurify from 'dompurify';
 import { useStore } from '../store';
 import ModelPill from '../components/ModelPill';
 
@@ -169,7 +170,7 @@ export default function GrammarPanel() {
             {isStreaming && !resultHtml ? (
               <div className="dots"><span /><span /><span /></div>
             ) : (
-              <div dangerouslySetInnerHTML={{ __html: resultHtml }} />
+              <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(resultHtml) }} />
             )}
           </div>
         )}

@@ -93,7 +93,6 @@ export default function RecordPanel() {
   // Transcript + notes
   const [transcript, setTranscript] = useState('');
   const [notesHtml, setNotesHtml] = useState('');
-  const [notesMode, setNotesMode] = useState<'summary' | 'meeting' | null>(null);
   const [copied, setCopied] = useState<'transcript' | 'notes' | null>(null);
 
   // Refs
@@ -117,6 +116,7 @@ export default function RecordPanel() {
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
       streamRef.current?.getTracks().forEach(t => t.stop());
       if (audioCtxRef.current?.state !== 'closed') {
         audioCtxRef.current?.close().catch(() => {});
@@ -138,7 +138,7 @@ export default function RecordPanel() {
     setAudioBlob(null);
     setTranscript('');
     setNotesHtml('');
-    setNotesMode(null);
+
     setStatus('');
 
     let mediaStream: MediaStream;
@@ -273,7 +273,6 @@ export default function RecordPanel() {
     if (activeStream) return;
 
     setNotesHtml('');
-    setNotesMode(mode);
 
     const prompt = mode === 'meeting'
       ? `Turn this transcript into structured meeting notes with these sections:\n\n## Agenda / Topics Discussed\n## Key Decisions\n## Action Items\n## Follow-ups\n\nTranscript:\n\n${transcript}`
@@ -296,11 +295,14 @@ export default function RecordPanel() {
     }));
   }, [transcript, wsReady, ws, activeStream, setActiveStream, getModel]);
 
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   /* ── Copy to clipboard ── */
   const copyText = useCallback((text: string, which: 'transcript' | 'notes') => {
     navigator.clipboard.writeText(text).then(() => {
       setCopied(which);
-      setTimeout(() => setCopied(null), 1500);
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = setTimeout(() => setCopied(null), 1500);
     });
   }, []);
 
@@ -602,7 +604,7 @@ export default function RecordPanel() {
                 setAudioBlob(null);
                 setTranscript('');
                 setNotesHtml('');
-                setNotesMode(null);
+            
               }}
               style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,

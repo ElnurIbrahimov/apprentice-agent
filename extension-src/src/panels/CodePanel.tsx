@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Terminal, ChevronRight, Copy, Play, Upload, X, Check, Pencil, Bug } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { useStore } from '../store';
@@ -47,6 +47,16 @@ export default function CodePanel() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  // Cleanup timers and abort on unmount
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+      if (abortRef.current) abortRef.current.abort();
+    };
+  }, []);
 
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
@@ -62,12 +72,16 @@ export default function CodePanel() {
   const copyCode = useCallback((code: string, id: string) => {
     navigator.clipboard.writeText(code);
     setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 1500);
+    if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+    copiedTimerRef.current = setTimeout(() => setCopiedId(null), 1500);
   }, []);
 
   /* ── Generate code via chat endpoint ── */
   const generateCode = useCallback(async (prompt: string): Promise<{ code: string; explanation: string }> => {
     const model = getModel('code');
+    if (abortRef.current) abortRef.current.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     try {
       const resp = await fetch(`${HTTP}/api/chat`, {
         method: 'POST',
@@ -76,6 +90,7 @@ export default function CodePanel() {
           message: `${SYSTEM_PROMPT}\n\n${prompt}`,
           model: model || undefined,
         }),
+        signal: ctrl.signal,
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
@@ -102,6 +117,9 @@ export default function CodePanel() {
   /* ── Execute code via chat (simulated execution) ── */
   const executeCode = useCallback(async (code: string): Promise<CodeOutput[]> => {
     const model = getModel('code');
+    if (abortRef.current) abortRef.current.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     try {
       const resp = await fetch(`${HTTP}/api/chat`, {
         method: 'POST',
@@ -110,6 +128,7 @@ export default function CodePanel() {
           message: `You are a Python code executor. Execute this Python code and return ONLY the output, nothing else. No explanations, no markdown fences, just the raw output as if running in a terminal.\n\n\`\`\`python\n${code}\n\`\`\``,
           model: model || undefined,
         }),
+        signal: ctrl.signal,
       });
       if (!resp.ok) {
         const d = await resp.json().catch(() => ({}));

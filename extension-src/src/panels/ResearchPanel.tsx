@@ -205,6 +205,7 @@ export default function ResearchPanel() {
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fallbackTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Deep-specific
   const [steps, setSteps] = useState<PipelineStep[]>([]);
@@ -223,10 +224,12 @@ export default function ResearchPanel() {
     return () => clearInterval(iv);
   }, [startTime, loading]);
 
-  // Cleanup fallback timers on unmount
+  // Cleanup fallback timers and abort on unmount
   useEffect(() => {
     return () => {
       fallbackTimersRef.current.forEach(t => clearTimeout(t));
+      if (abortRef.current) abortRef.current.abort();
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
     };
   }, []);
 
@@ -551,7 +554,8 @@ export default function ResearchPanel() {
     if (!resultRaw) return;
     navigator.clipboard.writeText(resultRaw).then(() => {
       setCopyLabel('Copied!');
-      setTimeout(() => setCopyLabel('Copy Report'), 1500);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopyLabel('Copy Report'), 1500);
     });
   };
 

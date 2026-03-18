@@ -42,9 +42,17 @@ export default function PdfPanel() {
   const [currentPage, setCurrentPage] = useState(0);
   const [translateLang, setTranslateLang] = useState('');
   const [copied, setCopied] = useState(false);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const dropRef = useRef<HTMLDivElement>(null);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -201,7 +209,8 @@ export default function PdfPanel() {
     try {
       await navigator.clipboard.writeText(resultRaw);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = setTimeout(() => setCopied(false), 1500);
     } catch { /* ignore */ }
   };
 

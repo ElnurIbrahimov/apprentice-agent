@@ -4,7 +4,6 @@ import { useStore } from '../store';
 import ModelPill from '../components/ModelPill';
 import { HTTP } from '../api';
 import { md } from '../markdown';
-import ext from '../ext';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -411,7 +410,7 @@ function ResultEntry({ result, isLatest }: { result: SearchResult; isLatest: boo
 /* ------------------------------------------------------------------ */
 
 export default function SearchPanel() {
-  const { getModel, ws, wsReady } = useStore();
+  const { getModel, ws } = useStore();
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState('');
@@ -422,6 +421,13 @@ export default function SearchPanel() {
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  // Cleanup abort controller on unmount
+  useEffect(() => {
+    return () => {
+      if (abortRef.current) abortRef.current.abort();
+    };
+  }, []);
 
   // Auto-scroll to bottom when new content arrives
   useEffect(() => {
@@ -476,97 +482,6 @@ export default function SearchPanel() {
 
     return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
   }, []);
-
-  /* ------ WS-based search ------ */
-
-  const doSearchWS = useCallback((query: string) => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
-
-    const model = getModel('search');
-    setStreamingAnswer('');
-    setLiveSources([]);
-
-    // Set up temporary message handler
-    const handleMsg = (ev: MessageEvent) => {
-      let d: any;
-      try { d = JSON.parse(ev.data); } catch { return; }
-
-      if (d.type === 'search_step') {
-        setPipelineSteps(prev => advanceStep(prev, d.step_id, d.detail));
-      } else if (d.type === 'search_source') {
-        const src: Source = {
-          url: d.url,
-          title: d.title || '',
-          snippet: d.snippet || '',
-          domain: d.domain || getDomain(d.url),
-          favicon: d.favicon || getFavicon(d.url),
-        };
-        setLiveSources(prev => [...prev, src]);
-        // Update pipeline detail with source count
-        setPipelineSteps(prev => prev.map(s =>
-          s.id === 'search' ? { ...s, detail: `Found ${prev.filter(x => x.id === 'search').length + 1} sources...` } : s
-        ));
-      } else if (d.type === 'chunk') {
-        setStreamingAnswer(prev => prev + (d.content || ''));
-        // Ensure we're on the generate step
-        setPipelineSteps(prev => {
-          const genStep = prev.find(s => s.id === 'generate');
-          if (genStep?.status !== 'active' && genStep?.status !== 'done') {
-            return advanceStep(prev, 'generate');
-          }
-          return prev;
-        });
-      } else if (d.type === 'done') {
-        ws.removeEventListener('message', handleMsg);
-        setPipelineSteps(prev => completeAllSteps(prev));
-
-        // Collect final values and build result
-        const finalSources = d.sources || [];
-        setStreamingAnswer(prevAnswer => {
-          const finalAnswer = d.answer || prevAnswer;
-          setLiveSources(prevSources => {
-            const allSources: Source[] = finalSources.length > 0
-              ? finalSources.map((s: any) => ({
-                  url: s.url,
-                  title: s.title || '',
-                  snippet: s.snippet || '',
-                  domain: s.domain || getDomain(s.url),
-                  favicon: s.favicon || getFavicon(s.url),
-                }))
-              : prevSources;
-
-            const result: SearchResult = {
-              query,
-              answer: finalAnswer,
-              sources: allSources,
-              relatedSearches: d.related_searches || [],
-              timestamp: Date.now(),
-            };
-            setResults(prev => [...prev, result]);
-            return []; // Clear live sources
-          });
-          setSearching(false);
-          return ''; // Clear streaming answer
-        });
-      } else if (d.type === 'error') {
-        ws.removeEventListener('message', handleMsg);
-        setError(d.content || d.error || 'Search error');
-        setSearching(false);
-        setPipelineSteps([]);
-      }
-    };
-
-    ws.addEventListener('message', handleMsg);
-
-    // Send search request
-    ws.send(JSON.stringify({
-      action_mode: 'search',
-      message: query,
-      model: model || undefined,
-    }));
-
-    return true;
-  }, [ws, getModel]);
 
   /* ------ HTTP-based search (primary) ------ */
 
@@ -681,6 +596,8 @@ export default function SearchPanel() {
     } else {
       // HTTP fallback to chat endpoint
       try {
+        const ctrl = new AbortController();
+        abortRef.current = ctrl;
         const r = await fetch(`${HTTP}/api/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -688,6 +605,7 @@ export default function SearchPanel() {
             message: `Search the web for: ${query}`,
             model: model || undefined,
           }),
+          signal: ctrl.signal,
         });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const data = await r.json();
@@ -770,18 +688,6 @@ export default function SearchPanel() {
       inputRef.current.focus();
     }
   };
-
-  /* ------ Related search click ------ */
-
-  const onRelatedClick = useCallback((e: React.MouseEvent) => {
-    const btn = (e.target as HTMLElement).closest('.search-related-pill') as HTMLButtonElement | null;
-    if (!btn) return;
-    const text = btn.textContent?.trim();
-    if (text && inputRef.current) {
-      inputRef.current.value = text;
-      doSearch(text);
-    }
-  }, [doSearch]);
 
   // Attach delegated handler for related pills
   useEffect(() => {

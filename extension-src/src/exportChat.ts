@@ -36,7 +36,7 @@ function formatDate(ts?: number): string {
 }
 
 /** Export full conversation as Markdown */
-export function exportAsMarkdown(messages: Message[], modelName?: string): string {
+function exportAsMarkdown(messages: Message[], modelName?: string): string {
   const date = messages.length ? formatDate(messages[0].timestamp) : formatDate();
   let out = `# AURA Chat Export\nDate: ${date}\n`;
   if (modelName) out += `Model: ${modelName}\n`;
@@ -51,7 +51,7 @@ export function exportAsMarkdown(messages: Message[], modelName?: string): strin
 }
 
 /** Export full conversation as JSON */
-export function exportAsJSON(messages: Message[], modelName?: string): string {
+function exportAsJSON(messages: Message[], modelName?: string): string {
   const arr = messages.map((m) => ({
     role: m.role === 'user' ? 'user' : 'aura',
     content: m.text,
@@ -63,7 +63,7 @@ export function exportAsJSON(messages: Message[], modelName?: string): string {
 }
 
 /** Export full conversation as plain text */
-export function exportAsText(messages: Message[]): string {
+function exportAsText(messages: Message[]): string {
   return messages
     .map((m) => {
       const role = m.role === 'user' ? 'User' : 'AURA';

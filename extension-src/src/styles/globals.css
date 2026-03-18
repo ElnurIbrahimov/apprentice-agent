@@ -52,6 +52,15 @@
 
   /* Header gradient line */
   --header-line-color: rgba(124, 58, 237, 0.6);
+
+  /* Keyframe intermediate colors (dark) */
+  --pulse-mid-shadow: 0 0 0 3px rgba(124, 58, 237, 0.08), 0 0 6px rgba(167, 139, 250, 0.2);
+  --breathe-mid-shadow: 0 0 0 3px rgba(124, 58, 237, 0.12), 0 0 18px rgba(167, 139, 250, 0.5);
+  --aura-pulse-lo-shadow: 0 0 4px rgba(124, 58, 237, 0.12);
+  --aura-pulse-hi-shadow: 0 0 14px rgba(124, 58, 237, 0.45);
+  --think-phase-glow: 0 0 12px rgba(124, 58, 237, 0.15);
+  --think-pill-glow-lo: 0 0 12px rgba(124, 58, 237, 0.35), 0 0 4px rgba(124, 58, 237, 0.2);
+  --think-pill-glow-hi: 0 0 18px rgba(124, 58, 237, 0.5), 0 0 8px rgba(124, 58, 237, 0.3);
 }
 
 /* ===== Light theme ===== */
@@ -99,6 +108,15 @@
 
   /* Header gradient line */
   --header-line-color: rgba(37, 99, 235, 0.5);
+
+  /* Keyframe intermediate colors (light) */
+  --pulse-mid-shadow: 0 0 0 3px rgba(37, 99, 235, 0.06), 0 0 6px rgba(59, 130, 246, 0.15);
+  --breathe-mid-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1), 0 0 14px rgba(59, 130, 246, 0.35);
+  --aura-pulse-lo-shadow: 0 0 4px rgba(37, 99, 235, 0.08);
+  --aura-pulse-hi-shadow: 0 0 14px rgba(37, 99, 235, 0.3);
+  --think-phase-glow: 0 0 12px rgba(37, 99, 235, 0.12);
+  --think-pill-glow-lo: 0 0 12px rgba(37, 99, 235, 0.25), 0 0 4px rgba(37, 99, 235, 0.15);
+  --think-pill-glow-hi: 0 0 18px rgba(37, 99, 235, 0.4), 0 0 8px rgba(37, 99, 235, 0.25);
 }
 
 *,
@@ -238,9 +256,6 @@ body::after {
 .panel-container {
   overflow: hidden;
 }
-.panel-container.panel-transitioning {
-  overflow: hidden;
-}
 .panel-wrapper {
   position: absolute;
   inset: 0;
@@ -303,7 +318,7 @@ body::after {
   }
   50% {
     opacity: 0.45;
-    box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.08), 0 0 6px rgba(167, 139, 250, 0.2);
+    box-shadow: var(--pulse-mid-shadow);
   }
 }
 
@@ -316,7 +331,7 @@ body::after {
   }
   50% {
     opacity: 0.7;
-    box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.12), 0 0 18px rgba(167, 139, 250, 0.5);
+    box-shadow: var(--breathe-mid-shadow);
     transform: scale(1.15);
   }
 }
@@ -468,6 +483,7 @@ body::after {
 
 /* Code blocks — always dark bg, even in light theme */
 pre {
+  position: relative;
   background: #0d0d14;
   border: 1px solid rgba(255,255,255,0.06);
   border-radius: var(--r-md);
@@ -510,7 +526,7 @@ pre .ccopy {
   font-size: 10px;
   padding: 2px 8px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
   font-family: inherit;
 }
 
@@ -632,7 +648,7 @@ pre code {
   border-radius: 50%;
   background: linear-gradient(135deg, var(--pl), var(--p));
   animation: auraPulse 1.4s ease-in-out infinite;
-  box-shadow: 0 0 8px rgba(124, 58, 237, 0.3);
+  box-shadow: var(--aura-pulse-lo-shadow);
 }
 .aura-thinking span:nth-child(1) {
   animation-delay: 0s;
@@ -649,17 +665,17 @@ pre code {
   0%, 100% {
     opacity: 0.25;
     transform: scale(0.7) translateY(0);
-    box-shadow: 0 0 4px rgba(124, 58, 237, 0.12);
+    box-shadow: var(--aura-pulse-lo-shadow);
   }
   50% {
     opacity: 1;
     transform: scale(1) translateY(-3px);
-    box-shadow: 0 0 14px rgba(124, 58, 237, 0.45);
+    box-shadow: var(--aura-pulse-hi-shadow);
   }
 }
 :root.light .aura-thinking span {
   background: linear-gradient(135deg, var(--pl), var(--p));
-  box-shadow: 0 0 8px rgba(37, 99, 235, 0.2);
+  box-shadow: var(--aura-pulse-lo-shadow);
 }
 
 /* ===== Streaming cursor — blinking purple block ===== */
@@ -692,6 +708,12 @@ pre code {
   border-color: rgba(124, 58, 237, 0.45) !important;
   transform: translateX(-50%) translateY(-2px) !important;
   box-shadow: 0 6px 24px rgba(0,0,0,0.5), 0 0 16px rgba(124, 58, 237, 0.2) !important;
+}
+:root.light .new-msg-indicator:hover {
+  background: rgba(37, 99, 235, 0.12) !important;
+  border-color: rgba(37, 99, 235, 0.35) !important;
+  transform: translateX(-50%) translateY(-2px) !important;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.1), 0 0 12px rgba(37, 99, 235, 0.15) !important;
 }
 @keyframes newMsgSlideUp {
   from {
@@ -795,7 +817,7 @@ header,
   border: 1px solid var(--b1);
   color: var(--mu);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
   font-family: inherit;
   padding: 0;
   overflow: hidden;
@@ -918,7 +940,9 @@ header,
   height: 36px;
   border-radius: 10px;
   color: var(--mu);
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: color 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+              background 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .rail-icon-btn:hover {
   background: rgba(124, 58, 237, 0.12);
@@ -1194,6 +1218,7 @@ header,
 
 /* ---- Pills ---- */
 .input-pill {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -1206,7 +1231,11 @@ header,
   border: 1px solid rgba(255, 255, 255, 0.06);
   background: transparent;
   color: var(--mu);
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: color 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+              background 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+              border-color 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+              transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   white-space: nowrap;
   line-height: 1;
 }
@@ -1288,7 +1317,10 @@ header,
   cursor: not-allowed;
   background: rgba(255, 255, 255, 0.06);
   color: rgba(255, 255, 255, 0.2);
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: color 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+              background 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+              transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .input-send-ready {
@@ -1366,7 +1398,7 @@ header,
 
 /* Action buttons on hover */
 .msg-action-btn {
-  transition: all 0.15s ease;
+  transition: color 0.15s ease, background 0.15s ease, transform 0.15s ease;
 }
 .msg-action-btn:hover {
   color: var(--pl) !important;
@@ -1375,9 +1407,6 @@ header,
 }
 
 /* Improved code block styling — language badge + copy polish */
-pre {
-  position: relative;
-}
 pre .chdr span {
   color: #a78bfa;
   background: rgba(167, 139, 250, 0.1);
@@ -1425,7 +1454,8 @@ pre .chdr span {
 
 /* Home action cards */
 .home-card {
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .home-card:active {
   transform: translateY(0);
@@ -1438,23 +1468,23 @@ pre .chdr span {
   background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
   border-color: rgba(124, 58, 237, 0.6);
   color: #fff;
-  box-shadow: 0 0 12px rgba(124, 58, 237, 0.35), 0 0 4px rgba(124, 58, 237, 0.2);
+  box-shadow: var(--think-pill-glow-lo);
   animation: thinkPillGlow 2.5s ease-in-out infinite;
 }
 .input-pill-think-active:hover {
   background: linear-gradient(135deg, #6d28d9 0%, #5b21b6 100%);
   border-color: rgba(124, 58, 237, 0.7);
   color: #fff;
-  box-shadow: 0 0 16px rgba(124, 58, 237, 0.45), 0 0 6px rgba(124, 58, 237, 0.3);
+  box-shadow: var(--think-pill-glow-hi);
 }
 @keyframes thinkPillGlow {
-  0%, 100% { box-shadow: 0 0 12px rgba(124, 58, 237, 0.35), 0 0 4px rgba(124, 58, 237, 0.2); }
-  50%      { box-shadow: 0 0 18px rgba(124, 58, 237, 0.5), 0 0 8px rgba(124, 58, 237, 0.3); }
+  0%, 100% { box-shadow: var(--think-pill-glow-lo); }
+  50%      { box-shadow: var(--think-pill-glow-hi); }
 }
 :root.light .input-pill-think-active {
   background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
   border-color: rgba(37, 99, 235, 0.6);
-  box-shadow: 0 0 12px rgba(37, 99, 235, 0.25), 0 0 4px rgba(37, 99, 235, 0.15);
+  box-shadow: var(--think-pill-glow-lo);
 }
 :root.light .input-pill-think-active:hover {
   background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
@@ -1505,10 +1535,7 @@ pre .chdr span {
   border-top-color: rgba(245, 245, 250, 0.96);
 }
 
-/* pill needs relative for tooltip positioning */
-.input-pill {
-  position: relative;
-}
+/* (position: relative merged into .input-pill above) */
 
 /* ---- Think / Respond phase indicators ---- */
 .think-phase-indicator {
@@ -1528,8 +1555,8 @@ pre .chdr span {
   animation: thinkIconSpin 3s linear infinite;
 }
 @keyframes thinkPhasePulse {
-  0%, 100% { opacity: 0.85; box-shadow: 0 0 0 0 rgba(124, 58, 237, 0); }
-  50%      { opacity: 1; box-shadow: 0 0 12px rgba(124, 58, 237, 0.15); }
+  0%, 100% { opacity: 0.85; box-shadow: none; }
+  50%      { opacity: 1; box-shadow: var(--think-phase-glow); }
 }
 @keyframes thinkIconSpin {
   0%   { transform: rotate(0deg); }
@@ -1645,7 +1672,9 @@ pre .chdr span {
   background: transparent;
   color: var(--mu);
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: color 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+              background 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   flex-shrink: 0;
   padding: 0;
   font-family: inherit;

@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { FEATURE_DEFS } from './types';
 import type { Message, StreamState, Context, PanelId, ThinkingLevel } from './types';
 import { HTTP } from './api';
 import ext from './ext';
@@ -14,7 +13,6 @@ interface AuraStore {
   mood: string;
   modelName: string;
   backendStatus: 'online' | 'offline' | 'connecting';
-  lastBackendCheck: number;
 
   // UI
   activePanel: PanelId;
@@ -54,7 +52,6 @@ interface AuraStore {
   setMoreOpen: (open: boolean) => void;
   toggleTheme: () => void;
   addMessage: (msg: Message) => void;
-  setMessages: (msgs: Message[]) => void;
   setActiveStream: (stream: StreamState | true | null) => void;
   setPendingCtx: (ctx: Context | null) => void;
   setThinkingMode: (on: boolean) => void;
@@ -65,7 +62,6 @@ interface AuraStore {
   setUserName: (name: string) => void;
   setModel: (feature: string, model: string | null) => void;
   setMdlLists: (cloud: string[], local: string[], chatgpt?: string[]) => void;
-  setAllModels: (model: string) => void;
   loadModels: () => Promise<void>;
   clearAll: () => void;
   getModel: (feature: string) => string | null;
@@ -127,7 +123,6 @@ export const useStore = create<AuraStore>((set, get) => {
     mood: '',
     modelName: '',
     backendStatus: 'connecting' as 'online' | 'offline' | 'connecting',
-    lastBackendCheck: 0,
     activePanel: 'chat',
     moreOpen: false,
     theme: 'dark' as 'dark' | 'light',
@@ -151,7 +146,7 @@ export const useStore = create<AuraStore>((set, get) => {
     setConversationId: (conversationId) => set({ conversationId }),
     setMood: (mood) => set({ mood }),
     setModelName: (modelName) => set({ modelName }),
-    setBackendStatus: (backendStatus) => set({ backendStatus, lastBackendCheck: Date.now() }),
+    setBackendStatus: (backendStatus) => set({ backendStatus }),
     setPanel: (activePanel) => set({ activePanel }),
     setMoreOpen: (moreOpen) => set({ moreOpen }),
     toggleTheme: () => {
@@ -165,7 +160,6 @@ export const useStore = create<AuraStore>((set, get) => {
       // Cap at 500 messages to prevent unbounded growth
       return { messages: msgs.length > 500 ? msgs.slice(-500) : msgs };
     }),
-    setMessages: (messages) => set({ messages }),
     setActiveStream: (activeStream) => set({ activeStream }),
     setPendingCtx: (pendingCtx) => set({ pendingCtx }),
     setThinkingMode: (thinkingMode) => set({ thinkingMode }),
@@ -213,15 +207,6 @@ export const useStore = create<AuraStore>((set, get) => {
         set({ featureModels: fm });
         ext?.storage?.local?.set({ featureModels: fm });
       }
-    },
-
-    setAllModels: (model: string) => {
-      const fm: Record<string, string> = {};
-      for (const def of FEATURE_DEFS) {
-        if (model) fm[def.key] = model;
-      }
-      set({ featureModels: fm });
-      ext?.storage?.local?.set({ featureModels: fm });
     },
 
     loadModels: async () => {

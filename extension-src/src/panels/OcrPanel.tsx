@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Camera, MessageSquare, Languages, Copy } from 'lucide-react';
 import { useStore } from '../store';
 import ext from '../ext';
@@ -7,6 +7,14 @@ export default function OcrPanel() {
   const { setPendingCtx, setPanel } = useStore();
   const [text, setText] = useState('');
   const [status, setStatus] = useState('');
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -47,7 +55,7 @@ export default function OcrPanel() {
     if (!text) return;
     navigator.clipboard.writeText(text).then(() => {
       const btn = document.getElementById('ocr-copy-btn');
-      if (btn) { btn.textContent = '✓ Copied'; setTimeout(() => { btn.textContent = 'Copy'; }, 1500); }
+      if (btn) { btn.textContent = '✓ Copied'; if (copyTimerRef.current) clearTimeout(copyTimerRef.current); copyTimerRef.current = setTimeout(() => { btn.textContent = 'Copy'; }, 1500); }
     });
   };
 

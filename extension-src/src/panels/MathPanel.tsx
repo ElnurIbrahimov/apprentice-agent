@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store';
 import ModelPill from '../components/ModelPill';
 import { HTTP } from '../api';
@@ -10,6 +10,14 @@ export default function MathPanel() {
   const [result, setResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  // Cleanup abort on unmount
+  useEffect(() => {
+    return () => {
+      if (abortRef.current) abortRef.current.abort();
+    };
+  }, []);
 
   const solve = async () => {
     const problem = inputRef.current?.value.trim();
@@ -17,11 +25,15 @@ export default function MathPanel() {
     setLoading(true);
     setStatus('Solving…');
     setResult(null);
+    if (abortRef.current) abortRef.current.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     try {
       const resp = await fetch(`${HTTP}/api/math/solve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ problem, mode, model: getModel('math') }),
+        signal: ctrl.signal,
       });
       if (!resp.ok) {
         const d = await resp.json().catch(() => ({}));
