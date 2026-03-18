@@ -3,6 +3,21 @@
 
 import os
 os.environ["TQDM_DISABLE"] = "1"
+os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+# Suppress sentence-transformers/HuggingFace "Batches: N%" progress bar
+os.environ["SENTENCE_TRANSFORMERS_NO_PROGRESS_BAR"] = "1"
+os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+
+# Globally disable tqdm progress bars (kills "Batches: 100%" from sentence-transformers)
+import unittest.mock
+unittest.mock.patch.dict(os.environ, {"TQDM_DISABLE": "1"}).start()
+try:
+    from tqdm import tqdm as _orig_tqdm
+    from functools import partialmethod
+    _orig_tqdm.__init__ = partialmethod(_orig_tqdm.__init__, disable=True)
+except ImportError:
+    pass
 
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="urllib3")
@@ -904,7 +919,9 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
         response_text = result.get("response", "")
         model_used = result.get("model", _current_model)
 
-        show_response(response_text, model=model_used)
+        # stream=True: agentic loop no longer streams raw text to stdout,
+        # so render the full pretty panel with streaming effect
+        show_response(response_text, model=model_used, stream=True)
 
         # Log interaction to activity log
         if activity_log:

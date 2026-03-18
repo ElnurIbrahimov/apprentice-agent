@@ -10,6 +10,7 @@ import logging
 from fastapi import APIRouter, File, UploadFile, HTTPException, Depends
 
 from api.auth import require_api_key
+from api.utils import safe_error_detail
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,7 @@ async def transcribe(file: UploadFile = File(...)):
         result = await loop.run_in_executor(None, _run_whisper)
         return {"text": result["text"]}
     except Exception as e:
-        raise HTTPException(500, f"Whisper error (ensure ffmpeg is on PATH): {e}")
+        raise HTTPException(500, safe_error_detail(e, "Whisper error (ensure ffmpeg is on PATH)"))
     finally:
         try:
             os.unlink(tmp)

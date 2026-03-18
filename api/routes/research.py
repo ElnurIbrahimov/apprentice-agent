@@ -232,4 +232,4 @@ async def deep_research(req: ResearchRequest):
             "citations": citations,
         }) + "\n"
 
-    return StreamingResponse(generate(), media_type="text/plain")
+    return StreamingResponse(generate(), media_type="application/x-ndjson")

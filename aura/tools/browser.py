@@ -57,6 +57,15 @@ class BrowserTool:
         Returns:
             dict with success status, title, and status code
         """
+        # Block dangerous URI schemes
+        _url_lower = url.lower().strip()
+        if _url_lower.startswith(('file://', 'data:', 'javascript:', 'ftp://', 'blob:')):
+            return {
+                "success": False,
+                "error": f"URL scheme blocked for safety: only http(s) URLs are allowed",
+                "url": url
+            }
+
         # Add protocol if missing
         if not url.startswith(('http://', 'https://')):
             url = 'https://' + url

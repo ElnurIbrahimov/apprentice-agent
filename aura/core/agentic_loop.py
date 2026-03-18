@@ -689,9 +689,10 @@ class AgenticLoop:
                 ):
                     if chunk_type == "content":
                         if not accumulated:
-                            sys.stdout.write("\r\033[K")  # Clear spinner
-                        sys.stdout.write(data)
-                        sys.stdout.flush()
+                            # Clear the "thinking..." spinner but keep cursor on same line
+                            sys.stdout.write("\r\033[K")
+                            sys.stdout.write(f"  \033[90m● generating...\033[0m")
+                            sys.stdout.flush()
                         accumulated += data
                     elif chunk_type == "tool_calls":
                         if not accumulated:
@@ -707,7 +708,7 @@ class AgenticLoop:
                         break
 
                 if accumulated:
-                    sys.stdout.write("\n")
+                    sys.stdout.write("\r\033[K")  # Clear "generating..." status
                     sys.stdout.flush()
                 elif not tool_calls:
                     sys.stdout.write("\r\033[K")  # Clear spinner if no output
@@ -782,7 +783,8 @@ class AgenticLoop:
                         args = json.loads(args)
                     if args is None:
                         args = {}
-                except (json.JSONDecodeError, TypeError):
+                except (json.JSONDecodeError, TypeError) as _parse_err:
+                    logger.warning(f"[AgenticLoop] Failed to parse tool args for {tool_name}: {str(args)[:200]}")
                     args = {}
                 parsed_calls.append((tool_name, args))
 

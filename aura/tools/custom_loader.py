@@ -47,14 +47,13 @@ def load_custom_tools(custom_dir: Path | None = None) -> dict:
             continue
 
         validator = _get_validator()
-        if validator is False:
+        if not callable(validator):
             logger.error(f"[CustomLoader] REFUSED to load {tool_file.name}: security validator unavailable")
             continue
-        if validator:
-            is_valid, validation_msg = validator(code, str(tool_file))
-            if not is_valid:
-                logger.warning(f"[CustomLoader] BLOCKED {tool_file.name}: {validation_msg}")
-                continue
+        is_valid, validation_msg = validator(code, str(tool_file))
+        if not is_valid:
+            logger.warning(f"[CustomLoader] BLOCKED {tool_file.name}: {validation_msg}")
+            continue
 
         module_name = f"aura.tools.custom.{tool_file.stem}"
         try:

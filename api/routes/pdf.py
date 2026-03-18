@@ -9,6 +9,7 @@ import logging
 from fastapi import APIRouter, File, UploadFile, HTTPException, Depends
 
 from api.auth import require_api_key
+from api.utils import safe_error_detail
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ async def extract_upload(file: UploadFile = File(...)):
         loop = asyncio.get_running_loop()
         pages = await loop.run_in_executor(None, _extract, data)
     except Exception as e:
-        raise HTTPException(500, f"PDF extraction failed: {e}")
+        raise HTTPException(500, safe_error_detail(e, "PDF extraction failed"))
 
     text = "\n\n".join(pages)
     return {
@@ -78,7 +79,7 @@ async def extract_url(body: dict):
         "127.", "10.", "172.16.", "172.17.", "172.18.", "172.19.",
         "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.",
         "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.",
-        "192.168.", "169.254.", "0.", "localhost",
+        "192.168.", "169.254.", "168.63.129.16", "0.", "localhost",
     )
     if any(_host.startswith(b) for b in _blocked_prefixes) or _host == "localhost":
         raise HTTPException(400, "Cannot fetch from private/loopback addresses")
@@ -95,8 +96,7 @@ async def extract_url(body: dict):
     except HTTPException:
         raise
     except Exception:
-        # If DNS resolution fails, let httpx handle it below
-        pass
+        raise HTTPException(400, "Cannot fetch URL: DNS resolution failed")
 
     _MAX_PDF_SIZE = 50 * 1024 * 1024  # 50MB
     try:
@@ -114,7 +114,7 @@ async def extract_url(body: dict):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(500, f"Failed to fetch PDF: {e}")
+        raise HTTPException(500, safe_error_detail(e, "Failed to fetch PDF"))
 
     def _extract_bytes(raw: bytes):
         with pdfplumber.open(io.BytesIO(raw)) as pdf:
@@ -124,7 +124,7 @@ async def extract_url(body: dict):
         loop = asyncio.get_running_loop()
         pages = await loop.run_in_executor(None, _extract_bytes, pdf_bytes)
     except Exception as e:
-        raise HTTPException(500, f"PDF extraction failed: {e}")
+        raise HTTPException(500, safe_error_detail(e, "PDF extraction failed"))
 
     text = "\n\n".join(pages)
     return {

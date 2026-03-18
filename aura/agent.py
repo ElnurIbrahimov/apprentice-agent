@@ -88,7 +88,7 @@ def validate_custom_tool_code(code: str, tool_path: str) -> Tuple[bool, str]:
     except SyntaxError as e:
         return False, f"Syntax error in {tool_path}: {e}"
 
-    # 3. Check imports
+    # 3. Check imports and dangerous AST patterns
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -101,6 +101,21 @@ def validate_custom_tool_code(code: str, tool_path: str) -> Tuple[bool, str]:
                 module_base = node.module.split('.')[0]
                 if module_base not in ALLOWED_TOOL_IMPORTS:
                     return False, f"Forbidden import 'from {node.module}' in {tool_path}"
+
+        # Block dynamic import calls: importlib.import_module(), __import__(), etc.
+        elif isinstance(node, ast.Call):
+            func = node.func
+            # Check for direct calls: __import__("os"), eval("code"), exec("code")
+            if isinstance(func, ast.Name) and func.id in ("__import__", "eval", "exec", "compile", "getattr", "delattr"):
+                return False, f"Forbidden call '{func.id}()' in {tool_path}"
+            # Check for attribute calls: importlib.import_module(), builtins.__import__()
+            if isinstance(func, ast.Attribute) and func.attr in ("import_module", "__import__", "system", "popen", "call", "run", "Popen"):
+                return False, f"Forbidden call '*.{func.attr}()' in {tool_path}"
+
+        # Block access to dunder attributes that enable sandbox escape
+        elif isinstance(node, ast.Attribute):
+            if node.attr in ("__subclasses__", "__bases__", "__mro__", "__globals__", "__code__", "__builtins__"):
+                return False, f"Forbidden attribute access '.{node.attr}' in {tool_path}"
 
     # 4. Check for required class structure OR module-level execute() function
     has_tool_class = False
@@ -137,10 +152,10 @@ TOOL_TIMEOUT = 30    # Timeout for tool execution
 
 from .brain import OllamaBrain, TaskType
 from .identity import load_identity, get_identity_prompt, detect_name_change, detect_personality_change, update_name, update_personality
-from .memory import MemorySystem
+from .memory.unified_memory import get_unified_memory
 from .metacognition import MetacognitionLogger
 from .config import Config
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, RegexBuilderTool, GitTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, get_monologue, KnowledgeGraphTool, get_knowledge_graph, NeuroDreamEngine, SleepPhase, CalendarTool, SpacedRepetitionTool, TaskManagerTool, ClipboardHistoryTool, APITesterTool, DatabaseTool, AudioTranscriberTool, ResearchTool, BraveSearchTool, TavilyTool, FirecrawlTool, ClipboardMemoryTool, ObsidianTool, GitHubTool, LogAnalystTool, DocumentGeneratorTool, WindowsControlTool, HomeAssistantTool, TaskSchedulerTool, DiscordTool, SlackTool, LocalImageGenTool, AmbientAudioTool, PredictiveTaskTool, MeetingIntelTool, VoiceSynthTool, LifeLoggerTool, CodeSearchTool, CodeEditTool
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, RegexBuilderTool, GitTool, ClawdbotTool, EvoEmoTool, get_tone_modifier, get_monologue, KnowledgeGraphTool, get_knowledge_graph, NeuroDreamEngine, SleepPhase, CalendarTool, SpacedRepetitionTool, TaskManagerTool, APITesterTool, DatabaseTool, AudioTranscriberTool, ResearchTool, BraveSearchTool, TavilyTool, FirecrawlTool, ObsidianTool, GitHubTool, LogAnalystTool, DocumentGeneratorTool, WindowsControlTool, HomeAssistantTool, TaskSchedulerTool, DiscordTool, SlackTool, LocalImageGenTool, AmbientAudioTool, PredictiveTaskTool, MeetingIntelTool, VoiceSynthTool, LifeLoggerTool, CodeSearchTool, CodeEditTool
 from .tools.crypto_price import CryptoPriceTool
 
 from .memory_retriever import MemoryRetriever
@@ -202,6 +217,8 @@ try:
     STRATEGY_BANDIT_AVAILABLE = True
 except ImportError:
     STRATEGY_BANDIT_AVAILABLE = False
+    ReasoningStrategy = None
+    get_strategy_bandit = None
 
 # Reasoning Template Library - Learn reusable reasoning patterns
 try:
@@ -465,8 +482,6 @@ _TOOL_KEYWORDS = frozenset([
     'generate image', 'create image', 'make image', 'draw image',
     'image generation', 'create picture', 'generate picture',
 
-    # --- Tool: hybrid_memory ---
-    'hybrid memory', 'store memory', 'recall memory', 'memory search',
 
     # --- Tool: voice/tts ---
     'text to speech', 'speak this', 'say this', 'read aloud',
@@ -530,7 +545,6 @@ class ApprenticeAgent:
         """
         # Validate and select best available models before creating brain
         try:
-            from .config import Config
             validated = Config.validate_models_on_startup()
             logger.info(f"[MODELS] Validated: {validated}")
         except Exception as e:
@@ -538,7 +552,7 @@ class ApprenticeAgent:
 
         # Skip Ollama warmup for fast init
         self.brain = OllamaBrain(warmup=not fast_init)
-        self.memory = MemorySystem()
+        self.memory = get_unified_memory()
 
         # Core lightweight tools (always load)
         self.tools = {
@@ -561,9 +575,7 @@ class ApprenticeAgent:
             "calendar": CalendarTool(),
             "spaced_repetition": SpacedRepetitionTool(),
             "task_manager": TaskManagerTool(),
-            "clipboard_history": ClipboardHistoryTool(),
             "research": ResearchTool(),
-            "clipboard_memory": ClipboardMemoryTool(),
             "obsidian": ObsidianTool(),
             "github": GitHubTool(),
             "log_analyst": LogAnalystTool(),
@@ -617,13 +629,6 @@ class ApprenticeAgent:
             except Exception as e:
                 logger.warning(f"image_gen not loaded: {e}")
 
-            # hybrid_memory
-            try:
-                from .tools.hybrid_memory import HybridMemory
-                self.tools['hybrid_memory'] = HybridMemory()
-                logger.info("[LOADED] hybrid_memory")
-            except Exception as e:
-                logger.warning(f"hybrid_memory not loaded: {e}")
 
             # voice
             try:
@@ -792,10 +797,10 @@ class ApprenticeAgent:
         # Initialize NeuroDream (Tool #24) - Sleep/Dream Memory Consolidation
         self.neurodream = NeuroDreamEngine(
             knowledge_graph=self.tools.get("knowledge_graph"),
-            hybrid_memory=None,  # Will be set if hybrid_memory is available
+            hybrid_memory=None,
             evoemo=self.tools.get("evoemo"),
             inner_monologue=self.monologue,
-            chromadb=self.memory.collection if hasattr(self.memory, 'collection') else None,
+            chromadb=None,
             idle_threshold_minutes=30
         )
         logger.debug("[LOADED] NeuroDream - Sleep/dream memory consolidation")
@@ -803,7 +808,7 @@ class ApprenticeAgent:
         # ===== Phase 3 Fix 3B: NeuroDream true idle polling thread =====
         # Polls check_idle_trigger() every 60s so NeuroDream can sleep autonomously
         import threading as _threading
-        import time as _nd_time
+        # time is already imported at module level
         self._neurodream_stop_event = _threading.Event()
         def _neurodream_idle_poll():
             while not self._neurodream_stop_event.wait(timeout=60):
@@ -983,7 +988,6 @@ class ApprenticeAgent:
                 # Register KG Brain with UnifiedMemory so it's included in unified context queries
                 if self.kg_bridge is not None:
                     try:
-                        from aura.memory.unified_memory import get_unified_memory
                         get_unified_memory().set_kg_brain(self.kg_bridge)
                     except Exception as e:
                         logger.debug(f"[Agent] non-critical: {e}")
@@ -994,6 +998,10 @@ class ApprenticeAgent:
                 self.kg_query_engine = None
         elif not KG_BRAIN_AVAILABLE:
             logger.debug("[INFO] Knowledge Graph Brain not available (install kuzu: pip install kuzu)")
+
+        # Thread-safety locks (instance-level, not class-level)
+        self._temporal_lock = threading.Lock()
+        self._kg_queue_lock = threading.Lock()
 
         # Initialize Episodic Time-Travel Memory - Autobiographical Memory
         # Like KG Brain, this is lightweight and can initialize even with fast_init
@@ -1220,35 +1228,24 @@ class ApprenticeAgent:
             from .tools.email_tool import EmailTool
             self.tools["email"] = EmailTool()
         elif tool_name == "calendar":
-            from .tools.calendar_tool import CalendarTool
             self.tools["calendar"] = CalendarTool()
         elif tool_name == "spaced_repetition":
-            from .tools.spaced_repetition import SpacedRepetitionTool
             self.tools["spaced_repetition"] = SpacedRepetitionTool()
         elif tool_name == "task_manager":
-            from .tools.task_manager import TaskManagerTool
             self.tools["task_manager"] = TaskManagerTool()
-        elif tool_name == "clipboard_history":
-            from .tools.clipboard_history import ClipboardHistoryTool
-            self.tools["clipboard_history"] = ClipboardHistoryTool()
         elif tool_name == "api_tester":
-            from .tools.api_tester import APITesterTool
             self.tools["api_tester"] = APITesterTool()
         elif tool_name == "database":
-            from .tools.database_tool import DatabaseTool
             self.tools["database"] = DatabaseTool()
         elif tool_name == "audio_transcriber":
-            from .tools.audio_transcriber import AudioTranscriberTool
             self.tools["audio_transcriber"] = AudioTranscriberTool()
         elif tool_name == "research":
-            from .tools.research_tool import ResearchTool
             self.tools["research"] = ResearchTool()
 
         return self.tools.get(tool_name)
 
     def _load_custom_tools(self) -> None:
         """Load active custom tools from registry."""
-        import json
         import importlib.util
 
         registry_path = Path(__file__).parent.parent / "data" / "custom_tools.json"
@@ -1299,7 +1296,7 @@ class ApprenticeAgent:
 
                         # Get the tool class
                         class_name = tool_entry.get("class_name")
-                        if hasattr(module, class_name):
+                        if class_name and hasattr(module, class_name):
                             tool_class = getattr(module, class_name)
                             self.tools[tool_name] = tool_class()
                             logger.debug(f"[LOADED] Custom tool: {tool_name} (validated)")
@@ -1619,9 +1616,9 @@ Guidelines:
             try:
                 _bundle = self.context_engine.gather(goal)
                 ace_context = _bundle.to_system_prompt()
-            except Exception:
-                pass
-        context = context or {}
+            except Exception as _ace_err:
+                logger.warning(f"[Agent] ACE context gather failed: {_ace_err}")
+        context = context or {}  # NOTE: reserved for future use, not yet wired into agent loop
         self.brain._last_screenshot_path = None
         self.metacognition.start_goal(goal)
         self.monologue.start_session()
@@ -1843,8 +1840,8 @@ Guidelines:
             tone = get_emotional_tone_modifier()
             if tone:
                 parts.append(tone[:300])
-        except Exception:
-            pass
+        except Exception as _tone_err:
+            logger.debug(f"[Agent] Emotional tone modifier unavailable: {_tone_err}")
 
         # ACE context
         if ace_context:
@@ -1857,13 +1854,12 @@ Guidelines:
             _profile_str = _profile.to_system_prompt()
             if _profile_str:
                 parts.append(_profile_str)
-        except Exception:
-            pass
+        except Exception as _profile_err:
+            logger.debug(f"[Agent] User profile load failed: {_profile_err}")
 
         # Memory recall (parallel) — unified store + KG
         try:
             _ctx_futures = {}
-            from aura.memory.unified_memory import get_unified_memory
             _umem = get_unified_memory()
             _ctx_futures["memory"] = _AGENT_EXECUTOR.submit(_umem.query, goal, 3)
             if self.kg_bridge is not None:
@@ -1877,10 +1873,10 @@ Guidelines:
                         parts.append(f"[Relevant memories]\n{mem_text}")
                     elif _key == "kg" and _result:
                         parts.append(f"[Knowledge context]\n{str(_result)[:300]}")
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as _ctx_err:
+                    logger.debug(f"[Agent] {_key} context retrieval failed: {_ctx_err}")
+        except Exception as _mem_err:
+            logger.debug(f"[Agent] Memory/KG context setup failed: {_mem_err}")
 
         # ReAct instructions (plan-aware when a plan exists)
         react_instruction = (
@@ -2025,10 +2021,10 @@ Guidelines:
             return
         try:
             if self.memory:
-                self.memory.remember(
+                self.memory.store(
                     content=f"Goal: {goal[:200]}\nResult: {response[:300]}",
-                    memory_type="episodic",
-                    metadata={"importance": 0.5, "source": "react_loop"},
+                    source="react_loop",
+                    importance=0.5,
                 )
         except Exception as e:
             logger.debug(f"[AGENT] Episode storage failed: {e}")
@@ -2630,7 +2626,8 @@ Guidelines:
             was_helpful: Whether the response was helpful
             feedback_text: Optional text feedback
         """
-        pass
+        logger.debug(f"[Agent] Feedback received: helpful={was_helpful}, text={feedback_text}")
+        # TODO: Implement feedback persistence (e.g., store in UnifiedMemory or emit to analytics)
 
     def _handle_neurodream_command(self, message: str) -> Optional[str]:
         """Handle NeuroDream sleep/dream commands directly.
@@ -2780,40 +2777,6 @@ Guidelines:
         else:
             return f"Git error: {result.get('error', 'Unknown error')}"
 
-    def _get_final_result(self) -> dict:
-        """Compile the final result of the agent run."""
-        # End inner monologue session
-        if self.state.completed:
-            self.monologue.think("reflect", "Task completed successfully!")
-        else:
-            self.monologue.think("reflect", f"Stopping after {self.state.iteration} iterations.")
-        session_summary = self.monologue.end_session()
-
-        # Flush Knowledge Graph Brain extraction queue
-        if self.kg_bridge is not None:
-            try:
-                extracted = self.kg_bridge.flush()
-                if extracted:
-                    logger.info(f"[KG BRAIN] Extracted {len(extracted)} entities at end of run")
-            except Exception as e:
-                logger.debug(f"[KG BRAIN] Flush error: {e}")
-
-        result = {
-            "goal": self.state.goal,
-            "completed": self.state.completed,
-            "iterations": self.state.iteration,
-            "final_evaluation": self.state.evaluation,
-            "history": self.state.history,
-            "monologue_summary": session_summary.get("summary", {})
-        }
-        # Include actual tool result for Git (prevents LLM hallucination in output)
-        if self.state.last_action and self.state.last_action.get('tool', '').lower() == 'git':
-            result["git_result"] = self.state.last_result
-            if self.state.last_result and self.state.last_result.get('output'):
-                result["response"] = self.state.last_result['output']
-
-        return result
-
     def _handle_direct_search(self, message: str, synthesize: bool = True) -> Optional[str]:
         """Handle explicit search requests directly, bypassing agent loop.
 
@@ -2828,7 +2791,6 @@ Guidelines:
         Returns:
             Formatted search results if search request, None otherwise
         """
-        import re
         message_lower = message.lower().strip()
 
         # If user wants comprehensive/detailed research, let it go through full agent loop
@@ -3000,7 +2962,6 @@ Instructions:
         Returns:
             Formatted price info if crypto request, None otherwise
         """
-        import re
         message_lower = message.lower().strip()
 
         # Crypto symbols and names mapping
@@ -3084,7 +3045,6 @@ Instructions:
         Returns:
             Formatted execution result if code request, None otherwise
         """
-        import re
         message_lower = message.lower().strip()
 
         # Check if code_executor tool is available
@@ -3397,7 +3357,6 @@ Python code:"""
         if not is_simple:
             _record_thought("recalling", f"searching all memory backends for: {message[:40]}", 0.5, "memory")
             try:
-                from aura.memory.unified_memory import get_unified_memory
                 from aura.emotion.integration import get_current_pad_dict
                 _umem = get_unified_memory()
                 _current_pad = get_current_pad_dict()
@@ -3455,8 +3414,8 @@ Python code:"""
             _grounding = self._temporal_grounding()
             if _grounding:
                 context_parts.append(_grounding)
-        except Exception:
-            pass
+        except Exception as _tg_err:
+            logger.debug(f"[Agent] Temporal grounding failed: {_tg_err}")
 
         # Soul personality
         soul_prompt = self._get_soul_prompt()
@@ -3510,8 +3469,8 @@ Python code:"""
                 _thinker_ctx = self.monologue.generate_thinking_context(brain=self.brain)
             if _thinker_ctx:
                 context_parts.append(_thinker_ctx)
-        except Exception:
-            pass
+        except Exception as _thinker_err:
+            logger.debug(f"[Agent] Thinker context failed: {_thinker_err}")
 
         system_prompt_addon = None
         if context_parts:
@@ -3539,16 +3498,16 @@ Python code:"""
         # Close the coherent loop — feed outcome back to ALMA
         try:
             self.brain.update_emotional_state(success=bool(response and len(response) > 10))
-        except Exception:
-            pass
+        except Exception as _alma_err:
+            logger.debug(f"[Agent] ALMA emotional update failed: {_alma_err}")
 
         # Update narrative self-model for significant interactions (background)
         if len(response) > 200:
             try:
                 from aura.narrative_self import get_narrative_self
                 _AGENT_EXECUTOR.submit(get_narrative_self().update_from_interaction, message, response, self.brain)
-            except Exception:
-                pass
+            except Exception as _narr_err:
+                logger.debug(f"[Agent] Narrative self update failed: {_narr_err}")
 
         # TTS
         if speak:
@@ -3559,14 +3518,15 @@ Python code:"""
             try:
                 if len(response) > 20:
                     extraction_text = f"User: {message}\nAssistant: {response[:500]}"
-                    self.kg_bridge.extraction_queue.append({
-                        "trace_id": f"chat_{time.time()}",
-                        "content": extraction_text,
-                        "surprise": 0.6,
-                        "timestamp": time.time()
-                    })
-                    if len(self.kg_bridge.extraction_queue) >= self.kg_bridge.config.batch_size:
-                        self.kg_bridge.flush()
+                    with self._kg_queue_lock:
+                        self.kg_bridge.extraction_queue.append({
+                            "trace_id": f"chat_{time.time()}",
+                            "content": extraction_text,
+                            "surprise": 0.6,
+                            "timestamp": time.time()
+                        })
+                        if len(self.kg_bridge.extraction_queue) >= self.kg_bridge.config.batch_size:
+                            self.kg_bridge.flush()
             except Exception as e:
                 logger.debug(f"[KG BRAIN] Chat entity extraction error: {e}")
 
@@ -3580,7 +3540,7 @@ Python code:"""
         # ===== Unified memory write — gated store =====
         if not is_simple and len(response) > 20:
             try:
-                from aura.memory.unified_memory import get_unified_memory as _get_umem
+                _get_umem = get_unified_memory
                 _clean_message = message.split("\n[Screen context:")[0].strip()
                 _clean_response = response.split("\n\n---\n")[0].strip() if "\n\n---\n" in response else response
                 _mem_content = f"User: {_clean_message[:200]}\nAURA: {_clean_response[:400]}"
@@ -3603,7 +3563,7 @@ Python code:"""
                         _fn(content=_c, source="conversation", importance=0.5, emotional_pad=_p)
                     except Exception as _e:
                         logger.debug("[UnifiedMemory] Background store error: %s", _e)
-                _threading.Thread(target=_safe_store, daemon=True).start()
+                _AGENT_EXECUTOR.submit(_safe_store)
             except Exception as e:
                 logger.debug(f"[UnifiedMemory] Conversation store error: {e}")
 
@@ -3613,15 +3573,11 @@ Python code:"""
                 _sl_ref = self.skill_library
                 _sl_msg = message[:500]
                 _sl_resp = response[:500]
-                import threading as _threading
-                _threading.Thread(
-                    target=lambda: _sl_ref.record_interaction(
-                        user_input=_sl_msg, output=_sl_resp,
-                        success=True, context={}
-                    ),
-                    daemon=True,
-                    name="skill-learner",
-                ).start()
+                _AGENT_EXECUTOR.submit(
+                    _sl_ref.record_interaction,
+                    user_input=_sl_msg, output=_sl_resp,
+                    success=True, context={}
+                )
         except Exception as e:
             logger.debug("[SkillLibrary] Record interaction error: %s", e)
 
@@ -3681,9 +3637,9 @@ Python code:"""
                     logger.debug(f"[StrategyBandit] selected: {selected_strategy.value} for {bandit_selection.category.value}")
             except Exception as e:
                 logger.debug(f"[StrategyBandit] Selection error, falling back to CoT: {e}")
-                selected_strategy = ReasoningStrategy.CHAIN_OF_THOUGHT
+                selected_strategy = ReasoningStrategy.CHAIN_OF_THOUGHT if ReasoningStrategy else "chain_of_thought"
         else:
-            selected_strategy = ReasoningStrategy.CHAIN_OF_THOUGHT
+            selected_strategy = ReasoningStrategy.CHAIN_OF_THOUGHT if ReasoningStrategy else "chain_of_thought"
 
         # ===== Prompt Evolution Engine — Inject evolved prompt =====
         if PROMPT_EVOLUTION_AVAILABLE and getattr(Config, 'PROMPT_EVOLUTION_ENABLED', False):
@@ -4106,8 +4062,6 @@ Python code:"""
         except Exception:
             return ""
 
-    _temporal_lock = threading.Lock()
-
     def _temporal_grounding(self) -> Optional[str]:
         """Build temporal grounding context if this is a new session.
 
@@ -4287,7 +4241,7 @@ Python code:"""
                 fact = fact.replace("remember this", "").replace("aura remember", "").strip()
                 if fact:
                     try:
-                        self.memory.store(fact, {"type": "user_fact"})
+                        self.memory.store(content=fact, source="user_fact", importance=0.7)
                         return f"Got it, I'll remember: '{fact[:50]}...'"
                     except Exception:
                         return "I couldn't store that memory."
@@ -4541,7 +4495,7 @@ Python code:"""
             return []
 
         try:
-            from aura_episodic_memory import EpisodeQuery, TemporalParser
+            from aura_episodic_memory import TemporalParser
 
             # Parse time filter if provided
             start_time = None
@@ -4630,8 +4584,6 @@ Python code:"""
             return {"success": False, "error": "Episodic Memory not available"}
 
         try:
-            from aura_episodic_memory import Episode, EpisodeType, TemporalContext
-
             # Map string to EpisodeType
             type_map = {
                 "conversation": EpisodeType.CONVERSATION,
@@ -5146,7 +5098,8 @@ Python code:"""
 
     def recall_memories(self, query: str, n: int = 5) -> list:
         """Recall relevant memories."""
-        return self.memory.recall(query, n_results=n)
+        results = self.memory.query(query, k=n)
+        return [{"content": r.content, "score": r.score, "metadata": r.metadata} for r in results]
 
     def run_dream_consolidation(self) -> dict:
         """Run DreamMode memory consolidation. Call after long conversations."""

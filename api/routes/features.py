@@ -18,7 +18,7 @@ def _get_agent_service():
     from api.services.agent_service import agent_service
     return agent_service
 
-router = APIRouter(prefix="/api", tags=["features"])
+router = APIRouter(prefix="/api", tags=["features"], dependencies=[Depends(require_api_key)])
 
 
 # ============================================================================
@@ -554,9 +554,8 @@ _TOOL_CATEGORIES: dict = {
     "filesystem": "Core", "web_search": "Core", "brave_search": "Core",
     "tavily": "Core", "firecrawl": "Core", "code_executor": "Core",
     # Memory
-    "clipboard_memory": "Memory", "obsidian": "Memory", "amem": "Memory",
-    "hybrid_amem": "Memory", "knowledge_graph": "Memory", "clipboard_history": "Memory",
-    "clipboard": "Memory",
+    "clipboard": "Memory", "obsidian": "Memory", "amem": "Memory",
+    "hybrid_amem": "Memory", "knowledge_graph": "Memory",
     # Communication
     "slack": "Communication", "discord": "Communication", "email": "Communication",
     "notifications": "Communication",

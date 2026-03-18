@@ -171,9 +171,10 @@ class WhatsAppBot(BasePlatform):
                     logger.warning("WhatsApp disconnected!")
 
             except websockets.exceptions.ConnectionClosed:
-                logger.warning("WebSocket connection closed")
                 self._connected = False
-                break
+                logger.warning("[WhatsApp] Connection lost, reconnecting in 5s...")
+                await asyncio.sleep(5)
+                continue  # retry the outer while True loop
             except json.JSONDecodeError as e:
                 logger.warning(f"Invalid JSON received: {e}")
             except Exception as e:
@@ -211,7 +212,10 @@ class WhatsAppBot(BasePlatform):
         message_id = data.get("id", "")
 
         # Check if allowed
-        if self.allowed_numbers and phone not in self.allowed_numbers:
+        # Normalize: strip '+' from both sides for comparison
+        phone_normalized = phone.lstrip('+')
+        allowed_normalized = {n.lstrip('+') for n in self.allowed_numbers}
+        if allowed_normalized and phone_normalized not in allowed_normalized:
             logger.info(f"Ignoring message from non-allowed number: {phone}")
             return
 

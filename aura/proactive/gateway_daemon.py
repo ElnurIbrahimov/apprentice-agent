@@ -922,7 +922,6 @@ class GatewayDaemon:
         respecting the daemon's existing rate limiting and DND checks.
         """
         import time as _time
-        from collections import deque
         from .proactive_messages import (
             generate_proactive_content,
             get_curiosity_message,
@@ -1756,7 +1755,7 @@ if __name__ == "__main__":
         print("\n--- Daemon started ---")
 
         # Simulate events
-        from .event_bus import create_calendar_event, EventPriority
+        from .event_bus import create_calendar_event
 
         # Publish a meeting reminder
         event = create_calendar_event(

@@ -110,7 +110,6 @@ class CodeIntelligenceTool:
         self._indexed_root = str(root)
 
         if NETWORKX_AVAILABLE:
-            import networkx as nx
             self._graph = nx.DiGraph()
 
         files_indexed = 0

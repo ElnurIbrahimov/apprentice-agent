@@ -74,8 +74,12 @@ def _log_execution(tool_name: str, action: str, success: bool, error: Optional[s
         JOBS_LOG.parent.mkdir(parents=True, exist_ok=True)
         log = []
         if JOBS_LOG.exists():
-            with open(JOBS_LOG, "r") as f:
-                log = json.load(f)
+            try:
+                with open(JOBS_LOG, "r") as f:
+                    log = json.load(f)
+            except (json.JSONDecodeError, ValueError):
+                logger.warning("[Scheduler] Corrupt log file, resetting")
+                log = []
         log.append({
             "timestamp": datetime.now().isoformat(),
             "tool": tool_name,
@@ -86,8 +90,8 @@ def _log_execution(tool_name: str, action: str, success: bool, error: Optional[s
         log = log[-500:]  # keep last 500 entries
         with open(JOBS_LOG, "w") as f:
             json.dump(log, f, indent=2)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"[Scheduler] Log write failed: {e}")
 
 
 def _get_scheduler() -> Any:
@@ -145,7 +149,7 @@ class TaskSchedulerTool:
         """Schedule a tool to run on a cron schedule.
 
         Args:
-            tool_name: Name of the AURA tool to run (e.g. 'github', 'clipboard_memory')
+            tool_name: Name of the AURA tool to run (e.g. 'github', 'clipboard')
             action: Action to call on the tool (e.g. 'weekly_summary', 'list_recent')
             cron_expression: Cron expression e.g. '0 9 * * 1' (Mon 9am), '0 2 * * *' (daily 2am)
             job_id: Optional unique ID (auto-generated if not provided)
@@ -387,7 +391,7 @@ class TaskSchedulerTool:
                                job_id="weekly_github", label="Weekly GitHub summary (Mon 9am)")
         results.append(r)
         # Hourly clipboard auto-save
-        r = self.add_interval_job("clipboard_memory", "list_recent", hours=1,
+        r = self.add_interval_job("clipboard", "list_recent", hours=1,
                                    job_id="hourly_clipboard", label="Hourly clipboard check")
         results.append(r)
         return {

@@ -3,6 +3,7 @@
 import logging
 import os
 import re
+import shlex
 import subprocess
 import sys
 import threading
@@ -14,6 +15,22 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 logger = logging.getLogger(__name__)
+
+# Environment keys safe to pass to child processes.
+# Everything else (API keys, tokens, secrets) is stripped.
+_SAFE_ENV_KEYS = {
+    "PATH", "TEMP", "TMP", "HOME", "SYSTEMROOT",
+    "COMSPEC", "PATHEXT", "LANG", "USERPROFILE",
+}
+
+
+def _get_sanitized_env() -> dict:
+    """Return a copy of os.environ filtered to only safe keys."""
+    return {
+        k: v for k, v in os.environ.items()
+        if k.upper() in _SAFE_ENV_KEYS
+    }
+
 
 SHELL_METACHAR_RE = re.compile(r'[&|;`$(){}[\]<>!\\^%\r\n]')
 
@@ -259,8 +276,13 @@ class ShellExecutorTool:
                 target_path = (Path(working_dir) / target).resolve()
                 # SECURITY: Block navigation to system-critical directories
                 target_str = str(target_path)
-                blocked_roots = ["C:\\Windows", "C:\\System32", "/etc", "/sys", "/proc"]
-                if any(target_str.startswith(root) for root in blocked_roots):
+                blocked_roots = [
+                    "C:\\Windows", "C:\\System32", "/etc", "/sys", "/proc",
+                    "/root", "/home", "/.ssh", "/.gnupg", "/var/lib",
+                    "C:\\Program Files", "C:\\ProgramData",
+                ]
+                if (any(target_str.startswith(root) for root in blocked_roots)
+                        or ".ssh" in target_str or ".gnupg" in target_str):
                     return {"success": False, "error": f"Access denied: {target_path}", "exit_code": 1, "session_id": session.id}
                 if target_path.exists() and target_path.is_dir():
                     session.cwd = str(target_path)
@@ -281,11 +303,9 @@ class ShellExecutorTool:
                         "session_id": session.id,
                     }
 
-        # Build command for platform
-        if self._is_windows:
-            shell_cmd = ["cmd.exe", "/c", command]
-        else:
-            shell_cmd = ["/bin/bash", "-c", command]
+        # Build command args — no shell wrapper needed because
+        # _contains_shell_injection() already rejected any metacharacters.
+        shell_cmd = shlex.split(command)
 
         start_time = time.time()
 
@@ -296,7 +316,7 @@ class ShellExecutorTool:
                 stderr=subprocess.PIPE,
                 cwd=working_dir,
                 text=True,
-                env=None,  # inherit current environment
+                env=_get_sanitized_env(),
             )
             stdout, stderr = proc.communicate(timeout=timeout)
             elapsed = time.time() - start_time
@@ -449,10 +469,9 @@ class ShellExecutorTool:
             if not Path(working_dir).exists():
                 working_dir = str(Path.cwd())
 
-        if self._is_windows:
-            shell_cmd = ["cmd.exe", "/c", command]
-        else:
-            shell_cmd = ["/bin/bash", "-c", command]
+        # Build command args — no shell wrapper needed because
+        # _contains_shell_injection() already rejected any metacharacters.
+        shell_cmd = shlex.split(command)
 
         start_time = time.time()
         stdout_lines = []
@@ -466,7 +485,7 @@ class ShellExecutorTool:
                 cwd=working_dir,
                 text=True,
                 bufsize=1,  # Line-buffered
-                env=None,
+                env=_get_sanitized_env(),
             )
 
             # Read stdout in real-time
@@ -603,24 +622,12 @@ class ShellExecutorTool:
                     )
                 except ImportError:
                     # Sandbox unavailable — safe fallback with shell=False
-                    import subprocess
-                    import shlex
                     try:
-                        # Sanitize environment: only pass safe keys to avoid
-                        # leaking secrets (API keys, tokens, etc.)
-                        _SAFE_ENV_KEYS = {
-                            "PATH", "TEMP", "TMP", "HOME", "SYSTEMROOT",
-                            "COMSPEC", "PATHEXT", "LANG", "USERPROFILE",
-                        }
-                        sanitized_env = {
-                            k: v for k, v in os.environ.items()
-                            if k.upper() in _SAFE_ENV_KEYS
-                        }
                         cmd_args = shlex.split(command)
                         result = subprocess.run(
                             cmd_args, shell=False, capture_output=True, text=True,
                             timeout=min(timeout, MAX_TIMEOUT), cwd=cwd,
-                            env=sanitized_env,
+                            env=_get_sanitized_env(),
                         )
                         return {
                             "success": result.returncode == 0,

@@ -1,5 +1,6 @@
 """API middleware for authentication, rate limiting, and security."""
 
+import os
 import time
 import uuid
 import logging
@@ -12,6 +13,11 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
+
+# When True, parse X-Forwarded-For to get the real client IP behind a reverse proxy.
+# NOTE: X-Forwarded-For can be spoofed if not behind a trusted reverse proxy.
+# Only enable this when running behind a trusted proxy (nginx, Cloudflare, etc.).
+_trust_proxy = os.environ.get("AURA_TRUST_PROXY", "").lower() in ("true", "1", "yes")
 
 
 class APIKeyAuthMiddleware(BaseHTTPMiddleware):
@@ -123,7 +129,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if request.headers.get("upgrade", "").lower() == "websocket":
             return await call_next(request)
 
-        client_ip = request.client.host if request.client else "unknown"
+        # Support reverse proxy: check X-Forwarded-For when behind a trusted proxy
+        if _trust_proxy:
+            forwarded_for = request.headers.get("x-forwarded-for")
+            if forwarded_for:
+                # X-Forwarded-For is comma-separated; leftmost is the original client
+                client_ip = forwarded_for.split(",")[0].strip()
+            else:
+                client_ip = request.client.host if request.client else "unknown"
+        else:
+            client_ip = request.client.host if request.client else "unknown"
         now = time.time()
 
         window_start = now - 60
@@ -160,7 +175,13 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         if request.headers.get("upgrade", "").lower() == "websocket":
             return await call_next(request)
 
-        request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+        import re as _re
+        raw_request_id = request.headers.get("X-Request-ID")
+        # Validate: only accept UUID-like or alphanumeric request IDs (max 64 chars)
+        if raw_request_id and _re.match(r'^[a-zA-Z0-9_\-]{1,64}$', raw_request_id):
+            request_id = raw_request_id
+        else:
+            request_id = str(uuid.uuid4())
         request.state.request_id = request_id
 
         response: Response = await call_next(request)

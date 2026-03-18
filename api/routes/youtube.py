@@ -9,6 +9,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Depends
 
 from api.auth import require_api_key
+from api.utils import safe_error_detail
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +112,7 @@ def _get_transcript(video_id: str) -> tuple[str, str]:
             raise HTTPException(422, "Transcripts are disabled for this video.")
         if "notranscriptfound" in err_str or "no transcript" in err_str:
             raise HTTPException(422, "No transcript available for this video (may be private or have no captions).")
-        raise HTTPException(500, f"Failed to fetch transcript: {e}")
+        raise HTTPException(500, safe_error_detail(e, "Failed to fetch transcript"))
 
     full_text = " ".join(e.get("text", "") for e in entries)
     snippet = full_text[:400].strip() + ("…" if len(full_text) > 400 else "")
@@ -158,7 +159,7 @@ KEY POINTS:
     except httpx.ConnectError:
         raise HTTPException(503, "Ollama is not running. Start it with: ollama serve")
     except Exception as e:
-        raise HTTPException(500, f"LLM summarization failed: {e}")
+        raise HTTPException(500, safe_error_detail(e, "LLM summarization failed"))
 
     # Parse summary
     summary = ""
@@ -218,7 +219,7 @@ async def summarize_youtube(body: dict):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(500, f"Transcript error: {e}")
+        raise HTTPException(500, safe_error_detail(e, "Transcript error"))
 
     # Fetch meta and summarize in parallel
     meta_task = asyncio.create_task(_fetch_video_meta(video_id))

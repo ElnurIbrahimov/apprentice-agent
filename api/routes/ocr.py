@@ -9,6 +9,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Depends
 
 from api.auth import require_api_key
+from api.utils import safe_error_detail
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +42,17 @@ async def ocr_image(body: dict):
         from PIL import Image
 
         def _decode_and_ocr():
+            import re as _re
             img_data = base64.b64decode(image_b64.split(",")[-1])
             img = Image.open(io.BytesIO(img_data))
-            return pytesseract.image_to_string(img, lang=body.get("lang", "eng")).strip()
+            lang = body.get("lang", "eng")
+            # Validate lang to prevent path traversal via Tesseract's traineddata lookup
+            if not _re.match(r'^[a-z]{2,4}(\+[a-z]{2,4})*$', lang):
+                lang = "eng"
+            return pytesseract.image_to_string(img, lang=lang).strip()
 
         loop = asyncio.get_running_loop()
         text = await loop.run_in_executor(None, _decode_and_ocr)
         return {"text": text}
     except Exception as e:
-        raise HTTPException(500, f"OCR failed: {e}")
+        raise HTTPException(500, safe_error_detail(e, "OCR failed"))

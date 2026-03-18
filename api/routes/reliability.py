@@ -17,6 +17,7 @@ from fastapi import APIRouter, Query, HTTPException, Depends
 from pydantic import BaseModel
 
 from api.auth import require_api_key
+from api.utils import safe_error_detail
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ async def telemetry_recent(
         from aura.reliability.telemetry import get_telemetry
         return {"events": get_telemetry().recent(n=n, kind=kind)}
     except Exception as e:
-        raise HTTPException(500, f"Telemetry unavailable: {e}")
+        raise HTTPException(500, safe_error_detail(e, "Telemetry unavailable"))
 
 
 @router.get("/api/telemetry/stats")
@@ -47,7 +48,7 @@ async def telemetry_stats():
         from aura.reliability.telemetry import get_telemetry
         return get_telemetry().stats()
     except Exception as e:
-        raise HTTPException(500, f"Telemetry unavailable: {e}")
+        raise HTTPException(500, safe_error_detail(e, "Telemetry unavailable"))
 
 
 # ---------------------------------------------------------------------------
@@ -109,4 +110,4 @@ async def run_eval(req: EvalRunRequest):
     except ImportError:
         raise HTTPException(501, "Eval harness not yet implemented for this suite")
     except Exception as e:
-        raise HTTPException(500, f"Eval failed: {e}")
+        raise HTTPException(500, safe_error_detail(e, "Eval failed"))

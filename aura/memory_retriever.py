@@ -170,8 +170,10 @@ class MemoryRetriever:
             )
             if resp.status_code == 200:
                 return resp.json().get("embedding")
-        except Exception:
-            pass
+            else:
+                logger.warning(f"[MemoryRetriever] Embedding API returned status {resp.status_code}")
+        except Exception as _embed_err:
+            logger.warning(f"[MemoryRetriever] Embedding call failed (Ollama down?): {_embed_err}")
         return None
 
     def _vector_search(self, query: str, limit: int = 5) -> List[str]:

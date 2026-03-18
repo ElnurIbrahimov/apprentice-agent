@@ -603,7 +603,6 @@ class QuickEpisodicMemory:
 
         def _store():
             try:
-                from datetime import datetime
                 episode = Episode(
                     content=content,
                     title=title or content[:60],

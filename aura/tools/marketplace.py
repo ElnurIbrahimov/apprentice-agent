@@ -148,10 +148,15 @@ class MarketplaceTool:
             dangerous.append(f"Syntax error: {e}")
             return dangerous
 
-        _DANGEROUS_IMPORTS = {
-            'subprocess', 'os', 'sys', 'shutil', 'socket',
-            'ctypes', 'builtins', '__builtins__'
-        }
+        try:
+            from aura.tools.code_executor import CodeExecutorTool
+            _DANGEROUS_IMPORTS = CodeExecutorTool.BLOCKED_MODULES
+        except ImportError:
+            _DANGEROUS_IMPORTS = {
+                'subprocess', 'os', 'sys', 'shutil', 'socket',
+                'ctypes', 'builtins', '__builtins__',
+                'pickle', 'marshal', 'importlib', 'pathlib',
+            }
         for node in _ast.walk(tree):
             if isinstance(node, (_ast.Import, _ast.ImportFrom)):
                 for alias in getattr(node, 'names', []):

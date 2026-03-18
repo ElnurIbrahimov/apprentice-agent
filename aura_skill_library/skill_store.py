@@ -124,7 +124,7 @@ class SkillStore:
 
         # Combine description + triggers for embedding
         text = f"{skill.name}. {skill.description}. " + " ".join(skill.trigger_patterns)
-        embedding = self.embedder.encode(text, convert_to_numpy=True)
+        embedding = self.embedder.encode(text, convert_to_numpy=True, show_progress_bar=False)
         return embedding.tolist()
 
     def save(self, skill: Skill) -> str:
@@ -241,7 +241,7 @@ class SkillStore:
             return self.search_by_trigger(query, threshold=0.0)[:limit]
 
         # Compute query embedding
-        query_embedding = self.embedder.encode(query, convert_to_numpy=True)
+        query_embedding = self.embedder.encode(query, convert_to_numpy=True, show_progress_bar=False)
 
         results = []
         for skill_id, info in self.index.items():
@@ -298,7 +298,7 @@ class SkillStore:
             if best_score == 0 and self.embedder is not None:
                 skill_embedding = info.get("embedding", [])
                 if skill_embedding:
-                    query_emb = self.embedder.encode(text, convert_to_numpy=True)
+                    query_emb = self.embedder.encode(text, convert_to_numpy=True, show_progress_bar=False)
                     skill_emb = np.array(skill_embedding)
                     similarity = float(np.dot(query_emb, skill_emb) / (
                         np.linalg.norm(query_emb) * np.linalg.norm(skill_emb) + 1e-8

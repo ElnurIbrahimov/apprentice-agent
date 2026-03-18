@@ -281,17 +281,6 @@ except Exception as _e:
     _safe_import_error("KnowledgeExtractor/create_extractor", _e)
 
 # ---------------------------------------------------------------------------
-#  Hybrid Memory
-# ---------------------------------------------------------------------------
-try:
-    from .hybrid_memory import HybridMemory, create_hybrid_memory, MemoryResult
-except Exception as _e:
-    HybridMemory = None
-    create_hybrid_memory = None
-    MemoryResult = None
-    _safe_import_error("HybridMemory", _e)
-
-# ---------------------------------------------------------------------------
 #  NeuroDream
 # ---------------------------------------------------------------------------
 try:
@@ -487,15 +476,6 @@ except Exception as _e:
     _safe_import_error("AudioTranscriberTool", _e)
 
 # ---------------------------------------------------------------------------
-#  Clipboard History
-# ---------------------------------------------------------------------------
-try:
-    from .clipboard_history import ClipboardHistoryTool
-except Exception as _e:
-    ClipboardHistoryTool = None
-    _safe_import_error("ClipboardHistoryTool", _e)
-
-# ---------------------------------------------------------------------------
 #  Research
 # ---------------------------------------------------------------------------
 try:
@@ -507,12 +487,6 @@ except Exception as _e:
 # ---------------------------------------------------------------------------
 #  Tier 1 Quick Wins
 # ---------------------------------------------------------------------------
-try:
-    from .clipboard_memory import ClipboardMemoryTool
-except Exception as _e:
-    ClipboardMemoryTool = None
-    _safe_import_error("ClipboardMemoryTool", _e)
-
 try:
     from .obsidian_tool import ObsidianTool
 except Exception as _e:
@@ -663,9 +637,6 @@ _ALL_SYMBOLS = [
     "EDGE_TYPES",
     "KnowledgeExtractor",
     "create_extractor",
-    "HybridMemory",
-    "create_hybrid_memory",
-    "MemoryResult",
     # NeuroDream
     "NeuroDreamEngine",
     "SleepPhase",
@@ -726,12 +697,9 @@ _ALL_SYMBOLS = [
     "DatabaseTool",
     # Audio Transcriber
     "AudioTranscriberTool",
-    # Clipboard History
-    "ClipboardHistoryTool",
     # Research
     "ResearchTool",
     # Tier 1 Quick Wins
-    "ClipboardMemoryTool",
     "ObsidianTool",
     "GitHubTool",
     "LogAnalystTool",

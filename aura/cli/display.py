@@ -212,7 +212,7 @@ def show_response(text: str, model: str = "", stream: bool = True):
                     border_style=border_style, padding=(0, 2), expand=True,
                 )
                 live.update(Padding(panel, (0, 2)))
-                time.sleep(0.015)
+                time.sleep(0.008)
 
     # Final render (clean, complete)
     try:
@@ -233,22 +233,17 @@ def show_response(text: str, model: str = "", stream: bool = True):
 
 
 def _split_for_streaming(text: str) -> list[str]:
-    """Split text into chunks for streaming display — by words, not chars."""
+    """Split text into chunks for streaming display."""
     words = text.split(' ')
     chunks = []
-    # Start with bigger chunks, slow down for first few words
-    for i, word in enumerate(words):
-        if i < 3:
-            chunks.append(word + ' ')
-        else:
-            # Group 2-4 words per chunk for speed
-            if i % 3 == 0:
-                chunks.append(word + ' ')
-            else:
-                if chunks:
-                    chunks[-1] += word + ' '
-                else:
-                    chunks.append(word + ' ')
+    # Use larger chunks for longer texts to keep animation snappy
+    chunk_size = 1 if len(text) < 200 else (3 if len(text) < 1000 else 5)
+    for i in range(0, len(words), chunk_size):
+        chunk_words = words[i:i+chunk_size]
+        chunk = ' '.join(chunk_words)
+        if i + chunk_size < len(words):
+            chunk += ' '
+        chunks.append(chunk)
     return chunks
 
 

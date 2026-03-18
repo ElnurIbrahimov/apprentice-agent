@@ -63,7 +63,7 @@ function CitationList({ citations }: { citations: Citation[] }) {
           <li key={c.id} className="flex items-start gap-1.5">
             <span className="flex-shrink-0 text-gray-500">[{c.id}]</span>
             <a
-              href={c.url}
+              href={/^https?:\/\//i.test(c.url) ? c.url : '#'}
               target="_blank"
               rel="noopener noreferrer"
               className="text-chat-accent hover:underline hover:text-chat-accent-hover truncate block"

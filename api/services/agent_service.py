@@ -360,7 +360,7 @@ class AgentService:
                         if hasattr(mem, '_init_backends'):
                             mem._init_backends()
                     except Exception as e:
-                        pass  # Pre-warm is best-effort
+                        logger.warning(f"[AgentService] Memory pre-warm failed: {e}")
 
                 threading.Thread(target=_prewarm_memory, daemon=True, name="memory-prewarm").start()
 
@@ -379,7 +379,6 @@ class AgentService:
         if self._agent is None:
             if self._initializing:
                 # Wait for background init to complete (up to 30s)
-                import time
                 deadline = time.time() + 30
                 while self._agent is None and time.time() < deadline:
                     time.sleep(0.2)
@@ -412,8 +411,8 @@ class AgentService:
 
             # Record interaction for ALMA emotional drift (Phase 2D)
             try:
-                from aura.emotion.alma_engine import alma_engine
-                alma_engine.record_interaction(success=True)
+                if alma_engine is not None:
+                    alma_engine.record_interaction(success=True)
             except Exception:
                 pass
 
@@ -854,7 +853,6 @@ Provide a well-structured, informative summary with key findings and cite source
                 _clean_msg = message.split("\n[Screen context:")[0].strip()
                 if hasattr(agent, 'memory_retriever') and agent.memory_retriever is not None:
                     try:
-                        import threading
                         threading.Thread(
                             target=agent.memory_retriever.store_interaction,
                             args=(_clean_msg, full_response[:500]),
@@ -871,7 +869,6 @@ Provide a well-structured, informative summary with key findings and cite source
                     try:
                         amem_tool = agent.tools['amem']
                         mem_content = f"[Conversation] User: {_clean_msg[:200]}\nAURA: {full_response[:300]}"
-                        import threading
                         threading.Thread(
                             target=amem_tool.amem.add,
                             kwargs={

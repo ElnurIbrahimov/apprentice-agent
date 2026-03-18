@@ -50,6 +50,9 @@ class ProactivePersistence:
         self._connect()
         self._create_tables()
 
+        import atexit as _atexit
+        _atexit.register(self.close)
+
         logger.info(f"[Persistence] Initialized at {self._db_path}")
 
     def _connect(self) -> None:

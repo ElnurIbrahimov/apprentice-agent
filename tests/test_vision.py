@@ -456,4 +456,4 @@ class TestConfigIntegration:
 
     def test_chain_contains_llava_fallback(self):
         """The chain should always include llava as a fallback."""
-        assert "llava" in Config.MODEL_VISION_CHAIN
+        assert any("llava" in m for m in Config.MODEL_VISION_CHAIN)

@@ -1,7 +1,6 @@
 """Ollama API integration as the agent's reasoning engine."""
 
 import os
-import re
 import json
 import logging
 import threading
@@ -33,7 +32,6 @@ try:
         get_emotional_tone_modifier,
         process_user_message,
         process_response_outcome,
-        bridge_evoemo_detection,
         get_mood_emoji,
     )
     from .emotion.alma_engine import alma_engine, trigger_emotion
@@ -184,7 +182,7 @@ _BG_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=8, thread_name_
 def _cleanup_executor():
     """Cleanup shared executor on exit."""
     _SHARED_EXECUTOR.shutdown(wait=False, cancel_futures=True)
-    _BG_EXECUTOR.shutdown(wait=True)
+    _BG_EXECUTOR.shutdown(wait=False, cancel_futures=True)
 
 atexit.register(_cleanup_executor)
 
@@ -326,6 +324,12 @@ class OllamaBrain:
         self._conversations_index_file = self._conversations_dir / "index.json"
         self._current_conversation_id: Optional[str] = None
         self._conversations_index_cache: dict | None = None
+        self._conversations_index_lock = threading.Lock()
+
+        # Project context cache (initialized here for thread safety)
+        self._project_ctx_cache = None
+        self._project_ctx_ts: float = 0.0
+        self._project_ctx_cwd: str = ""
 
         # Migrate legacy history and initialize conversations
         self._migrate_legacy_history()
@@ -1128,18 +1132,19 @@ class OllamaBrain:
         return conv_id
 
     def _load_conversations_index(self) -> list:
-        """Load the conversations index."""
-        if self._conversations_index_cache is not None:
-            return list(self._conversations_index_cache)
-        try:
-            if self._conversations_index_file.exists():
-                data = json.loads(self._conversations_index_file.read_text(encoding="utf-8"))
-                self._conversations_index_cache = data
-                return data
-        except (json.JSONDecodeError, IOError) as e:
-            logger.warning(f"[BRAIN] Could not load conversations index: {e}")
-        self._conversations_index_cache = []
-        return []
+        """Load the conversations index (thread-safe)."""
+        with self._conversations_index_lock:
+            if self._conversations_index_cache is not None:
+                return list(self._conversations_index_cache)
+            try:
+                if self._conversations_index_file.exists():
+                    data = json.loads(self._conversations_index_file.read_text(encoding="utf-8"))
+                    self._conversations_index_cache = data
+                    return list(data)
+            except (json.JSONDecodeError, IOError) as e:
+                logger.warning(f"[BRAIN] Could not load conversations index: {e}")
+            self._conversations_index_cache = []
+            return []
 
     def _invalidate_conversation_cache(self) -> None:
         """Invalidate the in-memory conversations index cache.
@@ -1147,18 +1152,20 @@ class OllamaBrain:
         Must be called by any method that mutates conversations (create, delete,
         rename, switch) so the next _load_conversations_index() re-reads from disk.
         """
-        self._conversations_index_cache = None
+        with self._conversations_index_lock:
+            self._conversations_index_cache = None
 
     def _save_conversations_index(self, index: list) -> None:
-        """Save the conversations index."""
-        try:
-            self._conversations_index_file.write_text(
-                json.dumps(index, indent=2, ensure_ascii=False),
-                encoding="utf-8"
-            )
-            self._conversations_index_cache = index
-        except IOError as e:
-            logger.warning(f"[BRAIN] Could not save conversations index: {e}")
+        """Save the conversations index (thread-safe)."""
+        with self._conversations_index_lock:
+            try:
+                self._conversations_index_file.write_text(
+                    json.dumps(index, indent=2, ensure_ascii=False),
+                    encoding="utf-8"
+                )
+                self._conversations_index_cache = index
+            except IOError as e:
+                logger.warning(f"[BRAIN] Could not save conversations index: {e}")
 
     def _update_conversation_index_entry(
         self,
@@ -1295,12 +1302,12 @@ class OllamaBrain:
             if index:
                 # Sort by most recently updated so we switch to the latest conversation
                 index.sort(key=lambda c: c.get("updated_at", 0), reverse=True)
+                target_id = index[0]["id"]
                 with self._history_lock:
-                    # Point _history_file away from the deleted dir before switch_conversation
-                    # tries to save history via _save_history_unlocked
-                    target_dir = self._conversations_dir / index[0]["id"]
+                    target_dir = self._conversations_dir / target_id
+                    self._current_conversation_id = target_id
                     self._history_file = target_dir / "history.json"
-                self.switch_conversation(index[0]["id"])
+                    self._load_history()
             else:
                 conv_id = self._create_conversation_dir("New Chat")
                 with self._history_lock:
@@ -1427,26 +1434,26 @@ class OllamaBrain:
             primary_error = str(e)
             logger.error(f"[BRAIN] Failed to save conversation to memory: {e}")
 
-        # Fallback: try hybrid memory
+        # Fallback: UnifiedMemory (independent SQLite backend)
         try:
-            from aura.tools.hybrid_amem import get_hybrid_memory
-            hybrid = get_hybrid_memory()
-            result = hybrid.remember(
+            from aura.memory.unified_memory import get_unified_memory
+            umem = get_unified_memory()
+            result = umem.store(
                 content=memory_content,
-                memory_type="episodic",
-                tags=["conversation", "chat_history"],
-                importance=0.6,
                 source="conversation_save",
+                importance=0.6,
+                tags=["conversation", "chat_history"],
             )
-            logger.info(f"[BRAIN] Saved conversation {conv_id} to hybrid memory")
+            logger.info(f"[BRAIN] Saved conversation {conv_id} via UnifiedMemory fallback")
             return {
                 "success": True,
-                "note_id": result.get("note_id"),
+                "note_id": result.get("store", ""),
+                "fallback": "unified_memory",
                 "message_count": len(messages),
                 "title": title,
             }
         except Exception as e2:
-            logger.error(f"[BRAIN] Hybrid memory fallback also failed: {e2}")
+            logger.error(f"[BRAIN] UnifiedMemory fallback also failed: {e2}")
             return {"success": False, "error": f"Memory save failed: {primary_error}; {e2}"}
 
     def clear_history(self):
@@ -1699,6 +1706,47 @@ class OllamaBrain:
             return Config.BUDGET_LARGE   # complex
         return Config.BUDGET_MEDIUM       # default (greetings, questions, etc.)
 
+    def _build_neuro_llm_options(self, prompt: str, neuro: dict) -> dict:
+        """Build neuromodulator-adjusted LLM options. Shared by think() and think_stream()."""
+        # Dopamine modulates temperature (creativity/exploration)
+        base_temp = 0.7
+        adjusted_temp = round(_neuro_scale(base_temp, neuro["dopamine"], sensitivity=0.25), 2)
+
+        # Serotonin modulates num_predict (response thoroughness)
+        base_num_predict = 1024
+        adjusted_num_predict = int(_neuro_scale(base_num_predict, neuro["serotonin"], sensitivity=0.3))
+
+        # Norepinephrine modulates top_p (focus vs exploration)
+        base_top_p = 0.9
+        adjusted_top_p = round(base_top_p - (neuro["norepinephrine"] - 0.5) * 0.15, 2)
+        adjusted_top_p = max(0.7, min(0.95, adjusted_top_p))
+
+        # Acetylcholine modulates repeat_penalty (attention precision)
+        base_repeat_penalty = 1.1
+        ach = neuro.get("acetylcholine", 0.5)
+        adjusted_repeat_penalty = round(_neuro_scale(base_repeat_penalty, ach, sensitivity=0.15), 2)
+
+        # Budget-forced num_predict cap
+        budget_tokens = self._classify_budget(prompt)
+        budget_num_predict = budget_tokens * 2
+        effective_num_predict = max(512, min(adjusted_num_predict, budget_num_predict))
+
+        logger.debug(
+            f"[BRAIN] Neuro-modulated LLM: temp={adjusted_temp} "
+            f"(DA={neuro['dopamine']:.2f}), "
+            f"num_predict={effective_num_predict} "
+            f"(5HT={neuro['serotonin']:.2f}), "
+            f"top_p={adjusted_top_p} "
+            f"(NE={neuro['norepinephrine']:.2f})"
+        )
+
+        return {
+            "temperature": adjusted_temp,
+            "num_predict": effective_num_predict,
+            "top_p": adjusted_top_p,
+            "repeat_penalty": adjusted_repeat_penalty,
+        }
+
     @staticmethod
     def _build_budget_instruction(budget: int) -> str:
         return f"\n\n[Response budget: ~{budget} tokens. Be appropriately concise.]"
@@ -1748,10 +1796,9 @@ class OllamaBrain:
             _now = time.time()
             _cwd = os.getcwd()
             # 60-second cache to avoid re-detecting every query
-            if (not hasattr(self, '_project_ctx_cache')
-                    or self._project_ctx_cache is None
-                    or _now - getattr(self, '_project_ctx_ts', 0) > 60
-                    or getattr(self, '_project_ctx_cwd', '') != _cwd):
+            if (self._project_ctx_cache is None
+                    or _now - self._project_ctx_ts > 60
+                    or self._project_ctx_cwd != _cwd):
                 from aura.tools.project_context import detect_and_load_context
                 self._project_ctx_cache = detect_and_load_context(_cwd)
                 self._project_ctx_ts = _now
@@ -1873,13 +1920,16 @@ class OllamaBrain:
         full_system_prompt = self._build_full_system_prompt(prompt, system_prompt, tone_modifier)
 
         # Auto-compact: cloud models have 128K-256K context, compact at ~60% (~150 msgs)
-        if use_history and len(self.conversation_history) > 150:
-            try:
-                summary = self.compact_history()
-                if summary:
-                    logger.info(f"[BRAIN] Auto-compacted history → {len(self.conversation_history)} msgs remain")
-            except Exception as e:
-                logger.debug(f"[Brain] non-critical: {e}")
+        if use_history:
+            with self._history_lock:
+                _needs_compact = len(self.conversation_history) > 150
+            if _needs_compact:
+                try:
+                    summary = self.compact_history()
+                    if summary:
+                        logger.info(f"[BRAIN] Auto-compacted history → {len(self.conversation_history)} msgs remain")
+                except Exception as e:
+                    logger.debug(f"[Brain] non-critical: {e}")
         messages = []
         if full_system_prompt:
             messages.append({"role": "system", "content": full_system_prompt})
@@ -1910,52 +1960,7 @@ class OllamaBrain:
             tm.record_real_thought("formulating", f"reasoning with {actual_model}...", intensity=0.7, source="brain")
         except Exception as e:
             logger.debug(f"[Brain] non-critical: {e}")
-        # Neuromodulator: Dopamine modulates temperature (creativity/exploration)
-        # High dopamine = slightly higher temp = more creative; low = more conservative
-        base_temp = 0.7
-        adjusted_temp = round(_neuro_scale(base_temp, neuro["dopamine"], sensitivity=0.25), 2)
-
-        # Neuromodulator: Serotonin modulates num_predict (response thoroughness)
-        # High serotonin = patience = longer responses allowed; low = terse
-        base_num_predict = 1024
-        adjusted_num_predict = int(_neuro_scale(base_num_predict, neuro["serotonin"], sensitivity=0.3))
-
-        # Neuromodulator: Norepinephrine modulates top_p (focus vs exploration)
-        # High norepinephrine = alert/focused = lower top_p (more deterministic)
-        # Low norepinephrine = relaxed = higher top_p (more varied responses)
-        base_top_p = 0.9
-        adjusted_top_p = round(base_top_p - (neuro["norepinephrine"] - 0.5) * 0.15, 2)
-        adjusted_top_p = max(0.7, min(0.95, adjusted_top_p))
-
-        # Neuromodulator: Acetylcholine modulates repeat_penalty (attention precision)
-        # High acetylcholine = focused attention = higher repeat penalty (less repetitive)
-        base_repeat_penalty = 1.1
-        ach = neuro.get("acetylcholine", 0.5)
-        adjusted_repeat_penalty = round(_neuro_scale(base_repeat_penalty, ach, sensitivity=0.15), 2)
-
-        # Budget-forced num_predict: hard cap based on query complexity
-        # The budget classification gives: conversational=BUDGET_SMALL, default=BUDGET_MEDIUM, complex=BUDGET_LARGE
-        # We use 2x multiplier for breathing room while still enforcing a ceiling
-        budget_tokens = self._classify_budget(prompt)
-        budget_num_predict = budget_tokens * 2
-        # Take the lower of neuromodulator-adjusted and budget-forced cap
-        effective_num_predict = max(512, min(adjusted_num_predict, budget_num_predict))
-
-        llm_options = {
-            "temperature": adjusted_temp,
-            "num_predict": effective_num_predict,
-            "top_p": adjusted_top_p,
-            "repeat_penalty": adjusted_repeat_penalty,
-        }
-
-        logger.debug(
-            f"[BRAIN] Neuro-modulated LLM: temp={adjusted_temp} "
-            f"(DA={neuro['dopamine']:.2f}), "
-            f"num_predict={adjusted_num_predict} "
-            f"(5HT={neuro['serotonin']:.2f}), "
-            f"top_p={adjusted_top_p} "
-            f"(NE={neuro['norepinephrine']:.2f})"
-        )
+        llm_options = self._build_neuro_llm_options(prompt, neuro)
 
         # Record neuromodulator influence on thinking panel
         try:
@@ -2116,13 +2121,16 @@ class OllamaBrain:
         full_system_prompt = self._build_full_system_prompt(prompt, system_prompt, tone_modifier)
 
         # Auto-compact: cloud models have 128K-256K context, compact at ~60% (~150 msgs)
-        if use_history and len(self.conversation_history) > 150:
-            try:
-                summary = self.compact_history()
-                if summary:
-                    logger.info(f"[BRAIN] Auto-compacted history → {len(self.conversation_history)} msgs remain")
-            except Exception as e:
-                logger.debug(f"[Brain] non-critical: {e}")
+        if use_history:
+            with self._history_lock:
+                _needs_compact = len(self.conversation_history) > 150
+            if _needs_compact:
+                try:
+                    summary = self.compact_history()
+                    if summary:
+                        logger.info(f"[BRAIN] Auto-compacted history → {len(self.conversation_history)} msgs remain")
+                except Exception as e:
+                    logger.debug(f"[Brain] non-critical: {e}")
         messages = []
         if full_system_prompt:
             messages.append({"role": "system", "content": full_system_prompt})
@@ -2148,39 +2156,8 @@ class OllamaBrain:
             tm.record_real_thought("formulating", f"streaming response with {actual_model}...", intensity=0.7, source="brain")
         except Exception as e:
             logger.debug(f"[Brain] non-critical: {e}")
-        # Neuromodulator: Dopamine modulates temperature (creativity/exploration)
         neuro = _get_neuromodulator_levels()
-        base_temp = 0.7
-        adjusted_temp = round(_neuro_scale(base_temp, neuro["dopamine"], sensitivity=0.25), 2)
-
-        # Neuromodulator: Serotonin modulates num_predict (response thoroughness)
-        base_num_predict = 1024
-        adjusted_num_predict = int(_neuro_scale(base_num_predict, neuro["serotonin"], sensitivity=0.3))
-
-        # Neuromodulator: Norepinephrine modulates top_p (focus vs exploration)
-        base_top_p = 0.9
-        adjusted_top_p = round(base_top_p - (neuro["norepinephrine"] - 0.5) * 0.15, 2)
-        adjusted_top_p = max(0.7, min(0.95, adjusted_top_p))
-
-        # Neuromodulator: Acetylcholine modulates repeat_penalty (attention precision)
-        base_repeat_penalty = 1.1
-        ach = neuro.get("acetylcholine", 0.5)
-        adjusted_repeat_penalty = round(_neuro_scale(base_repeat_penalty, ach, sensitivity=0.15), 2)
-
-        # Budget-forced num_predict: hard cap based on query complexity
-        # The budget classification gives: conversational=BUDGET_SMALL, default=BUDGET_MEDIUM, complex=BUDGET_LARGE
-        # We use 2x multiplier for breathing room while still enforcing a ceiling
-        budget_tokens = self._classify_budget(prompt)
-        budget_num_predict = budget_tokens * 2
-        # Take the lower of neuromodulator-adjusted and budget-forced cap
-        effective_num_predict = max(512, min(adjusted_num_predict, budget_num_predict))
-
-        llm_options = {
-            "temperature": adjusted_temp,
-            "num_predict": effective_num_predict,
-            "top_p": adjusted_top_p,
-            "repeat_penalty": adjusted_repeat_penalty,
-        }
+        llm_options = self._build_neuro_llm_options(prompt, neuro)
 
         full_response = ""
 
@@ -2244,7 +2221,7 @@ class OllamaBrain:
             self._record_tokens(actual_model, _stream_in_tok, _stream_out_tok)
 
         # Update history after streaming completes
-        if use_history and full_response:
+        if use_history:
             with self._history_lock:
                 self.conversation_history.append({"role": "user", "content": prompt})
                 self.conversation_history.append({"role": "assistant", "content": full_response})

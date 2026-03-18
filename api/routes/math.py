@@ -12,6 +12,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Depends
 
 from api.auth import require_api_key
+from api.utils import safe_error_detail
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +141,7 @@ async def solve_math(body: dict):
         response_text = r.json().get("response", "")
     except Exception as e:
         logger.error("[MathSolver] LLM call failed: %s", e)
-        raise HTTPException(500, f"LLM call failed: {e}")
+        raise HTTPException(500, safe_error_detail(e, "LLM call failed"))
 
     if not response_text:
         raise HTTPException(500, "Empty response from LLM")

@@ -8,6 +8,7 @@ import logging
 from fastapi import APIRouter, Query, HTTPException, Depends
 
 from api.auth import require_api_key
+from api.utils import safe_error_detail
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ async def web_search(q: str = Query(..., max_length=500), limit: int = Query(5, 
         )
     except Exception as e:
         logger.error("[Search] Tavily search failed: %s", e)
-        raise HTTPException(500, f"Search failed: {e}")
+        raise HTTPException(500, safe_error_detail(e, "Search failed"))
 
     return {
         "query": q,

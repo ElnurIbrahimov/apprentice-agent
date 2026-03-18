@@ -31,8 +31,8 @@ def _embed(text: str) -> Optional[list]:
         )
         if r.status_code == 200:
             return r.json().get("embedding")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("[CodebaseIndex] Embedding failed: %s", e)
     return None
 
 

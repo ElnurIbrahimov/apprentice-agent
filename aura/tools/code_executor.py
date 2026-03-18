@@ -42,6 +42,7 @@ class CodeExecutorTool:
         '__class__', '__bases__', '__subclasses__', '__mro__',
         '__code__', '__globals__', '__builtins__', '__dict__',
         '__import__', '__loader__', '__spec__',
+        '__aura_stdout_cap__', '__aura_stderr_cap__',
     }
 
     def __init__(self, timeout: int = 30, max_output_length: int = 5000):
@@ -284,13 +285,21 @@ class CodeExecutorTool:
         # SECURITY: sys is NOT imported — user code must not access sys.modules.
         # We capture stdout/stderr refs before exec to print results without
         # exposing the sys module to user code.
+        # SECURITY: Check that user code doesn't try to access wrapper internals
+        if '__aura_stdout_cap__' in code or '__aura_stderr_cap__' in code:
+            return {
+                "success": False,
+                "error": "Code blocked for safety: references to internal capture variables are not allowed",
+                "code": code,
+            }
+
         wrapper_code = f'''
 import io as _io
 from contextlib import redirect_stdout as _redirect_stdout, redirect_stderr as _redirect_stderr
 
 # Capture references to real stdout/stderr before user code runs
-_real_stderr = __import__('sys').stderr
-_real_stdout = __import__('sys').stdout
+__aura_stderr_cap__ = __import__('sys').stderr
+__aura_stdout_cap__ = __import__('sys').stdout
 
 # Capture output
 _stdout_capture = _io.StringIO()
@@ -306,12 +315,12 @@ try:
     _errors = _stderr_capture.getvalue()
 
     if _output:
-        _real_stdout.write(_output)
+        __aura_stdout_cap__.write(_output)
     if _errors:
-        _real_stderr.write(_errors)
+        __aura_stderr_cap__.write(_errors)
 
 except Exception as _e:
-    _real_stderr.write(f"Error: {{type(_e).__name__}}: {{_e}}\\n")
+    __aura_stderr_cap__.write(f"Error: {{type(_e).__name__}}: {{_e}}\\n")
 '''
 
         # Write to temp file and execute

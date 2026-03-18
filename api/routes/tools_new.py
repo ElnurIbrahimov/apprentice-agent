@@ -49,8 +49,7 @@ async def calendar_today():
         result = await loop.run_in_executor(None, _calendar_today_sync)
         return result
     except Exception as e:
-        logger.error(f"[Calendar] Error: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "calendar_today")}
 
 
 def _calendar_today_sync() -> dict:
@@ -68,7 +67,7 @@ async def calendar_upcoming(days: int = 7):
         result = await loop.run_in_executor(None, lambda: _calendar_upcoming_sync(days))
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "calendar_upcoming")}
 
 
 def _calendar_upcoming_sync(days: int) -> dict:
@@ -86,7 +85,7 @@ async def calendar_add(request: AddEventRequest):
         result = await loop.run_in_executor(None, lambda: _calendar_add_sync(request))
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "calendar_add")}
 
 
 def _calendar_add_sync(request: AddEventRequest) -> dict:
@@ -112,7 +111,7 @@ async def calendar_remove(event_id: str):
         result = await loop.run_in_executor(None, lambda: _calendar_remove_sync(event_id))
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "calendar_remove")}
 
 
 def _calendar_remove_sync(event_id: str) -> dict:
@@ -146,7 +145,7 @@ async def flashcards_due():
         result = await loop.run_in_executor(None, _flashcards_due_sync)
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "flashcards_due")}
 
 
 def _flashcards_due_sync() -> dict:
@@ -164,7 +163,7 @@ async def flashcards_answer(request: AnswerRequest):
         result = await loop.run_in_executor(None, lambda: _flashcards_answer_sync(request))
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "flashcards_answer")}
 
 
 def _flashcards_answer_sync(request: AnswerRequest) -> dict:
@@ -182,7 +181,7 @@ async def flashcards_stats():
         result = await loop.run_in_executor(None, _flashcards_stats_sync)
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "flashcards_stats")}
 
 
 def _flashcards_stats_sync() -> dict:
@@ -200,7 +199,7 @@ async def flashcards_add(request: AddCardRequest):
         result = await loop.run_in_executor(None, lambda: _flashcards_add_sync(request))
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "flashcards_add")}
 
 
 def _flashcards_add_sync(request: AddCardRequest) -> dict:
@@ -235,7 +234,7 @@ async def email_status():
         result = await loop.run_in_executor(None, _email_status_sync)
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "email_status")}
 
 
 def _email_status_sync() -> dict:
@@ -253,7 +252,7 @@ async def email_inbox(limit: int = 10):
         result = await loop.run_in_executor(None, lambda: _email_inbox_sync(limit))
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "email_inbox")}
 
 
 def _email_inbox_sync(limit: int) -> dict:
@@ -271,7 +270,7 @@ async def email_send(request: SendEmailRequest):
         result = await loop.run_in_executor(None, lambda: _email_send_sync(request))
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "email_send")}
 
 
 def _email_send_sync(request: SendEmailRequest) -> dict:
@@ -299,7 +298,7 @@ async def screen_read():
         result = await loop.run_in_executor(None, _screen_read_sync)
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "screen_read")}
 
 
 def _screen_read_sync() -> dict:
@@ -317,7 +316,7 @@ async def screen_active_window():
         result = await loop.run_in_executor(None, _screen_active_window_sync)
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "screen_active_window")}
 
 
 def _screen_active_window_sync() -> dict:
@@ -355,13 +354,51 @@ _SHELL_BLOCKED_PATTERNS = [
     "taskkill //F //IM node", "pkill -f node", "killall node",
 ]
 
+# Commands that must never reach the shell — checked as whole-word tokens
+_SHELL_BLOCKED_COMMANDS = {
+    "curl", "wget", "nc", "ncat", "netcat", "nmap", "ssh", "scp", "sftp",
+    "telnet", "ftp", "powershell", "cmd.exe", "cmd", "reg", "wmic", "certutil",
+    "bitsadmin", "mshta", "cscript", "wscript", "rundll32",
+}
+
+
+def _validate_shell_cwd(cwd: str | None) -> str | None:
+    """Validate and sanitize the cwd parameter for shell commands."""
+    if cwd is None:
+        return None
+    from pathlib import Path as _Path
+    try:
+        resolved = _Path(cwd).resolve(strict=True)
+    except (OSError, ValueError):
+        return None  # Fall back to default cwd
+    _cwd_str = str(resolved).lower().replace("\\", "/")
+    _blocked_dirs = (
+        "/windows/system32", "/windows/syswow64", "/etc", "/proc", "/sys",
+        "/dev", "/root", "/boot", "/.ssh", "/.gnupg", "/program files",
+    )
+    if any(_cwd_str.startswith(d) or ("/" + d.lstrip("/")) in _cwd_str for d in _blocked_dirs):
+        return None
+    if not resolved.is_dir():
+        return None
+    return str(resolved)
+
 
 def _shell_run_sync(request: ShellRunRequest) -> dict:
-    # Block obviously destructive commands
+    import re as _re
+    # Block obviously destructive commands (substring match)
     cmd_lower = request.command.lower().strip()
     for pattern in _SHELL_BLOCKED_PATTERNS:
         if pattern in cmd_lower:
             return {"success": False, "error": f"Blocked: command matches dangerous pattern '{pattern}'"}
+
+    # Block dangerous command names as whole tokens (prevents bypass via piping)
+    cmd_tokens = set(_re.findall(r'[a-z0-9_.]+', cmd_lower))
+    blocked_found = cmd_tokens & _SHELL_BLOCKED_COMMANDS
+    if blocked_found:
+        return {"success": False, "error": f"Blocked: command uses disallowed program '{next(iter(blocked_found))}'"}
+
+    # Validate cwd to prevent path traversal into system directories
+    validated_cwd = _validate_shell_cwd(request.cwd)
 
     agent = _get_agent_service().agent
     if "shell_executor" in agent.tools:
@@ -369,7 +406,7 @@ def _shell_run_sync(request: ShellRunRequest) -> dict:
             command=request.command,
             session_id=request.session_id,
             timeout=request.timeout,
-            cwd=request.cwd,
+            cwd=validated_cwd,
         )
     return {"success": False, "error": "Shell executor tool not loaded"}
 
@@ -382,7 +419,7 @@ async def shell_sessions():
         result = await loop.run_in_executor(None, _shell_sessions_sync)
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "shell_sessions")}
 
 
 def _shell_sessions_sync() -> dict:
@@ -421,7 +458,7 @@ async def tasks_list(status: Optional[str] = None, project: Optional[str] = None
         result = await loop.run_in_executor(None, lambda: _tasks_list_sync(status, project))
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "tasks_list")}
 
 
 def _tasks_list_sync(status: Optional[str], project: Optional[str]) -> dict:
@@ -439,7 +476,7 @@ async def tasks_board():
         result = await loop.run_in_executor(None, _tasks_board_sync)
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "tasks_board")}
 
 
 def _tasks_board_sync() -> dict:
@@ -457,7 +494,7 @@ async def tasks_add(request: AddTaskRequest):
         result = await loop.run_in_executor(None, lambda: _tasks_add_sync(request))
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "tasks_add")}
 
 
 def _tasks_add_sync(request: AddTaskRequest) -> dict:
@@ -482,7 +519,7 @@ async def tasks_update(request: UpdateTaskRequest):
         result = await loop.run_in_executor(None, lambda: _tasks_update_sync(request))
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "tasks_update")}
 
 
 def _tasks_update_sync(request: UpdateTaskRequest) -> dict:
@@ -509,7 +546,7 @@ async def tasks_remove(task_id: str):
         result = await loop.run_in_executor(None, lambda: _tasks_remove_sync(task_id))
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "tasks_remove")}
 
 
 def _tasks_remove_sync(task_id: str) -> dict:
@@ -527,7 +564,7 @@ async def tasks_overdue():
         result = await loop.run_in_executor(None, _tasks_overdue_sync)
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "tasks_overdue")}
 
 
 def _tasks_overdue_sync() -> dict:
@@ -551,10 +588,28 @@ class APITestRequest(BaseModel):
     @field_validator("url")
     @classmethod
     def validate_url_scheme(cls, v: str) -> str:
-        """Reject non-HTTP(S) schemes to prevent SSRF via file://, ftp://, etc."""
+        """Reject non-HTTP(S) schemes and private/internal IPs to prevent SSRF."""
+        import ipaddress
+        from urllib.parse import urlparse
         lower = v.strip().lower()
         if not (lower.startswith("http://") or lower.startswith("https://")):
             raise ValueError("Only http:// and https:// URLs are allowed")
+        # Block requests to private/internal networks
+        parsed = urlparse(v.strip())
+        hostname = parsed.hostname or ""
+        _blocked_hosts = {"localhost", "127.0.0.1", "::1", "0.0.0.0", "[::1]"}
+        if hostname in _blocked_hosts or hostname.endswith(".local"):
+            raise ValueError("Requests to localhost/internal hosts are blocked")
+        # Check for private IP ranges (RFC 1918, link-local, loopback)
+        try:
+            addr = ipaddress.ip_address(hostname)
+            if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+                raise ValueError("Requests to private/internal IP addresses are blocked")
+        except ValueError:
+            pass  # hostname is a domain name, not an IP — allow DNS resolution
+        # Block cloud metadata endpoints
+        if hostname in ("169.254.169.254", "metadata.google.internal"):
+            raise ValueError("Requests to cloud metadata endpoints are blocked")
         return v
 
     @field_validator("method")
@@ -574,7 +629,7 @@ async def api_tester_run(request: APITestRequest):
         result = await loop.run_in_executor(None, lambda: _api_tester_run_sync(request))
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "api_tester_run")}
 
 
 def _api_tester_run_sync(request: APITestRequest) -> dict:
@@ -598,7 +653,7 @@ async def api_tester_history(limit: int = 20):
         result = await loop.run_in_executor(None, lambda: _api_tester_history_sync(limit))
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "api_tester_history")}
 
 
 def _api_tester_history_sync(limit: int) -> dict:
@@ -634,12 +689,19 @@ async def database_query(request: SQLQueryRequest):
     sql_stripped = request.sql.strip().lower()
     if not sql_stripped.startswith(_SQL_ALLOWED_PREFIXES):
         return {"success": False, "error": "Only SELECT, PRAGMA, EXPLAIN, and WITH queries are allowed via the API"}
+    # Block multi-statement injection (e.g., "SELECT 1; DROP TABLE foo")
+    # Strip string literals first to avoid false positives on semicolons inside strings
+    import re as _re
+    _sql_no_strings = _re.sub(r"'[^']*'", "", request.sql)
+    _sql_no_strings = _re.sub(r'"[^"]*"', "", _sql_no_strings)
+    if ";" in _sql_no_strings:
+        return {"success": False, "error": "Multi-statement queries are not allowed"}
     try:
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, lambda: _database_query_sync(request))
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "database_query")}
 
 
 def _database_query_sync(request: SQLQueryRequest) -> dict:
@@ -657,7 +719,7 @@ async def database_schema(db: str = "default", table: Optional[str] = None):
         result = await loop.run_in_executor(None, lambda: _database_schema_sync(db, table))
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "database_schema")}
 
 
 def _database_schema_sync(db: str, table: Optional[str]) -> dict:
@@ -675,7 +737,7 @@ async def database_import_csv(request: CSVImportRequest):
         result = await loop.run_in_executor(None, lambda: _database_import_sync(request))
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "database_import_csv")}
 
 
 def _database_import_sync(request: CSVImportRequest) -> dict:
@@ -686,8 +748,10 @@ def _database_import_sync(request: CSVImportRequest) -> dict:
     except OSError:
         return {"success": False, "error": f"CSV file not found: {request.csv_path}"}
     # Block system directories
-    _csv_str = str(csv_resolved).lower()
-    if any(seg in _csv_str for seg in ("/etc/", "/proc/", "/sys/", "\\windows\\", "\\system32\\")):
+    _csv_str = str(csv_resolved).lower().replace("\\", "/")
+    _blocked_csv = ("/etc/", "/proc/", "/sys/", "/dev/", "/root/", "/windows/", "/system32/",
+                    "/program files/", "/programdata/", "/.ssh/", "/.gnupg/", "/appdata/roaming/")
+    if any(seg in _csv_str for seg in _blocked_csv):
         return {"success": False, "error": "Cannot import from system directories"}
 
     agent = _get_agent_service().agent
@@ -716,17 +780,19 @@ async def audio_transcribe(request: TranscribeRequest):
         result = await loop.run_in_executor(None, lambda: _audio_transcribe_sync(request))
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "audio_transcribe")}
 
 
 def _audio_transcribe_sync(request: TranscribeRequest) -> dict:
     # Validate file path — block system directories
     from pathlib import Path as _Path
     fp = _Path(request.file_path).resolve()
-    blocked_prefixes = ["/etc", "/proc", "/sys", "/dev", "C:\\Windows", "C:\\Program Files"]
-    for prefix in blocked_prefixes:
-        if str(fp).startswith(prefix):
-            return {"success": False, "error": f"Access denied: {prefix} is blocked"}
+    _fp_str = str(fp).lower().replace("\\", "/")
+    _blocked_audio = ("/etc", "/proc", "/sys", "/dev", "/root", "/windows", "/system32",
+                      "/program files", "/programdata", "/.ssh", "/.gnupg", "/appdata/roaming")
+    for prefix in _blocked_audio:
+        if prefix in _fp_str:
+            return {"success": False, "error": "Access denied: path is blocked"}
     if not fp.exists():
         return {"success": False, "error": f"File not found: {request.file_path}"}
 
@@ -748,7 +814,7 @@ async def audio_transcripts():
         result = await loop.run_in_executor(None, _audio_transcripts_sync)
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "audio_transcripts")}
 
 
 def _audio_transcripts_sync() -> dict:
@@ -766,7 +832,7 @@ async def audio_status():
         result = await loop.run_in_executor(None, _audio_status_sync)
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "audio_status")}
 
 
 def _audio_status_sync() -> dict:
@@ -788,14 +854,14 @@ async def clipboard_history(limit: int = 20, category: Optional[str] = None):
         result = await loop.run_in_executor(None, lambda: _clipboard_history_sync(limit, category))
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "clipboard_history")}
 
 
 def _clipboard_history_sync(limit: int, category: Optional[str]) -> dict:
     agent = _get_agent_service().agent
-    if "clipboard_history" in agent.tools:
-        return agent.tools["clipboard_history"].list_history(limit=limit, category=category)
-    return {"success": False, "error": "Clipboard history tool not loaded"}
+    if "clipboard" in agent.tools:
+        return agent.tools["clipboard"].list_history(limit=limit, category=category)
+    return {"success": False, "error": "Clipboard tool not loaded"}
 
 
 @router.post("/clipboard/capture")
@@ -806,14 +872,14 @@ async def clipboard_capture():
         result = await loop.run_in_executor(None, _clipboard_capture_sync)
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "clipboard_capture")}
 
 
 def _clipboard_capture_sync() -> dict:
     agent = _get_agent_service().agent
-    if "clipboard_history" in agent.tools:
-        return agent.tools["clipboard_history"].capture()
-    return {"success": False, "error": "Clipboard history tool not loaded"}
+    if "clipboard" in agent.tools:
+        return agent.tools["clipboard"].capture()
+    return {"success": False, "error": "Clipboard tool not loaded"}
 
 
 @router.get("/clipboard/search")
@@ -824,14 +890,14 @@ async def clipboard_search(query: str):
         result = await loop.run_in_executor(None, lambda: _clipboard_search_sync(query))
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "clipboard_search")}
 
 
 def _clipboard_search_sync(query: str) -> dict:
     agent = _get_agent_service().agent
-    if "clipboard_history" in agent.tools:
-        return agent.tools["clipboard_history"].search(query)
-    return {"success": False, "error": "Clipboard history tool not loaded"}
+    if "clipboard" in agent.tools:
+        return agent.tools["clipboard"].search(query)
+    return {"success": False, "error": "Clipboard tool not loaded"}
 
 
 @router.get("/clipboard/stats")
@@ -842,14 +908,14 @@ async def clipboard_stats():
         result = await loop.run_in_executor(None, _clipboard_stats_sync)
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "clipboard_stats")}
 
 
 def _clipboard_stats_sync() -> dict:
     agent = _get_agent_service().agent
-    if "clipboard_history" in agent.tools:
-        return agent.tools["clipboard_history"].stats()
-    return {"success": False, "error": "Clipboard history tool not loaded"}
+    if "clipboard" in agent.tools:
+        return agent.tools["clipboard"].stats()
+    return {"success": False, "error": "Clipboard tool not loaded"}
 
 
 # ============================================================================
@@ -872,7 +938,7 @@ async def research_list(category: Optional[str] = None):
         result = await loop.run_in_executor(None, lambda: _research_list_sync(category))
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "research_list")}
 
 
 def _research_list_sync(category: Optional[str]) -> dict:
@@ -890,7 +956,7 @@ async def research_save(request: SaveResearchRequest):
         result = await loop.run_in_executor(None, lambda: _research_save_sync(request))
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "research_save")}
 
 
 def _research_save_sync(request: SaveResearchRequest) -> dict:
@@ -914,7 +980,7 @@ async def research_search(query: str, category: Optional[str] = None):
         result = await loop.run_in_executor(None, lambda: _research_search_sync(query, category))
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "research_search")}
 
 
 def _research_search_sync(query: str, category: Optional[str]) -> dict:
@@ -932,7 +998,7 @@ async def research_stats():
         result = await loop.run_in_executor(None, _research_stats_sync)
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "research_stats")}
 
 
 def _research_stats_sync() -> dict:
@@ -950,7 +1016,7 @@ async def research_skills():
         result = await loop.run_in_executor(None, _research_skills_sync)
         return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _safe_error(e, "research_skills")}
 
 
 def _research_skills_sync() -> dict:

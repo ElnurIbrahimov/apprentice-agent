@@ -210,16 +210,16 @@ class LifeLogger:
             except Exception as e:
                 logger.debug(f"[LifeLogger] GitHub pull failed: {e}")
 
-        # Clipboard memory recent items
-        if "clipboard_memory" in tools:
+        # Clipboard recent items
+        if "clipboard" in tools:
             try:
-                result = tools["clipboard_memory"].list_recent(limit=20)
-                for item in result.get("items", []):
+                result = tools["clipboard"].list_recent(limit=20)
+                for item in result.get("entries", []):
                     self.log_event(
                         source="clipboard",
                         event_type="copy",
-                        title=item.get("text", "")[:80],
-                        description=item.get("label", ""),
+                        title=item.get("content", "")[:80],
+                        description=item.get("category", ""),
                         timestamp=item.get("timestamp"),
                     )
                     pulled["clipboard"] = pulled.get("clipboard", 0) + 1

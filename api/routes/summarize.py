@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 
 from api.auth import require_api_key
+from api.utils import safe_error_detail
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +117,7 @@ async def summarize_page(req: SummarizeRequest):
         raise HTTPException(502, f"Ollama error: {e.response.status_code}")
     except Exception as e:
         logger.error("[Summarize] Unexpected error: %s", e)
-        raise HTTPException(500, f"Summarization failed: {e}")
+        raise HTTPException(500, safe_error_detail(e, "Summarization failed"))
 
     summary = data.get("response", "").strip()
     if not summary:

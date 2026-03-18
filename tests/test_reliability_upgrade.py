@@ -495,7 +495,7 @@ class TestDreamConsolidator(unittest.TestCase):
         from aura.dream import DreamConsolidator
         consolidator = DreamConsolidator()
         # Mock the fetch so we don't need real backends
-        consolidator._fetch_memories = lambda user_id: self._make_memories(5)
+        consolidator._fetch_memories = lambda user_id, store=None: self._make_memories(5)
         consolidator._summarize_cluster = lambda cl, uid: None  # skip LLM
         consolidator._contradiction_report = lambda: []
         consolidator._write_summary_memory = lambda s, uid: None
@@ -509,7 +509,7 @@ class TestDreamConsolidator(unittest.TestCase):
         from aura.dream import DreamConsolidator
         consolidator = DreamConsolidator()
         consolidator._min_cluster = 5
-        consolidator._fetch_memories = lambda uid: self._make_memories(2)
+        consolidator._fetch_memories = lambda uid, store=None: self._make_memories(2)
         consolidator._write_summary_memory = lambda s, uid: None
         consolidator._contradiction_report = lambda: []
         consolidator._prune_stale = lambda mems, uid: []
@@ -544,7 +544,7 @@ class TestDreamConsolidator(unittest.TestCase):
         from aura.dream import DreamConsolidator
         consolidator = DreamConsolidator()
         consolidator._batch_size = 3
-        consolidator._fetch_memories = lambda uid: self._make_memories(20)
+        consolidator._fetch_memories = lambda uid, store=None: self._make_memories(20)
         consolidator._summarize_cluster = lambda cl, uid: None
         consolidator._contradiction_report = lambda: []
         consolidator._write_summary_memory = lambda s, uid: None
@@ -559,7 +559,7 @@ class TestDreamConsolidator(unittest.TestCase):
         seen_users = []
         consolidator = DreamConsolidator()
 
-        def fake_fetch(uid):
+        def fake_fetch(uid, store=None):
             seen_users.append(uid)
             return []
 

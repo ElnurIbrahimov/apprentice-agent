@@ -66,6 +66,7 @@ class TelegramBot(BasePlatform):
 
         # Track active chats for proactive messaging
         self.active_chats: Dict[str, dict] = {}
+        self._pending_forget: Dict[str, datetime] = {}
         self._load_state()
 
     @property
@@ -355,8 +356,6 @@ Status: Online and ready!"""
         )
 
         # Store pending forget request
-        if not hasattr(self, '_pending_forget'):
-            self._pending_forget = {}
         self._pending_forget[user_id] = datetime.now()
 
     # ============ MESSAGE HANDLER ============

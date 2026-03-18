@@ -24,7 +24,7 @@ if (!fs.existsSync(AUTH_PATH)) {
 }
 
 // WebSocket server for Python connection
-const wss = new WebSocketServer({ port: WS_PORT });
+const wss = new WebSocketServer({ port: WS_PORT, host: '127.0.0.1' });
 let pythonSocket = null;
 
 console.log('');
@@ -36,7 +36,19 @@ console.log('Waiting for Python AURA to connect...');
 console.log('');
 
 // Handle Python connection
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
+    // Verify shared secret if configured
+    const expectedSecret = process.env.WS_SECRET;
+    if (expectedSecret) {
+        const url = new URL(req.url, `http://localhost:${WS_PORT}`);
+        const clientSecret = url.searchParams.get('secret');
+        if (clientSecret !== expectedSecret) {
+            console.log('Rejected connection: invalid secret');
+            ws.close(4001, 'Invalid secret');
+            return;
+        }
+    }
+
     console.log('Python AURA connected!');
     pythonSocket = ws;
 

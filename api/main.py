@@ -255,15 +255,16 @@ async def lifespan(app: FastAPI):
         from aura.consciousness.self_improvement import get_self_improvement_engine
         get_self_improvement_engine().stop()
         logger.info("[API] Self-Improvement Engine stopped")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"[API] Self-Improvement Engine stop failed: {e}")
 
     # Stop Idle Presence Engine
     try:
         from aura.consciousness.idle_presence import get_idle_presence_engine
         get_idle_presence_engine().stop_background_tasks()
-    except Exception:
-        pass
+        logger.info("[API] Idle Presence Engine stopped")
+    except Exception as e:
+        logger.warning(f"[API] Idle Presence Engine stop failed: {e}")
 
     # Save memory systems before shutdown (prevent data loss)
     try:
@@ -318,7 +319,16 @@ try:
 except Exception:
     _cors_origins_str = '*'
 
-_cors_origins = ["*"] if _cors_origins_str == "*" else [o.strip() for o in _cors_origins_str.split(",")]
+# Default to localhost origins instead of wildcard for security.
+# Set API_CORS_ORIGINS="*" explicitly to allow all origins.
+if _cors_origins_str == "*":
+    _cors_origins = [
+        "http://localhost:5173", "http://127.0.0.1:5173",
+        "http://localhost:3000", "http://127.0.0.1:3000",
+        "http://localhost:8000", "http://127.0.0.1:8000",
+    ]
+else:
+    _cors_origins = [o.strip() for o in _cors_origins_str.split(",")]
 
 # When specific origins are configured, also accept 127.0.0.1 variants
 # so that localhost:5173 -> 127.0.0.1:8000 WebSocket works regardless.
@@ -361,7 +371,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
     allow_origin_regex=_cors_origin_regex,
-    allow_credentials=_cors_origins != ["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*", "X-API-Key"],
 )

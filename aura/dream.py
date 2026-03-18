@@ -34,10 +34,10 @@ class DreamMode:
 
     def __init__(self):
         from .brain import OllamaBrain
-        from .memory import MemorySystem
+        from .memory.unified_memory import get_unified_memory
         from .metacognition import MetacognitionLogger
         self.metacog = MetacognitionLogger()
-        self.memory = MemorySystem(collection_name="dream_insights")
+        self.memory = get_unified_memory()
         self.brain = OllamaBrain()
         self._consolidation_count: int = 0
 
@@ -318,32 +318,14 @@ Format each insight as a single clear sentence starting with a verb (Use, Prefer
             date = datetime.now().strftime("%Y-%m-%d")
 
         stored_ids = []
-        try:
-            from aura.memory.unified_memory import get_unified_memory
-            umem = get_unified_memory()
-            for insight in insights:
-                ids = umem.store(
-                    content=insight,
-                    source="dream",
-                    importance=0.6,
-                    tags=["dream_insight", f"date:{date}"],
-                    episode_type="insight",
-                )
-                stored_ids.append(ids.get("store", ""))
-        except Exception as e:
-            logger.warning(f"[DreamMode] Failed to store insights via unified memory: {e}")
-            # Fallback to deprecated MemorySystem for resilience
-            for insight in insights:
-                memory_id = self.memory.remember(
-                    content=insight,
-                    memory_type="dream_insight",
-                    metadata={
-                        "source": "dream_mode",
-                        "date_analyzed": date,
-                        "generated_at": datetime.now().isoformat()
-                    }
-                )
-                stored_ids.append(memory_id)
+        for insight in insights:
+            ids = self.memory.store(
+                content=insight,
+                source="dream_consolidation",
+                importance=0.7,
+                tags=["dream_insight", f"date:{date}"],
+            )
+            stored_ids.append(ids.get("store", "") if isinstance(ids, dict) else str(ids))
 
         return stored_ids
 
@@ -352,16 +334,18 @@ Format each insight as a single clear sentence starting with a verb (Use, Prefer
         try:
             if hasattr(self.memory, "close"):
                 self.memory.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"[Dream] Memory backend close() failed: {e}")
 
     def recall_insights(self, query: str, n_results: int = 5) -> list[dict]:
         """Recall relevant insights from memory."""
-        return self.memory.recall(query, n_results=n_results)
+        results = self.memory.query(query, k=n_results)
+        return [{"content": r.content, "score": r.score, "metadata": r.metadata} for r in results]
 
     def get_all_insights(self) -> list[dict]:
         """Get all stored insights."""
-        return [m for m in self.memory.memories if m.get("type") == "dream_insight"]
+        results = self.memory.query("dream insight", k=100)
+        return [{"content": r.content, "metadata": r.metadata} for r in results if "dream" in r.source]
 
 
 def run_dream_mode(date: Optional[str] = None) -> dict:

@@ -106,7 +106,7 @@ class TestChatStoresMemory:
         mock_get_umem.return_value = umem
 
         # Patch heavy dependencies to avoid real initialization
-        with patch("aura.agent.MemorySystem"), \
+        with patch("aura.agent.get_unified_memory"), \
              patch("aura.agent.Config"), \
              patch("aura.agent.load_identity", return_value={}), \
              patch("aura.agent.get_identity_prompt", return_value=""), \

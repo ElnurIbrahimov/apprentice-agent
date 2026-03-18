@@ -85,7 +85,6 @@ class DatabaseTool:
 
     def _get_db_path(self, db: str) -> tuple:
         """Return (path_str, error_msg) tuple. path_str is None on error."""
-        from pathlib import Path
         DB_DIR = Path(__file__).parent.parent.parent / "data" / "databases"
         DB_DIR.mkdir(parents=True, exist_ok=True)
         p = Path(db)
@@ -252,7 +251,6 @@ class DatabaseTool:
 
     def import_csv(self, csv_path: str, table: str, db: str = "default") -> dict:
         """Import a CSV file into a table."""
-        from pathlib import Path
         DATA_DIR = Path(__file__).parent.parent.parent / "data"
         resolved = Path(csv_path).resolve()
         data_dir = DATA_DIR.resolve()
@@ -278,7 +276,12 @@ class DatabaseTool:
             if not rows:
                 return {"success": False, "error": "CSV file is empty"}
 
+            import re as _re
             columns = list(rows[0].keys())
+            # Validate column names to prevent SQL injection via CSV headers
+            for col in columns:
+                if not _re.match(r'^[a-zA-Z_][a-zA-Z0-9_ .\-]*$', col):
+                    return {"success": False, "error": f"Invalid column name in CSV: {col!r}"}
             col_defs = ", ".join(f'"{col}" TEXT' for col in columns)
 
             conn = sqlite3.connect(db_path)

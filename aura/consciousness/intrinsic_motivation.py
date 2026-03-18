@@ -404,7 +404,6 @@ class IntrinsicMotivationEngine:
             from aura.tools.knowledge_graph import get_knowledge_graph
             kg = get_knowledge_graph()
 
-            from datetime import datetime, timedelta
             now = datetime.now()
             cutoff_dt = now - timedelta(days=7)
 

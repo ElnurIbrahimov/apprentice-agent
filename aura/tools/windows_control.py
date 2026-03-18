@@ -370,7 +370,6 @@ class WindowsControlTool:
         safe_executable = self.APP_ALLOWLIST[exe_lower]
 
         try:
-            import subprocess
             cmd_parts = [safe_executable]
             if args:
                 cmd_parts.extend(args.split())

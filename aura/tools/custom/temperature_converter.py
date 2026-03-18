@@ -55,7 +55,6 @@ class TemperatureConverterTool:
 
     def _extract_param(self, action: str, param_name: str, index: int) -> Any:
         """Extract a parameter from the action string."""
-        import re
         # Try to find named parameter
         pattern = rf'{param_name}[=:]\s*["\'"]?([^"\'"\s]+)["\'"]?'
         match = re.search(pattern, action, re.IGNORECASE)

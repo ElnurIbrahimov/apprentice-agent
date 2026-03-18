@@ -349,9 +349,15 @@ async def search_messages(q: str, limit: int = 20):
         def _search_sync():
             results = []
             q_lower = q.lower()
+            max_convs_scanned = 200
+            max_msgs_per_conv = 100
+            convs_scanned = 0
             for conv in (svc.list_conversations() or []):
+                convs_scanned += 1
+                if convs_scanned > max_convs_scanned:
+                    break
                 msgs = svc._agent.brain.get_conversation_messages(conv['id']) if svc._agent else []
-                for msg in (msgs or []):
+                for msg in (msgs or [])[-max_msgs_per_conv:]:
                     content = msg.get('content', '')
                     if q_lower in content.lower():
                         idx = content.lower().find(q_lower)

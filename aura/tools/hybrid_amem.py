@@ -186,13 +186,14 @@ class HybridAMEMSystem:
                     if self._alma_engine is not None:
                         neuro = self._alma_engine.neuromodulators
                         dopamine_level = neuro.dopamine
-                except Exception:
+                except Exception as _alma_err:
                     self._alma_engine_loaded = True  # don't retry on import error
+                    logger.debug(f"[HybridAMEM] ALMA dopamine scoring unavailable: {_alma_err}")
                 # Scale importance: dopamine=0.5 -> no change, 1.0 -> +20%, 0.0 -> -15%
                 dopamine_offset = (dopamine_level - 0.5) * 0.4
                 importance = max(0.1, min(1.0, importance + dopamine_offset))
-        except Exception:
-            pass
+        except Exception as _mood_err:
+            logger.debug(f"[HybridAMEM] Mood-modulated importance failed: {_mood_err}")
 
         # 1. Store in A-MEM (always)
         note = self.amem.add(

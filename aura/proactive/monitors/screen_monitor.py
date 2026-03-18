@@ -264,7 +264,7 @@ class ScreenMonitor(BaseMonitor):
                 try:
                     process = psutil.Process(pid.value)
                     app_name = process.name().replace(".exe", "")
-                except:
+                except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
                     app_name = "Unknown"
 
                 return (app_name, title.value)

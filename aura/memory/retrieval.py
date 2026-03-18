@@ -302,8 +302,8 @@ def retrieve(
         for result in final:
             try:
                 reinforce(store, result.record.id)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("[Retrieval] reinforce failed for %s: %s", result.record.id, e)
 
     logger.debug(
         "[Retrieval] query=%r → %d semantic, %d bm25, %d graph → %d RRF → %d final",

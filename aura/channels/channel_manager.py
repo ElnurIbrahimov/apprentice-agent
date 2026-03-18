@@ -103,13 +103,13 @@ class ChannelManager:
             logger.warning("[ChannelManager] No agent handler set — dropping message.")
             return
 
-        logger.info(
+        logger.debug(
             f"[ChannelManager] [{msg.channel_id}] {msg.user_name}: {msg.text[:60]}"
         )
 
         try:
             # Run sync handler in thread pool to avoid blocking event loop
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             response_text = await loop.run_in_executor(
                 None, self._agent_handler, msg
             )

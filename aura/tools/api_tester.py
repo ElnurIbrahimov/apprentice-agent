@@ -105,9 +105,12 @@ class APITesterTool:
         _parsed = urlparse(url)
         _hostname = _parsed.hostname or ""
         _ssrf_blocked = [
-            "169.254.169.254",  # AWS/GCP/Azure metadata
+            "169.254.169.254",  # AWS/GCP metadata
             "metadata.google.internal",
             "169.254.170.2",    # ECS metadata
+            "168.63.129.16",    # Azure metadata
+            "0.0.0.0",
+            "10.0.0.1",         # Common Kubernetes gateway
         ]
         if _hostname in _ssrf_blocked:
             return {"success": False, "error": "Blocked: metadata endpoint"}
@@ -120,7 +123,7 @@ class APITesterTool:
         # Check if hostname resolves to a private/loopback IP
         try:
             _ip = ipaddress.ip_address(_hostname)
-            if _ip.is_private or _ip.is_loopback or _ip.is_link_local:
+            if _ip.is_private or _ip.is_loopback or _ip.is_link_local or _ip.is_reserved:
                 return {"success": False, "error": "Blocked: private/loopback IP addresses not allowed"}
         except ValueError:
             # hostname is a DNS name — resolve and check
@@ -128,10 +131,10 @@ class APITesterTool:
                 _resolved = _socket.getaddrinfo(_hostname, None, _socket.AF_UNSPEC, _socket.SOCK_STREAM)
                 for _family, _type, _proto, _canonname, _sockaddr in _resolved:
                     _resolved_ip = ipaddress.ip_address(_sockaddr[0])
-                    if _resolved_ip.is_private or _resolved_ip.is_loopback or _resolved_ip.is_link_local:
+                    if _resolved_ip.is_private or _resolved_ip.is_loopback or _resolved_ip.is_link_local or _resolved_ip.is_reserved:
                         return {"success": False, "error": "Blocked: hostname resolves to private/loopback IP"}
             except (_socket.gaierror, OSError):
-                pass  # DNS resolution failed — let requests handle the error
+                return {"success": False, "error": "Blocked: DNS resolution failed for hostname"}
 
         req_headers = dict(headers or {})
         req_body = None

@@ -138,7 +138,8 @@ class KGContradictionDetector:
 
         try:
             new_node = self._get_node(new_node_id)
-        except Exception:
+        except Exception as e:
+            logger.warning("[KG Contradiction] Failed to get node %s: %s", new_node_id, e)
             return []
 
         if not new_node:
@@ -282,7 +283,8 @@ class KGContradictionDetector:
                     results.append((overlap, nid))
             results.sort(reverse=True)
             return [nid for _, nid in results[:limit]]
-        except Exception:
+        except Exception as e:
+            logger.warning("[KG Contradiction] Node similarity search failed: %s", e)
             return []
 
     def _detect_contradiction(

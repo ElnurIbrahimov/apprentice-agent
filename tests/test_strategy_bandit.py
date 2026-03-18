@@ -241,7 +241,7 @@ class TestStrategyBandit:
         for _ in range(30):
             bandit.record_outcome(
                 request_id=f"good_{_}",
-                strategy=ReasoningStrategy.REFLEXION,
+                strategy=ReasoningStrategy.MCTS,
                 category=category,
                 latency_ms=1000,
                 metrics={"judge_score": 0.95, "coherence_score": 0.9},

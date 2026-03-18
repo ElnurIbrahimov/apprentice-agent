@@ -372,7 +372,9 @@ class BrowserExecutor:
             page.fill(sel, action.text)
 
         elif action.kind == ActionKind.SCROLL:
-            page.evaluate(f"window.scrollBy(0, {action.amount})")
+            # Enforce integer to prevent JS injection via f-string interpolation
+            safe_amount = int(action.amount)
+            page.evaluate(f"window.scrollBy(0, {safe_amount})")
 
         elif action.kind == ActionKind.SELECT:
             sel = action.selector

@@ -44,6 +44,8 @@ def load_env():
             with open(env_file) as f:
                 for line in f:
                     line = line.strip()
+                    if line.startswith('export '):
+                        line = line[7:]
                     if "=" in line and not line.startswith("#"):
                         key, value = line.split("=", 1)
                         value = value.strip().strip('"').strip("'")

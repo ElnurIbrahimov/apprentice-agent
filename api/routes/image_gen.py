@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 
 from api.auth import require_api_key
+from api.utils import safe_error_detail
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +98,7 @@ async def generate_image(body: ImageGenRequest):
             r = await c.post(f"{COMFY}/prompt", json={"prompt": workflow})
             pid = r.json()["prompt_id"]
     except Exception as e:
-        raise HTTPException(500, f"Failed to queue prompt: {e}")
+        raise HTTPException(500, safe_error_detail(e, "Failed to queue prompt"))
 
     # Poll for completion (max 120s) — async so event loop is not blocked
     async with httpx.AsyncClient(timeout=10) as c:
@@ -113,7 +114,7 @@ async def generate_image(body: ImageGenRequest):
                         img_r = await c.get(f"{COMFY}/view?filename={fname}")
                         b64 = base64.b64encode(img_r.content).decode()
                         return {"image_b64": b64}
-            except Exception:
-                pass
+            except Exception as poll_err:
+                logger.debug("[ImageGen] Poll iteration error: %s", poll_err)
 
     raise HTTPException(504, "Image generation timed out after 120s")

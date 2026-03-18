@@ -840,7 +840,6 @@ def get_proactive_awareness_engine() -> ProactiveAwarenessEngine:
         with _engine_lock:
             if _engine is None:
                 from aura.consciousness.world_model import get_world_model
-                from aura.config import Config
                 _engine = ProactiveAwarenessEngine(
                     world_model=get_world_model(),
                     enabled=getattr(Config, "PROACTIVE_AWARENESS_ENABLED", True),

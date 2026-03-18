@@ -40,7 +40,7 @@ class SaveRequest(BaseModel):
     url: Optional[str] = Field("", max_length=2048)
     title: Optional[str] = Field("", max_length=500)
     tags: Optional[List[str]] = []
-    importance: Optional[float] = 0.7
+    importance: Optional[float] = Field(0.7, ge=0.0, le=1.0)
     source_type: Optional[str] = "selection"
 
 

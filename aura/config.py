@@ -93,6 +93,7 @@ def validate_model(model_name: str, ollama_host: str = None) -> bool:
         if now - _tags_cache_ts < 30.0 and _tags_cache:
             available_models = _tags_cache.get(host)
             if available_models is not None:
+                _tags_cache_ts = now  # Refresh timestamp on cache hit
                 if model_name in available_models:
                     return True
                 base_name = model_name.split(":")[0]
@@ -145,7 +146,7 @@ class Config:
     LIFE_MODELING_ENABLED: bool = os.getenv("LIFE_MODELING_ENABLED", "true").lower() in ("true", "1", "yes")
 
     # Auth (canonical flag — used by middleware + route dependency)
-    API_AUTH_ENABLED: bool = os.getenv("AURA_API_AUTH_ENABLED", "false").lower() in ("true", "1", "yes")
+    API_AUTH_ENABLED: bool = os.getenv("AURA_API_AUTH_ENABLED", "true").lower() in ("true", "1", "yes")
 
     # SearXNG search instance (configurable)
     SEARXNG_URL: str = os.getenv("SEARXNG_URL", "http://localhost:8888")
@@ -223,6 +224,15 @@ class Config:
 
         SECURITY: Thread-safe with locking.
         """
+        # Guard: reject known-weak API keys when auth is enabled
+        _weak_keys = {"", "change-this-to-a-strong-random-key", "test", "admin", "password"}
+        if cls.API_AUTH_ENABLED and cls.API_KEY in _weak_keys:
+            import logging
+            logging.getLogger(__name__).warning(
+                "[Config] AURA_API_KEY is empty or a known placeholder. "
+                "Set a strong random key: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+            )
+
         from concurrent.futures import ThreadPoolExecutor, as_completed
         roles = [
             ("fast", cls.MODEL_FAST, cls.MODEL_FAST_CHAIN),
@@ -342,7 +352,7 @@ class Config:
     # PersonaPlex and Sesame voice removed — using external voice provider
 
     # MirrorMind Configuration (Tool #21) - Self-Critique System
-    MIRRORMIND_ENABLED: bool = os.getenv("MIRRORMIND_ENABLED", "true").lower() == "true"
+    MIRRORMIND_ENABLED: bool = os.getenv("MIRRORMIND_ENABLED", "false").lower() == "true"
     MIRRORMIND_THRESHOLD: float = float(os.getenv("MIRRORMIND_THRESHOLD", "0.75"))
     MIRRORMIND_MAX_ITERATIONS: int = int(os.getenv("MIRRORMIND_MAX_ITERATIONS", "2"))
 
@@ -400,8 +410,8 @@ class Config:
 
     # API Security Configuration (primary definition is above, line ~143)
     API_KEY: str = os.getenv("AURA_API_KEY", "")  # Set to enable API key auth
-    API_RATE_LIMIT: int = int(os.getenv("AURA_API_RATE_LIMIT", "200"))  # requests per minute
-    API_CORS_ORIGINS: str = os.getenv("AURA_CORS_ORIGINS", "*")  # wildcard required for WebSocket in Starlette 0.50+
+    API_RATE_LIMIT: int = int(os.getenv("AURA_API_RATE_LIMIT", "60"))  # requests per minute
+    API_CORS_ORIGINS: str = os.getenv("AURA_CORS_ORIGINS", "http://localhost:5173,http://localhost:3000,http://localhost:8000")
 
     # AURA v3.0 ALIVE System Configuration
     AURA_ENABLED: bool = os.getenv("AURA_ENABLED", "true").lower() == "true"
@@ -414,7 +424,8 @@ class Config:
 
     @classmethod
     def is_production(cls) -> bool:
-        return cls.AURA_ENV == "production"
+        # Read env at call time (not class load time) so run_web.py --prod works
+        return os.getenv("AURA_ENV", cls.AURA_ENV) == "production"
 
     # Voice Configuration
     VOICE_CONFIG = {
