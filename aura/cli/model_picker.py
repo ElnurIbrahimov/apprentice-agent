@@ -6,10 +6,10 @@ import os
 MODEL_ROLES = [
     ("fast", "gemini-3-flash-preview:cloud", "1M ctx"),
     ("reason", "kimi-k2.5:cloud", "256K ctx"),
-    ("code", "minimax-m2.5:cloud", "196K ctx"),
+    ("code", "minimax-m2.7:cloud", "1M ctx, SWE-Pro 56.2%"),
     ("think", "kimi-k2-thinking:cloud", "256K ctx"),
     ("vision", "qwen3-vl:235b-cloud", "256K ctx"),
-    ("longctx", "gemini-3-flash-preview:cloud", "1M ctx"),
+    ("longctx", "minimax-m2.7:cloud", "1M ctx, self-evolving"),
 ]
 
 # Cache for all available models
