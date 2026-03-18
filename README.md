@@ -149,7 +149,7 @@ python run_telegram.py        # Requires TELEGRAM_BOT_TOKEN in .env
 | Source | Models | Examples |
 |--------|--------|---------|
 | **ChatGPT** (OAuth) | 12 | GPT-5.4 Pro, GPT-5.3 Codex Spark, GPT-5.1 Codex Max |
-| **Cloud** (Ollama bridge) | 20+ | Qwen 3.5 397B, DeepSeek V3.2, Kimi K2.5, Gemini 3 Flash, Devstral 2 123B, Cogito 2.1 671B |
+| **Cloud** (Ollama bridge) | 20+ | MiniMax M2.7 (self-evolving), Qwen 3.5 397B, DeepSeek V3.2, Kimi K2.5, Gemini 3 Flash, Devstral 2 123B, Cogito 2.1 671B |
 | **Local** (Ollama) | 26+ | DeepSeek R1 8B, Qwen 3 8B, Qwen 2.5 Coder 7B, Gemma 3 4B, LLaVA (vision) |
 
 **Role-based routing** — auto-selects the best model per task:
@@ -157,10 +157,10 @@ python run_telegram.py        # Requires TELEGRAM_BOT_TOKEN in .env
 | Role | Default |
 |------|---------|
 | **Fast** | `gemini-3-flash-preview:cloud` |
-| **Code** | `deepseek-v3.2:cloud` |
+| **Code** | `minimax-m2.7:cloud` (SWE-Pro 56.2%, self-evolving) |
 | **Reasoning** | `kimi-k2.5:cloud` |
 | **Vision** | `qwen3-vl:235b-cloud` |
-| **Long context** | `minimax-m2.5:cloud` (1M tokens) |
+| **Long context** | `minimax-m2.7:cloud` (1M tokens) |
 
 ---
 

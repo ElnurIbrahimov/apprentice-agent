@@ -23,7 +23,8 @@ const FAST_PATTERNS = [
 ];
 const POWER_PATTERNS = [
   '671b', '397b', '480b', '123b', '120b', 'cogito', 'qwen3.5',
-  'qwen3-coder', 'devstral-2', 'gpt-oss', 'kimi-k2',
+  'qwen3-coder', 'devstral-2', 'gpt-oss', 'kimi-k2', 'minimax-m2.7',
+  'minimax-m2.5', 'mistral-large',
 ];
 
 function classifyModel(name: string, source: 'cloud' | 'local' | 'chatgpt'): string {

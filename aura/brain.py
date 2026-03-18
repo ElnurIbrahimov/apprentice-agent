@@ -304,6 +304,7 @@ class OllamaBrain:
             "deepseek-v3.2:cloud":         (0.003,  0.003),
             "qwen3-coder:480b-cloud":      (0.004,  0.004),
             "devstral-2:123b-cloud":       (0.002,  0.002),
+            "minimax-m2.7:cloud":          (0.004,  0.004),
             "minimax-m2.5:cloud":          (0.004,  0.004),
         }
         # ChatGPT subscription models (cost is $0 — covered by subscription)
@@ -1824,8 +1825,10 @@ class OllamaBrain:
         try:
             from aura.tools.codebase_index import CodebaseIndex
             _cwd = os.getcwd()
-            _idx_db = Path(_cwd) / ".aura" / "index.db"
-            if _idx_db.exists() and len(full) < MAX_SYSTEM_PROMPT_CHARS - 1000:
+            _idx_db = Path("data/codebase_index/index.db")
+            # Also check legacy path
+            _idx_db_legacy = Path(_cwd) / ".aura" / "index.db"
+            if (_idx_db.exists() or _idx_db_legacy.exists()) and len(full) < MAX_SYSTEM_PROMPT_CHARS - 1000:
                 idx = CodebaseIndex(_cwd)
                 try:
                     if idx.stats()["total_chunks"] > 0:
