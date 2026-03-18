@@ -144,6 +144,30 @@ interface YtMetadataMessage {
   captionTracks: Array<{ baseUrl: string; languageCode: string; name: string }>;
 }
 
+interface NetflixSubtitlesMessage {
+  type: 'NETFLIX_SUBTITLES';
+  movieId: string;
+  lang: string;
+  trackId: string;
+  segments: Array<{ start: number; dur: number; text: string }>;
+}
+
+interface NetflixMetadataMessage {
+  type: 'NETFLIX_METADATA';
+  movieId: string;
+  title: string;
+  episodeTitle: string;
+  seasonNumber: number;
+  episodeNumber: number;
+  duration: number;
+}
+
+interface NetflixTabDetectedMessage {
+  type: 'NETFLIX_TAB_DETECTED';
+  url: string;
+  title: string;
+}
+
 interface TranslateBatchMessage {
   type: 'TRANSLATE_BATCH';
   texts: string[];
@@ -219,6 +243,26 @@ interface LinkPreviewResponse {
   error?: string;
 }
 
+interface ImageEditOpenMessage {
+  type: 'IMAGE_EDIT_OPEN';
+  imageUrl: string;
+}
+
+interface ImageDescribeMessage {
+  type: 'IMAGE_DESCRIBE';
+  imageUrl: string;
+}
+
+interface ImageSaveMessage {
+  type: 'IMAGE_SAVE';
+  imageUrl: string;
+}
+
+interface ImageEditLoadMessage {
+  type: 'IMAGE_EDIT_LOAD';
+  dataUrl: string;
+}
+
 type ExtensionMessage =
   | SidebarReadyMessage
   | SaveKnowledgeMessage
@@ -233,6 +277,8 @@ type ExtensionMessage =
   | QuickActionMessage
   | YtSubtitlesMessage
   | YtMetadataMessage
+  | NetflixSubtitlesMessage
+  | NetflixMetadataMessage
   | TranslateBatchMessage
   | SaveHighlightMessage
   | GetHighlightsMessage
@@ -241,7 +287,10 @@ type ExtensionMessage =
   | GetAllHighlightsMessage
   | ClearUrlHighlightsMessage
   | ScrollToHighlightMessage
-  | LinkPreviewMessage;
+  | LinkPreviewMessage
+  | ImageEditOpenMessage
+  | ImageDescribeMessage
+  | ImageSaveMessage;
 
 // ── Outbound / internal message types ────────────────────────────────────────
 
@@ -296,6 +345,7 @@ interface PendingStorage {
   pendingUrl?: string;
   pendingTitle?: string;
   pendingPanelSwitch?: string;
+  pendingImageDataUrl?: string;
 }
 
 interface SaveKnowledgeResponse {
@@ -556,6 +606,21 @@ ext.tabs.onUpdated.addListener(
         world: 'MAIN' as any,
       }).catch(() => {});
     }
+
+    if (url.includes('netflix.com/watch')) {
+      ext.runtime.sendMessage({
+        type: 'NETFLIX_TAB_DETECTED',
+        url,
+        title: tab.title || url,
+      } satisfies NetflixTabDetectedMessage).catch(() => {});
+
+      // Inject Netflix subtitle interceptor into MAIN world
+      chrome.scripting.executeScript({
+        target: { tabId },
+        files: ['netflix-inject.js'],
+        world: 'MAIN' as any,
+      }).catch(() => {});
+    }
   }
 );
 
@@ -571,7 +636,7 @@ ext.runtime.onMessage.addListener(
       // Sidebar has loaded — send any pending prefill text or panel switch
       case 'SIDEBAR_READY': {
         ext.storage.local.get(
-          ['pendingQuery', 'pendingAction', 'pendingUrl', 'pendingTitle', 'pendingPanelSwitch'],
+          ['pendingQuery', 'pendingAction', 'pendingUrl', 'pendingTitle', 'pendingPanelSwitch', 'pendingImageDataUrl'],
           (data: PendingStorage) => {
             if (data.pendingQuery) {
               ext.runtime.sendMessage({
@@ -582,6 +647,17 @@ ext.runtime.onMessage.addListener(
                 title: data.pendingTitle || '',
               } satisfies PrefillTextMessage).catch(() => {});
               ext.storage.local.remove(['pendingQuery', 'pendingAction', 'pendingUrl', 'pendingTitle']);
+            } else if (data.pendingImageDataUrl) {
+              // Image edit was requested before sidebar was open
+              ext.runtime.sendMessage({
+                type: 'SWITCH_PANEL',
+                panel: 'image',
+              } satisfies SwitchPanelMessage).catch(() => {});
+              ext.runtime.sendMessage({
+                type: 'IMAGE_EDIT_LOAD',
+                dataUrl: data.pendingImageDataUrl,
+              } satisfies ImageEditLoadMessage).catch(() => {});
+              ext.storage.local.remove(['pendingImageDataUrl']);
             } else if (data.pendingPanelSwitch) {
               ext.runtime.sendMessage({
                 type: 'SWITCH_PANEL',
@@ -945,6 +1021,13 @@ ext.runtime.onMessage.addListener(
         return false;
       }
 
+      // Netflix subtitle/metadata relay: content script → sidebar
+      case 'NETFLIX_SUBTITLES':
+      case 'NETFLIX_METADATA': {
+        ext.runtime.sendMessage(msg).catch(() => {});
+        return false;
+      }
+
       // Full page translation: batch translate text blocks via LLM
       case 'TRANSLATE_BATCH': {
         const batchMsg = msg as TranslateBatchMessage;
@@ -1202,6 +1285,94 @@ ext.runtime.onMessage.addListener(
             _linkPreviewActive--;
           });
         return true; // async
+      }
+
+      // Image hover toolbar: "Edit in AURA" — fetch image, convert to data URL, send to sidebar
+      case 'IMAGE_EDIT_OPEN': {
+        const imgUrl = (msg as ImageEditOpenMessage).imageUrl;
+        // Open sidebar + switch to image panel
+        if (sender.tab) {
+          if (chrome.sidePanel) {
+            chrome.sidePanel.open({ windowId: sender.tab.windowId! });
+          } else if (typeof browser !== 'undefined' && (browser as any)?.sidebarAction) {
+            (browser as any).sidebarAction.open();
+          }
+        }
+        // Switch to image panel
+        ext.runtime
+          .sendMessage({ type: 'SWITCH_PANEL', panel: 'image' } satisfies SwitchPanelMessage)
+          .catch(() => {
+            ext.storage.local.set({ pendingPanelSwitch: 'image' });
+          });
+
+        // Fetch image and convert to data URL, then send to sidebar
+        fetch(imgUrl, { signal: AbortSignal.timeout(10000) })
+          .then((r) => {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.blob();
+          })
+          .then(async (blob) => {
+            const arrayBuf = await blob.arrayBuffer();
+            const bytes = new Uint8Array(arrayBuf);
+            let binary = '';
+            for (let i = 0; i < bytes.length; i++) {
+              binary += String.fromCharCode(bytes[i]);
+            }
+            const b64 = btoa(binary);
+            const mime = blob.type || 'image/png';
+            const dataUrl = `data:${mime};base64,${b64}`;
+            // Send data URL to sidebar for the edit panel
+            ext.runtime
+              .sendMessage({ type: 'IMAGE_EDIT_LOAD', dataUrl } satisfies ImageEditLoadMessage)
+              .catch(() => {
+                // Sidebar may not be ready yet; store for later
+                ext.storage.local.set({ pendingImageDataUrl: dataUrl });
+              });
+          })
+          .catch(() => {
+            // If fetch fails (CORS etc.), try sending the URL directly for the sidebar to handle
+            ext.runtime
+              .sendMessage({ type: 'IMAGE_EDIT_LOAD', dataUrl: imgUrl } satisfies ImageEditLoadMessage)
+              .catch(() => {
+                ext.storage.local.set({ pendingImageDataUrl: imgUrl });
+              });
+          });
+        return false;
+      }
+
+      // Image hover toolbar: "Describe" — open sidebar, send image URL to chat
+      case 'IMAGE_DESCRIBE': {
+        const descImgUrl = (msg as ImageDescribeMessage).imageUrl;
+        // Store as pending prefill so sidebar loads with the describe request
+        ext.storage.local.set({
+          pendingQuery: `Describe this image in detail: ${descImgUrl}`,
+          pendingAction: 'ask',
+          pendingUrl: descImgUrl,
+          pendingTitle: 'Image Description',
+        });
+        if (sender.tab) {
+          if (chrome.sidePanel) {
+            chrome.sidePanel.open({ windowId: sender.tab.windowId! });
+          } else if (typeof browser !== 'undefined' && (browser as any)?.sidebarAction) {
+            (browser as any).sidebarAction.open();
+          }
+        }
+        return false;
+      }
+
+      // Image hover toolbar: "Save" — download image via the active tab
+      case 'IMAGE_SAVE': {
+        const saveImgUrl = (msg as ImageSaveMessage).imageUrl;
+        // Use chrome.downloads API to save the image
+        if (chrome.downloads) {
+          const filename = 'aura-saved-' + Date.now() + '.png';
+          chrome.downloads.download({
+            url: saveImgUrl,
+            filename,
+            saveAs: false,
+          });
+        }
+        return false;
       }
 
       default:

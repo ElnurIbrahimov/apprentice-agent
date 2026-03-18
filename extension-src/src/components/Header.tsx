@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Plus, Sun, Moon, RefreshCw } from 'lucide-react';
+import { Plus, Sun, Moon, RefreshCw, Download } from 'lucide-react';
 import { useStore } from '../store';
 import { fetchStatus } from '../ws';
+import { exportChat } from '../exportChat';
 
 const STATUS_DOT: Record<string, string> = {
   online: '#10b981',
@@ -10,10 +11,31 @@ const STATUS_DOT: Record<string, string> = {
 };
 
 export default function Header() {
-  const { wsReady, modelName, mood, clearAll, theme, toggleTheme, backendStatus } = useStore();
+  const { wsReady, modelName, mood, clearAll, theme, toggleTheme, backendStatus, messages, featureModels } = useStore();
   const status = backendStatus || (wsReady ? 'online' : 'offline');
   const [scrolled, setScrolled] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const headerRef = useRef<HTMLElement>(null);
+  const exportRef = useRef<HTMLDivElement>(null);
+
+  // Close export dropdown on outside click
+  useEffect(() => {
+    if (!exportOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
+        setExportOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [exportOpen]);
+
+  const chatModel = featureModels['chat']?.replace(/:cloud$/, '').split('/').pop() || undefined;
+
+  const handleExport = (format: 'markdown' | 'json' | 'text') => {
+    exportChat(messages, format, chatModel);
+    setExportOpen(false);
+  };
 
   // Track scroll position to add shadow
   useEffect(() => {
@@ -110,6 +132,73 @@ export default function Header() {
               <Moon size={13} className="theme-icon-moon" />
             </span>
           </button>
+
+          {/* Export dropdown */}
+          {messages.length > 0 && (
+            <div ref={exportRef} style={{ position: 'relative', display: 'inline-flex' }}>
+              <button
+                onClick={() => setExportOpen(!exportOpen)}
+                className="flex items-center gap-1 px-2 py-1 transition-all duration-150"
+                style={{
+                  background: 'var(--s2)',
+                  border: '1px solid var(--b1)',
+                  borderRadius: 'var(--r-sm)',
+                  color: 'var(--mu)',
+                  fontSize: '11px',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
+                title="Export conversation"
+              >
+                <Download size={12} />
+              </button>
+              {exportOpen && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '100%',
+                    right: 0,
+                    marginTop: 4,
+                    background: 'var(--s2)',
+                    border: '1px solid var(--b3)',
+                    borderRadius: 6,
+                    boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+                    zIndex: 50,
+                    minWidth: 155,
+                    overflow: 'hidden',
+                  }}
+                >
+                  {[
+                    { label: 'Export as Markdown', fmt: 'markdown' as const },
+                    { label: 'Export as JSON', fmt: 'json' as const },
+                    { label: 'Export as Text', fmt: 'text' as const },
+                  ].map((item) => (
+                    <button
+                      key={item.label}
+                      onClick={() => handleExport(item.fmt)}
+                      style={{
+                        display: 'block',
+                        width: '100%',
+                        padding: '7px 12px',
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--tx)',
+                        fontSize: '11px',
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                        fontFamily: 'inherit',
+                        transition: 'background 0.1s',
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--b1)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* New button */}
           <button

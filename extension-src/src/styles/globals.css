@@ -1626,3 +1626,136 @@ pre .chdr span {
   from { opacity: 0; }
   to   { opacity: 1; }
 }
+
+/* ===== Mic / Voice Input ===== */
+
+/* Mic button base */
+.input-mic-wrap {
+  position: relative;
+}
+
+.input-mic-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--mu);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  flex-shrink: 0;
+  padding: 0;
+  font-family: inherit;
+}
+.input-mic-btn:hover {
+  color: var(--tx);
+  background: rgba(255, 255, 255, 0.06);
+}
+:root.light .input-mic-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+/* Mic recording state — red icon + pulse */
+.input-mic-recording {
+  color: var(--rd) !important;
+  background: rgba(239, 68, 68, 0.12) !important;
+  animation: micPulse 1.4s ease-in-out infinite;
+}
+.input-mic-recording:hover {
+  color: var(--rd) !important;
+  background: rgba(239, 68, 68, 0.18) !important;
+}
+@keyframes micPulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(239, 68, 68, 0.12), 0 0 12px rgba(239, 68, 68, 0.15);
+  }
+}
+
+/* Glass wrapper recording glow */
+.input-glass-wrap.input-recording {
+  border-color: rgba(239, 68, 68, 0.3);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.45),
+    0 0 0 2px rgba(239, 68, 68, 0.08),
+    0 0 16px rgba(239, 68, 68, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+:root.light .input-glass-wrap.input-recording {
+  border-color: rgba(239, 68, 68, 0.25);
+  box-shadow:
+    0 4px 20px rgba(0, 0, 0, 0.06),
+    0 0 0 2px rgba(239, 68, 68, 0.06),
+    0 0 12px rgba(239, 68, 68, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+/* Listening indicator below input */
+.input-listening-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--rd);
+  opacity: 0.85;
+  animation: fadeIn 0.2s ease;
+}
+.input-listening-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--rd);
+  flex-shrink: 0;
+  animation: listeningDotPulse 1s ease-in-out infinite;
+}
+@keyframes listeningDotPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.4; transform: scale(0.75); }
+}
+
+/* Mic tooltip */
+.mic-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(20, 16, 36, 0.94);
+  color: #e0d6ff;
+  font-size: 10px;
+  font-weight: 400;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 50;
+  animation: tooltipFadeIn 0.15s ease-out;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.mic-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 4px solid transparent;
+  border-top-color: rgba(20, 16, 36, 0.94);
+}
+:root.light .mic-tooltip {
+  background: rgba(245, 245, 250, 0.96);
+  color: #1a1a2e;
+  border-color: rgba(239, 68, 68, 0.15);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+:root.light .mic-tooltip::after {
+  border-top-color: rgba(245, 245, 250, 0.96);
+}

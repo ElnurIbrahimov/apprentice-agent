@@ -24,6 +24,7 @@ import ImagePanel from './panels/ImagePanel';
 import ComparePanel from './panels/ComparePanel';
 import AgentPanel from './panels/AgentPanel';
 import ModelsPanel from './panels/ModelsPanel';
+import SettingsPanel from './panels/SettingsPanel';
 import ext from './ext';
 import type { PanelId } from './types';
 
@@ -50,6 +51,7 @@ const PANEL_ENTRIES: { id: PanelId; Component: React.FC }[] = [
   { id: 'compare', Component: ComparePanel },
   { id: 'agent', Component: AgentPanel },
   { id: 'models', Component: ModelsPanel },
+  { id: 'settings', Component: SettingsPanel },
 ];
 
 export default function App() {
@@ -124,9 +126,24 @@ export default function App() {
       if (msg.type === 'SWITCH_PANEL' && msg.panel) {
         setPanel(msg.panel);
       }
+      if (msg.type === 'IMAGE_EDIT_LOAD' && msg.dataUrl) {
+        setPanel('image');
+        // Dispatch to ImagePanel's EditTab via custom event
+        window.dispatchEvent(new CustomEvent('image-edit-load', { detail: { dataUrl: msg.dataUrl } }));
+      }
     };
 
     ext?.runtime?.onMessage?.addListener(handler);
+
+    // Check for pending image data URL (from content script hover toolbar)
+    ext?.storage?.local?.get(['pendingImageDataUrl'], (data: any) => {
+      if (data?.pendingImageDataUrl) {
+        setPanel('image');
+        window.dispatchEvent(new CustomEvent('image-edit-load', { detail: { dataUrl: data.pendingImageDataUrl } }));
+        ext?.storage?.local?.remove(['pendingImageDataUrl']);
+      }
+    });
+
     return () => ext?.runtime?.onMessage?.removeListener(handler);
   }, [setPanel, setPendingCtx]);
 

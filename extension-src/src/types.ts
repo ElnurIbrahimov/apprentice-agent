@@ -52,7 +52,8 @@ export type PanelId =
   | 'image'
   | 'compare'
   | 'agent'
-  | 'models';
+  | 'models'
+  | 'settings';
 
 export interface FeatureDef {
   key: string;

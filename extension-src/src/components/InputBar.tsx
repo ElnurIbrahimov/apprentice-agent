@@ -1,9 +1,38 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { Brain, Globe, FileText, X, Paperclip } from 'lucide-react';
+import { Brain, Globe, FileText, X, Paperclip, Mic } from 'lucide-react';
 import { useStore } from '../store';
 import { getPageContentCached } from '../ext';
 import ModelPill from './ModelPill';
 import type { ThinkingLevel } from '../types';
+
+// Web Speech API types
+interface SpeechRecognitionEvent {
+  results: SpeechRecognitionResultList;
+  resultIndex: number;
+}
+
+interface SpeechRecognitionErrorEvent {
+  error: string;
+}
+
+interface SpeechRecognitionInstance extends EventTarget {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start(): void;
+  stop(): void;
+  abort(): void;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
+  onend: (() => void) | null;
+}
+
+declare global {
+  interface Window {
+    SpeechRecognition?: new () => SpeechRecognitionInstance;
+    webkitSpeechRecognition?: new () => SpeechRecognitionInstance;
+  }
+}
 
 const THINKING_LABELS: Record<ThinkingLevel, string> = {
   low: 'Low',
@@ -53,6 +82,109 @@ export default function InputBar({ onSend, featureKey = 'chat', placeholder, dis
 
   const isStreaming = !!activeStream;
 
+  const autoResize = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const next = Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT);
+    el.style.height = next + 'px';
+    el.style.overflowY = el.scrollHeight > MAX_TEXTAREA_HEIGHT ? 'auto' : 'hidden';
+  }, []);
+
+  const handleInput = useCallback(() => {
+    autoResize();
+    const val = textareaRef.current?.value || '';
+    setHasText(val.trim().length > 0);
+    setCharCount(val.length);
+  }, [autoResize]);
+
+  // --- Speech recognition ---
+  const [isRecording, setIsRecording] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(true);
+  const [showMicTooltip, setShowMicTooltip] = useState(false);
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+
+  useEffect(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setSpeechSupported(false);
+    }
+  }, []);
+
+  const toggleRecording = useCallback(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setSpeechSupported(false);
+      setShowMicTooltip(true);
+      setTimeout(() => setShowMicTooltip(false), 2500);
+      return;
+    }
+
+    if (isRecording && recognitionRef.current) {
+      recognitionRef.current.stop();
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+    recognitionRef.current = recognition;
+
+    // Track the baseline length so we only append new speech
+    const baseLength = textareaRef.current?.value.length ?? 0;
+
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      let transcript = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        transcript += event.results[i][0].transcript;
+      }
+      if (textareaRef.current) {
+        const base = textareaRef.current.value.slice(0, baseLength);
+        const sep = base.length > 0 && !base.endsWith(' ') ? ' ' : '';
+        textareaRef.current.value = base + sep + transcript;
+        handleInput();
+      }
+    };
+
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+      if (event.error !== 'aborted') {
+        console.warn('Speech recognition error:', event.error);
+      }
+      setIsRecording(false);
+      recognitionRef.current = null;
+    };
+
+    recognition.onend = () => {
+      setIsRecording(false);
+      recognitionRef.current = null;
+    };
+
+    recognition.start();
+    setIsRecording(true);
+  }, [isRecording, handleInput]);
+
+  // Stop recording on Escape key
+  useEffect(() => {
+    if (!isRecording) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isRecording]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.abort();
+      }
+    };
+  }, []);
+
   // Cycle placeholder suggestions with crossfade
   useEffect(() => {
     if (placeholder) return;
@@ -91,22 +223,6 @@ export default function InputBar({ onSend, featureKey = 'chat', placeholder, dis
       autoResize();
     }
   };
-
-  const autoResize = useCallback(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    const next = Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT);
-    el.style.height = next + 'px';
-    el.style.overflowY = el.scrollHeight > MAX_TEXTAREA_HEIGHT ? 'auto' : 'hidden';
-  }, []);
-
-  const handleInput = useCallback(() => {
-    autoResize();
-    const val = textareaRef.current?.value || '';
-    setHasText(val.trim().length > 0);
-    setCharCount(val.length);
-  }, [autoResize]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -182,7 +298,7 @@ export default function InputBar({ onSend, featureKey = 'chat', placeholder, dis
       )}
 
       {/* Glass input wrapper */}
-      <div className={`input-glass-wrap ${isFocused ? 'input-focused' : ''} ${hasText ? 'has-text' : ''}`}>
+      <div className={`input-glass-wrap ${isFocused ? 'input-focused' : ''} ${hasText ? 'has-text' : ''} ${isRecording ? 'input-recording' : ''}`}>
         <textarea
           ref={textareaRef}
           rows={1}
@@ -289,6 +405,19 @@ export default function InputBar({ onSend, featureKey = 'chat', placeholder, dis
                 <span style={{ fontSize: '10px' }}>&#8984;</span>K
               </kbd>
             )}
+            <div className="input-mic-wrap">
+              <button
+                onClick={toggleRecording}
+                className={`input-mic-btn ${isRecording ? 'input-mic-recording' : ''}`}
+                aria-label={isRecording ? 'Stop recording' : 'Start voice input'}
+                title={!speechSupported ? 'Voice not available in this browser' : isRecording ? 'Stop recording (Esc)' : 'Voice input'}
+              >
+                <Mic size={16} />
+              </button>
+              {showMicTooltip && !speechSupported && (
+                <div className="mic-tooltip">Voice not available in this browser</div>
+              )}
+            </div>
             <button
               onClick={handleSend}
               disabled={!canSend}
@@ -308,6 +437,14 @@ export default function InputBar({ onSend, featureKey = 'chat', placeholder, dis
           </div>
         </div>
       </div>
+
+      {/* Listening indicator */}
+      {isRecording && (
+        <div className="input-listening-indicator">
+          <span className="input-listening-dot" />
+          <span>Listening...</span>
+        </div>
+      )}
     </div>
   );
 }

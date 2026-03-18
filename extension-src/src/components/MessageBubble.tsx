@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Copy, Check, Volume2, VolumeX, ChevronDown } from 'lucide-react';
+import { Copy, Check, Volume2, VolumeX, ChevronDown, Download } from 'lucide-react';
 import type { Message } from '../types';
 import { md } from '../markdown';
 import { speak, stopSpeaking, isSpeaking } from '../tts';
 import { useStore } from '../store';
+import { messageAsMarkdown, messageAsText, downloadFile } from '../exportChat';
 
 interface Props {
   message: Message;
@@ -18,6 +19,8 @@ export default function MessageBubble({ message, isLatest, isStreaming: isStream
   const [copied, setCopied] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [thinkExpanded, setThinkExpanded] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
   const thinkContentRef = useRef<HTMLDivElement>(null);
 
   const isStreaming = isStreamingProp || (isLatest && !!activeStream);
@@ -36,6 +39,39 @@ export default function MessageBubble({ message, isLatest, isStreaming: isStream
     }, 300);
     return () => clearInterval(interval);
   }, [speaking]);
+
+  // Close export dropdown on outside click
+  useEffect(() => {
+    if (!exportOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
+        setExportOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [exportOpen]);
+
+  const handleExportCopyMd = async () => {
+    try {
+      await navigator.clipboard.writeText(messageAsMarkdown(message));
+    } catch { /* noop */ }
+    setExportOpen(false);
+  };
+
+  const handleExportCopyText = async () => {
+    try {
+      await navigator.clipboard.writeText(messageAsText(message));
+    } catch { /* noop */ }
+    setExportOpen(false);
+  };
+
+  const handleExportSaveMd = () => {
+    const role = message.role === 'user' ? 'user' : 'aura';
+    const ts = new Date(message.timestamp).toISOString().slice(0, 10);
+    downloadFile(messageAsMarkdown(message), `${role}-${ts}.md`, 'text/markdown;charset=utf-8');
+    setExportOpen(false);
+  };
 
   const handleTts = () => {
     if (speaking) {
@@ -244,6 +280,73 @@ export default function MessageBubble({ message, isLatest, isStreaming: isStream
             {copied ? <Check size={11} /> : <Copy size={11} />}
             {copied && <span style={{ color: 'var(--gr)' }}>Copied!</span>}
           </button>
+
+          {/* Export dropdown */}
+          <div ref={exportRef} style={{ position: 'relative', display: 'inline-flex' }}>
+            <button
+              onClick={() => setExportOpen(!exportOpen)}
+              className="msg-action-btn"
+              title="Export message"
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--di)',
+                cursor: 'pointer',
+                padding: 2,
+                display: 'flex',
+                alignItems: 'center',
+                borderRadius: 4,
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <Download size={11} />
+            </button>
+            {exportOpen && (
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: '100%',
+                  left: 0,
+                  marginBottom: 4,
+                  background: 'var(--s2)',
+                  border: '1px solid var(--b3)',
+                  borderRadius: 6,
+                  boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+                  zIndex: 50,
+                  minWidth: 140,
+                  overflow: 'hidden',
+                }}
+              >
+                {[
+                  { label: 'Copy as Markdown', fn: handleExportCopyMd },
+                  { label: 'Copy as Text', fn: handleExportCopyText },
+                  { label: 'Save as .md file', fn: handleExportSaveMd },
+                ].map((item) => (
+                  <button
+                    key={item.label}
+                    onClick={item.fn}
+                    style={{
+                      display: 'block',
+                      width: '100%',
+                      padding: '6px 10px',
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--tx)',
+                      fontSize: '11px',
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                      transition: 'background 0.1s',
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--b1)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* Speak button */}
           <button

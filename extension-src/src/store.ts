@@ -32,6 +32,10 @@ interface AuraStore {
   deepResearch: boolean;
   autoSpeak: boolean;
 
+  // Custom Instructions / Persona
+  customInstructions: string;
+  userName: string;
+
   // Models
   featureModels: Record<string, string>;
   mdlCloudList: string[];
@@ -57,6 +61,8 @@ interface AuraStore {
   setThinkingLevel: (level: ThinkingLevel) => void;
   setDeepResearch: (on: boolean) => void;
   setAutoSpeak: (on: boolean) => void;
+  setCustomInstructions: (text: string) => void;
+  setUserName: (name: string) => void;
   setModel: (feature: string, model: string | null) => void;
   setMdlLists: (cloud: string[], local: string[], chatgpt?: string[]) => void;
   setAllModels: (model: string) => void;
@@ -99,6 +105,14 @@ export const useStore = create<AuraStore>((set, get) => {
     set({ autoSpeak: !!d?.autoSpeak });
   });
 
+  // Load saved custom instructions & user name
+  ext?.storage?.local?.get(['customInstructions', 'userName'], (d: any) => {
+    set({
+      customInstructions: d?.customInstructions || '',
+      userName: d?.userName || '',
+    });
+  });
+
   // Load saved theme
   ext?.storage?.local?.get(['theme'], (d: any) => {
     const saved = d?.theme === 'light' ? 'light' : 'dark';
@@ -124,6 +138,8 @@ export const useStore = create<AuraStore>((set, get) => {
     thinkingLevel: 'medium' as ThinkingLevel,
     deepResearch: false,
     autoSpeak: false,
+    customInstructions: '',
+    userName: '',
     featureModels: {},
     mdlCloudList: [],
     mdlLocalList: [],
@@ -158,6 +174,15 @@ export const useStore = create<AuraStore>((set, get) => {
     setAutoSpeak: (autoSpeak) => {
       set({ autoSpeak });
       ext?.storage?.local?.set({ autoSpeak });
+    },
+
+    setCustomInstructions: (customInstructions) => {
+      set({ customInstructions });
+      ext?.storage?.local?.set({ customInstructions });
+    },
+    setUserName: (userName) => {
+      set({ userName });
+      ext?.storage?.local?.set({ userName });
     },
 
     setModel: (feature, model) => {

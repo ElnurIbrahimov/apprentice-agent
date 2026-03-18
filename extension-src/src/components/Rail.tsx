@@ -4,7 +4,7 @@ import {
   MessageSquare, Search, Languages, PenLine, CheckSquare,
   Database, Zap, FileText, Wrench, File, Mic, Radio,
   Camera, Youtube, FlaskConical, Calculator, Terminal, Code2,
-  Image, BarChart2, Bot, Cpu, ChevronDown,
+  Image, BarChart2, Bot, Cpu, ChevronDown, Settings,
 } from 'lucide-react';
 import { useStore } from '../store';
 import type { PanelId } from '../types';
@@ -48,6 +48,7 @@ const EXTRA_ITEMS: RailItem[] = [
   { id: 'compare', label: 'Compare', Icon: BarChart2 },
   { id: 'agent', label: 'Agent', Icon: Bot },
   { id: 'models', label: 'Models', Icon: Cpu },
+  { id: 'settings', label: 'Settings', Icon: Settings },
 ];
 
 // Group label rendered between groups

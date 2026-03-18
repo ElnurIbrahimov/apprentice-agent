@@ -102,7 +102,40 @@ interface YtMetadataOutMessage {
   captionTracks: Array<{ baseUrl: string; languageCode: string; name: string }>;
 }
 
-type OutboundMessage = OpenPanelMessage | OpenWithTextMessage | SaveKnowledgeMessage | QuickActionOutMessage | LinkPreviewMessage | SaveHighlightMessage | DeleteHighlightMessage | GetHighlightsMessage | YtSubtitlesOutMessage | YtMetadataOutMessage;
+interface NetflixSubtitlesOutMessage {
+  type: 'NETFLIX_SUBTITLES';
+  movieId: string;
+  lang: string;
+  trackId: string;
+  segments: Array<{ start: number; dur: number; text: string }>;
+}
+
+interface NetflixMetadataOutMessage {
+  type: 'NETFLIX_METADATA';
+  movieId: string;
+  title: string;
+  episodeTitle: string;
+  seasonNumber: number;
+  episodeNumber: number;
+  duration: number;
+}
+
+interface ImageEditOpenMessage {
+  type: 'IMAGE_EDIT_OPEN';
+  imageUrl: string;
+}
+
+interface ImageDescribeMessage {
+  type: 'IMAGE_DESCRIBE';
+  imageUrl: string;
+}
+
+interface ImageSaveMessage {
+  type: 'IMAGE_SAVE';
+  imageUrl: string;
+}
+
+type OutboundMessage = OpenPanelMessage | OpenWithTextMessage | SaveKnowledgeMessage | QuickActionOutMessage | LinkPreviewMessage | SaveHighlightMessage | DeleteHighlightMessage | GetHighlightsMessage | YtSubtitlesOutMessage | YtMetadataOutMessage | NetflixSubtitlesOutMessage | NetflixMetadataOutMessage | ImageEditOpenMessage | ImageDescribeMessage | ImageSaveMessage;
 
 // Messages received from background → content
 interface ExtractPageMsg {
@@ -148,7 +181,7 @@ interface TranslateBatchResponse {
   error?: string;
 }
 
-type InboundMessage = ExtractPageMsg | GetDomMsg | ExecActionMsg | ShowOcrOverlayMsg | PageTranslateMsg | TranslateToggleModeMsg | TranslateRemoveMsg | TranslateChangeLangMsg | ScrollToHighlightMsg;
+type InboundMessage = ExtractPageMsg | GetDomMsg | ExecActionMsg | ShowOcrOverlayMsg | PageTranslateMsg | TranslateToggleModeMsg | TranslateRemoveMsg | TranslateChangeLangMsg | ScrollToHighlightMsg | ShowDockMsg;
 
 interface SaveKnowledgeResponse {
   ok: boolean;
@@ -228,6 +261,10 @@ interface ScrollToHighlightMsg {
   id: string;
 }
 
+interface ShowDockMsg {
+  type: 'SHOW_DOCK';
+}
+
 interface LinkPreviewData {
   title: string;
   description: string;
@@ -281,10 +318,11 @@ function safeSend(msg: OutboundMessage, cb?: (response: any) => void): void {
       err?.message?.includes('Extension context invalidated') ||
       err?.message?.includes('context invalidated')
     ) {
-      document.getElementById('aura-dock-host')?.remove();
+      document.getElementById('aura-dock-shadow')?.remove();
       document.getElementById('aura-host')?.remove();
       document.getElementById('aura-quick-action-host')?.remove();
       document.getElementById('aura-highlight-host')?.remove();
+      document.getElementById('aura-img-toolbar-host')?.remove();
       window.__auraToolbarMounted = false;
     }
   }
@@ -298,7 +336,7 @@ function safeSend(msg: OutboundMessage, cb?: (response: any) => void): void {
   window.__auraToolbarMounted = true;
 
   // Remove stale elements from any previous injection (handles extension reload)
-  const _prevDock = document.getElementById('aura-dock-host');
+  const _prevDock = document.getElementById('aura-dock-shadow');
   if (_prevDock) _prevDock.remove();
   const _prevHost = document.getElementById('aura-host');
   if (_prevHost) _prevHost.remove();
@@ -318,150 +356,204 @@ function safeSend(msg: OutboundMessage, cb?: (response: any) => void): void {
 
   const shadow: ShadowRoot = host.attachShadow({ mode: 'open' });
 
+  // ── Detect page color scheme ─────────────────────────────────────────
+  function isDarkMode(): boolean {
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) return true;
+    const bg = window.getComputedStyle(document.documentElement).backgroundColor;
+    if (!bg || bg === 'rgba(0, 0, 0, 0)') {
+      const bodyBg = document.body ? window.getComputedStyle(document.body).backgroundColor : '';
+      if (bodyBg && bodyBg !== 'rgba(0, 0, 0, 0)') {
+        const m = bodyBg.match(/\d+/g);
+        if (m) { const lum = (parseInt(m[0]) * 299 + parseInt(m[1]) * 587 + parseInt(m[2]) * 114) / 1000; return lum < 128; }
+      }
+      return false;
+    }
+    const m = bg.match(/\d+/g);
+    if (m) { const lum = (parseInt(m[0]) * 299 + parseInt(m[1]) * 587 + parseInt(m[2]) * 114) / 1000; return lum < 128; }
+    return false;
+  }
+  function themeClass(): string { return isDarkMode() ? 'dark' : 'light'; }
+
   // ── Styles (inside Shadow DOM — isolated from page) ───────────────────
 
   const style: HTMLStyleElement = document.createElement('style');
   style.textContent = `
-    /* ── Toolbar appear/disappear animations ── */
-    @keyframes aura-toolbar-in {
-      from {
-        opacity: 0;
-        transform: scale(0.92) translateY(-4px);
-      }
-      to {
-        opacity: 1;
-        transform: scale(1) translateY(0);
-      }
-    }
-    @keyframes aura-toolbar-out {
-      from {
-        opacity: 1;
-        transform: scale(1) translateY(0);
-      }
-      to {
-        opacity: 0;
-        transform: scale(0.92) translateY(-4px);
-      }
-    }
+    @keyframes aura-bubble-in { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes aura-bubble-out { from { opacity: 1; } to { opacity: 0; } }
 
-    #toolbar {
-      display: none;
-      position: fixed;
-      background: rgba(10, 8, 24, 0.88);
-      backdrop-filter: blur(20px) saturate(1.5);
-      -webkit-backdrop-filter: blur(20px) saturate(1.5);
-      border: 1px solid rgba(124, 58, 237, 0.25);
-      border-radius: 12px;
-      padding: 5px 8px;
-      gap: 3px;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255,255,255,0.05) inset;
-      pointer-events: auto;
-      z-index: 2147483647;
+    #bubble {
+      display: none; position: fixed; padding: 2px; gap: 4px;
+      border-radius: 8px; pointer-events: auto; z-index: 2147483647;
       align-items: center;
-      transform-origin: center bottom;
-    }
-    #toolbar.visible {
-      display: flex;
-      animation: aura-toolbar-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-    }
-    #toolbar.hiding {
-      display: flex;
-      animation: aura-toolbar-out 0.15s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-    }
-    #toolbar.below {
-      transform-origin: center top;
-    }
-
-    .aura-btn {
-      background: transparent;
-      border: none;
-      color: rgba(226, 232, 240, 0.9);
-      font-size: 12.5px;
-      font-weight: 500;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', system-ui, sans-serif;
-      padding: 5px 10px;
-      border-radius: 8px;
-      cursor: pointer;
-      white-space: nowrap;
-      display: flex;
-      align-items: center;
-      gap: 5px;
-      transition: background 0.15s ease, transform 0.15s ease, color 0.15s ease;
-      line-height: 1;
     }
-    .aura-btn:hover {
-      background: rgba(124, 58, 237, 0.3);
-      color: #fff;
-      transform: scale(1.02);
+    #bubble.light {
+      background: #ffffff; border: 1px solid rgba(0,0,0,0.08);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.08), 0 8px 24px rgba(0,0,0,0.06);
     }
-    .aura-btn:active {
-      transform: scale(0.98);
+    #bubble.dark {
+      background: #1e1e2e; border: 1px solid rgba(255,255,255,0.1);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.2), 0 4px 12px rgba(0,0,0,0.25), 0 8px 24px rgba(0,0,0,0.3);
     }
-    .aura-btn svg {
-      flex-shrink: 0;
-    }
+    #bubble.visible { display: flex; animation: aura-bubble-in 0.3s ease-in-out forwards; }
+    #bubble.hiding { display: flex; animation: aura-bubble-out 0.15s ease-in-out forwards; }
 
-    .aura-divider {
-      width: 1px;
-      height: 14px;
-      background: rgba(255, 255, 255, 0.08);
-      flex-shrink: 0;
+    .bubble-btn {
+      width: 26px; height: 26px; border: none; border-radius: 6px;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      padding: 0; transition: background 0.12s ease, transform 0.12s ease; flex-shrink: 0;
     }
+    #bubble.light .bubble-btn { background: transparent; color: #4a4a5a; }
+    #bubble.light .bubble-btn:hover { background: rgba(0,0,0,0.06); color: #1a1a2e; }
+    #bubble.dark .bubble-btn { background: transparent; color: rgba(200,200,220,0.8); }
+    #bubble.dark .bubble-btn:hover { background: rgba(255,255,255,0.08); color: #fff; }
+    .bubble-btn:active { transform: scale(0.92); }
+    .bubble-btn svg { width: 15px; height: 15px; flex-shrink: 0; }
+    .bubble-btn.logo-btn svg { width: 16px; height: 16px; }
+    #bubble.light .bubble-btn.logo-btn { color: #7c3aed; }
+    #bubble.light .bubble-btn.logo-btn:hover { background: rgba(124,58,237,0.1); }
+    #bubble.dark .bubble-btn.logo-btn { color: #a78bfa; }
+    #bubble.dark .bubble-btn.logo-btn:hover { background: rgba(124,58,237,0.2); }
+
+    .bubble-sep { width: 1px; height: 16px; flex-shrink: 0; }
+    #bubble.light .bubble-sep { background: rgba(0,0,0,0.08); }
+    #bubble.dark .bubble-sep { background: rgba(255,255,255,0.1); }
+
+    #quick-launch {
+      display: none; position: fixed; width: 450px; max-height: 420px;
+      border-radius: 12px; pointer-events: auto; z-index: 2147483647;
+      flex-direction: column; overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', system-ui, sans-serif;
+    }
+    #quick-launch.light {
+      background: #ffffff; border: 1px solid rgba(0,0,0,0.1);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.1), 0 12px 40px rgba(0,0,0,0.12);
+    }
+    #quick-launch.dark {
+      background: #1e1e2e; border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.3), 0 12px 40px rgba(0,0,0,0.4);
+    }
+    #quick-launch.visible { display: flex; animation: aura-bubble-in 0.3s ease-in-out forwards; }
+    #quick-launch.hiding { display: flex; animation: aura-bubble-out 0.15s ease-in-out forwards; }
+
+    .ql-header { display: flex; align-items: center; gap: 8px; padding: 12px 14px 8px; }
+    .ql-header svg { width: 18px; height: 18px; flex-shrink: 0; color: #7c3aed; }
+    .ql-header-title { font-size: 13px; font-weight: 600; }
+    #quick-launch.light .ql-header-title { color: #1a1a2e; }
+    #quick-launch.dark .ql-header-title { color: rgba(226,232,240,0.95); }
+    .ql-close {
+      margin-left: auto; width: 22px; height: 22px; border: none; border-radius: 5px;
+      background: transparent; cursor: pointer; display: flex; align-items: center;
+      justify-content: center; padding: 0; transition: background 0.12s;
+    }
+    #quick-launch.light .ql-close { color: #999; }
+    #quick-launch.light .ql-close:hover { background: rgba(0,0,0,0.06); color: #333; }
+    #quick-launch.dark .ql-close { color: rgba(200,200,220,0.5); }
+    #quick-launch.dark .ql-close:hover { background: rgba(255,255,255,0.08); color: #fff; }
+
+    .ql-preview { padding: 0 14px; margin-bottom: 8px; }
+    .ql-preview-text {
+      font-size: 12px; line-height: 1.5; max-height: 56px; overflow: hidden;
+      display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+      border-radius: 6px; padding: 8px 10px;
+    }
+    #quick-launch.light .ql-preview-text { background: rgba(0,0,0,0.03); color: #555; border: 1px solid rgba(0,0,0,0.05); }
+    #quick-launch.dark .ql-preview-text { background: rgba(255,255,255,0.04); color: rgba(200,200,220,0.7); border: 1px solid rgba(255,255,255,0.06); }
+
+    .ql-input-row { display: flex; gap: 8px; padding: 0 14px; margin-bottom: 10px; }
+    .ql-input {
+      flex: 1; border-radius: 8px; padding: 8px 12px; font-size: 13px;
+      font-family: inherit; outline: none; transition: border-color 0.15s;
+    }
+    #quick-launch.light .ql-input { background: #fff; border: 1px solid rgba(0,0,0,0.12); color: #1a1a2e; }
+    #quick-launch.light .ql-input::placeholder { color: #aaa; }
+    #quick-launch.light .ql-input:focus { border-color: #7c3aed; }
+    #quick-launch.dark .ql-input { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: rgba(226,232,240,0.95); }
+    #quick-launch.dark .ql-input::placeholder { color: rgba(200,200,220,0.35); }
+    #quick-launch.dark .ql-input:focus { border-color: #7c3aed; }
+
+    .ql-submit {
+      padding: 8px 16px; border-radius: 8px; border: none; background: #7c3aed; color: #fff;
+      font-size: 13px; font-weight: 600; font-family: inherit; cursor: pointer;
+      white-space: nowrap; transition: background 0.15s, transform 0.12s;
+    }
+    .ql-submit:hover { background: #6d28d9; }
+    .ql-submit:active { transform: scale(0.97); }
+
+    .ql-actions { display: flex; gap: 6px; padding: 0 14px 12px; flex-wrap: wrap; }
+    .ql-action-btn {
+      padding: 5px 12px; border-radius: 6px; font-size: 12px; font-weight: 500;
+      font-family: inherit; cursor: pointer; white-space: nowrap;
+      transition: background 0.12s, border-color 0.12s, color 0.12s;
+      display: flex; align-items: center; gap: 5px;
+    }
+    #quick-launch.light .ql-action-btn { background: rgba(0,0,0,0.03); border: 1px solid rgba(0,0,0,0.08); color: #555; }
+    #quick-launch.light .ql-action-btn:hover { background: rgba(124,58,237,0.08); border-color: rgba(124,58,237,0.25); color: #7c3aed; }
+    #quick-launch.dark .ql-action-btn { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); color: rgba(200,200,220,0.7); }
+    #quick-launch.dark .ql-action-btn:hover { background: rgba(124,58,237,0.15); border-color: rgba(124,58,237,0.3); color: #a78bfa; }
+
+    .ql-model-row { display: flex; align-items: center; gap: 6px; padding: 0 14px 10px; }
+    .ql-model-label { font-size: 11px; font-weight: 500; }
+    #quick-launch.light .ql-model-label { color: #999; }
+    #quick-launch.dark .ql-model-label { color: rgba(200,200,220,0.4); }
+    .ql-model-select {
+      font-size: 11px; font-family: inherit; border-radius: 5px; padding: 3px 8px;
+      cursor: pointer; outline: none;
+    }
+    #quick-launch.light .ql-model-select { background: #fff; border: 1px solid rgba(0,0,0,0.1); color: #333; }
+    #quick-launch.dark .ql-model-select { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); color: rgba(200,200,220,0.8); }
 
     #toast {
-      display: none;
-      position: fixed;
-      background: rgba(5, 150, 105, 0.92);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      color: #fff;
-      font-size: 12px;
-      font-weight: 500;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', system-ui, sans-serif;
-      padding: 6px 14px;
-      border-radius: 8px;
-      pointer-events: none;
-      z-index: 2147483647;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+      display: none; position: fixed;
+      background: rgba(5, 150, 105, 0.92); backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px); color: #fff; font-size: 12px;
+      font-weight: 500; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', system-ui, sans-serif;
+      padding: 6px 14px; border-radius: 8px; pointer-events: none;
+      z-index: 2147483647; box-shadow: 0 4px 16px rgba(0,0,0,0.3);
     }
-    #toast.visible {
-      display: block;
-    }
+    #toast.visible { display: block; }
   `;
   shadow.appendChild(style);
 
-  // ── Toolbar DOM ───────────────────────────────────────────────────────────
+  // ── Selection Bubble DOM (Sider-style mini icon bubble) ─────────────────
 
-  const toolbar: HTMLDivElement = document.createElement('div');
-  toolbar.id = 'toolbar';
+  const bubble: HTMLDivElement = document.createElement('div');
+  bubble.id = 'bubble';
 
-  // SVG icons (16x16 viewBox)
-  const ICON_SPARKLES = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.5 5.5L19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5L12 3z"/><path d="M19 1l.5 1.5L21 3l-1.5.5L19 5l-.5-1.5L17 3l1.5-.5L19 1z"/><path d="M5 19l.5 1.5L7 21l-1.5.5L5 23l-.5-1.5L3 21l1.5-.5L5 19z"/></svg>`;
-  const ICON_LAYERS = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>`;
-  const ICON_MESSAGE = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg>`;
-  const ICON_BOOKMARK = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg>`;
+  const BUBBLE_LOGO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3L2 21M12 3L22 21M5.8 14.2L18.2 14.2"/></svg>`;
+  const BUBBLE_COPY = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>`;
+  const BUBBLE_EXPLAIN = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.5 5.5L19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5L12 3z"/></svg>`;
+  const BUBBLE_SUMMARIZE = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>`;
+  const BUBBLE_MORE = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>`;
 
-  const buttons: ToolbarButtonDef[] = [
-    { label: 'Explain', icon: ICON_SPARKLES, action: 'explain' },
-    { label: 'Summarize', icon: ICON_LAYERS, action: 'summarize' },
-    { label: 'Ask AURA', icon: ICON_MESSAGE, action: 'ask' },
-    { label: 'Save', icon: ICON_BOOKMARK, action: 'save' },
+  interface BubbleButtonDef { svg: string; action: string; tip: string; cls?: string; }
+  const bubbleButtons: BubbleButtonDef[] = [
+    { svg: BUBBLE_LOGO, action: 'quick-launch', tip: 'AURA', cls: 'logo-btn' },
+    { svg: BUBBLE_COPY, action: 'copy', tip: 'Copy' },
+    { svg: BUBBLE_EXPLAIN, action: 'explain', tip: 'Explain' },
+    { svg: BUBBLE_SUMMARIZE, action: 'summarize', tip: 'Summarize' },
+    { svg: BUBBLE_MORE, action: 'more', tip: 'More actions' },
   ];
 
-  buttons.forEach((btn, i) => {
-    if (i > 0) {
-      const div: HTMLDivElement = document.createElement('div');
-      div.className = 'aura-divider';
-      toolbar.appendChild(div);
-    }
-    const el: HTMLButtonElement = document.createElement('button');
-    el.className = 'aura-btn';
-    el.innerHTML = btn.icon + `<span>${btn.label}</span>`;
-    el.dataset.action = btn.action;
-    toolbar.appendChild(el);
+  bubbleButtons.forEach((def, i) => {
+    if (i === 1) { const sep = document.createElement('div'); sep.className = 'bubble-sep'; bubble.appendChild(sep); }
+    const btn: HTMLButtonElement = document.createElement('button');
+    btn.className = 'bubble-btn' + (def.cls ? ' ' + def.cls : '');
+    btn.innerHTML = def.svg;
+    btn.dataset.action = def.action;
+    btn.title = def.tip;
+    bubble.appendChild(btn);
   });
+  shadow.appendChild(bubble);
 
-  shadow.appendChild(toolbar);
+  // ── Quick Launch Panel DOM ──────────────────────────────────────────────
+  const quickLaunch: HTMLDivElement = document.createElement('div');
+  quickLaunch.id = 'quick-launch';
+  quickLaunch.innerHTML = '<div class="ql-header"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3L2 21M12 3L22 21M5.8 14.2L18.2 14.2"/></svg><span class="ql-header-title">AURA</span><button class="ql-close" data-action="ql-close" title="Close"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div><div class="ql-preview"><div class="ql-preview-text" id="ql-selected-text"></div></div><div class="ql-input-row"><input class="ql-input" id="ql-prompt-input" type="text" placeholder="Ask anything about this text..." /><button class="ql-submit" id="ql-submit-btn">Send</button></div><div class="ql-actions"><button class="ql-action-btn" data-action="explain">Explain</button><button class="ql-action-btn" data-action="summarize">Summarize</button><button class="ql-action-btn" data-action="ask">Chat with AURA</button><button class="ql-action-btn" data-action="save">Save to Memory</button><button class="ql-action-btn" data-action="translate">Translate</button></div><div class="ql-model-row"><span class="ql-model-label">Model:</span><select class="ql-model-select" id="ql-model-select"><option value="auto">Auto</option><option value="fast">Fast</option><option value="balanced">Balanced</option><option value="powerful">Powerful</option></select></div>';
+  shadow.appendChild(quickLaunch);
+
+  // Alias so downstream toast positioning still works
+  const toolbar = bubble;
 
   // ── Toast ─────────────────────────────────────────────────────────────────
 
@@ -469,120 +561,190 @@ function safeSend(msg: OutboundMessage, cb?: (response: any) => void): void {
   toast.id = 'toast';
   shadow.appendChild(toast);
 
-  // ── Floating Action Dock (Shadow DOM isolated) ────────
+  // ── Floating Action Button (Sider-style FAB, Shadow DOM isolated) ────────
 
-  const dockShadowHost: HTMLDivElement = document.createElement('div');
-  dockShadowHost.id = 'aura-dock-shadow';
-  Object.assign(dockShadowHost.style, { position: 'fixed', right: '0', top: '0', zIndex: '2147483647', pointerEvents: 'none' });
-  document.body.appendChild(dockShadowHost);
-  const dockShadow = dockShadowHost.attachShadow({ mode: 'closed' });
+  const fabShadowHost: HTMLDivElement = document.createElement('div');
+  fabShadowHost.id = 'aura-dock-shadow';
+  Object.assign(fabShadowHost.style, {
+    position: 'fixed', left: '0', top: '0', width: '100vw', height: '100vh',
+    zIndex: '2147483647', pointerEvents: 'none',
+  });
+  document.body.appendChild(fabShadowHost);
+  const fabShadow: ShadowRoot = fabShadowHost.attachShadow({ mode: 'closed' });
 
-  // Dock styles inside its own shadow DOM
-  const dockStyle: HTMLStyleElement = document.createElement('style');
-  dockStyle.textContent = `
-    @keyframes aura-breathe {
-      0%, 100% { box-shadow: 0 0 4px rgba(124, 58, 237, 0.2), 0 0 8px rgba(124, 58, 237, 0.1); }
-      50% { box-shadow: 0 0 8px rgba(124, 58, 237, 0.45), 0 0 16px rgba(124, 58, 237, 0.2); }
-    }
-
-    #aura-dock-host {
+  const fabStyle: HTMLStyleElement = document.createElement('style');
+  fabStyle.textContent = `
+    /* ── FAB outer container — fixed to right or left edge ── */
+    .aura-fab {
       position: fixed;
       right: 0;
-      top: 50%;
-      transform: translateY(-50%);
-      z-index: 2147483647;
-      pointer-events: auto;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 0;
-      padding: 7px 4px;
-      background: rgba(10, 8, 24, 0.88);
-      backdrop-filter: blur(20px) saturate(1.5);
-      -webkit-backdrop-filter: blur(20px) saturate(1.5);
-      border: 1px solid rgba(124, 58, 237, 0.25);
-      border-right: none;
-      border-radius: 12px 0 0 12px;
-      box-shadow: -3px 0 20px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05) inset;
-      transition: border-color 0.25s ease, box-shadow 0.25s ease;
-      box-sizing: border-box;
+      bottom: 30px;
+      z-index: 2147483645;
+      user-select: none;
+      -webkit-user-select: none;
+      visibility: visible !important;
+      pointer-events: none;
+      transform: translate3d(100%, 0, 0);
+      transition: all 0.3s ease 0.2s;
+      opacity: 0;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', system-ui, sans-serif;
     }
-    #aura-dock-host:hover {
-      border-color: rgba(124, 58, 237, 0.5);
-      box-shadow: -4px 0 28px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.08) inset;
+    .aura-fab.show {
+      transform: translateZ(0);
+      opacity: 1;
+    }
+    .aura-fab.left {
+      left: 0;
+      right: auto;
+      transform: translate3d(-100%, 0, 0);
+    }
+    .aura-fab.left.show {
+      transform: translateZ(0);
+      opacity: 1;
     }
 
-    .dock-logo-wrap {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 2px;
-      cursor: default;
-      flex-shrink: 0;
-    }
-    .dock-logo-icon {
-      width: 32px;
-      height: 32px;
+    /* ── The pill button ── */
+    .aura-fab .fab-pill {
+      padding: 8px 10px;
+      border-radius: 999px 0 0 999px;
+      background: rgba(10, 8, 24, 0.92);
+      backdrop-filter: blur(16px) saturate(1.4);
+      -webkit-backdrop-filter: blur(16px) saturate(1.4);
+      box-shadow: 0 0 1px 0 rgba(124, 58, 237, 0.3),
+                  0 6px 24px rgba(12, 13, 25, 0.06),
+                  0 12px 48px rgba(12, 13, 25, 0.06),
+                  0 24px 96px rgba(12, 13, 25, 0.06);
       display: flex;
       align-items: center;
       justify-content: center;
-      color: rgba(160, 148, 210, 0.9);
-      border-radius: 8px;
-      animation: aura-breathe 3s ease-in-out infinite;
+      cursor: pointer;
+      pointer-events: auto;
+      position: relative;
     }
-    .dock-logo-label {
-      font-size: 8px;
-      font-weight: 700;
-      letter-spacing: 0.5px;
-      color: rgba(160, 148, 210, 0.5);
-      text-transform: uppercase;
-      line-height: 1;
-      opacity: 1;
-      transition: opacity 0.2s ease;
+    .aura-fab .fab-pill:not(.dragging) {
+      transition: padding 0.3s, border-radius 0.3s;
     }
-    #aura-dock-host:hover .dock-logo-label {
-      opacity: 0;
+    .aura-fab.left .fab-pill {
+      border-radius: 0 999px 999px 0;
     }
 
-    .dock-actions {
+    /* Hover expand */
+    .aura-fab .fab-pill:not(.dragging).hover {
+      padding: 8px 14px;
+    }
+
+    /* Dragging state: full circle */
+    .aura-fab .fab-pill.dragging {
+      border-radius: 999px;
+      padding: 8px;
+      cursor: move;
+    }
+
+    /* ── Close button ── */
+    .aura-fab .fab-close {
+      position: absolute;
+      bottom: -4px;
+      left: -4px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.12);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.2s ease, background 0.15s ease;
+      pointer-events: auto;
+      border: none;
+      padding: 0;
+      color: rgba(255, 255, 255, 0.7);
+    }
+    .aura-fab.left .fab-close {
+      left: auto;
+      right: -4px;
+    }
+    .aura-fab .fab-pill.hover:not(.dragging) .fab-close {
+      opacity: 1;
+    }
+    .aura-fab .fab-close:hover {
+      background: rgba(255, 255, 255, 0.22);
+    }
+
+    /* ── Logo icon ── */
+    .aura-fab .fab-logo {
+      width: 20px;
+      height: 20px;
+      pointer-events: none;
+      flex-shrink: 0;
+    }
+
+    /* ── Popout toolbar ── */
+    .aura-fab .fab-popout {
+      position: absolute;
+      right: 0;
+      bottom: 100%;
+      padding: 8px 0;
+      pointer-events: auto;
+      transition: padding 0.3s, opacity 0.3s;
+    }
+    .aura-fab .fab-popout.hidden {
+      padding: 0;
+      opacity: 0;
+      pointer-events: none;
+      visibility: hidden;
+    }
+    .aura-fab .fab-popout.hidden .fab-popout-inner {
+      transform: scale(0.95);
+    }
+    .aura-fab .fab-popout.reverse {
+      bottom: auto;
+      top: 100%;
+      padding: 8px 0;
+    }
+    .aura-fab.left .fab-popout {
+      right: auto;
+      left: 0;
+    }
+
+    .aura-fab .fab-popout-inner {
       display: flex;
       flex-direction: column;
       align-items: center;
       gap: 3px;
-      overflow: hidden;
-      max-height: 0;
-      opacity: 0;
-      padding-top: 0;
-      transition: max-height 0.3s cubic-bezier(0.16, 1, 0.3, 1),
-                  opacity 0.2s ease,
-                  padding-top 0.25s ease;
+      padding: 3px;
+      background: rgba(10, 8, 24, 0.92);
+      backdrop-filter: blur(16px) saturate(1.4);
+      -webkit-backdrop-filter: blur(16px) saturate(1.4);
+      border-radius: 999px;
+      box-shadow: 0 0 1px 0 rgba(124, 58, 237, 0.3),
+                  0 6px 24px rgba(12, 13, 25, 0.06),
+                  0 12px 48px rgba(12, 13, 25, 0.06),
+                  0 24px 96px rgba(12, 13, 25, 0.06);
+      transition: transform 0.2s ease;
     }
-    #aura-dock-host:hover .dock-actions {
-      max-height: 320px;
-      opacity: 1;
-      padding-top: 5px;
+    .aura-fab .fab-popout.reverse .fab-popout-inner {
+      flex-direction: column-reverse;
     }
 
-    .dock-sep {
-      width: 18px;
+    .fab-popout-sep {
+      width: 14px;
       height: 1px;
       background: rgba(255, 255, 255, 0.08);
-      margin: 2px 0;
       flex-shrink: 0;
     }
 
-    .dock-btn {
-      width: 32px;
-      height: 32px;
-      min-width: 32px;
-      min-height: 32px;
-      border-radius: 8px;
+    .fab-action-btn {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
       background: transparent;
       border: none;
       padding: 0;
       margin: 0;
-      color: rgba(160, 148, 210, 0.6);
+      color: rgba(160, 148, 210, 0.7);
       cursor: pointer;
       display: flex;
       align-items: center;
@@ -590,45 +752,59 @@ function safeSend(msg: OutboundMessage, cb?: (response: any) => void): void {
       flex-shrink: 0;
       box-sizing: border-box;
       outline: none;
-      transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+      transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
     }
-    .dock-btn:hover {
-      background: rgba(124, 58, 237, 0.25);
+    .fab-action-btn:hover {
+      background: rgba(124, 58, 237, 0.3);
       color: rgba(224, 214, 255, 1);
-      transform: scale(1.05);
     }
-    .dock-btn:active {
-      transform: scale(0.95);
+    .fab-action-btn:active {
+      transform: scale(0.9);
     }
   `;
-  dockShadow.appendChild(dockStyle);
+  fabShadow.appendChild(fabStyle);
 
-  const dockHost: HTMLDivElement = document.createElement('div');
-  dockHost.id = 'aura-dock-host';
-  dockShadow.appendChild(dockHost);
+  // ── FAB state ──
 
-  // Logo wrapper with breathing icon + "A" label
-  const dockLogoWrap: HTMLDivElement = document.createElement('div');
-  dockLogoWrap.className = 'dock-logo-wrap';
+  let _fabSide: 'left' | 'right' = 'right';
+  let _fabOffset: number = 0;        // translateY offset (negative = up from bottom:30px)
+  let _fabVisible: boolean = true;
+  let _fabHiddenOnce: boolean = false;
+  let _fabHovering: boolean = false;
+  let _fabDragging: boolean = false;
+  let _fabPopupOpen: boolean = false;
 
-  const dockLogoIcon: HTMLDivElement = document.createElement('div');
-  dockLogoIcon.className = 'dock-logo-icon';
-  dockLogoIcon.innerHTML = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3L2 21M12 3L22 21M5.8 14.2L18.2 14.2"/></svg>`;
-  dockLogoWrap.appendChild(dockLogoIcon);
+  // Load persisted state from chrome.storage
+  ext.storage.local.get(['auraFabSide', 'auraFabOffset'], (data: Record<string, unknown>) => {
+    if (data.auraFabSide === 'left' || data.auraFabSide === 'right') _fabSide = data.auraFabSide;
+    if (typeof data.auraFabOffset === 'number') _fabOffset = data.auraFabOffset;
+    applyFabState();
+  });
 
-  const dockLogoLabel: HTMLDivElement = document.createElement('div');
-  dockLogoLabel.className = 'dock-logo-label';
-  dockLogoLabel.textContent = 'A';
-  dockLogoWrap.appendChild(dockLogoLabel);
+  // ── Build DOM ──
 
-  dockHost.appendChild(dockLogoWrap);
+  const fabContainer: HTMLDivElement = document.createElement('div');
+  fabContainer.className = 'aura-fab';
+  fabShadow.appendChild(fabContainer);
 
-  // Action buttons container — expands on hover via CSS
-  const dockActions: HTMLDivElement = document.createElement('div');
-  dockActions.className = 'dock-actions';
-  dockHost.appendChild(dockActions);
+  const fabTranslateWrap: HTMLDivElement = document.createElement('div');
+  fabTranslateWrap.style.position = 'relative';
+  fabContainer.appendChild(fabTranslateWrap);
 
-  const _dockItems: (DockItemDef | null)[] = [
+  const fabPointerWrap: HTMLDivElement = document.createElement('div');
+  fabPointerWrap.style.pointerEvents = 'auto';
+  fabTranslateWrap.appendChild(fabPointerWrap);
+
+  // Popout toolbar (action buttons above/below FAB)
+  const fabPopout: HTMLDivElement = document.createElement('div');
+  fabPopout.className = 'fab-popout hidden';
+  fabPointerWrap.appendChild(fabPopout);
+
+  const fabPopoutInner: HTMLDivElement = document.createElement('div');
+  fabPopoutInner.className = 'fab-popout-inner';
+  fabPopout.appendChild(fabPopoutInner);
+
+  const _fabItems: (DockItemDef | null)[] = [
     { svg: '<path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>', action: 'dock-chat', tip: 'Chat with AURA' },
     { svg: '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>', action: 'dock-search', tip: 'Search' },
     null,
@@ -638,27 +814,211 @@ function safeSend(msg: OutboundMessage, cb?: (response: any) => void): void {
     { svg: '<path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/>', action: 'dock-save', tip: 'Save to Memory' },
   ];
 
-  _dockItems.forEach((item: DockItemDef | null) => {
+  _fabItems.forEach((item: DockItemDef | null) => {
     if (!item) {
       const sep: HTMLDivElement = document.createElement('div');
-      sep.className = 'dock-sep';
-      dockActions.appendChild(sep);
+      sep.className = 'fab-popout-sep';
+      fabPopoutInner.appendChild(sep);
       return;
     }
     const btn: HTMLButtonElement = document.createElement('button');
-    btn.className = 'dock-btn';
+    btn.className = 'fab-action-btn';
     btn.dataset.action = item.action;
     btn.title = item.tip;
-    btn.innerHTML = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${item.svg}</svg>`;
-    dockActions.appendChild(btn);
+    btn.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${item.svg}</svg>`;
+    fabPopoutInner.appendChild(btn);
   });
 
-  // Click handler
-  dockHost.addEventListener('click', (e: MouseEvent) => {
+  // The pill button itself
+  const fabPill: HTMLDivElement = document.createElement('div');
+  fabPill.className = 'fab-pill';
+  fabPointerWrap.appendChild(fabPill);
+
+  // AURA logo SVG (20px)
+  const fabLogo: HTMLDivElement = document.createElement('div');
+  fabLogo.className = 'fab-logo';
+  fabLogo.innerHTML = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="rgba(160, 148, 210, 0.9)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3L2 21M12 3L22 21M5.8 14.2L18.2 14.2"/></svg>`;
+  fabPill.appendChild(fabLogo);
+
+  // Close button (X at bottom-left corner, appears on hover only)
+  const fabClose: HTMLButtonElement = document.createElement('button');
+  fabClose.className = 'fab-close';
+  fabClose.innerHTML = `<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+  fabPill.appendChild(fabClose);
+
+  // ── Apply visual state ──
+
+  function applyFabState(): void {
+    fabContainer.classList.toggle('left', _fabSide === 'left');
+
+    if (_fabVisible && !_fabHiddenOnce) {
+      fabContainer.classList.add('show');
+    } else {
+      fabContainer.classList.remove('show');
+    }
+
+    // Vertical offset via translate3d on the inner wrapper
+    fabTranslateWrap.style.transform = `translate3d(0, ${_fabOffset + (_fabDragging ? 0.01 : 0)}px, 0)`;
+
+    // Popout direction: if near top of viewport, show below instead
+    const isNearTop = _fabOffset < -0.7 * window.innerHeight;
+    fabPopout.classList.toggle('reverse', isNearTop);
+
+    // Popout visibility
+    const showPopout = (_fabHovering || _fabPopupOpen) && !_fabDragging;
+    fabPopout.classList.toggle('hidden', !showPopout);
+
+    // Pill hover/drag classes
+    fabPill.classList.toggle('hover', _fabHovering && !_fabDragging);
+    fabPill.classList.toggle('dragging', _fabDragging);
+  }
+
+  function saveFabState(): void {
+    try {
+      ext.storage.local.set({ auraFabSide: _fabSide, auraFabOffset: _fabOffset });
+    } catch (_e) { /* ignore */ }
+  }
+
+  // ── Pointer-based drag (matches Sider's up() hook pattern) ──
+
+  let _downPos: [number, number] = [0, 0];
+  let _movePos: [number, number] = [0, 0];
+  let _downTranslateY: number = 0;
+  let _totalMoveDist: number = 0;
+  let _ptrDown: boolean = false;
+  let _ptrCaptured: boolean = false;
+
+  function parseTranslateY(el: HTMLElement): number {
+    const m = el.style.transform.match(/translate3d\(\s*[\d.eE+-]+px\s*,\s*([\d.eE+-]+)px/);
+    return m ? parseFloat(m[1]) : 0;
+  }
+
+  function clampOffset(offset: number): number {
+    const pillH = fabPill.getBoundingClientRect().height || 36;
+    const maxUp = -(window.innerHeight - 30 - 10 - pillH / 2);   // 10px from top
+    const maxDown = 30 - 10 - pillH / 2;                          // 10px from bottom
+    return Math.max(maxUp, Math.min(offset, maxDown));
+  }
+
+  function onFabPointerDown(e: PointerEvent): void {
+    if (e.button === 2) return;
+    _downPos = [e.clientX, e.clientY];
+    _movePos = [e.clientX, e.clientY];
+    _ptrDown = true;
+    _ptrCaptured = false;
+    _downTranslateY = parseTranslateY(fabTranslateWrap);
+    _totalMoveDist = 0;
+    fabPill.dataset.move = '0';
+    fabPill.style.touchAction = 'none';
+  }
+
+  function onFabPointerMove(e: PointerEvent): void {
+    if (!_ptrDown) return;
+    _movePos = [e.clientX, e.clientY];
+    const dx = _movePos[0] - _downPos[0];
+    const dy = _movePos[1] - _downPos[1];
+    _totalMoveDist = Math.abs(dx) + Math.abs(dy);
+    fabPill.dataset.move = String(_totalMoveDist);
+
+    // Start drag after 3px movement threshold
+    if (_totalMoveDist > 3 && !_fabDragging) {
+      _fabDragging = true;
+      if (!_ptrCaptured) {
+        fabPill.setPointerCapture(e.pointerId);
+        _ptrCaptured = true;
+      }
+      applyFabState();
+    }
+
+    if (!_fabDragging) return;
+
+    // Compute new vertical offset, clamped to 10px from edges
+    const newY = clampOffset(_downTranslateY + dy);
+    fabTranslateWrap.style.transform = `translate3d(0, ${newY}px, 0)`;
+
+    // Side switching: if pointer crosses horizontal midpoint, snap to that side
+    const currentSide: 'left' | 'right' = (_downPos[0] + dx) > window.innerWidth / 2 ? 'right' : 'left';
+    if (currentSide !== _fabSide) {
+      _fabSide = currentSide;
+      fabContainer.classList.toggle('left', _fabSide === 'left');
+    }
+  }
+
+  function onFabPointerUp(e: PointerEvent): void {
+    if (!_ptrDown) return;
+    _ptrDown = false;
+    if (_ptrCaptured) {
+      fabPill.releasePointerCapture(e.pointerId);
+      _ptrCaptured = false;
+    }
+
+    if (_fabDragging) {
+      const dy = _movePos[1] - _downPos[1];
+      const dx = _movePos[0] - _downPos[0];
+      let finalY = clampOffset(_downTranslateY + dy);
+      if (finalY > 0) finalY = 0;
+
+      _fabSide = (_downPos[0] + dx) > window.innerWidth / 2 ? 'right' : 'left';
+      _fabOffset = finalY;
+      _fabDragging = false;
+      applyFabState();
+      saveFabState();
+    }
+  }
+
+  fabPill.addEventListener('pointerdown', onFabPointerDown);
+  fabPill.addEventListener('pointermove', onFabPointerMove);
+  fabPill.addEventListener('pointerup', onFabPointerUp);
+  fabPill.addEventListener('pointercancel', onFabPointerUp);
+
+  // ── Hover logic ──
+
+  let _hoverTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function setFabHover(val: boolean): void {
+    if (_hoverTimer) { clearTimeout(_hoverTimer); _hoverTimer = null; }
+    if (val) {
+      _fabHovering = true;
+      applyFabState();
+    } else {
+      _hoverTimer = setTimeout(() => {
+        if (!_fabPopupOpen) {
+          _fabHovering = false;
+          applyFabState();
+        }
+      }, 0);
+    }
+  }
+
+  fabPill.addEventListener('mouseenter', () => setFabHover(true));
+  fabPill.addEventListener('mouseleave', () => setFabHover(false));
+  fabPopout.addEventListener('mouseenter', () => setFabHover(true));
+  fabPopout.addEventListener('mouseleave', () => setFabHover(false));
+
+  // ── Click: only fires if not a drag (>10px = drag, not click) ──
+
+  fabPill.addEventListener('click', (e: MouseEvent) => {
+    if (_totalMoveDist > 10) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('.fab-close')) return;
+    safeSend({ type: 'OPEN_PANEL', panel: 'chat' });
+  });
+
+  // Close button: hide FAB for this page session
+  fabClose.addEventListener('click', (e: MouseEvent) => {
+    e.stopPropagation();
+    _fabHiddenOnce = true;
+    _fabVisible = false;
+    applyFabState();
+  });
+
+  // ── Popout action clicks ──
+
+  fabPopoutInner.addEventListener('click', (e: MouseEvent) => {
     const target = e.target as HTMLElement;
     const btn: HTMLElement | null = target.closest('[data-action]');
     if (!btn) return;
-    const action: string = (btn as HTMLElement).dataset.action!;
+    const action: string = btn.dataset.action!;
     const url: string = window.location.href;
     const title: string = document.title;
 
@@ -677,12 +1037,41 @@ function safeSend(msg: OutboundMessage, cb?: (response: any) => void): void {
       safeSend(
         { type: 'SAVE_KNOWLEDGE', text: textToSave, url, title },
         (response: SaveKnowledgeResponse) => {
-          if (response && response.ok) showToast('Saved to AURA memory ✓');
+          if (response && response.ok) showToast('Saved to AURA memory');
           else showToast('Save failed — is backend running?', 3000);
         }
       );
     }
   });
+
+  // ── Window resize: clamp offset so FAB stays visible ──
+
+  function clampFabOnResize(): void {
+    if (Math.abs(_fabOffset) > window.innerHeight) {
+      _fabOffset = -(window.innerHeight - 66);
+      if (_fabOffset > 0) _fabOffset = 0;
+      saveFabState();
+    }
+    applyFabState();
+  }
+
+  window.addEventListener('resize', clampFabOnResize);
+  window.addEventListener('focus', () => setTimeout(clampFabOnResize, 100));
+
+  // Show dock function (called from message listener to re-show after hide)
+  function showDock(): void {
+    _fabHiddenOnce = false;
+    _fabVisible = true;
+    applyFabState();
+  }
+
+  // Initial show with slight delay (let storage load first)
+  setTimeout(() => {
+    if (!_fabHiddenOnce) {
+      _fabVisible = true;
+      applyFabState();
+    }
+  }, 50);
 
   let _toastTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -1071,7 +1460,7 @@ function safeSend(msg: OutboundMessage, cb?: (response: any) => void): void {
   // Restore highlights after page content settles
   setTimeout(restoreAllHighlights, 1500);
 
-  // ── Selection Handling ──────────────────────────────────────────────────
+  // ── Selection Handling (Sider-style bubble at cursor point) ────────────
 
   function getSelectionText(): string {
     const sel: Selection | null = window.getSelection();
@@ -1080,101 +1469,277 @@ function safeSend(msg: OutboundMessage, cb?: (response: any) => void): void {
   }
 
   let _hideAnimTimer: ReturnType<typeof setTimeout> | null = null;
+  let _lastMouseX = 0;
+  let _lastMouseY = 0;
+  let _mouseDownY = 0;
+  let _bubbleShowTime = 0;
+  let _qlVisible = false;
 
-  function positionToolbar(): void {
+  // Track mouse position on every mousedown and mousemove for selection direction
+  document.addEventListener('mousedown', (e: MouseEvent) => {
+    _mouseDownY = e.clientY;
+    _lastMouseX = e.clientX;
+    _lastMouseY = e.clientY;
+  }, true);
+
+  function positionBubble(): void {
     const sel: Selection | null = window.getSelection();
     if (!sel || sel.rangeCount === 0) return;
-    const range: Range = sel.getRangeAt(0);
-    const rect: DOMRect = range.getBoundingClientRect();
-    const TOOLBAR_HEIGHT = 42;
-    const GAP = 10;
+
+    const theme = themeClass();
+    bubble.classList.remove('light', 'dark');
+    bubble.classList.add(theme);
+
+    // Measure bubble size
+    bubble.style.visibility = 'hidden';
+    bubble.style.display = 'flex';
+    const bRect: DOMRect = bubble.getBoundingClientRect();
+    const bw: number = bRect.width || 160;
+    const bh: number = bRect.height || 34;
+    bubble.style.visibility = '';
+    bubble.style.display = '';
+
     const vw: number = window.innerWidth;
+    const vh: number = window.innerHeight;
 
-    // Measure toolbar width (temporarily make visible offscreen if needed)
-    toolbar.style.visibility = 'hidden';
-    toolbar.style.display = 'flex';
-    const tbRect: DOMRect = toolbar.getBoundingClientRect();
-    const tbWidth: number = tbRect.width || 320;
-    toolbar.style.visibility = '';
-    toolbar.style.display = '';
-
-    // Horizontal: center above selection, clamp to edges
-    let left: number = rect.left + (rect.width / 2) - (tbWidth / 2);
+    // Position at mouseup point
+    let left: number = _lastMouseX - (bw / 2);
     if (left < 8) left = 8;
-    if (left + tbWidth > vw - 8) left = vw - tbWidth - 8;
+    if (left + bw > vw - 8) left = vw - bw - 8;
 
-    // Vertical: prefer above selection, fall below if near top
-    const showBelow: boolean = rect.top < TOOLBAR_HEIGHT + GAP + 10;
-    toolbar.classList.toggle('below', showBelow);
-
-    if (showBelow) {
-      toolbar.style.top = `${Math.round(rect.bottom + GAP)}px`;
+    // Selection direction: if selected downward, show 15px below mouseup; if upward, 40px above
+    const selectionWentDown = _lastMouseY >= _mouseDownY;
+    let top: number;
+    if (selectionWentDown) {
+      top = _lastMouseY + 15;
+      if (top + bh > vh - 8) top = _lastMouseY - bh - 15;
     } else {
-      toolbar.style.top = `${Math.round(rect.top - TOOLBAR_HEIGHT - GAP)}px`;
+      top = _lastMouseY - bh - 40;
+      if (top < 8) top = _lastMouseY + 15;
     }
-    toolbar.style.left = `${Math.round(left)}px`;
+
+    bubble.style.top = `${Math.round(top)}px`;
+    bubble.style.left = `${Math.round(left)}px`;
   }
 
-  function showToolbar(): void {
+  function showBubble(): void {
     if (_hideAnimTimer) { clearTimeout(_hideAnimTimer); _hideAnimTimer = null; }
-    toolbar.classList.remove('hiding');
-    toolbar.classList.add('visible');
-    positionToolbar();
+    bubble.classList.remove('hiding');
+    bubble.classList.add('visible');
+    positionBubble();
     host.style.pointerEvents = 'auto';
+    _bubbleShowTime = Date.now();
   }
 
-  function hideToolbar(): void {
-    if (!toolbar.classList.contains('visible')) return;
-    toolbar.classList.remove('visible');
-    toolbar.classList.add('hiding');
+  function hideBubble(): void {
+    if (!bubble.classList.contains('visible') && !_qlVisible) return;
+    hideQuickLaunch();
+    bubble.classList.remove('visible');
+    bubble.classList.add('hiding');
     if (_hideAnimTimer) clearTimeout(_hideAnimTimer);
     _hideAnimTimer = setTimeout(() => {
-      toolbar.classList.remove('hiding');
+      bubble.classList.remove('hiding');
       host.style.pointerEvents = 'none';
       _hideAnimTimer = null;
     }, 150);
   }
 
-  document.addEventListener('mouseup', () => {
+  // Aliases for downstream code referencing old names
+  function showToolbar(): void { showBubble(); }
+  function hideToolbar(): void { hideBubble(); }
+
+  // ── Quick Launch Panel Logic ────────────────────────────────────────────
+
+  function showQuickLaunch(): void {
+    const text = getSelectionText();
+    if (!text) return;
+
+    const theme = themeClass();
+    quickLaunch.classList.remove('light', 'dark');
+    quickLaunch.classList.add(theme);
+
+    // Set selected text preview
+    const previewEl = shadow.getElementById('ql-selected-text');
+    if (previewEl) previewEl.textContent = text;
+
+    // Clear input
+    const inputEl = shadow.getElementById('ql-prompt-input') as HTMLInputElement | null;
+    if (inputEl) inputEl.value = '';
+
+    // Position near the bubble
+    const bubbleRect = bubble.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const qlW = 450;
+    const qlH = 400;
+
+    let left = bubbleRect.left;
+    if (left + qlW > vw - 16) left = vw - qlW - 16;
+    if (left < 16) left = 16;
+
+    let top = bubbleRect.bottom + 8;
+    if (top + qlH > vh - 16) {
+      top = bubbleRect.top - qlH - 8;
+      if (top < 16) top = 16;
+    }
+
+    quickLaunch.style.top = `${Math.round(top)}px`;
+    quickLaunch.style.left = `${Math.round(left)}px`;
+
+    quickLaunch.classList.remove('hiding');
+    quickLaunch.classList.add('visible');
+    _qlVisible = true;
+
+    // Focus the input
+    setTimeout(() => {
+      const inp = shadow.getElementById('ql-prompt-input') as HTMLInputElement | null;
+      if (inp) inp.focus();
+    }, 100);
+  }
+
+  function hideQuickLaunch(): void {
+    if (!_qlVisible) return;
+    quickLaunch.classList.remove('visible');
+    quickLaunch.classList.add('hiding');
+    _qlVisible = false;
+    setTimeout(() => { quickLaunch.classList.remove('hiding'); }, 150);
+  }
+
+  // ── Mouseup: show bubble ────────────────────────────────────────────────
+
+  document.addEventListener('mouseup', (e: MouseEvent) => {
+    _lastMouseX = e.clientX;
+    _lastMouseY = e.clientY;
     setTimeout(() => {
       const text: string = getSelectionText();
-      if (text.length > 0) showToolbar();
-      else hideToolbar();
+      if (text.length > 0) showBubble();
+      else hideBubble();
     }, 50);
   });
 
+  // ── Dismissal: click outside (100ms ignore), right-click, scroll, escape
+
   document.addEventListener('mousedown', (e: MouseEvent) => {
-    if (!host.contains(e.target as Node)) hideToolbar();
+    // 100ms ignore delay after bubble appears (prevents immediate dismiss from the mouseup that created it)
+    if (Date.now() - _bubbleShowTime < 100) return;
+    if (!host.contains(e.target as Node)) hideBubble();
+  });
+
+  document.addEventListener('contextmenu', () => { hideBubble(); });
+
+  window.addEventListener('scroll', () => { hideBubble(); }, { passive: true });
+
+  document.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'Escape') hideBubble();
   });
 
   document.addEventListener('selectionchange', () => {
-    if (getSelectionText().length === 0) hideToolbar();
+    if (getSelectionText().length === 0 && !_qlVisible) hideBubble();
   });
 
-  // ── Button Handlers ───────────────────────────────────────────────────
+  // ── Bubble Button Handlers ──────────────────────────────────────────────
 
-  toolbar.addEventListener('click', (e: MouseEvent) => {
+  bubble.addEventListener('click', (e: MouseEvent) => {
     const target = e.target as HTMLElement;
-    const btn: HTMLElement | null = target.closest('.aura-btn');
+    const btn: HTMLElement | null = target.closest('.bubble-btn');
     if (!btn) return;
-    const action: string = (btn as HTMLElement).dataset.action!;
+    e.stopPropagation();
+    const action: string = btn.dataset.action!;
     const text: string = getSelectionText();
-    if (!text) return;
     const url: string = window.location.href;
     const title: string = document.title;
 
-    if (action === 'save') {
-      // Create visual highlight + save to storage
+    if (action === 'quick-launch') {
+      showQuickLaunch();
+      return;
+    }
+
+    if (action === 'more') {
+      // "More" opens the sidebar with this text
+      if (text) safeSend({ type: 'OPEN_WITH_TEXT', action: 'ask', text, url, title });
+      hideBubble();
+      return;
+    }
+
+    if (!text) return;
+
+    if (action === 'copy') {
+      navigator.clipboard.writeText(text).then(() => {
+        showToast('Copied to clipboard');
+      }).catch(() => {
+        showToast('Copy failed', 3000);
+      });
+      hideBubble();
+    } else if (action === 'save') {
       saveHighlight();
-      // Also save to backend knowledge base
       safeSend(
         { type: 'SAVE_KNOWLEDGE', text, url, title },
-        (_response: SaveKnowledgeResponse) => { /* highlight toast already shown */ }
+        (_response: SaveKnowledgeResponse) => { /* toast already shown */ }
       );
+      hideBubble();
     } else {
       safeSend({ type: 'OPEN_WITH_TEXT', action, text, url, title });
+      hideBubble();
     }
-    hideToolbar();
+  });
+
+  // ── Quick Launch Panel Handlers ─────────────────────────────────────────
+
+  quickLaunch.addEventListener('click', (e: MouseEvent) => {
+    const target = e.target as HTMLElement;
+    e.stopPropagation();
+
+    // Close button
+    if (target.closest('[data-action="ql-close"]')) {
+      hideQuickLaunch();
+      return;
+    }
+
+    // Submit button
+    if (target.id === 'ql-submit-btn' || target.closest('#ql-submit-btn')) {
+      const inputEl = shadow.getElementById('ql-prompt-input') as HTMLInputElement | null;
+      const prompt = inputEl?.value?.trim() || '';
+      const text = getSelectionText();
+      if (!text && !prompt) return;
+      safeSend({ type: 'OPEN_WITH_TEXT', action: 'ask', text: prompt ? `${prompt}\n\nContext:\n${text}` : text, url: window.location.href, title: document.title });
+      hideBubble();
+      return;
+    }
+
+    // Quick action buttons
+    const actionBtn = target.closest('.ql-action-btn') as HTMLElement | null;
+    if (actionBtn) {
+      const action = actionBtn.dataset.action!;
+      const text = getSelectionText();
+      const url = window.location.href;
+      const title = document.title;
+      if (!text) return;
+
+      if (action === 'save') {
+        saveHighlight();
+        safeSend(
+          { type: 'SAVE_KNOWLEDGE', text, url, title },
+          (_response: SaveKnowledgeResponse) => { /* toast already shown */ }
+        );
+        hideBubble();
+      } else if (action === 'translate') {
+        safeSend({ type: 'OPEN_PANEL', panel: 'translate' });
+        hideBubble();
+      } else {
+        safeSend({ type: 'OPEN_WITH_TEXT', action, text, url, title });
+        hideBubble();
+      }
+      return;
+    }
+  });
+
+  // Submit on Enter in the quick launch input
+  quickLaunch.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      const submitBtn = shadow.getElementById('ql-submit-btn');
+      if (submitBtn) submitBtn.click();
+    }
   });
 
   // ── DOM Serializer (for Browser Agent) ────────────────────────────────
@@ -2084,6 +2649,39 @@ function safeSend(msg: OutboundMessage, cb?: (response: any) => void): void {
         channelName: d.channelName || '',
         chapters: d.chapters || [],
         captionTracks: d.captionTracks || [],
+      });
+    } catch { /* extension context may be invalidated */ }
+  }) as EventListener);
+
+  // ── Netflix Subtitle Interception Relay ─────────────────────────────
+  // The netflix-inject.js script runs in the MAIN world and dispatches
+  // CustomEvents on document. We listen here (ISOLATED world) and forward
+  // via chrome.runtime.sendMessage to the sidebar.
+
+  document.addEventListener('aura-netflix-subtitles', ((e: CustomEvent) => {
+    try {
+      const d = e.detail;
+      safeSend({
+        type: 'NETFLIX_SUBTITLES',
+        movieId: d.movieId || '',
+        lang: d.lang || '',
+        trackId: d.trackId || '',
+        segments: d.segments || [],
+      });
+    } catch { /* extension context may be invalidated */ }
+  }) as EventListener);
+
+  document.addEventListener('aura-netflix-metadata', ((e: CustomEvent) => {
+    try {
+      const d = e.detail;
+      safeSend({
+        type: 'NETFLIX_METADATA',
+        movieId: d.movieId || '',
+        title: d.title || '',
+        episodeTitle: d.episodeTitle || '',
+        seasonNumber: d.seasonNumber || 0,
+        episodeNumber: d.episodeNumber || 0,
+        duration: d.duration || 0,
       });
     } catch { /* extension context may be invalidated */ }
   }) as EventListener);
@@ -3108,6 +3706,227 @@ function safeSend(msg: OutboundMessage, cb?: (response: any) => void): void {
     if (_lpPopup && _lpCurLink) { const r = _lpCurLink.getBoundingClientRect(); if (r.bottom < 0 || r.top > window.innerHeight) { lpCancelTimers(); lpRemove(); } else { lpPosition(_lpCurLink); } }
   }, { passive: true });
 
+  // ── Image Hover Toolbar (Shadow DOM isolated) ─────────────────────────
+
+  const imgTbHost: HTMLDivElement = document.createElement('div');
+  imgTbHost.id = 'aura-img-toolbar-host';
+  Object.assign(imgTbHost.style, {
+    position: 'fixed', top: '0', left: '0',
+    zIndex: '2147483646', pointerEvents: 'none',
+  });
+  document.documentElement.appendChild(imgTbHost);
+  const imgTbShadow: ShadowRoot = imgTbHost.attachShadow({ mode: 'closed' });
+
+  const imgTbCss: HTMLStyleElement = document.createElement('style');
+  imgTbCss.textContent = `
+    @keyframes aura-imgtb-in {
+      from { opacity: 0; transform: translateY(4px) scale(0.95); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    @keyframes aura-imgtb-out {
+      from { opacity: 1; transform: translateY(0) scale(1); }
+      to   { opacity: 0; transform: translateY(4px) scale(0.95); }
+    }
+
+    .imgtb {
+      position: fixed;
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      padding: 4px 6px;
+      background: rgba(10, 8, 24, 0.88);
+      backdrop-filter: blur(20px) saturate(1.5);
+      -webkit-backdrop-filter: blur(20px) saturate(1.5);
+      border: 1px solid rgba(124, 58, 237, 0.25);
+      border-radius: 10px;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.05) inset;
+      pointer-events: auto;
+      animation: aura-imgtb-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', system-ui, sans-serif;
+    }
+    .imgtb.hiding {
+      animation: aura-imgtb-out 0.12s ease forwards;
+    }
+
+    .imgtb-btn {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      background: transparent;
+      border: none;
+      color: rgba(226, 232, 240, 0.85);
+      font-size: 11px;
+      font-weight: 500;
+      font-family: inherit;
+      padding: 4px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.12s ease, color 0.12s ease;
+      line-height: 1;
+    }
+    .imgtb-btn:hover {
+      background: rgba(124, 58, 237, 0.3);
+      color: #fff;
+    }
+    .imgtb-btn:active {
+      background: rgba(124, 58, 237, 0.45);
+    }
+    .imgtb-btn svg { flex-shrink: 0; }
+
+    .imgtb-sep {
+      width: 1px;
+      height: 14px;
+      background: rgba(255, 255, 255, 0.08);
+      flex-shrink: 0;
+    }
+  `;
+  imgTbShadow.appendChild(imgTbCss);
+
+  const imgTbContainer: HTMLDivElement = document.createElement('div');
+  imgTbShadow.appendChild(imgTbContainer);
+
+  let _imgTbEl: HTMLDivElement | null = null;
+  let _imgTbHoverTmr: ReturnType<typeof setTimeout> | null = null;
+  let _imgTbDismissTmr: ReturnType<typeof setTimeout> | null = null;
+  let _imgTbCurImg: HTMLImageElement | null = null;
+  const IMG_TB_MIN_SIZE = 80; // ignore tiny images (icons, spacers)
+
+  const IMGTB_ICON_EYE = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
+  const IMGTB_ICON_EDIT = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
+  const IMGTB_ICON_SAVE = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
+
+  function imgTbShouldShow(img: HTMLImageElement): boolean {
+    if (!img.src && !img.currentSrc) return false;
+    const src = img.currentSrc || img.src;
+    // Skip data URIs smaller than a threshold (likely spacer GIFs)
+    if (src.startsWith('data:') && src.length < 200) return false;
+    // Skip SVGs in data URIs (usually icons)
+    if (src.startsWith('data:image/svg')) return false;
+    // Skip tiny images
+    const rect = img.getBoundingClientRect();
+    if (rect.width < IMG_TB_MIN_SIZE || rect.height < IMG_TB_MIN_SIZE) return false;
+    return true;
+  }
+
+  function imgTbRemove(): void {
+    if (_imgTbEl) { _imgTbEl.remove(); _imgTbEl = null; }
+    _imgTbCurImg = null;
+  }
+
+  function imgTbCancelTimers(): void {
+    if (_imgTbHoverTmr) { clearTimeout(_imgTbHoverTmr); _imgTbHoverTmr = null; }
+    if (_imgTbDismissTmr) { clearTimeout(_imgTbDismissTmr); _imgTbDismissTmr = null; }
+  }
+
+  function imgTbStartDismiss(): void {
+    if (_imgTbDismissTmr) clearTimeout(_imgTbDismissTmr);
+    _imgTbDismissTmr = setTimeout(() => { imgTbRemove(); _imgTbDismissTmr = null; }, 400);
+  }
+
+  function imgTbCancelDismiss(): void {
+    if (_imgTbDismissTmr) { clearTimeout(_imgTbDismissTmr); _imgTbDismissTmr = null; }
+  }
+
+  function imgTbPosition(img: HTMLImageElement): void {
+    if (!_imgTbEl) return;
+    const r = img.getBoundingClientRect();
+    const tbH = 32;
+    // Position above the image, centered
+    let top = r.top - tbH - 6;
+    if (top < 4) top = r.top + 6; // Below top edge if no room above
+    let left = r.left + (r.width / 2) - 75;
+    if (left < 4) left = 4;
+    if (left + 150 > window.innerWidth - 4) left = window.innerWidth - 154;
+    _imgTbEl.style.top = Math.round(top) + 'px';
+    _imgTbEl.style.left = Math.round(left) + 'px';
+  }
+
+  function imgTbGetImageSrc(img: HTMLImageElement): string {
+    return img.currentSrc || img.src;
+  }
+
+  function imgTbBuild(img: HTMLImageElement): void {
+    imgTbRemove();
+    _imgTbCurImg = img;
+
+    _imgTbEl = document.createElement('div');
+    _imgTbEl.className = 'imgtb';
+
+    const items: { label: string; icon: string; action: string }[] = [
+      { label: 'Describe', icon: IMGTB_ICON_EYE, action: 'describe' },
+      { label: 'Edit in AURA', icon: IMGTB_ICON_EDIT, action: 'edit' },
+      { label: 'Save', icon: IMGTB_ICON_SAVE, action: 'save' },
+    ];
+
+    items.forEach((item, i) => {
+      if (i > 0) {
+        const sep = document.createElement('div');
+        sep.className = 'imgtb-sep';
+        _imgTbEl!.appendChild(sep);
+      }
+      const btn = document.createElement('button');
+      btn.className = 'imgtb-btn';
+      btn.innerHTML = item.icon + `<span>${item.label}</span>`;
+      btn.addEventListener('click', (e: MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const imgSrc = imgTbGetImageSrc(img);
+        if (item.action === 'describe') {
+          safeSend({ type: 'IMAGE_DESCRIBE', imageUrl: imgSrc } as any);
+        } else if (item.action === 'edit') {
+          safeSend({ type: 'IMAGE_EDIT_OPEN', imageUrl: imgSrc } as any);
+        } else if (item.action === 'save') {
+          safeSend({ type: 'IMAGE_SAVE', imageUrl: imgSrc } as any);
+          showToast('Image saved');
+        }
+        imgTbRemove();
+      });
+      _imgTbEl!.appendChild(btn);
+    });
+
+    _imgTbEl.addEventListener('mouseenter', imgTbCancelDismiss);
+    _imgTbEl.addEventListener('mouseleave', imgTbStartDismiss);
+
+    imgTbContainer.appendChild(_imgTbEl);
+    imgTbPosition(img);
+  }
+
+  // 1-second hover to show toolbar on images
+  document.addEventListener('mouseover', (me: MouseEvent) => {
+    const target = me.target as HTMLElement;
+    const img = target.tagName === 'IMG' ? (target as HTMLImageElement) : target.closest('img') as HTMLImageElement | null;
+    if (!img || !imgTbShouldShow(img)) return;
+    if (_imgTbCurImg === img && _imgTbEl) { imgTbCancelDismiss(); return; }
+    imgTbCancelTimers();
+    _imgTbHoverTmr = setTimeout(() => {
+      imgTbBuild(img);
+      _imgTbHoverTmr = null;
+    }, 1000);
+  }, true);
+
+  document.addEventListener('mouseout', (me: MouseEvent) => {
+    const target = me.target as HTMLElement;
+    const img = target.tagName === 'IMG' ? (target as HTMLImageElement) : target.closest('img') as HTMLImageElement | null;
+    if (img && img === _imgTbCurImg) {
+      const rel = me.relatedTarget as Node | null;
+      if (rel && imgTbHost.contains(rel)) return;
+      imgTbStartDismiss();
+    }
+    if (img && _imgTbHoverTmr) imgTbCancelTimers();
+  }, true);
+
+  window.addEventListener('scroll', () => {
+    if (_imgTbEl && _imgTbCurImg) {
+      const r = _imgTbCurImg.getBoundingClientRect();
+      if (r.bottom < 0 || r.top > window.innerHeight) {
+        imgTbCancelTimers(); imgTbRemove();
+      } else {
+        imgTbPosition(_imgTbCurImg);
+      }
+    }
+  }, { passive: true });
+
   // ── Message Listener ──────────────────────────────────────────────────
 
   ext.runtime.onMessage.addListener(
@@ -3178,8 +3997,711 @@ function safeSend(msg: OutboundMessage, cb?: (response: any) => void): void {
         return false;
       }
 
+      if (msg.type === 'SHOW_DOCK') {
+        showDock();
+        sendResponse({ ok: true });
+        return false;
+      }
+
       return undefined;
     }
   );
+
+
+  // ── Google SERP AI Answer Card ───────────────────────────────────────────
+
+  const SERP_BACKEND = 'http://localhost:8000';
+
+  function isGoogleSearchPage(): boolean {
+    const hostname = window.location.hostname;
+    const pathname = window.location.pathname;
+    const params = new URLSearchParams(window.location.search);
+    // Must be google.com/search with a q= param, not images/maps/etc
+    if (!hostname.match(/^(www\.)?google\./)) return false;
+    if (pathname !== '/search') return false;
+    if (!params.get('q')) return false;
+    // Exclude specialized tabs: images, maps, news, videos, shopping
+    const tbm = params.get('tbm');
+    if (tbm && ['isch', 'lcl', 'vid', 'shop', 'nws', 'bks', 'fin'].includes(tbm)) return false;
+    const udm = params.get('udm');
+    if (udm && ['2', '14'].includes(udm)) return false;
+    return true;
+  }
+
+  function getSearchQuery(): string {
+    const params = new URLSearchParams(window.location.search);
+    const qParam = params.get('q') || '';
+    if (qParam) return qParam;
+    const input = document.querySelector<HTMLInputElement>('input[name="q"]');
+    return input?.value || '';
+  }
+
+  function detectGoogleTheme(): 'dark' | 'light' {
+    const bg = window.getComputedStyle(document.body).backgroundColor;
+    if (!bg || bg === 'transparent') return 'light';
+    const rgbMatch = bg.match(/\d+/g);
+    if (rgbMatch && rgbMatch.length >= 3) {
+      const [r, g, b] = rgbMatch.map(Number);
+      const luminance = (0.299 * r + 0.587 * g + 0.114 * b);
+      return luminance < 128 ? 'dark' : 'light';
+    }
+    return 'light';
+  }
+
+  async function initGoogleSerpIntegration(): Promise<void> {
+    if (!isGoogleSearchPage()) return;
+
+    // Check user preference
+    const stored = await new Promise<Record<string, any>>((resolve) => {
+      ext.storage.local.get(['aura_serp_hidden'], resolve);
+    });
+    if (stored.aura_serp_hidden) return;
+
+    const query = getSearchQuery();
+    if (!query) return;
+
+    // Find injection point — before #search or #rso
+    const searchContainer = document.getElementById('search')
+      || document.getElementById('rso')
+      || document.querySelector('#center_col');
+    if (!searchContainer) return;
+
+    // Create Shadow DOM host
+    const serpHost = document.createElement('div');
+    serpHost.id = 'aura-serp-host';
+    Object.assign(serpHost.style, {
+      display: 'block',
+      width: '100%',
+      margin: '0 0 16px 0',
+      position: 'relative',
+      zIndex: '100',
+    });
+    searchContainer.parentNode!.insertBefore(serpHost, searchContainer);
+
+    const serpShadow = serpHost.attachShadow({ mode: 'closed' });
+    const theme = detectGoogleTheme();
+    const isDark = theme === 'dark';
+
+    // Styles
+    const serpStyle = document.createElement('style');
+    serpStyle.textContent = `
+      @keyframes serp-fade-in {
+        from { opacity: 0; transform: translateY(-8px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes serp-pulse {
+        0%, 100% { opacity: 0.4; }
+        50% { opacity: 1; }
+      }
+
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+      :host {
+        display: block;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', system-ui, sans-serif;
+      }
+
+      .serp-card {
+        background: ${isDark
+          ? 'rgba(30, 27, 48, 0.75)'
+          : 'rgba(255, 255, 255, 0.82)'};
+        backdrop-filter: blur(24px) saturate(1.4);
+        -webkit-backdrop-filter: blur(24px) saturate(1.4);
+        border: 1px solid ${isDark
+          ? 'rgba(124, 58, 237, 0.2)'
+          : 'rgba(124, 58, 237, 0.15)'};
+        border-radius: 16px;
+        padding: 20px 24px 16px;
+        animation: serp-fade-in 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        box-shadow: ${isDark
+          ? '0 4px 24px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255,255,255,0.04) inset'
+          : '0 2px 16px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0,0,0,0.03) inset'};
+        position: relative;
+        overflow: hidden;
+        transition: border-color 0.25s ease;
+      }
+      .serp-card:hover {
+        border-color: ${isDark
+          ? 'rgba(124, 58, 237, 0.35)'
+          : 'rgba(124, 58, 237, 0.3)'};
+      }
+
+      .serp-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 14px;
+      }
+      .serp-header-left {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .serp-logo {
+        width: 28px;
+        height: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: ${isDark ? 'rgba(160, 148, 210, 0.9)' : 'rgba(124, 58, 237, 0.85)'};
+        background: ${isDark
+          ? 'rgba(124, 58, 237, 0.12)'
+          : 'rgba(124, 58, 237, 0.08)'};
+        border-radius: 8px;
+        flex-shrink: 0;
+      }
+      .serp-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: ${isDark ? 'rgba(226, 232, 240, 0.9)' : 'rgba(30, 27, 48, 0.9)'};
+        letter-spacing: -0.01em;
+      }
+      .serp-title-sub {
+        font-size: 11px;
+        font-weight: 400;
+        color: ${isDark ? 'rgba(160, 148, 210, 0.5)' : 'rgba(100, 90, 140, 0.6)'};
+        margin-left: 6px;
+      }
+
+      .serp-controls {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .serp-ctrl-btn {
+        width: 28px;
+        height: 28px;
+        border-radius: 8px;
+        border: none;
+        background: transparent;
+        color: ${isDark ? 'rgba(160, 148, 210, 0.5)' : 'rgba(100, 90, 140, 0.5)'};
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background 0.15s, color 0.15s;
+        padding: 0;
+      }
+      .serp-ctrl-btn:hover {
+        background: ${isDark ? 'rgba(124, 58, 237, 0.15)' : 'rgba(124, 58, 237, 0.1)'};
+        color: ${isDark ? 'rgba(224, 214, 255, 1)' : 'rgba(124, 58, 237, 0.9)'};
+      }
+      .serp-ctrl-btn[title="Hide AURA answers"]:hover {
+        background: rgba(239, 68, 68, 0.12);
+        color: rgba(239, 68, 68, 0.9);
+      }
+
+      .serp-body {
+        font-size: 14px;
+        line-height: 1.7;
+        color: ${isDark ? 'rgba(226, 232, 240, 0.85)' : 'rgba(30, 27, 48, 0.85)'};
+        overflow: hidden;
+        transition: max-height 0.3s ease;
+      }
+      .serp-body.collapsed {
+        max-height: 0 !important;
+        margin: 0;
+        padding: 0;
+      }
+
+      .serp-loading {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 4px 0;
+      }
+      .serp-loading-dots {
+        display: flex;
+        gap: 4px;
+      }
+      .serp-loading-dots span {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: ${isDark ? 'rgba(124, 58, 237, 0.6)' : 'rgba(124, 58, 237, 0.5)'};
+        animation: serp-pulse 1.2s ease-in-out infinite;
+      }
+      .serp-loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+      .serp-loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+      .serp-loading-text {
+        font-size: 13px;
+        color: ${isDark ? 'rgba(160, 148, 210, 0.6)' : 'rgba(100, 90, 140, 0.6)'};
+      }
+
+      .serp-answer {
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .serp-answer p { margin-bottom: 8px; }
+      .serp-answer p:last-child { margin-bottom: 0; }
+      .serp-answer strong, .serp-answer b {
+        font-weight: 600;
+        color: ${isDark ? 'rgba(226, 232, 240, 0.95)' : 'rgba(30, 27, 48, 0.95)'};
+      }
+      .serp-answer code {
+        background: ${isDark ? 'rgba(124, 58, 237, 0.1)' : 'rgba(124, 58, 237, 0.06)'};
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 13px;
+        font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+      }
+      .serp-answer ul, .serp-answer ol {
+        padding-left: 20px;
+        margin-bottom: 8px;
+      }
+      .serp-answer li { margin-bottom: 4px; }
+      .serp-answer a {
+        color: ${isDark ? 'rgba(160, 148, 255, 0.9)' : 'rgba(100, 58, 237, 0.9)'};
+        text-decoration: none;
+      }
+      .serp-answer a:hover { text-decoration: underline; }
+
+      .serp-citations {
+        margin-top: 12px;
+        padding-top: 10px;
+        border-top: 1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'};
+      }
+      .serp-citations-label {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: ${isDark ? 'rgba(160, 148, 210, 0.5)' : 'rgba(100, 90, 140, 0.5)'};
+        margin-bottom: 6px;
+      }
+      .serp-citation-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .serp-citation-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        background: ${isDark ? 'rgba(124, 58, 237, 0.1)' : 'rgba(124, 58, 237, 0.06)'};
+        border: 1px solid ${isDark ? 'rgba(124, 58, 237, 0.15)' : 'rgba(124, 58, 237, 0.1)'};
+        border-radius: 6px;
+        padding: 4px 10px;
+        font-size: 12px;
+        color: ${isDark ? 'rgba(200, 180, 255, 0.8)' : 'rgba(100, 58, 237, 0.8)'};
+        text-decoration: none;
+        transition: background 0.15s, border-color 0.15s;
+        max-width: 280px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .serp-citation-chip:hover {
+        background: ${isDark ? 'rgba(124, 58, 237, 0.2)' : 'rgba(124, 58, 237, 0.12)'};
+        border-color: ${isDark ? 'rgba(124, 58, 237, 0.3)' : 'rgba(124, 58, 237, 0.2)'};
+      }
+      .serp-citation-num {
+        width: 16px;
+        height: 16px;
+        border-radius: 4px;
+        background: ${isDark ? 'rgba(124, 58, 237, 0.2)' : 'rgba(124, 58, 237, 0.1)'};
+        font-size: 10px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+
+      .serp-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-top: 14px;
+        padding-top: 10px;
+        border-top: 1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'};
+      }
+      .serp-followup-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: ${isDark ? 'rgba(124, 58, 237, 0.12)' : 'rgba(124, 58, 237, 0.08)'};
+        border: 1px solid ${isDark ? 'rgba(124, 58, 237, 0.2)' : 'rgba(124, 58, 237, 0.15)'};
+        border-radius: 8px;
+        padding: 7px 14px;
+        font-size: 12.5px;
+        font-weight: 500;
+        font-family: inherit;
+        color: ${isDark ? 'rgba(200, 180, 255, 0.9)' : 'rgba(100, 58, 237, 0.9)'};
+        cursor: pointer;
+        transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.15s;
+      }
+      .serp-followup-btn:hover {
+        background: ${isDark ? 'rgba(124, 58, 237, 0.22)' : 'rgba(124, 58, 237, 0.15)'};
+        border-color: ${isDark ? 'rgba(124, 58, 237, 0.35)' : 'rgba(124, 58, 237, 0.3)'};
+        transform: scale(1.01);
+      }
+      .serp-followup-btn:active { transform: scale(0.98); }
+      .serp-powered {
+        font-size: 11px;
+        color: ${isDark ? 'rgba(160, 148, 210, 0.35)' : 'rgba(100, 90, 140, 0.35)'};
+      }
+
+      .serp-offline {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 0;
+      }
+      .serp-offline-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: rgba(239, 68, 68, 0.6);
+        flex-shrink: 0;
+      }
+      .serp-offline-text {
+        font-size: 13px;
+        color: ${isDark ? 'rgba(226, 232, 240, 0.5)' : 'rgba(30, 27, 48, 0.5)'};
+      }
+
+      .serp-error {
+        font-size: 13px;
+        color: ${isDark ? 'rgba(239, 150, 150, 0.8)' : 'rgba(200, 50, 50, 0.7)'};
+        padding: 4px 0;
+      }
+    `;
+    serpShadow.appendChild(serpStyle);
+
+    // Card container
+    const card = document.createElement('div');
+    card.className = 'serp-card';
+
+    // Header
+    const serpHeader = document.createElement('div');
+    serpHeader.className = 'serp-header';
+
+    const headerLeft = document.createElement('div');
+    headerLeft.className = 'serp-header-left';
+
+    const serpLogo = document.createElement('div');
+    serpLogo.className = 'serp-logo';
+    serpLogo.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3L2 21M12 3L22 21M5.8 14.2L18.2 14.2"/></svg>`;
+
+    const titleWrap = document.createElement('div');
+    const titleText = document.createElement('span');
+    titleText.className = 'serp-title';
+    titleText.textContent = 'AI Answer';
+    const titleSub = document.createElement('span');
+    titleSub.className = 'serp-title-sub';
+    titleSub.textContent = 'by AURA';
+    titleWrap.appendChild(titleText);
+    titleWrap.appendChild(titleSub);
+
+    headerLeft.appendChild(serpLogo);
+    headerLeft.appendChild(titleWrap);
+
+    const controls = document.createElement('div');
+    controls.className = 'serp-controls';
+
+    // Collapse/expand toggle
+    const collapseBtn = document.createElement('button');
+    collapseBtn.className = 'serp-ctrl-btn';
+    collapseBtn.title = 'Collapse';
+    collapseBtn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>`;
+
+    // Hide toggle
+    const hideBtn = document.createElement('button');
+    hideBtn.className = 'serp-ctrl-btn';
+    hideBtn.title = 'Hide AURA answers';
+    hideBtn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+
+    controls.appendChild(collapseBtn);
+    controls.appendChild(hideBtn);
+
+    serpHeader.appendChild(headerLeft);
+    serpHeader.appendChild(controls);
+    card.appendChild(serpHeader);
+
+    // Body
+    const serpBody = document.createElement('div');
+    serpBody.className = 'serp-body';
+
+    // Loading state
+    const serpLoading = document.createElement('div');
+    serpLoading.className = 'serp-loading';
+    const serpDots = document.createElement('div');
+    serpDots.className = 'serp-loading-dots';
+    serpDots.innerHTML = '<span></span><span></span><span></span>';
+    const serpLoadingText = document.createElement('span');
+    serpLoadingText.className = 'serp-loading-text';
+    serpLoadingText.textContent = `Thinking about "${query.slice(0, 60)}${query.length > 60 ? '...' : ''}"`;
+    serpLoading.appendChild(serpDots);
+    serpLoading.appendChild(serpLoadingText);
+    serpBody.appendChild(serpLoading);
+
+    card.appendChild(serpBody);
+    serpShadow.appendChild(card);
+
+    // Collapse toggle logic
+    let isSerpCollapsed = false;
+    collapseBtn.addEventListener('click', () => {
+      isSerpCollapsed = !isSerpCollapsed;
+      if (isSerpCollapsed) {
+        serpBody.classList.add('collapsed');
+        collapseBtn.title = 'Expand';
+        collapseBtn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>`;
+      } else {
+        serpBody.classList.remove('collapsed');
+        collapseBtn.title = 'Collapse';
+        collapseBtn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>`;
+      }
+    });
+
+    // Hide toggle: persist and remove card
+    hideBtn.addEventListener('click', () => {
+      ext.storage.local.set({ aura_serp_hidden: true });
+      serpHost.remove();
+    });
+
+    // Fetch AI answer
+    try {
+      const resp = await fetch(`${SERP_BACKEND}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: query,
+          conversation_id: '__serp_answer__',
+          stream: true,
+          system_context: `The user searched Google for: "${query}". Provide a concise, direct answer to their query. Be helpful and factual. Use markdown formatting sparingly — bold for emphasis, lists where appropriate. If you reference sources, format them as [Source Title](URL) and they will be rendered as citation chips. Keep the answer focused and under 200 words unless the topic requires more detail.`,
+        }),
+      });
+
+      if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status}`);
+      }
+
+      // Clear loading
+      serpLoading.remove();
+
+      const answerEl = document.createElement('div');
+      answerEl.className = 'serp-answer';
+      serpBody.appendChild(answerEl);
+
+      // Stream the response (NDJSON lines)
+      const reader = resp.body?.getReader();
+      if (!reader) {
+        answerEl.textContent = await resp.text();
+        serpAddCitations(serpBody, answerEl.textContent);
+        serpAddFooter(card, query, answerEl.textContent);
+        return;
+      }
+
+      const decoder = new TextDecoder();
+      let fullText = '';
+      let streamBuffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        streamBuffer += decoder.decode(value, { stream: true });
+        const lines = streamBuffer.split('\n');
+        streamBuffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const chunk = JSON.parse(line);
+            if (chunk.token || chunk.delta || chunk.content) {
+              const token = chunk.token || chunk.delta || chunk.content || '';
+              fullText += token;
+              answerEl.innerHTML = serpRenderMarkdown(fullText);
+            } else if (chunk.response) {
+              fullText = chunk.response;
+              answerEl.innerHTML = serpRenderMarkdown(fullText);
+            } else if (chunk.error) {
+              answerEl.innerHTML = `<div class="serp-error">${serpEscapeHtml(chunk.error)}</div>`;
+              return;
+            }
+          } catch {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6).trim();
+              if (data === '[DONE]') continue;
+              try {
+                const chunk = JSON.parse(data);
+                const token = chunk.token || chunk.delta || chunk.content || chunk.response || '';
+                if (token) {
+                  fullText += token;
+                  answerEl.innerHTML = serpRenderMarkdown(fullText);
+                }
+              } catch {
+                fullText += line;
+                answerEl.innerHTML = serpRenderMarkdown(fullText);
+              }
+            }
+          }
+        }
+      }
+
+      // Process remaining buffer
+      if (streamBuffer.trim()) {
+        try {
+          const chunk = JSON.parse(streamBuffer);
+          if (chunk.token || chunk.delta || chunk.content) {
+            fullText += chunk.token || chunk.delta || chunk.content || '';
+          } else if (chunk.response) {
+            fullText = chunk.response;
+          }
+        } catch {
+          // ignore
+        }
+        answerEl.innerHTML = serpRenderMarkdown(fullText);
+      }
+
+      // If no text was streamed, try full response as plain text
+      if (!fullText.trim()) {
+        try {
+          const fallbackText = decoder.decode();
+          if (fallbackText.trim()) {
+            const parsed = JSON.parse(fallbackText);
+            fullText = parsed.response || parsed.message || fallbackText;
+            answerEl.innerHTML = serpRenderMarkdown(fullText);
+          }
+        } catch {
+          // leave empty
+        }
+      }
+
+      if (!fullText.trim()) {
+        answerEl.innerHTML = '<span class="serp-error">No response from AI.</span>';
+        return;
+      }
+
+      serpAddCitations(serpBody, fullText);
+      serpAddFooter(card, query, fullText);
+
+    } catch (_err: unknown) {
+      serpLoading.remove();
+      const offline = document.createElement('div');
+      offline.className = 'serp-offline';
+      const offDot = document.createElement('div');
+      offDot.className = 'serp-offline-dot';
+      const offText = document.createElement('span');
+      offText.className = 'serp-offline-text';
+      offText.textContent = 'AURA is offline — start the backend to see AI answers';
+      offline.appendChild(offDot);
+      offline.appendChild(offText);
+      serpBody.appendChild(offline);
+    }
+  }
+
+  function serpAddCitations(bodyEl: HTMLElement, fullText: string): void {
+    const citationRegex = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g;
+    const citations: Array<{ title: string; url: string }> = [];
+    let citMatch: RegExpExecArray | null;
+    while ((citMatch = citationRegex.exec(fullText)) !== null) {
+      citations.push({ title: citMatch[1], url: citMatch[2] });
+    }
+    if (citations.length === 0) return;
+
+    const citationsContainer = document.createElement('div');
+    citationsContainer.className = 'serp-citations';
+    const citLabel = document.createElement('div');
+    citLabel.className = 'serp-citations-label';
+    citLabel.textContent = 'Sources';
+    citationsContainer.appendChild(citLabel);
+
+    const citList = document.createElement('div');
+    citList.className = 'serp-citation-list';
+    citations.forEach((cit, idx) => {
+      const chip = document.createElement('a');
+      chip.className = 'serp-citation-chip';
+      chip.href = cit.url;
+      chip.target = '_blank';
+      chip.rel = 'noopener noreferrer';
+      const num = document.createElement('span');
+      num.className = 'serp-citation-num';
+      num.textContent = String(idx + 1);
+      chip.appendChild(num);
+      const chipText = document.createTextNode(' ' + cit.title);
+      chip.appendChild(chipText);
+      citList.appendChild(chip);
+    });
+    citationsContainer.appendChild(citList);
+    bodyEl.appendChild(citationsContainer);
+  }
+
+  function serpAddFooter(cardEl: HTMLElement, query: string, fullText: string): void {
+    const footer = document.createElement('div');
+    footer.className = 'serp-footer';
+
+    const followupBtn = document.createElement('button');
+    followupBtn.className = 'serp-followup-btn';
+    followupBtn.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg> Ask follow-up`;
+    followupBtn.addEventListener('click', () => {
+      safeSend({
+        type: 'OPEN_WITH_TEXT',
+        action: 'ask',
+        text: `I searched for "${query}" and got the following AI answer:\n\n${fullText}\n\nI have a follow-up question: `,
+        url: window.location.href,
+        title: document.title,
+      });
+    });
+
+    const powered = document.createElement('span');
+    powered.className = 'serp-powered';
+    powered.textContent = 'Powered by AURA';
+
+    footer.appendChild(followupBtn);
+    footer.appendChild(powered);
+    cardEl.appendChild(footer);
+  }
+
+  /** Minimal markdown-to-HTML renderer for SERP answers */
+  function serpRenderMarkdown(text: string): string {
+    let html = serpEscapeHtml(text);
+
+    // Bold: **text** or __text__
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/__(.+?)__/g, '<strong>$1</strong>');
+
+    // Italic: *text* or _text_
+    html = html.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
+
+    // Inline code: `text`
+    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+    // Links: [text](url)
+    html = html.replace(
+      /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
+      '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'
+    );
+
+    // Unordered lists: lines starting with - or *
+    html = html.replace(/^[\s]*[-*]\s+(.+)$/gm, '<li>$1</li>');
+    html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>');
+
+    // Ordered lists: lines starting with 1. 2. etc.
+    html = html.replace(/^[\s]*\d+\.\s+(.+)$/gm, '<li>$1</li>');
+
+    // Paragraphs: double newlines
+    html = html.replace(/\n\n+/g, '</p><p>');
+    html = '<p>' + html + '</p>';
+
+    // Single newlines to line breaks
+    html = html.replace(/\n/g, '<br>');
+
+    // Clean empty paragraphs
+    html = html.replace(/<p>\s*<\/p>/g, '');
+
+    return html;
+  }
+
+  function serpEscapeHtml(text: string): string {
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  // Boot Google SERP integration
+  initGoogleSerpIntegration();
 
 })();
