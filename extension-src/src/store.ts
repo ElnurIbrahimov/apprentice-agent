@@ -226,20 +226,16 @@ export const useStore = create<AuraStore>((set, get) => {
         for (const m of backendLocal) if (!local.includes(m)) local.push(m);
       } catch { /* backend not available */ }
 
-      // 3. If still no ChatGPT models, check auth status directly
+      // 3. Always include ChatGPT models — auth is checked at request time, not listing time.
+      // Users should always SEE the models are available. If they select one without auth,
+      // the backend returns a clear "run aura --login chatgpt" error.
       if (chatgpt.length === 0) {
-        try {
-          const authStatus = await fetch(`${HTTP}/api/auth/chatgpt/status`, { signal: AbortSignal.timeout(2000) }).then(r => r.json());
-          if (authStatus.authenticated) {
-            // Hardcode known ChatGPT models since the backend confirmed auth
-            chatgpt = [
-              'chatgpt:gpt-5.4', 'chatgpt:gpt-5.4-thinking', 'chatgpt:gpt-5.4-pro',
-              'chatgpt:gpt-5.3', 'chatgpt:gpt-5.3-codex', 'chatgpt:gpt-5.3-codex-spark',
-              'chatgpt:gpt-5.2', 'chatgpt:gpt-5.2-codex',
-              'chatgpt:gpt-5.1', 'chatgpt:gpt-5.1-codex', 'chatgpt:gpt-5.1-codex-mini', 'chatgpt:gpt-5.1-codex-max',
-            ];
-          }
-        } catch { /* no chatgpt */ }
+        chatgpt = [
+          'chatgpt:gpt-5.4', 'chatgpt:gpt-5.4-thinking', 'chatgpt:gpt-5.4-pro',
+          'chatgpt:gpt-5.3', 'chatgpt:gpt-5.3-codex', 'chatgpt:gpt-5.3-codex-spark',
+          'chatgpt:gpt-5.2', 'chatgpt:gpt-5.2-codex',
+          'chatgpt:gpt-5.1', 'chatgpt:gpt-5.1-codex', 'chatgpt:gpt-5.1-codex-mini', 'chatgpt:gpt-5.1-codex-max',
+        ];
       }
 
       get().setMdlLists(cloud, local, chatgpt);
