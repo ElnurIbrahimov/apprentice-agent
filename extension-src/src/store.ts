@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { FEATURE_DEFS } from './types';
-import type { Message, StreamState, Context, PanelId } from './types';
+import type { Message, StreamState, Context, PanelId, ThinkingLevel } from './types';
 import { HTTP } from './api';
 import ext from './ext';
 
@@ -28,6 +28,7 @@ interface AuraStore {
 
   // Modes
   thinkingMode: boolean;
+  thinkingLevel: ThinkingLevel;
   deepResearch: boolean;
   autoSpeak: boolean;
 
@@ -54,6 +55,7 @@ interface AuraStore {
   updateStreamText: (text: string) => void;
   setPendingCtx: (ctx: Context | null) => void;
   setThinkingMode: (on: boolean) => void;
+  setThinkingLevel: (level: ThinkingLevel) => void;
   setDeepResearch: (on: boolean) => void;
   setAutoSpeak: (on: boolean) => void;
   setModel: (feature: string, model: string | null) => void;
@@ -120,6 +122,7 @@ export const useStore = create<AuraStore>((set, get) => {
     activeStream: null,
     pendingCtx: null,
     thinkingMode: false,
+    thinkingLevel: 'medium' as ThinkingLevel,
     deepResearch: false,
     autoSpeak: false,
     featureModels: {},
@@ -157,6 +160,7 @@ export const useStore = create<AuraStore>((set, get) => {
       }),
     setPendingCtx: (pendingCtx) => set({ pendingCtx }),
     setThinkingMode: (thinkingMode) => set({ thinkingMode }),
+    setThinkingLevel: (thinkingLevel) => set({ thinkingLevel }),
     setDeepResearch: (deepResearch) => set({ deepResearch }),
     setAutoSpeak: (autoSpeak) => {
       set({ autoSpeak });

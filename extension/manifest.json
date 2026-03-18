@@ -4,7 +4,8 @@
   "version": "4.3.0",
   "description": "Your private AI assistant — always present, never clouds.",
   "permissions": ["sidePanel", "contextMenus", "storage", "activeTab", "tabs", "scripting"],
-  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*", "https://localhost/*", "https://127.0.0.1/*"],
+  "optional_permissions": ["tabCapture"],
+  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*", "https://localhost/*", "https://127.0.0.1/*", "*://www.youtube.com/*"],
   "background": { "service_worker": "background.js" },
   "side_panel": { "default_path": "sidebar.html" },
   "action": { "default_title": "Open AURA" },
@@ -13,6 +14,17 @@
       "matches": ["http://localhost/*", "http://127.0.0.1/*", "https://localhost/*", "https://127.0.0.1/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://www.youtube.com/watch*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["youtube-inject.js"],
+      "matches": ["*://www.youtube.com/*"]
     }
   ],
   "icons": {

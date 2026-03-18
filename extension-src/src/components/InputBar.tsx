@@ -3,6 +3,21 @@ import { Brain, Globe, FileText, X, Paperclip } from 'lucide-react';
 import { useStore } from '../store';
 import { getPageContentCached } from '../ext';
 import ModelPill from './ModelPill';
+import type { ThinkingLevel } from '../types';
+
+const THINKING_LABELS: Record<ThinkingLevel, string> = {
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+};
+
+const THINKING_TOOLTIPS: Record<ThinkingLevel, string> = {
+  low: 'Quick reasoning check',
+  medium: 'Step-by-step analysis',
+  high: 'Deep multi-perspective reasoning',
+};
+
+const THINKING_CYCLE: ThinkingLevel[] = ['low', 'medium', 'high'];
 
 interface Props {
   onSend: (text: string) => void;
@@ -24,7 +39,9 @@ const LINE_HEIGHT_PX = 20.25; // 13.5px * 1.5
 const MAX_TEXTAREA_HEIGHT = Math.ceil(MAX_VISIBLE_LINES * LINE_HEIGHT_PX) + 20; // + padding
 
 export default function InputBar({ onSend, featureKey = 'chat', placeholder, disabled }: Props) {
-  const { thinkingMode, setThinkingMode, deepResearch, setDeepResearch, activeStream, setPendingCtx, pendingCtx } = useStore();
+  const { thinkingMode, setThinkingMode, thinkingLevel, setThinkingLevel, deepResearch, setDeepResearch, activeStream, setPendingCtx, pendingCtx } = useStore();
+  const [showThinkTooltip, setShowThinkTooltip] = useState(false);
+  const thinkLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [pageLoading, setPageLoading] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
@@ -183,12 +200,61 @@ export default function InputBar({ onSend, featureKey = 'chat', placeholder, dis
           {/* Left side: pills */}
           <div className="input-action-left">
             <button
-              onClick={() => setThinkingMode(!thinkingMode)}
-              className={`input-pill ${thinkingMode ? 'input-pill-active' : ''}`}
-              title="Thinking mode"
+              onClick={() => {
+                if (!thinkingMode) {
+                  setThinkingMode(true);
+                } else {
+                  setThinkingMode(false);
+                }
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                if (thinkingMode) {
+                  // Cycle level on right-click
+                  const idx = THINKING_CYCLE.indexOf(thinkingLevel);
+                  setThinkingLevel(THINKING_CYCLE[(idx + 1) % THINKING_CYCLE.length]);
+                } else {
+                  setThinkingMode(true);
+                }
+              }}
+              onMouseDown={() => {
+                // Long-press to cycle level
+                thinkLongPressTimer.current = setTimeout(() => {
+                  thinkLongPressTimer.current = null;
+                  if (thinkingMode) {
+                    const idx = THINKING_CYCLE.indexOf(thinkingLevel);
+                    setThinkingLevel(THINKING_CYCLE[(idx + 1) % THINKING_CYCLE.length]);
+                  } else {
+                    setThinkingMode(true);
+                  }
+                }, 500);
+              }}
+              onMouseUp={() => {
+                if (thinkLongPressTimer.current) {
+                  clearTimeout(thinkLongPressTimer.current);
+                  thinkLongPressTimer.current = null;
+                }
+              }}
+              onMouseLeave={() => {
+                if (thinkLongPressTimer.current) {
+                  clearTimeout(thinkLongPressTimer.current);
+                  thinkLongPressTimer.current = null;
+                }
+                setShowThinkTooltip(false);
+              }}
+              onMouseEnter={() => setShowThinkTooltip(true)}
+              className={`input-pill ${thinkingMode ? 'input-pill-think-active' : ''}`}
+              title=""
             >
               <Brain size={11} />
-              <span>Think</span>
+              <span>{thinkingMode ? `Think: ${THINKING_LABELS[thinkingLevel]}` : 'Think'}</span>
+              {showThinkTooltip && (
+                <div className="think-tooltip">
+                  {thinkingMode
+                    ? `${THINKING_TOOLTIPS[thinkingLevel]} — right-click to cycle level`
+                    : 'Enable chain-of-thought reasoning'}
+                </div>
+              )}
             </button>
             <button
               onClick={() => setDeepResearch(!deepResearch)}

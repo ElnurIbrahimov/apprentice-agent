@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Copy, Check, Volume2, VolumeX } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Copy, Check, Volume2, VolumeX, ChevronDown } from 'lucide-react';
 import type { Message } from '../types';
 import { md } from '../markdown';
 import { speak, stopSpeaking, isSpeaking } from '../tts';
@@ -8,16 +8,20 @@ import { useStore } from '../store';
 interface Props {
   message: Message;
   isLatest?: boolean;
+  isStreaming?: boolean;
 }
 
-export default function MessageBubble({ message, isLatest }: Props) {
+export default function MessageBubble({ message, isLatest, isStreaming: isStreamingProp }: Props) {
   const isUser = message.role === 'user';
   const { activeStream, featureModels } = useStore();
   const [speaking, setSpeaking] = useState(false);
   const [copied, setCopied] = useState(false);
   const [hovered, setHovered] = useState(false);
+  const [thinkExpanded, setThinkExpanded] = useState(false);
+  const thinkContentRef = useRef<HTMLDivElement>(null);
 
-  const isStreaming = isLatest && !!activeStream;
+  const isStreaming = isStreamingProp || (isLatest && !!activeStream);
+  const hasThinking = !!message.thinkingContent;
 
   // Get active model name for the badge
   const modelDisplay = featureModels['chat']
@@ -150,6 +154,39 @@ export default function MessageBubble({ message, isLatest }: Props) {
           >
             {modelDisplay}
           </span>
+        )}
+
+        {/* Collapsible thinking section */}
+        {hasThinking && (
+          <div className="think-block">
+            <button
+              className="think-block-toggle"
+              onClick={() => setThinkExpanded(!thinkExpanded)}
+            >
+              <span className="think-block-icon">{'\uD83D\uDCAD'}</span>
+              <span>{thinkExpanded ? 'Thinking' : 'Thinking... (click to expand)'}</span>
+              <ChevronDown
+                size={12}
+                style={{
+                  marginLeft: 'auto',
+                  transition: 'transform 0.2s ease',
+                  transform: thinkExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                }}
+              />
+            </button>
+            <div
+              ref={thinkContentRef}
+              className="think-block-content"
+              style={{
+                maxHeight: thinkExpanded ? (thinkContentRef.current?.scrollHeight || 2000) + 'px' : '0px',
+              }}
+            >
+              <div
+                className="think-block-text md-body"
+                dangerouslySetInnerHTML={{ __html: md(message.thinkingContent!) }}
+              />
+            </div>
+          </div>
         )}
 
         {/* Message body */}

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Copy, Check, ArrowLeftRight, Globe } from 'lucide-react';
+import { Copy, Check, ArrowLeftRight, Globe, Languages, X } from 'lucide-react';
 import { useStore } from '../store';
 import ModelPill from '../components/ModelPill';
 import { sendMsg } from '../ext';
@@ -30,6 +30,8 @@ export default function TranslatePanel() {
   const [output, setOutput] = useState('');
   const [copied, setCopied] = useState(false);
   const [pageTranslating, setPageTranslating] = useState(false);
+  const [pageTranslateActive, setPageTranslateActive] = useState(false);
+  const [pageTranslateMode, setPageTranslateMode] = useState<'bilingual' | 'translated'>('bilingual');
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // Load saved language pair on mount
@@ -89,6 +91,76 @@ export default function TranslatePanel() {
     }));
   }, [inputText, from, to, wsReady, ws, activeStream, setActiveStream, getModel]);
 
+  // Full page translate — sends PAGE_TRANSLATE to content script via background
+  const translateFullPage = async () => {
+    setPageTranslating(true);
+    setPageTranslateActive(false);
+    setOutput('');
+
+    try {
+      // Get active tab and send message to content script
+      const tabResp = await sendMsg({ type: 'GET_CURRENT_TAB' });
+      if (!tabResp?.ok) {
+        setOutput('No active tab found.');
+        setPageTranslating(false);
+        return;
+      }
+
+      // Send PAGE_TRANSLATE to the content script of the active tab
+      const resp = await new Promise<any>((resolve) => {
+        ext.tabs.query({ active: true, currentWindow: true }, (tabs: any[]) => {
+          const tab = tabs?.[0];
+          if (!tab?.id) {
+            resolve({ ok: false, error: 'No active tab' });
+            return;
+          }
+          ext.tabs.sendMessage(tab.id, { type: 'PAGE_TRANSLATE', targetLang: to }, (r: any) => {
+            if (ext.runtime.lastError) {
+              resolve({ ok: false, error: ext.runtime.lastError.message });
+            } else {
+              resolve(r || { ok: false, error: 'No response' });
+            }
+          });
+        });
+      });
+
+      if (resp?.ok) {
+        setPageTranslateActive(true);
+        setPageTranslateMode('bilingual');
+      } else {
+        setOutput(resp?.error || 'Page translation failed. Try on a regular website.');
+      }
+    } catch {
+      setOutput('Failed to start page translation.');
+    }
+    setPageTranslating(false);
+  };
+
+  const togglePageMode = async () => {
+    const newMode = pageTranslateMode === 'bilingual' ? 'translated' : 'bilingual';
+    setPageTranslateMode(newMode);
+
+    ext.tabs.query({ active: true, currentWindow: true }, (tabs: any[]) => {
+      const tab = tabs?.[0];
+      if (tab?.id) {
+        ext.tabs.sendMessage(tab.id, { type: 'TRANSLATE_TOGGLE_MODE', mode: newMode }, () => {});
+      }
+    });
+  };
+
+  const removePageTranslation = async () => {
+    setPageTranslateActive(false);
+    setPageTranslateMode('bilingual');
+
+    ext.tabs.query({ active: true, currentWindow: true }, (tabs: any[]) => {
+      const tab = tabs?.[0];
+      if (tab?.id) {
+        ext.tabs.sendMessage(tab.id, { type: 'TRANSLATE_REMOVE' }, () => {});
+      }
+    });
+  };
+
+  // Legacy "Page" button for in-panel page translation
   const translatePage = async () => {
     if (!wsReady || ws?.readyState !== WebSocket.OPEN) {
       setOutput('AURA is offline.');
@@ -180,6 +252,112 @@ export default function TranslatePanel() {
             <option key={l} value={l}>{l}</option>
           ))}
         </select>
+      </div>
+
+      {/* Full Page Translate Section */}
+      <div className="flex-shrink-0 p-3" style={{ borderBottom: '1px solid var(--b1)' }}>
+        {!pageTranslateActive ? (
+          <button
+            onClick={translateFullPage}
+            disabled={pageTranslating}
+            style={{
+              width: '100%',
+              background: pageTranslating ? 'var(--s3)' : 'linear-gradient(135deg, rgba(124, 58, 237, 0.15), rgba(124, 58, 237, 0.08))',
+              border: '1px solid rgba(124, 58, 237, 0.3)',
+              borderRadius: 'var(--r-md)',
+              color: pageTranslating ? 'var(--mu)' : 'var(--tx)',
+              padding: '10px 14px',
+              cursor: pageTranslating ? 'not-allowed' : 'pointer',
+              fontSize: '12.5px',
+              fontFamily: 'inherit',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <Languages size={16} style={{ color: 'var(--p, #7c3aed)' }} />
+            {pageTranslating ? 'Translating page...' : `Translate This Page to ${to}`}
+          </button>
+        ) : (
+          <div style={{
+            background: 'rgba(124, 58, 237, 0.08)',
+            border: '1px solid rgba(124, 58, 237, 0.25)',
+            borderRadius: 'var(--r-md)',
+            padding: '8px 12px',
+          }}>
+            <div className="flex items-center justify-between" style={{ marginBottom: 6 }}>
+              <div className="flex items-center gap-2">
+                <span style={{
+                  width: 6, height: 6, borderRadius: '50%',
+                  background: '#7c3aed', display: 'inline-block',
+                }} />
+                <span style={{ fontSize: '11px', color: 'var(--mu)' }}>
+                  Page translated to <strong style={{ color: 'var(--p, #7c3aed)' }}>{to}</strong>
+                </span>
+              </div>
+              <button
+                onClick={removePageTranslation}
+                title="Remove translation"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--mu)',
+                  cursor: 'pointer',
+                  padding: 2,
+                  display: 'flex',
+                  alignItems: 'center',
+                  transition: 'color 0.15s',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.color = 'var(--err, #ef4444)')}
+                onMouseLeave={e => (e.currentTarget.style.color = 'var(--mu)')}
+              >
+                <X size={14} />
+              </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={togglePageMode}
+                style={{
+                  flex: 1,
+                  background: pageTranslateMode === 'bilingual'
+                    ? 'rgba(124, 58, 237, 0.2)'
+                    : 'transparent',
+                  border: '1px solid rgba(124, 58, 237, 0.2)',
+                  borderRadius: 'var(--r-sm)',
+                  color: pageTranslateMode === 'bilingual' ? 'var(--tx)' : 'var(--mu)',
+                  padding: '4px 8px',
+                  cursor: 'pointer',
+                  fontSize: '11px',
+                  fontFamily: 'inherit',
+                  transition: 'all 0.15s',
+                }}
+              >
+                Bilingual
+              </button>
+              <button
+                onClick={togglePageMode}
+                style={{
+                  flex: 1,
+                  background: pageTranslateMode === 'translated'
+                    ? 'rgba(124, 58, 237, 0.2)'
+                    : 'transparent',
+                  border: '1px solid rgba(124, 58, 237, 0.2)',
+                  borderRadius: 'var(--r-sm)',
+                  color: pageTranslateMode === 'translated' ? 'var(--tx)' : 'var(--mu)',
+                  padding: '4px 8px',
+                  cursor: 'pointer',
+                  fontSize: '11px',
+                  fontFamily: 'inherit',
+                  transition: 'all 0.15s',
+                }}
+              >
+                Translated only
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Input */}
@@ -275,7 +453,7 @@ export default function TranslatePanel() {
             <button
               onClick={translatePage}
               disabled={!!activeStream || pageTranslating}
-              title="Translate current page"
+              title="Translate page content in panel"
               style={{
                 background: 'none',
                 border: '1px solid var(--b1)',

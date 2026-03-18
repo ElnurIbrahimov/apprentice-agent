@@ -69,14 +69,109 @@ interface AgentNavMessage {
 
 interface QuickActionMessage {
   type: 'QUICK_ACTION';
-  action: 'improve' | 'expand' | 'shorten' | 'fix_grammar' | 'translate';
+  action: 'improve' | 'expand' | 'shorten' | 'fix_grammar' | 'translate'
+    | 'draft_reply' | 'make_formal' | 'make_casual' | 'gmail_translate';
   text: string;
   language?: string;
+  threadContext?: string;
 }
 
 interface QuickActionResponse {
   ok: boolean;
   result?: string;
+  error?: string;
+}
+
+interface YtSubtitlesMessage {
+  type: 'YT_SUBTITLES';
+  videoId: string;
+  lang: string;
+  segments: Array<{ start: number; dur: number; text: string }>;
+}
+
+interface YtMetadataMessage {
+  type: 'YT_METADATA';
+  videoId: string;
+  title: string;
+  duration: number;
+  description: string;
+  channelName: string;
+  chapters: Array<{ title: string; startMs: number }>;
+  captionTracks: Array<{ baseUrl: string; languageCode: string; name: string }>;
+}
+
+interface TranslateBatchMessage {
+  type: 'TRANSLATE_BATCH';
+  texts: string[];
+  targetLang: string;
+}
+
+interface TranslateBatchResponse {
+  ok: boolean;
+  translations?: string[];
+  error?: string;
+}
+
+// ── Highlight message types ──────────────────────────────────────────────────
+
+interface HighlightData {
+  id: string;
+  url: string;
+  text: string;
+  xpath: string;
+  context: string;
+  timestamp: number;
+  color: string;
+  pageTitle: string;
+  stale?: boolean;
+}
+
+interface SaveHighlightMessage {
+  type: 'SAVE_HIGHLIGHT';
+  highlight: HighlightData;
+}
+
+interface GetHighlightsMessage {
+  type: 'GET_HIGHLIGHTS';
+  url: string;
+}
+
+interface DeleteHighlightMessage {
+  type: 'DELETE_HIGHLIGHT';
+  id: string;
+  url: string;
+}
+
+interface SearchHighlightsMessage {
+  type: 'SEARCH_HIGHLIGHTS';
+  query: string;
+}
+
+interface GetAllHighlightsMessage {
+  type: 'GET_ALL_HIGHLIGHTS';
+}
+
+interface ClearUrlHighlightsMessage {
+  type: 'CLEAR_URL_HIGHLIGHTS';
+  url: string;
+}
+
+interface ScrollToHighlightMessage {
+  type: 'SCROLL_TO_HIGHLIGHT_PAGE';
+  id: string;
+  url: string;
+}
+
+interface LinkPreviewMessage {
+  type: 'LINK_PREVIEW';
+  url: string;
+}
+
+interface LinkPreviewResponse {
+  ok: boolean;
+  title?: string;
+  description?: string;
+  domain?: string;
   error?: string;
 }
 
@@ -91,7 +186,18 @@ type ExtensionMessage =
   | AgentDomMessage
   | AgentExecMessage
   | AgentNavMessage
-  | QuickActionMessage;
+  | QuickActionMessage
+  | YtSubtitlesMessage
+  | YtMetadataMessage
+  | TranslateBatchMessage
+  | SaveHighlightMessage
+  | GetHighlightsMessage
+  | DeleteHighlightMessage
+  | SearchHighlightsMessage
+  | GetAllHighlightsMessage
+  | ClearUrlHighlightsMessage
+  | ScrollToHighlightMessage
+  | LinkPreviewMessage;
 
 // ── Outbound / internal message types ────────────────────────────────────────
 
@@ -398,6 +504,13 @@ ext.tabs.onUpdated.addListener(
         url,
         title: tab.title || url,
       } satisfies YtTabDetectedMessage).catch(() => {});
+
+      // Inject YouTube subtitle interceptor into MAIN world
+      chrome.scripting.executeScript({
+        target: { tabId },
+        files: ['youtube-inject.js'],
+        world: 'MAIN' as any,
+      }).catch(() => {});
     }
   }
 );
@@ -701,13 +814,22 @@ ext.runtime.onMessage.addListener(
           shorten: 'Make this text more concise. Return ONLY the shortened text, no explanation:\n\n',
           fix_grammar: 'Fix all grammar and spelling errors. Return ONLY the corrected text, no explanation:\n\n',
           translate: 'Translate to {lang}. Return ONLY the translation, no explanation:\n\n',
+          draft_reply: 'You are an email assistant. Based on the email thread context below, draft a professional and helpful reply. Return ONLY the reply text, no explanation, no subject line, no greeting preamble like "Here is a draft".\n\nEmail thread:\n{thread}\n\nCurrent draft (if any):\n',
+          make_formal: 'Rewrite this email text in a professional, formal tone. Keep the same meaning and intent. Return ONLY the rewritten text, no explanation:\n\n',
+          make_casual: 'Rewrite this email text in a friendly, casual tone. Keep the same meaning and intent. Return ONLY the rewritten text, no explanation:\n\n',
+          gmail_translate: 'Translate this email text to {lang}. Return ONLY the translation, no explanation:\n\n',
         };
 
         let prompt = PROMPT_MAP[msg.action] || PROMPT_MAP.improve;
-        if (msg.action === 'translate' && msg.language) {
+        if ((msg.action === 'translate' || msg.action === 'gmail_translate') && msg.language) {
           prompt = prompt.replace('{lang}', msg.language);
-        } else if (msg.action === 'translate') {
+        } else if (msg.action === 'translate' || msg.action === 'gmail_translate') {
           prompt = prompt.replace('{lang}', 'English');
+        }
+        if (msg.action === 'draft_reply' && (msg as QuickActionMessage).threadContext) {
+          prompt = prompt.replace('{thread}', (msg as QuickActionMessage).threadContext || '');
+        } else if (msg.action === 'draft_reply') {
+          prompt = prompt.replace('{thread}', '(no thread context available)');
         }
         prompt += msg.text;
 
@@ -766,6 +888,246 @@ ext.runtime.onMessage.addListener(
           }
         );
         return true;
+      }
+
+      // YouTube subtitle/metadata relay: content script → sidebar
+      case 'YT_SUBTITLES':
+      case 'YT_METADATA': {
+        ext.runtime.sendMessage(msg).catch(() => {});
+        return false;
+      }
+
+      // Full page translation: batch translate text blocks via LLM
+      case 'TRANSLATE_BATCH': {
+        const batchMsg = msg as TranslateBatchMessage;
+        const { texts, targetLang } = batchMsg;
+
+        // Build a numbered prompt so we can parse results back
+        const numbered = texts.map((t, i) => `[${i + 1}] ${t}`).join('\n\n');
+        const prompt = `Translate the following numbered text blocks to ${targetLang}. Return ONLY the translations, keeping the same [N] numbering format. Preserve paragraph structure within each block. Do not add explanations.\n\n${numbered}`;
+
+        fetch(`${BACKEND}/api/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: prompt,
+            conversation_id: '__page_translate__',
+            stream: false,
+          }),
+        })
+          .then((r) => r.json())
+          .then((data: { response?: string; message?: string }) => {
+            const raw = data.response || data.message || '';
+            // Parse numbered translations back out
+            const translations: string[] = [];
+            for (let i = 0; i < texts.length; i++) {
+              const marker = `[${i + 1}]`;
+              const nextMarker = `[${i + 2}]`;
+              const startIdx = raw.indexOf(marker);
+              if (startIdx === -1) {
+                translations.push(raw && i === 0 ? raw.trim() : '[Translation unavailable]');
+                continue;
+              }
+              const contentStart = startIdx + marker.length;
+              const endIdx = i < texts.length - 1 ? raw.indexOf(nextMarker, contentStart) : -1;
+              const segment = endIdx === -1
+                ? raw.slice(contentStart)
+                : raw.slice(contentStart, endIdx);
+              translations.push(segment.trim());
+            }
+            sendResponse({ ok: true, translations } satisfies TranslateBatchResponse);
+          })
+          .catch((err: Error) => {
+            sendResponse({ ok: false, error: err.message } satisfies TranslateBatchResponse);
+          });
+        return true; // async
+      }
+
+      // ── Highlight handlers ──────────────────────────────────────────────────
+
+      case 'SAVE_HIGHLIGHT': {
+        const hl = msg.highlight;
+        ext.storage.local.get(['aura_highlights'], (data: Record<string, unknown>) => {
+          const store: Record<string, HighlightData[]> = (data.aura_highlights as Record<string, HighlightData[]>) || {};
+
+          // Check total count limit (1000)
+          let total = 0;
+          for (const url of Object.keys(store)) total += store[url].length;
+          if (total >= 1000) {
+            sendResponse({ ok: false, error: 'Highlight limit reached (1000). Please delete some highlights first.' });
+            return;
+          }
+
+          if (!store[hl.url]) store[hl.url] = [];
+          store[hl.url].push(hl);
+          ext.storage.local.set({ aura_highlights: store }, () => {
+            sendResponse({ ok: true });
+          });
+        });
+        return true;
+      }
+
+      case 'GET_HIGHLIGHTS': {
+        const url = (msg as GetHighlightsMessage).url;
+        ext.storage.local.get(['aura_highlights'], (data: Record<string, unknown>) => {
+          const store: Record<string, HighlightData[]> = (data.aura_highlights as Record<string, HighlightData[]>) || {};
+          sendResponse({ ok: true, highlights: store[url] || [] });
+        });
+        return true;
+      }
+
+      case 'DELETE_HIGHLIGHT': {
+        const { id, url } = msg as DeleteHighlightMessage;
+        ext.storage.local.get(['aura_highlights'], (data: Record<string, unknown>) => {
+          const store: Record<string, HighlightData[]> = (data.aura_highlights as Record<string, HighlightData[]>) || {};
+          if (store[url]) {
+            store[url] = store[url].filter((h: HighlightData) => h.id !== id);
+            if (store[url].length === 0) delete store[url];
+          }
+          ext.storage.local.set({ aura_highlights: store }, () => {
+            sendResponse({ ok: true });
+          });
+        });
+        return true;
+      }
+
+      case 'SEARCH_HIGHLIGHTS': {
+        const query = (msg as SearchHighlightsMessage).query.toLowerCase();
+        ext.storage.local.get(['aura_highlights'], (data: Record<string, unknown>) => {
+          const store: Record<string, HighlightData[]> = (data.aura_highlights as Record<string, HighlightData[]>) || {};
+          const results: HighlightData[] = [];
+          for (const url of Object.keys(store)) {
+            for (const hl of store[url]) {
+              if (
+                hl.text.toLowerCase().includes(query) ||
+                hl.pageTitle.toLowerCase().includes(query) ||
+                url.toLowerCase().includes(query)
+              ) {
+                results.push(hl);
+              }
+            }
+          }
+          results.sort((a, b) => b.timestamp - a.timestamp);
+          sendResponse({ ok: true, highlights: results });
+        });
+        return true;
+      }
+
+      case 'GET_ALL_HIGHLIGHTS': {
+        ext.storage.local.get(['aura_highlights'], (data: Record<string, unknown>) => {
+          const store: Record<string, HighlightData[]> = (data.aura_highlights as Record<string, HighlightData[]>) || {};
+          sendResponse({ ok: true, store });
+        });
+        return true;
+      }
+
+      case 'CLEAR_URL_HIGHLIGHTS': {
+        const url = (msg as ClearUrlHighlightsMessage).url;
+        ext.storage.local.get(['aura_highlights'], (data: Record<string, unknown>) => {
+          const store: Record<string, HighlightData[]> = (data.aura_highlights as Record<string, HighlightData[]>) || {};
+          delete store[url];
+          ext.storage.local.set({ aura_highlights: store }, () => {
+            sendResponse({ ok: true });
+          });
+        });
+        return true;
+      }
+
+      case 'SCROLL_TO_HIGHLIGHT_PAGE': {
+        const { id, url } = msg as ScrollToHighlightMessage;
+        ext.tabs.query({ active: true, currentWindow: true }, ([tab]: chrome.tabs.Tab[]) => {
+          if (!tab) { sendResponse({ ok: false }); return; }
+          const tabUrl = tab.url || '';
+          // If already on the right page, just scroll
+          if (tabUrl === url || tabUrl.split('#')[0] === url.split('#')[0]) {
+            ext.tabs.sendMessage(tab.id!, { type: 'SCROLL_TO_HIGHLIGHT', id }, () => {
+              sendResponse({ ok: true });
+            });
+          } else {
+            // Navigate to the page, then scroll after load
+            ext.tabs.update(tab.id!, { url }, () => {
+              // Wait for page load then scroll
+              const listener = (tabId: number, info: chrome.tabs.OnUpdatedInfo) => {
+                if (tabId === tab.id && info.status === 'complete') {
+                  ext.tabs.onUpdated.removeListener(listener);
+                  setTimeout(() => {
+                    ext.tabs.sendMessage(tab.id!, { type: 'SCROLL_TO_HIGHLIGHT', id });
+                  }, 2000); // Wait for content script + highlights to restore
+                  sendResponse({ ok: true });
+                }
+              };
+              ext.tabs.onUpdated.addListener(listener);
+              // Safety timeout
+              setTimeout(() => {
+                ext.tabs.onUpdated.removeListener(listener);
+              }, 15000);
+            });
+          }
+        });
+        return true;
+      }
+
+      // Link preview: fetch page title + meta description for hover popup
+      case 'LINK_PREVIEW': {
+        const previewUrl = (msg as LinkPreviewMessage).url;
+        let previewDomain = '';
+        try { previewDomain = new URL(previewUrl).hostname; } catch { previewDomain = previewUrl; }
+
+        fetch(previewUrl, {
+          signal: AbortSignal.timeout(3000),
+          headers: { 'Accept': 'text/html' },
+        })
+          .then((r) => {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.text();
+          })
+          .then((html: string) => {
+            // Parse title
+            let title = '';
+            const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
+            if (titleMatch) title = titleMatch[1].trim();
+
+            // Parse meta description
+            let description = '';
+            const descMatch = html.match(/<meta\s+name=["']description["']\s+content=["']([^"']*)["']/i)
+              || html.match(/<meta\s+content=["']([^"']*)["']\s+name=["']description["']/i);
+            if (descMatch) description = descMatch[1].trim();
+
+            // Try og:description as fallback
+            if (!description) {
+              const ogMatch = html.match(/<meta\s+property=["']og:description["']\s+content=["']([^"']*)["']/i)
+                || html.match(/<meta\s+content=["']([^"']*)["']\s+property=["']og:description["']/i);
+              if (ogMatch) description = ogMatch[1].trim();
+            }
+
+            // Try og:title as fallback for title
+            if (!title) {
+              const ogTitleMatch = html.match(/<meta\s+property=["']og:title["']\s+content=["']([^"']*)["']/i)
+                || html.match(/<meta\s+content=["']([^"']*)["']\s+property=["']og:title["']/i);
+              if (ogTitleMatch) title = ogTitleMatch[1].trim();
+            }
+
+            // Decode HTML entities in title/description
+            const decodeEntities = (s: string): string =>
+              s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#x27;/g, "'");
+
+            sendResponse({
+              ok: true,
+              title: decodeEntities(title),
+              description: decodeEntities(description),
+              domain: previewDomain,
+            } satisfies LinkPreviewResponse);
+          })
+          .catch(() => {
+            // CORS, timeout, or other fetch failure — return just the domain
+            sendResponse({
+              ok: true,
+              title: '',
+              description: '',
+              domain: previewDomain,
+            } satisfies LinkPreviewResponse);
+          });
+        return true; // async
       }
 
       default:

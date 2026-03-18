@@ -2,7 +2,7 @@
   "use strict";
   const ext = typeof browser !== "undefined" ? browser : chrome;
   function safeSend(msg, cb) {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d, _e, _f;
     try {
       if (cb) {
         ext.runtime.sendMessage(msg, cb);
@@ -15,6 +15,7 @@
         (_c = document.getElementById("aura-dock-host")) == null ? void 0 : _c.remove();
         (_d = document.getElementById("aura-host")) == null ? void 0 : _d.remove();
         (_e = document.getElementById("aura-quick-action-host")) == null ? void 0 : _e.remove();
+        (_f = document.getElementById("aura-highlight-host")) == null ? void 0 : _f.remove();
         window.__auraToolbarMounted = false;
       }
     }
@@ -392,6 +393,352 @@ ${url}`;
         _toastTimer = null;
       }, durationMs);
     }
+    const hlHost = document.createElement("div");
+    hlHost.id = "aura-highlight-host";
+    Object.assign(hlHost.style, {
+      position: "fixed",
+      top: "0",
+      left: "0",
+      zIndex: "2147483646",
+      pointerEvents: "none"
+    });
+    document.documentElement.appendChild(hlHost);
+    const hlShadow = hlHost.attachShadow({ mode: "closed" });
+    const hlStyle = document.createElement("style");
+    hlStyle.textContent = `
+    @keyframes hl-tooltip-in {
+      from { opacity: 0; transform: translateY(4px) scale(0.95); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .hl-tooltip {
+      position: fixed;
+      background: rgba(10, 8, 24, 0.92);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(124, 58, 237, 0.3);
+      border-radius: 8px;
+      padding: 5px 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      pointer-events: auto;
+      animation: hl-tooltip-in 0.15s ease forwards;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+      z-index: 2147483647;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', system-ui, sans-serif;
+    }
+    .hl-tooltip-text {
+      color: rgba(226, 232, 240, 0.9);
+      font-size: 11px;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    .hl-tooltip-delete {
+      width: 18px; height: 18px; border-radius: 4px;
+      background: transparent; border: none;
+      color: rgba(226, 232, 240, 0.5);
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      padding: 0; transition: background 0.12s, color 0.12s;
+    }
+    .hl-tooltip-delete:hover {
+      background: rgba(239, 68, 68, 0.25);
+      color: rgba(239, 68, 68, 1);
+    }
+  `;
+    hlShadow.appendChild(hlStyle);
+    const hlContainer = document.createElement("div");
+    hlShadow.appendChild(hlContainer);
+    const pageHlStyle = document.createElement("style");
+    pageHlStyle.textContent = `
+    mark[data-aura-hl] {
+      background: rgba(124, 58, 237, 0.15);
+      border-bottom: 2px solid rgba(124, 58, 237, 0.5);
+      border-radius: 2px;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+    mark[data-aura-hl]:hover {
+      background: rgba(124, 58, 237, 0.28);
+    }
+    mark[data-aura-hl].aura-hl-stale {
+      background: rgba(124, 58, 237, 0.08);
+      border-bottom: 2px dashed rgba(124, 58, 237, 0.35);
+    }
+    mark[data-aura-hl].aura-hl-flash {
+      background: rgba(124, 58, 237, 0.45) !important;
+      transition: background 0.3s ease;
+    }
+  `;
+    document.head.appendChild(pageHlStyle);
+    let _hlTooltipEl = null;
+    let _hlTooltipTimer = null;
+    function removeHlTooltip() {
+      if (_hlTooltipTimer) {
+        clearTimeout(_hlTooltipTimer);
+        _hlTooltipTimer = null;
+      }
+      if (_hlTooltipEl) {
+        _hlTooltipEl.remove();
+        _hlTooltipEl = null;
+      }
+    }
+    function showHlTooltip(mark, highlightId) {
+      removeHlTooltip();
+      const rect = mark.getBoundingClientRect();
+      _hlTooltipEl = document.createElement("div");
+      _hlTooltipEl.className = "hl-tooltip";
+      const label = document.createElement("span");
+      label.className = "hl-tooltip-text";
+      label.textContent = "Saved to AURA";
+      _hlTooltipEl.appendChild(label);
+      const delBtn = document.createElement("button");
+      delBtn.className = "hl-tooltip-delete";
+      delBtn.title = "Remove highlight";
+      delBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+      delBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        deleteHighlightFromPage(highlightId);
+        removeHlTooltip();
+      });
+      _hlTooltipEl.appendChild(delBtn);
+      _hlTooltipEl.style.top = `${Math.round(rect.top - 34)}px`;
+      _hlTooltipEl.style.left = `${Math.round(rect.left + rect.width / 2 - 60)}px`;
+      hlContainer.appendChild(_hlTooltipEl);
+    }
+    function getXPath(node) {
+      if (node.nodeType === Node.DOCUMENT_NODE) return "/";
+      const parts = [];
+      let current = node;
+      while (current && current !== document) {
+        if (current.nodeType === Node.ELEMENT_NODE) {
+          const el = current;
+          let tag = el.tagName.toLowerCase();
+          const parent = el.parentNode;
+          if (parent) {
+            const siblings = Array.from(parent.childNodes).filter(
+              (n) => n.nodeType === Node.ELEMENT_NODE && n.tagName === el.tagName
+            );
+            if (siblings.length > 1) {
+              const idx = siblings.indexOf(el) + 1;
+              tag += `[${idx}]`;
+            }
+          }
+          parts.unshift(tag);
+        } else if (current.nodeType === Node.TEXT_NODE) {
+          const parent = current.parentNode;
+          if (parent) {
+            const textNodes = Array.from(parent.childNodes).filter(
+              (n) => n.nodeType === Node.TEXT_NODE
+            );
+            if (textNodes.length > 1) {
+              const idx = textNodes.indexOf(current) + 1;
+              parts.unshift(`text()[${idx}]`);
+            } else {
+              parts.unshift("text()");
+            }
+          }
+        }
+        current = current.parentNode;
+      }
+      return "/" + parts.join("/");
+    }
+    function getHighlightContext(range) {
+      const container = range.commonAncestorContainer;
+      const fullText = container.nodeType === Node.TEXT_NODE ? container.textContent || "" : container.textContent || "";
+      const selectedText = range.toString();
+      const idx = fullText.indexOf(selectedText);
+      if (idx === -1) return "";
+      const before = fullText.slice(Math.max(0, idx - 50), idx);
+      const after = fullText.slice(idx + selectedText.length, idx + selectedText.length + 50);
+      return before + "|||" + after;
+    }
+    function generateHighlightId() {
+      return "hl_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
+    }
+    function wrapSelectionWithMark(highlightId) {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return null;
+      const range = sel.getRangeAt(0);
+      if (range.collapsed) return null;
+      try {
+        const mark = document.createElement("mark");
+        mark.setAttribute("data-aura-hl", highlightId);
+        range.surroundContents(mark);
+        sel.removeAllRanges();
+        attachMarkListeners(mark);
+        return mark;
+      } catch (_e) {
+        try {
+          const frag = range.cloneContents();
+          const textContent = frag.textContent || "";
+          if (!textContent.trim()) return null;
+          range.deleteContents();
+          const mark = document.createElement("mark");
+          mark.setAttribute("data-aura-hl", highlightId);
+          mark.textContent = textContent;
+          range.insertNode(mark);
+          sel.removeAllRanges();
+          attachMarkListeners(mark);
+          return mark;
+        } catch (_e2) {
+          return null;
+        }
+      }
+    }
+    function attachMarkListeners(mark) {
+      const hlId = mark.getAttribute("data-aura-hl") || "";
+      mark.addEventListener("mouseenter", () => showHlTooltip(mark, hlId));
+      mark.addEventListener("mouseleave", () => {
+        _hlTooltipTimer = setTimeout(removeHlTooltip, 300);
+      });
+    }
+    function saveHighlight() {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return false;
+      const range = sel.getRangeAt(0);
+      const text = range.toString().trim();
+      if (!text) return false;
+      const highlightId = generateHighlightId();
+      const xpath = getXPath(range.startContainer);
+      const context = getHighlightContext(range);
+      const mark = wrapSelectionWithMark(highlightId);
+      if (!mark) return false;
+      const highlight = {
+        id: highlightId,
+        url: window.location.href,
+        text,
+        xpath,
+        context,
+        timestamp: Date.now(),
+        color: "purple",
+        pageTitle: document.title
+      };
+      safeSend(
+        { type: "SAVE_HIGHLIGHT", highlight },
+        (response) => {
+          if (response && response.ok) {
+            showToast("Highlight saved to AURA");
+          } else {
+            showToast((response == null ? void 0 : response.error) || "Failed to save highlight", 3e3);
+          }
+        }
+      );
+      return true;
+    }
+    function deleteHighlightFromPage(highlightId) {
+      const mark = document.querySelector(`mark[data-aura-hl="${highlightId}"]`);
+      if (mark) {
+        const parent = mark.parentNode;
+        while (mark.firstChild) parent == null ? void 0 : parent.insertBefore(mark.firstChild, mark);
+        mark.remove();
+        parent == null ? void 0 : parent.normalize();
+      }
+      safeSend(
+        { type: "DELETE_HIGHLIGHT", id: highlightId, url: window.location.href },
+        (_response) => {
+          showToast("Highlight removed");
+        }
+      );
+    }
+    function findTextNode(xpath, text, context) {
+      try {
+        const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+        const node = result.singleNodeValue;
+        if (node && node.textContent && node.textContent.includes(text)) {
+          const range = document.createRange();
+          const idx = node.textContent.indexOf(text);
+          if (idx >= 0) {
+            range.setStart(node, idx);
+            range.setEnd(node, idx + text.length);
+            return range;
+          }
+        }
+      } catch (_e) {
+      }
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+      const [contextBefore, contextAfter] = context.split("|||");
+      let bestNode = null;
+      let bestOffset = -1;
+      let bestScore = 0;
+      while (walker.nextNode()) {
+        const tNode = walker.currentNode;
+        const nodeText = tNode.textContent || "";
+        const idx = nodeText.indexOf(text);
+        if (idx === -1) continue;
+        let score = 1;
+        if (contextBefore) {
+          const before = nodeText.slice(Math.max(0, idx - 50), idx);
+          if (before.includes(contextBefore.slice(-20))) score += 2;
+        }
+        if (contextAfter) {
+          const after = nodeText.slice(idx + text.length, idx + text.length + 50);
+          if (after.includes(contextAfter.slice(0, 20))) score += 2;
+        }
+        if (score > bestScore) {
+          bestScore = score;
+          bestNode = tNode;
+          bestOffset = idx;
+        }
+      }
+      if (bestNode && bestOffset >= 0) {
+        const range = document.createRange();
+        range.setStart(bestNode, bestOffset);
+        range.setEnd(bestNode, bestOffset + text.length);
+        return range;
+      }
+      return null;
+    }
+    function restoreHighlight(hl) {
+      if (document.querySelector(`mark[data-aura-hl="${hl.id}"]`)) return true;
+      const range = findTextNode(hl.xpath, hl.text, hl.context);
+      if (!range) return false;
+      try {
+        const mark = document.createElement("mark");
+        mark.setAttribute("data-aura-hl", hl.id);
+        if (hl.stale) mark.classList.add("aura-hl-stale");
+        range.surroundContents(mark);
+        attachMarkListeners(mark);
+        return true;
+      } catch (_e) {
+        try {
+          const text = range.toString();
+          range.deleteContents();
+          const mark = document.createElement("mark");
+          mark.setAttribute("data-aura-hl", hl.id);
+          if (hl.stale) mark.classList.add("aura-hl-stale");
+          mark.textContent = text;
+          range.insertNode(mark);
+          attachMarkListeners(mark);
+          return true;
+        } catch (_e2) {
+          return false;
+        }
+      }
+    }
+    function restoreAllHighlights() {
+      safeSend(
+        { type: "GET_HIGHLIGHTS", url: window.location.href },
+        (response) => {
+          if (!response || !response.ok || !response.highlights) return;
+          for (const hl of response.highlights) {
+            const success = restoreHighlight(hl);
+            if (!success) {
+              hl.stale = true;
+              restoreHighlight(hl);
+            }
+          }
+        }
+      );
+    }
+    function scrollToHighlight(highlightId) {
+      const mark = document.querySelector(`mark[data-aura-hl="${highlightId}"]`);
+      if (mark) {
+        mark.scrollIntoView({ behavior: "smooth", block: "center" });
+        mark.classList.add("aura-hl-flash");
+        setTimeout(() => mark.classList.remove("aura-hl-flash"), 1500);
+      }
+    }
+    setTimeout(restoreAllHighlights, 1500);
     function getSelectionText() {
       const sel = window.getSelection();
       if (!sel || sel.rangeCount === 0) return "";
@@ -468,11 +815,10 @@ ${url}`;
       const url = window.location.href;
       const title = document.title;
       if (action === "save") {
+        saveHighlight();
         safeSend(
           { type: "SAVE_KNOWLEDGE", text, url, title },
-          (response) => {
-            if (response && response.ok) showToast("Saved to AURA memory ✓");
-            else showToast("Save failed — is backend running?", 3e3);
+          (_response) => {
           }
         );
       } else {
@@ -1264,6 +1610,969 @@ ${description}
       }
     });
     qaObserver.observe(document.body, { childList: true, subtree: true });
+    document.addEventListener("aura-yt-subtitles", (e) => {
+      try {
+        const d = e.detail;
+        safeSend({
+          type: "YT_SUBTITLES",
+          videoId: d.videoId || "",
+          lang: d.lang || "",
+          segments: d.segments || []
+        });
+      } catch {
+      }
+    });
+    document.addEventListener("aura-yt-metadata", (e) => {
+      try {
+        const d = e.detail;
+        safeSend({
+          type: "YT_METADATA",
+          videoId: d.videoId || "",
+          title: d.title || "",
+          duration: d.duration || 0,
+          description: d.description || "",
+          channelName: d.channelName || "",
+          chapters: d.chapters || [],
+          captionTracks: d.captionTracks || []
+        });
+      } catch {
+      }
+    });
+    const TRANSLATABLE_SELECTORS = "p, h1, h2, h3, h4, h5, h6, li, td, th, blockquote, figcaption";
+    const AURA_TRANSLATE_ATTR = "data-aura-translated";
+    const BATCH_SIZE = 10;
+    const MAX_CONCURRENT = 10;
+    let _translateMode = "bilingual";
+    let _translateTargetLang = "English";
+    let _translateActive = false;
+    let _translateBadge = null;
+    let _translatedElements = [];
+    let _activeTranslations = 0;
+    function getTranslatableElements() {
+      const all = document.querySelectorAll(TRANSLATABLE_SELECTORS);
+      const results = [];
+      for (const el of all) {
+        if (el.hasAttribute(AURA_TRANSLATE_ATTR)) continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 && rect.height === 0) continue;
+        if (el.closest("#aura-host, #aura-dock-shadow, #aura-quick-action-host, .aura-translate-badge")) continue;
+        if (el.tagName === "SPAN" && (el.textContent || "").trim().length <= 20) continue;
+        const text = (el.textContent || "").trim();
+        if (text.length < 5) continue;
+        results.push(el);
+      }
+      return results;
+    }
+    function createTranslationElement(originalEl) {
+      const translationDiv = document.createElement("div");
+      translationDiv.className = "aura-page-translation";
+      translationDiv.setAttribute("data-aura-translation", "true");
+      Object.assign(translationDiv.style, {
+        borderLeft: "2px solid rgba(124, 58, 237, 0.6)",
+        background: "rgba(124, 58, 237, 0.05)",
+        padding: "6px 10px",
+        marginTop: "4px",
+        marginBottom: "4px",
+        fontSize: "0.95em",
+        color: "inherit",
+        opacity: "0",
+        fontFamily: "inherit",
+        lineHeight: "1.5",
+        borderRadius: "0 4px 4px 0",
+        transition: "opacity 0.3s ease",
+        fontStyle: "italic"
+      });
+      translationDiv.textContent = "Translating...";
+      translationDiv.style.color = "rgba(124, 58, 237, 0.5)";
+      originalEl.setAttribute(AURA_TRANSLATE_ATTR, "true");
+      originalEl.after(translationDiv);
+      requestAnimationFrame(() => {
+        translationDiv.style.opacity = "0.6";
+      });
+      return translationDiv;
+    }
+    function fadeInTranslation(el, text) {
+      el.style.opacity = "0";
+      el.textContent = text;
+      el.style.fontStyle = "normal";
+      el.style.color = "inherit";
+      requestAnimationFrame(() => {
+        el.style.opacity = "0.85";
+      });
+    }
+    function translateBatchRequest(texts, lang) {
+      return new Promise((resolve) => {
+        try {
+          ext.runtime.sendMessage(
+            { type: "TRANSLATE_BATCH", texts, targetLang: lang },
+            (response) => {
+              if (ext.runtime.lastError) {
+                resolve(texts.map(() => "[Translation failed]"));
+                return;
+              }
+              if ((response == null ? void 0 : response.ok) && response.translations) {
+                resolve(response.translations);
+              } else {
+                resolve(texts.map(() => (response == null ? void 0 : response.error) || "[Translation failed]"));
+              }
+            }
+          );
+        } catch {
+          resolve(texts.map(() => "[Translation failed]"));
+        }
+      });
+    }
+    async function startPageTranslation(targetLang) {
+      _translateTargetLang = targetLang;
+      _translateActive = true;
+      _translateMode = "bilingual";
+      _translatedElements = [];
+      _activeTranslations = 0;
+      showTranslateBadge();
+      const elements = getTranslatableElements();
+      if (elements.length === 0) return;
+      const pairs = [];
+      for (const el of elements) {
+        const text = (el.textContent || "").trim();
+        if (!text) continue;
+        const translationDiv = createTranslationElement(el);
+        _translatedElements.push({ original: el, translation: translationDiv });
+        pairs.push({ original: el, translation: translationDiv, text });
+      }
+      const batches = [];
+      for (let i = 0; i < pairs.length; i += BATCH_SIZE) {
+        batches.push(pairs.slice(i, i + BATCH_SIZE));
+      }
+      const processBatch = async (batch) => {
+        while (_activeTranslations >= MAX_CONCURRENT) {
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        if (!_translateActive) return;
+        _activeTranslations++;
+        try {
+          const texts = batch.map((p) => p.text);
+          const translations = await translateBatchRequest(texts, _translateTargetLang);
+          if (!_translateActive) return;
+          batch.forEach((pair, idx) => {
+            fadeInTranslation(pair.translation, translations[idx] || "[No translation]");
+            if (_translateMode === "translated") {
+              pair.original.style.display = "none";
+            }
+          });
+        } finally {
+          _activeTranslations--;
+        }
+      };
+      const promises = batches.map((batch) => processBatch(batch));
+      await Promise.all(promises);
+    }
+    function removePageTranslation() {
+      _translateActive = false;
+      for (const pair of _translatedElements) {
+        pair.translation.remove();
+        pair.original.removeAttribute(AURA_TRANSLATE_ATTR);
+        pair.original.style.display = "";
+      }
+      _translatedElements = [];
+      if (_translateBadge) {
+        _translateBadge.remove();
+        _translateBadge = null;
+      }
+    }
+    function setTranslateMode(mode) {
+      _translateMode = mode;
+      for (const pair of _translatedElements) {
+        if (mode === "translated") {
+          pair.original.style.display = "none";
+          pair.translation.style.marginTop = "0";
+        } else {
+          pair.original.style.display = "";
+          pair.translation.style.marginTop = "4px";
+        }
+      }
+      updateBadgeText();
+    }
+    function updateBadgeText() {
+      if (!_translateBadge) return;
+      const modeBtn = _translateBadge.querySelector("[data-badge-mode]");
+      if (modeBtn) {
+        modeBtn.textContent = _translateMode === "bilingual" ? "Bilingual" : "Translated";
+      }
+    }
+    function showTranslateBadge() {
+      if (_translateBadge) {
+        _translateBadge.remove();
+        _translateBadge = null;
+      }
+      _translateBadge = document.createElement("div");
+      _translateBadge.className = "aura-translate-badge";
+      Object.assign(_translateBadge.style, {
+        position: "fixed",
+        bottom: "20px",
+        right: "20px",
+        zIndex: "2147483646",
+        background: "rgba(10, 8, 24, 0.92)",
+        backdropFilter: "blur(20px) saturate(1.5)",
+        WebkitBackdropFilter: "blur(20px) saturate(1.5)",
+        border: "1px solid rgba(124, 58, 237, 0.35)",
+        borderRadius: "12px",
+        padding: "8px 12px",
+        display: "flex",
+        alignItems: "center",
+        gap: "8px",
+        boxShadow: "0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05) inset",
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', system-ui, sans-serif",
+        fontSize: "12px",
+        color: "rgba(226, 232, 240, 0.9)"
+      });
+      const dot = document.createElement("span");
+      Object.assign(dot.style, {
+        width: "6px",
+        height: "6px",
+        borderRadius: "50%",
+        background: "#7c3aed",
+        flexShrink: "0"
+      });
+      _translateBadge.appendChild(dot);
+      const label = document.createElement("span");
+      label.style.color = "rgba(160, 148, 210, 0.8)";
+      label.textContent = "Translation active";
+      _translateBadge.appendChild(label);
+      const sep1 = document.createElement("span");
+      Object.assign(sep1.style, { width: "1px", height: "14px", background: "rgba(255,255,255,0.1)", flexShrink: "0" });
+      _translateBadge.appendChild(sep1);
+      const langSpan = document.createElement("span");
+      langSpan.setAttribute("data-badge-lang", "");
+      langSpan.textContent = _translateTargetLang;
+      langSpan.style.color = "rgba(124, 58, 237, 0.9)";
+      langSpan.style.fontWeight = "600";
+      _translateBadge.appendChild(langSpan);
+      const badgeBtnBase = {
+        background: "rgba(124, 58, 237, 0.15)",
+        border: "1px solid rgba(124, 58, 237, 0.3)",
+        borderRadius: "6px",
+        color: "rgba(226, 232, 240, 0.9)",
+        padding: "3px 8px",
+        cursor: "pointer",
+        fontSize: "11px",
+        fontFamily: "inherit",
+        transition: "background 0.15s, border-color 0.15s"
+      };
+      const modeBtn = document.createElement("button");
+      modeBtn.setAttribute("data-badge-mode", "");
+      modeBtn.textContent = "Bilingual";
+      Object.assign(modeBtn.style, badgeBtnBase);
+      modeBtn.addEventListener("mouseenter", () => {
+        modeBtn.style.background = "rgba(124, 58, 237, 0.3)";
+      });
+      modeBtn.addEventListener("mouseleave", () => {
+        modeBtn.style.background = "rgba(124, 58, 237, 0.15)";
+      });
+      modeBtn.addEventListener("click", () => {
+        setTranslateMode(_translateMode === "bilingual" ? "translated" : "bilingual");
+      });
+      _translateBadge.appendChild(modeBtn);
+      const removeBtn = document.createElement("button");
+      removeBtn.textContent = "✕";
+      Object.assign(removeBtn.style, { ...badgeBtnBase, padding: "3px 6px", color: "rgba(226, 232, 240, 0.6)" });
+      removeBtn.title = "Remove translation";
+      removeBtn.addEventListener("mouseenter", () => {
+        removeBtn.style.background = "rgba(239, 68, 68, 0.2)";
+        removeBtn.style.borderColor = "rgba(239, 68, 68, 0.4)";
+        removeBtn.style.color = "rgba(239, 68, 68, 0.9)";
+      });
+      removeBtn.addEventListener("mouseleave", () => {
+        removeBtn.style.background = "rgba(124, 58, 237, 0.15)";
+        removeBtn.style.borderColor = "rgba(124, 58, 237, 0.3)";
+        removeBtn.style.color = "rgba(226, 232, 240, 0.6)";
+      });
+      removeBtn.addEventListener("click", () => {
+        removePageTranslation();
+      });
+      _translateBadge.appendChild(removeBtn);
+      document.body.appendChild(_translateBadge);
+    }
+    const GMAIL_HOST = "mail.google.com";
+    const _gmailTrackedComposes = /* @__PURE__ */ new Map();
+    function isGmailPage() {
+      return window.location.hostname === GMAIL_HOST;
+    }
+    function extractGmailThreadText() {
+      const bodies = document.querySelectorAll(".a3s.aiL");
+      if (bodies.length === 0) return "";
+      const parts = [];
+      bodies.forEach((body) => {
+        var _a;
+        const text = (_a = body.innerText) == null ? void 0 : _a.trim();
+        if (text) parts.push(text);
+      });
+      return parts.join("\n\n---\n\n").slice(0, 2e4);
+    }
+    function getComposeBody(composeEl) {
+      return composeEl.querySelector(
+        'div[aria-label="Message Body"], div[aria-label="Nachrichtentext"], div[aria-label="Corps du message"], div[g_editable="true"][contenteditable="true"], div.editable[contenteditable="true"], div[contenteditable="true"][role="textbox"]'
+      );
+    }
+    function getComposeText(composeEl) {
+      var _a;
+      const body = getComposeBody(composeEl);
+      if (!body) return "";
+      return ((_a = body.innerText) == null ? void 0 : _a.trim()) || "";
+    }
+    function setComposeText(composeEl, text) {
+      const body = getComposeBody(composeEl);
+      if (!body) return;
+      body.focus();
+      const sel = window.getSelection();
+      if (sel) {
+        const range = document.createRange();
+        range.selectNodeContents(body);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+      const success = document.execCommand("insertText", false, text);
+      if (!success) {
+        body.innerHTML = text.split("\n").map(
+          (line) => `<div>${line || "<br>"}</div>`
+        ).join("");
+      }
+      body.dispatchEvent(new Event("input", { bubbles: true }));
+      body.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    function injectGmailAiButton(composeEl) {
+      if (_gmailTrackedComposes.has(composeEl)) return;
+      const sendBtn = composeEl.querySelector(
+        'div[aria-label*="Send"], div[data-tooltip*="Send"], div[aria-label*="Enviar"], div[aria-label*="Envoyer"], div[aria-label*="Senden"], div[aria-label*="Отправить"]'
+      );
+      const toolbarRow = composeEl.querySelector(
+        ".btC, .bAK, tr.btC, .IZ"
+      );
+      const insertTarget = (sendBtn == null ? void 0 : sendBtn.parentElement) || toolbarRow;
+      if (!insertTarget) return;
+      const buttonHost = document.createElement("div");
+      buttonHost.className = "aura-gmail-ai-host";
+      Object.assign(buttonHost.style, {
+        display: "inline-flex",
+        alignItems: "center",
+        verticalAlign: "middle",
+        marginLeft: "8px",
+        position: "relative",
+        zIndex: "1"
+      });
+      const gmailShadow = buttonHost.attachShadow({ mode: "closed" });
+      const gmailStyle = document.createElement("style");
+      gmailStyle.textContent = `
+      @keyframes gmail-aura-in {
+        from { opacity: 0; transform: scale(0.85); }
+        to   { opacity: 1; transform: scale(1); }
+      }
+      @keyframes gmail-aura-spin {
+        to { transform: rotate(360deg); }
+      }
+      @keyframes gmail-aura-menu-in {
+        from { opacity: 0; transform: translateY(4px) scale(0.95); }
+        to   { opacity: 1; transform: translateY(0) scale(1); }
+      }
+
+      :host {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', system-ui, sans-serif;
+      }
+
+      .gmail-ai-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 4px 12px;
+        border-radius: 18px;
+        border: 1px solid rgba(124, 58, 237, 0.35);
+        background: rgba(124, 58, 237, 0.08);
+        color: #7c3aed;
+        font-size: 12px;
+        font-weight: 600;
+        font-family: inherit;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: all 0.15s ease;
+        animation: gmail-aura-in 0.25s ease forwards;
+        line-height: 1.4;
+        letter-spacing: 0.01em;
+      }
+      .gmail-ai-btn:hover {
+        background: rgba(124, 58, 237, 0.15);
+        border-color: rgba(124, 58, 237, 0.5);
+        box-shadow: 0 0 12px rgba(124, 58, 237, 0.15);
+      }
+      .gmail-ai-btn:active {
+        transform: scale(0.97);
+      }
+      .gmail-ai-btn .sparkle {
+        font-size: 13px;
+        line-height: 1;
+      }
+
+      .gmail-ai-menu {
+        position: absolute;
+        bottom: calc(100% + 6px);
+        left: 0;
+        background: rgba(10, 8, 24, 0.94);
+        backdrop-filter: blur(20px) saturate(1.5);
+        -webkit-backdrop-filter: blur(20px) saturate(1.5);
+        border: 1px solid rgba(124, 58, 237, 0.3);
+        border-radius: 10px;
+        padding: 4px;
+        min-width: 180px;
+        box-shadow: 0 -8px 32px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.05) inset;
+        animation: gmail-aura-menu-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        z-index: 10000;
+      }
+
+      .gmail-ai-menu-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-radius: 7px;
+        background: transparent;
+        border: none;
+        color: rgba(226, 232, 240, 0.92);
+        font-size: 12.5px;
+        font-weight: 500;
+        font-family: inherit;
+        cursor: pointer;
+        white-space: nowrap;
+        width: 100%;
+        text-align: left;
+        transition: background 0.12s, color 0.12s;
+        line-height: 1;
+        box-sizing: border-box;
+      }
+      .gmail-ai-menu-item:hover {
+        background: rgba(124, 58, 237, 0.25);
+        color: #fff;
+      }
+      .gmail-ai-menu-item:active {
+        background: rgba(124, 58, 237, 0.4);
+      }
+      .gmail-ai-menu-item .item-icon {
+        font-size: 14px;
+        width: 18px;
+        text-align: center;
+        flex-shrink: 0;
+      }
+      .gmail-ai-menu-item.loading {
+        opacity: 0.55;
+        pointer-events: none;
+      }
+
+      .gmail-ai-sep {
+        height: 1px;
+        background: rgba(255,255,255,0.08);
+        margin: 3px 8px;
+      }
+
+      .gmail-ai-sub {
+        padding: 2px 0 2px 4px;
+      }
+      .gmail-ai-sub .gmail-ai-menu-item {
+        font-size: 11.5px;
+        padding: 6px 12px 6px 26px;
+      }
+
+      .gmail-ai-spinner {
+        display: inline-block;
+        width: 14px;
+        height: 14px;
+        border: 2px solid rgba(124, 58, 237, 0.3);
+        border-top-color: rgba(160, 148, 210, 0.9);
+        border-radius: 50%;
+        animation: gmail-aura-spin 0.6s linear infinite;
+        flex-shrink: 0;
+      }
+
+      .gmail-ai-toast {
+        position: absolute;
+        bottom: calc(100% + 6px);
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(5, 150, 105, 0.92);
+        backdrop-filter: blur(12px);
+        color: #fff;
+        font-size: 11.5px;
+        font-weight: 500;
+        font-family: inherit;
+        padding: 5px 12px;
+        border-radius: 6px;
+        white-space: nowrap;
+        pointer-events: none;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+        animation: gmail-aura-menu-in 0.15s ease forwards;
+        z-index: 10001;
+      }
+    `;
+      gmailShadow.appendChild(gmailStyle);
+      const gmailContainer = document.createElement("div");
+      gmailContainer.style.position = "relative";
+      gmailContainer.style.display = "inline-flex";
+      gmailContainer.style.alignItems = "center";
+      gmailShadow.appendChild(gmailContainer);
+      const aiBtn = document.createElement("button");
+      aiBtn.className = "gmail-ai-btn";
+      aiBtn.innerHTML = `<span class="sparkle">✦</span> AI`;
+      gmailContainer.appendChild(aiBtn);
+      let gmailMenuEl = null;
+      let gmailTranslateSubEl = null;
+      let gmailToastEl = null;
+      let gmailToastTimer = null;
+      function showGmailToast(msg, duration = 2500) {
+        if (gmailToastEl) gmailToastEl.remove();
+        if (gmailToastTimer) clearTimeout(gmailToastTimer);
+        gmailToastEl = document.createElement("div");
+        gmailToastEl.className = "gmail-ai-toast";
+        gmailToastEl.textContent = msg;
+        gmailContainer.appendChild(gmailToastEl);
+        gmailToastTimer = setTimeout(() => {
+          if (gmailToastEl) {
+            gmailToastEl.remove();
+            gmailToastEl = null;
+          }
+          gmailToastTimer = null;
+        }, duration);
+      }
+      function removeGmailMenu() {
+        if (gmailMenuEl) {
+          gmailMenuEl.remove();
+          gmailMenuEl = null;
+        }
+        gmailTranslateSubEl = null;
+      }
+      function setGmailMenuLoading(loading) {
+        if (!gmailMenuEl) return;
+        gmailMenuEl.querySelectorAll(".gmail-ai-menu-item").forEach((item) => {
+          item.classList.add("loading");
+        });
+      }
+      function executeGmailAction(action, language) {
+        const composeText = getComposeText(composeEl);
+        const threadText = extractGmailThreadText();
+        if (action === "draft_reply" && !composeText && !threadText) {
+          showGmailToast("No email thread found", 3e3);
+          removeGmailMenu();
+          return;
+        }
+        if (action !== "draft_reply" && !composeText) {
+          showGmailToast("Compose body is empty", 3e3);
+          removeGmailMenu();
+          return;
+        }
+        setGmailMenuLoading();
+        const outMsg = {
+          type: "QUICK_ACTION",
+          action,
+          text: composeText || "(empty — draft a new reply)",
+          ...action === "draft_reply" ? { threadContext: threadText } : {},
+          ...language ? { language } : {}
+        };
+        safeSend(outMsg, (response) => {
+          if (response && response.ok && response.result) {
+            setComposeText(composeEl, response.result);
+            showGmailToast("Updated by AURA");
+          } else {
+            showGmailToast((response == null ? void 0 : response.error) || "Action failed", 3e3);
+          }
+          removeGmailMenu();
+        });
+      }
+      const GMAIL_ACTIONS = [
+        { icon: "✍️", label: "Draft reply", action: "draft_reply" },
+        { icon: "✨", label: "Improve", action: "improve" },
+        { icon: "🏢", label: "Make formal", action: "make_formal", separator: true },
+        { icon: "😊", label: "Make casual", action: "make_casual" },
+        { icon: "✂️", label: "Shorten", action: "shorten" },
+        { icon: "🌐", label: "Translate to...", action: "translate_menu", separator: true }
+      ];
+      const GMAIL_TRANSLATE_LANGS = ["English", "Spanish", "French", "German", "Chinese"];
+      function showGmailMenu() {
+        removeGmailMenu();
+        gmailMenuEl = document.createElement("div");
+        gmailMenuEl.className = "gmail-ai-menu";
+        GMAIL_ACTIONS.forEach((item) => {
+          if (item.separator) {
+            const sep = document.createElement("div");
+            sep.className = "gmail-ai-sep";
+            gmailMenuEl.appendChild(sep);
+          }
+          const btn = document.createElement("button");
+          btn.className = "gmail-ai-menu-item";
+          btn.innerHTML = `<span class="item-icon">${item.icon}</span><span>${item.label}</span>`;
+          btn.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (item.action === "translate_menu") {
+              toggleGmailTranslateSub(btn);
+            } else {
+              executeGmailAction(item.action);
+            }
+          });
+          gmailMenuEl.appendChild(btn);
+        });
+        gmailContainer.appendChild(gmailMenuEl);
+      }
+      function toggleGmailTranslateSub(anchor) {
+        if (gmailTranslateSubEl) {
+          gmailTranslateSubEl.remove();
+          gmailTranslateSubEl = null;
+          return;
+        }
+        gmailTranslateSubEl = document.createElement("div");
+        gmailTranslateSubEl.className = "gmail-ai-sub";
+        GMAIL_TRANSLATE_LANGS.forEach((lang) => {
+          const item = document.createElement("button");
+          item.className = "gmail-ai-menu-item";
+          item.textContent = lang;
+          item.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            executeGmailAction("gmail_translate", lang);
+          });
+          gmailTranslateSubEl.appendChild(item);
+        });
+        if (gmailMenuEl && anchor.parentNode === gmailMenuEl) {
+          anchor.after(gmailTranslateSubEl);
+        }
+      }
+      aiBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (gmailMenuEl) {
+          removeGmailMenu();
+        } else {
+          showGmailMenu();
+        }
+      });
+      const outsideClickHandler = (e) => {
+        if (!gmailMenuEl) return;
+        const path = e.composedPath();
+        if (!path.includes(buttonHost)) {
+          removeGmailMenu();
+        }
+      };
+      document.addEventListener("mousedown", outsideClickHandler, true);
+      if (sendBtn == null ? void 0 : sendBtn.parentElement) {
+        sendBtn.parentElement.insertBefore(buttonHost, sendBtn.nextSibling);
+      } else if (toolbarRow) {
+        toolbarRow.appendChild(buttonHost);
+      }
+      const composeObserver = new MutationObserver(() => {
+        if (!document.body.contains(composeEl)) {
+          composeObserver.disconnect();
+          document.removeEventListener("mousedown", outsideClickHandler, true);
+          buttonHost.remove();
+          _gmailTrackedComposes.delete(composeEl);
+        }
+      });
+      composeObserver.observe(document.body, { childList: true, subtree: true });
+      _gmailTrackedComposes.set(composeEl, {
+        composeEl,
+        buttonHost,
+        shadow: gmailShadow,
+        observer: composeObserver,
+        outsideHandler: outsideClickHandler
+      });
+    }
+    function scanGmailComposeWindows() {
+      const composeSelectors = [
+        'div[role="dialog"]',
+        // Popup compose / reply
+        "div.ip.iq",
+        // Inline reply
+        "div.nH.nn"
+        // Another compose variant
+      ];
+      composeSelectors.forEach((sel) => {
+        document.querySelectorAll(sel).forEach((el) => {
+          const body = getComposeBody(el);
+          if (!body) return;
+          if (_gmailTrackedComposes.has(el)) return;
+          injectGmailAiButton(el);
+        });
+      });
+    }
+    function initGmailIntegration() {
+      if (!isGmailPage()) return;
+      scanGmailComposeWindows();
+      const gmailObserver = new MutationObserver((mutations) => {
+        var _a, _b, _c;
+        let shouldScan = false;
+        for (const mutation of mutations) {
+          if (mutation.addedNodes.length > 0) {
+            for (const node of mutation.addedNodes) {
+              if (node.nodeType !== Node.ELEMENT_NODE) continue;
+              const el = node;
+              if (((_a = el.matches) == null ? void 0 : _a.call(el, 'div[role="dialog"]')) || ((_b = el.querySelector) == null ? void 0 : _b.call(el, 'div[role="dialog"]')) || ((_c = el.querySelector) == null ? void 0 : _c.call(el, 'div[contenteditable="true"]'))) {
+                shouldScan = true;
+                break;
+              }
+            }
+          }
+          if (shouldScan) break;
+        }
+        if (shouldScan) {
+          setTimeout(scanGmailComposeWindows, 300);
+        }
+      });
+      const gmailRoot = document.querySelector('div[role="main"]') || document.body;
+      gmailObserver.observe(gmailRoot, { childList: true, subtree: true });
+      let _gmailScanInterval = null;
+      _gmailScanInterval = setInterval(() => {
+        if (!isGmailPage()) {
+          if (_gmailScanInterval) clearInterval(_gmailScanInterval);
+          return;
+        }
+        scanGmailComposeWindows();
+      }, 3e3);
+    }
+    initGmailIntegration();
+    const _linkPreviewCache = /* @__PURE__ */ new Map();
+    const LP_CACHE_MAX = 50;
+    function lpCacheSet(cacheUrl, cacheData) {
+      if (_linkPreviewCache.size >= LP_CACHE_MAX) {
+        const oldest = _linkPreviewCache.keys().next().value;
+        if (oldest) _linkPreviewCache.delete(oldest);
+      }
+      _linkPreviewCache.set(cacheUrl, cacheData);
+    }
+    function lpCacheGet(cacheUrl) {
+      const d = _linkPreviewCache.get(cacheUrl);
+      if (d) {
+        _linkPreviewCache.delete(cacheUrl);
+        _linkPreviewCache.set(cacheUrl, d);
+      }
+      return d;
+    }
+    const lpHost = document.createElement("div");
+    lpHost.id = "aura-link-preview-host";
+    Object.assign(lpHost.style, { position: "fixed", top: "0", left: "0", zIndex: "2147483646", pointerEvents: "none" });
+    document.documentElement.appendChild(lpHost);
+    const lpShadow = lpHost.attachShadow({ mode: "closed" });
+    const lpCss = document.createElement("style");
+    lpCss.textContent = [
+      "@keyframes lp-in { from { opacity:0; transform:translateY(4px) scale(0.96); } to { opacity:1; transform:translateY(0) scale(1); } }",
+      "@keyframes lp-shimmer { 0% { background-position:-200px 0; } 100% { background-position:200px 0; } }",
+      '.lp-popup { position:fixed; width:320px; max-height:280px; background:rgba(10,8,24,0.92); backdrop-filter:blur(20px) saturate(1.5); -webkit-backdrop-filter:blur(20px) saturate(1.5); border:1px solid rgba(124,58,237,0.25); border-radius:12px; padding:14px 16px 12px; pointer-events:auto; animation:lp-in 0.2s cubic-bezier(0.16,1,0.3,1) forwards; box-shadow:0 8px 32px rgba(0,0,0,0.5),0 0 0 1px rgba(255,255,255,0.05) inset; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Inter",system-ui,sans-serif; box-sizing:border-box; overflow:hidden; display:flex; flex-direction:column; gap:8px; }',
+      ".lp-domain { display:inline-block; background:rgba(124,58,237,0.15); border:1px solid rgba(124,58,237,0.25); border-radius:4px; padding:2px 7px; font-size:10.5px; font-weight:600; color:rgba(160,148,210,0.9); letter-spacing:0.3px; max-width:fit-content; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }",
+      ".lp-title { font-size:13px; font-weight:600; color:rgba(226,232,240,0.95); line-height:1.35; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; margin:0; }",
+      ".lp-description { font-size:12px; font-weight:400; color:rgba(226,232,240,0.65); line-height:1.45; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; margin:0; }",
+      ".lp-shimmer { height:12px; border-radius:4px; background:linear-gradient(90deg,rgba(124,58,237,0.08) 25%,rgba(124,58,237,0.18) 50%,rgba(124,58,237,0.08) 75%); background-size:400px 100%; animation:lp-shimmer 1.5s infinite linear; }",
+      ".lp-shimmer.short { width:60%; } .lp-shimmer.long { width:90%; } .lp-shimmer+.lp-shimmer { margin-top:6px; }",
+      ".lp-loading-label { font-size:11px; color:rgba(160,148,210,0.5); margin-bottom:4px; }",
+      ".lp-actions { display:flex; gap:6px; margin-top:4px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06); }",
+      ".lp-btn { background:rgba(124,58,237,0.12); border:1px solid rgba(124,58,237,0.2); border-radius:6px; padding:4px 10px; font-size:11px; font-weight:500; font-family:inherit; color:rgba(200,180,255,0.9); cursor:pointer; transition:background 0.15s,border-color 0.15s,color 0.15s; white-space:nowrap; }",
+      ".lp-btn:hover { background:rgba(124,58,237,0.25); border-color:rgba(124,58,237,0.4); color:#fff; }",
+      ".lp-btn:active { background:rgba(124,58,237,0.35); }"
+    ].join("\n");
+    lpShadow.appendChild(lpCss);
+    const lpBox = document.createElement("div");
+    lpShadow.appendChild(lpBox);
+    let _lpPopup = null;
+    let _lpHoverTmr = null;
+    let _lpDismissTmr = null;
+    let _lpCurLink = null;
+    let _lpMouseIsDown = false;
+    document.addEventListener("mousedown", () => {
+      _lpMouseIsDown = true;
+    }, true);
+    document.addEventListener("mouseup", () => {
+      _lpMouseIsDown = false;
+    }, true);
+    function lpIsExternal(a) {
+      try {
+        return new URL(a.href, location.href).hostname !== location.hostname;
+      } catch {
+        return false;
+      }
+    }
+    function lpShouldShow(a) {
+      const h = a.href || "";
+      if (!h.startsWith("http://") && !h.startsWith("https://")) return false;
+      try {
+        const u = new URL(h, location.href);
+        if (u.hostname === location.hostname && u.pathname === location.pathname && u.hash) return false;
+      } catch {
+        return false;
+      }
+      if ((a.textContent || "").trim().length < 10) return false;
+      return lpIsExternal(a);
+    }
+    function lpRemove() {
+      if (_lpPopup) {
+        _lpPopup.remove();
+        _lpPopup = null;
+      }
+      _lpCurLink = null;
+    }
+    function lpCancelTimers() {
+      if (_lpHoverTmr) {
+        clearTimeout(_lpHoverTmr);
+        _lpHoverTmr = null;
+      }
+      if (_lpDismissTmr) {
+        clearTimeout(_lpDismissTmr);
+        _lpDismissTmr = null;
+      }
+    }
+    function lpStartDismiss() {
+      if (_lpDismissTmr) clearTimeout(_lpDismissTmr);
+      _lpDismissTmr = setTimeout(() => {
+        lpRemove();
+        _lpDismissTmr = null;
+      }, 300);
+    }
+    function lpCancelDismiss() {
+      if (_lpDismissTmr) {
+        clearTimeout(_lpDismissTmr);
+        _lpDismissTmr = null;
+      }
+    }
+    function lpPosition(a) {
+      if (!_lpPopup) return;
+      const r = a.getBoundingClientRect();
+      _lpPopup.style.visibility = "hidden";
+      _lpPopup.style.display = "flex";
+      const ph = _lpPopup.offsetHeight || 180;
+      _lpPopup.style.visibility = "";
+      let l = r.left + r.width / 2 - 160;
+      if (l < 8) l = 8;
+      if (l + 320 > window.innerWidth - 8) l = window.innerWidth - 328;
+      let t = r.bottom + 8;
+      if (t + ph > window.innerHeight - 8) {
+        t = r.top - ph - 8;
+        if (t < 8) t = 8;
+      }
+      _lpPopup.style.top = Math.round(t) + "px";
+      _lpPopup.style.left = Math.round(l) + "px";
+    }
+    function lpBuild(a, href) {
+      lpRemove();
+      _lpCurLink = a;
+      let dom = "";
+      try {
+        dom = new URL(href).hostname;
+      } catch {
+        dom = href;
+      }
+      const txt = (a.textContent || "").trim();
+      _lpPopup = document.createElement("div");
+      _lpPopup.className = "lp-popup";
+      const dEl = document.createElement("div");
+      dEl.className = "lp-domain";
+      dEl.textContent = dom;
+      _lpPopup.appendChild(dEl);
+      const tEl = document.createElement("div");
+      tEl.className = "lp-title";
+      tEl.textContent = txt;
+      _lpPopup.appendChild(tEl);
+      const lw = document.createElement("div");
+      const ll = document.createElement("div");
+      ll.className = "lp-loading-label";
+      ll.textContent = "Loading preview…";
+      const s1 = document.createElement("div");
+      s1.className = "lp-shimmer long";
+      const s2 = document.createElement("div");
+      s2.className = "lp-shimmer short";
+      lw.appendChild(ll);
+      lw.appendChild(s1);
+      lw.appendChild(s2);
+      _lpPopup.appendChild(lw);
+      const acts = document.createElement("div");
+      acts.className = "lp-actions";
+      const ob = document.createElement("button");
+      ob.className = "lp-btn";
+      ob.textContent = "Open";
+      ob.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        window.open(href, "_blank", "noopener");
+        lpRemove();
+      });
+      const sb = document.createElement("button");
+      sb.className = "lp-btn";
+      sb.textContent = "Summarize in AURA";
+      sb.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        safeSend({ type: "OPEN_WITH_TEXT", action: "summarize", text: "Summarize this page: " + href, url: href, title: txt });
+        lpRemove();
+      });
+      acts.appendChild(ob);
+      acts.appendChild(sb);
+      _lpPopup.appendChild(acts);
+      _lpPopup.addEventListener("mouseenter", lpCancelDismiss);
+      _lpPopup.addEventListener("mouseleave", lpStartDismiss);
+      lpBox.appendChild(_lpPopup);
+      lpPosition(a);
+      const c = lpCacheGet(href);
+      if (c) {
+        lpUpdate(lw, tEl, c);
+        return;
+      }
+      try {
+        ext.runtime.sendMessage({ type: "LINK_PREVIEW", url: href }, (rsp) => {
+          if (ext.runtime.lastError || !rsp) return;
+          if (!_lpPopup || _lpCurLink !== a) return;
+          const pd = { title: rsp.title || txt, description: rsp.description || "", domain: rsp.domain || dom };
+          lpCacheSet(href, pd);
+          lpUpdate(lw, tEl, pd);
+        });
+      } catch {
+      }
+    }
+    function lpUpdate(lw, te, d) {
+      lw.innerHTML = "";
+      lw.style.display = "none";
+      if (d.title && d.title !== te.textContent) te.textContent = d.title;
+      if (d.description) {
+        const de = document.createElement("div");
+        de.className = "lp-description";
+        de.textContent = d.description;
+        te.after(de);
+      }
+      if (_lpPopup && _lpCurLink) lpPosition(_lpCurLink);
+    }
+    document.addEventListener("mouseover", (me) => {
+      if (_lpMouseIsDown) return;
+      const a = me.target.closest("a");
+      if (!a || !lpShouldShow(a)) return;
+      if (_lpCurLink === a && _lpPopup) {
+        lpCancelDismiss();
+        return;
+      }
+      lpCancelTimers();
+      _lpHoverTmr = setTimeout(() => {
+        if (_lpMouseIsDown) return;
+        lpBuild(a, a.href);
+        _lpHoverTmr = null;
+      }, 800);
+    }, true);
+    document.addEventListener("mouseout", (me) => {
+      const a = me.target.closest("a");
+      if (a && a === _lpCurLink) {
+        const rel = me.relatedTarget;
+        if (rel && lpHost.contains(rel)) return;
+        lpStartDismiss();
+      }
+      if (a && _lpHoverTmr) lpCancelTimers();
+    }, true);
+    window.addEventListener("scroll", () => {
+      if (_lpPopup && _lpCurLink) {
+        const r = _lpCurLink.getBoundingClientRect();
+        if (r.bottom < 0 || r.top > window.innerHeight) {
+          lpCancelTimers();
+          lpRemove();
+        } else {
+          lpPosition(_lpCurLink);
+        }
+      }
+    }, { passive: true });
     ext.runtime.onMessage.addListener(
       (msg, _sender, sendResponse) => {
         if (msg.type === "EXTRACT_PAGE") {
@@ -1281,6 +2590,43 @@ ${description}
         if (msg.type === "SHOW_OCR_OVERLAY") {
           showOcrOverlay(msg.dataUrl, sendResponse);
           return true;
+        }
+        if (msg.type === "PAGE_TRANSLATE") {
+          if (_translateActive) removePageTranslation();
+          startPageTranslation(msg.targetLang).then(() => {
+            sendResponse({ ok: true });
+          }).catch((err) => {
+            sendResponse({ ok: false, error: err.message });
+          });
+          return true;
+        }
+        if (msg.type === "TRANSLATE_TOGGLE_MODE") {
+          setTranslateMode(msg.mode);
+          sendResponse({ ok: true });
+          return false;
+        }
+        if (msg.type === "TRANSLATE_REMOVE") {
+          removePageTranslation();
+          sendResponse({ ok: true });
+          return false;
+        }
+        if (msg.type === "TRANSLATE_CHANGE_LANG") {
+          if (_translateActive) {
+            removePageTranslation();
+            startPageTranslation(msg.targetLang).then(() => {
+              sendResponse({ ok: true });
+            }).catch((err) => {
+              sendResponse({ ok: false, error: err.message });
+            });
+            return true;
+          }
+          sendResponse({ ok: true });
+          return false;
+        }
+        if (msg.type === "SCROLL_TO_HIGHLIGHT") {
+          scrollToHighlight(msg.id);
+          sendResponse({ ok: true });
+          return false;
         }
         return void 0;
       }

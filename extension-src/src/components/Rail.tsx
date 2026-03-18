@@ -2,8 +2,8 @@ import React, { useState, useCallback } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import {
   MessageSquare, Search, Languages, PenLine, CheckSquare,
-  Database, Zap, FileText, Wrench, File, Mic,
-  Camera, Youtube, FlaskConical, Calculator, Code2,
+  Database, Zap, FileText, Wrench, File, Mic, Radio,
+  Camera, Youtube, FlaskConical, Calculator, Terminal, Code2,
   Image, BarChart2, Bot, Cpu, ChevronDown,
 } from 'lucide-react';
 import { useStore } from '../store';
@@ -37,10 +37,12 @@ const PRIMARY_ITEMS: RailItem[] = [
 const EXTRA_ITEMS: RailItem[] = [
   { id: 'pdf', label: 'PDF', Icon: File },
   { id: 'voice', label: 'Voice', Icon: Mic },
+  { id: 'record', label: 'REC Note', Icon: Radio },
   { id: 'ocr', label: 'OCR', Icon: Camera },
   { id: 'youtube', label: 'YouTube', Icon: Youtube },
   { id: 'research', label: 'Research', Icon: FlaskConical },
   { id: 'math', label: 'Math', Icon: Calculator },
+  { id: 'code', label: 'Code', Icon: Terminal },
   { id: 'artifacts', label: 'Artifacts', Icon: Code2 },
   { id: 'image', label: 'Image', Icon: Image },
   { id: 'compare', label: 'Compare', Icon: BarChart2 },

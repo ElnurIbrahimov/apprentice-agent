@@ -4,6 +4,7 @@ import { useStore } from './store';
 let _wsRetryDelay = 1000;
 let _wsConsecutiveFailures = 0;
 let _chunkBuf = '';
+let _thinkBuf = '';
 let _rafId: number | null = null;
 let _connTimer: ReturnType<typeof setTimeout> | null = null;
 let _staleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -28,14 +29,17 @@ function resetStaleTimer(socket: WebSocket) {
 
 function flushChunks(): void {
   _rafId = null;
-  if (!_chunkBuf) return;
+  if (!_chunkBuf && !_thinkBuf) return;
   const buf = _chunkBuf;
+  const tbuf = _thinkBuf;
   _chunkBuf = '';
+  _thinkBuf = '';
   const { activeStream } = useStore.getState();
   if (!activeStream || activeStream === true) return;
-  useStore.setState({
-    activeStream: { ...activeStream, rawText: activeStream.rawText + buf },
-  });
+  const update: any = { ...activeStream };
+  if (buf) update.rawText = activeStream.rawText + buf;
+  if (tbuf) update.thinkingText = (activeStream.thinkingText || '') + tbuf;
+  useStore.setState({ activeStream: update });
 }
 
 export function connectWS() {
@@ -75,7 +79,7 @@ export function connectWS() {
     }
     // Flush any pending chunk buffer before finalization
     if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; }
-    if (_chunkBuf) { flushChunks(); }
+    if (_chunkBuf || _thinkBuf) { flushChunks(); }
     const { activeStream } = useStore.getState();
     if (activeStream && activeStream !== true) {
       // Finalize with error so panels update correctly
@@ -104,28 +108,55 @@ export function connectWS() {
     const { activeStream } = useStore.getState();
     if (!activeStream || activeStream === true) return;
 
-    if (d.type === 'chunk') {
+    if (d.type === 'thinking_chunk') {
       const content = d.content || '';
+      // Mark as thinking phase if not already
+      if (!activeStream.isThinkingPhase) {
+        useStore.setState({
+          activeStream: {
+            ...activeStream,
+            isThinkingPhase: true,
+            thinkingStartTime: activeStream.thinkingStartTime || Date.now(),
+            thinkingText: activeStream.thinkingText || '',
+          },
+        });
+      }
       if (activeStream.onFirstChunk) {
         activeStream.onFirstChunk();
         useStore.setState({
-          activeStream: { ...activeStream, onFirstChunk: null },
+          activeStream: { ...useStore.getState().activeStream as any, onFirstChunk: null },
+        });
+      }
+      _thinkBuf += content;
+      if (!_rafId) _rafId = requestAnimationFrame(flushChunks);
+
+    } else if (d.type === 'chunk') {
+      const content = d.content || '';
+      // Transition from thinking phase to responding phase
+      if (activeStream.isThinkingPhase) {
+        useStore.setState({
+          activeStream: { ...activeStream, isThinkingPhase: false },
+        });
+      }
+      if (activeStream.onFirstChunk) {
+        activeStream.onFirstChunk();
+        useStore.setState({
+          activeStream: { ...useStore.getState().activeStream as any, onFirstChunk: null },
         });
       }
       // Batch chunk updates via rAF to avoid O(n²) string concat per frame
       _chunkBuf += content;
       if (!_rafId) _rafId = requestAnimationFrame(flushChunks);
-      // No separate scheduleMdRender — the setState above already triggers re-renders
 
     } else if (d.type === 'done') {
       // Stream complete — clear stale timer
       if (_staleTimer) { clearTimeout(_staleTimer); _staleTimer = null; }
       // Flush any pending chunks before finalizing
       if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; }
-      if (_chunkBuf) { flushChunks(); }
+      if (_chunkBuf || _thinkBuf) { flushChunks(); }
       const finalStream = useStore.getState().activeStream;
       if (finalStream && finalStream !== true && finalStream.onDone) {
-        finalStream.onDone(finalStream.rawText);
+        finalStream.onDone(finalStream.rawText, finalStream.thinkingText);
       }
       useStore.getState().setActiveStream(null);
 
@@ -135,6 +166,7 @@ export function connectWS() {
       // Flush pending chunks before error handling
       if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; }
       _chunkBuf = '';
+      _thinkBuf = '';
       const errStream = useStore.getState().activeStream;
       if (errStream && errStream !== true) {
         if (errStream.onFirstChunk) errStream.onFirstChunk();

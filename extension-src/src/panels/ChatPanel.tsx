@@ -8,7 +8,7 @@ import { PAGE_KEYWORDS } from '../ws';
 import { getPageContentCached, getCurrentTab } from '../ext';
 import type { StreamState } from '../types';
 import { speak } from '../tts';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Brain, Pen } from 'lucide-react';
 
 export default function ChatPanel() {
   const { messages, addMessage, activeStream, setActiveStream, setPendingCtx } = useStore();
@@ -110,7 +110,7 @@ export default function ChatPanel() {
       return;
     }
 
-    const { pendingCtx: ctx, thinkingMode, deepResearch, conversationId, getModel } = useStore.getState();
+    const { pendingCtx: ctx, thinkingMode, thinkingLevel, deepResearch, conversationId, getModel } = useStore.getState();
     if (ctx) {
       full = `[Context: ${ctx.title || ctx.url || 'selection'}]\n${ctx.text}\n\n---\n${text}`;
       setPendingCtx(null);
@@ -132,9 +132,16 @@ export default function ChatPanel() {
     const stream: StreamState = {
       type: 'chat',
       rawText: '',
-      onDone: (rawText) => {
+      thinkingText: '',
+      isThinkingPhase: thinkingMode,
+      thinkingStartTime: thinkingMode ? Date.now() : undefined,
+      onDone: (rawText, thinkingContent) => {
         useStore.setState(s => ({
-          messages: s.messages.map(m => m.id === aiId ? { ...m, text: rawText } : m),
+          messages: s.messages.map(m =>
+            m.id === aiId
+              ? { ...m, text: rawText, thinkingContent: thinkingContent || undefined }
+              : m
+          ),
         }));
         streamingMsgId.current = null;
         if (useStore.getState().autoSpeak) {
@@ -144,12 +151,17 @@ export default function ChatPanel() {
     };
 
     setActiveStream(stream);
-    socket!.send(JSON.stringify({
+    const payload: any = {
       type: 'chat',
       message: full,
       conversation_id: conversationId,
       model: getModel('chat'),
-    }));
+    };
+    if (thinkingMode) {
+      payload.thinking = true;
+      payload.thinking_level = thinkingLevel;
+    }
+    socket!.send(JSON.stringify(payload));
   }, [sysmsg, addMessage, setActiveStream, setPendingCtx]);
 
   // Handle aura-send events dispatched by AskPanel / ToolsPanel
@@ -166,6 +178,22 @@ export default function ChatPanel() {
 
   // Keep streaming message updated in real time
   const streamText = (activeStream && activeStream !== true) ? activeStream.rawText : null;
+  const streamThinkingText = (activeStream && activeStream !== true) ? activeStream.thinkingText : null;
+  const isThinkingPhase = (activeStream && activeStream !== true) ? activeStream.isThinkingPhase : false;
+  const thinkingStartTime = (activeStream && activeStream !== true) ? activeStream.thinkingStartTime : undefined;
+
+  // Elapsed time for thinking phase
+  const [thinkElapsed, setThinkElapsed] = useState(0);
+  useEffect(() => {
+    if (!isThinkingPhase || !thinkingStartTime) {
+      setThinkElapsed(0);
+      return;
+    }
+    const interval = setInterval(() => {
+      setThinkElapsed(Math.floor((Date.now() - thinkingStartTime) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isThinkingPhase, thinkingStartTime]);
 
   const isEmpty = messages.length === 0 && !activeStream;
 
@@ -186,8 +214,12 @@ export default function ChatPanel() {
             {messages.map((msg) => {
               // For streaming AI message, show live text
               if (msg.id === streamingMsgId.current && streamText !== null) {
-                const liveMsg = { ...msg, text: streamText };
-                if (!streamText) {
+                const liveMsg = {
+                  ...msg,
+                  text: streamText,
+                  thinkingContent: streamThinkingText || undefined,
+                };
+                if (!streamText && !streamThinkingText) {
                   return (
                     <div key={msg.id} className="flex gap-2 mb-3">
                       <div
@@ -196,14 +228,42 @@ export default function ChatPanel() {
                       >
                         A
                       </div>
-                      {/* Branded thinking indicator */}
-                      <div className="aura-thinking mt-1.5">
-                        <span /><span /><span />
-                      </div>
+                      {/* Phase indicator for thinking mode */}
+                      {isThinkingPhase ? (
+                        <div className="think-phase-indicator mt-1.5">
+                          <Brain size={12} className="think-phase-icon" />
+                          <span>Thinking...{thinkElapsed > 0 && ` ${thinkElapsed}s`}</span>
+                        </div>
+                      ) : (
+                        <div className="aura-thinking mt-1.5">
+                          <span /><span /><span />
+                        </div>
+                      )}
                     </div>
                   );
                 }
-                return <MessageBubble key={msg.id} message={liveMsg} isLatest />;
+                // Show phase indicator above the message during streaming
+                return (
+                  <React.Fragment key={msg.id}>
+                    {isThinkingPhase && streamThinkingText && !streamText && (
+                      <div className="flex gap-2 mb-1 items-center" style={{ paddingLeft: 38 }}>
+                        <div className="think-phase-indicator">
+                          <Brain size={12} className="think-phase-icon" />
+                          <span>Thinking...{thinkElapsed > 0 && ` ${thinkElapsed}s`}</span>
+                        </div>
+                      </div>
+                    )}
+                    {!isThinkingPhase && streamThinkingText && !!activeStream && (
+                      <div className="flex gap-2 mb-1 items-center" style={{ paddingLeft: 38 }}>
+                        <div className="respond-phase-indicator">
+                          <Pen size={11} />
+                          <span>Responding...</span>
+                        </div>
+                      </div>
+                    )}
+                    <MessageBubble key={msg.id} message={liveMsg} isLatest isStreaming />
+                  </React.Fragment>
+                );
               }
               return <MessageBubble key={msg.id} message={msg} />;
             })}

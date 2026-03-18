@@ -1,15 +1,21 @@
+export type ThinkingLevel = 'low' | 'medium' | 'high';
+
 export interface Message {
   id: string;
   role: 'user' | 'ai';
   text: string;
   timestamp: number;
+  thinkingContent?: string;
 }
 
 export interface StreamState {
   type: 'chat' | 'translate' | 'write' | 'search';
   rawText: string;
+  thinkingText?: string;
+  isThinkingPhase?: boolean;
+  thinkingStartTime?: number;
   onFirstChunk?: (() => void) | null;
-  onDone?: ((rawText: string) => void) | null;
+  onDone?: ((rawText: string, thinkingContent?: string) => void) | null;
 }
 
 export interface Context {
@@ -36,10 +42,12 @@ export type PanelId =
   | 'tools'
   | 'pdf'
   | 'voice'
+  | 'record'
   | 'ocr'
   | 'youtube'
   | 'research'
   | 'math'
+  | 'code'
   | 'artifacts'
   | 'image'
   | 'compare'
@@ -62,10 +70,12 @@ export const FEATURE_DEFS: FeatureDef[] = [
   { key: 'ask', label: 'Ask / Explain', icon: '⚡', desc: 'Quick-action context prompts' },
   { key: 'pdf', label: 'PDF Chat', icon: '📄', desc: 'Chat with PDF content' },
   { key: 'voice', label: 'Voice Notes', icon: '🎤', desc: 'Transcript summarization' },
+  { key: 'record', label: 'REC Note', icon: '🔴', desc: 'Tab/mic recording with AI transcription' },
   { key: 'agent', label: 'Browser Agent', icon: '🤖', desc: 'Page action planning' },
   { key: 'summary', label: 'Page Summary', icon: '📋', desc: 'One-click page summarization' },
   { key: 'youtube', label: 'YouTube', icon: '▶️', desc: 'Summarize YouTube videos' },
   { key: 'research', label: 'Deep Research', icon: '🔬', desc: 'Multi-source web research' },
   { key: 'math', label: 'Math Solver', icon: '➗', desc: 'Step-by-step math solving' },
+  { key: 'code', label: 'Code Interpreter', icon: '🖥️', desc: 'Run Python code & analyze data' },
   { key: 'artifacts', label: 'Artifacts', icon: '⌨️', desc: 'Generate runnable code/HTML/SVG' },
 ];

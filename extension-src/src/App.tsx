@@ -13,10 +13,12 @@ import SummaryPanel from './panels/SummaryPanel';
 import ToolsPanel from './panels/ToolsPanel';
 import PdfPanel from './panels/PdfPanel';
 import VoicePanel from './panels/VoicePanel';
+import RecordPanel from './panels/RecordPanel';
 import OcrPanel from './panels/OcrPanel';
 import YoutubePanel from './panels/YoutubePanel';
 import ResearchPanel from './panels/ResearchPanel';
 import MathPanel from './panels/MathPanel';
+import CodePanel from './panels/CodePanel';
 import ArtifactsPanel from './panels/ArtifactsPanel';
 import ImagePanel from './panels/ImagePanel';
 import ComparePanel from './panels/ComparePanel';
@@ -37,10 +39,12 @@ const PANEL_ENTRIES: { id: PanelId; Component: React.FC }[] = [
   { id: 'tools', Component: ToolsPanel },
   { id: 'pdf', Component: PdfPanel },
   { id: 'voice', Component: VoicePanel },
+  { id: 'record', Component: RecordPanel },
   { id: 'ocr', Component: OcrPanel },
   { id: 'youtube', Component: YoutubePanel },
   { id: 'research', Component: ResearchPanel },
   { id: 'math', Component: MathPanel },
+  { id: 'code', Component: CodePanel },
   { id: 'artifacts', Component: ArtifactsPanel },
   { id: 'image', Component: ImagePanel },
   { id: 'compare', Component: ComparePanel },
@@ -104,6 +108,12 @@ export default function App() {
         (window as any).__ytAutoUrl = msg.url;
         (window as any).__ytAutoTitle = msg.title;
         window.dispatchEvent(new CustomEvent('yt-detected', { detail: msg }));
+      }
+      if (msg.type === 'YT_SUBTITLES') {
+        window.dispatchEvent(new CustomEvent('yt-subtitles', { detail: msg }));
+      }
+      if (msg.type === 'YT_METADATA') {
+        window.dispatchEvent(new CustomEvent('yt-metadata', { detail: msg }));
       }
       if (msg.type === 'PDF_TAB_DETECTED') {
         window.dispatchEvent(new CustomEvent('pdf-detected', { detail: msg }));
