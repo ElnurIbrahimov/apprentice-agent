@@ -174,6 +174,85 @@ systemctl daemon-reload
 systemctl enable aura
 
 # ---------------------------------------------------------------------------
+# 8b. Telegram Bot service (starts if TELEGRAM_BOT_TOKEN is in .env)
+# ---------------------------------------------------------------------------
+log "Creating Telegram bot service..."
+cat > /etc/systemd/system/aura-telegram.service << 'SERVICE'
+[Unit]
+Description=AURA Telegram Bot
+After=network.target aura.service
+Wants=aura.service
+
+[Service]
+Type=simple
+User=aura
+Group=aura
+WorkingDirectory=/opt/aura
+EnvironmentFile=/opt/aura/.env
+ExecStart=/opt/aura/venv/bin/python run_telegram.py
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=120
+StartLimitBurst=3
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/aura/data /opt/aura/aura_data /opt/aura/logs
+PrivateTmp=yes
+MemoryMax=2G
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aura-telegram
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+
+# ---------------------------------------------------------------------------
+# 8c. Daemon service (proactive monitoring, dreams, background tasks)
+# ---------------------------------------------------------------------------
+log "Creating daemon service..."
+cat > /etc/systemd/system/aura-daemon.service << 'SERVICE'
+[Unit]
+Description=AURA Background Daemon (proactive monitoring, dreams)
+After=network.target aura.service
+Wants=aura.service
+
+[Service]
+Type=simple
+User=aura
+Group=aura
+WorkingDirectory=/opt/aura
+EnvironmentFile=/opt/aura/.env
+ExecStart=/opt/aura/venv/bin/python aura_daemon.py
+Restart=always
+RestartSec=15
+StartLimitIntervalSec=120
+StartLimitBurst=3
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/aura/data /opt/aura/aura_data /opt/aura/logs
+PrivateTmp=yes
+MemoryMax=2G
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aura-daemon
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+
+systemctl daemon-reload
+systemctl enable aura-telegram aura-daemon || true
+
+# ---------------------------------------------------------------------------
 # 9. Nginx reverse proxy
 # ---------------------------------------------------------------------------
 log "Configuring Nginx..."
@@ -257,13 +336,25 @@ log "Starting services..."
 systemctl restart nginx
 systemctl start aura
 
+# Start Telegram bot if token is configured
+if grep -q "TELEGRAM_BOT_TOKEN=." "$AURA_DIR/.env" 2>/dev/null; then
+  systemctl start aura-telegram
+  log "Telegram bot started."
+else
+  warn "Telegram bot not started (set TELEGRAM_BOT_TOKEN in .env to enable)."
+fi
+
+# Start daemon
+systemctl start aura-daemon
+log "Background daemon started."
+
 # Wait a moment for startup
 sleep 3
 
 if systemctl is-active --quiet aura; then
-  log "AURA service is running."
+  log "AURA backend is running."
 else
-  warn "AURA service may not have started. Check: journalctl -u aura -f"
+  warn "AURA backend may not have started. Check: journalctl -u aura -f"
 fi
 
 # ---------------------------------------------------------------------------
@@ -296,9 +387,17 @@ echo "     - Server URL: https://YOUR_DOMAIN"
 echo "     - API Key: (the key shown above / in .env)"
 echo ""
 echo "  Useful commands:"
-echo "     journalctl -u aura -f          # Live logs"
-echo "     systemctl restart aura         # Restart"
-echo "     systemctl status aura          # Status"
-echo "     curl localhost:8000/api/status  # Health check"
+echo "     journalctl -u aura -f              # Backend live logs"
+echo "     journalctl -u aura-telegram -f     # Telegram bot logs"
+echo "     journalctl -u aura-daemon -f       # Daemon logs"
+echo "     systemctl restart aura             # Restart backend"
+echo "     systemctl restart aura-telegram    # Restart Telegram bot"
+echo "     systemctl restart aura-daemon      # Restart daemon"
+echo "     systemctl status aura aura-telegram aura-daemon  # Status all"
+echo "     curl localhost:8000/api/status      # Health check"
+echo ""
+echo "  To enable Telegram bot:"
+echo "     1. Add TELEGRAM_BOT_TOKEN=your-token to /opt/aura/.env"
+echo "     2. systemctl restart aura-telegram"
 echo ""
 echo "==========================================================================="

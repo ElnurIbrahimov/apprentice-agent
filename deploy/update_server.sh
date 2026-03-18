@@ -39,15 +39,21 @@ deactivate
 log "Fixing ownership..."
 chown -R aura:aura "$AURA_DIR"
 
-log "Restarting AURA..."
+log "Restarting all AURA services..."
 systemctl restart aura
+systemctl is-active --quiet aura-telegram && systemctl restart aura-telegram
+systemctl is-active --quiet aura-daemon && systemctl restart aura-daemon
 
 sleep 3
 
 if systemctl is-active --quiet aura; then
-  log "AURA restarted successfully."
-  log "New version:"
-  git log --oneline -1
+  log "AURA backend restarted."
 else
-  error "AURA failed to start. Check: journalctl -u aura -f"
+  warn "AURA backend may have failed. Check: journalctl -u aura -f"
 fi
+
+systemctl is-active --quiet aura-telegram && log "Telegram bot restarted." || true
+systemctl is-active --quiet aura-daemon && log "Daemon restarted." || true
+
+log "New version:"
+git log --oneline -1
