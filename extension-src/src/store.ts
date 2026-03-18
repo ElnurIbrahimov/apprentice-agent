@@ -205,29 +205,43 @@ export const useStore = create<AuraStore>((set, get) => {
       let cloud: string[] = [];
       let local: string[] = [];
       let chatgpt: string[] = [];
+
+      // 1. Try Ollama for local/cloud models
       try {
-        const d = await fetch('http://localhost:11434/api/tags').then(r => r.json());
+        const d = await fetch('http://localhost:11434/api/tags', { signal: AbortSignal.timeout(3000) }).then(r => r.json());
         const all: string[] = (d.models || []).map((m: any) => m.name);
         cloud = all.filter(n => n.includes(':cloud'));
         local = all.filter(n => !n.includes(':cloud'));
-      } catch {
-        try {
-          const d = await fetch(`${HTTP}/api/models/available`).then(r => r.json());
-          cloud = (d.cloud || []).map((m: any) => m.name || m);
-          local = (d.local || []).map((m: any) => m.name || m);
-          chatgpt = (d.chatgpt || []).map((m: any) => m.name || m);
-        } catch { /* leave empty */ }
-      }
-      // Try fetching ChatGPT models separately if not already loaded
+      } catch { /* Ollama not available */ }
+
+      // 2. Try backend for models (also gets ChatGPT list)
+      try {
+        const d = await fetch(`${HTTP}/api/models/available`, { signal: AbortSignal.timeout(3000) }).then(r => r.json());
+        // Merge backend models with Ollama models (Ollama may have more)
+        const backendCloud = (d.cloud || []).map((m: any) => m.name || m);
+        const backendLocal = (d.local || []).map((m: any) => m.name || m);
+        chatgpt = (d.chatgpt || []).map((m: any) => m.name || m);
+        // Add any backend models not already in Ollama list
+        for (const m of backendCloud) if (!cloud.includes(m)) cloud.push(m);
+        for (const m of backendLocal) if (!local.includes(m)) local.push(m);
+      } catch { /* backend not available */ }
+
+      // 3. If still no ChatGPT models, check auth status directly
       if (chatgpt.length === 0) {
         try {
-          const authStatus = await fetch(`${HTTP}/api/auth/chatgpt/status`).then(r => r.json());
+          const authStatus = await fetch(`${HTTP}/api/auth/chatgpt/status`, { signal: AbortSignal.timeout(2000) }).then(r => r.json());
           if (authStatus.authenticated) {
-            const modelsResp = await fetch(`${HTTP}/api/models/available`).then(r => r.json());
-            chatgpt = (modelsResp.chatgpt || []).map((m: any) => m.name || m);
+            // Hardcode known ChatGPT models since the backend confirmed auth
+            chatgpt = [
+              'chatgpt:gpt-5.4', 'chatgpt:gpt-5.4-thinking', 'chatgpt:gpt-5.4-pro',
+              'chatgpt:gpt-5.3', 'chatgpt:gpt-5.3-codex', 'chatgpt:gpt-5.3-codex-spark',
+              'chatgpt:gpt-5.2', 'chatgpt:gpt-5.2-codex',
+              'chatgpt:gpt-5.1', 'chatgpt:gpt-5.1-codex', 'chatgpt:gpt-5.1-codex-mini', 'chatgpt:gpt-5.1-codex-max',
+            ];
           }
         } catch { /* no chatgpt */ }
       }
+
       get().setMdlLists(cloud, local, chatgpt);
     },
 

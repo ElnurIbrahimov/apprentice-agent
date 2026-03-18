@@ -164,30 +164,32 @@ export default function ModelPill({ featureKey }: Props) {
       <button
         ref={btnRef}
         onClick={toggle}
-        className="flex items-center gap-1 px-2 py-1 transition-all duration-150"
+        className="flex items-center gap-1 transition-all duration-150"
         style={{
-          background: 'var(--s2)',
-          border: '1px solid var(--b1)',
+          background: current ? 'var(--pg)' : 'var(--s2)',
+          border: `1px solid ${current ? 'rgba(124,58,237,0.25)' : 'var(--b2)'}`,
           borderRadius: 'var(--r-pill)',
-          color: current ? 'var(--pl)' : 'var(--mu)',
-          fontSize: '11px',
+          color: current ? 'var(--pl)' : 'var(--tx)',
+          fontSize: '12px',
+          fontWeight: 500,
           cursor: 'pointer',
           fontFamily: 'inherit',
-          gap: 4,
+          padding: '4px 10px',
+          gap: 5,
         }}
       >
         <span
           className="w-[6px] h-[6px] rounded-full flex-shrink-0"
           style={{ background: current ? 'var(--pl)' : 'var(--di)' }}
         />
-        <span style={{ maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {displayName}
         </span>
         <ChevronDown
-          size={9}
+          size={11}
           style={{
-            opacity: 0.55,
-            marginLeft: 1,
+            opacity: 0.7,
+            marginLeft: 2,
             transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
             transition: 'transform 0.2s ease',
           }}
