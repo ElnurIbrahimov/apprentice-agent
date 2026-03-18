@@ -3,7 +3,7 @@ import { useStore } from '../store';
 import { HTTP, apiFetch } from '../api';
 import { md } from '../markdown';
 
-const COMPARE_DEFAULTS = ['gemini-3-flash-preview:cloud', 'qwen3.5:397b-cloud', 'kimi-k2-thinking:cloud'];
+const COMPARE_DEFAULTS = ['gemini-3-flash-preview:cloud', 'minimax-m2.7:cloud', 'kimi-k2-thinking:cloud'];
 
 export default function ComparePanel() {
   const { mdlCloudList, mdlLocalList, setMdlLists, activePanel, setPendingCtx, setPanel } = useStore();
