@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/math", tags=["math"], dependencies=[Depends(require_api_key)])
 
-OLLAMA_BASE = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_BASE = os.getenv("OLLAMA_BASE_URL") or os.getenv("OLLAMA_HOST", "http://localhost:11434")
 
 SYSTEM_PROMPT = (
     "You are a math expert. Solve problems step by step. "
@@ -127,7 +127,7 @@ async def solve_math(body: dict):
     if mode not in ("solve", "explain", "graph_data"):
         mode = "solve"
 
-    model = body.get("model") or os.getenv("AURA_MATH_MODEL", "gemini-3-flash-preview:cloud")
+    model = body.get("model") or os.getenv("AURA_MATH_MODEL", "nemotron-3-super:cloud")
 
     prompt = _build_prompt(problem, mode)
 

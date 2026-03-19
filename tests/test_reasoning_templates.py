@@ -398,7 +398,7 @@ class TestTemplateAbstraction:
             "applicable_categories": ["code"],
         })
 
-        with patch.dict("sys.modules", {"aura.brain": MagicMock(Brain=MagicMock(return_value=mock_brain))}):
+        with patch.dict("sys.modules", {"aura.brain": MagicMock(OllamaBrain=MagicMock(return_value=mock_brain))}):
             library._run_abstraction_batch()
 
         # Brain should have been called for both categories (code + math)

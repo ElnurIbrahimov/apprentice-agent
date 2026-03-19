@@ -236,7 +236,7 @@ Logs every action's outcome for later analysis.
   "retry_rate": 50.0,
   "avg_confidence": 87.5,
   "tool_usage": {"code_executor": 1, "web_search": 3},
-  "model_usage": {"llama3:8b": 3, "qwen2:1.5b": 1}
+  "model_usage": {"kimi-k2.5:cloud": 3, "nemotron-3-super:cloud": 1}
 }
 ```
 
@@ -290,9 +290,9 @@ Automatically routes tasks to the most appropriate model based on complexity.
 
 | Model | Config Key | Use Case |
 |-------|------------|----------|
-| `qwen2:1.5b` | `MODEL_FAST` | Simple tasks, greetings, short answers |
-| `llama3:8b` | `MODEL_REASON` | Reasoning, planning, code, evaluation |
-| `llava` | `MODEL_VISION` | Image/screenshot analysis |
+| `nemotron-3-super:cloud` | `MODEL_FAST` | Simple tasks, greetings, short answers |
+| `kimi-k2.5:cloud` | `MODEL_REASON` | Reasoning, planning, code, evaluation |
+| `kimi-k2.5:cloud` | `MODEL_VISION` | Image/screenshot analysis |
 
 **Task Types (enum):**
 ```python
@@ -316,13 +316,13 @@ from aura.brain import OllamaBrain, TaskType
 brain = OllamaBrain()
 
 # Auto-detect model
-response = brain.think("Hello!")  # Uses qwen2:1.5b
+response = brain.think("Hello!")  # Uses nemotron-3-super:cloud
 
 # Explicit task type
 response = brain.think("Plan a strategy", task_type=TaskType.REASONING)
 
 # Check which model was used
-print(brain.get_last_model_used())  # "llama3:8b"
+print(brain.get_last_model_used())  # "kimi-k2.5:cloud"
 ```
 
 **Metacognition logging:**
@@ -333,7 +333,7 @@ print(brain.get_last_model_used())  # "llama3:8b"
 
 **Location:** `agent.py` (`_is_simple_query`, `_fast_path_response`)
 
-Simple conversational queries skip the full 5-phase agent loop and respond directly using the fast model (`qwen2:1.5b`).
+Simple conversational queries skip the full 5-phase agent loop and respond directly using the fast model (`nemotron-3-super:cloud`).
 
 **Triggers (Phase C - Expanded):**
 - **Greetings**: "hello", "hi", "hey", "thanks", "bye", "good morning", etc.
@@ -356,7 +356,7 @@ current weather, weather in, news about, stock price, bitcoin price
 ```bash
 # Fast-path (direct response)
 python main.py "Hello, how are you?"
-# Output: [FAST-PATH] Using qwen2:1.5b
+# Output: [FAST-PATH] Using nemotron-3-super:cloud
 
 # Disable fast-path
 python main.py --no-fastpath "Hello!"
@@ -365,7 +365,7 @@ python main.py --no-fastpath "Hello!"
 
 **How it works:**
 1. `_is_simple_query(goal)` checks if goal is conversational
-2. If true, `_fast_path_response(goal)` responds using `qwen2:1.5b`
+2. If true, `_fast_path_response(goal)` responds using `nemotron-3-super:cloud`
 3. Logs to metacognition with `tool="fast_path"`
 4. Returns immediately without observe/plan/act/evaluate
 
@@ -857,9 +857,9 @@ builder.enable_tool('bmi_calculator')
 - **Multi-Model Routing** (`brain.py`)
   - `_select_model()` method for automatic model selection
   - `TaskType` enum: SIMPLE, REASONING, CODE, VISION
-  - Routes simple tasks to `qwen2:1.5b` (fast)
-  - Routes reasoning/code to `llama3:8b`
-  - Routes vision to `llava`
+  - Routes simple tasks to `nemotron-3-super:cloud` (fast)
+  - Routes reasoning/code to `kimi-k2.5:cloud`
+  - Routes vision to `kimi-k2.5:cloud`
   - Logs `model_used` in metacognition
 
 - **Fast-Path Responses** (`agent.py`)

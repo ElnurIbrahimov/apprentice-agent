@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/youtube", tags=["youtube"], dependencies=[Depends(require_api_key)])
 
 import os as _os
-OLLAMA_URL = _os.getenv("OLLAMA_BASE_URL", "http://localhost:11434") + "/api/generate"
-SUMMARY_MODEL = "gemini-3-flash-preview:cloud"
+OLLAMA_URL = (_os.getenv("OLLAMA_BASE_URL") or _os.getenv("OLLAMA_HOST", "http://localhost:11434")) + "/api/generate"
+SUMMARY_MODEL = "nemotron-3-super:cloud"
 TRANSCRIPT_CHAR_LIMIT = 12000
 
 

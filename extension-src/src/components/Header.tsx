@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Plus, Sun, Moon, RefreshCw, Download, Clock } from 'lucide-react';
+import { Plus, Sun, Moon, RefreshCw, Download, Clock, Server } from 'lucide-react';
 import { useStore } from '../store';
 import { fetchStatus } from '../ws';
 import { exportChat } from '../exportChat';
+import { getServerLabel } from '../api';
 import ConversationHistory from './ConversationHistory';
 
 const STATUS_DOT: Record<string, string> = {
@@ -123,6 +124,18 @@ export default function Header() {
               <span className="truncate">{modelName}</span>
             </div>
           )}
+
+          {/* Server indicator */}
+          <div
+            className="header-conn-pill"
+            title={`Connected to: ${getServerLabel()}`}
+            style={{ opacity: 0.7, maxWidth: 120 }}
+          >
+            <Server size={10} style={{ flexShrink: 0 }} />
+            <span className="header-conn-label" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {getServerLabel()}
+            </span>
+          </div>
 
           {/* Connection pill */}
           <div className="header-conn-pill">

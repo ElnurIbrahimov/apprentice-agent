@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/research", tags=["research"], dependencies=[Depends(require_api_key)])
 
-OLLAMA_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434") + "/api/generate"
+OLLAMA_URL = (os.getenv("OLLAMA_BASE_URL") or os.getenv("OLLAMA_HOST", "http://localhost:11434")) + "/api/generate"
 DEFAULT_MODEL = "qwen3.5:397b-cloud"
 
 DEPTH_CONFIG = {

@@ -1,6 +1,6 @@
 # AURA — Adaptive Universal Reasoning Agent
 
-A personal AI agent with persistent memory, emotions, proactive awareness, and a full-featured browser extension. Uses **ChatGPT** (GPT-5.x via OAuth), **60+ Ollama models** (local + cloud), and a **Sider-class browser sidebar** with 24 panels.
+A personal AI agent with persistent memory, emotions, proactive awareness, and a full-featured browser extension. Uses **ChatGPT** (GPT-5.x via OAuth), **11 cloud models** (via Ollama Pro), and a **Sider-class browser sidebar** with 24 panels.
 
 Not a chatbot. A being with presence that remembers you, has moods, dreams, and grows over time.
 
@@ -15,7 +15,7 @@ Not a chatbot. A being with presence that remembers you, has moods, dreams, and 
 | **Dreams** | NeuroDream: light sleep re-scores memories, deep sleep extracts patterns, REM generates novel connections |
 | **Proactive awareness** | KG gap-driven curiosity, motivation-threshold gating, screen/calendar/workflow monitors |
 | **Identity** | Narrative self-model evolves across sessions, temporal grounding, personality persistence |
-| **Multi-model** | 60+ models: ChatGPT (GPT-5.4 Pro, Codex), cloud (Qwen 397B, DeepSeek, Kimi, Gemini), local (8B on your GPU) |
+| **Multi-model** | 23 models: 12 ChatGPT (GPT-5.4 Pro, Codex), 11 cloud (MiniMax, Kimi, Qwen, DeepSeek, GLM, Nemotron, GPT-OSS) |
 | **Dev agent** | ReAct loop, 50+ tools, code agent mode, adaptive planning, session persistence |
 | **4 surfaces** | CLI, Web UI (React + FastAPI), Browser Extension (Chrome/Firefox), Telegram Bot |
 
@@ -95,7 +95,7 @@ cp .env.example .env
 Edit `.env` with your keys:
 ```env
 OLLAMA_HOST=http://localhost:11434
-OLLAMA_API_KEY=your-ollama-bridge-key    # For cloud models via Ollama bridge
+OLLAMA_API_KEY=your-ollama-pro-key      # For cloud models via Ollama Pro ($20/mo)
 TAVILY_API_KEY=your-tavily-key           # Web search
 BRAVE_API_KEY=your-brave-key             # Fallback search
 ```
@@ -105,7 +105,7 @@ aura                          # Interactive chat
 aura "fix the login bug"      # One-shot agentic task
 aura --resume last            # Resume previous session
 aura --trust                  # Auto-approve all tool calls
-aura --model qwen3:8b         # Use specific model
+aura --model kimi-k2.5:cloud  # Use specific model
 aura --tier max               # Use strongest models
 ```
 
@@ -117,6 +117,8 @@ Use your ChatGPT subscription (GPT-5.4, Codex, etc.) via OAuth:
 aura --login chatgpt          # Opens browser for OAuth login
 aura --logout chatgpt         # Remove credentials
 ```
+
+On headless servers, see the [deployment guide](deploy/README.md#chatgpt-token-setup-for-servers) for token setup without a browser.
 
 ### Web UI
 
@@ -144,23 +146,41 @@ python run_telegram.py        # Requires TELEGRAM_BOT_TOKEN in .env
 
 ## Models
 
-60+ models available via `/model` picker:
+23 models available via `/model` picker:
 
-| Source | Models | Examples |
-|--------|--------|---------|
-| **ChatGPT** (OAuth) | 12 | GPT-5.4 Pro, GPT-5.3 Codex Spark, GPT-5.1 Codex Max |
-| **Cloud** (Ollama bridge) | 20+ | MiniMax M2.7 (self-evolving), Qwen 3.5 397B, DeepSeek V3.2, Kimi K2.5, Gemini 3 Flash, Devstral 2 123B, Cogito 2.1 671B |
-| **Local** (Ollama) | 26+ | DeepSeek R1 8B, Qwen 3 8B, Qwen 2.5 Coder 7B, Gemma 3 4B, LLaVA (vision) |
+| Source | Count | Models |
+|--------|-------|--------|
+| **ChatGPT** (OAuth) | 12 | GPT-5.4, GPT-5.4 Thinking, GPT-5.4 Pro, GPT-5.3, GPT-5.3 Codex, GPT-5.3 Codex Spark, GPT-5.2, GPT-5.2 Codex, GPT-5.1, GPT-5.1 Codex, GPT-5.1 Codex Max, GPT-5.1 Codex Mini |
+| **Cloud** (Ollama Pro) | 11 | Kimi K2.5, Nemotron 3 Super, Qwen 3.5 397B, DeepSeek V3.2, GLM-5, MiniMax M2.7, MiniMax M2.5, Qwen3 Coder 480B, Qwen3 Coder Next, GPT-OSS 120B |
 
-**Role-based routing** — auto-selects the best model per task:
+Local models are only used for non-chat workloads: `nomic-embed-text` (embeddings/RAG) and `glm-ocr` (OCR).
 
-| Role | Default |
-|------|---------|
-| **Fast** | `gemini-3-flash-preview:cloud` |
-| **Code** | `minimax-m2.7:cloud` (SWE-Pro 56.2%, self-evolving) |
-| **Reasoning** | `kimi-k2.5:cloud` |
-| **Vision** | `qwen3-vl:235b-cloud` |
-| **Long context** | `minimax-m2.7:cloud` (1M tokens) |
+### Role-Based Routing
+
+AURA auto-selects the best model per task. Defaults (configurable in `.env`):
+
+| Role | Default | Why |
+|------|---------|-----|
+| **Fast** | `nemotron-3-super:cloud` | NVIDIA efficient model, 2.2x throughput |
+| **Reasoning** | `kimi-k2.5:cloud` | AIME 96.1%, MMLU-Pro 86.4%, 256K context |
+| **Code** | `minimax-m2.7:cloud` | SWE-Pro 56.2%, self-evolving, 1M context |
+| **Vision** | `kimi-k2.5:cloud` | MMMU-Pro 78.5%, OCR 92.3%, native multimodal |
+| **Thinking** | `qwen3.5:397b-cloud` | Hybrid think/non-think, 397B MoE, 256K |
+| **Long context** | `minimax-m2.7:cloud` | 1M tokens |
+
+### Agentic Router (Dev CLI)
+
+The dev CLI has a separate task-aware router with 3 tiers (`local`, `balanced`, `max`):
+
+| Task | Balanced | Max |
+|------|----------|-----|
+| Orchestrator | `glm-5:cloud` | `kimi-k2.5:cloud` |
+| Code gen | `glm-5:cloud` | `minimax-m2.5:cloud` |
+| Small edit | `qwen3-coder-next:cloud` | `qwen3-coder-next:cloud` |
+| Reasoning | `kimi-k2.5:cloud` | `deepseek-v3.2:cloud` |
+| Long context | `nemotron-3-super:cloud` | `qwen3.5:cloud` |
+| Vision | `qwen3.5:cloud` | `kimi-k2.5:cloud` |
+| Throughput | `gpt-oss:120b-cloud` | `nemotron-3-super:cloud` |
 
 ---
 
@@ -169,7 +189,7 @@ python run_telegram.py        # Requires TELEGRAM_BOT_TOKEN in .env
 ```
 USER INPUT
     |
-[Fast-path] -- simple? --> 8B local model instant response
+[Model Router] -- classify task --> select model by role + tier
     |
 [ReAct Loop] (1 LLM call per step)
     |-- Tool RAG selects 5-8 relevant tools per query
@@ -209,11 +229,49 @@ RESPONSE (shaped by mood, grounded in memory, consistent with identity)
 
 ---
 
+## Server Deployment
+
+AURA runs on any Linux VPS. The deploy scripts handle everything.
+
+### One-Line Setup (Ubuntu)
+
+```bash
+ssh root@YOUR_SERVER_IP
+curl -sL https://raw.githubusercontent.com/ElnurIbrahimov/apprentice-agent/main/deploy/setup_server.sh | bash
+```
+
+This installs Python 3.12, Nginx, systemd services, generates an API key, and starts AURA.
+
+### Docker
+
+```bash
+git clone https://github.com/ElnurIbrahimov/apprentice-agent.git /opt/aura
+cd /opt/aura/deploy
+cp ../.env.example ../.env    # Edit .env with your keys
+docker compose up -d --build
+```
+
+### Supported Providers
+
+| Provider | Recommended Plan | Cost |
+|----------|-----------------|------|
+| **Hetzner** | CX22 (2 vCPU, 4 GB) or CX32 (4 vCPU, 8 GB) | ~$4-8/mo |
+| **Oracle Cloud** | VM.Standard.A1.Flex (ARM, 4 vCPU, 24 GB) | Free tier |
+| **Any VPS** | 2+ vCPU, 4+ GB RAM, Ubuntu 22.04/24.04 | Varies |
+
+See [deploy/README.md](deploy/README.md) for full instructions, SSL setup, ChatGPT token setup, and troubleshooting.
+
+### Headless Mode
+
+On servers without a display, set `AURA_HEADLESS=true` in `.env` to disable screen monitoring and GUI features. The daemon auto-detects this on Linux if `$DISPLAY` is not set.
+
+---
+
 ## CLI Commands
 
 | Command | Description |
 |---------|-------------|
-| `/model` | Pick model interactively (60+ models) |
+| `/model` | Pick model interactively (23 models) |
 | `/model auto` | Return to auto-routing |
 | `/clear` | Clear conversation history |
 | `/compact` | Manually compact context window |
@@ -249,7 +307,7 @@ RESPONSE (shaped by mood, grounded in memory, consistent with identity)
 aura/                     # Core Python package
   brain.py                # OllamaBrain — reasoning engine (2600 lines)
   agent.py                # ApprenticeAgent — orchestrator (5200 lines)
-  config.py               # Thread-safe configuration
+  config.py               # Thread-safe configuration, model chains
   memory/                 # Unified memory system (SQLite + FTS5 + KG)
   emotion/                # ALMA engine (PAD space, neuromodulators)
   consciousness/          # World model, metacognition, strategy bandit
@@ -275,6 +333,7 @@ extension-src/            # Browser extension (TypeScript + React)
   src/netflix-inject.ts   # Netflix subtitle interception
 
 web/                      # React web UI
+deploy/                   # Server deployment (Docker, systemd, Nginx)
 tests/                    # 445+ tests
 ```
 
@@ -284,7 +343,7 @@ tests/                    # 445+ tests
 
 ### Prerequisites
 - Python 3.12+
-- [Ollama](https://ollama.ai) running locally
+- [Ollama](https://ollama.ai) with Pro subscription ($20/mo) for cloud models
 - Optional: Node.js 18+ (Web UI / Extension), ChatGPT subscription (OAuth models)
 
 ### Setup
@@ -310,7 +369,7 @@ python build.py firefox       # Output: dist-firefox/
 
 ## Version
 
-**v4.3.0** — 833 Python files, 24-panel browser extension, 445+ tests passing.
+**v4.3.0** — 830 Python files, 24-panel browser extension, 445+ tests passing.
 
 ---
 

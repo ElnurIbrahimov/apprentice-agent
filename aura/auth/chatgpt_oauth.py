@@ -31,8 +31,32 @@ REDIRECT_URI = "http://localhost:1455/auth/callback"
 SCOPE = "openid profile email offline_access"
 CALLBACK_PORT = 1455
 
-# Token storage
-TOKEN_FILE = Path.home() / ".aura" / "chatgpt_auth.json"
+# Token storage — resolve path with fallback for server deployments
+# On the server, Path.home() may be /root or /home/aura, but the deploy script
+# writes tokens to /opt/aura/.aura/. Check the project dir first, then home.
+def _resolve_token_file() -> Path:
+    """Find the token file, preferring the project-local path on servers."""
+    # 1. Check /opt/aura/.aura/ (server deploy path)
+    server_path = Path("/opt/aura/.aura/chatgpt_auth.json")
+    if server_path.exists():
+        return server_path
+    # 2. Check home dir (local dev / default)
+    home_path = Path.home() / ".aura" / "chatgpt_auth.json"
+    if home_path.exists():
+        return home_path
+    # 3. If neither exists, prefer server path when running on Linux (deployed),
+    #    otherwise home path (local dev on Windows/Mac)
+    if os.name != "nt" and Path("/opt/aura").is_dir():
+        return server_path
+    return home_path
+
+
+def _get_token_file() -> Path:
+    """Get the current token file path (re-resolves each call)."""
+    return _resolve_token_file()
+
+# Keep module-level TOKEN_FILE for backward compat (used by auth.py status endpoint)
+TOKEN_FILE = _resolve_token_file()
 
 # Refresh 5 min before expiry
 REFRESH_BUFFER_MS = 5 * 60 * 1000
@@ -122,23 +146,25 @@ class _OAuthCallbackHandler(BaseHTTPRequestHandler):
 
 def _save_tokens(access: str, refresh: str, expires: int):
     """Save tokens to disk."""
-    TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tf = _get_token_file()
+    tf.parent.mkdir(parents=True, exist_ok=True)
     data = {
         "access": access,
         "refresh": refresh,
         "expires": expires,
         "account_id": _extract_account_id(access),
     }
-    TOKEN_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    logger.info("[CHATGPT_AUTH] Tokens saved")
+    tf.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    logger.info("[CHATGPT_AUTH] Tokens saved to %s", tf)
 
 
 def load_tokens() -> Optional[dict]:
     """Load tokens from disk. Returns dict with access, refresh, expires, account_id."""
     try:
-        if TOKEN_FILE.exists():
-            data = json.loads(TOKEN_FILE.read_text(encoding="utf-8"))
-            if data.get("access") and data.get("refresh"):
+        tf = _get_token_file()
+        if tf.exists():
+            data = json.loads(tf.read_text(encoding="utf-8"))
+            if data.get("access") or data.get("refresh"):
                 return data
     except Exception as e:
         logger.warning(f"[CHATGPT_AUTH] Failed to load tokens: {e}")
@@ -184,6 +210,12 @@ def get_valid_token() -> Optional[dict]:
     tokens = load_tokens()
     if not tokens:
         return None
+
+    # If we only have a refresh token (set via API), do an immediate refresh
+    if not tokens.get("access") or tokens.get("expires", 0) == 0:
+        logger.info("[CHATGPT_AUTH] No access token, refreshing from refresh token...")
+        tokens = refresh_token(tokens["refresh"])
+        return tokens
 
     now_ms = int(time.time() * 1000)
     if tokens["expires"] - now_ms < REFRESH_BUFFER_MS:
@@ -296,11 +328,31 @@ def login() -> bool:
 
 def logout():
     """Remove stored tokens."""
-    if TOKEN_FILE.exists():
-        TOKEN_FILE.unlink()
+    tf = _get_token_file()
+    if tf.exists():
+        tf.unlink()
         print("ChatGPT authentication cleared.")
     else:
         print("No ChatGPT authentication found.")
+
+
+def save_refresh_token(refresh: str, account_id: str = "") -> Path:
+    """Save a refresh token directly (no access token yet).
+
+    The access token will be obtained on first use via refresh_token().
+    Returns the path where the token was saved.
+    """
+    tf = _get_token_file()
+    tf.parent.mkdir(parents=True, exist_ok=True)
+    data = {
+        "access": "",
+        "refresh": refresh,
+        "expires": 0,
+        "account_id": account_id,
+    }
+    tf.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    logger.info("[CHATGPT_AUTH] Refresh token saved to %s", tf)
+    return tf
 
 
 def is_authenticated() -> bool:

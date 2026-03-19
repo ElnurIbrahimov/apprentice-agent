@@ -32,7 +32,7 @@ def test_classify_task_fallback():
 def test_select_model_per_tier():
     router = ModelRouter("local")
     model = router.select("code_gen")
-    assert model == "qwen2.5-coder:7b"
+    assert model == "qwen3-coder-next:cloud"
 
 
 def test_select_agentic_with_prompt():

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useStore } from '../store';
 import { User, FileText, Sparkles, RotateCcw, Save, Check, Server, Key } from 'lucide-react';
 import { getBackendUrl, setBackendUrl, setApiKey, API_KEY } from '../api';
-import { connectWS, fetchStatus } from '../ws';
+import { connectWS, fetchStatus, resetWsRetry } from '../ws';
 
 const STYLE_PRESETS: { label: string; icon: string; instructions: string }[] = [
   {
@@ -72,12 +72,7 @@ export default function SettingsPanel() {
   // Load backend URL and API key on mount
   useEffect(() => {
     const current = getBackendUrl();
-    // Show empty if it's the default localhost — user sees placeholder instead
-    if (current === 'http://localhost:8000') {
-      setLocalBackendUrl('');
-    } else {
-      setLocalBackendUrl(current);
-    }
+    setLocalBackendUrl(current);
     setLocalApiKey(API_KEY || '');
   }, []);
 
@@ -134,7 +129,7 @@ export default function SettingsPanel() {
   const handleTestConnection = async () => {
     setConnTesting(true);
     setConnStatus('idle');
-    const testUrl = localBackendUrl.trim().replace(/\/+$/, '') || 'http://localhost:8000';
+    const testUrl = localBackendUrl.trim().replace(/\/+$/, '') || 'http://89.167.107.134';
     try {
       const headers: Record<string, string> = {};
       if (localApiKey.trim()) headers['X-API-Key'] = localApiKey.trim();
@@ -168,11 +163,77 @@ export default function SettingsPanel() {
     if (ws) {
       ws.close();
     }
+    // Reset retry counters so reconnect starts fresh for the new server
+    resetWsRetry();
+    useStore.getState().setBackendStatus('connecting');
     // Small delay for close to propagate, then reconnect
     setTimeout(() => {
       fetchStatus();
       connectWS();
     }, 500);
+  };
+
+  // ChatGPT token state
+  const [gptRefresh, setGptRefresh] = useState('');
+  const [gptAccountId, setGptAccountId] = useState('');
+  const [gptSaving, setGptSaving] = useState(false);
+  const [gptStatus, setGptStatus] = useState<'idle' | 'ok' | 'fail'>('idle');
+  const [gptMsg, setGptMsg] = useState('');
+  const [gptAuthenticated, setGptAuthenticated] = useState<boolean | null>(null);
+  const gptTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Check ChatGPT auth status on mount
+  useEffect(() => {
+    const checkGpt = async () => {
+      try {
+        const base = getBackendUrl().replace(/\/+$/, '');
+        const headers: Record<string, string> = {};
+        if (API_KEY) headers['X-API-Key'] = API_KEY;
+        const r = await fetch(`${base}/api/auth/chatgpt/status`, { headers, signal: AbortSignal.timeout(5000) });
+        if (r.ok) {
+          const data = await r.json();
+          setGptAuthenticated(data.authenticated);
+        }
+      } catch { /* ignore */ }
+    };
+    checkGpt();
+    return () => { if (gptTimerRef.current) clearTimeout(gptTimerRef.current); };
+  }, []);
+
+  const handleSaveGptToken = async () => {
+    if (!gptRefresh.trim()) return;
+    setGptSaving(true);
+    setGptStatus('idle');
+    setGptMsg('');
+    try {
+      const base = getBackendUrl().replace(/\/+$/, '');
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (API_KEY) headers['X-API-Key'] = API_KEY;
+      const r = await fetch(`${base}/api/auth/chatgpt/set-token`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ refresh: gptRefresh.trim(), account_id: gptAccountId.trim() }),
+        signal: AbortSignal.timeout(30000),
+      });
+      const data = await r.json();
+      if (data.success) {
+        setGptStatus('ok');
+        setGptMsg(data.message || 'Token saved');
+        setGptAuthenticated(true);
+        setGptRefresh('');
+        setGptAccountId('');
+      } else {
+        setGptStatus('fail');
+        setGptMsg(data.error || 'Failed to save token');
+      }
+    } catch (e: any) {
+      setGptStatus('fail');
+      setGptMsg(e.message || 'Request failed');
+    } finally {
+      setGptSaving(false);
+      if (gptTimerRef.current) clearTimeout(gptTimerRef.current);
+      gptTimerRef.current = setTimeout(() => { setGptStatus('idle'); setGptMsg(''); }, 6000);
+    }
   };
 
   const charCount = localInstructions.length;
@@ -203,7 +264,7 @@ export default function SettingsPanel() {
             type="url"
             value={localBackendUrl}
             onChange={(e) => setLocalBackendUrl(e.target.value)}
-            placeholder="http://localhost:8000 (default)"
+            placeholder="http://89.167.107.134 (default)"
             maxLength={200}
             style={inputStyle}
             onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--pl)')}
@@ -279,6 +340,100 @@ export default function SettingsPanel() {
               }}
             >
               {connSaved ? 'Saved & Reconnecting' : 'Save & Reconnect'}
+            </button>
+          </div>
+        </section>
+
+        {/* Section: ChatGPT Token */}
+        <section>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <Key size={16} style={{ color: 'var(--pl)' }} />
+            <h3 style={{ margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--fg)', letterSpacing: '0.03em' }}>
+              CHATGPT TOKEN
+            </h3>
+            {gptAuthenticated === true && (
+              <span style={{ fontSize: 10, color: '#34d399', fontWeight: 500, marginLeft: 'auto' }}>Authenticated</span>
+            )}
+            {gptAuthenticated === false && (
+              <span style={{ fontSize: 10, color: '#f87171', fontWeight: 500, marginLeft: 'auto' }}>Not set</span>
+            )}
+          </div>
+          <p style={{ margin: '0 0 10px', fontSize: 11, color: 'var(--fg2)' }}>
+            Set your ChatGPT refresh token to enable chatgpt: models on the server.
+          </p>
+          <label
+            htmlFor="settings-gpt-refresh"
+            style={{ display: 'block', fontSize: 11, color: 'var(--fg2)', marginBottom: 6 }}
+          >
+            Refresh Token
+          </label>
+          <textarea
+            id="settings-gpt-refresh"
+            value={gptRefresh}
+            onChange={(e) => setGptRefresh(e.target.value)}
+            placeholder="Paste your ChatGPT refresh token here (starts with rt_...)"
+            rows={3}
+            style={{
+              ...inputStyle,
+              fontSize: 11,
+              fontFamily: 'monospace',
+              resize: 'vertical',
+              minHeight: 60,
+              wordBreak: 'break-all' as const,
+            }}
+            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--pl)')}
+            onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--b2)')}
+          />
+          <label
+            htmlFor="settings-gpt-account"
+            style={{ display: 'block', fontSize: 11, color: 'var(--fg2)', marginBottom: 6, marginTop: 10 }}
+          >
+            Account ID (optional)
+          </label>
+          <input
+            id="settings-gpt-account"
+            type="text"
+            value={gptAccountId}
+            onChange={(e) => setGptAccountId(e.target.value)}
+            placeholder="e.g. 92dff04b-90a9-4dfa-..."
+            maxLength={100}
+            style={{ ...inputStyle, fontSize: 12, fontFamily: 'monospace' }}
+            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--pl)')}
+            onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--b2)')}
+          />
+          <p style={{ margin: '6px 0 0', fontSize: 10, color: 'var(--fg3)' }}>
+            The token is sent to the server and saved there. It never leaves the server after that.
+          </p>
+
+          {gptMsg && (
+            <p style={{ margin: '8px 0 0', fontSize: 11, color: gptStatus === 'ok' ? '#34d399' : '#f87171' }}>
+              {gptMsg}
+            </p>
+          )}
+
+          <div style={{ marginTop: 12 }}>
+            <button
+              onClick={handleSaveGptToken}
+              disabled={gptSaving || !gptRefresh.trim()}
+              style={{
+                padding: '7px 18px',
+                fontSize: 12,
+                fontWeight: 600,
+                borderRadius: 8,
+                border: 'none',
+                background: gptStatus === 'ok'
+                  ? 'rgba(52, 211, 153, 0.2)'
+                  : gptRefresh.trim()
+                    ? 'linear-gradient(135deg, var(--p), var(--pl))'
+                    : 'var(--glass)',
+                color: gptStatus === 'ok' ? '#34d399' : gptRefresh.trim() ? 'white' : 'var(--fg3)',
+                cursor: gptSaving ? 'wait' : gptRefresh.trim() ? 'pointer' : 'default',
+                fontFamily: 'inherit',
+                transition: 'all 0.25s',
+                opacity: !gptRefresh.trim() && gptStatus === 'idle' ? 0.5 : 1,
+              }}
+            >
+              {gptSaving ? 'Saving...' : gptStatus === 'ok' ? 'Token Saved' : 'Save Token to Server'}
             </button>
           </div>
         </section>

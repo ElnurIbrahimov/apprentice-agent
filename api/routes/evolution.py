@@ -33,8 +33,8 @@ class EvolutionRequest(BaseModel):
     """Request to start a skill evolution run."""
     skill_ids: Optional[List[str]] = Field(None, description="Specific skill IDs (None = all)")
     max_iterations: int = Field(10, ge=1, le=50)
-    reflection_model: str = Field("qwen3:8b")
-    eval_model: str = Field("qwen2.5-coder:7b")
+    reflection_model: str = Field("qwen3.5:397b-cloud")
+    eval_model: str = Field("nemotron-3-super:cloud")
     timeout_seconds: int = Field(600, ge=60, le=3600)
 
 

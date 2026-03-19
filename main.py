@@ -153,7 +153,7 @@ def main():
         "--model",
         type=str,
         default=None,
-        help="Use a specific model (e.g., --model deepseek-r1:8b)"
+        help="Use a specific model (e.g., --model kimi-k2.5:cloud)"
     )
     parser.add_argument(
         "--format",

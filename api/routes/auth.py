@@ -1,8 +1,14 @@
 """Authentication routes for external providers (ChatGPT OAuth, etc.)."""
 
 from fastapi import APIRouter
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+class ChatGPTTokenRequest(BaseModel):
+    refresh: str
+    account_id: str = ""
 
 
 @router.get("/chatgpt/status")
@@ -19,6 +25,40 @@ async def chatgpt_status():
         return {"authenticated": authenticated, **info}
     except ImportError:
         return {"authenticated": False, "error": "auth module not available"}
+
+
+@router.post("/chatgpt/set-token")
+async def chatgpt_set_token(body: ChatGPTTokenRequest):
+    """Set the ChatGPT refresh token via HTTP POST.
+
+    This allows setting the token from the browser extension or any HTTP client,
+    avoiding the problem of long token strings breaking when pasted into a terminal.
+    """
+    if not body.refresh or not body.refresh.strip():
+        return {"success": False, "error": "refresh token is required"}
+    try:
+        from aura.auth.chatgpt_oauth import save_refresh_token, get_valid_token
+        path = save_refresh_token(body.refresh.strip(), body.account_id.strip())
+
+        # Try an immediate refresh to validate the token
+        tokens = get_valid_token()
+        if tokens and tokens.get("access"):
+            acct = tokens.get("account_id", "")
+            return {
+                "success": True,
+                "message": "Token saved and validated",
+                "account_id": (acct[:8] + "...") if acct else None,
+                "path": str(path),
+            }
+        else:
+            # Token was saved but refresh failed — might still work later
+            return {
+                "success": True,
+                "message": "Token saved but could not validate (refresh failed). It may still work if the token is correct.",
+                "path": str(path),
+            }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 @router.post("/chatgpt/login")

@@ -15,12 +15,12 @@ from api.auth import require_api_key
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/compare", tags=["compare"], dependencies=[Depends(require_api_key)])
 
-OLLAMA_BASE = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_BASE = os.getenv("OLLAMA_BASE_URL") or os.getenv("OLLAMA_HOST", "http://localhost:11434")
 
 DEFAULT_COMPARE_MODELS = [
-    "gemini-3-flash-preview:cloud",
+    "minimax-m2.7:cloud",
     "qwen3.5:397b-cloud",
-    "kimi-k2-thinking:cloud",
+    "kimi-k2.5:cloud",
 ]
 
 

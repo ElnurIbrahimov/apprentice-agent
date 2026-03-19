@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from api.auth import require_api_key
 from api.utils import safe_error_detail
 
-from api.models.schemas import StatusResponse, HealthResponse, MoodState
+from api.models.schemas import StatusResponse, HealthResponse, DeepHealthResponse, SubsystemStatus, MoodState
 
 logger = logging.getLogger(__name__)
 
@@ -147,10 +147,128 @@ class InitStatus(BaseModel):
     error: Optional[str] = None
 
 
+_server_start_time = time.time()
+
+
 @router.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
-    """Health check endpoint."""
+    """Lightweight health check endpoint (for load balancers / uptime monitors)."""
     return HealthResponse(status="ok", version="1.0.0")
+
+
+@router.get("/health/deep", response_model=DeepHealthResponse)
+async def deep_health_check() -> DeepHealthResponse:
+    """Comprehensive health check that probes all subsystems.
+
+    Returns overall status and per-subsystem details. Use this for
+    diagnosing server issues. Not rate-limited.
+    """
+    import os as _os
+    subsystems = []
+    overall = "ok"
+
+    # 1. Agent service
+    try:
+        svc = _get_agent_service()
+        if svc.is_ready:
+            subsystems.append(SubsystemStatus(name="agent", status="ok", detail="ready"))
+        elif getattr(svc, '_initializing', False):
+            subsystems.append(SubsystemStatus(name="agent", status="degraded", detail="initializing"))
+            if overall == "ok":
+                overall = "degraded"
+        else:
+            subsystems.append(SubsystemStatus(name="agent", status="down", detail="not started"))
+            overall = "degraded"
+    except Exception as e:
+        subsystems.append(SubsystemStatus(name="agent", status="down", detail=str(e)[:200]))
+        overall = "degraded"
+
+    # 2. Ollama / LLM backend
+    try:
+        import httpx
+        t0 = time.time()
+        ollama_host = _os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{ollama_host}/api/tags")
+            elapsed_ms = (time.time() - t0) * 1000
+            if resp.status_code == 200:
+                model_count = len(resp.json().get("models", []))
+                subsystems.append(SubsystemStatus(
+                    name="ollama", status="ok",
+                    detail=f"{model_count} models available",
+                    response_time_ms=round(elapsed_ms, 1),
+                ))
+            else:
+                subsystems.append(SubsystemStatus(
+                    name="ollama", status="degraded",
+                    detail=f"HTTP {resp.status_code}",
+                    response_time_ms=round(elapsed_ms, 1),
+                ))
+                if overall == "ok":
+                    overall = "degraded"
+    except Exception as e:
+        subsystems.append(SubsystemStatus(name="ollama", status="down", detail=str(e)[:200]))
+        overall = "degraded"
+
+    # 3. Memory / ChromaDB
+    try:
+        from aura.config import Config
+        chromadb_path = Config.CHROMADB_PATH
+        if chromadb_path.exists():
+            subsystems.append(SubsystemStatus(name="chromadb", status="ok", detail=str(chromadb_path)))
+        else:
+            subsystems.append(SubsystemStatus(name="chromadb", status="degraded", detail="path does not exist"))
+            if overall == "ok":
+                overall = "degraded"
+    except Exception as e:
+        subsystems.append(SubsystemStatus(name="chromadb", status="unavailable", detail=str(e)[:200]))
+
+    # 4. ALMA emotion engine
+    try:
+        from aura.emotion.alma_engine import alma_engine
+        if alma_engine:
+            state = alma_engine.get_emotional_state()
+            subsystems.append(SubsystemStatus(
+                name="alma", status="ok",
+                detail=f"emotion={state.get('dominant_emotion', 'neutral')}"
+            ))
+        else:
+            subsystems.append(SubsystemStatus(name="alma", status="unavailable", detail="not initialized"))
+    except ImportError:
+        subsystems.append(SubsystemStatus(name="alma", status="unavailable", detail="module not found"))
+    except Exception as e:
+        subsystems.append(SubsystemStatus(name="alma", status="down", detail=str(e)[:200]))
+
+    # 5. Disk space
+    try:
+        import shutil
+        usage = shutil.disk_usage("/opt/aura" if _os.path.exists("/opt/aura") else ".")
+        free_gb = usage.free / (1024 ** 3)
+        if free_gb < 1.0:
+            subsystems.append(SubsystemStatus(name="disk", status="degraded", detail=f"{free_gb:.1f}GB free"))
+            overall = "degraded"
+        else:
+            subsystems.append(SubsystemStatus(name="disk", status="ok", detail=f"{free_gb:.1f}GB free"))
+    except Exception as e:
+        subsystems.append(SubsystemStatus(name="disk", status="unavailable", detail=str(e)[:100]))
+
+    # 6. Rate limit config
+    try:
+        from aura.config import Config
+        rate_limit = Config.API_RATE_LIMIT
+    except Exception:
+        rate_limit = 300
+
+    env = _os.getenv("AURA_ENV", "development")
+
+    return DeepHealthResponse(
+        status=overall,
+        version="1.0.0",
+        uptime_seconds=int(time.time() - _server_start_time),
+        subsystems=[s.model_dump() for s in subsystems],
+        environment=env,
+        rate_limit_per_min=rate_limit,
+    )
 
 
 @router.get("/init", response_model=InitStatus)
@@ -563,7 +681,7 @@ async def get_models() -> ModelsResponse:
 
     except asyncio.TimeoutError:
         logger.warning("[Models] Timed out getting models")
-        return ModelsResponse(local_models=[], cloud_models=[], current_model="loading...")
+        return ModelsResponse(local_models=[], cloud_models=[], chatgpt_models=[], current_model="loading...")
     except Exception as e:
         logger.error(f"[Models] Error: {e}")
         raise HTTPException(status_code=500, detail=safe_error_detail(e))

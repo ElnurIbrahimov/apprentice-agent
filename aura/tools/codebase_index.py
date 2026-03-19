@@ -33,7 +33,11 @@ logger = logging.getLogger(__name__)
 
 # ── Embedding config ────────────────────────────────────────────
 _EMBED_MODEL = "nomic-embed-text:latest"
-_EMBED_URL = "http://localhost:11434/api/embeddings"
+try:
+    from aura.config import Config as _CbConfig
+    _EMBED_URL = _CbConfig.OLLAMA_HOST + "/api/embeddings"
+except Exception:
+    _EMBED_URL = os.getenv("OLLAMA_HOST", "http://localhost:11434") + "/api/embeddings"
 
 # ── File classification ─────────────────────────────────────────
 # Higher weight = more important in search ranking

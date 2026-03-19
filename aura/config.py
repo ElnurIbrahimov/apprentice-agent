@@ -392,7 +392,7 @@ class Config:
 
     # API Security Configuration (primary definition is above, line ~143)
     API_KEY: str = os.getenv("AURA_API_KEY", "")  # Set to enable API key auth
-    API_RATE_LIMIT: int = int(os.getenv("AURA_API_RATE_LIMIT", "60"))  # requests per minute
+    API_RATE_LIMIT: int = int(os.getenv("AURA_API_RATE_LIMIT", "300"))  # requests per minute (300 for server deployments)
     API_CORS_ORIGINS: str = os.getenv("AURA_CORS_ORIGINS", "http://localhost:5173,http://localhost:3000,http://localhost:8000")
 
     # AURA v3.0 ALIVE System Configuration
@@ -415,13 +415,8 @@ class Config:
     }
 
     # Vision model VRAM requirements (GB) — used by _can_fit_model() in vision.py
-    VISION_MODEL_VRAM: Dict[str, float] = {
-        "llava": 4.0,
-        "llava:13b": 8.0,
-        "llava:34b": 20.0,
-        "minicpm-v": 6.0,
-        "bakllava": 4.0,
-    }
+    # All vision is cloud-based now; keep dict for backward compat
+    VISION_MODEL_VRAM: Dict[str, float] = {}
 
     # Florence-2 Vision (local HuggingFace model — for image preprocessing only)
     FLORENCE2_MODEL: str = "microsoft/Florence-2-base"

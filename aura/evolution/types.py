@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 from enum import Enum
 import hashlib
 import json
+import os
 
 
 class CandidateSelectionStrategy(Enum):
@@ -110,8 +111,8 @@ class GEPAConfig:
     timeout_seconds: int = 600  # 10 min default
 
     # Models (Ollama endpoints)
-    reflection_model: str = "qwen3:8b"  # Strong model for mutation proposals
-    eval_model: str = "qwen2.5-coder:7b"  # Fast model for evaluation
+    reflection_model: str = "qwen3.5:397b-cloud"  # Strong model for mutation proposals
+    eval_model: str = "nemotron-3-super:cloud"  # Fast model for evaluation
 
     # Reflection
     minibatch_size: int = 3
@@ -136,7 +137,7 @@ class GEPAConfig:
     run_dir: str = "./aura_data/evolution_runs"
 
     # Ollama
-    ollama_base_url: str = "http://localhost:11434"
+    ollama_base_url: str = field(default_factory=lambda: os.getenv("OLLAMA_HOST", "http://localhost:11434"))
 
 
 @dataclass

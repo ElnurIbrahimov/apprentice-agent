@@ -19,10 +19,13 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
-def create_llm_func(model: str, base_url: str = "http://localhost:11434"):
+def create_llm_func(model: str, base_url: str = None):
     """Create an LLM function using Ollama's API."""
+    import os as _os
     import urllib.request
     import urllib.error
+    if base_url is None:
+        base_url = _os.getenv("OLLAMA_HOST", "http://localhost:11434")
 
     def llm_func(system_prompt: str, user_prompt: str) -> str:
         payload = {
@@ -199,12 +202,12 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Preview without running")
     parser.add_argument("--iterations", type=int, default=10, help="Max iterations")
     parser.add_argument(
-        "--reflect-model", default="qwen3:8b",
-        help="Model for reflection/mutation (default: qwen3:8b)"
+        "--reflect-model", default="qwen3.5:397b-cloud",
+        help="Model for reflection/mutation (default: qwen3.5:397b-cloud)"
     )
     parser.add_argument(
-        "--eval-model", default="qwen2.5-coder:7b",
-        help="Model for evaluation (default: qwen2.5-coder:7b)"
+        "--eval-model", default="nemotron-3-super:cloud",
+        help="Model for evaluation (default: nemotron-3-super:cloud)"
     )
     parser.add_argument("--timeout", type=int, default=600, help="Timeout in seconds")
     parser.add_argument("--verbose", "-v", action="store_true")

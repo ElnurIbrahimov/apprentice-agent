@@ -31,6 +31,8 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
     PUBLIC_PATHS = {
         "/",
         "/health",
+        "/api/health",
+        "/api/health/deep",
         "/api/status",
         "/api/auth/chatgpt/status",
         "/api/auth/chatgpt/login",
@@ -93,7 +95,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     Uses a sliding window counter approach.
     """
 
-    def __init__(self, app, requests_per_minute: int = 60, enabled: bool = True):
+    # Paths exempt from rate limiting (health checks, monitoring)
+    EXEMPT_PATHS = {"/", "/health", "/api/health", "/api/health/deep", "/api/status", "/api/init"}
+
+    def __init__(self, app, requests_per_minute: int = 300, enabled: bool = True):
         super().__init__(app)
         self.requests_per_minute = requests_per_minute
         self.enabled = enabled and requests_per_minute > 0
@@ -127,6 +132,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         # Skip rate limiting for WebSocket upgrades (handled differently)
         if request.headers.get("upgrade", "").lower() == "websocket":
+            return await call_next(request)
+
+        # Skip rate limiting for health/monitoring endpoints
+        if request.url.path in self.EXEMPT_PATHS:
             return await call_next(request)
 
         # Support reverse proxy: check X-Forwarded-For when behind a trusted proxy

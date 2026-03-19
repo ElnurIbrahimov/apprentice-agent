@@ -101,22 +101,22 @@ class TestGetClient:
         """Without brain, returns local client and unchanged model."""
         with patch('aura.tools.vision.ollama.Client', return_value=mock_client):
             tool = VisionTool()
-        client, model = tool._get_client("llava")
+        client, model = tool._get_client("kimi-k2.5:cloud")
         assert client is mock_client
-        assert model == "llava"
+        assert model == "kimi-k2.5:cloud"
 
     def test_brain_client_when_brain_provided(self, mock_brain):
         """With brain, returns brain's client."""
         tool = VisionTool(brain=mock_brain)
-        client, model = tool._get_client("llava")
+        client, model = tool._get_client("kimi-k2.5:cloud")
         assert client is mock_brain.client
-        assert model == "llava"
+        assert model == "kimi-k2.5:cloud"
 
     def test_cloud_suffix_stripped(self, mock_brain):
-        """Cloud-suffixed model names are stripped to local names."""
+        """Cloud-suffixed model names with -cloud are stripped to base names."""
         tool = VisionTool(brain=mock_brain)
-        client, model = tool._get_client("qwen3-vl:235b-cloud")
-        assert model == "qwen3-vl:235b"
+        client, model = tool._get_client("some-model-cloud")
+        assert model == "some-model"
 
     def test_non_cloud_model_unchanged(self, mock_brain):
         """Non-cloud model names pass through unchanged."""
@@ -132,10 +132,10 @@ class TestGetClient:
 class TestFallbackChain:
     def test_primary_model_succeeds(self, mock_brain):
         """When primary model works, no fallback needed."""
-        tool = VisionTool(model="llava", brain=mock_brain)
+        tool = VisionTool(model="kimi-k2.5:cloud", brain=mock_brain)
         content, model_used = tool._analyze_with_fallback("base64data", "describe")
         assert content == "A test image description"
-        assert model_used == "llava"
+        assert model_used == "kimi-k2.5:cloud"
         mock_brain.client.chat.assert_called_once()
 
     def test_fallback_on_primary_failure(self, mock_brain):
@@ -161,10 +161,10 @@ class TestFallbackChain:
         """Primary model isn't tried twice if it's also in the chain."""
         mock_brain.client.chat.side_effect = Exception("fail")
         # Use a model that's in MODEL_VISION_CHAIN
-        tool = VisionTool(model="llava", brain=mock_brain)
+        tool = VisionTool(model="kimi-k2.5:cloud", brain=mock_brain)
         with pytest.raises(RuntimeError):
             tool._analyze_with_fallback("base64data", "describe")
-        # llava should appear only once in the tried list
+        # The primary model should appear only once in the tried list
         models_tried = [
             c.kwargs['model'] if 'model' in c.kwargs else c.args[0]
             for c in mock_brain.client.chat.call_args_list
@@ -214,9 +214,9 @@ class TestAnalyzeImage:
 
     def test_returns_model_used(self, tiny_png, mock_brain):
         """Result dict includes which model actually handled the request."""
-        tool = VisionTool(model="llava", brain=mock_brain)
+        tool = VisionTool(model="kimi-k2.5:cloud", brain=mock_brain)
         result = tool.analyze_image(tiny_png)
-        assert result["model"] == "llava"
+        assert result["model"] == "kimi-k2.5:cloud"
 
     def test_all_models_fail_returns_error(self, tiny_png, mock_brain):
         mock_brain.client.chat.side_effect = Exception("fail")
@@ -454,6 +454,6 @@ class TestConfigIntegration:
         result = Config.get_model("nonexistent_role")
         assert result == Config.MODEL_NAME
 
-    def test_chain_contains_llava_fallback(self):
-        """The chain should always include llava as a fallback."""
-        assert any("llava" in m for m in Config.MODEL_VISION_CHAIN)
+    def test_chain_contains_cloud_models(self):
+        """The chain should contain cloud models we actually have."""
+        assert any("cloud" in m for m in Config.MODEL_VISION_CHAIN)

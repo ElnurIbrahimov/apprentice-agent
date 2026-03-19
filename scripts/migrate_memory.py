@@ -22,6 +22,7 @@ Created: 2026-03-16
 import argparse
 import json
 import logging
+import os
 import sqlite3
 import sys
 import time
@@ -47,8 +48,9 @@ def get_embedding(text: str):
     try:
         import numpy as np
         import requests
+        _host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
         r = requests.post(
-            "http://localhost:11434/api/embeddings",
+            f"{_host}/api/embeddings",
             json={"model": "nomic-embed-text:latest", "prompt": text[:1000]},
             timeout=5,
         )

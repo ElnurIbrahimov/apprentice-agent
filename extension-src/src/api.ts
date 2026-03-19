@@ -3,20 +3,20 @@ import ext from './ext';
 // ---------------------------------------------------------------------------
 // Backend URL configuration
 //
-// Defaults to localhost for local development. Users can configure a remote
-// server URL via the Settings panel, which persists to chrome.storage.local.
+// Defaults to the remote server. Users can configure a different URL via the
+// Settings panel, which persists to chrome.storage.local.
 // On startup, initBackendUrl() loads the saved URL and updates HTTP + WS_URL.
 // ---------------------------------------------------------------------------
 
 const DEFAULT_HTTP = 'http://89.167.107.134';
-const DEFAULT_WS = 'ws://89.167.107.134/api/chat/stream';
+const DEFAULT_API_KEY = 'i-L5ShpMkY2B7loNb8VS4EAAT-Ronh-K8cIgRILGjnQ';
 
 export let HTTP = DEFAULT_HTTP;
-export let WS_URL = DEFAULT_WS;
-export let API_KEY = 'i-L5ShpMkY2B7loNb8VS4EAAT-Ronh-K8cIgRILGjnQ';
+export let WS_URL = deriveWsUrl(DEFAULT_HTTP);
+export let API_KEY = DEFAULT_API_KEY;
 
 /** Derive the WebSocket URL from an HTTP base URL. */
-function deriveWsUrl(httpUrl: string): string {
+export function deriveWsUrl(httpUrl: string): string {
   let base = httpUrl.replace(/\/+$/, '');
   if (base.startsWith('https://')) {
     base = 'wss://' + base.slice('https://'.length);
@@ -27,16 +27,53 @@ function deriveWsUrl(httpUrl: string): string {
 }
 
 /**
+ * Extract a display-friendly server label from the HTTP URL.
+ * e.g. "http://89.167.107.134" -> "89.167.107.134"
+ *      "http://localhost:8000" -> "localhost:8000"
+ */
+export function getServerLabel(): string {
+  try {
+    const u = new URL(HTTP);
+    return u.host;
+  } catch {
+    return HTTP.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+  }
+}
+
+/**
  * Load saved backend URL and API key from chrome.storage.local.
  * Call this once at extension startup (before connecting WebSocket).
  * Returns a promise that resolves when HTTP/WS_URL/API_KEY are set.
  */
 export function initBackendUrl(): Promise<void> {
-  // Force server URL — route through nginx on port 80
-  HTTP = 'http://89.167.107.134';
-  WS_URL = 'ws://89.167.107.134/api/chat/stream';
-  API_KEY = 'i-L5ShpMkY2B7loNb8VS4EAAT-Ronh-K8cIgRILGjnQ';
-  return Promise.resolve();
+  return new Promise((resolve) => {
+    if (!ext?.storage?.local) {
+      // No storage API (dev mode / non-extension context) — use defaults
+      HTTP = DEFAULT_HTTP;
+      WS_URL = deriveWsUrl(HTTP);
+      API_KEY = DEFAULT_API_KEY;
+      resolve();
+      return;
+    }
+    ext.storage.local.get(['backendUrl', 'apiKey'], (d: any) => {
+      const savedUrl = d?.backendUrl?.trim?.();
+      const savedKey = d?.apiKey?.trim?.();
+
+      if (savedUrl) {
+        HTTP = savedUrl.replace(/\/+$/, '');
+      } else {
+        HTTP = DEFAULT_HTTP;
+      }
+      WS_URL = deriveWsUrl(HTTP);
+
+      if (savedKey) {
+        API_KEY = savedKey;
+      } else {
+        API_KEY = DEFAULT_API_KEY;
+      }
+      resolve();
+    });
+  });
 }
 
 /**
@@ -47,7 +84,7 @@ export function setBackendUrl(url: string): void {
   const cleaned = url.trim().replace(/\/+$/, '');
   if (!cleaned) {
     HTTP = DEFAULT_HTTP;
-    WS_URL = DEFAULT_WS;
+    WS_URL = deriveWsUrl(DEFAULT_HTTP);
     ext?.storage?.local?.remove(['backendUrl']);
   } else {
     HTTP = cleaned;

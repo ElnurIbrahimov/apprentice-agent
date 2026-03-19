@@ -65,12 +65,15 @@ SLASH_COMMANDS = [
 SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
     "/model": [
         ("auto", "Auto-select best model"),
-        ("deepseek-r1:8b", "DeepSeek R1 8B (local)"),
-        ("qwen3:8b", "Qwen 3 8B (local)"),
-        ("qwen2.5-coder:7b", "Qwen 2.5 Coder 7B (local)"),
-        ("devstral-2:123b", "Devstral 2 123B (cloud)"),
-        ("cogito-2.1:671b", "Cogito 2.1 671B (cloud)"),
-        ("qwen3-coder:480b", "Qwen 3 Coder 480B (cloud)"),
+        ("minimax-m2.7:cloud", "MiniMax M2.7 (cloud, 1M ctx)"),
+        ("minimax-m2.5:cloud", "MiniMax M2.5 (cloud, SWE 80.2%)"),
+        ("kimi-k2.5:cloud", "Kimi K2.5 (cloud, agentic)"),
+        ("qwen3.5:397b-cloud", "Qwen 3.5 397B (cloud, reasoning)"),
+        ("deepseek-v3.2:cloud", "DeepSeek V3.2 (cloud, all-rounder)"),
+        ("qwen3-coder:480b-cloud", "Qwen 3 Coder 480B (cloud, code)"),
+        ("nemotron-3-super:cloud", "Nemotron 3 Super (cloud, fast)"),
+        ("glm-5:cloud", "GLM-5 (cloud, general)"),
+        ("gpt-oss:120b-cloud", "GPT-OSS 120B (cloud)"),
     ],
     "/project": [
         ("info", "Show project summary"),

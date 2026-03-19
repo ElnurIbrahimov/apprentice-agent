@@ -258,7 +258,7 @@ class OllamaBrain:
         # Local Ollama client (for local models)
         self.client = ollama.Client(host=Config.OLLAMA_HOST)
 
-        # Cloud Ollama client (for cloud models like deepseek-v3.1:671b-cloud)
+        # Cloud Ollama client (for cloud models like kimi-k2.5:cloud)
         self._cloud_client = None
         api_key = os.getenv("OLLAMA_API_KEY")
         if api_key:
@@ -369,7 +369,7 @@ class OllamaBrain:
 
         Routing:
         - chatgpt:* models → ChatGPT OAuth client (Codex Responses API)
-        - *-cloud / *:cloud models → Ollama cloud client
+        - *-cloud / *:cloud models → Ollama cloud client (or local bridge)
         - everything else → local Ollama client
 
         Returns:
@@ -382,7 +382,9 @@ class OllamaBrain:
                 return self._chatgpt_client, model
             else:
                 logger.warning(f"[BRAIN] ChatGPT not authenticated, cannot use {model}")
-                # Fall through to default
+                # Fall back to cloud client if available, not local Ollama
+                if self._cloud_client:
+                    return self._cloud_client, Config.MODEL_FAST
                 return self.client, Config.MODEL_FAST
 
         if model.endswith(("-cloud", ":cloud")):
@@ -390,9 +392,10 @@ class OllamaBrain:
                 logger.debug(f"[BRAIN] Using cloud client for model: {model}")
                 return self._cloud_client, model
             else:
-                # No api.ollama.com key — route through local Ollama bridge which
-                # proxies cloud models (deepseek-v3.2:cloud, qwen3.5:397b-cloud, etc.)
-                logger.debug(f"[BRAIN] No OLLAMA_API_KEY — routing {model} via local Ollama bridge")
+                # No OLLAMA_API_KEY — try local Ollama bridge as last resort.
+                # On a server without local Ollama this will fail, but the
+                # caller's fallback chain + timeout will handle it gracefully.
+                logger.warning(f"[BRAIN] No OLLAMA_API_KEY — routing {model} via local Ollama bridge (may fail without local Ollama)")
                 return self.client, model
         return self.client, model
 
@@ -1894,7 +1897,8 @@ class OllamaBrain:
         system_prompt: Optional[str] = None,
         use_history: bool = True,
         task_type: Optional[TaskType] = None,
-        tone_modifier: Optional[str] = None
+        tone_modifier: Optional[str] = None,
+        model_override: Optional[str] = None
     ) -> str:
         """Generate a response using Ollama for reasoning tasks.
 
@@ -1904,6 +1908,7 @@ class OllamaBrain:
             use_history: Whether to include conversation history
             task_type: Type of task for model routing (auto-detected if None)
             tone_modifier: Optional emotional tone modifier from EvoEmo/ALMA
+            model_override: Explicit model to use (bypasses all routing and stats)
         """
         # Check if auto-reset is needed to prevent slowdown
         self._check_auto_reset()
@@ -1915,9 +1920,15 @@ class OllamaBrain:
             except Exception as e:
                 logger.debug(f"[BRAIN] ALMA message processing failed: {e}")
 
-        # Select model based on task type, then apply outcome-aware routing overlay
-        model = self._select_model(prompt, task_type)
-        model = self._routing_stats_override(model, task_type)
+        # Use explicit model_override if provided — user's choice is final,
+        # no routing stats, no auto-override, no fallback chain selection
+        if model_override:
+            logger.info(f"[BRAIN] Using explicit model override: {model_override}")
+            model = model_override
+        else:
+            # Select model based on task type, then apply outcome-aware routing overlay
+            model = self._select_model(prompt, task_type)
+            model = self._routing_stats_override(model, task_type)
         self._last_model_used = model
 
         full_system_prompt = self._build_full_system_prompt(prompt, system_prompt, tone_modifier)
@@ -2382,17 +2393,21 @@ class OllamaBrain:
     # Outcome-aware routing helpers
     # ------------------------------------------------------------------
 
-    def _routing_stats_override(self, model: str, task_type: Optional[TaskType] = None) -> str:
+    def _routing_stats_override(self, model: str, task_type: Optional[TaskType] = None, user_selected: bool = False) -> str:
         """Apply outcome-aware routing stats overlay to heuristic model selection.
 
         Only activates when ENABLE_OUTCOME_AWARE_ROUTING=True and RoutingStats
         has ≥MIN_SAMPLES data for the selected chain + microtask category.
         Falls back to heuristic model unchanged when data is insufficient.
+
+        Args:
+            user_selected: If True, the model was explicitly chosen by the user
+                           (via UI dropdown or CLI). NEVER override user selections.
         """
         if not getattr(Config, "ENABLE_OUTCOME_AWARE_ROUTING", True):
             return model
-        # Don't override user's explicit model choice
-        if self._model_override:
+        # Don't override user's explicit model choice (parameter OR instance-level)
+        if user_selected or self._model_override:
             return model
         try:
             from aura.reliability.routing_stats import get_routing_stats, MicrotaskCategory

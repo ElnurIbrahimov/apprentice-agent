@@ -7,7 +7,7 @@ These are real "covert trains of thought" — parallel cognitive processes
 that run alongside overt conversation, not templates or random text.
 
 Uses brain.think() with use_history=False so thoughts don't pollute
-the chat conversation. Runs on mistral:7b (already loaded, no extra VRAM).
+the chat conversation. Runs on the configured fast cloud model.
 
 Frontend expects: { type: string, content: string, timestamp: number }
 Supported types: observation, reflection, inference, memory, planning, emotion, curiosity

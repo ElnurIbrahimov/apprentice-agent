@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Write ChatGPT auth token to the server. Run on the server:
    python3 /opt/aura/deploy/setup_chatgpt_token.py
+
+NOTE: You can now set the token via the API instead:
+   POST /api/auth/chatgpt/set-token  {"refresh": "rt_...", "account_id": "..."}
+   Or use the extension Settings panel > ChatGPT Token section.
 """
 import json, os
 
@@ -8,9 +12,9 @@ TOKEN_DIR = "/opt/aura/.aura"
 TOKEN_FILE = os.path.join(TOKEN_DIR, "chatgpt_auth.json")
 
 token_data = {
-    "refresh": "rt_DjlZSXy1KOCd_xvjvREV3la59K-k2PBvxxO9vamBZ20.t5jtlM1KnwyUyU1l4b7xpWdN4HzbBQhPsQMeiindFBs",
+    "refresh": "PASTE_YOUR_REFRESH_TOKEN_HERE",
     "expires": 0,
-    "account_id": "92dff04b-90a9-4dfa-82eb-f35c6a9c3646"
+    "account_id": "PASTE_YOUR_ACCOUNT_ID_HERE"
 }
 
 os.makedirs(TOKEN_DIR, exist_ok=True)

@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/agent", tags=["agent"], dependencies=[Depends(require_api_key)])
 
-OLLAMA_BASE = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_BASE = os.getenv("OLLAMA_BASE_URL") or os.getenv("OLLAMA_HOST", "http://localhost:11434")
 
 
 # ---------------------------------------------------------------------------
@@ -59,7 +59,7 @@ async def agent_action(body: dict):
     session_id = body.get("session_id", "")
     if session_id and not _SESSION_ID_RE.match(session_id):
         raise HTTPException(400, "Invalid session_id: must be alphanumeric/hyphens, max 64 chars")
-    model = body.get("model") or os.getenv("AURA_AGENT_MODEL", "gemini-3-flash-preview:cloud")
+    model = body.get("model") or os.getenv("AURA_AGENT_MODEL", "nemotron-3-super:cloud")
 
     t0 = time.monotonic()
 

@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/summarize", tags=["summarize"], dependencies=[Depends(require_api_key)])
 
-OLLAMA_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434") + "/api/generate"
-DEFAULT_MODEL = os.getenv("AURA_AGENT_MODEL", "gemini-3-flash-preview:cloud")
+OLLAMA_URL = (os.getenv("OLLAMA_BASE_URL") or os.getenv("OLLAMA_HOST", "http://localhost:11434")) + "/api/generate"
+DEFAULT_MODEL = os.getenv("AURA_AGENT_MODEL", "nemotron-3-super:cloud")
 MAX_TEXT_CHARS = 50000
 
 

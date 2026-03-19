@@ -84,6 +84,24 @@ class HealthResponse(BaseModel):
     version: str = "1.0.0"
 
 
+class SubsystemStatus(BaseModel):
+    """Status of an individual subsystem."""
+    name: str
+    status: str  # "ok", "degraded", "down", "unavailable"
+    detail: Optional[str] = None
+    response_time_ms: Optional[float] = None
+
+
+class DeepHealthResponse(BaseModel):
+    """Comprehensive health check response with subsystem details."""
+    status: str = "ok"  # "ok", "degraded", "down"
+    version: str = "1.0.0"
+    uptime_seconds: int = 0
+    subsystems: list = []  # List[SubsystemStatus]
+    environment: str = "unknown"
+    rate_limit_per_min: int = 0
+
+
 class WebSocketMessage(BaseModel):
     """WebSocket message format."""
     type: str  # "chat", "chunk", "done", "error"

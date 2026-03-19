@@ -359,7 +359,7 @@ try:
     )
     app.add_middleware(
         RateLimitMiddleware,
-        requests_per_minute=getattr(_auth_cfg, 'API_RATE_LIMIT', 200),
+        requests_per_minute=getattr(_auth_cfg, 'API_RATE_LIMIT', 300),
         enabled=True,
     )
 except Exception as e:

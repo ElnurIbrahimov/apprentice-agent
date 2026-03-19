@@ -496,8 +496,11 @@ async def websocket_chat(websocket: WebSocket):
         Server -> Client: {"type": "done", "response": "Hi there!", "mood": {...}}
         Server -> Client: {"type": "stopped"} - Generation was stopped
     """
-    # Only accept API key via header, not query params
+    # Accept API key via header OR query param (browsers cannot send custom
+    # headers on WebSocket connections, so the extension passes it as ?api_key=)
     api_key = websocket.headers.get("X-API-Key", "")
+    if not api_key:
+        api_key = websocket.query_params.get("api_key", "")
     if not verify_api_key_ws(api_key):
         await websocket.close(code=1008)
         return

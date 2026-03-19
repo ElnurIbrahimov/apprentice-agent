@@ -81,7 +81,7 @@ class VoiceManager:
         _ensure_voice_models()
         self.sesame = SesameTTS() if SesameTTS else None
         self.personaplex = PersonaPlexTool() if PersonaPlexTool else None
-        self._ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        self._ollama_host = os.getenv("OLLAMA_HOST") or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
         self.available = VOICE_MODELS_AVAILABLE
 
     def switch_to_pipeline(self) -> dict:

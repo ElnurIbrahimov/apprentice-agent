@@ -11,24 +11,21 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 MODEL_CONTEXT_WINDOWS = {
-    # Local models
-    "qwen3:8b": 32768,
-    "qwen2.5-coder:7b": 32768,
-    "deepseek-r1:8b": 32768,
-    "gemma3:4b": 8192,
-    "phi4-mini": 16384,
-    "hermes3:8b": 8192,
-    "deepcoder:1.5b": 8192,
-    "qwen2:1.5b": 8192,
+    # Utility models (local)
+    "nomic-embed-text:latest": 8192,
+    "glm-ocr:latest": 8192,
     # Cloud models
-    "qwen3.5:397b-cloud": 131072,
-    "devstral-2:123b-cloud": 131072,
-    "kimi-k2.5:cloud": 131072,
-    "kimi-k2-thinking:cloud": 131072,
-    "cogito-2.1:671b-cloud": 131072,
-    "qwen3-coder:480b-cloud": 131072,
+    "minimax-m2.7:cloud": 1048576,
     "minimax-m2.5:cloud": 196608,
-    "gemini-3-flash-preview:cloud": 1048576,
+    "kimi-k2.5:cloud": 131072,
+    "qwen3.5:397b-cloud": 131072,
+    "qwen3.5:cloud": 131072,
+    "deepseek-v3.2:cloud": 131072,
+    "qwen3-coder:480b-cloud": 131072,
+    "qwen3-coder-next:cloud": 131072,
+    "gpt-oss:120b-cloud": 131072,
+    "glm-5:cloud": 131072,
+    "nemotron-3-super:cloud": 131072,
 }
 DEFAULT_CONTEXT_WINDOW = 32768
 

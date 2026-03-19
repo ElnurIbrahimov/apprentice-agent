@@ -110,6 +110,10 @@ if [ ! -f "$AURA_DIR/.env" ]; then
   sed -i "s|^AURA_ENV=.*|AURA_ENV=production|" "$AURA_DIR/.env"
   # Trust nginx as reverse proxy for correct rate limiting
   echo "AURA_TRUST_PROXY=true" >> "$AURA_DIR/.env"
+  # Headless mode — disable screen/GUI/audio features
+  echo "AURA_HEADLESS=1" >> "$AURA_DIR/.env"
+  # Server-appropriate rate limit
+  echo "AURA_API_RATE_LIMIT=300" >> "$AURA_DIR/.env"
 
   log "Generated API key: ${API_KEY}"
   warn "SAVE THIS KEY — you'll need it in the browser extension settings."
@@ -144,11 +148,22 @@ User=aura
 Group=aura
 WorkingDirectory=/opt/aura
 EnvironmentFile=/opt/aura/.env
+
+# Set PYTHONDONTWRITEBYTECODE to prevent __pycache__ creation on server
+# Set AURA_HEADLESS so all components know this is a headless server
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=AURA_HEADLESS=1
+Environment=AURA_ENV=production
+
 ExecStart=/opt/aura/venv/bin/python run_web.py --host 127.0.0.1 --port 8000 --prod
-Restart=always
+
+# Restart policy: auto-restart on failure with increasing backoff
+Restart=on-failure
 RestartSec=5
-StartLimitIntervalSec=60
-StartLimitBurst=5
+RestartSteps=5
+RestartMaxDelaySec=120
+StartLimitIntervalSec=600
+StartLimitBurst=10
 
 # Security hardening
 NoNewPrivileges=yes
@@ -160,6 +175,10 @@ PrivateTmp=yes
 # Resource limits
 LimitNOFILE=65536
 MemoryMax=4G
+MemoryHigh=3G
+
+# Watchdog: systemd kills the service if it doesn't notify within 120s
+WatchdogSec=120
 
 # Logging
 StandardOutput=journal
@@ -182,6 +201,8 @@ cat > /etc/systemd/system/aura-telegram.service << 'SERVICE'
 Description=AURA Telegram Bot
 After=network.target aura.service
 Wants=aura.service
+# Bind lifecycle to main service — if aura stops, telegram stops too
+BindsTo=aura.service
 
 [Service]
 Type=simple
@@ -189,11 +210,19 @@ User=aura
 Group=aura
 WorkingDirectory=/opt/aura
 EnvironmentFile=/opt/aura/.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=AURA_HEADLESS=1
+Environment=AURA_ENV=production
+
 ExecStart=/opt/aura/venv/bin/python run_telegram.py
-Restart=always
+
+# Restart with backoff: 10s -> 20s -> 40s -> 80s -> 120s max
+Restart=on-failure
 RestartSec=10
-StartLimitIntervalSec=120
-StartLimitBurst=3
+RestartSteps=5
+RestartMaxDelaySec=120
+StartLimitIntervalSec=600
+StartLimitBurst=8
 
 # Security hardening
 NoNewPrivileges=yes
@@ -202,6 +231,7 @@ ProtectHome=yes
 ReadWritePaths=/opt/aura/data /opt/aura/aura_data /opt/aura/logs
 PrivateTmp=yes
 MemoryMax=2G
+MemoryHigh=1536M
 
 StandardOutput=journal
 StandardError=journal
@@ -220,6 +250,7 @@ cat > /etc/systemd/system/aura-daemon.service << 'SERVICE'
 Description=AURA Background Daemon (proactive monitoring, dreams)
 After=network.target aura.service
 Wants=aura.service
+BindsTo=aura.service
 
 [Service]
 Type=simple
@@ -227,11 +258,19 @@ User=aura
 Group=aura
 WorkingDirectory=/opt/aura
 EnvironmentFile=/opt/aura/.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=AURA_HEADLESS=1
+Environment=AURA_ENV=production
+
 ExecStart=/opt/aura/venv/bin/python aura_daemon.py
-Restart=always
+
+# Restart with backoff: 15s -> 30s -> 60s -> 120s max
+Restart=on-failure
 RestartSec=15
-StartLimitIntervalSec=120
-StartLimitBurst=3
+RestartSteps=4
+RestartMaxDelaySec=120
+StartLimitIntervalSec=600
+StartLimitBurst=8
 
 # Security hardening
 NoNewPrivileges=yes
@@ -240,6 +279,7 @@ ProtectHome=yes
 ReadWritePaths=/opt/aura/data /opt/aura/aura_data /opt/aura/logs
 PrivateTmp=yes
 MemoryMax=2G
+MemoryHigh=1536M
 
 StandardOutput=journal
 StandardError=journal
@@ -298,7 +338,7 @@ server {
         proxy_cache off;
     }
 
-    # Health check endpoint (no auth needed by AURA middleware)
+    # Health check endpoints (no auth needed by AURA middleware)
     location = /api/status {
         proxy_pass http://127.0.0.1:8000;
         proxy_http_version 1.1;
@@ -307,6 +347,25 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         access_log off;
+    }
+
+    location = /api/health {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        access_log off;
+    }
+
+    location = /api/health/deep {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 NGINX

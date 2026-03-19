@@ -1,7 +1,5 @@
 """Model configuration API — list available models, get/set per-role routing."""
 
-import asyncio
-import os
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
@@ -32,37 +30,19 @@ ROLE_LABELS = {
 }
 
 
-async def _ollama_models_async() -> list[dict]:
-    """Fetch model list from Ollama (async, non-blocking)."""
-    try:
-        import httpx
-        host = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-        async with httpx.AsyncClient(timeout=5) as c:
-            r = await c.get(f"{host}/api/tags")
-        if r.status_code == 200:
-            raw = r.json().get("models", [])
-            return [
-                {
-                    "name": m["name"],
-                    "size": m.get("size", 0),
-                    "is_cloud": m["name"].endswith(":cloud"),
-                }
-                for m in raw
-            ]
-    except Exception as e:
-        logger.warning(f"[Models] Could not fetch Ollama models: {e}")
-    return []
+def _get_verified_models() -> dict:
+    """Return verified model lists from config — no Ollama API query.
 
+    Cloud models come from VERIFIED_CLOUD_MODELS (hardcoded, trusted).
+    Local models come from VERIFIED_LOCAL_MODELS (utility only).
+    ChatGPT models come from chatgpt_client or hardcoded fallback.
+    """
+    from aura.config import VERIFIED_CLOUD_MODELS, VERIFIED_LOCAL_MODELS
 
-@router.get("/available")
-async def list_available_models():
-    """Return all models available (Ollama + ChatGPT), split by provider."""
-    models = await _ollama_models_async()
-    cloud = [m for m in models if m["is_cloud"]]
-    local = [m for m in models if not m["is_cloud"]]
+    cloud = [{"name": m, "size": 0, "is_cloud": True} for m in sorted(VERIFIED_CLOUD_MODELS)]
+    local = [{"name": m, "size": 0, "is_cloud": False} for m in sorted(VERIFIED_LOCAL_MODELS)]
 
-    # Add ChatGPT models — always include them, auth checked at request time
-    chatgpt_names = []
+    # ChatGPT models
     try:
         from aura.auth.chatgpt_client import ALL_CHATGPT_MODELS
         chatgpt_names = list(ALL_CHATGPT_MODELS)
@@ -73,20 +53,37 @@ async def list_available_models():
             "chatgpt:gpt-5.2", "chatgpt:gpt-5.2-codex",
             "chatgpt:gpt-5.1", "chatgpt:gpt-5.1-codex", "chatgpt:gpt-5.1-codex-mini", "chatgpt:gpt-5.1-codex-max",
         ]
-    chatgpt = [{"name": m, "size": 0, "is_cloud": True} for m in chatgpt_names]
+    chatgpt = [{"name": m, "size": 0, "is_cloud": True} for m in sorted(chatgpt_names)]
 
-    return {"cloud": cloud, "local": local, "chatgpt": chatgpt, "total": len(models) + len(chatgpt)}
+    return {"cloud": cloud, "local": local, "chatgpt": chatgpt, "total": len(cloud) + len(local) + len(chatgpt)}
+
+
+@router.get("/available")
+async def list_available_models():
+    """Return all verified models (cloud + local + ChatGPT), split by provider."""
+    return _get_verified_models()
+
+
+# Local models that are utility-only (not useful for chat)
+_NON_CHAT_KEYWORDS = {"embed", "nomic-embed", "bge-", "e5-", "gte-", "ocr"}
 
 
 @router.get("")
 async def list_models_web():
-    """Web UI compatible endpoint — returns flat model name lists."""
-    result = await list_available_models()
+    """Web UI compatible endpoint — returns flat model name lists.
+
+    Filters out embedding/OCR local models that aren't useful for chat.
+    """
+    result = _get_verified_models()
+    local_chat = [
+        m["name"] for m in result["local"]
+        if not any(kw in m["name"].lower() for kw in _NON_CHAT_KEYWORDS)
+    ]
     return {
         "chatgpt_models": [m["name"] for m in result["chatgpt"]],
         "cloud_models": [m["name"] for m in result["cloud"]],
-        "local_models": [m["name"] for m in result["local"]],
-        "total": result["total"],
+        "local_models": local_chat,
+        "total": len(result["chatgpt"]) + len(result["cloud"]) + len(local_chat),
     }
 
 

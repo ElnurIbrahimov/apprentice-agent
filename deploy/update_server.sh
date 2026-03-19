@@ -1,7 +1,7 @@
 #!/bin/bash
 # ===========================================================================
 # Aura Server Update Script
-# Pulls latest code, installs new dependencies, restarts the service.
+# Pulls latest code, cleans caches, installs deps, restarts all services.
 #
 # Usage:
 #   sudo bash /opt/aura/deploy/update_server.sh
@@ -29,6 +29,19 @@ git log --oneline -1
 log "Pulling latest changes..."
 git pull --ff-only || error "Git pull failed. Resolve conflicts manually."
 
+# ---------------------------------------------------------------------------
+# Clean ALL __pycache__ directories to prevent stale bytecode after git pull
+# ---------------------------------------------------------------------------
+log "Cleaning __pycache__ directories..."
+CACHE_COUNT=$(find "$AURA_DIR" -type d -name "__pycache__" | wc -l)
+find "$AURA_DIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+find "$AURA_DIR" -name "*.pyc" -delete 2>/dev/null || true
+find "$AURA_DIR" -name "*.pyo" -delete 2>/dev/null || true
+log "Cleaned $CACHE_COUNT __pycache__ directories and all .pyc/.pyo files"
+
+# ---------------------------------------------------------------------------
+# Update Python dependencies
+# ---------------------------------------------------------------------------
 log "Updating Python dependencies..."
 source "$AURA_DIR/venv/bin/activate"
 grep -v -E '(comtypes|pyttsx3|pycaw|winotify|screen-brightness-control|sounddevice|mss|pyperclip)' \
@@ -39,21 +52,65 @@ deactivate
 log "Fixing ownership..."
 chown -R aura:aura "$AURA_DIR"
 
-log "Restarting all AURA services..."
-systemctl restart aura
-systemctl is-active --quiet aura-telegram && systemctl restart aura-telegram
-systemctl is-active --quiet aura-daemon && systemctl restart aura-daemon
+# ---------------------------------------------------------------------------
+# Restart all services (stop first to ensure clean state)
+# ---------------------------------------------------------------------------
+log "Stopping all AURA services..."
+systemctl stop aura-daemon 2>/dev/null || true
+systemctl stop aura-telegram 2>/dev/null || true
+systemctl stop aura 2>/dev/null || true
+sleep 1
 
-sleep 3
+log "Starting AURA backend..."
+systemctl start aura
 
-if systemctl is-active --quiet aura; then
-  log "AURA backend restarted."
-else
-  warn "AURA backend may have failed. Check: journalctl -u aura -f"
+# Wait for backend to become healthy before starting dependents
+RETRIES=0
+MAX_RETRIES=15
+while [ $RETRIES -lt $MAX_RETRIES ]; do
+  if curl -sf http://127.0.0.1:8000/api/health > /dev/null 2>&1; then
+    log "Backend is healthy."
+    break
+  fi
+  RETRIES=$((RETRIES + 1))
+  sleep 2
+done
+if [ $RETRIES -eq $MAX_RETRIES ]; then
+  warn "Backend did not become healthy in 30s. Starting dependents anyway."
 fi
 
-systemctl is-active --quiet aura-telegram && log "Telegram bot restarted." || true
-systemctl is-active --quiet aura-daemon && log "Daemon restarted." || true
+# Start Telegram bot if enabled
+if systemctl is-enabled --quiet aura-telegram 2>/dev/null; then
+  systemctl start aura-telegram
+  log "Telegram bot started."
+fi
+
+# Start daemon if enabled
+if systemctl is-enabled --quiet aura-daemon 2>/dev/null; then
+  systemctl start aura-daemon
+  log "Daemon started."
+fi
+
+sleep 2
+
+# ---------------------------------------------------------------------------
+# Verify all services
+# ---------------------------------------------------------------------------
+log "Service status:"
+for svc in aura aura-telegram aura-daemon; do
+  if systemctl is-active --quiet "$svc" 2>/dev/null; then
+    log "  $svc: RUNNING"
+  else
+    warn "  $svc: NOT RUNNING (check: journalctl -u $svc -n 50)"
+  fi
+done
 
 log "New version:"
 git log --oneline -1
+
+# Quick health check
+if curl -sf http://127.0.0.1:8000/api/health 2>/dev/null; then
+  log "Health check: OK"
+else
+  warn "Health check: FAILED"
+fi

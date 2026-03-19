@@ -12,51 +12,51 @@ logger = logging.getLogger(__name__)
 # Routing table: task_category -> {tier: model_name}
 # Updated 2026-03-13 — based on verified benchmarks (SWE-bench, AIME, MMLU-Pro)
 #
-# Models available (cloud): kimi-k2.5, glm-5, minimax-m2.5, deepseek-v3.2,
-#   qwen3.5, qwen3-coder:480b, qwen3-coder-next, nemotron-3-super, gpt-oss
-# Models available (local): qwen3:8b, qwen2.5-coder:7b, deepseek-r1:8b,
-#   deepcoder:1.5b, gemma3:4b, hermes3:8b
+# Models available (cloud): minimax-m2.7, minimax-m2.5, kimi-k2.5, qwen3.5:397b,
+#   qwen3.5, deepseek-v3.2, qwen3-coder:480b, qwen3-coder-next, gpt-oss:120b,
+#   glm-5, nemotron-3-super
+# Utility (local): nomic-embed-text, glm-ocr
 #
 ROUTING_TABLE = {
     "orchestrator": {
         "max": "kimi-k2.5:cloud",              # MMLU-Pro 86.4%, SWE 76.8%, AIME 96.1%
         "balanced": "glm-5:cloud",              # SWE 77.8%, hallucination 34% (lowest)
-        "local": "qwen3:8b",
+        "local": "nemotron-3-super:cloud",      # fast cloud fallback
     },
     "code_gen": {
         "max": "minimax-m2.5:cloud",           # SWE 80.2%, Multi-SWE 51.3%, BFCL 76.8%
         "balanced": "glm-5:cloud",              # SWE 77.8%, HumanEval 90%
-        "local": "qwen2.5-coder:7b",
+        "local": "qwen3-coder-next:cloud",      # efficient code MoE
     },
     "small_edit": {
         "max": "qwen3-coder-next:cloud",       # SWE 70.6%, 3B active — fast for edits
-        "balanced": "qwen2.5-coder:7b",
-        "local": "qwen2.5-coder:7b",
+        "balanced": "qwen3-coder-next:cloud",
+        "local": "nemotron-3-super:cloud",      # fast cloud fallback
     },
     "reasoning": {
         "max": "deepseek-v3.2:cloud",          # AIME 94.2%, IMO gold, MMLU-Pro 85%
         "balanced": "kimi-k2.5:cloud",          # AIME 96.1%, MMLU-Pro 86.4%
-        "local": "deepseek-r1:8b",
+        "local": "qwen3.5:397b-cloud",          # deep planning fallback
     },
     "tool_dispatch": {
-        "max": "qwen3:8b",                     # local, instant, sufficient for routing
-        "balanced": "qwen3:8b",
-        "local": "qwen3:8b",
+        "max": "nemotron-3-super:cloud",       # fast, sufficient for routing
+        "balanced": "nemotron-3-super:cloud",
+        "local": "nemotron-3-super:cloud",
     },
     "long_context": {
-        "max": "qwen3.5:cloud",                # 1M context, 397B MoE, SWE 76.4%
+        "max": "minimax-m2.7:cloud",            # 1M context, self-evolving
         "balanced": "nemotron-3-super:cloud",   # 1M context, 2.2x throughput
-        "local": "hermes3:8b",
+        "local": "minimax-m2.5:cloud",          # 196K context
     },
     "vision": {
         "max": "kimi-k2.5:cloud",              # MMMU-Pro 78.5%, OCR 92.3%, MathVision 84.2%
         "balanced": "qwen3.5:cloud",            # 397B MoE, multimodal capable
-        "local": "gemma3:4b",
+        "local": "kimi-k2.5:cloud",             # native multimodal
     },
     "throughput": {
         "max": "nemotron-3-super:cloud",       # 2.2x faster than GPT-OSS, PinchBench 85.6%
         "balanced": "gpt-oss:120b-cloud",       # 5.1B active, fast, MMLU 90%
-        "local": "deepcoder:1.5b",
+        "local": "nemotron-3-super:cloud",      # fast cloud fallback
     },
 }
 

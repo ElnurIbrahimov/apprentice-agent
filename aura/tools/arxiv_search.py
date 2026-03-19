@@ -221,7 +221,7 @@ class ArxivSearchTool:
         """
         Search arXiv and generate an AI-powered research summary.
 
-        Searches for papers, collects abstracts, and uses llama3:8b to
+        Searches for papers, collects abstracts, and uses the configured fast model to
         generate a comprehensive markdown summary comparing the papers.
 
         Args:
@@ -262,7 +262,7 @@ class ArxivSearchTool:
 
             papers_text = "\n---\n".join(papers_context)
 
-            # Generate summary using llama3:8b
+            # Generate summary using the configured fast model
             prompt = f"""You are a research assistant. Analyze the following {len(papers)} academic papers from arXiv about "{query}" and create a comprehensive research summary.
 
 {papers_text}

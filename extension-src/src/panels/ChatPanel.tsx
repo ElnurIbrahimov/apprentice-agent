@@ -81,7 +81,7 @@ export default function ChatPanel() {
   const sendMessage = useCallback(async (text: string, overrideModel?: string) => {
     if (!text.trim()) return;
     const st = useStore.getState();
-    if (st.backendStatus === 'offline') { sysmsg('AURA is offline — start the backend server.'); return; }
+    // Don't hard-block here -- the WS/HTTP check below does a health probe
     if (st.activeStream) return;
 
     // Lock immediately
@@ -108,10 +108,28 @@ export default function ChatPanel() {
     // Check if WS or HTTP is available
     const { wsReady: ready, ws: socket, backendStatus: bs } = useStore.getState();
     const useWs = ready && socket?.readyState === WebSocket.OPEN;
+    // Only hard-block on 'offline'. If 'connecting', attempt HTTP fallback —
+    // the server may be reachable even if WebSocket hasn't connected yet.
     if (!useWs && bs === 'offline') {
-      setActiveStream(null);
-      sysmsg('AURA is offline — start the backend server.');
-      return;
+      // Quick HTTP health check before giving up — WS might be down but HTTP works
+      try {
+        const { HTTP: httpUrl, API_KEY: key } = await import('../api');
+        const headers: Record<string, string> = {};
+        if (key) headers['X-API-Key'] = key;
+        const probe = await fetch(`${httpUrl}/api/status`, { headers, signal: AbortSignal.timeout(5000) });
+        if (probe.ok) {
+          // Server is actually reachable — update status and continue with HTTP fallback
+          useStore.getState().setBackendStatus('online');
+        } else {
+          setActiveStream(null);
+          sysmsg('AURA is offline — start the backend server.');
+          return;
+        }
+      } catch {
+        setActiveStream(null);
+        sysmsg('AURA is offline — start the backend server.');
+        return;
+      }
     }
 
     const { pendingCtx: ctx, thinkingMode, thinkingLevel, deepResearch, conversationId, getModel, customInstructions, userName } = useStore.getState();
@@ -194,11 +212,27 @@ export default function ChatPanel() {
           const { HTTP, API_KEY } = await import('../api');
           const headers: Record<string, string> = { 'Content-Type': 'application/json' };
           if (API_KEY) headers['X-API-Key'] = API_KEY;
+          // Send full payload (same fields as WS) so the server has all context
+          const httpPayload: any = {
+            message: full,
+            model: payload.model,
+          };
+          if (payload.conversation_id) httpPayload.conversation_id = payload.conversation_id;
+          if (payload.custom_instructions) httpPayload.custom_instructions = payload.custom_instructions;
+          if (payload.user_name) httpPayload.user_name = payload.user_name;
+          if (payload.thinking) {
+            httpPayload.thinking = true;
+            httpPayload.thinking_level = payload.thinking_level;
+          }
           const resp = await fetch(`${HTTP}/api/chat`, {
             method: 'POST',
             headers,
-            body: JSON.stringify({ message: full, model: payload.model }),
+            body: JSON.stringify(httpPayload),
           });
+          if (!resp.ok) {
+            const errData = await resp.json().catch(() => ({}));
+            throw new Error((errData as any).detail || `HTTP ${resp.status}`);
+          }
           const data = await resp.json();
           const aiText = data?.response || data?.message?.content || data?.content || JSON.stringify(data);
           stream.rawText = aiText;

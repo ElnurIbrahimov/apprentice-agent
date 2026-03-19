@@ -20,6 +20,7 @@ import signal
 import logging
 import threading
 import argparse
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from datetime import datetime
@@ -28,15 +29,59 @@ from typing import Optional
 # Headless mode — skip screen/GUI features on servers without a display
 HEADLESS = bool(os.environ.get("AURA_HEADLESS")) or not os.environ.get("DISPLAY")
 
+# On headless servers, prevent imports of GUI/audio modules from crashing.
+# We install import hooks that return stub modules for known Windows/desktop-only packages.
+if HEADLESS:
+    _HEADLESS_STUBS = {
+        "mss", "mss.tools", "pyperclip", "pyautogui",
+        "sounddevice", "pyttsx3", "comtypes", "pycaw",
+        "winotify", "screen_brightness_control",
+        "win32gui", "win32con", "win32api", "win32process",
+        "pystray", "PIL.Image",
+    }
+
+    import importlib.abc
+    import importlib.machinery
+    import types
+
+    class _HeadlessStubFinder(importlib.abc.MetaPathFinder):
+        """Return a stub loader for desktop-only modules in headless mode."""
+        def find_spec(self, fullname, path, target=None):
+            if fullname in _HEADLESS_STUBS or fullname.split(".")[0] in _HEADLESS_STUBS:
+                return importlib.machinery.ModuleSpec(fullname, _HeadlessStubLoader())
+            return None
+
+    class _HeadlessStubLoader(importlib.abc.Loader):
+        """Return a dummy module that raises ImportError on attribute access."""
+        def create_module(self, spec):
+            mod = types.ModuleType(spec.name)
+            mod.__spec__ = spec
+            mod.__loader__ = self
+            mod.__path__ = []  # Allow submodule imports
+            mod._is_headless_stub = True
+            return mod
+
+        def exec_module(self, module):
+            pass
+
+    sys.meta_path.insert(0, _HeadlessStubFinder())
+
+
 # PID lock — prevent double-launch
 PID_FILE = Path.home() / ".aura_daemon.pid"
-LOG_FILE = Path.home() / ".aura_daemon.log"
+
+# Log file — on servers, also write to /opt/aura/logs if available
+_log_dir = Path(os.getenv("AURA_DATA_DIR", "data")).parent / "logs"
+if _log_dir.exists():
+    LOG_FILE = _log_dir / "aura_daemon.log"
+else:
+    LOG_FILE = Path.home() / ".aura_daemon.log"
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [DAEMON] %(levelname)s %(message)s",
+    format="%(asctime)s [DAEMON] %(levelname)s %(name)s %(message)s",
     handlers=[
-        logging.FileHandler(LOG_FILE),
+        logging.FileHandler(LOG_FILE, encoding="utf-8"),
         logging.StreamHandler(sys.stdout),
     ],
 )
@@ -62,6 +107,7 @@ class AuraDaemon:
     def __init__(self):
         self._running = False
         self._agent = None
+        self._agent_load_error: Optional[str] = None
         self._agent_ready = threading.Event()
         self._load_agent_thread: Optional[threading.Thread] = None
         self._last_screen_hash = None
@@ -70,6 +116,7 @@ class AuraDaemon:
         self._proactive = ProactiveEngine(self._event_bus)
         self._ipc = IPCServer(self._event_bus)
         self._headless = HEADLESS
+        self._start_time = time.time()
 
         # Screen monitoring — skip entirely on headless servers
         if not self._headless:
@@ -91,57 +138,76 @@ class AuraDaemon:
         """Start the daemon."""
         self._write_pid()
         self._running = True
-        logger.info("AURA daemon starting... (headless=%s)", self._headless)
+        logger.info("AURA daemon starting... (headless=%s, pid=%d)", self._headless, os.getpid())
 
         # Load agent (lazy — don't block startup)
         self._load_agent_thread = threading.Thread(target=self._load_agent, daemon=True)
         self._load_agent_thread.start()
 
         # Start IPC server (CLI connects here)
-        self._ipc.start()
+        try:
+            self._ipc.start()
+        except Exception as e:
+            logger.error("IPC server failed to start: %s", e)
+            # Non-fatal — daemon can still run without IPC
 
         # Main loop
         try:
             self._run_loop()
         except KeyboardInterrupt:
             pass
+        except Exception as e:
+            logger.critical("Daemon main loop crashed: %s\n%s", e, traceback.format_exc())
         finally:
             self.stop()
 
     def stop(self):
         self._running = False
-        self._event_bus.shutdown()
+        try:
+            self._event_bus.shutdown()
+        except Exception:
+            pass
         if self._screen_pool:
-            self._screen_pool.shutdown(wait=False)
-        self._ipc.stop()
+            try:
+                self._screen_pool.shutdown(wait=False)
+            except Exception:
+                pass
+        try:
+            self._ipc.stop()
+        except Exception:
+            pass
         self._remove_pid()
         logger.info("AURA daemon stopped.")
 
     def _run_loop(self):
         """Main heartbeat loop."""
         if self._headless:
-            logger.info("Headless mode — screen monitoring disabled")
+            logger.info("Headless mode -- screen monitoring disabled")
         while self._running:
             now = time.monotonic()
 
-            # 5s: screen monitoring (non-blocking, skip if previous tick still running)
-            # Skipped entirely in headless mode (no display)
-            if not self._headless and not self._screen_tick_pending:
-                self._screen_tick_pending = True
-                self._screen_pool.submit(self._tick_screen_wrapper)
+            try:
+                # 5s: screen monitoring (non-blocking, skip if previous tick still running)
+                # Skipped entirely in headless mode (no display)
+                if not self._headless and not self._screen_tick_pending:
+                    self._screen_tick_pending = True
+                    self._screen_pool.submit(self._tick_screen_wrapper)
 
-            # 30s: hooks + system health
-            if now - self._last_hooks_tick >= self.TICK_HOOKS:
-                self._tick_hooks()
-                self._last_hooks_tick = now
+                # 30s: hooks + system health
+                if now - self._last_hooks_tick >= self.TICK_HOOKS:
+                    self._tick_hooks()
+                    self._last_hooks_tick = now
 
-            # 5min: idle check
-            if now - self._last_idle_tick >= self.TICK_IDLE:
-                self._tick_idle()
-                self._last_idle_tick = now
+                # 5min: idle check
+                if now - self._last_idle_tick >= self.TICK_IDLE:
+                    self._tick_idle()
+                    self._last_idle_tick = now
 
-            # 3 AM: full dream
-            self._check_dream_time()
+                # 3 AM: full dream
+                self._check_dream_time()
+
+            except Exception as e:
+                logger.error("Tick error (non-fatal): %s", e)
 
             time.sleep(self.TICK_SCREEN)
 
@@ -180,7 +246,7 @@ class AuraDaemon:
                         self._event_bus.emit("screen:error_detected", {"errors": errors})
 
         except Exception as e:
-            logger.debug(f"Screen tick failed: {e}")
+            logger.debug("Screen tick failed: %s", e)
 
     def _tick_hooks(self):
         """Run hooks evaluation."""
@@ -190,19 +256,26 @@ class AuraDaemon:
             if hasattr(self._agent, 'hooks') and self._agent.hooks:
                 self._agent.hooks._check_triggers()
         except Exception as e:
-            logger.debug(f"Hooks tick failed: {e}")
+            logger.debug("Hooks tick failed: %s", e)
 
     def _tick_idle(self):
         """Check idle state, maybe trigger light dream."""
         idle_secs = time.monotonic() - self._last_activity
         if idle_secs >= 1800:  # 30 minutes idle
-            logger.info(f"Idle for {idle_secs/60:.0f}min — triggering light dream")
+            logger.info("Idle for %.0fmin -- triggering light dream", idle_secs / 60)
             self._event_bus.emit("daemon:idle", {"idle_seconds": idle_secs})
             if self._agent and hasattr(self._agent, 'neurodream') and self._agent.neurodream:
                 threading.Thread(
-                    target=self._agent.neurodream.light_sleep,
+                    target=self._safe_light_sleep,
                     daemon=True
                 ).start()
+
+    def _safe_light_sleep(self):
+        """Run light sleep with error handling."""
+        try:
+            self._agent.neurodream.light_sleep()
+        except Exception as e:
+            logger.error("Light sleep failed: %s", e)
 
     def _check_dream_time(self):
         """Trigger full dream at 3 AM (once per day)."""
@@ -213,7 +286,7 @@ class AuraDaemon:
                 self._agent is not None):
             self._last_dream_date = today
             self._save_daemon_state()
-            logger.info("3 AM — starting full dream cycle")
+            logger.info("3 AM -- starting full dream cycle")
             self._event_bus.emit("daemon:dream_start", {})
             threading.Thread(target=self._run_full_dream, daemon=True).start()
 
@@ -224,10 +297,12 @@ class AuraDaemon:
             run_dream_mode()
             logger.info("Dream cycle complete")
             self._event_bus.emit("daemon:dream_complete", {})
+        except ImportError as e:
+            logger.warning("Dream module not available: %s", e)
         except Exception as e:
-            logger.error(f"Dream failed: {e}")
+            logger.error("Dream failed: %s\n%s", e, traceback.format_exc())
 
-        # Run DreamConsolidator pipeline (cluster → summarize → prune → report)
+        # Run DreamConsolidator pipeline (cluster -> summarize -> prune -> report)
         try:
             from aura.dream import get_dream_consolidator
             consolidator = get_dream_consolidator()
@@ -240,29 +315,60 @@ class AuraDaemon:
                 pass
             consolidator.run_cycle_background(user_id=user_id)
             logger.info("DreamConsolidator cycle started in background (user=%s)", user_id)
+        except ImportError as e:
+            logger.warning("DreamConsolidator not available: %s", e)
         except Exception as e:
-            logger.error(f"DreamConsolidator failed: {e}")
+            logger.error("DreamConsolidator failed: %s", e)
 
     def _load_agent(self):
-        """Load ApprenticeAgent in background — doesn't block daemon start."""
+        """Load ApprenticeAgent in background -- doesn't block daemon start.
+
+        On headless servers, catches ALL import errors gracefully so
+        missing GUI/audio modules don't crash the daemon.
+        """
         try:
             sys.path.insert(0, str(Path(__file__).parent))
+            logger.info("Loading ApprenticeAgent (fast_init=True)...")
             from aura.agent import ApprenticeAgent
             self._agent = ApprenticeAgent(fast_init=True)
-            logger.info("Agent loaded successfully")
+            tools_loaded = len(self._agent.tools) if hasattr(self._agent, 'tools') else 0
+            logger.info("Agent loaded successfully (%d tools)", tools_loaded)
+            self._agent_load_error = None
             self._event_bus.emit("daemon:agent_ready", {})
+        except ImportError as e:
+            self._agent_load_error = f"ImportError: {e}"
+            logger.error("Agent load failed (missing module): %s\n%s", e, traceback.format_exc())
+            if self._headless:
+                logger.warning(
+                    "This may be a desktop-only module. The daemon will continue "
+                    "running without the agent. Fix by installing the missing package "
+                    "or ensuring it is excluded in requirements-server.txt."
+                )
         except Exception as e:
-            logger.error(f"Agent load failed: {e}")
+            self._agent_load_error = str(e)
+            logger.error("Agent load failed: %s\n%s", e, traceback.format_exc())
         finally:
             self._agent_ready.set()
 
+    def get_status(self) -> dict:
+        """Return daemon status for health checks."""
+        return {
+            "running": self._running,
+            "headless": self._headless,
+            "uptime_seconds": int(time.time() - self._start_time),
+            "agent_loaded": self._agent is not None,
+            "agent_error": self._agent_load_error,
+            "agent_tools": len(self._agent.tools) if self._agent and hasattr(self._agent, 'tools') else 0,
+            "pid": os.getpid(),
+        }
+
     def record_activity(self):
-        """Call this when user interacts — resets idle timer."""
+        """Call this when user interacts -- resets idle timer."""
         self._last_activity = time.monotonic()
         if self._agent and hasattr(self._agent, 'neurodream') and self._agent.neurodream:
             self._agent.neurodream.record_activity()
 
-    # ── Daemon state persistence ─────────────────────────────────────────────
+    # -- Daemon state persistence --------------------------------------------
 
     def _load_daemon_state(self):
         """Load persisted daemon state (e.g. last dream date)."""
@@ -274,7 +380,7 @@ class AuraDaemon:
                     from datetime import date as date_cls
                     self._last_dream_date = date_cls.fromisoformat(last_dream)
         except Exception as e:
-            logger.debug(f"Failed to load daemon state: {e}")
+            logger.debug("Failed to load daemon state: %s", e)
 
     def _save_daemon_state(self):
         """Persist daemon state to disk."""
@@ -285,21 +391,21 @@ class AuraDaemon:
             }
             self._state_file.write_text(json.dumps(data), encoding="utf-8")
         except Exception as e:
-            logger.debug(f"Failed to save daemon state: {e}")
+            logger.debug("Failed to save daemon state: %s", e)
 
-    # ── PID management ──────────────────────────────────────────────────────
+    # -- PID management ------------------------------------------------------
 
     def _write_pid(self):
         try:
             PID_FILE.write_text(str(os.getpid()))
         except OSError as e:
-            logger.error(f"Failed to write PID file: {e}")
+            logger.error("Failed to write PID file: %s", e)
 
     def _remove_pid(self):
         try:
             PID_FILE.unlink(missing_ok=True)
         except OSError as e:
-            logger.warning(f"Failed to remove PID file: {e}")
+            logger.warning("Failed to remove PID file: %s", e)
 
     @staticmethod
     def is_running() -> bool:
@@ -364,7 +470,7 @@ class EventBus:
             try:
                 self._pool.submit(handler, event_type, data)
             except Exception as e:
-                logger.debug(f"EventBus handler error: {e}")
+                logger.debug("EventBus handler error: %s", e)
 
     def subscribe(self, pattern: str, handler):
         with self._lock:
@@ -374,7 +480,10 @@ class EventBus:
 
     def shutdown(self):
         """Shut down the thread pool used for event dispatch."""
-        self._pool.shutdown(wait=False)
+        try:
+            self._pool.shutdown(wait=False)
+        except Exception:
+            pass
 
 
 class ProactiveEngine:
@@ -419,12 +528,12 @@ class ProactiveEngine:
             "score": score,
             "data": data,
         })
-        logger.info(f"Proactive suggestion triggered by {event_type} (score={score:.2f})")
+        logger.info("Proactive suggestion triggered by %s (score=%.2f)", event_type, score)
 
 
 class IPCServer:
     """
-    Named pipe IPC — CLI connects here to send messages to daemon.
+    Named pipe IPC -- CLI connects here to send messages to daemon.
     Falls back to TCP on localhost:19733 if named pipe unavailable.
     """
 
@@ -448,8 +557,11 @@ class IPCServer:
         """Try named pipe first, fall back to TCP."""
         try:
             self._serve_tcp()
+        except OSError as e:
+            # Port already in use — likely stale PID file, non-fatal
+            logger.warning("IPC server could not bind (port in use?): %s", e)
         except Exception as e:
-            logger.error(f"IPC server failed: {e}")
+            logger.error("IPC server failed: %s", e)
 
     def _serve_tcp(self):
         import socket
@@ -458,7 +570,7 @@ class IPCServer:
             srv.bind(("127.0.0.1", self.TCP_PORT))
             srv.listen(5)
             srv.settimeout(1.0)
-            logger.info(f"IPC listening on TCP 127.0.0.1:{self.TCP_PORT}")
+            logger.info("IPC listening on TCP 127.0.0.1:%d", self.TCP_PORT)
             while self._running:
                 try:
                     conn, _ = srv.accept()
@@ -489,13 +601,13 @@ class IPCServer:
                 msg = json.loads(data)
                 msg_type = msg.get("type", "message")
                 if msg_type not in self.ALLOWED_IPC_TYPES:
-                    logger.warning(f"IPC rejected unknown type: {msg_type}")
+                    logger.warning("IPC rejected unknown type: %s", msg_type)
                     conn.send(json.dumps({"status": "error", "reason": "unknown command type"}).encode())
                     return
                 self._event_bus.emit(f"ipc:{msg_type}", msg)
                 conn.send(json.dumps({"status": "ok"}).encode())
         except Exception as e:
-            logger.debug(f"IPC client error: {e}")
+            logger.debug("IPC client error: %s", e)
         finally:
             conn.close()
 

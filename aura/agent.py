@@ -156,7 +156,10 @@ from .memory.unified_memory import get_unified_memory
 from .metacognition import MetacognitionLogger
 from .config import Config
 from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, GitTool, EvoEmoTool, get_tone_modifier, get_monologue, KnowledgeGraphTool, get_knowledge_graph, NeuroDreamEngine, SleepPhase, CalendarTool, SpacedRepetitionTool, TaskManagerTool, APITesterTool, DatabaseTool, AudioTranscriberTool, ResearchTool, BraveSearchTool, TavilyTool, FirecrawlTool, ObsidianTool, GitHubTool, LogAnalystTool, DocumentGeneratorTool, WindowsControlTool, TaskSchedulerTool, PredictiveTaskTool, MeetingIntelTool, VoiceSynthTool, LifeLoggerTool, CodeSearchTool, CodeEditTool
-from .tools.crypto_price import CryptoPriceTool
+try:
+    from .tools.crypto_price import CryptoPriceTool
+except Exception:
+    CryptoPriceTool = None
 
 from .memory_retriever import MemoryRetriever
 try:
@@ -551,55 +554,89 @@ class ApprenticeAgent:
         self.memory = get_unified_memory()
 
         # Core lightweight tools (always load)
-        self.tools = {
-            "code_search": CodeSearchTool(),
-            "code_edit": CodeEditTool(),
-            "filesystem": FileSystemTool(),
-            "web_search": WebSearchTool(),
-            "brave_search": BraveSearchTool(),
-            "tavily_search": TavilyTool(),
-            "firecrawl": FirecrawlTool(),
-            "crypto_price": CryptoPriceTool(),
-            "code_executor": CodeExecutorTool(),
-            "clipboard": ClipboardTool(),
-            "notifications": NotificationTool(),
-            "git": GitTool(),
-            "evoemo": EvoEmoTool(),
-            "inner_monologue": get_monologue(),
-            "calendar": CalendarTool(),
-            "spaced_repetition": SpacedRepetitionTool(),
-            "task_manager": TaskManagerTool(),
-            "research": ResearchTool(),
-            "obsidian": ObsidianTool(),
-            "github": GitHubTool(),
-            "log_analyst": LogAnalystTool(),
-            "document_generator": DocumentGeneratorTool(),
+        # Each instantiation is guarded: if a tool class is None (failed import)
+        # or its constructor throws, we skip it instead of crashing the agent.
+        self.tools = {}
+        _core_tools = [
+            ("code_search", CodeSearchTool),
+            ("code_edit", CodeEditTool),
+            ("filesystem", FileSystemTool),
+            ("web_search", WebSearchTool),
+            ("brave_search", BraveSearchTool),
+            ("tavily_search", TavilyTool),
+            ("firecrawl", FirecrawlTool),
+            ("crypto_price", CryptoPriceTool),
+            ("code_executor", CodeExecutorTool),
+            ("clipboard", ClipboardTool),
+            ("notifications", NotificationTool),
+            ("git", GitTool),
+            ("evoemo", EvoEmoTool),
+            ("calendar", CalendarTool),
+            ("spaced_repetition", SpacedRepetitionTool),
+            ("task_manager", TaskManagerTool),
+            ("research", ResearchTool),
+            ("obsidian", ObsidianTool),
+            ("github", GitHubTool),
+            ("log_analyst", LogAnalystTool),
+            ("document_generator", DocumentGeneratorTool),
             # Tier 2 High-Impact Tools
-            "windows_control": WindowsControlTool(),
-            "task_scheduler": TaskSchedulerTool(),
+            ("windows_control", WindowsControlTool),
+            ("task_scheduler", TaskSchedulerTool),
             # Tier 3 Moonshot Tools
-            "predictive_tasks": PredictiveTaskTool(),
-            "meeting_intel": MeetingIntelTool(),
-            "voice_synth": VoiceSynthTool(),
-            "life_logger": LifeLoggerTool(),
-        }
+            ("predictive_tasks", PredictiveTaskTool),
+            ("meeting_intel", MeetingIntelTool),
+            ("voice_synth", VoiceSynthTool),
+            ("life_logger", LifeLoggerTool),
+        ]
+        for _tool_name, _tool_cls in _core_tools:
+            try:
+                if _tool_cls is None:
+                    logger.warning(f"[TOOLS] {_tool_name} skipped — import failed (class is None)")
+                    continue
+                self.tools[_tool_name] = _tool_cls()
+                logger.debug(f"[TOOLS] {_tool_name} loaded")
+            except Exception as _e:
+                logger.warning(f"[TOOLS] {_tool_name} skipped — init failed: {_e}")
+
+        # inner_monologue is a factory function, not a class
+        try:
+            if get_monologue is not None:
+                self.tools["inner_monologue"] = get_monologue()
+        except Exception as _e:
+            logger.warning(f"[TOOLS] inner_monologue skipped — init failed: {_e}")
+
         # Wire LifeLogger to sibling tools for cross-source sync
-        self.tools["life_logger"].set_tools(self.tools)
-        logger.info("[LOADED] crypto_price - Real-time crypto prices from CoinGecko")
+        if "life_logger" in self.tools:
+            try:
+                self.tools["life_logger"].set_tools(self.tools)
+            except Exception as _e:
+                logger.warning(f"[TOOLS] life_logger.set_tools failed: {_e}")
+        logger.info(f"[TOOLS] {len(self.tools)} core tools loaded")
 
         # Heavier tools - load lazily or skip for fast init
         if not fast_init:
-            self.tools.update({
-                "screenshot": ScreenshotTool(),
-                "vision": VisionTool(brain=self.brain),
-                "pdf_reader": PDFReaderTool(),
-                "arxiv_search": ArxivSearchTool(),
-                "browser": BrowserTool(),
-                "system_control": SystemControlTool(),
-                "tool_builder": ToolBuilderTool(),
-                "marketplace": MarketplaceTool(),
-                "knowledge_graph": get_knowledge_graph()
-            })
+            _heavy_tools = [
+                ("screenshot", lambda: ScreenshotTool()),
+                ("vision", lambda: VisionTool(brain=self.brain)),
+                ("pdf_reader", lambda: PDFReaderTool()),
+                ("arxiv_search", lambda: ArxivSearchTool()),
+                ("browser", lambda: BrowserTool()),
+                ("system_control", lambda: SystemControlTool()),
+                ("tool_builder", lambda: ToolBuilderTool()),
+                ("marketplace", lambda: MarketplaceTool()),
+                ("knowledge_graph", lambda: get_knowledge_graph()),
+            ]
+            for _tool_name, _tool_factory in _heavy_tools:
+                try:
+                    _cls_or_fn = _tool_factory  # it's a lambda wrapping the call
+                    inst = _cls_or_fn()
+                    if inst is not None:
+                        self.tools[_tool_name] = inst
+                        logger.debug(f"[TOOLS] {_tool_name} loaded (heavy)")
+                    else:
+                        logger.warning(f"[TOOLS] {_tool_name} skipped — factory returned None")
+                except Exception as _e:
+                    logger.warning(f"[TOOLS] {_tool_name} skipped — init failed: {_e}")
 
             # === LOAD ADDITIONAL TOOLS ===
             # deep_research

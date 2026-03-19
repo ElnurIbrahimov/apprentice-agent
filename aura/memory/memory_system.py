@@ -57,7 +57,7 @@ class MemorySystem:
         self._db_path = Config.CHROMADB_PATH / f"{self.collection_name}.db"
         self._lock = threading.Lock()
         self._conn: Optional[sqlite3.Connection] = None
-        self._EMBED_URL = getattr(Config, 'OLLAMA_EMBED_URL', 'http://localhost:11434/api/embeddings')
+        self._EMBED_URL = getattr(Config, 'OLLAMA_EMBED_URL', None) or (Config.OLLAMA_HOST + '/api/embeddings')
         self._init_db()
         self._migrate_json()
         atexit.register(self.close)

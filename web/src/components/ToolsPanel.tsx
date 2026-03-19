@@ -1,9 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import type { Tool, VoiceStatus, SessionCosts } from '../types';
 import {
-  ArrowPathIcon,
   WrenchScrewdriverIcon,
-  CpuChipIcon,
   SpeakerWaveIcon,
   MagnifyingGlassIcon,
   CurrencyDollarIcon,
@@ -15,7 +13,7 @@ export function ToolsPanel() {
   const [categories, setCategories] = useState<string[]>([]);
   const [voice, setVoice] = useState<VoiceStatus | null>(null);
   const [costs, setCosts] = useState<SessionCosts | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [, setLoading] = useState(false);
   const [reloading, setReloading] = useState(false);
   const [reloadMsg, setReloadMsg] = useState<string | null>(null);
   const [search, setSearch] = useState('');

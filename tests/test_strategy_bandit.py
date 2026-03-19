@@ -257,12 +257,12 @@ class TestStrategyBandit:
                 metrics={"judge_score": 0.3, "coherence_score": 0.3},
             )
 
-        # Check: reflexion should have higher mean reward
+        # Check: MCTS should have higher mean reward
         stats = bandit.get_arm_stats()
         code_stats = stats.get("code", [])
-        reflexion = next(a for a in code_stats if a["strategy"] == "reflexion")
+        mcts = next(a for a in code_stats if a["strategy"] == "mcts")
         cot = next(a for a in code_stats if a["strategy"] == "chain_of_thought")
-        assert reflexion["mean_reward"] > cot["mean_reward"]
+        assert mcts["mean_reward"] > cot["mean_reward"]
 
     def test_user_feedback_updates_outcome(self, bandit):
         selection = bandit.select_strategy("Analyze this data trend")

@@ -11,12 +11,12 @@ def test_format_session_line_basic():
         "title": "Fix login bug",
         "updated_at": time.time() - 300,  # 5 min ago
         "stats": {"message_count": 12},
-        "model": "qwen3:8b",
+        "model": "kimi-k2.5:cloud",
     }
     line = _format_session_line(session)
     assert "Fix login bug" in line
     assert "12" in line
-    assert "qwen3" in line
+    assert "kimi-k2.5:cloud" in line
     assert "m ago" in line
 
 

@@ -164,38 +164,38 @@ ACTION_TRIGGERS = {
 # Best models for each action mode
 ACTION_MODE_MODELS = {
     "search": {
-        "preferred": "gemini-3-flash-preview:cloud",
-        "fallbacks": ["nemotron-3-nano:30b-cloud", "kimi-k2.5:cloud"],
+        "preferred": "nemotron-3-super:cloud",
+        "fallbacks": ["kimi-k2.5:cloud", "glm-5:cloud"],
         "description": "Quick web search"
     },
     "research": {
         "preferred": "qwen3.5:397b-cloud",
-        "fallbacks": ["cogito-2.1:671b-cloud", "deepseek-v3.2:cloud"],
+        "fallbacks": ["deepseek-v3.2:cloud", "kimi-k2.5:cloud"],
         "description": "Comprehensive research"
     },
     "agent": {
         "preferred": "kimi-k2.5:cloud",
-        "fallbacks": ["devstral-2:123b-cloud", "deepseek-v3.2:cloud"],
+        "fallbacks": ["minimax-m2.7:cloud", "deepseek-v3.2:cloud"],
         "description": "Autonomous task execution"
     },
     "code": {
         "preferred": "qwen3-coder:480b-cloud",
-        "fallbacks": ["devstral-2:123b-cloud", "qwen3-coder-next:cloud"],
+        "fallbacks": ["minimax-m2.7:cloud", "qwen3-coder-next:cloud"],
         "description": "Code generation and analysis"
     },
     "vision": {
-        "preferred": "qwen3-vl:235b-cloud",
-        "fallbacks": ["kimi-k2.5:cloud", "gemini-3-flash-preview:cloud"],
+        "preferred": "kimi-k2.5:cloud",
+        "fallbacks": ["qwen3.5:397b-cloud", "glm-5:cloud"],
         "description": "Image analysis"
     },
     "deep_research": {
-        "preferred": "kimi-k2-thinking:cloud",
-        "fallbacks": ["qwen3.5:397b-cloud", "cogito-2.1:671b-cloud"],
+        "preferred": "qwen3.5:397b-cloud",
+        "fallbacks": ["kimi-k2.5:cloud", "deepseek-v3.2:cloud"],
         "description": "Multi-source deep research with page reading"
     },
     "swarm": {
         "preferred": "qwen3.5:397b-cloud",
-        "fallbacks": ["cogito-2.1:671b-cloud", "kimi-k2.5:cloud"],
+        "fallbacks": ["kimi-k2.5:cloud", "minimax-m2.7:cloud"],
         "description": "Multi-agent parallel collaboration"
     }
 }
@@ -465,8 +465,9 @@ class AgentService:
                         # Get or create orchestrator for this session
                         if not hasattr(self, '_orchestrator') or self._orchestrator is None:
                             tool_registry = getattr(self.agent, 'tool_registry', {})
+                            _chat_model = effective_model  # capture for closure
                             def llm_func(system_prompt, user_message):
-                                return self.agent.brain.think(user_message, system_prompt=system_prompt, use_history=False)
+                                return self.agent.brain.think(user_message, system_prompt=system_prompt, use_history=False, model_override=_chat_model)
                             self._orchestrator = MultiAgentOrchestrator(
                                 tool_registry=tool_registry,
                                 llm_func=llm_func,
@@ -531,7 +532,7 @@ class AgentService:
 {result.get('content', '')[:8000]}
 
 Provide key findings and cite sources."""
-                        synthesized = self.agent.brain.think(synthesis_prompt)
+                        synthesized = self.agent.brain.think(synthesis_prompt, model_override=effective_model)
                         response = f"## Deep Research: {topic}\n\n{synthesized}\n\n---\n*{result.get('summary', '')}*"
                     else:
                         response = f"Research failed: {result.get('error', 'Unknown error')}"
@@ -717,10 +718,10 @@ Content:
 Provide a well-structured, informative summary with key findings and cite sources using [1], [2] etc."""
 
                         if hasattr(brain, 'think_stream'):
-                            for chunk in brain.think_stream(synthesis_prompt):
+                            for chunk in brain.think_stream(synthesis_prompt, model_override=effective_model):
                                 yield {"type": "chunk", "content": chunk}
                         else:
-                            yield {"type": "chunk", "content": brain.think(synthesis_prompt)}
+                            yield {"type": "chunk", "content": brain.think(synthesis_prompt, model_override=effective_model)}
                         yield {"type": "chunk", "content": f"\n\n---\n*{result.get('summary', '')}*"}
 
                         # Yield citations from deep research sources
@@ -756,8 +757,9 @@ Provide a well-structured, informative summary with key findings and cite source
                     # Get or create orchestrator
                     if not hasattr(self, '_orchestrator') or self._orchestrator is None:
                         tool_registry = getattr(self.agent, 'tool_registry', {})
+                        _swarm_model = effective_model  # capture for closure
                         def llm_func(system_prompt, user_message):
-                            return brain.think(user_message, system_prompt=system_prompt, use_history=False)
+                            return brain.think(user_message, system_prompt=system_prompt, use_history=False, model_override=_swarm_model)
                         self._orchestrator = MultiAgentOrchestrator(
                             tool_registry=tool_registry,
                             llm_func=llm_func,
@@ -1213,47 +1215,28 @@ Provide a well-structured, informative summary with key findings and cite source
             return False
 
     def get_available_models(self) -> Dict[str, Any]:
-        """Get list of available models (local and cloud).
+        """Get list of available models from verified config — no Ollama API query.
 
-        NOTE: No lock needed - reads config and makes HTTP request to Ollama.
-        Holding the lock here while waiting on Ollama HTTP caused deadlocks.
+        Cloud models come from VERIFIED_CLOUD_MODELS (hardcoded, trusted).
+        Local models come from VERIFIED_LOCAL_MODELS (utility only).
+        ChatGPT models come from chatgpt_client or hardcoded fallback.
         """
         try:
-            import requests
             from aura.config import VERIFIED_LOCAL_MODELS, VERIFIED_CLOUD_MODELS
 
-            local_models = []
-            cloud_models = list(VERIFIED_CLOUD_MODELS)
-
-            # Non-chat models to exclude from the selector (embeddings, OCR, etc.)
-            NON_CHAT_MODELS = {"nomic-embed-text:latest", "glm-ocr:latest"}
-
-            # Get locally installed models from Ollama — keep only true local chat models
-            try:
-                ollama_host = os.getenv("OLLAMA_BASE_URL", os.getenv("OLLAMA_HOST", "http://localhost:11434"))
-                response = requests.get(f"{ollama_host}/api/tags", timeout=3)
-                if response.status_code == 200:
-                    all_ollama = [m["name"] for m in response.json().get("models", [])]
-                    # Cloud models (handled by cloud_models list) and non-chat models excluded
-                    local_models = [
-                        m for m in all_ollama
-                        if not m.endswith(("-cloud", ":cloud"))
-                        and m not in NON_CHAT_MODELS
-                    ]
-            except Exception as e:
-                logger.warning(f"[AgentService] Could not fetch local models: {e}")
-                local_models = []
+            cloud_models = sorted(VERIFIED_CLOUD_MODELS)
+            local_models = sorted(VERIFIED_LOCAL_MODELS)
 
             # Always include ChatGPT models — auth checked at request time
             try:
                 from aura.auth.chatgpt_client import ALL_CHATGPT_MODELS
-                chatgpt_models = list(ALL_CHATGPT_MODELS)
+                chatgpt_models = sorted(ALL_CHATGPT_MODELS)
             except ImportError:
                 chatgpt_models = [
-                    "chatgpt:gpt-5.4", "chatgpt:gpt-5.4-thinking", "chatgpt:gpt-5.4-pro",
-                    "chatgpt:gpt-5.3", "chatgpt:gpt-5.3-codex", "chatgpt:gpt-5.3-codex-spark",
+                    "chatgpt:gpt-5.1", "chatgpt:gpt-5.1-codex", "chatgpt:gpt-5.1-codex-max", "chatgpt:gpt-5.1-codex-mini",
                     "chatgpt:gpt-5.2", "chatgpt:gpt-5.2-codex",
-                    "chatgpt:gpt-5.1", "chatgpt:gpt-5.1-codex", "chatgpt:gpt-5.1-codex-mini", "chatgpt:gpt-5.1-codex-max",
+                    "chatgpt:gpt-5.3", "chatgpt:gpt-5.3-codex", "chatgpt:gpt-5.3-codex-spark",
+                    "chatgpt:gpt-5.4", "chatgpt:gpt-5.4-pro", "chatgpt:gpt-5.4-thinking",
                 ]
 
             current_model = "auto"
@@ -1261,9 +1244,9 @@ Provide a well-structured, informative summary with key findings and cite source
                 current_model = getattr(self._agent.brain, 'model', 'auto')
 
             return {
-                "local": sorted(local_models),
-                "cloud": sorted(cloud_models),
-                "chatgpt": sorted(chatgpt_models),
+                "local": local_models,
+                "cloud": cloud_models,
+                "chatgpt": chatgpt_models,
                 "current": current_model
             }
         except Exception as e:
@@ -1271,6 +1254,7 @@ Provide a well-structured, informative summary with key findings and cite source
             return {
                 "local": [],
                 "cloud": [],
+                "chatgpt": [],
                 "current": "unknown"
             }
 

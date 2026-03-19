@@ -1290,7 +1290,7 @@ Esc Esc         Rewind to checkpoint
 
 Verify the status bar now shows:
 ```
-[~/project (python) main] | qwen3:8b | 42 tools | balanced | $0.02 | 12.4K/128K [████░░░░] | CARE | session (5 msgs) Alt+M
+[~/project (python) main] | kimi-k2.5:cloud | 42 tools | balanced | $0.02 | 12.4K/128K [████░░░░] | CARE | session (5 msgs) Alt+M
 ```
 
 - [ ] **Step 3: Run all tests**

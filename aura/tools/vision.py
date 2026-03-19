@@ -1,7 +1,7 @@
 """Vision tool for analyzing images using Ollama vision models with fallback chain.
 
 Supports:
-- Ollama models (llava, minicpm-v, qwen2.5-vl) via multi-model fallback
+- Ollama cloud models (kimi-k2.5, qwen3.5) via multi-model fallback
 - Florence-2 (microsoft/Florence-2-base) via HuggingFace transformers for fast OCR/UI analysis
 - VRAM-aware model selection to avoid OOM on constrained GPUs
 """
@@ -134,7 +134,7 @@ class VisionTool:
     """Tool for analyzing images using vision LLM with model fallback chain.
 
     Supports Florence-2 (fast structured OCR/detection) as primary analyzer
-    and Ollama models (llava, minicpm-v, qwen2.5-vl) as fallback.
+    and Ollama cloud models (kimi-k2.5, qwen3.5) as fallback.
     """
 
     def __init__(self, model: str = None, brain=None):
@@ -156,8 +156,8 @@ class VisionTool:
         """Get an ollama client and resolved model name.
 
         If brain is available, uses brain's client. Otherwise uses local client.
-        Cloud-suffixed models (e.g. 'qwen3-vl:235b-cloud') are stripped to their
-        local name since we only have local Ollama connectivity.
+        Cloud-suffixed models (e.g. 'kimi-k2.5:cloud') are stripped to their
+        base name for Ollama API calls.
 
         Returns:
             Tuple of (client, actual_model_name)

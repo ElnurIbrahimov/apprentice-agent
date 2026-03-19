@@ -163,8 +163,10 @@ class MemoryRetriever:
         """Get embedding from Ollama nomic-embed-text."""
         try:
             import requests
+            from aura.config import Config
+            embed_url = Config.OLLAMA_HOST + "/api/embeddings"
             resp = requests.post(
-                "http://localhost:11434/api/embeddings",
+                embed_url,
                 json={"model": "nomic-embed-text:latest", "prompt": text},
                 timeout=3,
             )
@@ -173,7 +175,7 @@ class MemoryRetriever:
             else:
                 logger.warning(f"[MemoryRetriever] Embedding API returned status {resp.status_code}")
         except Exception as _embed_err:
-            logger.warning(f"[MemoryRetriever] Embedding call failed (Ollama down?): {_embed_err}")
+            logger.debug(f"[MemoryRetriever] Embedding call failed (Ollama down?): {_embed_err}")
         return None
 
     def _vector_search(self, query: str, limit: int = 5) -> List[str]:

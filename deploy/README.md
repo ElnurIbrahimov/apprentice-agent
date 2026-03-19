@@ -12,9 +12,9 @@ Run AURA on an always-on server so you can access it from anywhere via the brows
 | OS | Ubuntu 22.04 LTS | Ubuntu 24.04 LTS |
 | Network | Public IP | Domain name + SSL |
 
-AURA needs an Ollama instance for LLM inference. Options:
-- Run Ollama on the same server (needs more RAM/GPU)
-- Point `OLLAMA_HOST` at a separate Ollama server or cloud provider
+AURA uses cloud models via Ollama Pro ($20/month). No local GPU needed — all LLM inference happens in the cloud. You just need:
+- `OLLAMA_API_KEY` for cloud models (Kimi, Qwen, MiniMax, DeepSeek, etc.)
+- Optionally, a ChatGPT subscription for GPT-5.x models via OAuth
 
 ## Quick Deploy (Bare Metal)
 
@@ -117,6 +117,60 @@ Hetzner Cloud offers cheap VPS starting at ~$4/month.
 
 3. **Domain + SSL** — same as above (point DNS, run certbot)
 
+## ChatGPT Token Setup for Servers
+
+On a headless server you cannot open a browser for OAuth login. Use one of these methods:
+
+### Method 1: Login locally, copy token to server
+
+1. On your local machine (with a browser):
+   ```bash
+   aura --login chatgpt
+   ```
+
+2. Copy the token file to your server:
+   ```bash
+   scp ~/.aura/chatgpt_auth.json root@YOUR_SERVER:/opt/aura/.aura/chatgpt_auth.json
+   chown aura:aura /opt/aura/.aura/chatgpt_auth.json
+   ```
+
+3. The refresh token auto-renews the access token, so this is a one-time setup.
+
+### Method 2: Use the API endpoint
+
+1. Get a refresh token from a local login (check `~/.aura/chatgpt_auth.json` for the `refresh` field).
+
+2. POST it to your server's API:
+   ```bash
+   curl -X POST https://yourdomain.com/api/auth/chatgpt/token \
+     -H "X-API-Key: YOUR_AURA_API_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{"refresh_token": "YOUR_REFRESH_TOKEN"}'
+   ```
+
+3. Verify:
+   ```bash
+   curl https://yourdomain.com/api/auth/chatgpt/status \
+     -H "X-API-Key: YOUR_AURA_API_KEY"
+   ```
+
+### Method 3: Write the token file directly
+
+```bash
+mkdir -p /opt/aura/.aura
+cat > /opt/aura/.aura/chatgpt_auth.json << 'EOF'
+{
+  "access": "",
+  "refresh": "YOUR_REFRESH_TOKEN_HERE",
+  "expires": 0,
+  "account_id": ""
+}
+EOF
+chown aura:aura /opt/aura/.aura/chatgpt_auth.json
+```
+
+The empty `access` and `expires: 0` will trigger an automatic refresh on first use.
+
 ## SSL/HTTPS with Let's Encrypt
 
 After running the setup script and setting your domain in nginx:
@@ -163,6 +217,7 @@ Before exposing AURA to the internet:
 - [ ] Ollama is NOT exposed to the internet (bind to 127.0.0.1 only)
 - [ ] SSH uses key auth, not passwords (`PasswordAuthentication no` in sshd_config)
 - [ ] API key is entered in the extension settings (not hardcoded anywhere public)
+- [ ] `AURA_HEADLESS=true` is set in `.env` (disables screen monitoring on servers)
 
 ## CORS Configuration
 
@@ -186,8 +241,14 @@ journalctl -u aura -n 100
 # Service status
 systemctl status aura
 
+# All three services
+systemctl status aura aura-telegram aura-daemon
+
 # Health check
 curl -s https://yourdomain.com/api/status | python3 -m json.tool
+
+# ChatGPT auth status
+curl -s -H "X-API-Key: YOUR_KEY" https://yourdomain.com/api/auth/chatgpt/status
 
 # Nginx access logs
 tail -f /var/log/nginx/access.log
@@ -215,27 +276,57 @@ docker compose up -d --build
 
 ## Troubleshooting
 
-**AURA won't start:**
+### AURA won't start
+
 ```bash
 journalctl -u aura -n 50   # Check logs for errors
 cat /opt/aura/.env          # Verify config
 /opt/aura/venv/bin/python -c "import fastapi; print('ok')"  # Test deps
 ```
 
-**WebSocket connection fails:**
+### WebSocket connection fails
+
 - Check that nginx has `proxy_set_header Upgrade` and `Connection "upgrade"`
 - Check browser console for CORS errors
 - Verify SSL cert is valid: `curl -v https://yourdomain.com/api/status`
 
-**Extension shows "offline":**
+### Extension shows "offline"
+
 - Verify the Server URL in extension settings matches your domain exactly
 - Check API key matches the one in `.env`
 - Test with: `curl -H "X-API-Key: YOUR_KEY" https://yourdomain.com/api/status`
 
-**Rate limiting:**
-- Default is 200 requests/minute per IP
-- Adjust `AURA_API_RATE_LIMIT` in `.env` if needed
+### Rate limiting (429 errors)
 
-**Ollama connection:**
+- Default is 60 requests/minute per IP
+- Adjust `AURA_API_RATE_LIMIT` in `.env` if needed
+- The extension makes multiple requests per interaction (chat + streaming + status), so increase to 200+ for heavy use
+
+### Model not found
+
+- Cloud models require `OLLAMA_API_KEY` to be set (Ollama Pro subscription)
+- Check available models: `curl -H "X-API-Key: YOUR_KEY" https://yourdomain.com/api/models`
+- If a specific cloud model is down, AURA's fallback chains will try alternatives automatically
+
+### ChatGPT auth failures
+
+- Token expired: The refresh token auto-renews, but if the refresh token itself expired (rare), re-login:
+  ```bash
+  # On local machine with browser:
+  aura --login chatgpt
+  # Then copy token to server (see ChatGPT Token Setup above)
+  ```
+- Check status: `curl -H "X-API-Key: YOUR_KEY" https://yourdomain.com/api/auth/chatgpt/status`
+- Verify token file exists: `ls -la /opt/aura/.aura/chatgpt_auth.json`
+
+### Ollama connection
+
+- If using Ollama Pro (cloud-only, no local Ollama needed), just set `OLLAMA_API_KEY` in `.env`
 - If Ollama runs on a different machine, set `OLLAMA_HOST=http://OLLAMA_IP:11434`
 - If on the same machine, default `http://localhost:11434` works
+
+### High memory usage
+
+- Default memory limit is 4 GB (set in systemd service and docker-compose)
+- Reduce if needed: edit `/etc/systemd/system/aura.service` and change `MemoryMax`
+- AURA uses ~1-2 GB at rest, spikes during heavy memory retrieval or KG operations

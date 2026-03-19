@@ -147,7 +147,7 @@ function App() {
           fixed lg:relative inset-y-0 left-0 z-40
           w-64 lg:w-64 shrink-0
           transform transition-transform duration-200 ease-in-out
-          ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0 lg:hidden'}
+          ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
           ${isMobile && sidebarOpen ? 'shadow-2xl' : ''}
         `}
       >
