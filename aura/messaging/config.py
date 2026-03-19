@@ -123,3 +123,6 @@ def load_config():
         "whatsapp": WHATSAPP_CONFIG,
         "general": MESSAGING_CONFIG
     }
+
+# Auto-load config from environment on import
+load_config()
