@@ -1244,15 +1244,17 @@ Provide a well-structured, informative summary with key findings and cite source
                 logger.warning(f"[AgentService] Could not fetch local models: {e}")
                 local_models = []
 
-            # Add ChatGPT OAuth models if authenticated
-            chatgpt_models = []
+            # Always include ChatGPT models — auth checked at request time
             try:
-                from aura.auth.chatgpt_oauth import is_authenticated
-                if is_authenticated():
-                    from aura.auth.chatgpt_client import ALL_CHATGPT_MODELS
-                    chatgpt_models = list(ALL_CHATGPT_MODELS)
+                from aura.auth.chatgpt_client import ALL_CHATGPT_MODELS
+                chatgpt_models = list(ALL_CHATGPT_MODELS)
             except ImportError:
-                pass
+                chatgpt_models = [
+                    "chatgpt:gpt-5.4", "chatgpt:gpt-5.4-thinking", "chatgpt:gpt-5.4-pro",
+                    "chatgpt:gpt-5.3", "chatgpt:gpt-5.3-codex", "chatgpt:gpt-5.3-codex-spark",
+                    "chatgpt:gpt-5.2", "chatgpt:gpt-5.2-codex",
+                    "chatgpt:gpt-5.1", "chatgpt:gpt-5.1-codex", "chatgpt:gpt-5.1-codex-mini", "chatgpt:gpt-5.1-codex-max",
+                ]
 
             current_model = "auto"
             if self._agent is not None:

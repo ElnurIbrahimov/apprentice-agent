@@ -2391,6 +2391,9 @@ class OllamaBrain:
         """
         if not getattr(Config, "ENABLE_OUTCOME_AWARE_ROUTING", True):
             return model
+        # Don't override user's explicit model choice
+        if self._model_override:
+            return model
         try:
             from aura.reliability.routing_stats import get_routing_stats, MicrotaskCategory
             _CAT_MAP = {
