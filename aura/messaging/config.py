@@ -83,9 +83,15 @@ MESSAGING_CONFIG = {
 
 
 def load_config():
-    """Load config from environment or file"""
+    """Load config from environment or file.
 
-    # Try to load from .env file
+    .env values only fill in vars that are NOT already set in the
+    environment, matching standard dotenv behaviour.  This prevents
+    an empty .env line like ``TELEGRAM_ALLOWED_USERS=`` from wiping
+    out a value that was exported in the shell before launch.
+    """
+
+    # Try to load from .env file — only set vars not already present
     env_file = Path(".env")
     if env_file.exists():
         try:
@@ -94,7 +100,11 @@ def load_config():
                     line = line.strip()
                     if "=" in line and not line.startswith("#"):
                         key, value = line.split("=", 1)
-                        os.environ[key.strip()] = value.strip().strip('"').strip("'")
+                        key = key.strip()
+                        value = value.strip().strip('"').strip("'")
+                        # Only set if not already in environment (don't overwrite)
+                        if key not in os.environ:
+                            os.environ[key] = value
         except Exception:
             pass
 
@@ -102,14 +112,16 @@ def load_config():
     if os.getenv("TELEGRAM_BOT_TOKEN"):
         TELEGRAM_CONFIG["telegram_token"] = os.getenv("TELEGRAM_BOT_TOKEN")
 
-    if os.getenv("TELEGRAM_ALLOWED_USERS"):
+    raw_users = os.getenv("TELEGRAM_ALLOWED_USERS", "")
+    if raw_users:
         TELEGRAM_CONFIG["allowed_users"] = [
-            u.strip() for u in os.getenv("TELEGRAM_ALLOWED_USERS").split(",")
+            u.strip() for u in raw_users.split(",") if u.strip()
         ]
 
-    if os.getenv("TELEGRAM_ADMIN_USERS"):
+    raw_admins = os.getenv("TELEGRAM_ADMIN_USERS", "")
+    if raw_admins:
         TELEGRAM_CONFIG["admin_users"] = [
-            u.strip() for u in os.getenv("TELEGRAM_ADMIN_USERS").split(",")
+            u.strip() for u in raw_admins.split(",") if u.strip()
         ]
 
     if os.getenv("WHATSAPP_WEBSOCKET_URL"):

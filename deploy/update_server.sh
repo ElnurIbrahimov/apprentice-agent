@@ -27,7 +27,23 @@ log "Current version:"
 git log --oneline -1
 
 log "Pulling latest changes..."
-git pull --ff-only || error "Git pull failed. Resolve conflicts manually."
+GIT_OUTPUT=$(git pull --ff-only 2>&1) || {
+  if echo "$GIT_OUTPUT" | grep -qiE "authentication|403|401|could not read Username"; then
+    echo ""
+    error "Git authentication failed — the repo is private and needs a token.
+
+    Follow the instructions in: /opt/aura/deploy/setup_git_auth.md
+
+    Quick fix:
+      1. Go to https://github.com/settings/tokens
+      2. Generate a token with 'repo' scope
+      3. Run: sudo -u aura git -C /opt/aura remote set-url origin https://YOUR_TOKEN@github.com/ElnurIbrahimov/apprentice-agent.git
+      4. Re-run this script"
+  else
+    echo "$GIT_OUTPUT"
+    error "Git pull failed. Output above may help diagnose the issue."
+  fi
+}
 
 # ---------------------------------------------------------------------------
 # Clean ALL __pycache__ directories to prevent stale bytecode after git pull

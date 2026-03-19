@@ -87,6 +87,7 @@ export default function Rail() {
         onClick={() => setPanel(item.id)}
         onMouseEnter={(e) => { setHoveredId(item.id); showTooltip(item.label, e); }}
         onMouseLeave={() => { setHoveredId(null); hideTooltip(); }}
+        title={item.label}
         className={`rail-btn rail-icon-btn ${isActive ? 'rail-active' : ''}`}
       >
         <item.Icon

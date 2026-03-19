@@ -48,10 +48,14 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 def load_env():
-    """Load environment variables from .env file"""
+    """Load environment variables from .env file.
+
+    Existing env vars are NOT overwritten — shell exports take
+    precedence over .env values, matching python-dotenv defaults.
+    """
     try:
         from dotenv import load_dotenv
-        load_dotenv()
+        load_dotenv()  # override=False by default
     except ImportError:
         env_file = Path(".env")
         if env_file.exists():
@@ -62,8 +66,10 @@ def load_env():
                         line = line[7:]
                     if "=" in line and not line.startswith("#"):
                         key, value = line.split("=", 1)
+                        key = key.strip()
                         value = value.strip().strip('"').strip("'")
-                        os.environ[key.strip()] = value
+                        if key not in os.environ:
+                            os.environ[key] = value
 
 
 class TelegramAgentWrapper:

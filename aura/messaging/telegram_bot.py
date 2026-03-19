@@ -7,6 +7,7 @@ Install: pip install python-telegram-bot>=20.0
 
 import asyncio
 import logging
+import os
 import random
 from datetime import datetime
 from typing import Optional, Dict, List
@@ -194,19 +195,21 @@ class TelegramBot(BasePlatform):
             logger.warning(f"Could not send typing indicator: {e}")
 
     def _is_user_allowed(self, user_id: int) -> bool:
-        """Check if user is allowed to use the bot.
-
-        SECURITY: Returns False if no whitelist configured (fail-closed).
-        Add your Telegram user ID to TELEGRAM_ALLOWED_USERS in config.
-        Get your user ID from @userinfobot on Telegram.
-        """
-        if not self.allowed_users:
-            logger.warning(
-                f"[TelegramBot] Rejected user {user_id} — no allowed_users configured. "
-                "Set TELEGRAM_ALLOWED_USERS in config to enable bot access."
-            )
+        """Check if user is allowed — reads os.environ EVERY call (bulletproof)."""
+        env_val = os.environ.get("TELEGRAM_ALLOWED_USERS", "")
+        allowed = [u.strip() for u in env_val.split(",") if u.strip()] if env_val else []
+        if self.allowed_users:
+            for u in self.allowed_users:
+                if u and u not in allowed:
+                    allowed.append(u)
+        if not allowed:
+            logger.warning(f"[TelegramBot] Rejected user {user_id} — no allowed_users configured.")
             return False
-        return str(user_id) in self.allowed_users
+        is_allowed = str(user_id) in allowed
+        if not is_allowed:
+            logger.warning(f"[TelegramBot] Rejected user {user_id} — not in allowed list {allowed}")
+        return is_allowed
+
 
     def _is_admin(self, user_id: int) -> bool:
         """Check if user is an admin"""
