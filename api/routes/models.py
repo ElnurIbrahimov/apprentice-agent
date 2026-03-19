@@ -61,17 +61,33 @@ async def list_available_models():
     cloud = [m for m in models if m["is_cloud"]]
     local = [m for m in models if not m["is_cloud"]]
 
-    # Add ChatGPT models if authenticated
-    chatgpt = []
+    # Add ChatGPT models — always include them, auth checked at request time
+    chatgpt_names = []
     try:
-        from aura.auth.chatgpt_oauth import is_authenticated
-        if is_authenticated():
-            from aura.auth.chatgpt_client import ALL_CHATGPT_MODELS
-            chatgpt = [{"name": m, "size": 0, "is_cloud": True} for m in ALL_CHATGPT_MODELS]
+        from aura.auth.chatgpt_client import ALL_CHATGPT_MODELS
+        chatgpt_names = list(ALL_CHATGPT_MODELS)
     except ImportError:
-        pass
+        chatgpt_names = [
+            "chatgpt:gpt-5.4", "chatgpt:gpt-5.4-thinking", "chatgpt:gpt-5.4-pro",
+            "chatgpt:gpt-5.3", "chatgpt:gpt-5.3-codex", "chatgpt:gpt-5.3-codex-spark",
+            "chatgpt:gpt-5.2", "chatgpt:gpt-5.2-codex",
+            "chatgpt:gpt-5.1", "chatgpt:gpt-5.1-codex", "chatgpt:gpt-5.1-codex-mini", "chatgpt:gpt-5.1-codex-max",
+        ]
+    chatgpt = [{"name": m, "size": 0, "is_cloud": True} for m in chatgpt_names]
 
     return {"cloud": cloud, "local": local, "chatgpt": chatgpt, "total": len(models) + len(chatgpt)}
+
+
+@router.get("")
+async def list_models_web():
+    """Web UI compatible endpoint — returns flat model name lists."""
+    result = await list_available_models()
+    return {
+        "chatgpt_models": [m["name"] for m in result["chatgpt"]],
+        "cloud_models": [m["name"] for m in result["cloud"]],
+        "local_models": [m["name"] for m in result["local"]],
+        "total": result["total"],
+    }
 
 
 @router.get("/config")
