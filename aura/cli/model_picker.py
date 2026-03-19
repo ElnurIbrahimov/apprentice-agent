@@ -4,12 +4,12 @@ import os
 
 # Model roles with display info (updated from Config on startup)
 MODEL_ROLES = [
-    ("fast", "gemini-3-flash-preview:cloud", "1M ctx"),
-    ("reason", "kimi-k2.5:cloud", "256K ctx"),
+    ("fast", "nemotron-3-super:cloud", "fast inference"),
+    ("reason", "kimi-k2.5:cloud", "256K ctx, top agentic"),
     ("code", "minimax-m2.7:cloud", "1M ctx, SWE-Pro 56.2%"),
-    ("think", "kimi-k2-thinking:cloud", "256K ctx"),
-    ("vision", "qwen3-vl:235b-cloud", "256K ctx"),
-    ("longctx", "minimax-m2.7:cloud", "1M ctx, self-evolving"),
+    ("think", "qwen3.5:397b-cloud", "256K ctx, hybrid thinking"),
+    ("vision", "kimi-k2.5:cloud", "multimodal"),
+    ("longctx", "minimax-m2.7:cloud", "1M ctx"),
 ]
 
 # Cache for all available models

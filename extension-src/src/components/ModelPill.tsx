@@ -18,13 +18,11 @@ const TIERS: TierDef[] = [
 ];
 
 const FAST_PATTERNS = [
-  'gemini-3-flash', 'gemini-flash', 'gemma3:4b', 'gemma3:1b',
-  'deepcoder:1.5b', 'qwen2:1.5b', 'qwen3:1', 'phi',
+  'nemotron', 'glm-5',
 ];
 const POWER_PATTERNS = [
-  '671b', '397b', '480b', '123b', '120b', 'cogito', 'qwen3.5',
-  'qwen3-coder', 'devstral-2', 'gpt-oss', 'kimi-k2', 'minimax-m2.7',
-  'minimax-m2.5', 'mistral-large',
+  '397b', '480b', '120b', 'qwen3.5', 'qwen3-coder', 'gpt-oss',
+  'kimi-k2', 'minimax-m2.7', 'minimax-m2.5',
 ];
 
 function classifyModel(name: string, source: 'cloud' | 'local' | 'chatgpt'): string {

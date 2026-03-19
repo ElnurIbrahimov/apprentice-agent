@@ -39,29 +39,21 @@ def _get_validation_session():
 # Verified cloud models via Ollama.com (Pro $20/month subscription)
 # Updated Feb 2026 — all models accessed via Ollama cloud API
 VERIFIED_CLOUD_MODELS = {
-    # Fast / general conversation
-    "gemini-3-flash-preview:cloud",   # Speed-optimized, low latency
-    "nemotron-3-nano:30b-cloud",      # NVIDIA efficient 30B fallback
-    "kimi-k2.5:cloud",                # General purpose, multimodal
+    # Fast / general
+    "kimi-k2.5:cloud",                # General purpose, multimodal, 256K
+    "nemotron-3-super:cloud",         # NVIDIA efficient, fast
     # Reasoning / planning
     "qwen3.5:397b-cloud",             # Deep planning, MMLU/GPQA leader
-    "cogito-2.1:671b-cloud",          # Extended reasoning, MIT license
+    "qwen3.5:cloud",                  # Lighter variant
     "deepseek-v3.2:cloud",            # Strong all-rounder
-    # Code generation / debugging
-    "qwen3-coder:480b-cloud",         # Code-specialized at 480B scale
-    "devstral-2:123b-cloud",          # Agentic coding, SWE-bench focus
-    "qwen3-coder-next:cloud",         # Efficient code MoE variant
-    # Vision / multimodal
-    "qwen3-vl:235b-cloud",            # Only dedicated vision-language model
-    # Deep thinking / chain-of-thought
-    "kimi-k2-thinking:cloud",         # Explicit thinking mode, extended CoT
-    # Long context / document analysis + code
-    "minimax-m2.7:cloud",             # Self-evolving, SWE-Pro 56.2%, 1M context
-    "minimax-m2.5:cloud",             # Legacy, million-token context windows
-    # General purpose extras
-    "mistral-large-3:675b-cloud",     # Large Mistral for general tasks
-    "gpt-oss:120b-cloud",             # OSS GPT-style fallback
     "glm-5:cloud",                    # Zhipu AI general model
+    # Code generation / debugging
+    "minimax-m2.7:cloud",             # SWE-Pro 56.2%, self-evolving, 1M context
+    "minimax-m2.5:cloud",             # 80.2% SWE-Bench, 196K
+    "qwen3-coder:480b-cloud",         # Code-specialized at 480B scale
+    "qwen3-coder-next:cloud",         # Efficient code MoE variant
+    # General purpose
+    "gpt-oss:120b-cloud",             # OSS GPT-style
 }
 
 # Local models kept only for non-chat workloads (embeddings, OCR)
@@ -160,61 +152,47 @@ class Config:
 
     # Model chains (first available is used as fallback)
     MODEL_FAST_CHAIN = [
-        "gemini-3-flash-preview:cloud",   # Primary: 1M ctx, fastest
-        "kimi-k2.5:cloud",                # Fallback: 256K, strong general
-        "nemotron-3-nano:30b-cloud",       # Fallback: 1M ctx, efficient
-        "qwen3:8b",                        # Local fallback: offline-capable
-        "qwen2:1.5b",                      # Local fallback: tiny/fast
+        "nemotron-3-super:cloud",          # Primary: fast
+        "kimi-k2.5:cloud",                # Fallback: strong general
+        "glm-5:cloud",                     # Fallback: general
     ]
     MODEL_REASON_CHAIN = [
-        "kimi-k2.5:cloud",                # Primary: 96% AIME, top agentic, 256K
-        "minimax-m2.7:cloud",             # Fallback: SWE-Pro 56.2%, strong reasoning, 1M
-        "glm-5:cloud",                     # Fallback: 86% GPQA, strong agentic
+        "kimi-k2.5:cloud",                # Primary: top agentic, 256K
+        "minimax-m2.7:cloud",             # Fallback: SWE-Pro 56.2%, 1M
         "qwen3.5:397b-cloud",             # Fallback: hybrid thinking, 256K
-        "cogito-2.1:671b-cloud",           # Fallback: extended reasoning
-        "deepseek-v3.2:cloud",             # Fallback: strong all-rounder, 128K
-        "deepseek-r1:8b",                  # Local fallback: reasoning-capable
-        "qwen3:8b",                        # Local fallback: offline-capable
+        "glm-5:cloud",                     # Fallback: strong agentic
+        "deepseek-v3.2:cloud",             # Fallback: strong all-rounder
     ]
     MODEL_CODE_CHAIN = [
-        "minimax-m2.7:cloud",             # Primary: SWE-Pro 56.2%, self-evolving, 1M ctx
-        "minimax-m2.5:cloud",             # Fallback: 80.2% SWE-Bench, 196K
+        "minimax-m2.7:cloud",             # Primary: SWE-Pro 56.2%, 1M ctx
+        "minimax-m2.5:cloud",             # Fallback: 80.2% SWE-Bench
         "qwen3-coder:480b-cloud",          # Fallback: 480B code specialist
-        "devstral-2:123b-cloud",           # Fallback: agentic code/SWE
         "qwen3-coder-next:cloud",          # Fallback: efficient code MoE
-        "deepseek-v3.2:cloud",             # Fallback: strong at code, 128K
-        "qwen2.5-coder:7b",               # Local fallback: code-specialized
-        "deepseek-r1:8b",                  # Local fallback: offline code
+        "deepseek-v3.2:cloud",             # Fallback: strong at code
     ]
     MODEL_VISION_CHAIN = [
-        "qwen3-vl:235b-cloud",             # Primary: best open vision, 256K
-        "kimi-k2.5:cloud",                 # Fallback: native multimodal
-        "gemini-3-flash-preview:cloud",    # Fallback: Gemini supports vision
-        "llava:latest",                    # Local fallback: vision-capable
+        "kimi-k2.5:cloud",                # Primary: native multimodal
+        "qwen3.5:397b-cloud",             # Fallback: general
     ]
     MODEL_THINK_CHAIN = [
-        "kimi-k2-thinking:cloud",          # Primary: dedicated thinking mode, 256K
-        "qwen3.5:397b-cloud",             # Fallback: hybrid think/non-think, 256K
-        "cogito-2.1:671b-cloud",           # Fallback: extended reasoning
-        "deepseek-r1:8b",                  # Local fallback: reasoning chain-of-thought
+        "qwen3.5:397b-cloud",             # Primary: hybrid think/non-think, 256K
+        "kimi-k2.5:cloud",                # Fallback: strong reasoning
+        "minimax-m2.7:cloud",             # Fallback: deep reasoning, 1M
     ]
     MODEL_LONGCTX_CHAIN = [
-        "minimax-m2.7:cloud",             # Primary: 1M tokens, strongest long-context
-        "gemini-3-flash-preview:cloud",    # Fallback: 1M tokens, fastest
-        "nemotron-3-nano:30b-cloud",       # Fallback: 1M tokens
-        "minimax-m2.5:cloud",              # Fallback: 196K (legacy)
+        "minimax-m2.7:cloud",             # Primary: 1M tokens
+        "minimax-m2.5:cloud",              # Fallback: 196K
         "kimi-k2.5:cloud",                 # Fallback: 256K
         "qwen3.5:397b-cloud",             # Fallback: 256K
-        "qwen3:8b",                        # Local fallback: best local context window
     ]
 
     # Primary defaults
-    MODEL_FAST: str = os.getenv("MODEL_FAST", "gemini-3-flash-preview:cloud")
+    MODEL_FAST: str = os.getenv("MODEL_FAST", "nemotron-3-super:cloud")
     MODEL_REASON: str = os.getenv("MODEL_REASON", "kimi-k2.5:cloud")
     MODEL_CODE: str = os.getenv("MODEL_CODE", "minimax-m2.7:cloud")
-    MODEL_VISION: str = os.getenv("MODEL_VISION", "qwen3-vl:235b-cloud")
-    MODEL_THINK: str = os.getenv("MODEL_THINK", "kimi-k2-thinking:cloud")
-    MODEL_LONGCTX: str = os.getenv("MODEL_LONGCTX", "gemini-3-flash-preview:cloud")
+    MODEL_VISION: str = os.getenv("MODEL_VISION", "kimi-k2.5:cloud")
+    MODEL_THINK: str = os.getenv("MODEL_THINK", "qwen3.5:397b-cloud")
+    MODEL_LONGCTX: str = os.getenv("MODEL_LONGCTX", "minimax-m2.7:cloud")
 
     MODEL_NAME: str = MODEL_REASON  # Default model (backward compat)
 

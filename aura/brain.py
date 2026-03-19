@@ -295,17 +295,17 @@ class OllamaBrain:
         self._token_lock = threading.Lock()
         # Rough USD cost per 1K tokens (input/output) for cloud models
         self._MODEL_COST_PER_1K: dict = {
-            "gemini-3-flash-preview:cloud": (0.00015, 0.0006),
-            "nemotron-3-nano:30b-cloud":    (0.0004, 0.0004),
+            "nemotron-3-super:cloud":      (0.0004, 0.0004),
             "kimi-k2.5:cloud":             (0.003,  0.003),
-            "kimi-k2-thinking:cloud":      (0.01,   0.03),
             "qwen3.5:397b-cloud":          (0.004,  0.004),
-            "cogito-2.1:671b-cloud":       (0.004,  0.004),
+            "qwen3.5:cloud":              (0.004,  0.004),
             "deepseek-v3.2:cloud":         (0.003,  0.003),
+            "glm-5:cloud":                (0.003,  0.003),
             "qwen3-coder:480b-cloud":      (0.004,  0.004),
-            "devstral-2:123b-cloud":       (0.002,  0.002),
+            "qwen3-coder-next:cloud":      (0.003,  0.003),
             "minimax-m2.7:cloud":          (0.004,  0.004),
             "minimax-m2.5:cloud":          (0.004,  0.004),
+            "gpt-oss:120b-cloud":          (0.003,  0.003),
         }
         # ChatGPT subscription models (cost is $0 — covered by subscription)
         if CHATGPT_AVAILABLE:
