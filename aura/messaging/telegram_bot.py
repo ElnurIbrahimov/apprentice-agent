@@ -495,14 +495,21 @@ Status: Online and ready!"""
         - Humanization post-processing
         """
         try:
-            if hasattr(self.aura, 'chat'):
+            # Try generate_response (TelegramAgentWrapper), then chat (direct agent)
+            if hasattr(self.aura, 'generate_response'):
+                response = self.aura.generate_response(text)
+                if response:
+                    return response
+            elif hasattr(self.aura, 'chat'):
                 response = self.aura.chat(text)
                 if response:
                     return response
+            else:
+                logger.error(f"AURA has no chat or generate_response method. Type: {type(self.aura)}")
         except Exception as e:
-            logger.error(f"AURA processing error: {e}")
+            logger.error(f"AURA processing error: {e}", exc_info=True)
 
-        return "Hey, I'm here! What's on your mind?"
+        return "Sorry, I couldn't process that. Try again in a moment."
 
     # ============ PROACTIVE MESSAGING ============
 
