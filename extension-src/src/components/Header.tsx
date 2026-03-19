@@ -13,7 +13,7 @@ const STATUS_DOT: Record<string, string> = {
 
 export default function Header() {
   const { wsReady, modelName, mood, theme, toggleTheme, backendStatus, messages, featureModels, newConversation, conversations, loadConversationList, historyLoaded } = useStore();
-  const status = backendStatus || (wsReady ? 'online' : 'offline');
+  const status = backendStatus === 'online' ? 'online' : backendStatus === 'offline' ? 'offline' : 'connecting';
   const [scrolled, setScrolled] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);

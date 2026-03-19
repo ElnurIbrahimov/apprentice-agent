@@ -81,7 +81,7 @@ export default function ChatPanel() {
   const sendMessage = useCallback(async (text: string, overrideModel?: string) => {
     if (!text.trim()) return;
     const st = useStore.getState();
-    if (!st.wsReady) { sysmsg('AURA is offline — start the backend server.'); return; }
+    if (st.backendStatus === 'offline') { sysmsg('AURA is offline — start the backend server.'); return; }
     if (st.activeStream) return;
 
     // Lock immediately
@@ -105,11 +105,12 @@ export default function ChatPanel() {
       }
     }
 
-    // Re-check WS after awaits
-    const { wsReady: ready, ws: socket } = useStore.getState();
-    if (!ready || socket?.readyState !== WebSocket.OPEN) {
+    // Check if WS or HTTP is available
+    const { wsReady: ready, ws: socket, backendStatus: bs } = useStore.getState();
+    const useWs = ready && socket?.readyState === WebSocket.OPEN;
+    if (!useWs && bs === 'offline') {
       setActiveStream(null);
-      sysmsg('AURA disconnected — reconnecting…');
+      sysmsg('AURA is offline — start the backend server.');
       return;
     }
 
@@ -184,7 +185,32 @@ export default function ChatPanel() {
       payload.thinking = true;
       payload.thinking_level = thinkingLevel;
     }
-    socket!.send(JSON.stringify(payload));
+    if (useWs) {
+      socket!.send(JSON.stringify(payload));
+    } else {
+      // HTTP fallback when WebSocket is unavailable
+      (async () => {
+        try {
+          const { HTTP, API_KEY } = await import('../api');
+          const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+          if (API_KEY) headers['X-API-Key'] = API_KEY;
+          const resp = await fetch(`${HTTP}/api/chat`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ message: full, model: payload.model }),
+          });
+          const data = await resp.json();
+          const aiText = data?.response || data?.message?.content || data?.content || JSON.stringify(data);
+          stream.rawText = aiText;
+          if (stream.onDone) stream.onDone(aiText);
+          setActiveStream(null);
+        } catch (err: any) {
+          stream.rawText = `Error: ${err.message || 'Request failed'}`;
+          if (stream.onDone) stream.onDone(stream.rawText);
+          setActiveStream(null);
+        }
+      })();
+    }
   }, [sysmsg, addMessage, setActiveStream, setPendingCtx, fileAttachments]);
 
   // Handle aura-send events dispatched by AskPanel / ToolsPanel

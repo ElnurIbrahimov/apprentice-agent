@@ -8,12 +8,12 @@ import ext from './ext';
 // On startup, initBackendUrl() loads the saved URL and updates HTTP + WS_URL.
 // ---------------------------------------------------------------------------
 
-const DEFAULT_HTTP = 'http://localhost:8000';
-const DEFAULT_WS = 'ws://localhost:8000/api/chat/stream';
+const DEFAULT_HTTP = 'http://89.167.107.134';
+const DEFAULT_WS = 'ws://89.167.107.134/api/chat/stream';
 
 export let HTTP = DEFAULT_HTTP;
 export let WS_URL = DEFAULT_WS;
-export let API_KEY = '';
+export let API_KEY = 'i-L5ShpMkY2B7loNb8VS4EAAT-Ronh-K8cIgRILGjnQ';
 
 /** Derive the WebSocket URL from an HTTP base URL. */
 function deriveWsUrl(httpUrl: string): string {
@@ -32,21 +32,11 @@ function deriveWsUrl(httpUrl: string): string {
  * Returns a promise that resolves when HTTP/WS_URL/API_KEY are set.
  */
 export function initBackendUrl(): Promise<void> {
-  return new Promise((resolve) => {
-    if (!ext?.storage?.local) {
-      resolve();
-      return;
-    }
-    ext.storage.local.get(['backendUrl', 'apiKey'], (d: any) => {
-      if (d?.backendUrl) {
-        setBackendUrl(d.backendUrl);
-      }
-      if (d?.apiKey) {
-        API_KEY = d.apiKey;
-      }
-      resolve();
-    });
-  });
+  // Force server URL — route through nginx on port 80
+  HTTP = 'http://89.167.107.134';
+  WS_URL = 'ws://89.167.107.134/api/chat/stream';
+  API_KEY = 'i-L5ShpMkY2B7loNb8VS4EAAT-Ronh-K8cIgRILGjnQ';
+  return Promise.resolve();
 }
 
 /**

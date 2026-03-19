@@ -73,11 +73,15 @@ export function connectWS() {
     useStore.getState().setWsReady(false);
     useStore.getState().setWs(null);
     _wsConsecutiveFailures++;
-    // Set 'connecting' initially — only go 'offline' after 3 consecutive failures
-    if (_wsConsecutiveFailures >= 3) {
-      useStore.getState().setBackendStatus('offline');
-    } else {
-      useStore.getState().setBackendStatus('connecting');
+    // Don't override 'online' status from successful HTTP — WebSocket is optional for streaming
+    // Only set offline if HTTP fetch also failed (backendStatus was already not 'online')
+    const currentStatus = useStore.getState().backendStatus;
+    if (currentStatus !== 'online') {
+      if (_wsConsecutiveFailures >= 3) {
+        useStore.getState().setBackendStatus('offline');
+      } else {
+        useStore.getState().setBackendStatus('connecting');
+      }
     }
     // Flush any pending chunk buffer before finalization
     if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; }
@@ -89,12 +93,14 @@ export function connectWS() {
       if (activeStream.onDone) activeStream.onDone(activeStream.rawText ? activeStream.rawText + '\n\n⚠ Connection lost' : '⚠ Connection lost');
     }
     useStore.getState().setActiveStream(null);
-    // Reconnect with exponential backoff + jitter
-    const jitter = Math.random() * _wsRetryDelay * 0.3;
-    setTimeout(() => {
-      _wsRetryDelay = Math.min(_wsRetryDelay * 2, 30000);
-      connectWS();
-    }, _wsRetryDelay + jitter);
+    // Reconnect with exponential backoff + jitter — stop after 5 failures
+    if (_wsConsecutiveFailures <= 5) {
+      const jitter = Math.random() * _wsRetryDelay * 0.3;
+      setTimeout(() => {
+        _wsRetryDelay = Math.min(_wsRetryDelay * 2, 30000);
+        connectWS();
+      }, _wsRetryDelay + jitter);
+    }
   };
 
   socket.onerror = () => {
