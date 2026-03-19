@@ -25,6 +25,9 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional
 
+# Headless mode — skip screen/GUI features on servers without a display
+HEADLESS = bool(os.environ.get("AURA_HEADLESS")) or not os.environ.get("DISPLAY")
+
 # PID lock — prevent double-launch
 PID_FILE = Path.home() / ".aura_daemon.pid"
 LOG_FILE = Path.home() / ".aura_daemon.log"
@@ -66,7 +69,13 @@ class AuraDaemon:
         self._event_bus = EventBus()
         self._proactive = ProactiveEngine(self._event_bus)
         self._ipc = IPCServer(self._event_bus)
-        self._screen_pool = ThreadPoolExecutor(max_workers=1)
+        self._headless = HEADLESS
+
+        # Screen monitoring — skip entirely on headless servers
+        if not self._headless:
+            self._screen_pool = ThreadPoolExecutor(max_workers=1)
+        else:
+            self._screen_pool = None
         self._screen_tick_pending = False
 
         # Tick tracking (monotonic for interval measurement)
@@ -82,7 +91,7 @@ class AuraDaemon:
         """Start the daemon."""
         self._write_pid()
         self._running = True
-        logger.info("AURA daemon starting...")
+        logger.info("AURA daemon starting... (headless=%s)", self._headless)
 
         # Load agent (lazy — don't block startup)
         self._load_agent_thread = threading.Thread(target=self._load_agent, daemon=True)
@@ -102,18 +111,22 @@ class AuraDaemon:
     def stop(self):
         self._running = False
         self._event_bus.shutdown()
-        self._screen_pool.shutdown(wait=False)
+        if self._screen_pool:
+            self._screen_pool.shutdown(wait=False)
         self._ipc.stop()
         self._remove_pid()
         logger.info("AURA daemon stopped.")
 
     def _run_loop(self):
         """Main heartbeat loop."""
+        if self._headless:
+            logger.info("Headless mode — screen monitoring disabled")
         while self._running:
             now = time.monotonic()
 
             # 5s: screen monitoring (non-blocking, skip if previous tick still running)
-            if not self._screen_tick_pending:
+            # Skipped entirely in headless mode (no display)
+            if not self._headless and not self._screen_tick_pending:
                 self._screen_tick_pending = True
                 self._screen_pool.submit(self._tick_screen_wrapper)
 
@@ -312,14 +325,21 @@ class AuraDaemon:
         except ImportError:
             pass
 
-        # Fallback: tasklist check on Windows
+        # Fallback: platform-specific process check
         try:
-            import subprocess
-            result = subprocess.run(
-                ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-                capture_output=True, text=True, timeout=3,
-            )
-            return str(pid) in result.stdout
+            if sys.platform == "win32":
+                import subprocess
+                result = subprocess.run(
+                    ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                    capture_output=True, text=True, timeout=3,
+                )
+                return str(pid) in result.stdout
+            else:
+                # Linux/macOS: check /proc or send signal 0
+                os.kill(pid, 0)
+                return True
+        except (ProcessLookupError, PermissionError):
+            return False
         except Exception:
             return False
 
@@ -525,6 +545,8 @@ def main():
 
     daemon = AuraDaemon()
     signal.signal(signal.SIGTERM, lambda s, f: daemon.stop())
+    if hasattr(signal, "SIGINT"):
+        signal.signal(signal.SIGINT, lambda s, f: daemon.stop())
     daemon.start()
 
 
