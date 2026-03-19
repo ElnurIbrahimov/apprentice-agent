@@ -77,16 +77,31 @@ class MemoryRetriever:
         return profile
 
     def _save_user_profile(self):
-        """Save user profile to disk."""
+        """Write-through user profile to UnifiedMemory (primary) and disk (backup)."""
+        # Primary: write to UnifiedMemory
         try:
-            with open(self.user_profile_path, 'w', encoding='utf-8') as f:
-                f.write("# User Profile\n\n")
-                f.write(f"*Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}*\n\n")
-                for key, value in self.user_profile.items():
-                    f.write(f"**{key.title()}**: {value}\n")
-            logger.info(f"[MEMORY] Saved profile: {len(self.user_profile)} facts")
+            from aura.memory.unified_memory import get_unified_memory
+            um = get_unified_memory()
+            for key, value in self.user_profile.items():
+                um.store(
+                    content=f"[user_profile:{key}] {value}",
+                    source="user_profile",
+                    importance=0.7,
+                    tags=[key, "user_profile"],
+                    episode_type="user_profile",
+                )
+            logger.info(f"[MEMORY] Saved profile to UnifiedMemory: {len(self.user_profile)} facts")
         except Exception as e:
-            logger.error(f"Failed to save profile: {e}")
+            logger.warning(f"[MEMORY] UnifiedMemory profile write failed, falling back to disk: {e}")
+            # Fallback: write to disk only if UnifiedMemory fails
+            try:
+                with open(self.user_profile_path, 'w', encoding='utf-8') as f:
+                    f.write("# User Profile\n\n")
+                    f.write(f"*Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}*\n\n")
+                    for key, value in self.user_profile.items():
+                        f.write(f"**{key.title()}**: {value}\n")
+            except Exception as disk_err:
+                logger.error(f"[MEMORY] Profile save failed entirely: {disk_err}")
 
     MAX_PROFILE_FACTS = 200
 
@@ -158,25 +173,6 @@ class MemoryRetriever:
             except Exception:
                 pass
         return facts
-
-    def _embed_text(self, text: str) -> Optional[List[float]]:
-        """Get embedding from Ollama nomic-embed-text."""
-        try:
-            import requests
-            from aura.config import Config
-            embed_url = Config.OLLAMA_HOST + "/api/embeddings"
-            resp = requests.post(
-                embed_url,
-                json={"model": "nomic-embed-text:latest", "prompt": text},
-                timeout=3,
-            )
-            if resp.status_code == 200:
-                return resp.json().get("embedding")
-            else:
-                logger.warning(f"[MemoryRetriever] Embedding API returned status {resp.status_code}")
-        except Exception as _embed_err:
-            logger.debug(f"[MemoryRetriever] Embedding call failed (Ollama down?): {_embed_err}")
-        return None
 
     def _vector_search(self, query: str, limit: int = 5) -> List[str]:
         """Search episodic memory via UnifiedMemory (fixes the raw QdrantClient singleton conflict)."""
@@ -361,27 +357,24 @@ class MemoryRetriever:
             True if stored successfully
         """
 
-        today = datetime.now().strftime("%Y-%m-%d")
-        daily_dir = self.data_dir / "daily"
-        daily_dir.mkdir(parents=True, exist_ok=True)
-
-        daily_file = daily_dir / f"{today}.md"
-
-        # Append to daily file
-        timestamp = datetime.now().strftime("%H:%M")
-        entry = f"\n[{timestamp}] User: {user_message[:100]}\n[{timestamp}] AURA: {aura_response[:100]}\n"
-
         try:
-            with open(daily_file, "a", encoding='utf-8') as f:
-                f.write(entry)
+            # Primary: store interaction to UnifiedMemory
+            from aura.memory.unified_memory import get_unified_memory
+            um = get_unified_memory()
+            um.store(
+                content=f"User: {user_message[:200]}\nAura: {aura_response[:200]}",
+                source="chat_interaction",
+                importance=0.5,
+                tags=["interaction", chat_id or "default"],
+                episode_type="conversation",
+            )
 
             # Also extract and store any facts
             self._extract_facts(user_message)
-
             return True
 
         except Exception as e:
-            logger.error(f"Failed to store interaction: {e}")
+            logger.error(f"[MemoryRetriever] Failed to store interaction: {e}")
             return False
 
     def _extract_facts(self, message: str) -> None:
@@ -407,25 +400,16 @@ class MemoryRetriever:
             (r"i(?:'m| am) your (\w+)", "relationship"),
         ]
 
-        # Also store to learned_facts.md for history
-        facts_file = self.data_dir / "learned_facts.md"
-
         for pattern, category in fact_patterns:
             match = re.search(pattern, msg_lower)
             if match:
                 value = match.group(1).strip().title()
                 try:
-                    # Store to user profile (persisted)
+                    # Store to user profile → writes through to UnifiedMemory
                     self.store_fact(category, value)
-
-                    # Also log to facts file for history
-                    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
-                    entry = f"\n- **[{timestamp}]** [{category}] {value} `[auto-extracted]`\n"
-                    with open(facts_file, "a", encoding='utf-8') as f:
-                        f.write(entry)
-                    logger.info(f"Extracted fact: [{category}] = {value}")
+                    logger.info(f"[MemoryRetriever] Extracted fact: [{category}] = {value}")
                 except Exception as e:
-                    logger.warning(f"Failed to store fact: {e}")
+                    logger.warning(f"[MemoryRetriever] Failed to store fact: {e}")
                 break  # Only store one fact per message
 
 

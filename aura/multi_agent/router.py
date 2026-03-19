@@ -214,16 +214,59 @@ class IntentRouter:
         scores.sort(key=lambda x: x[1], reverse=True)
         return scores
 
+    # Scored injection patterns: (regex, weight, description)
+    _INJECTION_PATTERNS = [
+        (r"ignore\s+(all\s+)?previous\s+(instructions?|context|rules)", 0.4, "instruction_override"),
+        (r"ignore\s+(everything\s+)?(above|before)", 0.4, "instruction_override"),
+        (r"disregard\s+(all\s+)?(previous|above|prior|your)", 0.4, "instruction_override"),
+        (r"forget\s+(everything|all|your|previous)", 0.35, "memory_wipe"),
+        (r"you\s+are\s+now\s+", 0.5, "identity_override"),
+        (r"act\s+as\s+(if\s+you\s+are|a|an)\s+", 0.3, "identity_override"),
+        (r"pretend\s+(to\s+be|you\s+are)", 0.4, "identity_override"),
+        (r"new\s+instructions?\s*:", 0.5, "instruction_inject"),
+        (r"override\s+(your|all|previous|safety)", 0.5, "instruction_inject"),
+        (r"\bsystem\s*:\s*", 0.3, "role_spoof"),
+        (r"\[system\]", 0.3, "role_spoof"),
+        (r"\bassistant\s*:\s*", 0.2, "role_spoof"),
+        (r"\\n\\n\s*system", 0.3, "role_spoof"),
+        (r"do\s+not\s+follow\s+(your|any|the)\s+(rules|guidelines|instructions)", 0.5, "rule_override"),
+        (r"jailbreak", 0.5, "explicit_jailbreak"),
+        (r"DAN\s+mode", 0.5, "explicit_jailbreak"),
+    ]
+    _INJECTION_THRESHOLD = 0.5  # Block if cumulative score >= this
+
     def _sanitize_for_prompt(self, text: str) -> str:
-        """Basic sanitization to reduce prompt injection risk."""
+        """Score-based sanitization to reduce prompt injection risk.
+
+        Uses weighted regex patterns instead of simple string replacement.
+        Logs suspicious inputs even below threshold.
+        """
+        import re as _re
         # Truncate
         text = text[:500]
-        # Remove common injection patterns
-        for pattern in ["ignore previous", "ignore all", "disregard", "you are now",
-                        "system:", "[system]", "assistant:", "\\n\\nsystem"]:
-            text = text.replace(pattern, "[filtered]")
-            text = text.replace(pattern.upper(), "[filtered]")
-            text = text.replace(pattern.title(), "[filtered]")
+        # Normalize for detection (but return original-cased text with redactions)
+        normalized = text.lower().strip()
+
+        score = 0.0
+        matched_categories = []
+        for pattern, weight, category in self._INJECTION_PATTERNS:
+            if _re.search(pattern, normalized):
+                score += weight
+                matched_categories.append(category)
+                # Redact the matched pattern in the output
+                text = _re.sub(pattern, "[filtered]", text, flags=_re.IGNORECASE)
+
+        if score >= self._INJECTION_THRESHOLD:
+            logger.warning(
+                f"[Router] Prompt injection blocked (score={score:.2f}, "
+                f"categories={matched_categories}): {normalized[:100]}..."
+            )
+        elif score > 0:
+            logger.info(
+                f"[Router] Low injection risk (score={score:.2f}, "
+                f"categories={matched_categories})"
+            )
+
         return text
 
     def _llm_classify(

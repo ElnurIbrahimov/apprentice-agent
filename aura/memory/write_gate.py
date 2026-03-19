@@ -169,7 +169,8 @@ class MemoryWriteGate:
             self._write_thr    = getattr(Config, "MEMORY_WRITE_THRESHOLD",      self.DEFAULT_WRITE_THRESHOLD)
             self._merge_thr    = getattr(Config, "MEMORY_MERGE_THRESHOLD",      self.DEFAULT_MERGE_THRESHOLD)
             self._supersede_thr= getattr(Config, "MEMORY_SUPERSEDE_THRESHOLD",  self.DEFAULT_SUPERSEDE_THRESHOLD)
-        except Exception:
+        except (ImportError, AttributeError) as e:
+            logger.debug(f"[WriteGate] Config import failed, using defaults: {e}")
             self._enabled       = True
             self._write_thr     = self.DEFAULT_WRITE_THRESHOLD
             self._merge_thr     = self.DEFAULT_MERGE_THRESHOLD

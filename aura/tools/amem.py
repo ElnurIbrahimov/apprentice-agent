@@ -43,6 +43,11 @@ from dataclasses import dataclass, asdict, field
 import numpy as np
 
 
+def _deterministic_point_id(note_id: str) -> int:
+    """Deterministic Qdrant point ID from note ID (survives process restarts)."""
+    return int(hashlib.md5(note_id.encode()).hexdigest()[:15], 16)
+
+
 class _BoundedEmbeddingCache:
     """OrderedDict-backed LRU cache for embeddings with bounded memory usage."""
 
@@ -293,7 +298,8 @@ class AMEMSystem:
             with os.fdopen(tmp_fd, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False, default=str)
             os.replace(tmp_path, str(path))
-        except Exception:
+        except Exception as e:
+            logger.error(f"[AMEM] Atomic JSON write failed for {path}: {e}")
             try:
                 os.unlink(tmp_path)
             except OSError:
@@ -314,7 +320,8 @@ class AMEMSystem:
                 for rec in records:
                     f.write(json.dumps(rec, ensure_ascii=False, default=str) + '\n')
             os.replace(tmp_path, str(path))
-        except Exception:
+        except Exception as e:
+            logger.error(f"[AMEM] Atomic JSONL write failed for {path}: {e}")
             try:
                 os.unlink(tmp_path)
             except OSError:
@@ -442,7 +449,7 @@ class AMEMSystem:
                             payload["emotion_arousal"] = note.emotional_pad.get("arousal", 0.0)
                             payload["emotion_dominance"] = note.emotional_pad.get("dominance", 0.0)
                         try:
-                            point_id = abs(hash(note.id)) % (2**63)
+                            point_id = _deterministic_point_id(note.id)
                             self._qdrant_client.upsert(
                                 collection_name=self._qdrant_collection,
                                 points=[PointStruct(id=point_id, vector=vec, payload=payload)]
@@ -544,7 +551,8 @@ class AMEMSystem:
                                         from aura.emotion.alma_engine import alma_engine
                                         _s = alma_engine.get_emotional_state()
                                         _sero = _s.get("neuromodulators", {}).get("serotonin", 0.5) if _s else 0.5
-                                    except Exception:
+                                    except (ImportError, Exception) as e:
+                                        logger.debug(f"[AMEM] Serotonin fetch failed, using default: {e}")
                                         _sero = 0.5
                                     recency_w = 0.2 + (_sero - 0.5) * -0.1  # 0.25 at low, 0.15 at high
                                     recency_w = max(0.15, min(0.25, recency_w))
@@ -770,7 +778,7 @@ class AMEMSystem:
                                 "created_at": note.created_at or "",
                             }
                             try:
-                                point_id = abs(hash(note_id)) % (2**63)
+                                point_id = _deterministic_point_id(note_id)
                                 self._qdrant_client.upsert(
                                     collection_name=self._qdrant_collection,
                                     points=[PointStruct(id=point_id, vector=_emb, payload=_payload)]
@@ -815,7 +823,7 @@ class AMEMSystem:
             # Remove from Qdrant
             if self._qdrant_client:
                 try:
-                    point_id = abs(hash(note_id)) % (2**63)
+                    point_id = _deterministic_point_id(note_id)
                     self._qdrant_client.delete(
                         collection_name=self._qdrant_collection,
                         points_selector=[point_id]
@@ -960,6 +968,9 @@ class AMEMSystem:
         This implements the A-MEM memory evolution principle:
         when new knowledge is added, it can update the context
         and connections of related existing knowledge.
+
+        Runs outside the main add() lock (involves LLM I/O), but
+        re-acquires self._lock when mutating linked note attributes.
         """
         if not self.llm_func:
             return
@@ -970,18 +981,23 @@ class AMEMSystem:
             if strength < 0.6:  # Only evolve strongly related
                 continue
 
-            linked = self._notes.get(linked_id)
-            if not linked:
-                continue
+            # Snapshot linked note data under lock for the LLM prompt
+            with self._lock:
+                linked = self._notes.get(linked_id)
+                if not linked:
+                    continue
+                linked_content = linked.content
+                linked_context = linked.context
+                linked_keywords = list(linked.keywords)
 
             # Update context to incorporate new relationship
             try:
                 evolution_prompt = f"""A new memory has been added that relates to an existing memory.
 
 Existing memory:
-Content: {linked.content}
-Context: {linked.context}
-Keywords: {', '.join(linked.keywords)}
+Content: {linked_content}
+Context: {linked_context}
+Keywords: {', '.join(linked_keywords)}
 
 New related memory:
 Content: {new_note.content}
@@ -992,9 +1008,13 @@ Keep it brief (1-2 sentences). Only output the updated context, nothing else."""
 
                 updated_context = self.llm_func(evolution_prompt)
                 if updated_context and len(updated_context) < 500:
-                    linked.context = updated_context.strip()
-                    linked.updated_at = datetime.now().isoformat()
-                    logger.debug(f"Evolved note {linked_id[:8]}")
+                    with self._lock:
+                        # Re-check note still exists after LLM call
+                        linked = self._notes.get(linked_id)
+                        if linked:
+                            linked.context = updated_context.strip()
+                            linked.updated_at = datetime.now().isoformat()
+                            logger.debug(f"Evolved note {linked_id[:8]}")
 
             except Exception as e:
                 logger.warning(f"Evolution failed for {linked_id}: {e}")
@@ -1325,7 +1345,7 @@ Guidelines:
                             "importance": float(note.importance),
                             "created_at": note.created_at or "",
                         }
-                        point_id = abs(hash(note_id)) % (2**63)
+                        point_id = _deterministic_point_id(note_id)
                         points_to_upsert.append(PointStruct(id=point_id, vector=vec, payload=payload))
                     for note_id in self._notes:
                         if note_id not in self._embeddings:
@@ -1387,7 +1407,7 @@ Guidelines:
                                             "importance": float(_note.importance),
                                             "created_at": _note.created_at or "",
                                         }
-                                        _point_id = abs(hash(_nid)) % (2**63)
+                                        _point_id = _deterministic_point_id(_nid)
                                         _self._qdrant_client.upsert(
                                             collection_name=_self._qdrant_collection,
                                             points=[PointStruct(id=_point_id, vector=_vec, payload=_payload)]

@@ -32,7 +32,7 @@ function CodeBlock({ language, children }: { language: string; children: string 
         <button
           onClick={handleCodeCopy}
           aria-label="Copy code"
-          className="px-2 py-1 text-xs text-gray-400 bg-gray-700 hover:bg-gray-600 hover:text-gray-200 transition-colors rounded-bl flex items-center gap-1"
+          className="px-2 py-1.5 text-xs text-gray-400 bg-gray-700 hover:bg-gray-600 hover:text-gray-200 active:bg-gray-500 transition-colors rounded-bl flex items-center gap-1 code-copy-btn touch-target"
         >
           {codeCopied ? (
             <><CheckIcon className="w-3 h-3 text-green-400" /><span className="text-green-400">Copied</span></>

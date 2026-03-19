@@ -195,7 +195,8 @@ class BrowserTool:
                     el.click(timeout=1000)
                     time.sleep(0.2)
                     return  # one popup dismissed is enough per call
-            except Exception:
+            except Exception as e:
+                logger.debug(f"[BrowserTool] Popup dismiss failed: {e}")
                 continue
 
     # ------------------------------------------------------------------
@@ -303,7 +304,8 @@ class BrowserTool:
                     "title": page.title(),
                     "active": tid == self._active_tab,
                 })
-            except Exception:
+            except Exception as e:
+                logger.debug(f"[BrowserTool] Tab info fetch failed for {tid}: {e}")
                 tabs.append({
                     "tab_id": tid,
                     "url": "unknown",
@@ -799,8 +801,8 @@ class BrowserTool:
                 if cookies:
                     self._context.add_cookies(cookies)
                     logger.debug("[BrowserTool] Restored %d cookies from %s", len(cookies), self.cookies_path)
-        except Exception:
-            pass  # non-critical
+        except Exception as e:
+            logger.debug(f"[BrowserTool] Cookie restore failed (non-critical): {e}")
 
     def set_user_agent(self, user_agent: str) -> dict:
         """Update user-agent. Takes effect on next new context/tab.
@@ -891,8 +893,8 @@ class BrowserTool:
             # Auto-dismiss popups after navigation
             try:
                 self._dismiss_popups()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[BrowserTool] Post-navigation popup dismiss failed: {e}")
 
             return {
                 "success": True,
@@ -989,8 +991,8 @@ class BrowserTool:
             # Accept cookies if prompted
             try:
                 self._page.click("button:has-text('Accept all')", timeout=3000)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[BrowserTool] Google cookie accept skipped: {e}")
 
             self._page.fill("textarea[name='q'], input[name='q']", query)
             self._page.keyboard.press("Enter")
@@ -1033,8 +1035,8 @@ class BrowserTool:
                     if cookies:
                         self.cookies_path.parent.mkdir(parents=True, exist_ok=True)
                         self.cookies_path.write_text(json.dumps(cookies, indent=2), encoding="utf-8")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[BrowserTool] Cookie save on close failed: {e}")
 
             # Close all tab references
             self._tabs.clear()

@@ -279,7 +279,8 @@ class UnifiedMemory:
                  "source_id": r.source_id, "source": r.source}
                 for r in nearby_results
             ]
-        except Exception:
+        except Exception as e:
+            logger.warning(f"[UnifiedMemory] Nearby query failed: {e}")
             nearby = []
 
         candidate = MemoryCandidate(

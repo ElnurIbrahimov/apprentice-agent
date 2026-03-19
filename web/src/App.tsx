@@ -156,11 +156,23 @@ function App() {
         </ErrorBoundary>
       </aside>
 
-      {/* Mobile overlay backdrop */}
+      {/* Mobile overlay backdrop — tap or swipe left to close */}
       {isMobile && sidebarOpen && (
         <div
-          className="fixed inset-0 z-30 bg-black/50 lg:hidden"
+          className="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm lg:hidden"
           onClick={() => setSidebarOpen(false)}
+          onTouchStart={(e) => {
+            const startX = e.touches[0].clientX;
+            const el = e.currentTarget;
+            const handleMove = (ev: TouchEvent) => {
+              if (ev.touches[0].clientX - startX < -50) {
+                setSidebarOpen(false);
+                el.removeEventListener('touchmove', handleMove);
+              }
+            };
+            el.addEventListener('touchmove', handleMove, { passive: true });
+            el.addEventListener('touchend', () => el.removeEventListener('touchmove', handleMove), { once: true });
+          }}
         />
       )}
 
@@ -171,7 +183,7 @@ function App() {
           <div className="flex items-center">
             <button
               onClick={toggleSidebar}
-              className="p-2 -ml-2 text-chat-text-secondary hover:text-chat-text rounded-lg lg:hidden"
+              className="p-2 -ml-2 text-chat-text-secondary hover:text-chat-text active:text-white rounded-lg lg:hidden touch-target"
             >
               <Bars3Icon className="w-6 h-6" />
             </button>
@@ -186,14 +198,14 @@ function App() {
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+                  className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-2 rounded-lg text-sm transition-colors touch-target ${
                     activeTab === tab.id
                       ? 'bg-chat-accent text-white'
-                      : 'text-chat-text-secondary hover:text-chat-text hover:bg-chat-assistant'
+                      : 'text-chat-text-secondary hover:text-chat-text active:text-white hover:bg-chat-assistant'
                   }`}
                 >
-                  <Icon className="w-4 h-4" />
-                  <span className="hidden sm:inline">{tab.label}</span>
+                  <Icon className="w-4 h-4 shrink-0" />
+                  <span className="hidden sm:inline truncate">{tab.label}</span>
                 </button>
               );
             })}

@@ -25,7 +25,7 @@ try:
     from aura.config import Config
     DEFAULT_HALF_LIFE_HOURS = getattr(Config, "FADEM_HALF_LIFE_HOURS", 14 * 24)
     PRUNE_THRESHOLD = getattr(Config, "FADEM_PRUNE_THRESHOLD", 0.05)
-except Exception:
+except (ImportError, AttributeError) as e:
     DEFAULT_HALF_LIFE_HOURS = 14 * 24  # 336 hours = 2 weeks
     PRUNE_THRESHOLD = 0.05
 

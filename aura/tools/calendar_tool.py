@@ -223,7 +223,8 @@ class GoogleCalendarBackend:
             service = self._get_service()
             settings = service.settings().get(setting="timezone").execute()
             return settings.get("value", "UTC")
-        except Exception:
+        except Exception as e:
+            logger.debug(f"[Calendar] Timezone fetch failed, defaulting to UTC: {e}")
             return "UTC"
 
 
@@ -454,8 +455,8 @@ def smart_parse_datetime(text: str) -> Optional[datetime]:
     if HAS_DATEUTIL:
         try:
             return dateutil_parse(text)
-        except Exception:
-            pass
+        except (ValueError, OverflowError) as e:
+            logger.debug(f"[Calendar] dateutil parse failed for '{text[:50]}': {e}")
 
     # --- Manual ISO / common formats ---
     formats = [
@@ -558,15 +559,15 @@ class CalendarTool:
                     sources = json.load(f)
                 for s in sources:
                     self._ics.add_source(s)
-            except Exception:
-                pass
+            except (json.JSONDecodeError, IOError) as e:
+                logger.warning(f"[Calendar] Failed to load ICS sources: {e}")
 
     def _save_ics_sources(self):
         try:
             with open(self._ics_sources_file, "w") as f:
                 json.dump(self._ics.sources, f, indent=2)
-        except Exception:
-            pass
+        except IOError as e:
+            logger.warning(f"[Calendar] Failed to save ICS sources: {e}")
 
     def add_ics_source(self, source: str) -> dict:
         """Add a CalDAV URL or local .ics file path as a source."""
@@ -784,7 +785,8 @@ class CalendarTool:
             try:
                 start_dt = datetime.fromisoformat(ev["start"].replace("Z", "+00:00"))
                 time_str = start_dt.strftime("%H:%M")
-            except Exception:
+            except (ValueError, KeyError) as e:
+                logger.debug(f"[Calendar] Time format failed: {e}")
                 time_str = "??:??"
             loc = f" @ {ev['location']}" if ev.get("location") else ""
             src = f" [{ev.get('source', 'local')}]" if ev.get("source", "local") != "local" else ""

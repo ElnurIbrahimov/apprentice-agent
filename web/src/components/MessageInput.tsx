@@ -253,7 +253,7 @@ export function MessageInput({
 
   return (
     <div
-      className="px-4 pb-6 pt-3 transition-all duration-200"
+      className="px-3 sm:px-4 pb-3 sm:pb-6 pt-2 sm:pt-3 transition-all duration-200 input-safe-area"
       style={{ background: isDragOver ? 'rgba(124,58,237,0.05)' : 'transparent' }}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -316,13 +316,13 @@ export function MessageInput({
             }
             disabled={disabled}
             rows={1}
-            className="bg-transparent text-chat-text outline-none resize-none w-full"
+            className="bg-transparent text-chat-text outline-none resize-none w-full input-textarea"
             style={{
               padding: '14px 16px 6px',
-              fontSize: '1rem',
+              fontSize: '16px',
               lineHeight: 1.6,
-              minHeight: 52,
-              maxHeight: 200,
+              minHeight: 48,
+              maxHeight: 120,
             }}
           />
 
@@ -336,7 +336,7 @@ export function MessageInput({
                 disabled={disabled}
                 aria-label="More options"
                 style={{
-                  width: 32, height: 32, borderRadius: 8,
+                  width: 36, height: 36, borderRadius: 8,
                   background: showPlusMenu ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.06)',
                   border: '1px solid rgba(255,255,255,0.1)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',

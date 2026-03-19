@@ -161,7 +161,7 @@ export function ChatContainer() {
       <div
         ref={scrollContainerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto relative">
+        className="flex-1 overflow-y-auto relative messages-scroll">
         {isSwitchingConversation && messages.length === 0 ? (
           <div className="animate-pulse space-y-4 p-4">
             {[1, 2, 3].map(i => (

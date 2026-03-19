@@ -189,7 +189,8 @@ class MemoryStore:
             try:
                 from aura.config import Config
                 self._db_path = Path(getattr(Config, "AURA_MEMORY_DB_PATH", "") or _DEFAULT_DB_PATH)
-            except Exception:
+            except (ImportError, AttributeError) as e:
+                logger.debug(f"[MemoryStore] Config import failed, using default path: {e}")
                 self._db_path = _DEFAULT_DB_PATH
 
         self._db_path.parent.mkdir(parents=True, exist_ok=True)

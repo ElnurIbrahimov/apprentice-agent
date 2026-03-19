@@ -348,18 +348,35 @@ async def shell_run(request: ShellRunRequest):
         return {"success": False, "error": _safe_error(e, "shell_run")}
 
 
-_SHELL_BLOCKED_PATTERNS = [
+# ALLOWLIST: Only these commands may be executed. Everything else is blocked.
+_SHELL_ALLOWED_COMMANDS = {
+    # File inspection
+    "ls", "dir", "cat", "head", "tail", "less", "more", "wc", "file", "stat",
+    "find", "grep", "rg", "awk", "sed", "sort", "uniq", "diff", "tr", "cut",
+    # Directory navigation
+    "pwd", "cd", "tree", "basename", "dirname", "realpath",
+    # System info (read-only)
+    "whoami", "date", "uptime", "uname", "hostname", "df", "du", "free", "top",
+    "env", "printenv", "echo", "printf",
+    # Dev tools
+    "python", "python3", "pip", "pip3", "node", "npm", "npx", "yarn", "pnpm",
+    "git", "make", "cargo", "go", "ruby", "java", "javac",
+    # File manipulation (non-destructive)
+    "cp", "mv", "mkdir", "touch", "ln", "tar", "zip", "unzip", "gzip", "gunzip",
+    # Process info (read-only)
+    "ps", "pgrep",
+    # Network (safe read-only)
+    "ping", "dig", "nslookup", "host", "curl", "wget",
+}
+
+# Extra patterns that are ALWAYS blocked even if the base command is allowed
+_SHELL_DANGER_PATTERNS = [
     "rm -rf /", "rm -rf /*", "mkfs.", "dd if=", ":(){", "fork bomb",
     "chmod -R 777 /", "shutdown", "reboot", "init 0", "init 6",
     "taskkill //F //IM node", "pkill -f node", "killall node",
+    "> /dev/sd", "| base64 -d | sh", "| bash", "| sh",
+    "$(", "`",  # Command substitution — block to prevent injection
 ]
-
-# Commands that must never reach the shell — checked as whole-word tokens
-_SHELL_BLOCKED_COMMANDS = {
-    "curl", "wget", "nc", "ncat", "netcat", "nmap", "ssh", "scp", "sftp",
-    "telnet", "ftp", "powershell", "cmd.exe", "cmd", "reg", "wmic", "certutil",
-    "bitsadmin", "mshta", "cscript", "wscript", "rundll32",
-}
 
 
 def _validate_shell_cwd(cwd: str | None) -> str | None:
@@ -383,19 +400,59 @@ def _validate_shell_cwd(cwd: str | None) -> str | None:
     return str(resolved)
 
 
+def _extract_command_names(cmd: str) -> list[str]:
+    """Extract base command names from a shell command string, handling pipes, &&, ||, ;."""
+    import re as _re
+    import shlex
+    # Split on shell operators
+    segments = _re.split(r'\s*(?:\|\||&&|[|;])\s*', cmd)
+    commands = []
+    for seg in segments:
+        seg = seg.strip()
+        if not seg:
+            continue
+        # Handle env var prefixes like KEY=val command
+        while '=' in seg.split()[0] if seg.split() else False:
+            seg = ' '.join(seg.split()[1:])
+            if not seg:
+                break
+        if not seg:
+            continue
+        # Get the first token (the command name)
+        try:
+            tokens = shlex.split(seg)
+        except ValueError:
+            tokens = seg.split()
+        if tokens:
+            # Strip path: /usr/bin/python -> python
+            import os
+            cmd_name = os.path.basename(tokens[0]).lower()
+            # Strip extensions: python3.12 -> python3
+            cmd_name = _re.sub(r'\.\d+$', '', cmd_name)
+            # Strip .exe on Windows
+            if cmd_name.endswith('.exe'):
+                cmd_name = cmd_name[:-4]
+            commands.append(cmd_name)
+    return commands
+
+
 def _shell_run_sync(request: ShellRunRequest) -> dict:
     import re as _re
-    # Block obviously destructive commands (substring match)
     cmd_lower = request.command.lower().strip()
-    for pattern in _SHELL_BLOCKED_PATTERNS:
-        if pattern in cmd_lower:
-            return {"success": False, "error": f"Blocked: command matches dangerous pattern '{pattern}'"}
 
-    # Block dangerous command names as whole tokens (prevents bypass via piping)
-    cmd_tokens = set(_re.findall(r'[a-z0-9_.]+', cmd_lower))
-    blocked_found = cmd_tokens & _SHELL_BLOCKED_COMMANDS
-    if blocked_found:
-        return {"success": False, "error": f"Blocked: command uses disallowed program '{next(iter(blocked_found))}'"}
+    # Step 1: Block dangerous patterns (always, regardless of allowlist)
+    for pattern in _SHELL_DANGER_PATTERNS:
+        if pattern in cmd_lower:
+            return {"success": False, "error": f"Blocked: command matches dangerous pattern"}
+
+    # Step 2: ALLOWLIST — extract every command name and verify ALL are allowed
+    cmd_names = _extract_command_names(request.command)
+    if not cmd_names:
+        return {"success": False, "error": "Blocked: could not parse command"}
+
+    for cmd_name in cmd_names:
+        if cmd_name not in _SHELL_ALLOWED_COMMANDS:
+            return {"success": False, "error": f"Blocked: '{cmd_name}' is not in the allowed commands list"}
 
     # Validate cwd to prevent path traversal into system directories
     validated_cwd = _validate_shell_cwd(request.cwd)
@@ -601,12 +658,25 @@ class APITestRequest(BaseModel):
         if hostname in _blocked_hosts or hostname.endswith(".local"):
             raise ValueError("Requests to localhost/internal hosts are blocked")
         # Check for private IP ranges (RFC 1918, link-local, loopback)
+        _is_ip = True
         try:
             addr = ipaddress.ip_address(hostname)
+        except ValueError:
+            _is_ip = False
+        if _is_ip:
             if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
                 raise ValueError("Requests to private/internal IP addresses are blocked")
-        except ValueError:
-            pass  # hostname is a domain name, not an IP — allow DNS resolution
+        else:
+            # hostname is a domain name — resolve and check all IPs
+            import socket
+            try:
+                addrinfos = socket.getaddrinfo(hostname, None)
+                for family, _type, _proto, _canonname, sockaddr in addrinfos:
+                    resolved_ip = ipaddress.ip_address(sockaddr[0])
+                    if resolved_ip.is_private or resolved_ip.is_loopback or resolved_ip.is_link_local or resolved_ip.is_reserved:
+                        raise ValueError(f"Domain {hostname} resolves to blocked IP {resolved_ip}")
+            except socket.gaierror:
+                raise ValueError(f"Cannot resolve hostname: {hostname}")
         # Block cloud metadata endpoints
         if hostname in ("169.254.169.254", "metadata.google.internal"):
             raise ValueError("Requests to cloud metadata endpoints are blocked")
@@ -741,18 +811,18 @@ async def database_import_csv(request: CSVImportRequest):
 
 
 def _database_import_sync(request: CSVImportRequest) -> dict:
-    # Validate CSV path — block path traversal and sensitive locations
+    # Validate CSV path — restrict to project data directory
+    import os as _os
     from pathlib import Path as _Path
+    _safe_base = _Path(_os.getenv("AURA_DATA_DIR", "data")).resolve()
     try:
         csv_resolved = _Path(request.csv_path).resolve(strict=True)
     except OSError:
-        return {"success": False, "error": f"CSV file not found: {request.csv_path}"}
-    # Block system directories
-    _csv_str = str(csv_resolved).lower().replace("\\", "/")
-    _blocked_csv = ("/etc/", "/proc/", "/sys/", "/dev/", "/root/", "/windows/", "/system32/",
-                    "/program files/", "/programdata/", "/.ssh/", "/.gnupg/", "/appdata/roaming/")
-    if any(seg in _csv_str for seg in _blocked_csv):
-        return {"success": False, "error": "Cannot import from system directories"}
+        return {"success": False, "error": "CSV file not found"}
+    try:
+        csv_resolved.relative_to(_safe_base)
+    except ValueError:
+        return {"success": False, "error": "CSV path must be within the data directory"}
 
     agent = _get_agent_service().agent
     if "database" in agent.tools:
@@ -784,17 +854,17 @@ async def audio_transcribe(request: TranscribeRequest):
 
 
 def _audio_transcribe_sync(request: TranscribeRequest) -> dict:
-    # Validate file path — block system directories
+    # Validate file path — restrict to project data directory
+    import os as _os
     from pathlib import Path as _Path
+    _safe_base = _Path(_os.getenv("AURA_DATA_DIR", "data")).resolve()
     fp = _Path(request.file_path).resolve()
-    _fp_str = str(fp).lower().replace("\\", "/")
-    _blocked_audio = ("/etc", "/proc", "/sys", "/dev", "/root", "/windows", "/system32",
-                      "/program files", "/programdata", "/.ssh", "/.gnupg", "/appdata/roaming")
-    for prefix in _blocked_audio:
-        if prefix in _fp_str:
-            return {"success": False, "error": "Access denied: path is blocked"}
+    try:
+        fp.relative_to(_safe_base)
+    except ValueError:
+        return {"success": False, "error": "File path must be within the data directory"}
     if not fp.exists():
-        return {"success": False, "error": f"File not found: {request.file_path}"}
+        return {"success": False, "error": "File not found"}
 
     agent = _get_agent_service().agent
     if "audio_transcriber" in agent.tools:
