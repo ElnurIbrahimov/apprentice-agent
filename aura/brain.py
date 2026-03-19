@@ -1770,6 +1770,17 @@ class OllamaBrain:
         identity_prompt = get_identity_prompt()
         full = f"{identity_prompt}\n\n{system_prompt}" if system_prompt else identity_prompt
 
+        # === WEB SEARCH INSTRUCTION ===
+        web_search_instruction = (
+            "IMPORTANT: If the user asks about something you are not sure about, "
+            "something recent, current events, news, real-time data (dates, prices, "
+            "weather, scores, stock prices, exchange rates), or asks you to look "
+            "something up or verify information — you MUST use the web_search or "
+            "tavily tool to search the internet FIRST. Do NOT guess or make up "
+            "answers. Always verify uncertain facts by searching."
+        )
+        full = f"{full}\n\n{web_search_instruction}"
+
         # === SUBSYSTEM CONTEXT INJECTION (cached, TTL=12s) ===
         # Side-effect calls (observe/record) still run every time; only context
         # retrieval is cached to avoid 8+ module round-trips on rapid messages.

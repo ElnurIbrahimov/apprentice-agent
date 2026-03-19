@@ -504,7 +504,7 @@ pip install youtube-transcript-api
 - Sidebar shows a purple auto-detect banner: "YouTube detected — [video title] — [Summarize this video]"
 - User can also manually paste any YouTube URL (youtu.be, /watch, /shorts, /embed formats all supported)
 - On click: POSTs to `POST /api/youtube/summarize`
-- Backend extracts the 11-char video ID, fetches the transcript via `youtube-transcript-api` (supports auto-generated captions), truncates to 12,000 chars, fetches og:title/channel/duration from the YouTube page, then sends everything to `gemini-3-flash-preview:cloud` via Ollama with a structured prompt
+- Backend extracts the 11-char video ID, fetches the transcript via `youtube-transcript-api` (supports auto-generated captions), truncates to 12,000 chars, fetches og:title/channel/duration from the YouTube page, then sends everything to `nemotron-3-super:cloud` via Ollama with a structured prompt
 - LLM response is parsed into a summary paragraph + 5 key bullet points
 - Results panel shows: video title + channel + duration card, summary block, key points list, collapsible transcript snippet
 - Error states handled: no transcript (private/disabled), Ollama offline, invalid URL, timeout

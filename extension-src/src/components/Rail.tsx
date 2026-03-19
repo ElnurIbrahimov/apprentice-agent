@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import type { LucideIcon } from 'lucide-react';
 import {
   MessageSquare, Search, Languages, PenLine, CheckSquare,
@@ -67,11 +68,11 @@ function GroupLabel({ text }: { text: string }) {
 export default function Rail() {
   const { activePanel, setPanel, moreOpen, setMoreOpen } = useStore();
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const [tooltip, setTooltip] = useState<{ label: string; top: number } | null>(null);
+  const [tooltip, setTooltip] = useState<{ label: string; top: number; right: number } | null>(null);
 
   const showTooltip = useCallback((label: string, e: React.MouseEvent) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setTooltip({ label, top: rect.top + rect.height / 2 });
+    setTooltip({ label, top: rect.top + rect.height / 2, right: window.innerWidth - rect.left + 8 });
   }, []);
 
   const hideTooltip = useCallback(() => setTooltip(null), []);
@@ -114,6 +115,7 @@ export default function Rail() {
   }
 
   return (
+    <>
     <nav className="rail-nav">
       {/* Primary items with group labels */}
       <div className="rail-section">
@@ -150,22 +152,24 @@ export default function Rail() {
 
       {/* Spacer */}
       <div style={{ flex: 1 }} />
-
-      {/* Tooltip */}
-      {tooltip && (
-        <div
-          className="rail-tooltip"
-          style={{
-            position: 'fixed',
-            left: 62,
-            top: tooltip.top,
-            transform: 'translateY(-50%)',
-            zIndex: 9999,
-          }}
-        >
-          {tooltip.label}
-        </div>
-      )}
     </nav>
+
+    {/* Tooltip — portaled to body to escape rail overflow clipping */}
+    {tooltip && createPortal(
+      <div
+        className="rail-tooltip"
+        style={{
+          position: 'fixed',
+          right: tooltip.right,
+          top: tooltip.top,
+          transform: 'translateY(-50%)',
+          zIndex: 9999,
+        }}
+      >
+        {tooltip.label}
+      </div>,
+      document.body
+    )}
+    </>
   );
 }

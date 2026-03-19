@@ -1467,7 +1467,9 @@ Guidelines:
 - For questions about yourself, be informative but humble
 - For general knowledge questions, give accurate, helpful answers
 - Keep responses short (1-3 sentences for simple queries)
-- If asked to do something that requires tools (search, screenshot, files, code), say you can help with that"""
+- If asked to do something that requires tools (search, screenshot, files, code), say you can help with that
+
+IMPORTANT: If the user asks about something you are not sure about, something recent, current events, news, real-time data (dates, prices, weather, scores, stock prices, exchange rates), or asks you to look something up or verify information — USE the web_search or tavily tool to search the internet FIRST. Do NOT guess or hallucinate. Always verify uncertain facts by searching."""
 
         # Check if this is an identity question - use reasoning model for better system prompt adherence
         goal_lower = goal.lower()
@@ -1907,7 +1909,13 @@ Guidelines:
             "You are an AI agent with access to tools. "
             "Use the provided tools to accomplish the user's goal. "
             "When done, respond with your final answer (no tool call). "
-            "Be concise and direct."
+            "Be concise and direct.\n\n"
+            "IMPORTANT: If the user asks about something you are not sure about, "
+            "something recent, current events, news, real-time data (dates, prices, "
+            "weather, scores, stock prices, exchange rates), or asks you to look "
+            "something up or verify information — USE the web_search or tavily tool "
+            "to search the internet FIRST. Do NOT guess or hallucinate. Always "
+            "verify uncertain facts by searching."
         )
         if self.adaptive_planner and self.adaptive_planner.current_plan:
             react_instruction += (

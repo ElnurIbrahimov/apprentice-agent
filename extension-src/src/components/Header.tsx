@@ -118,38 +118,16 @@ export default function Header() {
             <span className="text-sm leading-none mr-0.5">{mood}</span>
           )}
 
-          {/* Model name pill (when connected) */}
-          {status === 'online' && modelName && (
-            <div className="header-model-pill">
-              <span className="truncate">{modelName}</span>
-            </div>
-          )}
-
-          {/* Server indicator */}
-          <div
-            className="header-conn-pill"
-            title={`Connected to: ${getServerLabel()}`}
-            style={{ opacity: 0.7, maxWidth: 120 }}
-          >
-            <Server size={10} style={{ flexShrink: 0 }} />
-            <span className="header-conn-label" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {getServerLabel()}
-            </span>
-          </div>
-
-          {/* Connection pill */}
-          <div className="header-conn-pill">
-            <span
-              className={`header-conn-dot${status === 'online' ? ' header-conn-dot-pulse' : ''}`}
-              style={{
-                background: STATUS_DOT[status] || '#ef4444',
-                animation: status === 'connecting' ? 'pulse 1s ease-in-out infinite' : undefined,
-              }}
-            />
-            <span className="header-conn-label">
-              {pillLabel}
-            </span>
-          </div>
+          {/* Connection dot only — minimal */}
+          <span
+            className={`header-conn-dot${status === 'online' ? ' header-conn-dot-pulse' : ''}`}
+            title={`${pillLabel} — ${getServerLabel()}`}
+            style={{
+              background: STATUS_DOT[status] || '#ef4444',
+              animation: status === 'connecting' ? 'pulse 1s ease-in-out infinite' : undefined,
+              width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+            }}
+          />
 
           {/* Theme toggle */}
           <button
@@ -164,24 +142,18 @@ export default function Header() {
             </span>
           </button>
 
-          {/* Export dropdown */}
+          {/* Export dropdown — icon only, no label */}
           {messages.length > 0 && (
             <div ref={exportRef} style={{ position: 'relative', display: 'inline-flex' }}>
               <button
                 onClick={() => setExportOpen(!exportOpen)}
-                className="flex items-center gap-1 px-2 py-1 transition-all duration-150"
+                title="Export"
                 style={{
-                  background: 'var(--s2)',
-                  border: '1px solid var(--b1)',
-                  borderRadius: 'var(--r-sm)',
-                  color: 'var(--mu)',
-                  fontSize: '11px',
-                  cursor: 'pointer',
-                  fontFamily: 'inherit',
+                  background: 'none', border: 'none', color: 'var(--mu)',
+                  cursor: 'pointer', padding: 2, display: 'flex',
                 }}
-                title="Export conversation"
               >
-                <Download size={12} />
+                <Download size={13} />
               </button>
               {exportOpen && (
                 <div
@@ -231,26 +203,18 @@ export default function Header() {
             </div>
           )}
 
-          {/* History button */}
+          {/* History button — icon only */}
           <div style={{ position: 'relative', display: 'inline-flex' }}>
             <button
               onClick={handleHistoryToggle}
-              className="flex items-center gap-1 px-2 py-1 transition-all duration-150"
+              title="History"
               style={{
-                background: historyOpen ? 'var(--pg)' : 'var(--s2)',
-                border: `1px solid ${historyOpen ? 'var(--pl)' : 'var(--b1)'}`,
-                borderRadius: 'var(--r-sm)',
+                background: 'none', border: 'none',
                 color: historyOpen ? 'var(--pl)' : 'var(--mu)',
-                fontSize: '11px',
-                cursor: 'pointer',
-                fontFamily: 'inherit',
+                cursor: 'pointer', padding: 2, display: 'flex',
               }}
-              title="Chat history"
             >
-              <Clock size={12} />
-              {conversations.length > 0 && (
-                <span style={{ fontSize: '9px', opacity: 0.7 }}>{conversations.length}</span>
-              )}
+              <Clock size={13} />
             </button>
             <ConversationHistory open={historyOpen} onClose={() => setHistoryOpen(false)} />
           </div>
@@ -258,20 +222,13 @@ export default function Header() {
           {/* New button */}
           <button
             onClick={handleNewConversation}
-            className="flex items-center gap-1 px-2 py-1 transition-all duration-150"
+            title="New chat"
             style={{
-              background: 'var(--s2)',
-              border: '1px solid var(--b1)',
-              borderRadius: 'var(--r-sm)',
-              color: 'var(--mu)',
-              fontSize: '11px',
-              cursor: 'pointer',
-              fontFamily: 'inherit',
+              background: 'none', border: 'none',
+              color: 'var(--mu)', cursor: 'pointer', padding: 2, display: 'flex',
             }}
-            title="New conversation"
           >
-            <Plus size={12} />
-            <span>New</span>
+            <Plus size={14} />
           </button>
         </div>
       </header>

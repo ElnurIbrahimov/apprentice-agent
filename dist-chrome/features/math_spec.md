@@ -525,4 +525,4 @@ app.include_router(math_route.router)
 - Ctrl+Enter in the textarea triggers solve (power user shortcut).
 - "Send to Chat" populates the context bar and switches to the chat panel, so the user can ask follow-up questions about the solution.
 - The backend JSON extraction handles: raw JSON, markdown-fenced JSON, JSON buried in prose.
-- Default model is `gemini-3-flash-preview:cloud` (same as agent_action.py). Users can override per-feature via the model pill.
+- Default model is `nemotron-3-super:cloud` (same as agent_action.py). Users can override per-feature via the model pill.

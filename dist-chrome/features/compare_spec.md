@@ -262,9 +262,9 @@ let compareInitialized = false;
 
 // Default pre-selections (first 3 cloud models by preference order)
 const COMPARE_DEFAULT_MODELS = [
-  'gemini-3-flash-preview:cloud',
+  'minimax-m2.7:cloud',
   'qwen3.5:397b-cloud',
-  'kimi-k2-thinking:cloud',
+  'kimi-k2.5:cloud',
 ];
 
 function initComparePanel() {
