@@ -287,7 +287,7 @@ class IdentityCore:
 
             # Save per-user expressive layers
             for user_id, exp in self._expressive_cache.items():
-                exp_file = self._data_dir / f"expressive_{user_id}.json"
+                exp_file = self._data_dir / f"expressive_{self._safe_user_id(user_id)}.json"
                 exp_file.write_text(
                     json.dumps(exp.to_dict(), indent=2), encoding="utf-8"
                 )
@@ -324,9 +324,15 @@ class IdentityCore:
         except Exception as e:
             logger.warning(f"[IdentityCore] Failed to load: {e}")
 
+    @staticmethod
+    def _safe_user_id(user_id: str) -> str:
+        """Sanitize user_id for safe use in file paths."""
+        import re
+        return re.sub(r'[^a-zA-Z0-9_-]', '_', user_id)
+
     def _load_expressive(self, user_id: str) -> Optional[ExpressiveLayer]:
         """Load a user's expressive layer."""
-        exp_file = self._data_dir / f"expressive_{user_id}.json"
+        exp_file = self._data_dir / f"expressive_{self._safe_user_id(user_id)}.json"
         if not exp_file.exists():
             return None
         try:

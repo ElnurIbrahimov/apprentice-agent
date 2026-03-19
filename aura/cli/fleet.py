@@ -13,6 +13,7 @@ from rich.panel import Panel
 from rich.text import Text
 from rich.table import Table
 from rich.live import Live
+from rich.progress import Progress, BarColumn, TextColumn, SpinnerColumn
 
 
 class SubAgentStatus(str, Enum):
@@ -58,36 +59,116 @@ class FleetRun:
         return end - self.start_time if self.start_time else 0.0
 
 
-def render_fleet_dashboard(console: Console, fleet: FleetRun) -> None:
-    """Render a live dashboard of fleet execution status."""
-    table = Table(title=f"Fleet: {fleet.goal}", border_style="cyan", show_lines=True)
-    table.add_column("#", style="dim", width=3)
-    table.add_column("Task", min_width=30)
-    table.add_column("Status", width=10)
-    table.add_column("Time", width=8)
-    table.add_column("Result", max_width=40)
-
+def _build_fleet_renderable(fleet: FleetRun):
+    """Build a Rich renderable for the fleet dashboard (used by both static and live)."""
     status_styles = {
-        SubAgentStatus.PENDING: ("○", "dim"),
-        SubAgentStatus.RUNNING: ("◉", "cyan"),
-        SubAgentStatus.DONE: ("●", "green"),
-        SubAgentStatus.FAILED: ("✗", "red"),
+        SubAgentStatus.PENDING: ("⏳", "dim"),
+        SubAgentStatus.RUNNING: ("🔄", "bold cyan"),
+        SubAgentStatus.DONE: ("✅", "bold green"),
+        SubAgentStatus.FAILED: ("❌", "bold red"),
     }
+
+    table = Table(
+        show_header=True,
+        header_style="bold white",
+        border_style="cyan",
+        show_lines=False,
+        pad_edge=True,
+        expand=True,
+    )
+    table.add_column("#", style="dim", width=4, justify="center")
+    table.add_column("Task", min_width=30, ratio=3)
+    table.add_column("Status", width=14, justify="center")
+    table.add_column("Time", width=8, justify="right", style="dim")
+    table.add_column("Result", max_width=40, ratio=2, no_wrap=True)
 
     for task in fleet.tasks:
         icon, style = status_styles.get(task.status, ("?", ""))
-        elapsed_str = f"{task.elapsed:.1f}s" if task.elapsed > 0 else "—"
-        result_str = task.result[:40] if task.result else (task.error[:40] if task.error else "—")
-        table.add_row(
-            task.id[:3],
-            task.description[:50],
-            f"[{style}]{icon} {task.status.value}[/{style}]",
-            elapsed_str,
-            result_str,
-        )
+        elapsed_str = f"[cyan]{task.elapsed:.1f}s[/cyan]" if task.elapsed > 0 else "[dim]—[/dim]"
 
-    footer = f"Progress: {fleet.progress} | Elapsed: {fleet.elapsed:.1f}s"
-    console.print(Panel(table, subtitle=f"[dim]{footer}[/dim]", border_style="cyan"))
+        if task.status == SubAgentStatus.FAILED and task.error:
+            result_str = f"[red]{task.error[:40]}[/red]"
+        elif task.result:
+            result_str = f"[dim]{task.result[:40]}[/dim]"
+        else:
+            result_str = "[dim]—[/dim]"
+
+        status_text = f"[{style}]{icon} {task.status.value}[/{style}]"
+
+        # Highlight running tasks
+        desc_style = "bold white" if task.status == SubAgentStatus.RUNNING else ""
+        desc = f"[{desc_style}]{task.description[:50]}[/{desc_style}]" if desc_style else task.description[:50]
+
+        table.add_row(task.id[:4], desc, status_text, elapsed_str, result_str)
+
+    # Progress bar
+    done_count = sum(1 for t in fleet.tasks if t.status in (SubAgentStatus.DONE, SubAgentStatus.FAILED))
+    total = len(fleet.tasks) or 1
+    pct = done_count / total
+    bar_width = 30
+    filled = int(pct * bar_width)
+    bar = f"[green]{'━' * filled}[/green][dim]{'━' * (bar_width - filled)}[/dim]"
+
+    failed_count = sum(1 for t in fleet.tasks if t.status == SubAgentStatus.FAILED)
+    running_count = sum(1 for t in fleet.tasks if t.status == SubAgentStatus.RUNNING)
+
+    status_parts = [f"[bold]{done_count}/{total}[/bold]"]
+    if running_count > 0:
+        status_parts.append(f"[cyan]{running_count} running[/cyan]")
+    if failed_count > 0:
+        status_parts.append(f"[red]{failed_count} failed[/red]")
+    status_parts.append(f"[dim]{fleet.elapsed:.1f}s elapsed[/dim]")
+    subtitle = f"{bar}  {' · '.join(status_parts)}"
+
+    return Panel(
+        table,
+        title=f"[bold cyan]🚀 Fleet: {fleet.goal}[/bold cyan]",
+        subtitle=subtitle,
+        border_style="cyan",
+        padding=(0, 1),
+    )
+
+
+def render_fleet_dashboard(console: Console, fleet: FleetRun) -> None:
+    """Render a static snapshot of the fleet dashboard."""
+    console.print(_build_fleet_renderable(fleet))
+
+
+def run_fleet_live(
+    console: Console,
+    fleet: FleetRun,
+    executor: "FleetExecutor",
+    execute_fn: Callable[[str], Dict],
+    refresh_rate: float = 4.0,
+) -> FleetRun:
+    """Run fleet execution with a Rich Live-updating dashboard.
+
+    Args:
+        console: Rich Console instance
+        fleet: FleetRun with tasks to execute
+        executor: FleetExecutor instance
+        execute_fn: Function to execute each sub-task
+        refresh_rate: Live display refresh rate (per second)
+
+    Returns:
+        Completed FleetRun
+    """
+    lock = threading.Lock()
+
+    def _on_update(f: FleetRun) -> None:
+        with lock:
+            live.update(_build_fleet_renderable(f))
+
+    with Live(
+        _build_fleet_renderable(fleet),
+        console=console,
+        refresh_per_second=refresh_rate,
+        transient=False,
+    ) as live:
+        result = executor.run(fleet, execute_fn, on_update=_on_update)
+        live.update(_build_fleet_renderable(result))
+
+    return result
 
 
 def parse_decomposition(response: str) -> List[SubTask]:

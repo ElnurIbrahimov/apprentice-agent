@@ -14,6 +14,7 @@ Endpoints:
 import json
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from typing import List, Optional
@@ -179,9 +180,16 @@ async def list_feed(limit: int = 50, offset: int = 0):
     return FeedListResponse(items=items, total=total)
 
 
+def _validate_feed_id(item_id: str) -> None:
+    """Reject item_ids that could cause path traversal."""
+    if not re.match(r'^[a-zA-Z0-9_-]+$', item_id):
+        raise HTTPException(status_code=400, detail="Invalid feed item ID")
+
+
 @router.get("/{item_id}")
 async def get_feed_item(item_id: str):
     """Get a specific feed item by ID."""
+    _validate_feed_id(item_id)
     filepath = FEED_DIR / f"{item_id}.json"
     if not filepath.exists():
         raise HTTPException(status_code=404, detail=f"Feed item '{item_id}' not found")
@@ -195,6 +203,7 @@ async def get_feed_item(item_id: str):
 @router.delete("/{item_id}")
 async def delete_feed_item(item_id: str):
     """Delete a specific feed item."""
+    _validate_feed_id(item_id)
     filepath = FEED_DIR / f"{item_id}.json"
     if not filepath.exists():
         raise HTTPException(status_code=404, detail=f"Feed item '{item_id}' not found")

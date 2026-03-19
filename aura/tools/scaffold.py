@@ -1282,8 +1282,15 @@ def _slugify(name: str) -> str:
 def _write_files(base: Path, file_map: Dict[str, str]) -> List[str]:
     """Write a dict of {relative_path: content} to disk. Returns list of created paths."""
     created = []
+    base_resolved = base.resolve()
     for rel_path, content in sorted(file_map.items()):
-        full = base / rel_path
+        if ".." in str(rel_path):
+            logger.warning(f"[Scaffold] Skipping path with traversal: {rel_path}")
+            continue
+        full = (base / rel_path).resolve()
+        if not str(full).startswith(str(base_resolved)):
+            logger.warning(f"[Scaffold] Skipping path outside target: {rel_path}")
+            continue
         full.parent.mkdir(parents=True, exist_ok=True)
         full.write_text(content, encoding="utf-8")
         created.append(str(full))
@@ -1588,10 +1595,11 @@ class ScaffoldTool:
         else:
             return {"skipped": True, "reason": "No dependencies to install"}
 
+        import shlex
         try:
             proc = subprocess.run(
-                cmd,
-                shell=True,
+                shlex.split(cmd),
+                shell=False,
                 cwd=str(target),
                 capture_output=True,
                 text=True,

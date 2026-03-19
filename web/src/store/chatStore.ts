@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Message, MoodState, StatusResponse, ConnectionStatus, Conversation, Citation, ToolTrace } from '../types';
+import type { Message, MoodState, StatusResponse, ConnectionStatus, Conversation, Citation, ToolTrace, FleetTask } from '../types';
 
 interface ChatState {
   // Messages
@@ -53,9 +53,19 @@ interface ChatState {
   // Conversation switching
   isSwitchingConversation: boolean;
   setIsSwitchingConversation: (val: boolean) => void;
+
+  // Suggestion chips
+  suggestions: string[];
+  setSuggestions: (suggestions: string[]) => void;
+  clearSuggestions: () => void;
+
+  // Fleet dashboard
+  fleetData: { goal: string; tasks: FleetTask[]; totalElapsed: number } | null;
+  setFleetData: (data: { goal: string; tasks: FleetTask[]; totalElapsed: number } | null) => void;
+  clearFleetData: () => void;
 }
 
-const generateId = () => `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+const generateId = () => `msg_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
 
 export const useChatStore = create<ChatState>((set, get) => ({
   // Messages
@@ -167,4 +177,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // Conversation switching
   isSwitchingConversation: false,
   setIsSwitchingConversation: (val) => set({ isSwitchingConversation: val }),
+
+  // Suggestion chips
+  suggestions: [],
+  setSuggestions: (suggestions) => set({ suggestions }),
+  clearSuggestions: () => set({ suggestions: [] }),
+
+  // Fleet dashboard
+  fleetData: null,
+  setFleetData: (data) => set({ fleetData: data }),
+  clearFleetData: () => set({ fleetData: null }),
 }));

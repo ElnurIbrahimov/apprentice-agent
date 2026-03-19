@@ -64,6 +64,9 @@ class MultiAgentOrchestrator:
         # Initialize router
         self.router = IntentRouter(self.specialists)
 
+        # Shared thread pool for parallel execution
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=8)
+
         # Conversation history
         self.history: List[ConversationTurn] = []
 
@@ -168,12 +171,12 @@ class MultiAgentOrchestrator:
         """Execute multiple agents in parallel."""
         results = []
 
-        max_workers = min(len(agent_names), 8)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(self._execute_single, name, message): name
-                for name in agent_names if name in self.specialists
-            }
+        futures = {
+            self._executor.submit(self._execute_single, name, message): name
+            for name in agent_names if name in self.specialists
+        }
+
+        if futures:
 
             for future in concurrent.futures.as_completed(futures, timeout=60):
                 try:

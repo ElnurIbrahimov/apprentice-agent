@@ -44,10 +44,14 @@ class FinancialState:
 
     @property
     def runway_months(self) -> float:
-        """Calculate financial runway in months."""
+        """Calculate financial runway in months.
+
+        NOTE: Assumes savings and emergency_fund_months are separate pools.
+        If savings already includes the emergency fund, this double-counts.
+        """
         if self.monthly_expenses <= 0:
             return float('inf')
-        return (self.savings + self.emergency_fund_months * self.monthly_expenses) / self.monthly_expenses
+        return self.savings / self.monthly_expenses + self.emergency_fund_months
 
 
 @dataclass

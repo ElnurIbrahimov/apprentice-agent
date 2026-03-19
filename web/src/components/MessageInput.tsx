@@ -7,6 +7,9 @@ import {
 import { AttachmentList } from './AttachmentPreview';
 import { useFileUpload, isSupported } from '../hooks/useFileUpload';
 import { useChatStore } from '../store/chatStore';
+import { useSettingsStore } from '../store/settingsStore';
+import { haptic } from '../utils/haptics';
+import { sounds } from '../utils/sounds';
 import type { FileAttachment } from '../types';
 
 // Action modes
@@ -35,6 +38,7 @@ const MODE_COLORS: Record<ActionMode, string> = {
 interface MessageInputProps {
   onSend: (message: string, attachments?: FileAttachment[], actionMode?: string | null) => void;
   onStop?: () => void;
+  onTypingStart?: () => void;
   disabled?: boolean;
   isLoading?: boolean;
   placeholder?: string;
@@ -43,6 +47,7 @@ interface MessageInputProps {
 export function MessageInput({
   onSend,
   onStop,
+  onTypingStart,
   disabled = false,
   isLoading = false,
   placeholder = 'Message AURA...',
@@ -62,6 +67,7 @@ export function MessageInput({
   const mountedRef = useRef(true);
 
   const { selectedModel, availableModels, setSelectedModel } = useChatStore();
+  const { settings } = useSettingsStore();
 
   const {
     attachments,
@@ -156,6 +162,10 @@ export function MessageInput({
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!canSend) return;
+
+    // Haptic feedback on send (Android only)
+    haptic(50);
+    if (settings.soundEnabled) sounds.send();
 
     // Get ready attachments (not uploading, no errors)
     const readyAttachments = attachments.filter(a => !a.uploading && !a.error);
@@ -303,7 +313,13 @@ export function MessageInput({
           <textarea
             ref={textareaRef}
             value={message}
-            onChange={(e) => setMessage(e.target.value)}
+            onChange={(e) => {
+              const val = e.target.value;
+              if (val.length > 0 && message.length === 0 && onTypingStart) {
+                onTypingStart();
+              }
+              setMessage(val);
+            }}
             onKeyDown={handleKeyDown}
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}

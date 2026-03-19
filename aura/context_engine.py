@@ -203,9 +203,9 @@ class AlwaysOnContextEngine:
 
     def _get_memory_context(self, query: str) -> Optional[ContextBlock]:
         try:
-            memories = self.agent.memory.recall(query, n_results=4)
-            if memories:
-                content = "\n".join(f"- {m['content'][:120]}" for m in memories[:4])
+            results = self.agent.memory.query(query, k=4)
+            if results:
+                content = "\n".join(f"- {r.content[:120]}" for r in results[:4])
                 return ContextBlock("Memory", content, priority=70)
         except Exception as e:
             logger.debug(f"[ACE] Memory failed: {e}")

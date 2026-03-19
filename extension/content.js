@@ -23,6 +23,7 @@
     }
   }
   (function() {
+    var _a;
     if (window.__auraToolbarMounted) return;
     window.__auraToolbarMounted = true;
     const _prevDock = document.getElementById("aura-dock-shadow");
@@ -1224,7 +1225,7 @@ ${url}`;
       }
     });
     quickLaunch.addEventListener("click", (e) => {
-      var _a;
+      var _a2;
       const target = e.target;
       e.stopPropagation();
       if (target.closest('[data-action="ql-close"]')) {
@@ -1233,7 +1234,7 @@ ${url}`;
       }
       if (target.id === "ql-submit-btn" || target.closest("#ql-submit-btn")) {
         const inputEl = shadow.getElementById("ql-prompt-input");
-        const prompt = ((_a = inputEl == null ? void 0 : inputEl.value) == null ? void 0 : _a.trim()) || "";
+        const prompt = ((_a2 = inputEl == null ? void 0 : inputEl.value) == null ? void 0 : _a2.trim()) || "";
         const text = getSelectionText();
         if (!text && !prompt) return;
         safeSend({ type: "OPEN_WITH_TEXT", action: "ask", text: prompt ? `${prompt}
@@ -1276,7 +1277,7 @@ ${text}` : text, url: window.location.href, title: document.title });
       }
     });
     function bestSelector(el) {
-      var _a;
+      var _a2;
       if (el.id) return "#" + CSS.escape(el.id);
       const al = el.getAttribute("aria-label");
       if (al) return `[aria-label="${al}"]`;
@@ -1288,7 +1289,7 @@ ${text}` : text, url: window.location.href, title: document.title });
           path.unshift("#" + CSS.escape(cur.id));
           break;
         }
-        const siblings = [...((_a = cur.parentElement) == null ? void 0 : _a.children) || []];
+        const siblings = [...((_a2 = cur.parentElement) == null ? void 0 : _a2.children) || []];
         const idx = siblings.indexOf(cur) + 1;
         path.unshift(s + ":nth-child(" + idx + ")");
       }
@@ -1551,7 +1552,7 @@ ${text}` : text, url: window.location.href, title: document.title });
         "BR"
       ]);
       function walk(node) {
-        var _a;
+        var _a2;
         if (node.nodeType === Node.TEXT_NODE) {
           const text = (node.textContent || "").replace(/\s+/g, " ");
           if (text.trim()) parts.push(text);
@@ -1560,7 +1561,7 @@ ${text}` : text, url: window.location.href, title: document.title });
         if (node.nodeType !== Node.ELEMENT_NODE) return;
         const el = node;
         const tag = el.tagName;
-        if (el.hasAttribute("hidden") || ((_a = el.style) == null ? void 0 : _a.display) === "none") return;
+        if (el.hasAttribute("hidden") || ((_a2 = el.style) == null ? void 0 : _a2.display) === "none") return;
         if (/^H[1-6]$/.test(tag)) {
           const level = parseInt(tag[1]);
           const prefix = "#".repeat(Math.min(level, 3)) + " ";
@@ -1611,13 +1612,13 @@ ${text}` : text, url: window.location.href, title: document.title });
       return parts.join("").replace(/\n{3,}/g, "\n\n").replace(/[ \t]+/g, " ").trim();
     }
     function extractMainContent() {
-      var _a, _b, _c, _d;
+      var _a2, _b, _c, _d;
       try {
         const url = window.location.href;
         const title = document.title;
         if (url.match(/\.pdf($|\?|#)/i) || document.contentType === "application/pdf") {
           return {
-            text: ((_b = (_a = document.body) == null ? void 0 : _a.innerText) == null ? void 0 : _b.slice(0, MAX_TEXT_BYTES)) || "[PDF document]",
+            text: ((_b = (_a2 = document.body) == null ? void 0 : _a2.innerText) == null ? void 0 : _b.slice(0, MAX_TEXT_BYTES)) || "[PDF document]",
             title,
             url,
             wordCount: 0,
@@ -1649,12 +1650,12 @@ ${text}` : text, url: window.location.href, title: document.title });
       }
     }
     function extractYouTubeContent() {
-      var _a, _b;
+      var _a2, _b;
       const url = window.location.href;
       const titleEl = document.querySelector(
         "h1.ytd-watch-metadata, h1.ytd-video-primary-info-renderer, #title h1"
       );
-      const videoTitle = ((_a = titleEl == null ? void 0 : titleEl.textContent) == null ? void 0 : _a.trim()) || document.title.replace(/ - YouTube$/, "").trim();
+      const videoTitle = ((_a2 = titleEl == null ? void 0 : titleEl.textContent) == null ? void 0 : _a2.trim()) || document.title.replace(/ - YouTube$/, "").trim();
       let transcript = "";
       const transcriptSegments = document.querySelectorAll(
         "ytd-transcript-segment-renderer .segment-text, yt-formatted-string.ytd-transcript-segment-renderer, #segments-container ytd-transcript-segment-renderer"
@@ -1662,8 +1663,8 @@ ${text}` : text, url: window.location.href, title: document.title });
       if (transcriptSegments.length > 0) {
         const lines = [];
         transcriptSegments.forEach((seg) => {
-          var _a2;
-          const text2 = (_a2 = seg.textContent) == null ? void 0 : _a2.trim();
+          var _a3;
+          const text2 = (_a3 = seg.textContent) == null ? void 0 : _a3.trim();
           if (text2) lines.push(text2);
         });
         transcript = lines.join(" ");
@@ -1682,9 +1683,9 @@ ${text}` : text, url: window.location.href, title: document.title });
       if (commentEls.length > 0) {
         const commentLines = [];
         commentEls.forEach((el, i) => {
-          var _a2;
+          var _a3;
           if (i >= 10) return;
-          const text2 = (_a2 = el.textContent) == null ? void 0 : _a2.trim();
+          const text2 = (_a3 = el.textContent) == null ? void 0 : _a3.trim();
           if (text2) commentLines.push("- " + text2);
         });
         if (commentLines.length > 0) {
@@ -2386,8 +2387,8 @@ ${description}
       if (bodies.length === 0) return "";
       const parts = [];
       bodies.forEach((body) => {
-        var _a;
-        const text = (_a = body.innerText) == null ? void 0 : _a.trim();
+        var _a2;
+        const text = (_a2 = body.innerText) == null ? void 0 : _a2.trim();
         if (text) parts.push(text);
       });
       return parts.join("\n\n---\n\n").slice(0, 2e4);
@@ -2435,10 +2436,10 @@ ${description}
       return composeEl.querySelector('div[contenteditable="true"][role="textbox"]');
     }
     function getComposeText(composeEl) {
-      var _a;
+      var _a2;
       const body = getComposeBody(composeEl);
       if (!body) return "";
-      return ((_a = body.innerText) == null ? void 0 : _a.trim()) || "";
+      return ((_a2 = body.innerText) == null ? void 0 : _a2.trim()) || "";
     }
     function escapeHtml(s) {
       return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -2825,14 +2826,14 @@ ${description}
       if (!isGmailPage()) return;
       scanGmailComposeWindows();
       const gmailObserver = new MutationObserver((mutations) => {
-        var _a, _b, _c;
+        var _a2, _b, _c;
         let shouldScan = false;
         for (const mutation of mutations) {
           if (mutation.addedNodes.length > 0) {
             for (const node of mutation.addedNodes) {
               if (node.nodeType !== Node.ELEMENT_NODE) continue;
               const el = node;
-              if (((_a = el.matches) == null ? void 0 : _a.call(el, 'div[role="dialog"]')) || ((_b = el.querySelector) == null ? void 0 : _b.call(el, 'div[role="dialog"]')) || ((_c = el.querySelector) == null ? void 0 : _c.call(el, 'div[contenteditable="true"]'))) {
+              if (((_a2 = el.matches) == null ? void 0 : _a2.call(el, 'div[role="dialog"]')) || ((_b = el.querySelector) == null ? void 0 : _b.call(el, 'div[role="dialog"]')) || ((_c = el.querySelector) == null ? void 0 : _c.call(el, 'div[contenteditable="true"]'))) {
                 shouldScan = true;
                 break;
               }
@@ -3949,7 +3950,17 @@ ${description}
         return void 0;
       }
     );
-    const SERP_BACKEND = "http://localhost:8000";
+    const SERP_DEFAULT_BACKEND = "http://89.167.107.134";
+    const SERP_DEFAULT_API_KEY = "i-L5ShpMkY2B7loNb8VS4EAAT-Ronh-K8cIgRILGjnQ";
+    let SERP_BACKEND = SERP_DEFAULT_BACKEND;
+    let SERP_API_KEY = SERP_DEFAULT_API_KEY;
+    if ((_a = ext == null ? void 0 : ext.storage) == null ? void 0 : _a.local) {
+      ext.storage.local.get(["backendUrl", "apiKey"], (d) => {
+        var _a2, _b;
+        if ((_a2 = d == null ? void 0 : d.backendUrl) == null ? void 0 : _a2.trim()) SERP_BACKEND = d.backendUrl.trim().replace(/\/+$/, "");
+        if ((_b = d == null ? void 0 : d.apiKey) == null ? void 0 : _b.trim()) SERP_API_KEY = d.apiKey.trim();
+      });
+    }
     function isGoogleSearchPage() {
       const hostname = window.location.hostname;
       const pathname = window.location.pathname;
@@ -3982,7 +3993,7 @@ ${description}
       return "light";
     }
     async function initGoogleSerpIntegration() {
-      var _a;
+      var _a2;
       if (!isGoogleSearchPage()) return;
       const stored = await new Promise((resolve) => {
         ext.storage.local.get(["aura_serp_hidden"], resolve);
@@ -4351,9 +4362,11 @@ ${description}
         serpHost.remove();
       });
       try {
+        const serpHeaders = { "Content-Type": "application/json" };
+        if (SERP_API_KEY) serpHeaders["X-API-Key"] = SERP_API_KEY;
         const resp = await fetch(`${SERP_BACKEND}/api/chat`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: serpHeaders,
           body: JSON.stringify({
             message: query,
             conversation_id: "__serp_answer__",
@@ -4368,7 +4381,7 @@ ${description}
         const answerEl = document.createElement("div");
         answerEl.className = "serp-answer";
         serpBody.appendChild(answerEl);
-        const reader = (_a = resp.body) == null ? void 0 : _a.getReader();
+        const reader = (_a2 = resp.body) == null ? void 0 : _a2.getReader();
         if (!reader) {
           answerEl.textContent = await resp.text();
           serpAddCitations(serpBody, answerEl.textContent);

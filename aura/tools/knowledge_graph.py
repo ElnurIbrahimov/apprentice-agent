@@ -226,6 +226,9 @@ class KnowledgeGraphTool:
         # Thread safety (RLock allows reentrant locking for nested method calls)
         self._lock = threading.RLock()
 
+        # Dirty flag for deferred saves (e.g. access_count updates in get_node)
+        self._dirty = False
+
         # File paths
         self.nodes_file = self.db_path / "nodes.jsonl"
         self.edges_file = self.db_path / "edges.jsonl"
@@ -349,7 +352,7 @@ class KnowledgeGraphTool:
             if node:
                 node.access_count += 1
                 node.last_accessed = datetime.now().isoformat()
-                self.save()
+                self._dirty = True
             return node
 
     def get_node_by_label(self, label: str) -> Optional[Node]:
@@ -1402,6 +1405,12 @@ class KnowledgeGraphTool:
                 stats["edge_types"][edge.type] = stats["edge_types"].get(edge.type, 0) + 1
 
             self._atomic_write_json(self.stats_file, stats)
+            self._dirty = False
+
+    def flush_if_dirty(self):
+        """Save to disk only if there are pending access-count updates."""
+        if self._dirty:
+            self.save()
 
     def load(self):
         """Load graph from disk."""

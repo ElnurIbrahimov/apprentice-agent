@@ -56,6 +56,11 @@ class DatabaseTool:
                     f"PRAGMA '{pragma_name}' is not allowed. "
                     f"Allowed PRAGMAs: {', '.join(sorted(self.ALLOWED_PRAGMAS))}"
                 )
+        # Block multi-statement queries (semicolons outside string literals)
+        # Strip string literals first, then check for semicolons
+        no_strings = re.sub(r"'[^']*'", '', stripped)
+        if ';' in no_strings:
+            return False, "Multi-statement queries are not allowed."
         return True, None
 
     @staticmethod
@@ -85,7 +90,6 @@ class DatabaseTool:
 
     def _get_db_path(self, db: str) -> tuple:
         """Return (path_str, error_msg) tuple. path_str is None on error."""
-        DB_DIR = Path(__file__).parent.parent.parent / "data" / "databases"
         DB_DIR.mkdir(parents=True, exist_ok=True)
         p = Path(db)
         try:
@@ -103,10 +107,8 @@ class DatabaseTool:
         conn = None
         try:
             conn = sqlite3.connect(db_path)
-            # Apply authorizer as second defense for read-only queries
-            is_read_only = query.strip().upper().startswith(("SELECT", "PRAGMA", "EXPLAIN"))
-            if is_read_only:
-                conn.set_authorizer(self._read_only_authorizer)
+            # Always apply read-only authorizer as defense-in-depth
+            conn.set_authorizer(self._read_only_authorizer)
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute(query, params)

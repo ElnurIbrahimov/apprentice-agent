@@ -693,8 +693,8 @@ class SelfImprovementEngine:
                 get_intrinsic_motivation,
             )
             im = get_intrinsic_motivation()
-            drives = im.get_drive_levels()
-            competence_urgency = drives.get("competence", {}).get("urgency", 0)
+            drives = im.get_drives_summary()
+            competence_urgency = drives.get("competence", 0)
             if competence_urgency < self.COMPETENCE_URGENCY_THRESHOLD:
                 return False
         except Exception as e:

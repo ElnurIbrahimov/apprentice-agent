@@ -1238,10 +1238,13 @@ class OllamaBrain:
         index = self._load_conversations_index()
         # Sort by updated_at descending (most recent first)
         index.sort(key=lambda c: c.get("updated_at", 0), reverse=True)
-        # Add is_active flag
+        # Return copies with is_active flag to avoid mutating cached index
+        result = []
         for entry in index:
-            entry["is_active"] = entry["id"] == self._current_conversation_id
-        return index
+            entry_copy = dict(entry)
+            entry_copy["is_active"] = entry["id"] == self._current_conversation_id
+            result.append(entry_copy)
+        return result
 
     def switch_conversation(self, conversation_id: str) -> bool:
         """Switch to a different conversation.
@@ -2607,9 +2610,6 @@ Content to summarize:
 Write a clear, concise summary (3-5 sentences) of the key points relevant to the goal."""
 
         return self.think(prompt, system_prompt="You summarize information clearly and concisely.", use_history=False)
-
-    def _default_system_prompt(self) -> str:
-        return "You are a helpful AI assistant. Be concise and direct."
 
     # =========================================================================
     # ALMA Emotional Intelligence Methods

@@ -13,7 +13,6 @@ from datetime import datetime
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .markdown_store import MarkdownStore
     from .emotion import EmotionalEngine
 
 logger = logging.getLogger(__name__)
@@ -29,7 +28,7 @@ class FastPathHandler:
 
     def __init__(
         self,
-        memory_store: Optional['MarkdownStore'] = None,
+        memory_store=None,
         emotional_engine: Optional['EmotionalEngine'] = None
     ):
         """

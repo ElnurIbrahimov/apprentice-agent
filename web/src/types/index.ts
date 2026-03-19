@@ -60,6 +60,7 @@ export interface Message {
   citations?: Citation[];
   toolTrace?: ToolTrace[];
   compareResults?: ModelResult[];
+  memoriesUsed?: string[];  // Memory snippets that influenced this response
   proactive?: {
     action: string;       // e.g., 'notify', 'suggest', 'remind', 'ask'
     trigger?: string;     // What triggered this message
@@ -264,6 +265,16 @@ export interface ActivityEvent {
   summary: string;
   payload?: Record<string, unknown> | null;
   duration_ms?: number | null;
+}
+
+// Fleet Dashboard
+export interface FleetTask {
+  id: string;
+  description: string;
+  status: 'pending' | 'running' | 'done' | 'failed';
+  elapsed: number;
+  result?: string;
+  error?: string;
 }
 
 // Tab types

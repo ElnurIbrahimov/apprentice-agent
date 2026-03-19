@@ -155,6 +155,9 @@ class MetacognitiveEngine:
         self._data_dir = Path(data_dir)
         self._data_dir.mkdir(parents=True, exist_ok=True)
 
+        # Thread safety for mutable state
+        self._lock = threading.RLock()
+
         # Capability profile
         self._capabilities: Dict[str, CapabilityScore] = {}
         # Learning goals
@@ -626,16 +629,17 @@ class MetacognitiveEngine:
         confidence: float = 0.5,
     ) -> None:
         """Internal outcome recording."""
-        self._outcomes.append({
-            "domain": domain,
-            "success": success,
-            "confidence": confidence,
-            "details": details,
-            "timestamp": datetime.now().isoformat(),
-        })
-        # Keep bounded
-        if len(self._outcomes) > 500:
-            self._outcomes = self._outcomes[-500:]
+        with self._lock:
+            self._outcomes.append({
+                "domain": domain,
+                "success": success,
+                "confidence": confidence,
+                "details": details,
+                "timestamp": datetime.now().isoformat(),
+            })
+            # Keep bounded
+            if len(self._outcomes) > 500:
+                self._outcomes = self._outcomes[-500:]
 
     # ====================================================================
     # Signal Gathering (from subsystems)
@@ -768,45 +772,46 @@ class MetacognitiveEngine:
 
         Returns summary of the cycle.
         """
-        logger.info("[Metacognition] Starting metacognitive cycle")
+        with self._lock:
+            logger.info("[Metacognition] Starting metacognitive cycle")
 
-        # Step 1: Assess
-        capabilities = self.assess_capabilities()
+            # Step 1: Assess
+            capabilities = self.assess_capabilities()
 
-        # Step 2: Plan
-        new_goals = self.create_learning_plan()
+            # Step 2: Plan
+            new_goals = self.create_learning_plan()
 
-        # Step 3: Execute improvements for active/pending goals
-        improvements = []
-        for goal in self._goals:
-            if goal.status in ("pending", "active") and goal.attempts < 5:
-                record = self.execute_improvement(goal.id)
-                if record:
-                    improvements.append(record)
-                # Limit to 2 improvements per cycle
-                if len(improvements) >= 2:
-                    break
+            # Step 3: Execute improvements for active/pending goals
+            improvements = []
+            for goal in self._goals:
+                if goal.status in ("pending", "active") and goal.attempts < 5:
+                    record = self.execute_improvement(goal.id)
+                    if record:
+                        improvements.append(record)
+                    # Limit to 2 improvements per cycle
+                    if len(improvements) >= 2:
+                        break
 
-        # Step 4: Evaluate
-        evaluation = self.evaluate_progress()
+            # Step 4: Evaluate
+            evaluation = self.evaluate_progress()
 
-        result = {
-            "capabilities_assessed": len(capabilities),
-            "new_goals_created": len(new_goals),
-            "improvements_attempted": len(improvements),
-            "improvements_successful": sum(1 for r in improvements if r.success),
-            "average_capability": evaluation["summary"]["average_capability"],
-            "strengths": evaluation["strengths"],
-            "weaknesses": evaluation["weaknesses"],
-        }
+            result = {
+                "capabilities_assessed": len(capabilities),
+                "new_goals_created": len(new_goals),
+                "improvements_attempted": len(improvements),
+                "improvements_successful": sum(1 for r in improvements if r.success),
+                "average_capability": evaluation["summary"]["average_capability"],
+                "strengths": evaluation["strengths"],
+                "weaknesses": evaluation["weaknesses"],
+            }
 
-        logger.info(
-            f"[Metacognition] Cycle complete: "
-            f"{result['improvements_successful']}/{result['improvements_attempted']} improvements, "
-            f"avg capability={result['average_capability']:.2f}"
-        )
+            logger.info(
+                f"[Metacognition] Cycle complete: "
+                f"{result['improvements_successful']}/{result['improvements_attempted']} improvements, "
+                f"avg capability={result['average_capability']:.2f}"
+            )
 
-        return result
+            return result
 
     # ====================================================================
     # Persistence
@@ -821,78 +826,80 @@ class MetacognitiveEngine:
         if not state_file.exists():
             return
 
-        try:
-            data = json.loads(state_file.read_text(encoding="utf-8"))
+        with self._lock:
+            try:
+                data = json.loads(state_file.read_text(encoding="utf-8"))
 
-            # Load capabilities (filter to known fields for schema resilience)
-            for d, cap_data in data.get("capabilities", {}).items():
-                self._capabilities[d] = CapabilityScore(
-                    **{k: v for k, v in cap_data.items() if k in CapabilityScore.__dataclass_fields__}
-                )
+                # Load capabilities (filter to known fields for schema resilience)
+                for d, cap_data in data.get("capabilities", {}).items():
+                    self._capabilities[d] = CapabilityScore(
+                        **{k: v for k, v in cap_data.items() if k in CapabilityScore.__dataclass_fields__}
+                    )
 
-            # Load goals (filter to known fields for schema resilience)
-            for g_data in data.get("goals", []):
-                self._goals.append(LearningGoal(
-                    **{k: v for k, v in g_data.items() if k in LearningGoal.__dataclass_fields__}
-                ))
+                # Load goals (filter to known fields for schema resilience)
+                for g_data in data.get("goals", []):
+                    self._goals.append(LearningGoal(
+                        **{k: v for k, v in g_data.items() if k in LearningGoal.__dataclass_fields__}
+                    ))
 
-            # Load improvements (filter to known fields for schema resilience)
-            for r_data in data.get("improvements", []):
-                self._improvements.append(ImprovementRecord(
-                    **{k: v for k, v in r_data.items() if k in ImprovementRecord.__dataclass_fields__}
-                ))
+                # Load improvements (filter to known fields for schema resilience)
+                for r_data in data.get("improvements", []):
+                    self._improvements.append(ImprovementRecord(
+                        **{k: v for k, v in r_data.items() if k in ImprovementRecord.__dataclass_fields__}
+                    ))
 
-            # Load outcomes
-            self._outcomes = data.get("outcomes", [])
+                # Load outcomes
+                self._outcomes = data.get("outcomes", [])
 
-        except Exception as e:
-            logger.warning(f"[Metacognition] Failed to load state: {e}")
+            except Exception as e:
+                logger.warning(f"[Metacognition] Failed to load state: {e}")
 
     def _save_state(self) -> None:
         """Save state to disk."""
-        try:
-            data = {
-                "capabilities": {
-                    d: {
-                        "domain": c.domain, "score": c.score,
-                        "confidence": c.confidence, "sample_count": c.sample_count,
-                        "trend": c.trend, "last_assessed": c.last_assessed,
-                        "evidence": c.evidence,
-                    }
-                    for d, c in self._capabilities.items()
-                },
-                "goals": [
-                    {
-                        "id": g.id, "domain": g.domain,
-                        "description": g.description, "strategy": g.strategy,
-                        "priority": g.priority, "created_at": g.created_at,
-                        "target_score": g.target_score,
-                        "current_score": g.current_score,
-                        "status": g.status, "progress": g.progress,
-                        "attempts": g.attempts,
-                        "completed_at": g.completed_at, "result": g.result,
-                    }
-                    for g in self._goals
-                ],
-                "improvements": [
-                    {
-                        "goal_id": r.goal_id, "timestamp": r.timestamp,
-                        "strategy": r.strategy, "action_taken": r.action_taken,
-                        "before_score": r.before_score,
-                        "after_score": r.after_score,
-                        "success": r.success, "notes": r.notes,
-                    }
-                    for r in self._improvements[-100:]  # Keep last 100
-                ],
-                "outcomes": self._outcomes[-500:],
-                "saved_at": datetime.now().isoformat(),
-            }
+        with self._lock:
+            try:
+                data = {
+                    "capabilities": {
+                        d: {
+                            "domain": c.domain, "score": c.score,
+                            "confidence": c.confidence, "sample_count": c.sample_count,
+                            "trend": c.trend, "last_assessed": c.last_assessed,
+                            "evidence": c.evidence,
+                        }
+                        for d, c in self._capabilities.items()
+                    },
+                    "goals": [
+                        {
+                            "id": g.id, "domain": g.domain,
+                            "description": g.description, "strategy": g.strategy,
+                            "priority": g.priority, "created_at": g.created_at,
+                            "target_score": g.target_score,
+                            "current_score": g.current_score,
+                            "status": g.status, "progress": g.progress,
+                            "attempts": g.attempts,
+                            "completed_at": g.completed_at, "result": g.result,
+                        }
+                        for g in self._goals
+                    ],
+                    "improvements": [
+                        {
+                            "goal_id": r.goal_id, "timestamp": r.timestamp,
+                            "strategy": r.strategy, "action_taken": r.action_taken,
+                            "before_score": r.before_score,
+                            "after_score": r.after_score,
+                            "success": r.success, "notes": r.notes,
+                        }
+                        for r in self._improvements[-100:]  # Keep last 100
+                    ],
+                    "outcomes": self._outcomes[-500:],
+                    "saved_at": datetime.now().isoformat(),
+                }
 
-            self._state_file().write_text(
-                json.dumps(data, indent=2, default=str), encoding="utf-8"
-            )
-        except Exception as e:
-            logger.warning(f"[Metacognition] Failed to save state: {e}")
+                self._state_file().write_text(
+                    json.dumps(data, indent=2, default=str), encoding="utf-8"
+                )
+            except Exception as e:
+                logger.warning(f"[Metacognition] Failed to save state: {e}")
 
     def get_status(self) -> Dict[str, Any]:
         """Get current metacognition status for API."""

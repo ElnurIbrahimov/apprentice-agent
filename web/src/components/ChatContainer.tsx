@@ -5,7 +5,12 @@ import { MessageBubble } from './MessageBubble';
 import { MessageInput } from './MessageInput';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useProactiveMessages } from '../hooks/useProactiveMessages';
+import { haptic } from '../utils/haptics';
+import { sounds } from '../utils/sounds';
+import { useMoodTheme } from '../hooks/useMoodTheme';
 import type { FileAttachment, ModelResult } from '../types';
+import { FleetDashboard } from './FleetDashboard';
+import { ProactiveCard } from './ProactiveCard';
 import {
   ChatBubbleLeftRightIcon,
   MagnifyingGlassIcon,
@@ -14,6 +19,11 @@ import {
   ChevronDownIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline';
+
+// Swipe drawer constants
+const EDGE_ZONE = 20; // px from left edge to trigger
+const DRAWER_WIDTH = 280;
+const OPEN_THRESHOLD = 0.35; // fraction of drawer width to snap open
 
 // Quick action button configurations with icons
 const QUICK_ACTIONS = [
@@ -35,13 +45,150 @@ const QUICK_ACTIONS = [
   },
 ];
 
+// Thinking shimmer skeleton
+function ThinkingShimmer({ toolStatus }: { toolStatus: { name: string; action: string } }) {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const start = Date.now();
+    const interval = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - start) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const label = toolStatus.action === 'thinking'
+    ? `Thinking... ${elapsed}s`
+    : `Using ${toolStatus.name}... ${elapsed}s`;
+
+  return (
+    <div className="py-5 px-4 md:px-8">
+      <div className="max-w-3xl mx-auto flex gap-4">
+        {/* Avatar placeholder */}
+        <div className="flex-shrink-0 mt-1">
+          <div className="w-9 h-9 rounded-lg shimmer-bar" />
+        </div>
+        {/* Shimmer content */}
+        <div className="flex-1 min-w-0 space-y-3">
+          <span className="text-xs text-chat-text-secondary">{label}</span>
+          <div className="shimmer-bar h-3" style={{ width: '80%' }} />
+          <div className="shimmer-bar h-3" style={{ width: '60%' }} />
+          <div className="shimmer-bar h-3" style={{ width: '40%' }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Default follow-up suggestions
+const FOLLOW_UP_SETS = [
+  ['Tell me more', 'Can you explain that differently?', 'What else should I know?'],
+  ['Go deeper on that', 'Give me an example', 'What are the tradeoffs?'],
+  ['Summarize that', 'What would you recommend?', 'Any alternatives?'],
+];
+
 export function ChatContainer() {
-  const { messages, isLoading, error, setError, connectionStatus, toolStatus, isSwitchingConversation } = useChatStore();
+  useMoodTheme();
+  const { messages, isLoading, error, setError, connectionStatus, toolStatus, isSwitchingConversation, suggestions, setSuggestions, clearSuggestions, fleetData, clearFleetData } = useChatStore();
   const { sendMessage, stopGeneration, connect: reconnect } = useWebSocket();
   const { settings } = useSettingsStore();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
+  const initialMessageCountRef = useRef(messages.length);
+  const prevIsLoadingRef = useRef(isLoading);
+
+  // Thinking history tracking
+  const [thinkingHistory, setThinkingHistory] = useState<{ elapsed: number; timestamp: number } | null>(null);
+  const [thinkingExpanded, setThinkingExpanded] = useState(false);
+  const thinkingStartRef = useRef<number | null>(null);
+  const prevToolStatusRef = useRef(toolStatus);
+
+  // --- Proactive notification cards ---
+  const [dismissedProactiveIds, setDismissedProactiveIds] = useState<Set<string>>(new Set());
+
+  const proactiveMessages = messages
+    .filter(m => m.proactive && !dismissedProactiveIds.has(m.id))
+    .slice(-3); // Show max 3 cards
+
+  const handleDismissProactive = useCallback((id: string) => {
+    setDismissedProactiveIds(prev => new Set(prev).add(id));
+  }, []);
+
+  // --- Swipe drawer state ---
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerDragging, setDrawerDragging] = useState(false);
+  const [drawerTranslateX, setDrawerTranslateX] = useState(-DRAWER_WIDTH);
+  const [edgeHintActive, setEdgeHintActive] = useState(false);
+  const drawerTouchStartXRef = useRef(0);
+  const drawerTouchStartYRef = useRef(0);
+  const drawerActiveRef = useRef(false); // whether this swipe is a drawer gesture
+
+  const handleDrawerTouchStart = useCallback((e: React.TouchEvent) => {
+    if (window.innerWidth >= 768) return;
+    const touchX = e.touches[0].clientX;
+    if (touchX <= EDGE_ZONE && !drawerOpen) {
+      drawerTouchStartXRef.current = touchX;
+      drawerTouchStartYRef.current = e.touches[0].clientY;
+      drawerActiveRef.current = true;
+      setDrawerDragging(true);
+      setEdgeHintActive(true);
+    }
+  }, [drawerOpen]);
+
+  const handleDrawerTouchMove = useCallback((e: React.TouchEvent) => {
+    if (!drawerActiveRef.current) return;
+    const deltaX = e.touches[0].clientX - drawerTouchStartXRef.current;
+    const deltaY = Math.abs(e.touches[0].clientY - drawerTouchStartYRef.current);
+    // If vertical scroll is dominant, cancel drawer gesture
+    if (deltaY > 30 && deltaX < 20) {
+      drawerActiveRef.current = false;
+      setDrawerDragging(false);
+      setEdgeHintActive(false);
+      setDrawerTranslateX(-DRAWER_WIDTH);
+      return;
+    }
+    const clamped = Math.min(Math.max(deltaX - DRAWER_WIDTH, -DRAWER_WIDTH), 0);
+    setDrawerTranslateX(clamped);
+  }, []);
+
+  const handleDrawerTouchEnd = useCallback(() => {
+    if (!drawerActiveRef.current) return;
+    drawerActiveRef.current = false;
+    setDrawerDragging(false);
+    setEdgeHintActive(false);
+    const progress = (drawerTranslateX + DRAWER_WIDTH) / DRAWER_WIDTH;
+    if (progress > OPEN_THRESHOLD) {
+      setDrawerOpen(true);
+      setDrawerTranslateX(0);
+    } else {
+      setDrawerOpen(false);
+      setDrawerTranslateX(-DRAWER_WIDTH);
+    }
+  }, [drawerTranslateX]);
+
+  const closeDrawer = useCallback(() => {
+    setDrawerOpen(false);
+    setDrawerTranslateX(-DRAWER_WIDTH);
+  }, []);
+
+  // Track thinking start/end transitions
+  useEffect(() => {
+    const prev = prevToolStatusRef.current;
+    if (!prev && toolStatus) {
+      // Thinking just started
+      thinkingStartRef.current = Date.now();
+      setThinkingHistory(null);
+      setThinkingExpanded(false);
+    } else if (prev && !toolStatus && thinkingStartRef.current) {
+      // Thinking just ended
+      const elapsed = Math.floor((Date.now() - thinkingStartRef.current) / 1000);
+      setThinkingHistory({ elapsed, timestamp: Date.now() });
+      setThinkingExpanded(false);
+      thinkingStartRef.current = null;
+    }
+    prevToolStatusRef.current = toolStatus;
+  }, [toolStatus]);
 
   useProactiveMessages(connectionStatus === 'connected');
 
@@ -68,14 +215,30 @@ export function ChatContainer() {
     }
   }, [isLoading]);
 
-  // Auto-dismiss error after 10 seconds
+  // Show suggestion chips + play receive sound after response completes
+  useEffect(() => {
+    if (prevIsLoadingRef.current && !isLoading && messages.length > 0) {
+      const set = FOLLOW_UP_SETS[Math.floor(Math.random() * FOLLOW_UP_SETS.length)];
+      setSuggestions(set);
+      if (settings.soundEnabled) sounds.receive();
+    }
+    prevIsLoadingRef.current = isLoading;
+  }, [isLoading, messages.length, setSuggestions, settings.soundEnabled]);
+
+  // Auto-dismiss error after 10 seconds + haptic/sound on error
   useEffect(() => {
     if (!error) return;
+    haptic(100);
+    if (settings.soundEnabled) sounds.error();
     const timer = setTimeout(() => setError(null), 10000);
     return () => clearTimeout(timer);
-  }, [error, setError]);
+  }, [error, setError, settings.soundEnabled]);
 
   const handleSend = async (message: string, attachments?: FileAttachment[], actionMode?: string | null) => {
+    clearSuggestions();
+    setThinkingHistory(null);
+    setThinkingExpanded(false);
+    initialMessageCountRef.current = messages.length;
     if (actionMode === 'compare') {
       // Route through REST /api/compare instead of WebSocket
       const store = useChatStore.getState();
@@ -123,6 +286,21 @@ export function ChatContainer() {
 
   return (
     <div className="flex flex-col h-full" style={{ background: 'transparent' }}>
+      {/* Proactive notification cards */}
+      {proactiveMessages.length > 0 && (
+        <div className="proactive-container">
+          {proactiveMessages.map(msg => (
+            <ProactiveCard
+              key={msg.id}
+              action={msg.proactive!.action}
+              content={msg.content}
+              trigger={msg.proactive!.trigger}
+              onDismiss={() => handleDismissProactive(msg.id)}
+            />
+          ))}
+        </div>
+      )}
+
       {/* Connection status banner */}
       {connectionStatus !== 'connected' && (
         <div className={`px-4 py-2 text-center text-sm transition-all duration-300 ${
@@ -157,10 +335,48 @@ export function ChatContainer() {
         </div>
       )}
 
+      {/* Swipe drawer edge hint */}
+      <div className={`swipe-edge-hint${edgeHintActive ? ' hint-active' : ''}`} />
+
+      {/* Swipe drawer overlay */}
+      <div
+        className={`swipe-drawer-overlay${drawerOpen ? ' drawer-visible' : ''}`}
+        onClick={closeDrawer}
+        aria-hidden="true"
+      />
+
+      {/* Swipe drawer */}
+      <div
+        className={`swipe-drawer${drawerOpen ? ' drawer-open' : ''}`}
+        style={drawerDragging ? { transform: `translateX(${drawerTranslateX}px)`, transition: 'none' } : undefined}
+      >
+        <div className="swipe-drawer-header">Conversations</div>
+        <div className="swipe-drawer-body">
+          <p className="swipe-drawer-placeholder">
+            Swipe from the left edge to open this drawer.
+            Conversation history will appear here.
+          </p>
+        </div>
+      </div>
+
+      {/* Fleet dashboard */}
+      {fleetData && (
+        <FleetDashboard
+          goal={fleetData.goal}
+          tasks={fleetData.tasks}
+          totalElapsed={fleetData.totalElapsed}
+          onClose={clearFleetData}
+        />
+      )}
+
       {/* Messages area */}
       <div
         ref={scrollContainerRef}
         onScroll={handleScroll}
+        onTouchStart={handleDrawerTouchStart}
+        onTouchMove={handleDrawerTouchMove}
+        onTouchEnd={handleDrawerTouchEnd}
+        style={{ viewTransitionName: 'chat-messages' }}
         className="flex-1 overflow-y-auto relative messages-scroll">
         {isSwitchingConversation && messages.length === 0 ? (
           <div className="animate-pulse space-y-4 p-4">
@@ -239,9 +455,18 @@ export function ChatContainer() {
         ) : (
           // Message list
           <div className="pb-4">
-            {messages.map((message) => (
-              <MessageBubble key={message.id} message={message} />
-            ))}
+            {messages.map((message, index) => {
+              const isNew = index >= initialMessageCountRef.current;
+              const animIndex = isNew ? index - initialMessageCountRef.current : 0;
+              return (
+                <MessageBubble
+                  key={message.id}
+                  message={message}
+                  animateIn={isNew}
+                  animationIndex={animIndex}
+                />
+              );
+            })}
             <div ref={messagesEndRef} />
           </div>
         )}
@@ -259,13 +484,102 @@ export function ChatContainer() {
         )}
       </div>
 
-      {/* Tool status indicator */}
+      {/* Tool status / thinking shimmer */}
       {toolStatus && (
-        <div className="px-4 pb-1 flex items-center gap-2 text-xs text-chat-text-secondary">
-          <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-ping inline-block" />
-          {toolStatus.action === 'thinking'
-            ? 'AURA is thinking...'
-            : `Using ${toolStatus.name}...`}
+        <ThinkingShimmer toolStatus={toolStatus} />
+      )}
+
+      {/* Collapsed thinking history pill */}
+      {!toolStatus && thinkingHistory && (
+        <div className="px-4 py-2">
+          <div className="max-w-3xl mx-auto">
+            <button
+              onClick={() => setThinkingExpanded(prev => !prev)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '4px 12px',
+                fontSize: '12px',
+                color: 'rgba(255,255,255,0.5)',
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: '999px',
+                cursor: 'pointer',
+                backdropFilter: 'blur(8px)',
+                transition: 'all 0.2s ease',
+              }}
+              onMouseEnter={e => {
+                (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.08)';
+                (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.15)';
+                (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.7)';
+              }}
+              onMouseLeave={e => {
+                (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.04)';
+                (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.08)';
+                (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.5)';
+              }}
+            >
+              <ChevronDownIcon
+                className="w-3 h-3"
+                style={{
+                  transform: thinkingExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                  transition: 'transform 0.2s ease',
+                }}
+              />
+              Thought for {thinkingHistory.elapsed}s
+            </button>
+
+            {thinkingExpanded && (
+              <div
+                style={{
+                  marginTop: '8px',
+                  padding: '12px 16px',
+                  background: 'rgba(255,255,255,0.02)',
+                  border: '1px solid rgba(255,255,255,0.06)',
+                  borderRadius: '10px',
+                  animation: 'fadeIn 0.2s ease',
+                }}
+              >
+                <div className="flex gap-4">
+                  <div className="flex-shrink-0 mt-1">
+                    <div
+                      className="w-9 h-9 rounded-lg"
+                      style={{ background: 'rgba(255,255,255,0.06)' }}
+                    />
+                  </div>
+                  <div className="flex-1 min-w-0 space-y-3">
+                    <span className="text-xs text-chat-text-secondary">
+                      Thought for {thinkingHistory.elapsed}s
+                    </span>
+                    <div style={{ height: 12, width: '80%', background: 'rgba(255,255,255,0.04)', borderRadius: 4 }} />
+                    <div style={{ height: 12, width: '60%', background: 'rgba(255,255,255,0.04)', borderRadius: 4 }} />
+                    <div style={{ height: 12, width: '40%', background: 'rgba(255,255,255,0.04)', borderRadius: 4 }} />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Suggestion chips */}
+      {suggestions.length > 0 && !isLoading && (
+        <div className="px-4 pb-2 overflow-x-auto">
+          <div className="max-w-3xl mx-auto flex gap-2">
+            {suggestions.map((text, i) => (
+              <button
+                key={text}
+                onClick={() => {
+                  clearSuggestions();
+                  handleSend(text);
+                }}
+                className={`suggestion-chip chip-delay-${i}`}
+              >
+                {text}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -275,6 +589,7 @@ export function ChatContainer() {
         onStop={stopGeneration}
         disabled={isDisabled}
         isLoading={isLoading}
+        onTypingStart={clearSuggestions}
         placeholder={
           connectionStatus !== 'connected'
             ? 'Connecting...'

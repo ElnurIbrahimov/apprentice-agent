@@ -474,6 +474,10 @@ class IdlePresenceEngine:
         if idle_seconds > 90:
             self._run_awareness_analysis()
 
+        # Task 3.6: Skill health check — suggest evolving weak skills (>5min idle, 6h cooldown)
+        if idle_seconds > 300:
+            self._run_skill_health_check()
+
         # Task 4: Auto-trigger NeuroDream sleep when idle long enough
         if idle_seconds > self._sleep_idle_threshold:
             self._check_and_trigger_sleep(idle_seconds)
@@ -545,6 +549,46 @@ class IdlePresenceEngine:
                 self._record_activity(IdleActivity.PATTERN_MINING, desc, cognitive_load=0.2)
         except Exception as e:
             logger.debug(f"[IdlePresence] Awareness analysis error: {e}")
+
+    def _run_skill_health_check(self) -> None:
+        """Check for underperforming skills and emit a proactive suggestion.
+
+        Uses a 6-hour internal cooldown (enforced by skill_health_monitor).
+        If weak skills are found, delivers the suggestion via the Gateway Daemon.
+        """
+        try:
+            from aura.proactive.skill_health_monitor import check_and_suggest
+            suggestion = check_and_suggest()
+            if not suggestion:
+                return
+
+            self._record_activity(
+                IdleActivity.PATTERN_MINING,
+                f"skill health: found underperforming skills",
+                cognitive_load=0.15,
+            )
+
+            # Deliver as a proactive message through the Gateway Daemon
+            try:
+                from aura.proactive.gateway_daemon import get_gateway_daemon
+                from aura.proactive.event_bus import EventPriority
+                from aura.proactive.active_inference import ProactiveAction
+
+                daemon = get_gateway_daemon()
+                from aura.proactive.gateway_daemon import ProactiveMessage
+                message = ProactiveMessage(
+                    action=ProactiveAction.SUGGEST,
+                    content=suggestion,
+                    priority=EventPriority.LOW,
+                    metadata={"source": "skill_health_monitor"},
+                )
+                daemon._deliver_message(message)
+                logger.info(f"[IdlePresence] Skill health suggestion delivered")
+            except Exception as e:
+                logger.debug(f"[IdlePresence] Could not deliver skill health suggestion: {e}")
+
+        except Exception as e:
+            logger.debug(f"[IdlePresence] Skill health check error: {e}")
 
     # ====================================================================
     # Sleep Scheduling

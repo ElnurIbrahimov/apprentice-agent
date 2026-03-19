@@ -39,7 +39,7 @@ class NarrativeSelf:
     version: int = 1
 
     def __post_init__(self):
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     def to_prompt(self) -> str:
         """Format for system prompt injection (~400-600 tokens)."""

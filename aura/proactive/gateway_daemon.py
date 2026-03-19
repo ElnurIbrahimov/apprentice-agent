@@ -119,7 +119,7 @@ class GatewayDaemon:
         self.event_bus = EventBus(use_redis=use_redis, redis_url=redis_url)
         self.salience_filter = SalienceFilter(threshold=salience_threshold)
         self.inference_engine = ActiveInferenceEngine(use_pymdp=use_pymdp)
-        self.emotion_action_bridge = EmotionActionBridge()
+        self.emotion_action_bridge = EmotionActionBridge() if EmotionActionBridge else None
 
         # Per-instance dedup deque for emotion action dispatch
         self._emotion_action_recent: deque = deque(maxlen=20)
@@ -335,9 +335,12 @@ class GatewayDaemon:
         # Subscribe to all channels
         channels = list(EventBus.CHANNELS.keys())
 
-        # Start subscription in background
-        asyncio.create_task(
+        # Start subscription in background (store reference to detect failures)
+        self._sub_task = asyncio.create_task(
             self.event_bus.subscribe(channels, self._handle_event)
+        )
+        self._sub_task.add_done_callback(
+            lambda t: t.exception() and logger.error(f"Event bus subscription died: {t.exception()}")
         )
 
         # Start decision loop
@@ -659,9 +662,9 @@ class GatewayDaemon:
                 break
             except (SystemExit, KeyboardInterrupt):
                 raise
-            except BaseException as e:
-                # Catch BaseException to survive Rust panics (pyo3 PanicException)
-                # and other non-Exception errors that would kill the loop
+            except Exception as e:
+                # Catch Exception to survive normal errors but let truly fatal
+                # errors (MemoryError, SystemExit, KeyboardInterrupt) propagate
                 logger.error(f"[GatewayDaemon] Decision loop error ({type(e).__name__}): {e}")
                 await asyncio.sleep(5)  # Brief pause before retrying
 

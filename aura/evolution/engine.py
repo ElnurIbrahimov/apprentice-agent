@@ -117,6 +117,7 @@ class GEPAEngine:
 
         # Main loop
         stop_reason = "max_iterations"
+        iteration = 0
         for iteration in range(1, self.config.max_iterations + 1):
             elapsed = time.time() - start_time
             logger.info(f"\n=== Iteration {iteration}/{self.config.max_iterations} ===")
@@ -165,7 +166,7 @@ class GEPAEngine:
         result = GEPAResult(
             best_candidate=best,
             all_candidates=list(self.all_candidates.values()),
-            iterations_run=iteration if 'iteration' in dir() else 0,
+            iterations_run=iteration,
             total_evals=self.adapter.total_evals,
             pareto_front={
                 ex_id: list(cids)[0] if cids else -1

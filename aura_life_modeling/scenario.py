@@ -41,7 +41,7 @@ class ImpactRange:
             rng = random
 
         if self.distribution == "triangular":
-            return rng.triangular(self.min_value, self.most_likely, self.max_value)
+            return rng.triangular(self.min_value, self.max_value, self.most_likely)
         elif self.distribution == "normal":
             mean = self.most_likely
             std = (self.max_value - self.min_value) / 4

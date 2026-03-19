@@ -259,7 +259,7 @@ Apply the skill's procedure to handle this request. Follow the steps carefully."
         if feedback_callback:
             try:
                 feedback = feedback_callback(result)
-                if feedback:
+                if isinstance(feedback, dict):
                     result["success"] = feedback.get("success", result["success"])
             except Exception as e:
                 logger.warning(f"Feedback callback error: {e}")
@@ -271,7 +271,7 @@ Apply the skill's procedure to handle this request. Follow the steps carefully."
                 aura_output=result["output"],
                 success=result["success"],
                 context=context,
-                feedback=feedback.get("comment") if feedback else None
+                feedback=feedback.get("comment") if isinstance(feedback, dict) else None
             )
 
             if learned_id and learned_id.startswith("learned_"):

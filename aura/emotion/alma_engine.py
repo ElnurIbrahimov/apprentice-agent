@@ -1418,18 +1418,33 @@ class ALMAEngine:
 # Singleton Instance & Convenience Functions
 # =============================================================================
 
-# Global instance
-alma_engine = ALMAEngine()
+# Lazy singleton — NOT instantiated at import time to avoid heavy I/O
+# during module loading.  Use get_alma_engine() to access.
+_alma_engine: Optional[ALMAEngine] = None
+_alma_engine_lock = threading.Lock()
 
 
 def get_alma_engine() -> ALMAEngine:
-    """Get the global ALMA engine singleton."""
-    return alma_engine
+    """Get the global ALMA engine singleton (lazy-initialized)."""
+    global _alma_engine
+    if _alma_engine is None:
+        with _alma_engine_lock:
+            if _alma_engine is None:
+                _alma_engine = ALMAEngine()
+    return _alma_engine
+
+
+def __getattr__(name: str):
+    """Module-level __getattr__ so that ``from aura.emotion.alma_engine import alma_engine``
+    still works transparently via lazy initialization (PEP 562)."""
+    if name == "alma_engine":
+        return get_alma_engine()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def get_emotional_state() -> Dict[str, Any]:
     """Get AURA's current emotional state."""
-    return alma_engine.get_emotional_state()
+    return get_alma_engine().get_emotional_state()
 
 
 def trigger_emotion(
@@ -1438,12 +1453,12 @@ def trigger_emotion(
     trigger: str = "unknown"
 ) -> EmotionState:
     """Trigger an emotional response."""
-    return alma_engine.trigger_emotion(emotion_name, intensity, trigger)
+    return get_alma_engine().trigger_emotion(emotion_name, intensity, trigger)
 
 
 def get_response_modulation() -> Dict[str, float]:
     """Get response modulation parameters."""
-    return alma_engine.get_response_modulation()
+    return get_alma_engine().get_response_modulation()
 
 
 def update_from_interaction(
@@ -1453,14 +1468,14 @@ def update_from_interaction(
     topic_interest: float = 0.5
 ):
     """Update emotional state from an interaction."""
-    alma_engine.update_from_interaction(
+    get_alma_engine().update_from_interaction(
         user_message, user_emotion, interaction_success, topic_interest
     )
 
 
 def save_state():
     """Save ALMA emotional state to disk (call on shutdown)."""
-    alma_engine._save_state()
+    get_alma_engine()._save_state()
     logger.info("[ALMA] State saved for emotional continuity")
 
 

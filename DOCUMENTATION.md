@@ -131,15 +131,17 @@ The reasoning engine that interfaces with Ollama for all LLM operations.
 - `_select_model(prompt, task_type)` - Route to appropriate model
 - `get_last_model_used()` - Get model from last call
 
-#### MemorySystem (`memory.py`)
+#### MemorySystem (`memory.py`) — REMOVED
 
-JSON-based memory storage with text similarity search.
+> **Note:** The original `MemorySystem` (JSON-based, later SQLite `agent_memory.db`) has been removed. It was confirmed as dead code — never instantiated at runtime. The primary memory system is now **UnifiedMemory** (SQLite+FTS5, `aura_memory.db`) with Kuzu KG integration, RRF+reranker retrieval, and automatic entity extraction. `MarkdownStore` has also been removed (dead code). See `ENGINEERING_REVIEW_2026-03-19.md` section 15 for the full corrected memory architecture.
 
-**Methods:**
-- `remember(content, memory_type, metadata)` - Store memory
-- `recall(query, n_results)` - Retrieve relevant memories
-- `count()` - Get total memory count
-- `get_recent(n)` - Get recent memories
+**Active memory systems at runtime:**
+- **UnifiedMemory** (SQLite+FTS5) — primary read/write on every chat
+- **MemoryRetriever** — parallel .md writer (being consolidated into UnifiedMemory via write-through)
+- **Episodic Memory** (Qdrant) — auto-recalled into system prompt via `quick_recall()`
+- **A-MEM** (Zettelkasten) — tool-only, queried when LLM invokes the tool
+- **KG Kuzu** — wired into UnifiedMemory as graph retrieval channel
+- **KG NetworkX** — tool-only, separate from Kuzu
 
 #### Tools (15 Total)
 
@@ -927,3 +929,5 @@ Targeted reliability and security hardening pass (2026-03):
 - **Tool security**: AST validation extended to marketplace and custom tool imports
 - **Centralized thresholds**: Key tunable values (salience, ToM, budget, history) consolidated in `Config` class with env-var overrides
 - **Daemon reliability**: Monotonic time for intervals, PID race condition fix
+- **Memory cleanup**: Removed dead code (`MarkdownStore`, deprecated `MemorySystem`). Corrected memory architecture — UnifiedMemory is the primary system. See `ENGINEERING_REVIEW_2026-03-19.md` section 15.
+- **GEPA Evolution wired in**: `/evolve` chat command for manual trigger, API endpoint for programmatic access, proactive suggestions when skills underperform (>5 uses, <60% success), idle checks every 6 hours for weak skills. Evolution is user-approved only — never autonomous.

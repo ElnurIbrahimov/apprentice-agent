@@ -308,6 +308,7 @@ class AgentService:
         self._agent: Optional[ApprenticeAgent] = None
         self._agent_lock = threading.RLock()
         self._initializing = False
+        self._orchestrator = None
         self._initialized = True
         logger.info("[AgentService] Singleton initialized")
 
@@ -465,9 +466,10 @@ class AgentService:
                         # Get or create orchestrator for this session
                         if not hasattr(self, '_orchestrator') or self._orchestrator is None:
                             tool_registry = getattr(self.agent, 'tool_registry', {})
-                            _chat_model = effective_model  # capture for closure
                             def llm_func(system_prompt, user_message):
-                                return self.agent.brain.think(user_message, system_prompt=system_prompt, use_history=False, model_override=_chat_model)
+                                # Read model dynamically from brain's current override
+                                current_override = self.agent.brain._model_override if hasattr(self.agent.brain, '_model_override') else None
+                                return self.agent.brain.think(user_message, system_prompt=system_prompt, use_history=False, model_override=current_override)
                             self._orchestrator = MultiAgentOrchestrator(
                                 tool_registry=tool_registry,
                                 llm_func=llm_func,
@@ -757,9 +759,10 @@ Provide a well-structured, informative summary with key findings and cite source
                     # Get or create orchestrator
                     if not hasattr(self, '_orchestrator') or self._orchestrator is None:
                         tool_registry = getattr(self.agent, 'tool_registry', {})
-                        _swarm_model = effective_model  # capture for closure
                         def llm_func(system_prompt, user_message):
-                            return brain.think(user_message, system_prompt=system_prompt, use_history=False, model_override=_swarm_model)
+                            # Read model dynamically from brain's current override
+                            current_override = brain._model_override if hasattr(brain, '_model_override') else None
+                            return brain.think(user_message, system_prompt=system_prompt, use_history=False, model_override=current_override)
                         self._orchestrator = MultiAgentOrchestrator(
                             tool_registry=tool_registry,
                             llm_func=llm_func,
@@ -905,11 +908,9 @@ Provide a well-structured, informative summary with key findings and cite source
 
         finally:
             # ===== TEARDOWN =====
-            # NOTE: Model override NOT cleared here. The override persists for subsequent requests
-            # until explicitly replaced by a new request's model_override or action detection.
-            # Clearing it here would race with subsequent requests and lose user intent.
-            # The override is naturally scoped to the session/context, not per-request.
-            pass
+            # Clear model override after request (matches chat() behavior)
+            if effective_model and brain:
+                brain.set_model_override(None)
 
     def run(self, goal: str, context: Optional[Dict] = None,
             use_fastpath: Optional[bool] = None, max_iterations: int = 10) -> Dict[str, Any]:

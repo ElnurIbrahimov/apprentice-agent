@@ -1137,11 +1137,14 @@ class EmailTool:
             data = self._gmail.download_attachment(email_id, att_id)
             target_dir = Path(save_dir) if save_dir else Path.home() / "Downloads"
             target_dir.mkdir(parents=True, exist_ok=True)
-            filepath = target_dir / att["filename"]
+            safe_name = Path(att["filename"]).name  # Strip directory components
+            filepath = (target_dir / safe_name).resolve()
+            if not str(filepath).startswith(str(target_dir.resolve())):
+                return {"success": False, "error": "Invalid attachment filename"}
             filepath.write_bytes(data)
 
-            return {"success": True, "path": str(filepath), "filename": att["filename"],
-                    "size": len(data), "response": f"Downloaded {att['filename']} to {filepath}"}
+            return {"success": True, "path": str(filepath), "filename": safe_name,
+                    "size": len(data), "response": f"Downloaded {safe_name} to {filepath}"}
         except Exception as e:
             return {"success": False, "error": f"Download failed: {e}"}
 
@@ -1178,11 +1181,14 @@ class EmailTool:
             payload = part.get_payload(decode=True)
             target_dir = Path(save_dir) if save_dir else Path.home() / "Downloads"
             target_dir.mkdir(parents=True, exist_ok=True)
-            filepath = target_dir / filename
+            safe_name = Path(filename).name  # Strip directory components
+            filepath = (target_dir / safe_name).resolve()
+            if not str(filepath).startswith(str(target_dir.resolve())):
+                return {"success": False, "error": "Invalid attachment filename"}
             filepath.write_bytes(payload)
 
-            return {"success": True, "path": str(filepath), "filename": filename,
-                    "size": len(payload), "response": f"Downloaded {filename} to {filepath}"}
+            return {"success": True, "path": str(filepath), "filename": safe_name,
+                    "size": len(payload), "response": f"Downloaded {safe_name} to {filepath}"}
         except Exception as e:
             if conn:
                 try:

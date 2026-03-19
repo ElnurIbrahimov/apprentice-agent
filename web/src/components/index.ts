@@ -1,3 +1,4 @@
+export { BottomSheet } from './BottomSheet';
 export { ChatContainer } from './ChatContainer';
 export { MessageBubble } from './MessageBubble';
 export { MessageInput } from './MessageInput';
@@ -12,3 +13,4 @@ export { AMEMPanel } from './AMEMPanel';
 export { SettingsModal } from './SettingsModal';
 export { ToastContainer, useToastStore, toast } from './Toast';
 export type { ToastMessage, ToastType } from './Toast';
+export { FleetDashboard } from './FleetDashboard';

@@ -14,7 +14,7 @@ export default {
         'chat-assistant': 'rgba(20, 20, 25, 0.4)',
         'chat-border': 'rgba(255, 255, 255, 0.06)',
         'chat-text': '#ededed',
-        'chat-text-secondary': '#888888',
+        'chat-text-secondary': '#a1a1aa',
         'chat-text-tertiary': '#444444',
         'chat-accent': '#7c3aed',
         'chat-accent-hover': '#6d28d9',
@@ -23,6 +23,12 @@ export default {
         'aura-purple-light': '#a78bfa',
         'aura-blue': '#3b82f6',
         'aura-glow': 'rgba(139, 92, 246, 0.4)',
+        // Surface elevation
+        'surface-0': '#09090b',
+        'surface-1': '#121214',
+        'surface-2': '#1a1a1d',
+        'surface-3': '#1e1e21',
+        'surface-4': '#232326',
       },
       animation: {
         'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',

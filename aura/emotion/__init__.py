@@ -14,12 +14,20 @@ from .alma_engine import (
     EmotionState,
     MoodState,
     PersonalityProfile,
-    alma_engine,
+    get_alma_engine,
     get_emotional_state,
     trigger_emotion,
     get_response_modulation,
     update_from_interaction,
 )
+
+
+def __getattr__(name: str):
+    """Lazy access to ``alma_engine`` singleton (avoids import-time instantiation)."""
+    if name == "alma_engine":
+        return get_alma_engine()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "ALMAEngine",
@@ -28,6 +36,7 @@ __all__ = [
     "MoodState",
     "PersonalityProfile",
     "alma_engine",
+    "get_alma_engine",
     "get_emotional_state",
     "trigger_emotion",
     "get_response_modulation",

@@ -14,9 +14,6 @@ Phase 2 Memory Consolidation:
 # Shared embedding utility
 from .embedding import get_embedding
 
-# Backward compatibility: re-export MemorySystem from old memory.py
-from .memory_system import MemorySystem
-
 # Consolidated store (Phase 2)
 from .store import MemoryStore, MemoryRecord, get_memory_store
 
@@ -35,8 +32,6 @@ from .user_profile import UserProfile, load_profile, save_profile, update_profil
 __all__ = [
     # Embedding
     "get_embedding",
-    # Legacy
-    "MemorySystem",
     # Consolidated store
     "MemoryStore",
     "MemoryRecord",

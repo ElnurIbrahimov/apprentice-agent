@@ -115,12 +115,45 @@ def show_thinking(label: str = "Working..."):
     )
 
 
-def show_tool_call(tool_name: str, description: str = "", result=None):
-    """Print a tool call in a compact styled format.
+# Phase-aware verb mapping for contextual spinner labels
+_TOOL_PHASE_VERBS: dict[str, str] = {
+    "web_search": "Searching the web...",
+    "search_web": "Searching the web...",
+    "browse": "Browsing...",
+    "browse_url": "Browsing...",
+    "read_file": "Reading files...",
+    "edit_file": "Editing code...",
+    "write_file": "Writing code...",
+    "execute": "Running code...",
+    "run_command": "Running command...",
+    "shell": "Running shell...",
+    "analyze": "Analyzing...",
+    "summarize": "Summarizing...",
+    "translate": "Translating...",
+    "calculate": "Calculating...",
+    "research": "Researching...",
+    "deep_research": "Deep researching...",
+    "memory_recall": "Remembering...",
+    "memory_store": "Storing memory...",
+}
+
+
+def get_thinking_label(tool_name: str | None = None) -> str:
+    """Return a phase-aware thinking label based on the current tool being used."""
+    if tool_name and tool_name in _TOOL_PHASE_VERBS:
+        return _TOOL_PHASE_VERBS[tool_name]
+    return "Thinking..."
+
+
+def show_tool_call(tool_name: str, description: str = "", result=None, elapsed: float = 0.0):
+    """Print a tool call in a compact styled format with elapsed time.
 
     If result is provided and contains diff info for edit/write, show a compact diff summary.
     If result is provided with substantial output, render via ToolOutputRenderer.
     """
+    # Format the elapsed time suffix
+    time_str = f" {format_elapsed(elapsed)}" if elapsed > 0 else ""
+
     if tool_name in ("edit_file", "write_file") and result and isinstance(result, dict) and result.get("diff"):
         try:
             from aura.cli.diff_viewer import render_diff_compact
@@ -130,6 +163,7 @@ def show_tool_call(tool_name: str, description: str = "", result=None):
                 result.get("old_content", ""),
                 result.get("new_content", ""),
                 filename=filename,
+                elapsed=elapsed,
             )
             console.print(f"  {summary}")
             return
@@ -147,7 +181,9 @@ def show_tool_call(tool_name: str, description: str = "", result=None):
     line.append("  ▸ ", style=f"dim {tool_color}")
     line.append(tool_name, style=f"bold {tool_color}")
     if description:
-        line.append(f"  {description}", style=f"dim {tool_color}")
+        line.append(f" {description}", style=f"dim {tool_color}")
+    if time_str:
+        line.append(time_str, style="dim")
     console.print(line)
 
     # Render substantial tool output via ToolOutputRenderer
@@ -172,7 +208,7 @@ def show_response(text: str, model: str = "", stream: bool = True):
     Args:
         text: Response text (markdown)
         model: Model name to display
-        stream: If True, simulate streaming with Live display
+        stream: If True, use block-level streaming (only re-renders active block)
     """
     # Get theme colors
     try:
@@ -196,44 +232,79 @@ def show_response(text: str, model: str = "", stream: bool = True):
         label.append(f"  ({model})", style="dim")
 
     if stream and len(text) > 20:
-        # Streaming effect: render progressively longer text
+        # Block-level streaming: freeze finalized blocks, only re-render the active one
         import time
+
+        # Print header once
+        console.print(Padding(Text.from_markup(f"  [dim {border_style.replace('dim ', '')}]{'─' * 60}[/]"), (0, 2)))
+        console.print(Padding(label, (0, 2)))
+        console.print(Padding(Text.from_markup(f"  [dim {border_style.replace('dim ', '')}]{'─' * 60}[/]"), (0, 2)))
+
         chunks = _split_for_streaming(text)
         accumulated = ""
+        finalized_count = 0  # how many blocks we've already printed
+
         with Live(console=console, refresh_per_second=15, transient=True) as live:
             for chunk in chunks:
                 accumulated += chunk
-                try:
-                    md = Markdown(accumulated, code_theme=code_theme)
-                except Exception:
-                    md = Text(accumulated)
-                panel = Panel(
-                    md, title=label, title_align="left",
-                    border_style=border_style, padding=(0, 2), expand=True,
-                )
-                live.update(Padding(panel, (0, 2)))
+                blocks = _split_into_blocks(accumulated)
+
+                # Print any newly finalized blocks (all except the last)
+                while finalized_count < len(blocks) - 1:
+                    block_text = blocks[finalized_count]
+                    try:
+                        block_md = Markdown(block_text, code_theme=code_theme)
+                    except Exception:
+                        block_md = Text(block_text)
+                    # Exit live temporarily to print finalized block permanently
+                    live.update(Text(""))
+                    console.print(Padding(block_md, (0, 4)))
+                    finalized_count += 1
+
+                # Live-update only the active (last) block
+                if blocks:
+                    active_block = blocks[-1]
+                    try:
+                        active_md = Markdown(active_block, code_theme=code_theme)
+                    except Exception:
+                        active_md = Text(active_block)
+                    live.update(Padding(active_md, (0, 4)))
+
                 time.sleep(0.008)
 
-    # Final render (clean, complete)
-    try:
-        md = Markdown(text, code_theme=code_theme)
-    except Exception:
-        md = Text(text)
+        # Print the final active block permanently
+        blocks = _split_into_blocks(accumulated)
+        if blocks and finalized_count < len(blocks):
+            for i in range(finalized_count, len(blocks)):
+                try:
+                    block_md = Markdown(blocks[i], code_theme=code_theme)
+                except Exception:
+                    block_md = Text(blocks[i])
+                console.print(Padding(block_md, (0, 4)))
 
-    panel = Panel(
-        md,
-        title=label,
-        title_align="left",
-        border_style=border_style,
-        padding=(0, 2),
-        expand=True,
-    )
-    console.print(Padding(panel, (0, 2)))
-    console.print()
+        console.print(Padding(Text.from_markup(f"  [dim {border_style.replace('dim ', '')}]{'─' * 60}[/]"), (0, 2)))
+        console.print()
+    else:
+        # Non-streaming: render the full panel as before
+        try:
+            md = Markdown(text, code_theme=code_theme)
+        except Exception:
+            md = Text(text)
+
+        panel = Panel(
+            md,
+            title=label,
+            title_align="left",
+            border_style=border_style,
+            padding=(0, 2),
+            expand=True,
+        )
+        console.print(Padding(panel, (0, 2)))
+        console.print()
 
 
 def _split_for_streaming(text: str) -> list[str]:
-    """Split text into chunks for streaming display."""
+    """Split text into word-based chunks for streaming display."""
     words = text.split(' ')
     chunks = []
     # Use larger chunks for longer texts to keep animation snappy
@@ -245,6 +316,115 @@ def _split_for_streaming(text: str) -> list[str]:
             chunk += ' '
         chunks.append(chunk)
     return chunks
+
+
+def _split_into_blocks(text: str) -> list[str]:
+    """Split markdown text into top-level blocks by double-newlines.
+
+    Respects code fences (``` blocks stay together as a single block).
+    Returns a list of block strings.
+    """
+    lines = text.split('\n')
+    blocks: list[str] = []
+    current_lines: list[str] = []
+    in_code_fence = False
+    prev_was_empty = False
+
+    for line in lines:
+        stripped = line.strip()
+
+        # Track code fence boundaries
+        if stripped.startswith('```'):
+            in_code_fence = not in_code_fence
+            current_lines.append(line)
+            prev_was_empty = False
+            continue
+
+        # Inside a code fence — everything stays in the current block
+        if in_code_fence:
+            current_lines.append(line)
+            prev_was_empty = False
+            continue
+
+        # Outside code fence: detect blank line (block boundary)
+        if stripped == '':
+            if current_lines and any(l.strip() for l in current_lines):
+                # Blank line after content — finalize current block
+                while current_lines and current_lines[-1].strip() == '':
+                    current_lines.pop()
+                if current_lines:
+                    blocks.append('\n'.join(current_lines))
+                current_lines = []
+            else:
+                current_lines.append(line)
+            prev_was_empty = True
+        else:
+            current_lines.append(line)
+            prev_was_empty = False
+
+    # Whatever remains is the current (possibly incomplete) block
+    if current_lines:
+        remaining = '\n'.join(current_lines).strip()
+        if remaining:
+            blocks.append(remaining)
+
+    # If nothing was parsed, return the whole text as one block
+    if not blocks and text.strip():
+        blocks.append(text.strip())
+
+    return blocks
+
+
+def show_context_summary(
+    memory_count: int = 0,
+    kg_topic: str = "",
+    mood: str = "",
+    model: str = "",
+    tool_count: int = 0,
+    memory_snippets: list[str] | None = None,
+):
+    """Show a one-line context summary before the response, with optional memory snippets.
+
+    Example:
+      context: 3 memories | mood: curious | model: devstral-2
+      remembered: "prefers Python" | "working on BroadMind" | "uses RTX 4060"
+    """
+    if memory_snippets is None:
+        memory_snippets = []
+
+    parts = []
+    if memory_count > 0:
+        parts.append(f"[dim]{memory_count} memories[/dim]")
+    if kg_topic:
+        topic = kg_topic[:30]
+        parts.append(f'[dim]KG: [/dim][dim italic]"{topic}"[/dim italic]')
+    if mood:
+        parts.append(f"[dim]mood: [/dim][dim]{mood}[/dim]")
+    if model:
+        short = model.replace(":cloud", "").replace(":latest", "")
+        if len(short) > 25:
+            short = short[:22] + "..."
+        parts.append(f"[dim]model: [/dim][dim cyan]{short}[/dim cyan]")
+    if tool_count > 0:
+        parts.append(f"[dim]{tool_count} tools[/dim]")
+
+    if not parts:
+        return
+
+    line = "  [dim]context:[/dim] " + " [dim]|[/dim] ".join(parts)
+    console.print(Text.from_markup(line))
+
+    # Show memory snippets on a second line (max 3, truncated to 40 chars each)
+    if memory_snippets:
+        snippets = memory_snippets[:3]
+        formatted = []
+        for s in snippets:
+            truncated = s.strip()
+            if len(truncated) > 40:
+                truncated = truncated[:37] + "..."
+            formatted.append(f'[dim italic]"{truncated}"[/dim italic]')
+        snippet_line = "  [dim]remembered:[/dim] " + " [dim]|[/dim] ".join(formatted)
+        console.print(Text.from_markup(snippet_line))
 
 
 def show_error(message: str):
@@ -367,3 +547,96 @@ def show_help():
     console.print()
     console.print(table)
     console.print()
+
+
+def show_checkpoint_picker(checkpoints: list[dict]) -> str | None:
+    """Display checkpoints in a numbered list and let the user pick one.
+
+    Args:
+        checkpoints: List of checkpoint dicts from CheckpointManager.list_checkpoints()
+
+    Returns:
+        Selected checkpoint ID, or None if cancelled.
+    """
+    from rich.table import Table
+    import time as _time
+
+    if not checkpoints:
+        show_info("No checkpoints available.")
+        return None
+
+    # Show last 10 checkpoints
+    display = checkpoints[:10]
+
+    table = Table(
+        show_header=True,
+        header_style="bold cyan",
+        border_style="dim",
+        padding=(0, 1),
+        title="[bold]Checkpoints[/bold]",
+    )
+    table.add_column("#", style="bold white", width=4, justify="right")
+    table.add_column("Time", style="dim", width=16)
+    table.add_column("Label", style="white", min_width=20)
+    table.add_column("Files", style="dim cyan", width=30)
+
+    now = _time.time()
+    for i, cp in enumerate(display, 1):
+        # Relative time
+        delta = now - cp.get("timestamp", now)
+        if delta < 60:
+            rel = f"{int(delta)}s ago"
+        elif delta < 3600:
+            rel = f"{int(delta / 60)}m ago"
+        elif delta < 86400:
+            rel = f"{int(delta / 3600)}h ago"
+        else:
+            rel = f"{int(delta / 86400)}d ago"
+
+        label = cp.get("label", "") or "-"
+        files = cp.get("files", [])
+        file_names = ", ".join(
+            f.get("backup_name", "?") for f in files[:3]
+        )
+        if len(files) > 3:
+            file_names += f" +{len(files) - 3}"
+
+        table.add_row(str(i), rel, label, file_names)
+
+    console.print()
+    console.print(table)
+    console.print()
+
+    # Prompt for selection
+    try:
+        raw = console.input("[dim]  Pick checkpoint # (or Enter to cancel): [/dim]")
+        raw = raw.strip()
+        if not raw:
+            return None
+        idx = int(raw) - 1
+        if 0 <= idx < len(display):
+            return display[idx]["id"]
+        else:
+            show_error(f"Invalid selection: {raw}")
+            return None
+    except (ValueError, EOFError, KeyboardInterrupt):
+        return None
+
+
+def show_rewind_result(success: bool, checkpoint_id: str):
+    """Display the result of a rewind operation.
+
+    Args:
+        success: Whether the rewind succeeded.
+        checkpoint_id: The checkpoint ID that was targeted.
+    """
+    if success:
+        msg = Text()
+        msg.append("  ✓ ", style="bold green")
+        msg.append(f"Rewound to checkpoint {checkpoint_id}", style="green")
+        console.print(msg)
+    else:
+        msg = Text()
+        msg.append("  ✗ ", style="bold red")
+        msg.append("Failed to rewind", style="red")
+        console.print(msg)

@@ -155,6 +155,11 @@ def _save_tokens(access: str, refresh: str, expires: int):
         "account_id": _extract_account_id(access),
     }
     tf.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    try:
+        import stat
+        tf.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0600 — owner read/write only
+    except (OSError, NotImplementedError):
+        pass  # Windows may not support Unix permissions
     logger.info("[CHATGPT_AUTH] Tokens saved to %s", tf)
 
 

@@ -304,6 +304,40 @@ body::after {
   }
 }
 
+/* Directional spring transitions (Phase 3) */
+.panel-wrapper.panel-slide-in-right {
+  opacity: 1;
+  animation: panelSlideInRight 250ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+.panel-wrapper.panel-slide-in-left {
+  opacity: 1;
+  animation: panelSlideInLeft 250ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+.panel-wrapper.panel-slide-out-left {
+  pointer-events: none;
+  animation: panelSlideOutLeft 200ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+.panel-wrapper.panel-slide-out-right {
+  pointer-events: none;
+  animation: panelSlideOutRight 200ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+@keyframes panelSlideInRight {
+  from { opacity: 0; transform: translateX(16px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes panelSlideInLeft {
+  from { opacity: 0; transform: translateX(-16px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes panelSlideOutLeft {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(-16px); }
+}
+@keyframes panelSlideOutRight {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(16px); }
+}
+
 /* Dots animation */
 @keyframes dotPulse {
   0%, 100% { opacity: 0.2; transform: scale(0.8); }
@@ -2297,4 +2331,113 @@ pre .chdr span {
   color: var(--mu);
   opacity: 0.7;
   flex-shrink: 0;
+}
+
+/* ===== Logo thinking pulse (fast purple, for streaming) ===== */
+@keyframes auraDotThink {
+  0%, 100% {
+    box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.3), 0 0 14px rgba(167, 139, 250, 0.7);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.15), 0 0 22px rgba(167, 139, 250, 0.9);
+    transform: scale(1.3);
+  }
+}
+
+/* ===== Page-aware context bar ===== */
+.page-context-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  background: var(--glass);
+  backdrop-filter: blur(12px) saturate(1.3);
+  -webkit-backdrop-filter: blur(12px) saturate(1.3);
+  border-bottom: 1px solid var(--b3);
+  flex-shrink: 0;
+  animation: ctxBarIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes ctxBarIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.page-context-label {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--pl);
+  white-space: nowrap;
+  line-height: 1;
+}
+.page-context-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 500;
+  font-family: inherit;
+  border-radius: var(--r-pill);
+  cursor: pointer;
+  border: 1px solid var(--b1);
+  background: var(--pg);
+  color: var(--pl);
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+.page-context-btn:hover {
+  background: var(--pg2);
+  border-color: var(--b2);
+  color: var(--tx);
+}
+
+/* ===== Glassmorphic panel internals ===== */
+.panel-card {
+  background: var(--glass);
+  backdrop-filter: blur(12px) saturate(1.3);
+  -webkit-backdrop-filter: blur(12px) saturate(1.3);
+  border: 1px solid var(--b1);
+  border-radius: var(--r-md);
+  padding: 12px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.panel-card:hover {
+  border-color: var(--b2);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+}
+:root.light .panel-card:hover {
+  box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+}
+
+.panel-input {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--b1);
+  border-radius: var(--r-sm);
+  padding: 8px 12px;
+  color: var(--tx);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  width: 100%;
+}
+.panel-input:focus {
+  border-color: var(--p);
+  box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.1);
+}
+:root.light .panel-input {
+  background: rgba(0, 0, 0, 0.02);
+}
+:root.light .panel-input:focus {
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.08);
+}
+
+.panel-section-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--mu);
+  margin-bottom: 8px;
 }

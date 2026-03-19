@@ -1,11 +1,13 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { Message, Citation } from '../types';
 import { ModelCompare } from './ModelCompare';
 import { SparklesIcon, BoltIcon } from '@heroicons/react/24/solid';
-import { ClipboardDocumentIcon, CheckIcon } from '@heroicons/react/24/outline';
+import { ClipboardDocumentIcon, CheckIcon, ClipboardIcon, ArrowPathIcon, ShareIcon } from '@heroicons/react/24/outline';
 import { AttachmentList } from './AttachmentPreview';
 import { ToolTrace } from './ToolTrace';
+import { MemoryIndicator } from './MemoryIndicator';
+import { haptic } from '../utils/haptics';
 
 function CodeBlock({ language, children }: { language: string; children: string }) {
   const [codeCopied, setCodeCopied] = useState(false);
@@ -27,21 +29,28 @@ function CodeBlock({ language, children }: { language: string; children: string 
   };
 
   return (
-    <div className="relative">
-      <div className="absolute top-0 right-0 flex items-center gap-1 z-10">
+    <div className="relative rounded-lg border border-white/[0.06] overflow-hidden" style={{ background: '#0d0d14' }}>
+      {/* Top bar: language badge left, copy button right */}
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/[0.06]">
+        <span
+          className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full"
+          style={{ background: 'rgba(139,92,246,0.25)', color: '#c4b5fd' }}
+        >
+          {language}
+        </span>
         <button
           onClick={handleCodeCopy}
           aria-label="Copy code"
-          className="px-2 py-1.5 text-xs text-gray-400 bg-gray-700 hover:bg-gray-600 hover:text-gray-200 active:bg-gray-500 transition-colors rounded-bl flex items-center gap-1 code-copy-btn touch-target"
+          className="flex items-center gap-1 px-2 py-1 text-xs text-gray-400 hover:text-gray-200 hover:bg-white/[0.06] active:bg-white/[0.1] transition-colors rounded code-copy-btn touch-target"
         >
           {codeCopied ? (
-            <><CheckIcon className="w-3 h-3 text-green-400" /><span className="text-green-400">Copied</span></>
+            <><CheckIcon className="w-3.5 h-3.5 text-green-400" /><span className="text-green-400">Copied</span></>
           ) : (
-            <><ClipboardDocumentIcon className="w-3 h-3" /><span>{language}</span></>
+            <><ClipboardDocumentIcon className="w-3.5 h-3.5" /><span>Copy</span></>
           )}
         </button>
       </div>
-      <pre className="bg-gray-900 p-4 rounded-lg overflow-x-auto pt-8">
+      <pre className="p-4 overflow-x-auto m-0" style={{ background: '#0d0d14' }}>
         <code className={`language-${language}`}>
           {children}
         </code>
@@ -88,6 +97,8 @@ function CitationList({ citations }: { citations: Citation[] }) {
 
 interface MessageBubbleProps {
   message: Message;
+  animateIn?: boolean;
+  animationIndex?: number;
 }
 
 // Action icons for proactive messages
@@ -100,12 +111,29 @@ const PROACTIVE_ICONS: Record<string, string> = {
   prepare: '📋',
 };
 
-export function MessageBubble({ message }: MessageBubbleProps) {
+export function MessageBubble({ message, animateIn = false, animationIndex = 0 }: MessageBubbleProps) {
   const isUser = message.role === 'user';
   const isStreaming = message.isStreaming;
   const isProactive = !!message.proactive;
   const [copied, setCopied] = useState(false);
+  const [cursorExiting, setCursorExiting] = useState(false);
+  const prevStreamingRef = useRef(isStreaming);
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Long-press context menu state
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchStartPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  // Cursor fade-out when streaming ends
+  useEffect(() => {
+    if (prevStreamingRef.current && !isStreaming) {
+      setCursorExiting(true);
+      const timer = setTimeout(() => setCursorExiting(false), 200);
+      return () => clearTimeout(timer);
+    }
+    prevStreamingRef.current = isStreaming;
+  }, [isStreaming]);
 
   useEffect(() => {
     return () => {
@@ -124,9 +152,87 @@ export function MessageBubble({ message }: MessageBubbleProps) {
     }
   };
 
+  // Clean up long-press timer on unmount
+  useEffect(() => {
+    return () => { if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current); };
+  }, []);
+
+  // Close context menu on scroll or outside click
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    window.addEventListener('scroll', close, true);
+    return () => window.removeEventListener('scroll', close, true);
+  }, [contextMenu]);
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    touchStartPosRef.current = { x: touch.clientX, y: touch.clientY };
+    longPressTimerRef.current = setTimeout(() => {
+      haptic(30);
+      setContextMenu({ x: touch.clientX, y: touch.clientY });
+    }, 500);
+  }, []);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (!longPressTimerRef.current) return;
+    const touch = e.touches[0];
+    const dx = touch.clientX - touchStartPosRef.current.x;
+    const dy = touch.clientY - touchStartPosRef.current.y;
+    if (Math.sqrt(dx * dx + dy * dy) > 10) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
+
+  const handleTouchEnd = useCallback(() => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
+
+  const handleCtxCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(message.content);
+    } catch (e) {
+      console.warn('[CtxMenu Copy] Failed:', e);
+    }
+    setContextMenu(null);
+  }, [message.content]);
+
+  const handleCtxRegenerate = useCallback(() => {
+    console.log('[CtxMenu] Regenerate requested for message:', message.id);
+    setContextMenu(null);
+  }, [message.id]);
+
+  const handleCtxShare = useCallback(async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({ text: message.content });
+      } catch (e) {
+        // User cancelled or share failed — not an error
+        if ((e as DOMException).name !== 'AbortError') {
+          console.warn('[CtxMenu Share] Failed:', e);
+        }
+      }
+    } else {
+      // Fallback: copy to clipboard
+      try {
+        await navigator.clipboard.writeText(message.content);
+      } catch (e) {
+        console.warn('[CtxMenu Share fallback] Failed:', e);
+      }
+    }
+    setContextMenu(null);
+  }, [message.content]);
+
+  const staggerClass = animationIndex <= 4 ? `msg-stagger-${animationIndex}` : 'msg-stagger-4';
+  const animClass = animateIn ? `msg-animate-in ${staggerClass}` : '';
+
   if (isUser) {
     return (
-      <div className="py-4 px-4 md:px-8">
+      <div className={`py-4 px-4 md:px-8 ${animClass}`}>
         <div className="max-w-3xl mx-auto flex justify-end">
           <div style={{
             background: '#fff',
@@ -150,7 +256,42 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   }
 
   return (
-    <div className={`py-5 px-4 md:px-8 ${isProactive ? 'bg-gradient-to-r from-purple-900/10 to-transparent' : ''}`}>
+    <div
+      className={`py-5 px-4 md:px-8 ${isProactive ? 'bg-gradient-to-r from-purple-900/10 to-transparent' : ''} ${animClass}`}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+    >
+      {/* Long-press context menu */}
+      {contextMenu && (
+        <>
+          <div
+            className="fixed inset-0 z-[999]"
+            onClick={() => setContextMenu(null)}
+            onTouchEnd={() => setContextMenu(null)}
+          />
+          <div
+            className="ctx-menu fixed z-[1000]"
+            style={{
+              left: Math.min(contextMenu.x, window.innerWidth - 180),
+              top: Math.min(contextMenu.y, window.innerHeight - 140),
+            }}
+          >
+            <button className="ctx-menu-item w-full" onClick={handleCtxCopy}>
+              <ClipboardIcon className="w-4 h-4" />
+              Copy
+            </button>
+            <button className="ctx-menu-item w-full" onClick={handleCtxRegenerate}>
+              <ArrowPathIcon className="w-4 h-4" />
+              Regenerate
+            </button>
+            <button className="ctx-menu-item w-full" onClick={handleCtxShare}>
+              <ShareIcon className="w-4 h-4" />
+              Share
+            </button>
+          </div>
+        </>
+      )}
       <div className="max-w-3xl mx-auto flex gap-4">
         {/* AI Avatar */}
         <div className="flex-shrink-0 relative mt-1">
@@ -197,7 +338,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           )}
 
           {/* Message content */}
-          <div className="prose prose-invert max-w-none text-chat-text">
+          <div className={`prose prose-invert max-w-none text-chat-text ${isStreaming ? 'stream-container-active' : ''}`}>
             <ReactMarkdown
               components={{
                 code({ className, children, ...props }) {
@@ -227,14 +368,19 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             >
               {message.content}
             </ReactMarkdown>
-            {isStreaming && (
-              <span className="typing-cursor inline-block w-2 h-4 bg-purple-400 ml-1" />
+            {(isStreaming || cursorExiting) && (
+              <span className={`stream-cursor ${cursorExiting ? 'cursor-exiting' : ''}`} />
             )}
           </div>
 
           {/* Citations */}
           {message.citations && message.citations.length > 0 && !isStreaming && (
             <CitationList citations={message.citations} />
+          )}
+
+          {/* Memory transparency */}
+          {message.memoriesUsed && message.memoriesUsed.length > 0 && !isStreaming && (
+            <MemoryIndicator memories={message.memoriesUsed} />
           )}
 
           {/* Model compare */}

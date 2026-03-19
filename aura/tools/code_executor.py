@@ -331,12 +331,17 @@ except Exception as _e:
         proc = None
         try:
             # Run in subprocess with timeout
+            # Sanitize environment to avoid leaking API keys/tokens
+            safe_env = {k: v for k, v in os.environ.items()
+                        if k in ("PATH", "HOME", "USERPROFILE", "TEMP", "TMP",
+                                 "SYSTEMROOT", "WINDIR", "COMSPEC", "PYTHONPATH")}
             proc = subprocess.Popen(
                 [sys.executable, temp_path],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 cwd=tempfile.gettempdir(),  # Run in temp directory
+                env=safe_env,
             )
             try:
                 stdout_data, stderr_data = proc.communicate(timeout=self.timeout)

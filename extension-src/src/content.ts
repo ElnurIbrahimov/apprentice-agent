@@ -4607,7 +4607,18 @@ function safeSend(msg: OutboundMessage, cb?: (response: any) => void): void {
 
   // ── Google SERP AI Answer Card ───────────────────────────────────────────
 
-  const SERP_BACKEND = 'http://localhost:8000';
+  const SERP_DEFAULT_BACKEND = 'http://89.167.107.134';
+  const SERP_DEFAULT_API_KEY = 'i-L5ShpMkY2B7loNb8VS4EAAT-Ronh-K8cIgRILGjnQ';
+  let SERP_BACKEND = SERP_DEFAULT_BACKEND;
+  let SERP_API_KEY = SERP_DEFAULT_API_KEY;
+
+  // Load configured backend URL from storage (same source as sidebar)
+  if (ext?.storage?.local) {
+    ext.storage.local.get(['backendUrl', 'apiKey'], (d: any) => {
+      if (d?.backendUrl?.trim()) SERP_BACKEND = d.backendUrl.trim().replace(/\/+$/, '');
+      if (d?.apiKey?.trim()) SERP_API_KEY = d.apiKey.trim();
+    });
+  }
 
   function isGoogleSearchPage(): boolean {
     const hostname = window.location.hostname;
@@ -5060,9 +5071,11 @@ function safeSend(msg: OutboundMessage, cb?: (response: any) => void): void {
 
     // Fetch AI answer
     try {
+      const serpHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (SERP_API_KEY) serpHeaders['X-API-Key'] = SERP_API_KEY;
       const resp = await fetch(`${SERP_BACKEND}/api/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: serpHeaders,
         body: JSON.stringify({
           message: query,
           conversation_id: '__serp_answer__',

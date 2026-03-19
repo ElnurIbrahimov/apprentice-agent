@@ -228,9 +228,8 @@ class MultiUserManager:
                 self._end_session(user_id)
 
         # Create new session
-        session_id = hashlib.md5(
-            f"{user_id}_{time.time()}".encode()
-        ).hexdigest()[:12]
+        import secrets
+        session_id = secrets.token_hex(12)
         session = UserSession(
             user_id=user_id, session_id=session_id,
             platform=context.get("platform", "unknown"),

@@ -1,7 +1,10 @@
 """Authentication routes for external providers (ChatGPT OAuth, etc.)."""
 
-from fastapi import APIRouter
+import logging
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+
+from api.auth import require_api_key
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -27,7 +30,7 @@ async def chatgpt_status():
         return {"authenticated": False, "error": "auth module not available"}
 
 
-@router.post("/chatgpt/set-token")
+@router.post("/chatgpt/set-token", dependencies=[Depends(require_api_key)])
 async def chatgpt_set_token(body: ChatGPTTokenRequest):
     """Set the ChatGPT refresh token via HTTP POST.
 
@@ -58,7 +61,8 @@ async def chatgpt_set_token(body: ChatGPTTokenRequest):
                 "path": str(path),
             }
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        logging.getLogger(__name__).error("chatgpt set-token failed: %s", e, exc_info=True)
+        return {"success": False, "error": "Failed to set token — check server logs"}
 
 
 @router.post("/chatgpt/login")
@@ -102,7 +106,8 @@ async def chatgpt_login_url():
                             f"server on port {CALLBACK_PORT} will capture the token.",
         }
     except Exception as e:
-        return {"error": str(e)}
+        logging.getLogger(__name__).error("chatgpt login-url failed: %s", e, exc_info=True)
+        return {"error": "Failed to generate login URL — check server logs"}
 
 
 @router.post("/chatgpt/logout")
@@ -113,4 +118,5 @@ async def chatgpt_logout():
         logout()
         return {"success": True}
     except Exception as e:
-        return {"error": str(e)}
+        logging.getLogger(__name__).error("chatgpt logout failed: %s", e, exc_info=True)
+        return {"error": "Logout failed — check server logs"}

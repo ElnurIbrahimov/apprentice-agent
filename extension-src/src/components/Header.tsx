@@ -5,6 +5,7 @@ import { fetchStatus } from '../ws';
 import { exportChat } from '../exportChat';
 import { getServerLabel } from '../api';
 import ConversationHistory from './ConversationHistory';
+import ext from '../ext';
 
 const STATUS_DOT: Record<string, string> = {
   online: '#10b981',
@@ -12,12 +13,36 @@ const STATUS_DOT: Record<string, string> = {
   offline: '#ef4444',
 };
 
+// Map mood emoji to a glow color for the logo dot
+const MOOD_GLOW: Record<string, string> = {
+  '\uD83D\uDE0A': '#eab308', // happy - yellow
+  '\uD83D\uDE04': '#eab308', // grinning - yellow
+  '\uD83D\uDE03': '#f59e0b', // smiley - amber
+  '\uD83D\uDE42': '#10b981', // slightly smiling - green
+  '\uD83D\uDE14': '#3b82f6', // pensive - blue
+  '\uD83D\uDE22': '#3b82f6', // crying - blue
+  '\uD83D\uDE20': '#ef4444', // angry - red
+  '\uD83E\uDD14': '#8b5cf6', // thinking - purple
+  '\uD83D\uDE10': '#6b7280', // neutral - gray
+  '\uD83D\uDE31': '#f97316', // scared - orange
+  '\uD83D\uDE2E': '#a78bfa', // surprised - light purple
+  '\uD83D\uDE0D': '#ec4899', // heart eyes - pink
+  '\uD83D\uDE34': '#06b6d4', // sleeping - teal
+};
+
+function getMoodGlowColor(moodEmoji: string): string | null {
+  if (!moodEmoji) return null;
+  return MOOD_GLOW[moodEmoji] || null;
+}
+
 export default function Header() {
-  const { wsReady, modelName, mood, theme, toggleTheme, backendStatus, messages, featureModels, newConversation, conversations, loadConversationList, historyLoaded } = useStore();
+  const { wsReady, modelName, mood, theme, toggleTheme, backendStatus, messages, featureModels, newConversation, conversations, loadConversationList, historyLoaded, activeStream, setPanel } = useStore();
   const status = backendStatus === 'online' ? 'online' : backendStatus === 'offline' ? 'offline' : 'connecting';
+  const isThinking = !!activeStream;
   const [scrolled, setScrolled] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [pageType, setPageType] = useState<string | null>(null);
   const headerRef = useRef<HTMLElement>(null);
   const exportRef = useRef<HTMLDivElement>(null);
 
@@ -27,6 +52,26 @@ export default function Header() {
       loadConversationList();
     }
   }, [historyLoaded, loadConversationList]);
+
+  // Detect page type from messages + active tab URL
+  useEffect(() => {
+    const handler = (msg: any) => {
+      if (msg.type === 'YT_TAB_DETECTED') setPageType('youtube');
+      if (msg.type === 'PDF_TAB_DETECTED') setPageType('pdf');
+    };
+    ext?.runtime?.onMessage?.addListener(handler);
+
+    // Also check current tab URL on mount
+    try {
+      ext?.tabs?.query?.({ active: true, currentWindow: true }, (tabs: any[]) => {
+        const url = tabs?.[0]?.url || '';
+        if (url.includes('youtube.com/watch')) setPageType('youtube');
+        else if (url.endsWith('.pdf') || url.includes('pdf')) setPageType('pdf');
+      });
+    } catch { /* not available outside extension context */ }
+
+    return () => ext?.runtime?.onMessage?.removeListener(handler);
+  }, []);
 
   const handleHistoryToggle = useCallback(() => {
     setHistoryOpen(prev => !prev);
@@ -83,6 +128,8 @@ export default function Header() {
       ? 'reconnecting'
       : 'offline';
 
+  const moodGlow = getMoodGlowColor(mood);
+
   return (
     <>
       <header
@@ -97,15 +144,29 @@ export default function Header() {
           <span
             className="header-logo-dot"
             style={{
-              background: status === 'online'
-                ? 'radial-gradient(circle, #6ee7b7, #10b981)'
-                : 'var(--logo-dot-bg)',
-              boxShadow: status === 'online'
-                ? '0 0 0 2px rgba(16,185,129,0.22), 0 0 10px rgba(16,185,129,0.5)'
-                : 'var(--logo-dot-shadow)',
+              background: status === 'offline'
+                ? 'radial-gradient(circle, #f87171, #ef4444)'
+                : isThinking
+                  ? 'radial-gradient(circle, #c4b5fd, #7c3aed)'
+                  : status === 'online'
+                    ? 'radial-gradient(circle, #6ee7b7, #10b981)'
+                    : 'var(--logo-dot-bg)',
+              boxShadow: status === 'offline'
+                ? '0 0 0 2px rgba(239,68,68,0.22), 0 0 10px rgba(239,68,68,0.5)'
+                : isThinking
+                  ? '0 0 0 2px rgba(124,58,237,0.3), 0 0 14px rgba(167,139,250,0.7)'
+                  : status === 'online'
+                    ? moodGlow
+                      ? `0 0 0 2px rgba(16,185,129,0.22), 0 0 10px rgba(16,185,129,0.3), 0 0 16px ${moodGlow}66`
+                      : '0 0 0 2px rgba(16,185,129,0.22), 0 0 10px rgba(16,185,129,0.5)'
+                    : 'var(--logo-dot-shadow)',
               animation: status === 'connecting'
                 ? 'pulse 1s ease-in-out infinite'
-                : 'breatheGlow 2.5s ease-in-out infinite',
+                : isThinking
+                  ? 'auraDotThink 0.8s ease-in-out infinite'
+                  : status === 'offline'
+                    ? 'none'
+                    : 'breatheGlow 2.5s ease-in-out infinite',
             }}
           />
           <span className="header-logo-text">AURA</span>
@@ -232,6 +293,23 @@ export default function Header() {
           </button>
         </div>
       </header>
+
+      {/* Page-aware context bar */}
+      {pageType === 'youtube' && (
+        <div className="page-context-bar">
+          <span className="page-context-label">{'\u25B6'} YouTube detected</span>
+          <div style={{ flex: 1 }} />
+          <button className="page-context-btn" onClick={() => { setPanel('youtube'); window.dispatchEvent(new CustomEvent('yt-action', { detail: 'summarize' })); }}>Summarize</button>
+          <button className="page-context-btn" onClick={() => { setPanel('youtube'); window.dispatchEvent(new CustomEvent('yt-action', { detail: 'transcript' })); }}>Transcript</button>
+        </div>
+      )}
+      {pageType === 'pdf' && (
+        <div className="page-context-bar">
+          <span className="page-context-label">{'\uD83D\uDCC4'} PDF detected</span>
+          <div style={{ flex: 1 }} />
+          <button className="page-context-btn" onClick={() => setPanel('pdf')}>Chat with PDF</button>
+        </div>
+      )}
 
       {/* Offline banner */}
       {status === 'offline' && (

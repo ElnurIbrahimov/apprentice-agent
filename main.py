@@ -874,6 +874,7 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
         # to be visible on the main thread, and think_with_tools has its own
         # 120s timeout so it won't hang forever)
         show_info("Thinking...")
+        _last_tool_label = None
         try:
             def _on_tool(name, args, _result):
                 # Fire pre_tool_call hooks before display
@@ -918,6 +919,35 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
 
         response_text = result.get("response", "")
         model_used = result.get("model", _current_model)
+
+        # Context summary line — show what influenced this response
+        _ctx_memory_count = 0
+        _ctx_kg_topic = ""
+        _ctx_mood = ""
+        _ctx_tool_count = 0
+        try:
+            if hasattr(agent, 'memory') and hasattr(agent.memory, 'memories'):
+                _ctx_memory_count = len(agent.memory.memories)
+            elif hasattr(agent, 'memory') and hasattr(agent.memory, 'count'):
+                _ctx_memory_count = agent.memory.count()
+        except Exception:
+            pass
+        try:
+            if hasattr(agent, 'mood') and agent.mood:
+                _ctx_mood = str(agent.mood.get("mood", "")) if isinstance(agent.mood, dict) else str(agent.mood)
+        except Exception:
+            pass
+        try:
+            _ctx_tool_count = result.get("tool_calls", 0)
+        except Exception:
+            pass
+        from aura.cli.display import show_context_summary
+        show_context_summary(
+            memory_count=_ctx_memory_count,
+            mood=_ctx_mood,
+            model=model_used,
+            tool_count=_ctx_tool_count,
+        )
 
         # stream=True: agentic loop no longer streams raw text to stdout,
         # so render the full pretty panel with streaming effect
@@ -1969,47 +1999,138 @@ def _handle_shell_command(agent, arg: str):
 
 
 def _handle_evolve_command(agent, arg: str):
-    """Handle /evolve — run GEPA skill evolution."""
-    print("\n  [GEPA] Starting skill evolution...")
+    """Handle /evolve — run GEPA skill evolution.
+
+    Usage:
+        /evolve                              Evolve all skills (5 iterations)
+        /evolve --skill-ids id1,id2          Evolve specific skills
+        /evolve --dry-run                    Preview without running
+        /evolve --max-iterations 10          Set iteration count
+    """
     try:
         from aura.evolution.runner import run_evolution
+        from aura_skill_library.skill_store import SkillStore
+    except ImportError as e:
+        print(f"\n  [GEPA] Import error: {e}\n")
+        return
 
-        parts = arg.split() if arg else []
-        skill_ids = None
-        dry_run = "--dry-run" in parts
-        iterations = 10
+    parts = arg.split() if arg else []
+    skill_ids = None
+    dry_run = "--dry-run" in parts
+    max_iterations = 5
 
-        for i, p in enumerate(parts):
-            if p == "--skill" and i + 1 < len(parts):
-                skill_ids = [parts[i + 1]]
-            if p == "--iterations" and i + 1 < len(parts):
-                try:
-                    iterations = int(parts[i + 1])
-                except ValueError:
-                    pass
+    for i, p in enumerate(parts):
+        if p == "--skill-ids" and i + 1 < len(parts):
+            skill_ids = [s.strip() for s in parts[i + 1].split(",") if s.strip()]
+        # Keep legacy --skill flag working
+        if p == "--skill" and i + 1 < len(parts):
+            skill_ids = [parts[i + 1]]
+        if p == "--max-iterations" and i + 1 < len(parts):
+            try:
+                max_iterations = int(parts[i + 1])
+            except ValueError:
+                print(f"  [GEPA] Invalid --max-iterations value: {parts[i + 1]}")
+                return
 
+    # Snapshot procedures before evolution for diff display
+    before_procedures = {}
+    try:
+        store = SkillStore(storage_path="./aura_data/skill_library")
+        target_ids = skill_ids if skill_ids else list(store.index.keys())
+        for sid in target_ids:
+            skill = store.load(sid)
+            if skill:
+                before_procedures[sid] = skill.procedure
+    except Exception:
+        pass  # Non-critical — diff just won't show
+
+    if dry_run:
+        print(f"\n  [GEPA] Dry run — previewing evolution plan...")
+    else:
+        print(f"\n  [GEPA] Starting skill evolution (max {max_iterations} iterations)...")
+        if skill_ids:
+            print(f"  Target skills: {', '.join(skill_ids)}")
+        else:
+            print(f"  Target: all skills in library")
+
+    try:
         result = run_evolution(
             skill_ids=skill_ids,
-            config_overrides={"max_iterations": iterations},
+            config_overrides={"max_iterations": max_iterations},
             dry_run=dry_run,
         )
-
-        if result.get("error"):
-            print(f"  [GEPA] Error: {result['error']}")
-        elif result.get("dry_run"):
-            print(f"  [GEPA] Would evolve: {result['skills']}")
-        else:
-            print(f"  [GEPA] Done! Improvement: +{result.get('improvement', 0):.3f}")
-            print(f"  Score: {result.get('seed_score', 0):.3f} -> {result.get('best_score', 0):.3f}")
-            print(f"  Skills updated: {result.get('skills_updated', 0)}")
-            print(f"  Iterations: {result.get('iterations', 0)}, Evals: {result.get('total_evals', 0)}")
-            print(f"  Time: {result.get('duration_seconds', 0):.1f}s")
-            print(f"  Run saved to: {result.get('run_dir', 'N/A')}")
-
-    except ImportError as e:
-        print(f"  [GEPA] Import error: {e}")
     except Exception as e:
-        print(f"  [GEPA] Failed: {e}")
+        print(f"  [GEPA] Failed: {e}\n")
+        return
+
+    if result.get("error"):
+        print(f"  [GEPA] Error: {result['error']}")
+    elif result.get("dry_run"):
+        print(f"\n  [GEPA] Dry-run results:")
+        print(f"  Skills to evolve: {len(result.get('skills', []))}")
+        for sid in result.get("skills", []):
+            name = store.index.get(sid, {}).get("name", sid) if store else sid
+            print(f"    - {name} ({sid})")
+        config = result.get("config", {})
+        print(f"  Max iterations: {config.get('max_iterations', '?')}")
+        print(f"  Reflection model: {config.get('reflection_model', '?')}")
+        print(f"  Eval model: {config.get('eval_model', '?')}")
+    else:
+        improvement = result.get("improvement", 0)
+        seed_score = result.get("seed_score", 0)
+        best_score = result.get("best_score", 0)
+        updated = result.get("skills_updated", 0)
+
+        print(f"\n  [GEPA] Evolution complete!")
+        print(f"  Score: {seed_score:.3f} -> {best_score:.3f} (+{improvement:.3f})")
+        print(f"  Skills updated: {updated}")
+        print(f"  Iterations: {result.get('iterations', 0)}, Evals: {result.get('total_evals', 0)}")
+        print(f"  Time: {result.get('duration_seconds', 0):.1f}s")
+        print(f"  Stop reason: {result.get('stop_reason', 'N/A')}")
+        print(f"  Run saved to: {result.get('run_dir', 'N/A')}")
+
+        # Show before/after diff for changed skills
+        if updated > 0 and before_procedures:
+            print(f"\n  --- Procedure diffs ---")
+            try:
+                store_after = SkillStore(storage_path="./aura_data/skill_library")
+                for sid, old_proc in before_procedures.items():
+                    skill_after = store_after.load(sid)
+                    if not skill_after:
+                        continue
+                    new_proc = skill_after.procedure
+                    if old_proc == new_proc:
+                        continue
+                    name = store_after.index.get(sid, {}).get("name", sid)
+                    print(f"\n  [{name}] (v{skill_after.metadata.version}):")
+                    # Show a simple line-by-line diff
+                    old_lines = old_proc.splitlines()
+                    new_lines = new_proc.splitlines()
+                    import difflib
+                    diff = difflib.unified_diff(
+                        old_lines, new_lines,
+                        fromfile=f"{name} (before)",
+                        tofile=f"{name} (after)",
+                        lineterm="",
+                    )
+                    diff_lines = list(diff)
+                    if diff_lines:
+                        for line in diff_lines[:40]:  # Cap output
+                            prefix = "  "
+                            if line.startswith("+") and not line.startswith("+++"):
+                                prefix = "  + "
+                            elif line.startswith("-") and not line.startswith("---"):
+                                prefix = "  - "
+                            elif line.startswith("@@"):
+                                prefix = "  "
+                            print(f"  {prefix}{line}")
+                        if len(diff_lines) > 40:
+                            print(f"    ... ({len(diff_lines) - 40} more lines)")
+                    else:
+                        print(f"    (no textual changes)")
+            except Exception as e:
+                print(f"  (Could not generate diff: {e})")
+
     print()
 
 

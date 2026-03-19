@@ -83,7 +83,12 @@ class TemporalParser:
         Args:
             base_time: Reference time for relative expressions (defaults to now)
         """
-        self.base_time = base_time or datetime.now()
+        self._fixed_base_time = base_time  # None means use current time
+
+    @property
+    def base_time(self) -> datetime:
+        """Return fixed base time or current time for relative expressions."""
+        return self._fixed_base_time or datetime.now()
 
     def parse(self, text: str) -> Optional[TemporalRange]:
         """

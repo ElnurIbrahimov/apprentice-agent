@@ -110,6 +110,8 @@ class AuraDaemon:
         self._agent_load_error: Optional[str] = None
         self._agent_ready = threading.Event()
         self._load_agent_thread: Optional[threading.Thread] = None
+        self._last_agent_attempt: float = 0.0  # monotonic time of last load attempt
+        self._agent_retry_interval: float = 60.0  # seconds between retry attempts
         self._last_screen_hash = None
         self._last_activity = time.monotonic()
         self._event_bus = EventBus()
@@ -187,6 +189,15 @@ class AuraDaemon:
             now = time.monotonic()
 
             try:
+                # Retry agent load if it failed and enough time has passed
+                if (self._agent is None
+                        and self._agent_ready.is_set()
+                        and now - self._last_agent_attempt >= self._agent_retry_interval):
+                    logger.info("Agent is None after failed load -- retrying _load_agent")
+                    self._agent_ready.clear()
+                    self._load_agent_thread = threading.Thread(target=self._load_agent, daemon=True)
+                    self._load_agent_thread.start()
+
                 # 5s: screen monitoring (non-blocking, skip if previous tick still running)
                 # Skipped entirely in headless mode (no display)
                 if not self._headless and not self._screen_tick_pending:
@@ -326,6 +337,7 @@ class AuraDaemon:
         On headless servers, catches ALL import errors gracefully so
         missing GUI/audio modules don't crash the daemon.
         """
+        self._last_agent_attempt = time.monotonic()
         try:
             sys.path.insert(0, str(Path(__file__).parent))
             logger.info("Loading ApprenticeAgent (fast_init=True)...")
@@ -544,6 +556,21 @@ class IPCServer:
         self._event_bus = event_bus
         self._thread = None
         self._running = False
+        self._auth_token = self._generate_auth_token()
+
+    def _generate_auth_token(self) -> str:
+        """Generate a random auth token and write it to a restricted file."""
+        import secrets, stat
+        token = secrets.token_hex(32)
+        token_path = Path(os.getenv("AURA_DATA_DIR", "data")) / "ipc_token"
+        token_path.parent.mkdir(parents=True, exist_ok=True)
+        token_path.write_text(token, encoding="utf-8")
+        try:
+            token_path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0o600
+        except OSError:
+            pass  # Windows may not support POSIX permissions
+        logger.info("IPC auth token written to %s", token_path)
+        return token
 
     def start(self):
         self._running = True
@@ -599,6 +626,13 @@ class IPCServer:
             data = b"".join(chunks).decode("utf-8").strip()
             if data:
                 msg = json.loads(data)
+                # Validate auth token before processing any command
+                import hmac
+                msg_token = msg.get("token", "")
+                if not hmac.compare_digest(msg_token, self._auth_token):
+                    logger.warning("IPC rejected: invalid auth token")
+                    conn.send(json.dumps({"status": "error", "reason": "invalid auth token"}).encode())
+                    return
                 msg_type = msg.get("type", "message")
                 if msg_type not in self.ALLOWED_IPC_TYPES:
                     logger.warning("IPC rejected unknown type: %s", msg_type)

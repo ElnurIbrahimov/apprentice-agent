@@ -1,6 +1,7 @@
 """Main agent implementation with ReAct loop (single LLM call per step)."""
 
 import json
+import os
 import re
 import time
 import logging
@@ -487,6 +488,9 @@ _TOOL_KEYWORDS = frozenset([
     'tts', 'sesame tts',
 ])
 
+# Pre-compiled combined regex for _TOOL_KEYWORDS (avoids re-compiling ~150 patterns per message)
+_TOOL_KEYWORDS_RE = re.compile(r'\b(?:' + '|'.join(re.escape(kw) for kw in _TOOL_KEYWORDS) + r')\b')
+
 
 class AgentPhase(Enum):
     """Phases of the agent loop.
@@ -792,8 +796,8 @@ class ApprenticeAgent:
                 logger.warning(f"[Agent] Custom tool loading failed: {_e}")
 
         # Connect inner monologue to EvoEmo for emotional awareness
-        self.monologue = self.tools["inner_monologue"]
-        if "evoemo" in self.tools:
+        self.monologue = self.tools.get("inner_monologue")
+        if self.monologue and "evoemo" in self.tools:
             self.monologue.connect_evoemo(self.tools["evoemo"])
         self.state = AgentState()
         self.max_iterations = 10
@@ -1400,7 +1404,7 @@ class ApprenticeAgent:
             return False
 
         # NEVER fast-path if any tool keyword matches
-        if any(re.search(r'\b' + re.escape(kw) + r'\b', goal_lower) for kw in _TOOL_KEYWORDS):
+        if _TOOL_KEYWORDS_RE.search(goal_lower):
             return False
         for kw in self.custom_tool_keywords:
             if kw in goal_lower:
@@ -2413,64 +2417,6 @@ IMPORTANT: If the user asks about something you are not sure about, something re
             "consecutive_failures": consecutive_failures,
         }
 
-    def _detect_git_action(self, goal: str) -> Optional[tuple[str, str]]:
-        """Detect if the goal requires the Git tool.
-
-        Args:
-            goal: The user's goal
-
-        Returns:
-            (tool_name, action) tuple if Git matches, None otherwise
-        """
-        goal_lower = goal.lower()
-
-        git_keywords = [
-            # Explicit git commands
-            'git status', 'git log', 'git diff', 'git branch', 'git stash',
-            'git add', 'git commit', 'git push', 'git pull', 'git clone',
-            # Branch queries
-            'what branch', 'which branch', 'current branch', 'show branches', 'list branches',
-            # Commit queries
-            'show commits', 'recent commits', 'commit history', 'last commit',
-            # Status queries
-            'staged files', 'unstaged', 'untracked', 'show changes',
-            'what changed', 'pending changes', 'working tree'
-        ]
-
-        # Check if any Git keyword is present
-        if any(kw in goal_lower for kw in git_keywords):
-            logger.debug(f"[GIT] Detected Git action in: {goal[:50]}...")
-            return ("git", goal)
-
-        return None
-
-    def _detect_monologue_action(self, goal: str) -> Optional[tuple[str, str]]:
-        """Detect if the goal requires the Inner Monologue tool.
-
-        Args:
-            goal: The user's goal
-
-        Returns:
-            (tool_name, action) tuple if monologue matches, None otherwise
-        """
-        goal_lower = goal.lower()
-
-        monologue_keywords = [
-            'show thoughts', 'your thoughts', 'recent thoughts',
-            'think aloud on', 'think aloud off',
-            'verbosity 0', 'verbosity 1', 'verbosity 2', 'verbosity 3',
-            'why did you do that', 'explain your reasoning', 'reasoning chain',
-            'what were you thinking', 'how did you decide',
-            'export thoughts', 'inner monologue'
-        ]
-
-        # Check if any monologue keyword is present
-        if any(kw in goal_lower for kw in monologue_keywords):
-            logger.debug(f"[MONOLOGUE] Detected monologue action in: {goal[:50]}...")
-            return ("inner_monologue", goal)
-
-        return None
-
     def _handle_monologue_command(self, message: str) -> Optional[str]:
         """Handle inner monologue commands directly, bypassing the LLM.
 
@@ -2507,23 +2453,6 @@ IMPORTANT: If the user asks about something you are not sure about, something re
             return str(result)
 
         return result.get("error", "Unknown error")
-
-    def _detect_knowledge_graph_action(self, goal: str) -> Optional[Tuple[str, str]]:
-        """Detect knowledge graph commands in user goals."""
-        goal_lower = goal.lower()
-
-        kg_keywords = [
-            'knowledge graph', 'show graph', 'what do you know about',
-            'how is', 'related to', 'connected to', 'find path',
-            'show knowledge', 'graph memory', 'what have you learned',
-            'consolidate memory', 'forget about'
-        ]
-
-        if any(kw in goal_lower for kw in kg_keywords):
-            logger.debug(f"[KG] Detected knowledge graph action in: {goal[:50]}...")
-            return ("knowledge_graph", goal)
-
-        return None
 
     def _handle_knowledge_graph_command(self, message: str) -> Optional[str]:
         """Handle knowledge graph commands directly, bypassing the LLM.
@@ -2650,16 +2579,6 @@ IMPORTANT: If the user asks about something you are not sure about, something re
             return str(result)
 
         return result.get("error", "Unknown error")
-
-    def record_user_feedback(self, was_helpful: bool, feedback_text: str = None):
-        """Record user feedback.
-
-        Args:
-            was_helpful: Whether the response was helpful
-            feedback_text: Optional text feedback
-        """
-        logger.debug(f"[Agent] Feedback received: helpful={was_helpful}, text={feedback_text}")
-        # TODO: Implement feedback persistence (e.g., store in UnifiedMemory or emit to analytics)
 
     def _handle_neurodream_command(self, message: str) -> Optional[str]:
         """Handle NeuroDream sleep/dream commands directly.
@@ -3159,8 +3078,8 @@ print(f"First {n} Fibonacci numbers: {{result}}")"""
     return primes
 
 # Generate enough primes
-primes = sieve_of_eratosthenes({int(n) * 15})[:int({n})]
-print(f"First {n} prime numbers: {{primes}}")"""
+primes = sieve_of_eratosthenes({int(n) * 15})[:{int(n)}]
+print(f"First {int(n)} prime numbers: " + str(primes))"""
                     else:
                         code_to_run = f"""def is_prime(n):
     if n < 2:
@@ -3988,101 +3907,6 @@ Python code:"""
                 return self.tools["evoemo"].analyze_text(message)
         except Exception as e:
             logger.debug(f"[EvoEmo] Analysis error: {e}")
-        return None
-
-    def _handle_emotional_message(self, message: str) -> Optional[str]:
-        """
-        Handle emotional/conversational messages that don't need the full agent loop.
-        Returns a response if this is an emotional share, None if it needs agent processing.
-        """
-        import random
-
-        message_lower = message.lower()
-
-        # Check for positive emojis
-        positive_emojis = ["😍", "🎉", "😊", "❤️", "🥳", "😄", "🔥", "💪", "✨", "👏", "😁", "🙌", "💕", "🤩"]
-        negative_emojis = ["😢", "😭", "😞", "😔", "💔", "😿", "🥺", "😰"]
-        has_positive_emoji = any(e in message for e in positive_emojis)
-        has_negative_emoji = any(e in message for e in negative_emojis)
-
-        # Task indicators - if present, let agent loop handle it
-        task_words = ["create", "make", "build", "write", "code", "help me",
-                     "can you", "please", "how do i", "what is", "explain",
-                     "search", "find", "show me", "tell me how"]
-        has_task = any(w in message_lower for w in task_words)
-
-        # If clearly a task request, let agent handle it
-        if has_task:
-            return None
-
-        # Positive/success indicators
-        positive_words = ["pay me well", "pays well", "good salary", "great salary",
-                        "good offer", "great offer", "amazing offer", "raise", "bonus",
-                        "got the", "i got", "passed", "accepted", "promoted", "won",
-                        "finally", "it worked", "made it", "nailed it", "crushed it",
-                        "so happy", "so excited", "amazing news", "great news", "good news",
-                        "best day", "awesome", "wonderful", "fantastic", "incredible",
-                        "they offered", "offered me", "hired", "got hired"]
-
-        # Negative indicators
-        negative_words = ["didn't get", "didnt get", "failed", "rejected", "lost",
-                        "fired", "broke up", "dumped", "struggling", "stressed",
-                        "anxious", "worried", "sad", "depressed", "tired", "exhausted",
-                        "terrible", "awful", "horrible", "sucks", "worst"]
-
-        # Check for positive message
-        is_positive = (has_positive_emoji and not has_negative_emoji) or \
-                     any(w in message_lower for w in positive_words)
-
-        # Check for negative message
-        is_negative = has_negative_emoji or any(w in message_lower for w in negative_words)
-
-        # Handle positive messages with excitement
-        if is_positive and not is_negative:
-            responses = [
-                "That's AMAZING!! Tell me everything!",
-                "Oh wow, that's so exciting! How do you feel?",
-                "YES! That's incredible news! What happened?",
-                "Holy crap, congrats!! That's huge!",
-                "Wait, really?! That's awesome! Tell me more!",
-                "No way!! That's fantastic! I'm so happy for you!",
-                "OMG that's wonderful! How are you feeling about it?",
-            ]
-            logger.debug(f"[EMOTIONAL] Detected POSITIVE message, handling directly")
-            return random.choice(responses)
-
-        # Handle negative messages with empathy
-        if is_negative and not is_positive:
-            responses = [
-                "I'm sorry to hear that. That's really tough.",
-                "Oof, that's hard. I'm here if you want to talk.",
-                "That sucks. How are you holding up?",
-                "I hear you. That sounds really difficult.",
-                "Hey... that's rough. Want to talk about it?",
-                "I'm here. That must be really hard.",
-            ]
-            logger.debug(f"[EMOTIONAL] Detected NEGATIVE message, handling directly")
-            return random.choice(responses)
-
-        # Casual/playful messages (like "lol", short messages, etc.)
-        playful_indicators = ["lol", "haha", "hehe", "😂", "🤣", ":)", "xd", "rofl"]
-        if any(p in message_lower for p in playful_indicators) and len(message.split()) < 15:
-            responses = [
-                "Haha, I like that!",
-                "Ha! What's on your mind?",
-                "Lol, tell me more!",
-                "Haha, what else is going on?",
-            ]
-            logger.debug(f"[EMOTIONAL] Detected PLAYFUL message, handling directly")
-            return random.choice(responses)
-
-        # Short conversational messages (not tasks)
-        if len(message.split()) < 8 and "?" not in message:
-            # Could be casual chat, but not clearly emotional
-            # Let it pass to agent for now
-            pass
-
-        # Not clearly emotional - let agent loop handle it
         return None
 
     def _get_soul_prompt(self) -> str:

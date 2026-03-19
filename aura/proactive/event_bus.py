@@ -106,14 +106,12 @@ class InMemoryBackend(EventBusBackend):
     def __init__(self):
         self._channels: Dict[str, List[asyncio.Queue]] = {}
         self._subscriptions: Dict[str, Set[asyncio.Queue]] = {}
-        self._lock = None
+        self._lock = asyncio.Lock()
         self._running = True
         logger.info("[EventBus] In-memory backend initialized")
 
     def _get_lock(self) -> asyncio.Lock:
-        """Lazy-init the asyncio lock (must be called from within an event loop)."""
-        if self._lock is None:
-            self._lock = asyncio.Lock()
+        """Return the asyncio lock (eagerly initialized in __init__)."""
         return self._lock
 
     async def publish(self, channel: str, event: Event) -> bool:

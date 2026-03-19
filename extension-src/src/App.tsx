@@ -28,6 +28,7 @@ import AgentPanel from './panels/AgentPanel';
 import SlidesPanel from './panels/SlidesPanel';
 import ModelsPanel from './panels/ModelsPanel';
 import SettingsPanel from './panels/SettingsPanel';
+import CommandPalette from './components/CommandPalette';
 import ext from './ext';
 import type { PanelId } from './types';
 
@@ -64,12 +65,21 @@ export default function App() {
   const { activePanel, setPanel, setPendingCtx } = useStore();
   const [visiblePanel, setVisiblePanel] = useState<PanelId>(activePanel);
   const [transitioning, setTransitioning] = useState(false);
+  const [slideDirection, setSlideDirection] = useState<'left' | 'right'>('right');
   const prevPanelRef = useRef<PanelId>(activePanel);
   const scrollPositions = useRef<Map<string, number>>(new Map());
+
+  // Panel index for directional transitions
+  const panelIndex = (id: PanelId) => PANEL_ENTRIES.findIndex(e => e.id === id);
 
   // Cross-fade transition when activePanel changes
   useEffect(() => {
     if (activePanel === prevPanelRef.current) return;
+
+    // Determine slide direction: deeper panels slide in from right
+    const oldIdx = panelIndex(prevPanelRef.current);
+    const newIdx = panelIndex(activePanel);
+    setSlideDirection(newIdx > oldIdx ? 'right' : 'left');
 
     // Save scroll position of outgoing panel
     const outgoing = prevPanelRef.current;
@@ -95,7 +105,7 @@ export default function App() {
         }
         setTransitioning(false);
       });
-    }, 150); // matches out-fade duration
+    }, 200); // matches slide-out duration
 
     return () => clearTimeout(timer);
   }, [activePanel]);
@@ -174,8 +184,8 @@ export default function App() {
             const isActive = id === activePanel;
             let cls = 'panel-hidden';
             if (transitioning) {
-              if (isVisible) cls = 'panel-fade-out';
-              else if (isActive) cls = 'panel-fade-in';
+              if (isVisible) cls = slideDirection === 'right' ? 'panel-slide-out-left' : 'panel-slide-out-right';
+              else if (isActive) cls = slideDirection === 'right' ? 'panel-slide-in-right' : 'panel-slide-in-left';
             } else {
               if (isActive) cls = 'panel-visible';
             }
@@ -194,6 +204,7 @@ export default function App() {
       {/* Right rail */}
       <Rail />
     </div>
+    <CommandPalette />
     </>
   );
 }

@@ -239,12 +239,6 @@ class AURAKnowledgeGraph:
         except Exception as e:
             logger.debug(f"[KG] Edge migration (may be no-op): {e}")
 
-    def _escape_string(self, s: str) -> str:
-        """Escape special characters in strings for Kuzu Cypher queries."""
-        if s is None:
-            return ""
-        return s.replace("\\", "\\\\").replace("'", "\\'").replace('"', '\\"')
-
     def add_entity(self, entity: Entity) -> str:
         """
         Add or update an entity in the graph.

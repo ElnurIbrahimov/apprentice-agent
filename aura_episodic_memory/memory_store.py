@@ -652,7 +652,7 @@ class EpisodicMemoryStore:
         try:
             from aura_episodic_memory.consolidation import MemoryConsolidator
             consolidator = MemoryConsolidator(self)
-            consolidator.consolidate()
+            consolidator.run_full_consolidation()
         except Exception as e:
             logger.warning(f"[EpisodicMemory] Scheduled consolidation failed: {e}")
         finally:

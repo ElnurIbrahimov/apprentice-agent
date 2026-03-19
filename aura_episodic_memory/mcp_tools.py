@@ -6,6 +6,7 @@ Provides agent-accessible tools for memory operations.
 
 import json
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
@@ -551,8 +552,9 @@ class QuickEpisodicMemory:
 
     def __init__(self, memory_store: EpisodicMemoryStore):
         self._store = memory_store
-        self._cache: dict = {}  # Simple LRU-like dict
+        self._cache: dict = {}  # Simple LRU-like dict with TTL
         self._cache_max = 100
+        self._cache_ttl = 60  # seconds
 
     def quick_recall(self, query: str, limit: int = 3) -> list:
         """Search memories with 500ms timeout and LRU cache on query embeddings."""
@@ -560,7 +562,11 @@ class QuickEpisodicMemory:
 
         cache_key = f"{query[:80]}:{limit}"
         if cache_key in self._cache:
-            return self._cache[cache_key]
+            cached_result, cached_time = self._cache[cache_key]
+            if (time.time() - cached_time) < self._cache_ttl:
+                return cached_result
+            else:
+                del self._cache[cache_key]
 
         result = []
         done = threading.Event()
@@ -589,11 +595,11 @@ class QuickEpisodicMemory:
         t.start()
         done.wait(timeout=0.5)  # 500ms hard timeout
 
-        # Cache result (evict oldest if too large)
+        # Cache result with timestamp (evict oldest if too large)
         if len(self._cache) >= self._cache_max:
             oldest_key = next(iter(self._cache))
             del self._cache[oldest_key]
-        self._cache[cache_key] = result
+        self._cache[cache_key] = (result, time.time())
 
         return result
 

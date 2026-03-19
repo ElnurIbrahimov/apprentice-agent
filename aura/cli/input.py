@@ -59,6 +59,7 @@ SLASH_COMMANDS = [
     ("/blame", "Git blame with context"),
     ("/test", "Run tests"),
     ("/watch", "Watch files for AI comments"),
+    ("/evolve", "Evolve skills with GEPA"),
 ]
 
 # Subcommand completions for commands that accept them
@@ -116,6 +117,11 @@ SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
     ],
     "/export": [
         ("research", "Export research session to Markdown"),
+    ],
+    "/evolve": [
+        ("--skill-ids", "Comma-separated skill IDs to evolve"),
+        ("--dry-run", "Preview without running"),
+        ("--max-iterations", "Max evolution iterations (default 5)"),
     ],
 }
 
