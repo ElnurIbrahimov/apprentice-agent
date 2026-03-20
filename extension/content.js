@@ -3993,7 +3993,6 @@ ${description}
       return "light";
     }
     async function initGoogleSerpIntegration() {
-      var _a2;
       if (!isGoogleSearchPage()) return;
       const stored = await new Promise((resolve) => {
         ext.storage.local.get(["aura_serp_hidden"], resolve);
@@ -4362,98 +4361,42 @@ ${description}
         serpHost.remove();
       });
       try {
-        const serpHeaders = { "Content-Type": "application/json" };
-        if (SERP_API_KEY) serpHeaders["X-API-Key"] = SERP_API_KEY;
-        const resp = await fetch(`${SERP_BACKEND}/api/chat`, {
-          method: "POST",
-          headers: serpHeaders,
-          body: JSON.stringify({
-            message: query,
-            conversation_id: "__serp_answer__",
-            stream: true,
-            system_context: `The user searched Google for: "${query}". Provide a concise, direct answer to their query. Be helpful and factual. Use markdown formatting sparingly — bold for emphasis, lists where appropriate. If you reference sources, format them as [Source Title](URL) and they will be rendered as citation chips. Keep the answer focused and under 200 words unless the topic requires more detail.`
-          })
+        const fetchBody = JSON.stringify({
+          message: query,
+          conversation_id: "__serp_answer__",
+          stream: false,
+          system_context: `The user searched Google for: "${query}". Provide a concise, direct answer to their query. Be helpful and factual. Use markdown formatting sparingly — bold for emphasis, lists where appropriate. If you reference sources, format them as [Source Title](URL) and they will be rendered as citation chips. Keep the answer focused and under 200 words unless the topic requires more detail.`
         });
-        if (!resp.ok) {
-          throw new Error(`HTTP ${resp.status}`);
+        const proxyResult = await new Promise((resolve) => {
+          ext.runtime.sendMessage(
+            { type: "SERP_FETCH", url: `${SERP_BACKEND}/api/chat`, body: fetchBody, apiKey: SERP_API_KEY },
+            (response) => resolve(response)
+          );
+        });
+        if (!(proxyResult == null ? void 0 : proxyResult.ok)) {
+          throw new Error((proxyResult == null ? void 0 : proxyResult.error) || "Backend unreachable");
         }
         serpLoading.remove();
         const answerEl = document.createElement("div");
         answerEl.className = "serp-answer";
         serpBody.appendChild(answerEl);
-        const reader = (_a2 = resp.body) == null ? void 0 : _a2.getReader();
-        if (!reader) {
-          answerEl.textContent = await resp.text();
-          serpAddCitations(serpBody, answerEl.textContent);
-          serpAddFooter(card, query, answerEl.textContent);
-          return;
-        }
-        const decoder = new TextDecoder();
         let fullText = "";
-        let streamBuffer = "";
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          streamBuffer += decoder.decode(value, { stream: true });
-          const lines = streamBuffer.split("\n");
-          streamBuffer = lines.pop() || "";
-          for (const line of lines) {
-            if (!line.trim()) continue;
-            try {
-              const chunk = JSON.parse(line);
-              if (chunk.token || chunk.delta || chunk.content) {
-                const token = chunk.token || chunk.delta || chunk.content || "";
-                fullText += token;
-                answerEl.innerHTML = serpRenderMarkdown(fullText);
-              } else if (chunk.response) {
-                fullText = chunk.response;
-                answerEl.innerHTML = serpRenderMarkdown(fullText);
-              } else if (chunk.error) {
-                answerEl.innerHTML = `<div class="serp-error">${serpEscapeHtml(chunk.error)}</div>`;
-                return;
-              }
-            } catch {
-              if (line.startsWith("data: ")) {
-                const data = line.slice(6).trim();
-                if (data === "[DONE]") continue;
-                try {
-                  const chunk = JSON.parse(data);
-                  const token = chunk.token || chunk.delta || chunk.content || chunk.response || "";
-                  if (token) {
-                    fullText += token;
-                    answerEl.innerHTML = serpRenderMarkdown(fullText);
-                  }
-                } catch {
-                  fullText += line;
-                  answerEl.innerHTML = serpRenderMarkdown(fullText);
-                }
-              }
-            }
-          }
-        }
-        if (streamBuffer.trim()) {
+        const responseText = proxyResult.text || "";
+        const lines = responseText.split("\n").filter((l) => l.trim());
+        for (const line of lines) {
           try {
-            const chunk = JSON.parse(streamBuffer);
-            if (chunk.token || chunk.delta || chunk.content) {
-              fullText += chunk.token || chunk.delta || chunk.content || "";
-            } else if (chunk.response) {
-              fullText = chunk.response;
-            }
+            const parsed = JSON.parse(line);
+            if (parsed.chunk) fullText += parsed.chunk;
+            else if (parsed.response) fullText = parsed.response;
+            else if (parsed.content) fullText = parsed.content;
           } catch {
-          }
-          answerEl.innerHTML = serpRenderMarkdown(fullText);
-        }
-        if (!fullText.trim()) {
-          try {
-            const fallbackText = decoder.decode();
-            if (fallbackText.trim()) {
-              const parsed = JSON.parse(fallbackText);
-              fullText = parsed.response || parsed.message || fallbackText;
-              answerEl.innerHTML = serpRenderMarkdown(fullText);
-            }
-          } catch {
+            fullText += line;
           }
         }
+        if (!fullText.trim() && responseText.trim()) {
+          fullText = responseText;
+        }
+        answerEl.innerHTML = serpRenderMarkdown(fullText);
         if (!fullText.trim()) {
           answerEl.innerHTML = '<span class="serp-error">No response from AI.</span>';
           return;

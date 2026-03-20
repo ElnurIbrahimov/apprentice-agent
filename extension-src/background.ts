@@ -270,7 +270,15 @@ interface OpenSidebarMessage {
   conversationId?: string;
 }
 
+interface SerpFetchMessage {
+  type: 'SERP_FETCH';
+  url: string;
+  body: string;
+  apiKey?: string;
+}
+
 type ExtensionMessage =
+  | SerpFetchMessage
   | SidebarReadyMessage
   | SaveKnowledgeMessage
   | GetCurrentTabMessage
@@ -1679,6 +1687,30 @@ ext.runtime.onMessage.addListener(
           });
         }
         return false;
+      }
+
+      // SERP AI Answer — proxy fetch through background to avoid CORS
+      case 'SERP_FETCH': {
+        (async () => {
+          try {
+            const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+            if (msg.apiKey) headers['X-API-Key'] = msg.apiKey;
+            const resp = await fetch(msg.url, {
+              method: 'POST',
+              headers,
+              body: msg.body,
+            });
+            if (!resp.ok) {
+              sendResponse({ ok: false, error: `HTTP ${resp.status}` });
+              return;
+            }
+            const text = await resp.text();
+            sendResponse({ ok: true, text });
+          } catch (e: any) {
+            sendResponse({ ok: false, error: e?.message || 'fetch failed' });
+          }
+        })();
+        return true; // async sendResponse
       }
 
       default:
