@@ -5078,12 +5078,34 @@ function safeSend(msg: OutboundMessage, cb?: (response: any) => void): void {
         system_context: `The user searched Google for: "${query}". Provide a concise, direct answer to their query. Be helpful and factual. Use markdown formatting sparingly — bold for emphasis, lists where appropriate. If you reference sources, format them as [Source Title](URL) and they will be rendered as citation chips. Keep the answer focused and under 200 words unless the topic requires more detail.`,
       });
 
-      const proxyResult: any = await new Promise((resolve) => {
-        ext.runtime.sendMessage(
-          { type: 'SERP_FETCH', url: `${SERP_BACKEND}/api/chat`, body: fetchBody, apiKey: SERP_API_KEY },
-          (response: any) => resolve(response)
-        );
-      });
+      // Try background proxy first, fall back to direct fetch
+      let proxyResult: any = null;
+      try {
+        proxyResult = await new Promise((resolve, reject) => {
+          ext.runtime.sendMessage(
+            { type: 'SERP_FETCH', url: `${SERP_BACKEND}/api/chat`, body: fetchBody, apiKey: SERP_API_KEY },
+            (response: any) => {
+              if (ext.runtime.lastError) {
+                reject(new Error(ext.runtime.lastError.message));
+              } else {
+                resolve(response);
+              }
+            }
+          );
+        });
+      } catch {
+        // Background unavailable (extension reloaded?) — try direct fetch as fallback
+        const serpHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (SERP_API_KEY) serpHeaders['X-API-Key'] = SERP_API_KEY;
+        const directResp = await fetch(`${SERP_BACKEND}/api/chat`, {
+          method: 'POST',
+          headers: serpHeaders,
+          body: fetchBody,
+          signal: AbortSignal.timeout(30000),
+        });
+        if (!directResp.ok) throw new Error(`HTTP ${directResp.status}`);
+        proxyResult = { ok: true, text: await directResp.text() };
+      }
 
       if (!proxyResult?.ok) {
         throw new Error(proxyResult?.error || 'Backend unreachable');

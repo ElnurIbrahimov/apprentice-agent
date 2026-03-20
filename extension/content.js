@@ -4367,12 +4367,32 @@ ${description}
           stream: false,
           system_context: `The user searched Google for: "${query}". Provide a concise, direct answer to their query. Be helpful and factual. Use markdown formatting sparingly — bold for emphasis, lists where appropriate. If you reference sources, format them as [Source Title](URL) and they will be rendered as citation chips. Keep the answer focused and under 200 words unless the topic requires more detail.`
         });
-        const proxyResult = await new Promise((resolve) => {
-          ext.runtime.sendMessage(
-            { type: "SERP_FETCH", url: `${SERP_BACKEND}/api/chat`, body: fetchBody, apiKey: SERP_API_KEY },
-            (response) => resolve(response)
-          );
-        });
+        let proxyResult = null;
+        try {
+          proxyResult = await new Promise((resolve, reject) => {
+            ext.runtime.sendMessage(
+              { type: "SERP_FETCH", url: `${SERP_BACKEND}/api/chat`, body: fetchBody, apiKey: SERP_API_KEY },
+              (response) => {
+                if (ext.runtime.lastError) {
+                  reject(new Error(ext.runtime.lastError.message));
+                } else {
+                  resolve(response);
+                }
+              }
+            );
+          });
+        } catch {
+          const serpHeaders = { "Content-Type": "application/json" };
+          if (SERP_API_KEY) serpHeaders["X-API-Key"] = SERP_API_KEY;
+          const directResp = await fetch(`${SERP_BACKEND}/api/chat`, {
+            method: "POST",
+            headers: serpHeaders,
+            body: fetchBody,
+            signal: AbortSignal.timeout(3e4)
+          });
+          if (!directResp.ok) throw new Error(`HTTP ${directResp.status}`);
+          proxyResult = { ok: true, text: await directResp.text() };
+        }
         if (!(proxyResult == null ? void 0 : proxyResult.ok)) {
           throw new Error((proxyResult == null ? void 0 : proxyResult.error) || "Backend unreachable");
         }
