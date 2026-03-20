@@ -4411,7 +4411,7 @@ ${description}
         offDot.className = "serp-offline-dot";
         const offText = document.createElement("span");
         offText.className = "serp-offline-text";
-        offText.textContent = "AURA is offline — start the backend to see AI answers";
+        offText.textContent = `AURA is offline — backend did not respond (${(_err == null ? void 0 : _err.message) || "timeout"})`;
         offline.appendChild(offDot);
         offline.appendChild(offText);
         serpBody.appendChild(offline);

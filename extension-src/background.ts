@@ -1699,6 +1699,7 @@ ext.runtime.onMessage.addListener(
               method: 'POST',
               headers,
               body: msg.body,
+              signal: AbortSignal.timeout(30000),
             });
             if (!resp.ok) {
               sendResponse({ ok: false, error: `HTTP ${resp.status}` });
