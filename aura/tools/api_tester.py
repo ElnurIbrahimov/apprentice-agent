@@ -392,18 +392,26 @@ class APITesterTool:
         return headers
 
     def _validate_url(self, url: str) -> Tuple[Optional[str], Optional[str]]:
-        """Validate and normalize URL. Returns (url, error)."""
+        """Validate and normalize URL. Returns (resolved_url, error).
+
+        SECURITY: Resolves DNS once and rewrites the URL to use the resolved IP,
+        preventing DNS rebinding attacks where a hostname resolves to a public IP
+        at validation time but a private IP at request time.
+
+        Returns the original hostname separately so callers can set the Host header.
+        """
         parsed = urlparse(url)
         if not parsed.scheme:
             url = "https://" + url
-        if not urlparse(url).netloc:
+        parsed = urlparse(url)
+        if not parsed.netloc:
             return None, f"Invalid URL: {url}"
 
         # SSRF protection
         import ipaddress
         import socket as _socket
-        _parsed = urlparse(url)
-        _hostname = _parsed.hostname or ""
+        _hostname = parsed.hostname or ""
+        _port = parsed.port
         _ssrf_blocked = [
             "169.254.169.254", "metadata.google.internal",
             "169.254.170.2", "168.63.129.16", "0.0.0.0", "10.0.0.1",
@@ -415,20 +423,41 @@ class APITesterTool:
         if _hostname_lower in ("localhost", "[::1]", "::1"):
             return None, "Blocked: localhost/loopback addresses not allowed"
 
+        resolved_ip = None
         try:
             _ip = ipaddress.ip_address(_hostname)
             if _ip.is_private or _ip.is_loopback or _ip.is_link_local or _ip.is_reserved:
                 return None, "Blocked: private/loopback IP addresses not allowed"
+            resolved_ip = str(_ip)
         except ValueError:
+            # Hostname is a domain — resolve and validate ALL returned IPs
             try:
                 _resolved = _socket.getaddrinfo(_hostname, None, _socket.AF_UNSPEC, _socket.SOCK_STREAM)
                 for _family, _type, _proto, _canonname, _sockaddr in _resolved:
                     _resolved_ip = ipaddress.ip_address(_sockaddr[0])
                     if _resolved_ip.is_private or _resolved_ip.is_loopback or _resolved_ip.is_link_local or _resolved_ip.is_reserved:
                         return None, "Blocked: hostname resolves to private/loopback IP"
+                # Use the first resolved IP to prevent DNS rebinding
+                if _resolved:
+                    resolved_ip = _resolved[0][4][0]
             except (_socket.gaierror, OSError):
                 return None, "Blocked: DNS resolution failed for hostname"
 
+        # Rewrite URL to use resolved IP, preventing DNS rebinding.
+        # Store original hostname so caller can set Host header for TLS/vhosts.
+        if resolved_ip and _hostname != resolved_ip:
+            # Build new netloc with resolved IP
+            if ":" in resolved_ip:
+                # IPv6 — wrap in brackets
+                new_host = f"[{resolved_ip}]"
+            else:
+                new_host = resolved_ip
+            new_netloc = f"{new_host}:{_port}" if _port else new_host
+            pinned_url = parsed._replace(netloc=new_netloc).geturl()
+            self._original_hostname = _hostname
+            return pinned_url, None
+
+        self._original_hostname = None
         return url, None
 
     # -----------------------------------------------------------------------
@@ -470,6 +499,12 @@ class APITesterTool:
             return {"success": False, "error": url_err}
 
         req_headers = self._interpolate_dict(dict(headers or {}))
+
+        # If URL was rewritten to a resolved IP (SSRF protection), set Host header
+        # so TLS SNI and virtual hosts still work correctly.
+        if getattr(self, '_original_hostname', None):
+            req_headers.setdefault("Host", self._original_hostname)
+            self._original_hostname = None
 
         # Apply stored auth
         req_headers = self._apply_auth(req_headers, auth_profile)

@@ -60,7 +60,7 @@ FORBIDDEN_PATTERNS = [
 MAX_HISTORY_SIZE = 100
 
 
-def validate_custom_tool_code(code: str, tool_path: str) -> Tuple[bool, str]:
+def validate_custom_tool_code(code: str, tool_path: str, require_structure: bool = True) -> Tuple[bool, str]:
     """
     Validate custom tool code before dynamic import.
 
@@ -135,6 +135,9 @@ def validate_custom_tool_code(code: str, tool_path: str) -> Tuple[bool, str]:
         elif isinstance(node, ast.FunctionDef) and node.name == "execute":
             # Synthesized tools may use a module-level execute() function
             has_module_execute = True
+
+    if not require_structure:
+        return True, "Valid (security checks passed)"
 
     if has_tool_class and has_execute:
         return True, "Valid"
@@ -2373,6 +2376,19 @@ IMPORTANT: If the user asks about something you are not sure about, something re
         })
 
         logger.info(f"[REACT-CODE] Executing code block ({len(code)} chars)")
+
+        # SECURITY: Validate LLM-generated code before execution (mirrors _handle_direct_code)
+        is_safe, reason = validate_custom_tool_code(code, "<react_code_agent>", require_structure=False)
+        if not is_safe:
+            logger.warning(f"[REACT-CODE] Blocked unsafe LLM-generated code: {reason}")
+            messages.append({"role": "user", "content": f"Code execution blocked: {reason}. Please use only safe operations."})
+            return {
+                "status": "continue",
+                "response": "",
+                "tool_calls_count": 0,
+                "consecutive_failures": consecutive_failures + 1,
+            }
+
         exec_result = code_agent.execute_code_safely(code, tool_namespace)
         formatted = code_agent.format_execution_result(exec_result)
 

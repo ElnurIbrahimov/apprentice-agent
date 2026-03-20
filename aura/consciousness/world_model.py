@@ -956,42 +956,57 @@ class WorldModel:
                 return None
 
             now = _now_iso()
+            category = new_category or old_belief.category
 
-            # Mark old belief as superseded
-            old_belief.valid_to = now
-            conn = self._connect()
-            try:
-                conn.execute(
-                    "UPDATE beliefs SET valid_to=? WHERE id=?",
-                    (now, old_id),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-
-            # Remove from current beliefs cache
-            del self._beliefs[old_id]
-
-            # Create new belief
-            new_belief = self.add_belief(
+            # Build the new belief object
+            new_belief = Belief(
+                id=_gen_id("belief"),
                 statement=new_statement,
-                category=new_category or old_belief.category,
-                confidence=new_confidence,
+                confidence=min(max(new_confidence, 0.0), 1.0),
+                category=category,
                 evidence=new_evidence or [],
-                conversation_id=conversation_id,
+                first_formed=now,
+                last_reinforced=now,
+                valid_from=now,
+                valid_to=None,
+                superseded_by=None,
+                source_conversation_ids=[conversation_id] if conversation_id else [],
             )
 
-            # Link old to new
-            old_belief.superseded_by = new_belief.id
+            # Atomic: single connection, single transaction for all writes
             conn = self._connect()
             try:
                 conn.execute(
-                    "UPDATE beliefs SET superseded_by=? WHERE id=?",
-                    (new_belief.id, old_id),
+                    "UPDATE beliefs SET valid_to=?, superseded_by=? WHERE id=?",
+                    (now, new_belief.id, old_id),
+                )
+                conn.execute(
+                    """INSERT INTO beliefs
+                       (id, statement, confidence, category, evidence,
+                        first_formed, last_reinforced, valid_from, valid_to,
+                        superseded_by, source_conversation_ids)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        new_belief.id, new_belief.statement, new_belief.confidence,
+                        new_belief.category.value, _json_dumps(new_belief.evidence),
+                        new_belief.first_formed, new_belief.last_reinforced,
+                        new_belief.valid_from, new_belief.valid_to,
+                        new_belief.superseded_by,
+                        _json_dumps(new_belief.source_conversation_ids),
+                    ),
                 )
                 conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
             finally:
                 conn.close()
+
+            # Update cache only after successful DB commit
+            old_belief.valid_to = now
+            old_belief.superseded_by = new_belief.id
+            del self._beliefs[old_id]
+            self._beliefs[new_belief.id] = new_belief
 
             self._log_state_change(
                 ChangeType.BELIEF_REVISED, "belief", old_id,

@@ -398,6 +398,7 @@ class AgentService:
         Returns:
             Dict with response, fast_path flag, and mood
         """
+        # ===== SETUP PHASE - Brief lock (mirrors chat_stream pattern) =====
         with self._agent_lock:
             # Handle /think command for System 1/2 switching
             if message.strip().startswith("/think"):
@@ -407,6 +408,22 @@ class AgentService:
             detected_action = detect_action_mode(message)
             effective_model = model_override
 
+            if not effective_model and detected_action:
+                effective_model = get_model_for_action(detected_action)
+                if effective_model:
+                    logger.info(f"[AgentService] Chat auto-selected model for {detected_action}: {effective_model}")
+
+            # Set model override if we have one
+            if effective_model:
+                self.agent.brain.set_model_override(effective_model)
+                logger.info(f"[AgentService] Using model: {effective_model}")
+
+            # Get references we need (agent is thread-safe for reads)
+            agent = self.agent
+            brain = self.agent.brain
+        # ===== END SETUP - Lock released, LLM call proceeds without blocking =====
+
+        try:
             # === Record real thought: processing begins ===
             _record_thought("analyzing", f"processing: {message[:60]}...", 0.7, "service")
 
@@ -443,175 +460,165 @@ class AgentService:
             except Exception:
                 pass
 
-            if not effective_model and detected_action:
-                effective_model = get_model_for_action(detected_action)
-                if effective_model:
-                    logger.info(f"[AgentService] Chat auto-selected model for {detected_action}: {effective_model}")
-                    _record_thought("connecting", f"action mode: {detected_action} -> {effective_model}", 0.5, "service")
+            _record_thought("connecting", f"action mode: {detected_action} -> {effective_model}", 0.5, "service") if detected_action and effective_model else None
 
-            # Set model override if we have one
-            if effective_model:
-                self.agent.brain.set_model_override(effective_model)
-                logger.info(f"[AgentService] Using model: {effective_model}")
+            # ===== SWARM MODE HANDLER (via MultiAgentOrchestrator) =====
+            if detected_action == "swarm":
+                logger.info(f"[AgentService] Multi-agent mode for: {message[:50]}...")
+                _record_thought("connecting", "activating multi-agent orchestrator", 0.8, "service")
 
-            try:
-                # ===== SWARM MODE HANDLER (via MultiAgentOrchestrator) =====
-                if detected_action == "swarm":
-                    logger.info(f"[AgentService] Multi-agent mode for: {message[:50]}...")
-                    _record_thought("connecting", "activating multi-agent orchestrator", 0.8, "service")
+                try:
+                    from aura.multi_agent.orchestrator import MultiAgentOrchestrator
 
-                    try:
-                        from aura.multi_agent.orchestrator import MultiAgentOrchestrator
+                    # Get or create orchestrator for this session
+                    if not hasattr(self, '_orchestrator') or self._orchestrator is None:
+                        tool_registry = getattr(agent, 'tool_registry', {})
+                        def llm_func(system_prompt, user_message):
+                            # Read model dynamically from brain's current override
+                            current_override = brain._model_override if hasattr(brain, '_model_override') else None
+                            return brain.think(user_message, system_prompt=system_prompt, use_history=False, model_override=current_override)
+                        self._orchestrator = MultiAgentOrchestrator(
+                            tool_registry=tool_registry,
+                            llm_func=llm_func,
+                        )
 
-                        # Get or create orchestrator for this session
-                        if not hasattr(self, '_orchestrator') or self._orchestrator is None:
-                            tool_registry = getattr(self.agent, 'tool_registry', {})
-                            def llm_func(system_prompt, user_message):
-                                # Read model dynamically from brain's current override
-                                current_override = self.agent.brain._model_override if hasattr(self.agent.brain, '_model_override') else None
-                                return self.agent.brain.think(user_message, system_prompt=system_prompt, use_history=False, model_override=current_override)
-                            self._orchestrator = MultiAgentOrchestrator(
-                                tool_registry=tool_registry,
-                                llm_func=llm_func,
-                            )
+                    # Optionally gather search context for real-time queries
+                    needs_search_keywords = [
+                        "news", "latest", "current", "recent", "today", "now",
+                        "update", "happening", "trending", "2024", "2025", "2026",
+                        "research", "developments", "breakthroughs", "announced"
+                    ]
+                    msg_lower = message.lower()
+                    query = message
+                    if any(kw in msg_lower for kw in needs_search_keywords):
+                        try:
+                            from aura.tools.web_search import WebSearchTool
+                            topic = msg_lower
+                            for trigger in ["swarm", "multi-agent", "multiple agents", "team research", "collaborative", "all agents", "agent team"]:
+                                topic = topic.replace(trigger, "").strip()
+                            topic = topic.strip(" :,.-")
+                            search_results = WebSearchTool().search(topic, num_results=8)
+                            if search_results.get("success") and search_results.get("results"):
+                                ctx = "\n".join([f"- {r.get('title','')}: {r.get('snippet','')}" for r in search_results["results"][:8]])
+                                query = f"{message}\n\nSearch context:\n{ctx}"
+                        except Exception as e:
+                            logger.warning(f"[AgentService] Swarm search error: {e}")
 
-                        # Optionally gather search context for real-time queries
-                        needs_search_keywords = [
-                            "news", "latest", "current", "recent", "today", "now",
-                            "update", "happening", "trending", "2024", "2025", "2026",
-                            "research", "developments", "breakthroughs", "announced"
-                        ]
-                        msg_lower = message.lower()
-                        query = message
-                        if any(kw in msg_lower for kw in needs_search_keywords):
-                            try:
-                                from aura.tools.web_search import WebSearchTool
-                                topic = msg_lower
-                                for trigger in ["swarm", "multi-agent", "multiple agents", "team research", "collaborative", "all agents", "agent team"]:
-                                    topic = topic.replace(trigger, "").strip()
-                                topic = topic.strip(" :,.-")
-                                search_results = WebSearchTool().search(topic, num_results=8)
-                                if search_results.get("success") and search_results.get("results"):
-                                    ctx = "\n".join([f"- {r.get('title','')}: {r.get('snippet','')}" for r in search_results["results"][:8]])
-                                    query = f"{message}\n\nSearch context:\n{ctx}"
-                            except Exception as e:
-                                logger.warning(f"[AgentService] Swarm search error: {e}")
-
-                        # Route through the proper orchestrator
-                        response = self._orchestrator.chat(query)
-
-                        return {
-                            "response": response,
-                            "fast_path": False,
-                            "mood": self._get_mood(),
-                            "model_used": effective_model or "multi-agent"
-                        }
-
-                    except Exception as e:
-                        logger.error(f"[AgentService] Multi-agent error: {e}")
-                        return {
-                            "response": f"Multi-agent system error: {e}. Falling back to single agent.",
-                            "fast_path": False,
-                            "mood": self._get_mood(),
-                            "model_used": effective_model
-                        }
-
-                # ===== DEEP RESEARCH HANDLER =====
-                if detected_action == "deep_research":
-                    _record_thought("analyzing", "initiating deep research pipeline...", 0.8, "service")
-                    from aura.tools.deep_research import DeepResearchTool
-                    deep_tool = DeepResearchTool()
-
-                    topic = message.lower()
-                    for trigger in ["deep research", "thorough research", "extensive research"]:
-                        topic = topic.replace(trigger, "").strip()
-                    topic = topic.strip(" on about for")
-
-                    result = deep_tool.research(topic, depth="deep")
-
-                    if result.get("success"):
-                        synthesis_prompt = f"""Summarize this research on '{topic}':
-{result.get('content', '')[:8000]}
-
-Provide key findings and cite sources."""
-                        synthesized = self.agent.brain.think(synthesis_prompt, model_override=effective_model)
-                        response = f"## Deep Research: {topic}\n\n{synthesized}\n\n---\n*{result.get('summary', '')}*"
-                    else:
-                        response = f"Research failed: {result.get('error', 'Unknown error')}"
+                    # Route through the proper orchestrator
+                    response = self._orchestrator.chat(query)
 
                     return {
                         "response": response,
                         "fast_path": False,
                         "mood": self._get_mood(),
-                        "model_used": effective_model or "deep_research"
+                        "model_used": effective_model or "multi-agent"
                     }
 
-                # Screen context injection (Phase 3D)
-                screen_hint = ""
-                try:
-                    from aura.tools.screenpipe import get_screenpipe_client
-                    sp = get_screenpipe_client()
-                    if sp.is_available():
-                        ctx = sp.get_screen_context(minutes=1, max_chars=500)
-                        if ctx.get("available") and ctx.get("current_app"):
-                            screen_hint = (
-                                f"\n[Screen context: user is in {ctx['current_app']}"
-                                + (f" — {ctx['current_window']}" if ctx.get("current_window") else "")
-                                + (". Error visible on screen." if ctx.get("has_errors") else "")
-                                + "]"
-                            )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error(f"[AgentService] Multi-agent error: {e}")
+                    return {
+                        "response": f"Multi-agent system error: {e}. Falling back to single agent.",
+                        "fast_path": False,
+                        "mood": self._get_mood(),
+                        "model_used": effective_model
+                    }
 
-                enriched_msg = message + screen_hint if screen_hint else message
+            # ===== DEEP RESEARCH HANDLER =====
+            if detected_action == "deep_research":
+                _record_thought("analyzing", "initiating deep research pipeline...", 0.8, "service")
+                from aura.tools.deep_research import DeepResearchTool
+                deep_tool = DeepResearchTool()
 
-                # Use agent.chat() which has direct handlers for search/crypto
-                response = self.agent.chat(enriched_msg, speak=speak)
+                topic = message.lower()
+                for trigger in ["deep research", "thorough research", "extensive research"]:
+                    topic = topic.replace(trigger, "").strip()
+                topic = topic.strip(" on about for")
 
-                # Truth Spine: classify response and tag to VerifiedMemory (non-blocking)
-                # Uses module-level singleton to avoid per-call disk reads.
-                try:
-                    _verified_mem = _get_truth_spine()
-                    _resp_lower = response.lower()
-                    import re as _re
-                    # FACT: actual URL present (not just the word "verified")
-                    _has_url = bool(_re.search(r'https?://\S+', response))
-                    _has_artifact = any(m in response for m in ["sha256:", "✓"])
-                    if _has_url or _has_artifact:
-                        _tier = MemoryTier.BELIEF  # URL ≠ verified fact; downgrade to BELIEF
-                        _verified_mem.store_belief(
-                            content=response[:500],
-                            source="chat",
-                            reasoning="Response cites a URL or artifact (unverified by agent)"
-                        )
-                    elif any(m in _resp_lower for m in ["i think", "i believe", "likely", "probably", "it seems"]):
-                        _tier = MemoryTier.BELIEF
-                        _verified_mem.store_belief(
-                            content=response[:500],
-                            source="chat",
-                            reasoning="Response contains inference or belief language"
-                        )
-                    else:
-                        _tier = MemoryTier.SPECULATION
-                        _verified_mem.store_speculation(
-                            content=response[:500],
-                            source="chat",
-                            reason="Unverified LLM output"
-                        )
-                    logger.debug(f"[TruthSpine] Response classified as {_tier.value}")
-                except Exception as _ts_err:
-                    logger.debug(f"[TruthSpine] Classification error: {_ts_err}")
+                result = deep_tool.research(topic, depth="deep")
+
+                if result.get("success"):
+                    synthesis_prompt = f"""Summarize this research on '{topic}':
+{result.get('content', '')[:8000]}
+
+Provide key findings and cite sources."""
+                    synthesized = brain.think(synthesis_prompt, model_override=effective_model)
+                    response = f"## Deep Research: {topic}\n\n{synthesized}\n\n---\n*{result.get('summary', '')}*"
+                else:
+                    response = f"Research failed: {result.get('error', 'Unknown error')}"
 
                 return {
                     "response": response,
-                    "fast_path": self._was_fast_path(message),
+                    "fast_path": False,
                     "mood": self._get_mood(),
-                    "model_used": self.agent.brain.get_last_model_used()
+                    "model_used": effective_model or "deep_research"
                 }
-            finally:
-                # Clear model override after request
-                if effective_model:
-                    self.agent.brain.set_model_override(None)
+
+            # Screen context injection (Phase 3D)
+            screen_hint = ""
+            try:
+                from aura.tools.screenpipe import get_screenpipe_client
+                sp = get_screenpipe_client()
+                if sp.is_available():
+                    ctx = sp.get_screen_context(minutes=1, max_chars=500)
+                    if ctx.get("available") and ctx.get("current_app"):
+                        screen_hint = (
+                            f"\n[Screen context: user is in {ctx['current_app']}"
+                            + (f" — {ctx['current_window']}" if ctx.get("current_window") else "")
+                            + (". Error visible on screen." if ctx.get("has_errors") else "")
+                            + "]"
+                        )
+            except Exception:
+                pass
+
+            enriched_msg = message + screen_hint if screen_hint else message
+
+            # Use agent.chat() which has direct handlers for search/crypto
+            response = agent.chat(enriched_msg, speak=speak)
+
+            # Truth Spine: classify response and tag to VerifiedMemory (non-blocking)
+            # Uses module-level singleton to avoid per-call disk reads.
+            try:
+                _verified_mem = _get_truth_spine()
+                _resp_lower = response.lower()
+                import re as _re
+                # FACT: actual URL present (not just the word "verified")
+                _has_url = bool(_re.search(r'https?://\S+', response))
+                _has_artifact = any(m in response for m in ["sha256:", "✓"])
+                if _has_url or _has_artifact:
+                    _tier = MemoryTier.BELIEF  # URL ≠ verified fact; downgrade to BELIEF
+                    _verified_mem.store_belief(
+                        content=response[:500],
+                        source="chat",
+                        reasoning="Response cites a URL or artifact (unverified by agent)"
+                    )
+                elif any(m in _resp_lower for m in ["i think", "i believe", "likely", "probably", "it seems"]):
+                    _tier = MemoryTier.BELIEF
+                    _verified_mem.store_belief(
+                        content=response[:500],
+                        source="chat",
+                        reasoning="Response contains inference or belief language"
+                    )
+                else:
+                    _tier = MemoryTier.SPECULATION
+                    _verified_mem.store_speculation(
+                        content=response[:500],
+                        source="chat",
+                        reason="Unverified LLM output"
+                    )
+                logger.debug(f"[TruthSpine] Response classified as {_tier.value}")
+            except Exception as _ts_err:
+                logger.debug(f"[TruthSpine] Classification error: {_ts_err}")
+
+            return {
+                "response": response,
+                "fast_path": self._was_fast_path(message),
+                "mood": self._get_mood(),
+                "model_used": brain.get_last_model_used()
+            }
+        finally:
+            # Clear model override after request
+            if effective_model:
+                brain.set_model_override(None)
 
     def chat_stream(self, message: str, model_override: Optional[str] = None, action_mode: Optional[str] = None):
         """Stream a chat response from the agent.
