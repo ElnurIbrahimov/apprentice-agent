@@ -8,6 +8,10 @@ from api.auth import require_api_key
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
+# Fallback server-side PKCE verifier store (keyed by OAuth state).
+# Used only if aura.auth.chatgpt_oauth.store_pkce_verifier is unavailable.
+_pkce_store: dict[str, str] = {}
+
 
 class ChatGPTTokenRequest(BaseModel):
     refresh: str
@@ -65,7 +69,7 @@ async def chatgpt_set_token(body: ChatGPTTokenRequest):
         return {"success": False, "error": "Failed to set token — check server logs"}
 
 
-@router.post("/chatgpt/login")
+@router.post("/chatgpt/login", dependencies=[Depends(require_api_key)])
 async def chatgpt_login_url():
     """Get the ChatGPT OAuth login URL (for browser-based login).
 
@@ -97,10 +101,19 @@ async def chatgpt_login_url():
         }
         url = f"{AUTHORIZE_URL}?{urlencode(params)}"
 
+        # Store verifier server-side keyed by state for the callback to use.
+        # SECURITY: Never return the PKCE verifier over the network — it must
+        # stay server-side. The callback handler retrieves it by state.
+        try:
+            from aura.auth.chatgpt_oauth import store_pkce_verifier
+            store_pkce_verifier(state, verifier)
+        except ImportError:
+            # Fallback: store in a module-level dict (single-process only)
+            _pkce_store[state] = verifier
+
         return {
             "url": url,
             "state": state,
-            "verifier": verifier,
             "port": CALLBACK_PORT,
             "instructions": "Open the URL in a browser. After login, the callback "
                             f"server on port {CALLBACK_PORT} will capture the token.",

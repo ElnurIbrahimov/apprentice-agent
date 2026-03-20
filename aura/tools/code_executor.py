@@ -307,6 +307,9 @@ _stderr_capture = _io.StringIO()
 
 try:
     with _redirect_stdout(_stdout_capture), _redirect_stderr(_stderr_capture):
+        # SECURITY: Remove wrapper internals from namespace before user code runs
+        # to prevent escalation via __aura_stdout_cap__ -> sys -> os
+        del _io, _redirect_stdout, _redirect_stderr
         # User code starts here
 {self._indent_code(code, 8)}
         # User code ends here

@@ -68,6 +68,7 @@ interface AuraStore {
   mdlCloudList: string[];
   mdlLocalList: string[];
   mdlChatgptList: string[];
+  mdlDirectList: string[];
   mdlListsLoaded: boolean;
 
   // Actions
@@ -90,7 +91,7 @@ interface AuraStore {
   setCustomInstructions: (text: string) => void;
   setUserName: (name: string) => void;
   setModel: (feature: string, model: string | null) => void;
-  setMdlLists: (cloud: string[], local: string[], chatgpt?: string[]) => void;
+  setMdlLists: (cloud: string[], local: string[], chatgpt?: string[], direct?: string[]) => void;
   loadModels: () => Promise<void>;
   clearAll: () => void;
   getModel: (feature: string) => string | null;
@@ -111,7 +112,7 @@ export const useStore = create<AuraStore>((set, get) => {
     const savedFeatureModels = d?.featureModels || {};
     // If cached lists exist, pre-populate so UI doesn't flash empty
     if (cached) {
-      const allAvailable = [...(cached.cloud || []), ...(cached.local || []), ...(cached.chatgpt || [])];
+      const allAvailable = [...(cached.cloud || []), ...(cached.local || []), ...(cached.chatgpt || []), ...(cached.direct || [])];
       // Prune stale feature assignments — remove models no longer available
       const pruned: Record<string, string> = {};
       for (const [k, v] of Object.entries(savedFeatureModels)) {
@@ -122,6 +123,7 @@ export const useStore = create<AuraStore>((set, get) => {
         mdlCloudList: cached.cloud || [],
         mdlLocalList: cached.local || [],
         mdlChatgptList: cached.chatgpt || [],
+        mdlDirectList: cached.direct || [],
         mdlListsLoaded: true,
       });
       // Persist pruned if different
@@ -179,6 +181,7 @@ export const useStore = create<AuraStore>((set, get) => {
     mdlCloudList: [],
     mdlLocalList: [],
     mdlChatgptList: [],
+    mdlDirectList: [],
     mdlListsLoaded: false,
 
     setWs: (ws) => set({ ws }),
@@ -239,14 +242,14 @@ export const useStore = create<AuraStore>((set, get) => {
       set({ featureModels });
     },
 
-    setMdlLists: (mdlCloudList, mdlLocalList, mdlChatgptList = []) => {
-      set({ mdlCloudList, mdlLocalList, mdlChatgptList, mdlListsLoaded: true });
+    setMdlLists: (mdlCloudList, mdlLocalList, mdlChatgptList = [], mdlDirectList = []) => {
+      set({ mdlCloudList, mdlLocalList, mdlChatgptList, mdlDirectList, mdlListsLoaded: true });
       // Cache to storage for fast restore on next open
       ext?.storage?.local?.set({
-        cachedModelLists: { cloud: mdlCloudList, local: mdlLocalList, chatgpt: mdlChatgptList },
+        cachedModelLists: { cloud: mdlCloudList, local: mdlLocalList, chatgpt: mdlChatgptList, direct: mdlDirectList },
       });
       // Prune stale feature model assignments
-      const allAvailable = [...mdlCloudList, ...mdlLocalList, ...mdlChatgptList];
+      const allAvailable = [...mdlCloudList, ...mdlLocalList, ...mdlChatgptList, ...mdlDirectList];
       const fm = { ...get().featureModels };
       let changed = false;
       for (const [k, v] of Object.entries(fm)) {
@@ -263,10 +266,11 @@ export const useStore = create<AuraStore>((set, get) => {
 
     loadModels: async () => {
       const s = get();
-      if (s.mdlListsLoaded && (s.mdlCloudList.length || s.mdlLocalList.length || s.mdlChatgptList.length)) return;
+      if (s.mdlListsLoaded && (s.mdlCloudList.length || s.mdlLocalList.length || s.mdlChatgptList.length || s.mdlDirectList.length)) return;
       let cloud: string[] = [];
       let local: string[] = [];
       let chatgpt: string[] = [];
+      let direct: string[] = [];
 
       // 1. Try Ollama for local/cloud models
       try {
@@ -276,13 +280,14 @@ export const useStore = create<AuraStore>((set, get) => {
         local = all.filter(n => !n.includes(':cloud'));
       } catch { /* Ollama not available */ }
 
-      // 2. Try backend for models (also gets ChatGPT list)
+      // 2. Try backend for models (also gets ChatGPT + direct API lists)
       try {
         const d = await fetch(`${HTTP}/api/models/available`, { signal: AbortSignal.timeout(3000), headers: API_KEY ? { 'X-API-Key': API_KEY } : {} }).then(r => r.json());
         // Merge backend models with Ollama models (Ollama may have more)
         const backendCloud = (d.cloud || []).map((m: any) => m.name || m);
         const backendLocal = (d.local || []).map((m: any) => m.name || m);
         chatgpt = (d.chatgpt || []).map((m: any) => m.name || m);
+        direct = (d.direct_api || []).map((m: any) => m.name || m);
         // Add any backend models not already in Ollama list
         for (const m of backendCloud) if (!cloud.includes(m)) cloud.push(m);
         for (const m of backendLocal) if (!local.includes(m)) local.push(m);
@@ -300,7 +305,7 @@ export const useStore = create<AuraStore>((set, get) => {
         ];
       }
 
-      get().setMdlLists(cloud, local, chatgpt);
+      get().setMdlLists(cloud, local, chatgpt, direct);
     },
 
     clearAll: () => {

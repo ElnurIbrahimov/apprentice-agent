@@ -187,6 +187,11 @@ class MetacognitiveEngine:
 
         Returns updated capability scores for all domains.
         """
+        with self._lock:
+            return self._assess_capabilities_unlocked()
+
+    def _assess_capabilities_unlocked(self) -> Dict[str, CapabilityScore]:
+        """Internal implementation — caller must hold self._lock."""
         now = datetime.now().isoformat()
 
         # Gather signals from each source
@@ -431,7 +436,7 @@ class MetacognitiveEngine:
         if goal.target_score > goal.current_score:
             progress_range = goal.target_score - goal.current_score
             actual_progress = after_score - goal.current_score
-            goal.progress = max(0.0, min(1.0, actual_progress / progress_range))
+            goal.progress = max(0.0, min(1.0, actual_progress / progress_range)) if progress_range > 0 else 1.0
 
         # Complete goal if target reached or too many attempts
         if after_score >= goal.target_score:

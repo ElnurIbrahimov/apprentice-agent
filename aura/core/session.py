@@ -68,10 +68,9 @@ class AgenticSession:
         try:
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, default=str, ensure_ascii=False)
-            # Atomic rename (works on same filesystem)
-            if target.exists():
-                target.unlink()
-            tmp.rename(target)
+            # Atomic replace (safe on Windows — no unlink gap)
+            import os as _os
+            _os.replace(str(tmp), str(target))
             self._dirty = False
             self._save_counter += 1
         except Exception as e:

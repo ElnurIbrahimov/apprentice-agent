@@ -4,6 +4,7 @@ Evaluation Cache — SHA256-keyed memoization for (candidate, example) pairs.
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
@@ -44,9 +45,19 @@ class EvaluationCache:
 
     def save(self):
         if self._cache_path:
+            import tempfile
             self._cache_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self._cache_path, 'w') as f:
-                json.dump(self._memory, f)
+            fd, tmp_path = tempfile.mkstemp(dir=str(self._cache_path.parent), suffix=".tmp")
+            try:
+                with os.fdopen(fd, 'w') as f:
+                    json.dump(self._memory, f)
+                os.replace(tmp_path, str(self._cache_path))
+            except Exception:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
 
     @property
     def stats(self) -> Dict[str, int]:

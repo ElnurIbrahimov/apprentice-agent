@@ -12,7 +12,7 @@ messages via the existing proactive_messages system.
 """
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
@@ -25,7 +25,7 @@ class EmotionAction:
     reason: str        # Why this action was triggered
     priority: float    # 0-1
     cooldown: float    # Seconds before this type can fire again
-    context: Dict[str, Any]  # Extra data for message generation (topics, weak_areas, etc.)
+    context: Dict[str, Any] = field(default_factory=dict)  # Extra data for message generation
 
 
 class EmotionActionBridge:

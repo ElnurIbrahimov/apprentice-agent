@@ -108,7 +108,7 @@ def _matches_glob_filter(path: Path, glob_filter: Optional[str]) -> bool:
     """Check if file matches a glob filter like '*.py' or '**/*.tsx'."""
     if not glob_filter:
         return True
-    return fnmatch(path.name, glob_filter)
+    return fnmatch(str(path), glob_filter) or fnmatch(path.name, glob_filter)
 
 
 def _walk_files(root: Path, file_type: Optional[str] = None,

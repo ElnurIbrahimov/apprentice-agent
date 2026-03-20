@@ -23,7 +23,10 @@ async def require_api_key(x_api_key: str = Header(default="")) -> str:
     """FastAPI dependency: validates X-API-Key header."""
     # If API-level auth is disabled (AURA_API_AUTH_ENABLED=false), allow all.
     # Consistent with APIKeyAuthMiddleware and verify_api_key_ws.
-    api_auth_enabled = os.environ.get("AURA_API_AUTH_ENABLED", "false").lower() in ("true", "1", "yes")
+    api_auth_enabled = os.environ.get("AURA_API_AUTH_ENABLED", "true").lower() in ("true", "1", "yes")
+    if api_auth_enabled and not os.environ.get("AURA_API_KEY"):
+        logger.warning("AURA_API_AUTH_ENABLED is true but no AURA_API_KEY set — auth disabled")
+        api_auth_enabled = False
     if not api_auth_enabled:
         return ""
 
@@ -58,8 +61,8 @@ def verify_api_key_ws(key: str) -> bool:
     """
     # If the API-level auth flag is not enabled, allow all WS connections.
     # This matches APIKeyAuthMiddleware which reads AURA_API_AUTH_ENABLED
-    # (defaults to "false" when unset — see aura/config.py API_AUTH_ENABLED).
-    api_auth_enabled = os.environ.get("AURA_API_AUTH_ENABLED", "false").lower() in ("true", "1", "yes")
+    # (defaults to "true" when unset — consistent with require_api_key).
+    api_auth_enabled = os.environ.get("AURA_API_AUTH_ENABLED", "true").lower() in ("true", "1", "yes")
     if not api_auth_enabled:
         return True
 

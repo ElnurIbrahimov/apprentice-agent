@@ -4,13 +4,10 @@ import json
 import math
 from typing import List, Dict, Optional
 
-_CHARS_PER_TOKEN = 3.8
-
 def estimate_tokens(text: str) -> int:
-    """Estimate token count from text using char-based heuristic."""
-    if not text:
-        return 0
-    return max(1, int(len(text) / _CHARS_PER_TOKEN))
+    """Estimate token count — delegates to the authoritative token_manager."""
+    from aura.core.token_manager import estimate_tokens as _est
+    return _est(text)
 
 def estimate_messages_tokens(messages: List[Dict]) -> int:
     """Estimate total tokens across a message list."""

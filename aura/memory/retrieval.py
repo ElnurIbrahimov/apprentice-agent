@@ -250,7 +250,7 @@ def retrieve(
         if encoder is not None:
             try:
                 pairs = [(query, c.record.content[:512]) for c in top_candidates]
-                scores = encoder.predict(pairs)
+                scores = encoder.predict(pairs, show_progress_bar=False)
                 for i, score in enumerate(scores):
                     top_candidates[i].rerank_score = float(score)
                 reranked = True

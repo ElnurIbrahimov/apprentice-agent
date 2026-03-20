@@ -49,7 +49,8 @@ def load_env():
                     if "=" in line and not line.startswith("#"):
                         key, value = line.split("=", 1)
                         value = value.strip().strip('"').strip("'")
-                        os.environ[key.strip()] = value
+                        if key.strip() not in os.environ:
+                            os.environ[key.strip()] = value
 
 
 async def main():

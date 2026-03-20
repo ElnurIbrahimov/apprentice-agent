@@ -77,6 +77,16 @@ def _build_model_list(current_model: str) -> list:
     except ImportError:
         pass
 
+    # Direct API provider models (if keys are configured)
+    try:
+        from aura.providers import list_all_provider_models
+        for m, provider_name in list_all_provider_models():
+            if m not in seen:
+                seen.add(m)
+                items.append((m, provider_name, "api"))
+    except ImportError:
+        pass
+
     # All Ollama local models not already listed
     all_models = _fetch_all_models()
     for m in all_models:
@@ -204,6 +214,10 @@ def _pick_model_interactive(current_model: str) -> "str | None":
                     fragments.append(("class:role", f" {role:<12s}"))
                 elif role == "cloud":
                     fragments.append(("class:cloud", f" {'cloud':<12s}"))
+                elif role == "chatgpt":
+                    fragments.append(("class:cloud", f" {'chatgpt':<12s}"))
+                elif ctx == "api":
+                    fragments.append(("class:api", f" {role:<12s}"))
                 else:
                     fragments.append(("class:local", f" {'local':<12s}"))
 
@@ -322,6 +336,7 @@ def _pick_model_interactive(current_model: str) -> "str | None":
         "model": "#cccccc",
         "role": "bold yellow",
         "cloud": "bold cyan",
+        "api": "bold magenta",
         "local": "#888888",
         "hint": "bold cyan",
     })

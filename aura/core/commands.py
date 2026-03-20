@@ -271,9 +271,9 @@ def cmd_commit(args) -> int:
     if getattr(args, 'all', False):
         git.add(cwd, files=".")
 
-    # Get diff of staged changes
-    staged_diff = git.diff(cwd)
-    diff_text = staged_diff.get("diff", "")
+    # Get diff of staged changes (--cached shows staged, not unstaged)
+    staged_result = git._run_git(["diff", "--cached"], cwd) if hasattr(git, '_run_git') else git.diff(cwd)
+    diff_text = staged_result.get("output", staged_result.get("diff", ""))
 
     if not diff_text:
         print("No staged changes. Use 'git add' first or pass --all.")

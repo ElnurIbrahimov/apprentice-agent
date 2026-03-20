@@ -56,7 +56,7 @@ def test_render_collapsed():
     render_collapsed(console, s)
     output = console.file.getvalue()
     assert "shell" in output
-    assert "expand" in output.lower()
+    assert "ls output" in output
 
 def test_render_expanded():
     console = Console(file=StringIO(), force_terminal=True, width=80)

@@ -1,8 +1,22 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useStore } from '../store';
-import { User, FileText, Sparkles, RotateCcw, Save, Check, Server, Key } from 'lucide-react';
+import { User, FileText, Sparkles, RotateCcw, Save, Check, Server, Key, ChevronDown, ChevronRight, Zap, Eye, EyeOff } from 'lucide-react';
 import { getBackendUrl, setBackendUrl, setApiKey, API_KEY } from '../api';
 import { connectWS, fetchStatus, resetWsRetry } from '../ws';
+
+// Direct API provider definitions
+const API_PROVIDERS = [
+  { name: 'anthropic', display: 'Anthropic', placeholder: 'sk-ant-...' },
+  { name: 'openai', display: 'OpenAI', placeholder: 'sk-...' },
+  { name: 'gemini', display: 'Google Gemini', placeholder: 'AIza...' },
+  { name: 'grok', display: 'xAI (Grok)', placeholder: 'xai-...' },
+  { name: 'perplexity', display: 'Perplexity', placeholder: 'pplx-...' },
+  { name: 'deepseek', display: 'DeepSeek', placeholder: 'sk-...' },
+  { name: 'minimax', display: 'MiniMax', placeholder: 'eyJ...' },
+  { name: 'qwen', display: 'Qwen (Alibaba)', placeholder: 'sk-...' },
+  { name: 'kimi', display: 'Kimi (Moonshot)', placeholder: 'sk-...' },
+  { name: 'glm', display: 'GLM (Zhipu)', placeholder: '' },
+] as const;
 
 const STYLE_PRESETS: { label: string; icon: string; instructions: string }[] = [
   {
@@ -236,6 +250,80 @@ export default function SettingsPanel() {
     }
   };
 
+  // API Providers state
+  const [providerKeys, setProviderKeys] = useState<Record<string, string>>({});
+  const [providerStatus, setProviderStatus] = useState<Record<string, boolean>>({});
+  const [providerExpanded, setProviderExpanded] = useState<string | null>(null);
+  const [providerShowKey, setProviderShowKey] = useState<Record<string, boolean>>({});
+  const [providerSaving, setProviderSaving] = useState<string | null>(null);
+  const [providerMsg, setProviderMsg] = useState<Record<string, { ok: boolean; text: string }>>({});
+
+  // Load provider status on mount
+  useEffect(() => {
+    const fetchProviders = async () => {
+      try {
+        const base = getBackendUrl().replace(/\/+$/, '');
+        const headers: Record<string, string> = {};
+        if (API_KEY) headers['X-API-Key'] = API_KEY;
+        const r = await fetch(`${base}/api/providers`, { headers, signal: AbortSignal.timeout(5000) });
+        if (r.ok) {
+          const data = await r.json();
+          const statusMap: Record<string, boolean> = {};
+          for (const p of data.providers || []) {
+            statusMap[p.name] = p.configured;
+          }
+          setProviderStatus(statusMap);
+        }
+      } catch { /* ignore */ }
+    };
+    fetchProviders();
+  }, []);
+
+  const handleSaveProviderKey = useCallback(async (name: string) => {
+    const key = providerKeys[name]?.trim();
+    if (!key) return;
+    setProviderSaving(name);
+    setProviderMsg((prev) => ({ ...prev, [name]: undefined as any }));
+    try {
+      const base = getBackendUrl().replace(/\/+$/, '');
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (API_KEY) headers['X-API-Key'] = API_KEY;
+      const r = await fetch(`${base}/api/providers/${name}/key`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ key }),
+        signal: AbortSignal.timeout(10000),
+      });
+      const data = await r.json();
+      if (data.ok) {
+        setProviderStatus((prev) => ({ ...prev, [name]: true }));
+        setProviderKeys((prev) => ({ ...prev, [name]: '' }));
+        setProviderMsg((prev) => ({ ...prev, [name]: { ok: true, text: 'Key saved' } }));
+        // Reload models to pick up newly available provider models
+        useStore.getState().loadModels();
+      } else {
+        setProviderMsg((prev) => ({ ...prev, [name]: { ok: false, text: 'Failed to save' } }));
+      }
+    } catch (e: any) {
+      setProviderMsg((prev) => ({ ...prev, [name]: { ok: false, text: e.message || 'Request failed' } }));
+    } finally {
+      setProviderSaving(null);
+      setTimeout(() => setProviderMsg((prev) => ({ ...prev, [name]: undefined as any })), 4000);
+    }
+  }, [providerKeys]);
+
+  const handleRemoveProviderKey = useCallback(async (name: string) => {
+    try {
+      const base = getBackendUrl().replace(/\/+$/, '');
+      const headers: Record<string, string> = {};
+      if (API_KEY) headers['X-API-Key'] = API_KEY;
+      await fetch(`${base}/api/providers/${name}/key`, { method: 'DELETE', headers, signal: AbortSignal.timeout(10000) });
+      setProviderStatus((prev) => ({ ...prev, [name]: false }));
+      setProviderMsg((prev) => ({ ...prev, [name]: { ok: true, text: 'Key removed' } }));
+      setTimeout(() => setProviderMsg((prev) => ({ ...prev, [name]: undefined as any })), 4000);
+    } catch { /* ignore */ }
+  }, []);
+
   const charCount = localInstructions.length;
   const isDirty = localName !== userName || localInstructions !== customInstructions;
 
@@ -435,6 +523,143 @@ export default function SettingsPanel() {
             >
               {gptSaving ? 'Saving...' : gptStatus === 'ok' ? 'Token Saved' : 'Save Token to Server'}
             </button>
+          </div>
+        </section>
+
+        {/* Section: API Providers */}
+        <section>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <Zap size={16} style={{ color: 'var(--pl)' }} />
+            <h3 style={{ margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--fg)', letterSpacing: '0.03em' }}>
+              API PROVIDERS
+            </h3>
+            <span style={{ fontSize: 10, color: 'var(--fg3)', marginLeft: 'auto' }}>
+              {Object.values(providerStatus).filter(Boolean).length} configured
+            </span>
+          </div>
+          <p style={{ margin: '0 0 10px', fontSize: 11, color: 'var(--fg2)' }}>
+            Add API keys for direct model access. Models appear in the picker once a key is set.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {API_PROVIDERS.map((prov) => {
+              const isExpanded = providerExpanded === prov.name;
+              const isConfigured = providerStatus[prov.name] || false;
+              const isSaving = providerSaving === prov.name;
+              const msg = providerMsg[prov.name];
+              const showKey = providerShowKey[prov.name] || false;
+              return (
+                <div key={prov.name} style={{
+                  border: '1px solid var(--b2)',
+                  borderRadius: 8,
+                  background: 'var(--glass)',
+                  overflow: 'hidden',
+                }}>
+                  <button
+                    onClick={() => setProviderExpanded(isExpanded ? null : prov.name)}
+                    style={{
+                      width: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '8px 12px',
+                      fontSize: 12,
+                      fontWeight: 500,
+                      border: 'none',
+                      background: 'transparent',
+                      color: 'var(--fg)',
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                      textAlign: 'left',
+                    }}
+                  >
+                    {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                    <span style={{ flex: 1 }}>{prov.display}</span>
+                    <span style={{
+                      fontSize: 9,
+                      padding: '2px 6px',
+                      borderRadius: 10,
+                      background: isConfigured ? 'rgba(52, 211, 153, 0.15)' : 'rgba(148, 163, 184, 0.1)',
+                      color: isConfigured ? '#34d399' : 'var(--fg3)',
+                      fontWeight: 600,
+                    }}>
+                      {isConfigured ? 'Active' : 'Not set'}
+                    </span>
+                  </button>
+                  {isExpanded && (
+                    <div style={{ padding: '0 12px 10px' }}>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <div style={{ position: 'relative', flex: 1 }}>
+                          <input
+                            type={showKey ? 'text' : 'password'}
+                            value={providerKeys[prov.name] || ''}
+                            onChange={(e) => setProviderKeys((prev) => ({ ...prev, [prov.name]: e.target.value }))}
+                            placeholder={prov.placeholder || 'Paste API key'}
+                            maxLength={500}
+                            style={{ ...inputStyle, fontSize: 11, fontFamily: 'monospace', paddingRight: 32 }}
+                            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--pl)')}
+                            onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--b2)')}
+                          />
+                          <button
+                            onClick={() => setProviderShowKey((prev) => ({ ...prev, [prov.name]: !showKey }))}
+                            style={{
+                              position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)',
+                              background: 'none', border: 'none', cursor: 'pointer', padding: 2,
+                              color: 'var(--fg3)',
+                            }}
+                          >
+                            {showKey ? <EyeOff size={13} /> : <Eye size={13} />}
+                          </button>
+                        </div>
+                        <button
+                          onClick={() => handleSaveProviderKey(prov.name)}
+                          disabled={isSaving || !(providerKeys[prov.name]?.trim())}
+                          style={{
+                            padding: '7px 12px',
+                            fontSize: 11,
+                            fontWeight: 600,
+                            borderRadius: 6,
+                            border: 'none',
+                            background: providerKeys[prov.name]?.trim()
+                              ? 'linear-gradient(135deg, var(--p), var(--pl))'
+                              : 'var(--glass)',
+                            color: providerKeys[prov.name]?.trim() ? 'white' : 'var(--fg3)',
+                            cursor: isSaving ? 'wait' : providerKeys[prov.name]?.trim() ? 'pointer' : 'default',
+                            fontFamily: 'inherit',
+                            whiteSpace: 'nowrap',
+                            opacity: !providerKeys[prov.name]?.trim() ? 0.5 : 1,
+                          }}
+                        >
+                          {isSaving ? '...' : 'Save'}
+                        </button>
+                      </div>
+                      {isConfigured && (
+                        <button
+                          onClick={() => handleRemoveProviderKey(prov.name)}
+                          style={{
+                            marginTop: 6,
+                            padding: '4px 10px',
+                            fontSize: 10,
+                            border: '1px solid rgba(248, 113, 113, 0.3)',
+                            borderRadius: 5,
+                            background: 'transparent',
+                            color: '#f87171',
+                            cursor: 'pointer',
+                            fontFamily: 'inherit',
+                          }}
+                        >
+                          Remove key
+                        </button>
+                      )}
+                      {msg && (
+                        <p style={{ margin: '6px 0 0', fontSize: 10, color: msg.ok ? '#34d399' : '#f87171' }}>
+                          {msg.text}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </section>
 

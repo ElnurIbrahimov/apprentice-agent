@@ -165,7 +165,7 @@ except Exception as _e:
     _safe_import_error("MarketplaceTool", _e)
 
 # RegexBuilderTool removed — LLMs handle regex natively (2026-03-18)
-RegexBuilderTool = None
+# RegexBuilderTool — removed
 
 # ---------------------------------------------------------------------------
 #  Git
@@ -178,7 +178,6 @@ except Exception as _e:
 
 # ---------------------------------------------------------------------------
 # PersonaPlex removed — using external voice provider
-PersonaPlexTool = None
 
 # ---------------------------------------------------------------------------
 #  Tool Contract (ToolResult, ToolSpec, etc.)
@@ -195,7 +194,6 @@ except Exception as _e:
     _safe_import_error("ToolResult/ToolSpec/ToolRegistry", _e)
 
 # SesameTTS removed — using external voice provider
-SesameTTS = None
 SESAME_AVAILABLE = False
 
 # ---------------------------------------------------------------------------
@@ -208,10 +206,7 @@ except Exception as _e:
     get_voice_manager = None
     _safe_import_error("VoiceManager/get_voice_manager", _e)
 
-# ClawdbotTool removed — vaporware CLI, channels/ system replaced it (2026-03-18)
-ClawdbotTool = None
-clawdbot = None
-clawdbot_send = None
+# ClawdbotTool removed (2026-03-18)
 
 # ---------------------------------------------------------------------------
 #  EvoEmo
@@ -508,8 +503,7 @@ except Exception as _e:
     WindowsControlTool = None
     _safe_import_error("WindowsControlTool", _e)
 
-# HomeAssistantTool removed — no HASS instance configured (2026-03-18)
-HomeAssistantTool = None
+# HomeAssistantTool removed (2026-03-18)
 
 try:
     from .task_scheduler import TaskSchedulerTool
@@ -517,20 +511,12 @@ except Exception as _e:
     TaskSchedulerTool = None
     _safe_import_error("TaskSchedulerTool", _e)
 
-# DiscordTool removed — no bot token configured, unused (2026-03-18)
-DiscordTool = None
-
-# SlackTool removed — no bot token configured, unused (2026-03-18)
-SlackTool = None
-
-# LocalImageGenTool removed — duplicate of image_gen.py (2026-03-18)
-LocalImageGenTool = None
+# DiscordTool, SlackTool, LocalImageGenTool removed (2026-03-18)
 
 # ---------------------------------------------------------------------------
 #  Tier 3 Moonshot
 # ---------------------------------------------------------------------------
-# AmbientAudioTool removed — experimental stub, never called (2026-03-18)
-AmbientAudioTool = None
+# AmbientAudioTool removed (2026-03-18)
 
 try:
     from .predictive_tasks import PredictiveTaskTool

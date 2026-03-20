@@ -1,7 +1,12 @@
 """Screenshot tool for capturing screen images."""
 
-import mss
-import mss.tools
+try:
+    import mss
+    import mss.tools
+    MSS_AVAILABLE = True
+except ImportError:
+    mss = None
+    MSS_AVAILABLE = False
 from pathlib import Path
 from datetime import datetime
 from typing import Optional

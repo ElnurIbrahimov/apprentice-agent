@@ -27,10 +27,13 @@ import math
 import time
 import uuid
 import json
+import hashlib
+import os
 import logging
 from collections import deque
 from enum import Enum
 from copy import deepcopy
+from pathlib import Path
 from typing import List, Dict, Any, Optional, Callable, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -227,6 +230,12 @@ class MCTSConfig:
         enable_reflection: bool = True,
         enable_pruning: bool = True,
         pruning_threshold: float = 0.2,
+        # SOTA additions
+        max_token_budget: int = 50000,
+        stagnation_window: int = 5,
+        stagnation_exploration_boost: float = 0.5,
+        beam_width: int = 3,
+        max_json_retries: int = 2,
     ):
         self.max_iterations = max_iterations
         self.max_depth = max_depth
@@ -238,6 +247,11 @@ class MCTSConfig:
         self.enable_reflection = enable_reflection
         self.enable_pruning = enable_pruning
         self.pruning_threshold = pruning_threshold
+        self.max_token_budget = max_token_budget
+        self.stagnation_window = stagnation_window
+        self.stagnation_exploration_boost = stagnation_exploration_boost
+        self.beam_width = beam_width
+        self.max_json_retries = max_json_retries
 
 
 @dataclass
@@ -253,6 +267,61 @@ class MCTSResult:
     tree: MCTSNode  # Root of the tree
     reflections: List[Reflection]
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+class TreeCache:
+    """Saves/loads MCTS tree state for warm-starting similar problems."""
+
+    CACHE_DIR = Path(os.getenv("AURA_DATA_DIR", "data")) / "mcts_cache"
+
+    def __init__(self):
+        self.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+    def _problem_hash(self, problem: str) -> str:
+        """MD5 hash of problem text."""
+        return hashlib.md5(problem.encode()).hexdigest()
+
+    def save_tree(self, problem: str, root: MCTSNode):
+        """Serialize full tree to JSON file."""
+        data = {
+            "problem": problem,
+            "timestamp": datetime.now().isoformat(),
+            "tree": self._serialize_node(root),
+        }
+        path = self.CACHE_DIR / f"{self._problem_hash(problem)}.json"
+        path.write_text(json.dumps(data, indent=2))
+
+    def load_tree(self, problem: str) -> Optional[Dict]:
+        """Load cached tree if exists."""
+        path = self.CACHE_DIR / f"{self._problem_hash(problem)}.json"
+        if path.exists():
+            try:
+                return json.loads(path.read_text())
+            except (json.JSONDecodeError, OSError):
+                return None
+        return None
+
+    def _serialize_node(self, node: MCTSNode) -> Dict:
+        """Full serialization (not truncated like to_dict)."""
+        return {
+            "id": node.id,
+            "thought": {
+                "id": node.thought.id,
+                "type": node.thought.type.value,
+                "content": node.thought.content,
+                "confidence": node.thought.confidence,
+                "metadata": node.thought.metadata,
+                "timestamp": node.thought.timestamp,
+            },
+            "depth": node.depth,
+            "visits": node.visits,
+            "value": node.value,
+            "avg_value": node.avg_value,
+            "state": node.state.value,
+            "is_terminal": node.is_terminal,
+            "is_successful": node.is_successful,
+            "children": [self._serialize_node(c) for c in node.children],
+        }
 
 
 class MCTSReasoning:
@@ -293,6 +362,10 @@ class MCTSReasoning:
         self.iteration_count = 0
         self.nodes_created = 0
         self.start_time: Optional[float] = None
+        self.tokens_used: int = 0
+        self.current_best: Optional[MCTSResult] = None
+        self._value_history: List[float] = []
+        self._stagnation_boost: float = 0.0
 
         # Callbacks for UI updates
         self.on_node_created: Optional[Callable[[MCTSNode], None]] = None
@@ -314,6 +387,10 @@ class MCTSReasoning:
         self.iteration_count = 0
         self.nodes_created = 0
         self.reflections = []
+        self.tokens_used = 0
+        self.current_best = None
+        self._value_history = []
+        self._stagnation_boost = 0.0
 
         # Create root node
         root_thought = Thought(
@@ -327,44 +404,44 @@ class MCTSReasoning:
 
         logger.info(f"Starting MCTS search for: {problem[:100]}...")
 
-        # Main MCTS loop
+        # Main MCTS loop (beam search)
         while not self._should_stop():
             self.iteration_count += 1
 
-            # 1. Selection - Navigate to most promising leaf
-            selected_node = self._select(self.root)
+            beam = self._select_beam(self.root)
 
-            # 2. Expansion - Generate candidate thoughts
-            if not selected_node.is_terminal and selected_node.depth < self.config.max_depth:
-                expanded_nodes = self._expand(selected_node)
-
-                if expanded_nodes:
-                    # 3. Simulation/Evaluation - Score expanded nodes
-                    for node in expanded_nodes:
-                        reward = self._evaluate(node)
-
-                        # 4. Backpropagation - Update values up the tree
-                        node.backpropagate(reward)
-
+            for node in beam:
+                if not node.is_terminal and node.depth < self.config.max_depth:
+                    expanded = self._expand(node)
+                    for child in expanded:
+                        reward = self._evaluate(child)
+                        child.backpropagate(reward)
                         if self.on_node_evaluated:
-                            self.on_node_evaluated(node, reward)
-            else:
-                # Terminal or max depth - just evaluate and backpropagate
-                reward = self._evaluate(selected_node)
-                selected_node.backpropagate(reward)
+                            self.on_node_evaluated(child, reward)
+                else:
+                    reward = self._evaluate(node)
+                    node.backpropagate(reward)
 
-            # 5. Reflection on low-value paths
             if self.config.enable_reflection:
-                self._maybe_reflect(selected_node)
+                for node in beam:
+                    self._maybe_reflect(node)
 
-            # 6. Pruning
             if self.config.enable_pruning:
                 self._prune_low_value_branches()
 
-            if self.on_iteration_complete:
-                self.on_iteration_complete(self.iteration_count, self.root)
+            # Update anytime best result
+            self._update_current_best()
 
-            logger.debug(f"Iteration {self.iteration_count}: explored node at depth {selected_node.depth}")
+            # Check stagnation and adapt exploration
+            self._check_stagnation()
+
+            if self.on_iteration_complete:
+                try:
+                    self.on_iteration_complete(self.iteration_count, self.root, self.current_best)
+                except TypeError:
+                    self.on_iteration_complete(self.iteration_count, self.root)
+
+            logger.debug(f"Iteration {self.iteration_count}: beam size {len(beam)}, tokens {self.tokens_used}")
 
         # Find best path
         best_path = self._get_best_path()
@@ -387,6 +464,7 @@ class MCTSReasoning:
                 "max_depth_reached": max(n.depth for n in self._get_all_nodes()),
                 "terminal_nodes": sum(1 for n in self._get_all_nodes() if n.is_terminal),
                 "successful_terminals": sum(1 for n in self._get_all_nodes() if n.is_successful),
+                "total_tokens_used": self.tokens_used,
             }
         )
 
@@ -394,8 +472,21 @@ class MCTSReasoning:
 
         return result
 
+    def _estimate_tokens(self, text: str) -> int:
+        """Rough token estimate: ~4 chars per token."""
+        return len(text) // 4
+
+    def get_current_best(self) -> Optional[MCTSResult]:
+        """Return the current best result (anytime access)."""
+        return self.current_best
+
     def _should_stop(self) -> bool:
         """Check if search should stop"""
+        # Token budget
+        if self.tokens_used >= self.config.max_token_budget:
+            logger.info("MCTS stopped: token budget exhausted")
+            return True
+
         # Timeout
         if time.time() - self.start_time > self.config.timeout_seconds:
             logger.info("MCTS stopped: timeout")
@@ -414,11 +505,20 @@ class MCTSReasoning:
 
         return False
 
+    def _get_adaptive_exploration(self) -> float:
+        """Adaptive exploration weight that decays over iterations, boosted on stagnation."""
+        c_init = self.config.exploration_weight
+        t = self.iteration_count
+        max_iter = self.config.max_iterations
+        base = c_init * math.sqrt(max(0.0, 1.0 - t / max_iter))
+        return max(0.01, base + self._stagnation_boost)
+
     def _select(self, node: MCTSNode) -> MCTSNode:
         """
         Selection phase: Navigate tree using UCT until reaching a leaf.
         """
         current = node
+        exploration = self._get_adaptive_exploration()
 
         while current.children and not current.is_terminal:
             valid_children = [c for c in current.children if c.state != NodeState.PRUNED]
@@ -432,10 +532,66 @@ class MCTSReasoning:
                 if unvisited:
                     return unvisited[0]
 
-            # Select best child using UCB1
-            current = max(valid_children, key=lambda c: c.get_ucb1(self.config.exploration_weight))
+            # Select best child using adaptive UCB1
+            current = max(valid_children, key=lambda c: c.get_ucb1(exploration))
 
         return current
+
+    def _select_beam(self, root: MCTSNode) -> List[MCTSNode]:
+        """Select top-K leaves by UCB1 for beam search (K = config.beam_width)."""
+        exploration = self._get_adaptive_exploration()
+        all_nodes = self._get_all_nodes()
+        leaves = [
+            n for n in all_nodes
+            if n.is_leaf and n.state != NodeState.PRUNED and n is not root
+        ]
+        # Include non-fully-expanded internal nodes as candidates too
+        expandable = [
+            n for n in all_nodes
+            if not n.is_leaf and not n.is_fully_expanded and n.state != NodeState.PRUNED
+        ]
+        candidates = leaves + expandable
+        if not candidates:
+            # Fall back to single select
+            return [self._select(root)]
+        # Sort by UCB1 descending, pick top beam_width
+        candidates.sort(key=lambda c: c.get_ucb1(exploration), reverse=True)
+        return candidates[:self.config.beam_width]
+
+    def _check_stagnation(self):
+        """Detect stagnation and boost exploration when best value plateaus."""
+        best_path = self._get_best_path()
+        current_val = best_path[-1].avg_value if best_path else 0.0
+        self._value_history.append(current_val)
+
+        window = self.config.stagnation_window
+        if len(self._value_history) >= window:
+            recent = self._value_history[-window:]
+            if max(recent) <= recent[0]:
+                # No improvement in window — boost exploration
+                self._stagnation_boost = self.config.stagnation_exploration_boost
+                logger.debug(f"Stagnation detected, boosting exploration by {self._stagnation_boost}")
+            else:
+                # Improving — reset boost
+                self._stagnation_boost = 0.0
+
+    def _update_current_best(self):
+        """Update the anytime best result."""
+        best_path = self._get_best_path()
+        best_answer = self._extract_answer(best_path)
+        confidence = best_path[-1].avg_value if best_path else 0.0
+        self.current_best = MCTSResult(
+            success=confidence >= self.config.min_confidence_threshold,
+            best_path=best_path,
+            best_answer=best_answer,
+            confidence=confidence,
+            iterations=self.iteration_count,
+            nodes_explored=self.nodes_created,
+            time_taken=time.time() - self.start_time,
+            tree=self.root,
+            reflections=self.reflections,
+            metadata={"total_tokens_used": self.tokens_used},
+        )
 
     def _expand(self, node: MCTSNode) -> List[MCTSNode]:
         """
@@ -479,6 +635,7 @@ Think creatively and consider multiple angles. Include at least one unconvention
 
         try:
             response = self.llm(prompt, "You are a careful reasoning assistant exploring multiple solution paths.")
+            self.tokens_used += self._estimate_tokens(prompt) + self._estimate_tokens(response)
             candidates = self._parse_candidates(response)
         except Exception as e:
             logger.error(f"Error generating candidates: {e}")
@@ -552,6 +709,7 @@ Provide your evaluation as JSON:
 
         try:
             response = self.llm(prompt, "You are an expert evaluator assessing reasoning quality. Be critical but fair.")
+            self.tokens_used += self._estimate_tokens(prompt) + self._estimate_tokens(response)
             evaluation = self._parse_evaluation(response)
 
             score = float(evaluation.get("score", 0.5))
@@ -742,7 +900,9 @@ Provide your reflection as JSON:
         return self._parse_json(response)
 
     def _parse_json(self, response: str) -> Dict:
-        """Parse JSON from LLM response, handling markdown code blocks"""
+        """Parse JSON from LLM response, handling markdown code blocks. Retries via LLM on failure."""
+        raw = response
+
         # Try to extract JSON from code blocks
         if "```json" in response:
             start = response.find("```json") + 7
@@ -755,7 +915,6 @@ Provide your reflection as JSON:
 
         # Try to find JSON object
         try:
-            # Find first { and last }
             start = response.find("{")
             end = response.rfind("}") + 1
             if start >= 0 and end > start:
@@ -763,7 +922,19 @@ Provide your reflection as JSON:
         except json.JSONDecodeError:
             pass
 
-        # Return empty dict if parsing fails
+        # Structured output retry via LLM
+        for attempt in range(self.config.max_json_retries):
+            try:
+                fix_prompt = f"The following text should be valid JSON but has errors. Fix it and return ONLY valid JSON:\n{raw}"
+                fixed = self.llm(fix_prompt, "Return only valid JSON, no explanation.")
+                self.tokens_used += self._estimate_tokens(fix_prompt) + self._estimate_tokens(fixed)
+                start = fixed.find("{")
+                end = fixed.rfind("}") + 1
+                if start >= 0 and end > start:
+                    return json.loads(fixed[start:end])
+            except Exception:
+                continue
+
         logger.warning(f"Failed to parse JSON from response: {response[:100]}...")
         return {}
 

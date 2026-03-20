@@ -174,7 +174,13 @@ class WhatsAppBot(BasePlatform):
                 self._connected = False
                 logger.warning("[WhatsApp] Connection lost, reconnecting in 5s...")
                 await asyncio.sleep(5)
-                continue  # retry the outer while True loop
+                try:
+                    self.websocket = await websockets.connect(self.ws_url)
+                    self._connected = True
+                    logger.info("[WhatsApp] Reconnected successfully")
+                except Exception as e:
+                    logger.error(f"[WhatsApp] Reconnect failed: {e}")
+                continue
             except json.JSONDecodeError as e:
                 logger.warning(f"Invalid JSON received: {e}")
             except Exception as e:
@@ -286,7 +292,7 @@ class WhatsAppBot(BasePlatform):
     # ============ OVERRIDE AURA PROCESSING ============
 
     async def _process_with_aura(self, text: str, user_id: str) -> str:
-        """Process message through AURA engine"""
+        """Process message through AURA engine."""
 
         # Try fast path first (if available on the engine/agent)
         try:
@@ -294,35 +300,23 @@ class WhatsAppBot(BasePlatform):
                 fast_response = self.aura.fast_path_handler.try_fast_path(text)
                 if fast_response:
                     return fast_response
-
         except Exception as e:
             logger.error(f"Fast path error: {e}")
 
-        # Fall back to simple responses
+        # Use the real AURA agent for response generation
         try:
-            if hasattr(self.aura, 'process_input'):
-                context = self.aura.process_input(text)
-                topic = context.get("topic", "general")
-
-                responses = {
-                    "coding": ["Let me help with that!", "Interesting!"],
-                    "learning": ["Happy to explain!", "Good question!"],
-                    "casual": ["Hey!", "What's up?"],
-                    "general": ["I hear you!", "Got it!"]
-                }
-
-                base_response = random.choice(responses.get(topic, responses["general"]))
-
-                if hasattr(self.aura, 'process_response'):
-                    response = self.aura.process_response(base_response, context)
-                    return response.content
-
-                return base_response
-
+            if hasattr(self.aura, 'chat'):
+                response = self.aura.chat(text, user_id=user_id)
+                if response:
+                    return response
+            elif hasattr(self.aura, 'generate_response'):
+                response = self.aura.generate_response(text)
+                if response:
+                    return response
         except Exception as e:
             logger.error(f"AURA processing error: {e}")
 
-        return "I'm here! What's up?"
+        return "I'm here but had trouble processing that. Try again?"
 
     # ============ PROACTIVE MESSAGING ============
 

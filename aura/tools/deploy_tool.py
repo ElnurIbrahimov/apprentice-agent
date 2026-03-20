@@ -74,7 +74,9 @@ def _run(args: List[str], cwd: str = ".", timeout: int = DEPLOY_TIMEOUT,
     if not Path(resolved).exists():
         return {"success": False, "error": f"Path does not exist: {cwd}"}
 
-    run_env = os.environ.copy()
+    _SENSITIVE_KEYS = {"AURA_API_KEY", "E2B_API_KEY", "OLLAMA_API_KEY", "TELEGRAM_BOT_TOKEN",
+                       "BRAVE_API_KEY", "TAVILY_API_KEY", "FIRECRAWL_API_KEY", "CHATGPT_REFRESH_TOKEN"}
+    run_env = {k: v for k, v in os.environ.items() if k not in _SENSITIVE_KEYS}
     if env:
         run_env.update(env)
 

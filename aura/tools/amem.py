@@ -5,6 +5,12 @@ Zettelkasten-inspired memory with dynamic linking and evolution.
 Based on: "A-MEM: Agentic Memory for LLM Agents" (NeurIPS 2025)
 https://arxiv.org/abs/2502.12110
 
+WARNING: This module uses sentence-transformers (all-MiniLM-L6-v2) for embeddings,
+while the main memory system (aura.memory) uses Ollama nomic-embed-text.
+These produce INCOMPATIBLE vector spaces — memories stored here cannot be
+compared with memories in the unified store. This module is being superseded
+by aura.memory.unified_memory. New code should use UnifiedMemory instead.
+
 Features:
 - Atomic notes with structured attributes (keywords, tags, context)
 - Semantic embedding-based linking via Qdrant/sentence-transformers

@@ -55,7 +55,19 @@ def _get_verified_models() -> dict:
         ]
     chatgpt = [{"name": m, "size": 0, "is_cloud": True} for m in sorted(chatgpt_names)]
 
-    return {"cloud": cloud, "local": local, "chatgpt": chatgpt, "total": len(cloud) + len(local) + len(chatgpt)}
+    # Direct API provider models (from configured providers)
+    direct_api = []
+    try:
+        from aura.providers import list_all_provider_models
+        for model_name, provider_display in list_all_provider_models():
+            direct_api.append({"name": model_name, "size": 0, "is_cloud": True, "provider": provider_display})
+    except Exception:
+        pass
+
+    return {
+        "cloud": cloud, "local": local, "chatgpt": chatgpt, "direct_api": direct_api,
+        "total": len(cloud) + len(local) + len(chatgpt) + len(direct_api),
+    }
 
 
 @router.get("/available")
@@ -79,11 +91,13 @@ async def list_models_web():
         m["name"] for m in result["local"]
         if not any(kw in m["name"].lower() for kw in _NON_CHAT_KEYWORDS)
     ]
+    direct_api = [m["name"] for m in result.get("direct_api", [])]
     return {
         "chatgpt_models": [m["name"] for m in result["chatgpt"]],
         "cloud_models": [m["name"] for m in result["cloud"]],
         "local_models": local_chat,
-        "total": len(result["chatgpt"]) + len(result["cloud"]) + len(local_chat),
+        "direct_api_models": direct_api,
+        "total": len(result["chatgpt"]) + len(result["cloud"]) + len(local_chat) + len(direct_api),
     }
 
 

@@ -16,6 +16,14 @@ class PermissionTier(Enum):
     PROMPT = "prompt"
     BLOCKED = "blocked"
 
+    def _severity(self) -> int:
+        """Numeric severity for permission comparison.
+
+        Higher = more restrictive. Used by apply_aura_md_overrides to prevent
+        project configs from escalating permissions.
+        """
+        return {"auto": 0, "prompt": 1, "blocked": 2}[self.value]
+
 
 AUTO = PermissionTier.AUTO
 PROMPT = PermissionTier.PROMPT
@@ -76,11 +84,19 @@ class PermissionManager:
         self._permissions[tool_key] = tier
 
     def apply_aura_md_overrides(self, config: dict) -> None:
-        """Apply permission overrides from AURA.md frontmatter."""
+        """Apply permission overrides from AURA.md frontmatter.
+
+        Security: project configs can only RESTRICT permissions, never escalate.
+        """
         perms = config.get("permissions", {})
         for key, value in perms.items():
             try:
-                self._permissions[key] = PermissionTier(value)
+                new_tier = PermissionTier(value)
+                current = self._permissions.get(key)
+                if current is not None and new_tier._severity() < current._severity():
+                    logger.warning(f"[Permissions] Project config tried to escalate {key} from {current.name} to {new_tier.name} — blocked")
+                    continue
+                self._permissions[key] = new_tier
             except ValueError:
                 logger.warning(f"[Permissions] Unknown tier '{value}' for '{key}'")
 

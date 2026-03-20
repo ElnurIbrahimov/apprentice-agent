@@ -1622,14 +1622,29 @@ class WorldModel:
     # ----------------------------------------------------------------
 
     def _update_snapshot(self) -> None:
-        """Atomic write of current state to JSON snapshot file."""
+        """Atomic write of current state to JSON snapshot file.
+
+        Must be called while holding self._lock, or from a path where no
+        concurrent mutation is possible.
+        """
         try:
             state = self.get_full_state_json()
-            tmp_path = self._snapshot_path + ".tmp"
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                json.dump(state, f, indent=2, default=str)
-            # Atomic rename
-            os.replace(tmp_path, self._snapshot_path)
+            # Use tempfile to avoid concurrent writes clobbering a shared .tmp path
+            import tempfile
+            _dir = os.path.dirname(self._snapshot_path) or "."
+            fd, tmp_path = tempfile.mkstemp(dir=_dir, suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(state, f, indent=2, default=str)
+                # Atomic rename
+                os.replace(tmp_path, self._snapshot_path)
+            except Exception:
+                # Clean up temp file on failure
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
         except Exception as e:
             logger.debug(f"[WorldModel] Snapshot write failed: {e}")
 
@@ -2391,7 +2406,8 @@ class WorldModel:
         finally:
             conn.close()
 
-        self._update_snapshot()
+        with self._lock:
+            self._update_snapshot()
         logger.info(f"[WorldModel] Maintenance complete: {results}")
         return results
 

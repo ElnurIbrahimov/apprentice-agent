@@ -108,7 +108,7 @@ class DisclosureManager:
 def render_collapsed(console: Console, section: CollapsibleSection) -> None:
     """Render a collapsed section — one-line summary with expand hint."""
     elapsed_str = f" ({section.elapsed:.1f}s)" if section.elapsed > 0.5 else ""
-    console.print(f"  [dim]\u25b8[/dim] [yellow]{section.tool_name}[/yellow] {section.title}{elapsed_str} [dim]\\[e to expand][/dim]")
+    console.print(f"  [dim]\u25b8[/dim] [yellow]{section.tool_name}[/yellow] {section.title}{elapsed_str}")
 
 
 def render_expanded(console: Console, section: CollapsibleSection) -> None:
@@ -117,7 +117,7 @@ def render_expanded(console: Console, section: CollapsibleSection) -> None:
     console.print(f"  [dim]\u25be[/dim] [yellow]{section.tool_name}[/yellow] {section.title}{elapsed_str}")
     for line in section.content.splitlines():
         console.print(f"  [dim]\u2502[/dim] {line}")
-    console.print(f"  [dim]\u2514 \\[c to collapse][/dim]")
+    console.print(f"  [dim]\u2514[/dim]")
 
 
 def render_section(console: Console, section: CollapsibleSection) -> None:

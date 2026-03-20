@@ -31,8 +31,9 @@ def sanitize_outgoing(text: str, source: str = "unknown") -> tuple[str, bool]:
     if not text:
         return "", False
 
-    text = text[:MAX_MESSAGE_LENGTH]
+    # Check patterns on FULL text before truncating for output
     flagged = bool(_SUSPICIOUS_PATTERNS.search(text))
+    text = text[:MAX_MESSAGE_LENGTH]
 
     if flagged:
         logger.warning(

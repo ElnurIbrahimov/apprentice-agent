@@ -650,9 +650,9 @@ async def reset_personality():
     raise HTTPException(status_code=503, detail="ALMA not available")
 
 
-@router.get("/models", response_model=ModelsResponse)
-async def get_models() -> ModelsResponse:
-    """Get available models (local and cloud).
+@router.get("/models/detailed", response_model=ModelsResponse)
+async def get_models_detailed() -> ModelsResponse:
+    """Get available models with detailed info (local and cloud).
 
     Returns:
         List of available local and cloud models

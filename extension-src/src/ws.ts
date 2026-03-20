@@ -65,9 +65,9 @@ export function connectWS() {
   if (ws && ws.readyState <= 1) return;
 
   // Read fresh WS_URL and API_KEY (live bindings from api.ts)
-  const wsUrl = API_KEY ? `${WS_URL}?api_key=${encodeURIComponent(API_KEY)}` : WS_URL;
+  // API key sent as first message after connect (not in query string — avoids log exposure)
   console.log('[Aura] Connecting WebSocket to:', WS_URL);
-  const socket = new WebSocket(wsUrl);
+  const socket = new WebSocket(WS_URL);
 
   // 5s connection timeout -- if not open by then, close and let onclose retry
   _connTimer = setTimeout(() => {
@@ -80,6 +80,10 @@ export function connectWS() {
 
   socket.onopen = () => {
     if (_connTimer) { clearTimeout(_connTimer); _connTimer = null; }
+    // Authenticate via first message (keeps key out of URL/logs)
+    if (API_KEY) {
+      socket.send(JSON.stringify({ type: 'auth', api_key: API_KEY }));
+    }
     console.log('[Aura] WebSocket connected');
     useStore.getState().setWsReady(true);
     useStore.getState().setWs(socket);

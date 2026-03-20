@@ -281,7 +281,8 @@ class ShellExecutorTool:
                     "/root", "/home", "/.ssh", "/.gnupg", "/var/lib",
                     "C:\\Program Files", "C:\\ProgramData",
                 ]
-                if (any(target_str.startswith(root) for root in blocked_roots)
+                target_lower = target_str.lower()
+                if (any(target_lower.startswith(root.lower()) for root in blocked_roots)
                         or ".ssh" in target_str or ".gnupg" in target_str):
                     return {"success": False, "error": f"Access denied: {target_path}", "exit_code": 1, "session_id": session.id}
                 if target_path.exists() and target_path.is_dir():

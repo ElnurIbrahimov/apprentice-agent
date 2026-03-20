@@ -410,7 +410,7 @@ class ClipboardTool:
             return self.analyze()
 
         # Write / copy
-        if "write" in a or "copy" in a and "history" not in a:
+        if ("write" in a or "copy" in a) and "history" not in a:
             text = kwargs.get("text")
             if not text:
                 text = self._extract_text_to_copy(action)

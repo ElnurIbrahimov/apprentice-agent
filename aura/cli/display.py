@@ -466,7 +466,7 @@ def show_help():
     table.add_row("Ctrl+N", "New session")
     table.add_row("Ctrl+K", "Command palette (fuzzy search)")
     table.add_row("Ctrl+G", "Open editor for long prompt")
-    table.add_row("Shift+Tab", "Cycle permission mode (Plan / Careful / Auto-Edit / Full Auto)")
+    table.add_row("Shift+Tab", "Cycle permission mode (Plan / Careful / Full Auto)")
     table.add_row("Esc Esc", "Rewind to checkpoint")
     table.add_row("Ctrl+C / Ctrl+D", "Exit")
     table.add_row("?", "Show this help")

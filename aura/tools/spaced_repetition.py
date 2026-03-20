@@ -94,7 +94,7 @@ class SpacedRepetitionTool:
             elif card.repetitions == 1:
                 card.interval = 6
             else:
-                card.interval = int(card.interval * card.ease_factor)
+                card.interval = max(int(card.interval * card.ease_factor), card.interval + 1)
             card.repetitions += 1
 
         # Update ease factor (minimum 1.3)

@@ -842,10 +842,16 @@ def run_chat_mode(agent, speak: bool = False, trust: bool = False, model: str = 
         # Signal activity to daemon (if running)
         try:
             import socket, json as _json
+            # Read IPC auth token so the daemon accepts the message
+            _ipc_token = ""
+            _token_path = os.path.join(os.path.dirname(__file__), "data", "ipc_token")
+            if os.path.isfile(_token_path):
+                with open(_token_path) as _tf:
+                    _ipc_token = _tf.read().strip()
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.settimeout(0.1)
                 s.connect(("127.0.0.1", 19733))
-                s.send((_json.dumps({"type": "activity"}) + "\n").encode())
+                s.send((_json.dumps({"type": "activity", "token": _ipc_token}) + "\n").encode())
         except Exception:
             pass
 
@@ -1446,7 +1452,17 @@ def handle_command(agent, command: str, speak: bool = False):
         try:
             diff_args = ["git", "diff"]
             if arg:
-                diff_args.extend(arg.split())
+                # SECURITY: Only allow safe diff flags — block -c, --ext-diff, etc.
+                _safe_diff_tokens = []
+                for _tok in arg.split():
+                    if _tok.startswith("-c") or _tok.startswith("--ext-diff"):
+                        print(f"  Blocked unsafe flag: {_tok}")
+                        _safe_diff_tokens = None
+                        break
+                    _safe_diff_tokens.append(_tok)
+                if _safe_diff_tokens is None:
+                    continue
+                diff_args.extend(_safe_diff_tokens)
             result = _sp.run(diff_args, capture_output=True, text=True, cwd=os.getcwd(), timeout=10)
             if result.stdout:
                 print(result.stdout[:5000])
@@ -1459,15 +1475,32 @@ def handle_command(agent, command: str, speak: bool = False):
             print("Usage: /git <command> (e.g., /git status, /git log, /git diff)")
         else:
             import subprocess as _sp
-            try:
-                result = _sp.run(
-                    ["git"] + arg.split(),
-                    capture_output=True, text=True, cwd=os.getcwd(), timeout=15,
-                )
-                output = result.stdout or result.stderr
-                print(output[:5000] if output else "  (no output)")
-            except Exception as e:
-                print(f"  Error: {e}")
+            # SECURITY: Only allow known-safe git subcommands to prevent
+            # arbitrary code execution via git -c, --upload-pack, etc.
+            _GIT_SAFE_SUBCOMMANDS = frozenset({
+                "status", "log", "diff", "branch", "show", "stash",
+                "remote", "tag", "shortlog", "describe", "rev-parse",
+                "ls-files", "ls-tree", "blame",
+            })
+            _git_tokens = arg.split()
+            _git_subcmd = _git_tokens[0].lower().lstrip("-") if _git_tokens else ""
+            # Block any -c flag anywhere in the args (git -c can execute arbitrary commands)
+            _has_dangerous_flag = any(t == "-c" or t.startswith("-c=") or t.startswith("--exec") or t.startswith("--upload-pack") for t in _git_tokens)
+            if _has_dangerous_flag:
+                print("  Blocked: dangerous git flags (-c, --exec, --upload-pack) are not allowed")
+            elif _git_subcmd not in _GIT_SAFE_SUBCOMMANDS:
+                print(f"  Blocked: '/git {_git_subcmd}' — only read-only git commands are allowed")
+                print(f"  Allowed: {', '.join(sorted(_GIT_SAFE_SUBCOMMANDS))}")
+            else:
+                try:
+                    result = _sp.run(
+                        ["git"] + _git_tokens,
+                        capture_output=True, text=True, cwd=os.getcwd(), timeout=15,
+                    )
+                    output = result.stdout or result.stderr
+                    print(output[:5000] if output else "  (no output)")
+                except Exception as e:
+                    print(f"  Error: {e}")
     elif cmd == "/pr":
         from aura.cli.git_tools import create_pr, get_staged_diff, get_recent_log, get_current_branch, PR_DESCRIPTION_PROMPT
         from aura.cli.display import console as _pr_console

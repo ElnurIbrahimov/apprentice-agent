@@ -421,7 +421,7 @@ class TaskSchedulerTool:
             return self.setup_defaults()
         if "cron" in a or "schedule" in a:
             tool = kwargs.get("tool") or kwargs.get("tool_name") or ""
-            act = kwargs.get("tool_action") or kwargs.get("tool_action") or ""
+            act = kwargs.get("tool_action") or kwargs.get("action") or ""
             cron = kwargs.get("cron") or kwargs.get("cron_expression") or ""
             if cron:
                 return self.add_cron_job(tool, act, cron, job_id or None, kwargs.get("label"), kwargs.get("kwargs"))

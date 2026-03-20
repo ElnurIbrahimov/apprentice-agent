@@ -61,6 +61,7 @@ def _calendar_today_sync() -> dict:
 
 @router.get("/calendar/upcoming")
 async def calendar_upcoming(days: int = 7):
+    days = max(1, min(days, 365))  # Clamp to prevent abuse
     """Get upcoming events."""
     try:
         loop = asyncio.get_running_loop()
@@ -247,6 +248,7 @@ def _email_status_sync() -> dict:
 @router.get("/email/inbox")
 async def email_inbox(limit: int = 10):
     """Get recent emails."""
+    limit = max(1, min(limit, 100))  # Clamp to prevent abuse
     try:
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, lambda: _email_inbox_sync(limit))
@@ -378,6 +380,18 @@ _SHELL_DANGER_PATTERNS = [
     "$(", "`",  # Command substitution — block to prevent injection
 ]
 
+# Interpreters that accept code-execution flags — block these flag combos
+# to prevent `python -c "os.system(...)"` style bypasses of the allowlist.
+_INTERPRETER_EXEC_FLAGS = {
+    "python": {"-c", "--command"},
+    "python3": {"-c", "--command"},
+    "node": {"-e", "--eval", "--print", "-p"},
+    "ruby": {"-e"},
+    "perl": {"-e"},
+    "java": {},  # java doesn't have direct eval, safe
+    "go": {"run"},  # `go run arbitrary.go` can execute anything
+}
+
 
 def _validate_shell_cwd(cwd: str | None) -> str | None:
     """Validate and sanitize the cwd parameter for shell commands."""
@@ -453,6 +467,26 @@ def _shell_run_sync(request: ShellRunRequest) -> dict:
     for cmd_name in cmd_names:
         if cmd_name not in _SHELL_ALLOWED_COMMANDS:
             return {"success": False, "error": f"Blocked: '{cmd_name}' is not in the allowed commands list"}
+
+    # Step 3: Block interpreter code-execution flags (e.g. `python -c "..."`, `node -e "..."`)
+    # These bypass the allowlist by running arbitrary code through an allowed interpreter.
+    import shlex as _shlex
+    try:
+        _tokens = _shlex.split(request.command)
+    except ValueError:
+        _tokens = request.command.split()
+    for i, tok in enumerate(_tokens):
+        _tok_base = os.path.basename(tok).lower().replace(".exe", "")
+        _tok_base = _re.sub(r'\.\d+$', '', _tok_base)
+        if _tok_base in _INTERPRETER_EXEC_FLAGS:
+            blocked_flags = _INTERPRETER_EXEC_FLAGS[_tok_base]
+            # Check remaining tokens for exec flags
+            for subsequent in _tokens[i + 1:]:
+                if subsequent in blocked_flags:
+                    return {
+                        "success": False,
+                        "error": f"Blocked: '{_tok_base} {subsequent}' can execute arbitrary code",
+                    }
 
     # Validate cwd to prevent path traversal into system directories
     validated_cwd = _validate_shell_cwd(request.cwd)
@@ -718,6 +752,7 @@ def _api_tester_run_sync(request: APITestRequest) -> dict:
 @router.get("/api-tester/history")
 async def api_tester_history(limit: int = 20):
     """Get API request history."""
+    limit = max(1, min(limit, 100))  # Clamp to prevent abuse
     try:
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, lambda: _api_tester_history_sync(limit))

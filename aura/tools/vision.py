@@ -9,7 +9,12 @@ Supports:
 import json
 import base64
 import logging
-import ollama
+try:
+    import ollama
+    OLLAMA_AVAILABLE = True
+except ImportError:
+    ollama = None
+    OLLAMA_AVAILABLE = False
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
 

@@ -590,6 +590,14 @@ class AgenticLoop:
                 logger.debug(f"[AgenticLoop] MCP client init failed (non-fatal): {e}")
         self.executor._mcp_client = self._mcp_client
 
+    def __del__(self):
+        """Clean up MCP connections to prevent process leaks."""
+        try:
+            if hasattr(self, '_mcp_client') and self._mcp_client:
+                self._mcp_client.disconnect_all()
+        except Exception:
+            pass
+
     def _get_active_tools(self) -> list:
         """Get all active tools including MCP tools if connected."""
         base_tools = getattr(self, '_sub_agent_tools', None) or AGENTIC_TOOLS

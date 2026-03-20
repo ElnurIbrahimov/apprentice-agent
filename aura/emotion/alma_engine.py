@@ -470,7 +470,7 @@ class ALMAEngine:
 
         # Buffered emotion history writer
         self._log_buffer: List[dict] = []
-        self._log_buffer_lock = threading.Lock()
+        self._log_buffer_lock = threading.RLock()  # RLock: _save_state and close() both acquire this
         self._log_file_handle: Optional[Any] = None
         self._LOG_FLUSH_THRESHOLD = 10
 
@@ -861,13 +861,15 @@ class ALMAEngine:
             )
 
         # Save state periodically (rate-limited to avoid excessive disk writes)
-        self._save_interaction_count += 1
-        now = time.time()
-        if (self._save_interaction_count >= self._SAVE_EVERY_N
-                or (now - self._last_save_time) >= self._SAVE_INTERVAL_SECS):
-            self._save_state()
-            self._save_interaction_count = 0
-            self._last_save_time = now
+        # Protected by _lock to prevent double-save from concurrent threads.
+        with self._lock:
+            self._save_interaction_count += 1
+            now = time.time()
+            if (self._save_interaction_count >= self._SAVE_EVERY_N
+                    or (now - self._last_save_time) >= self._SAVE_INTERVAL_SECS):
+                self._save_state()
+                self._save_interaction_count = 0
+                self._last_save_time = now
 
     def _respond_to_user_emotion(self, user_emotion: str):
         """Generate empathetic emotional response to user's emotion."""

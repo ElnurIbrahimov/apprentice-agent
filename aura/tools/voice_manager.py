@@ -94,7 +94,7 @@ class VoiceManager:
         """
         try:
             # Unload PersonaPlex first if running
-            if self.current_mode == "duplex":
+            if self.current_mode == "duplex" and self.personaplex is not None:
                 logger.debug("Stopping PersonaPlex server...")
                 self.personaplex.stop_server()
                 if TORCH_AVAILABLE and torch.cuda.is_available():

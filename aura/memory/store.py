@@ -337,11 +337,16 @@ class MemoryStore:
         """Update last_accessed and increment access_count."""
         now = datetime.now().isoformat()
         with self._lock:
-            self._get_conn().execute(
-                "UPDATE memories SET last_accessed=?, access_count=access_count+1, updated_at=? WHERE id=?",
-                (now, now, memory_id),
-            )
-            self._get_conn().commit()
+            conn = self._get_conn()
+            try:
+                conn.execute(
+                    "UPDATE memories SET last_accessed=?, access_count=access_count+1, updated_at=? WHERE id=?",
+                    (now, now, memory_id),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
 
     # ------------------------------------------------------------------
     # Search

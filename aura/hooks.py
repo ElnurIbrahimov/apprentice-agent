@@ -41,6 +41,7 @@ class HooksManager:
         """
         self.tools = tools or {}
         self._hooks: Dict[str, dict] = {}
+        self._hooks_lock = threading.Lock()
         self._background_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._last_clipboard: Optional[str] = None
@@ -80,7 +81,8 @@ class HooksManager:
             "last_triggered": None,
             "trigger_count": 0,
         }
-        self._hooks[hook_id] = hook
+        with self._hooks_lock:
+            self._hooks[hook_id] = hook
 
         # Initialize file mtime tracking if needed
         if event == "file_modified" and os.path.exists(condition):
@@ -99,12 +101,13 @@ class HooksManager:
         Returns:
             True if removed, False if not found
         """
-        if hook_id in self._hooks:
-            del self._hooks[hook_id]
-            self._save_hooks()
-            logger.info(f"[HOOKS] Unregistered hook {hook_id}")
-            return True
-        return False
+        with self._hooks_lock:
+            if hook_id in self._hooks:
+                del self._hooks[hook_id]
+                self._save_hooks()
+                logger.info(f"[HOOKS] Unregistered hook {hook_id}")
+                return True
+            return False
 
     def list_hooks(self) -> List[dict]:
         """List all registered hooks.
@@ -112,13 +115,16 @@ class HooksManager:
         Returns:
             List of hook dicts
         """
-        return list(self._hooks.values())
+        with self._hooks_lock:
+            return list(self._hooks.values())
 
     def check_events(self):
         """Check all event sources and trigger matching hooks."""
         now = datetime.now()
 
-        for hook_id, hook in list(self._hooks.items()):
+        with self._hooks_lock:
+            hooks_snapshot = list(self._hooks.items())
+        for hook_id, hook in hooks_snapshot:
             try:
                 triggered = False
                 event = hook["event"]

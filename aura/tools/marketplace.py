@@ -745,8 +745,13 @@ marketplace install {tool_name}
 
             latest_version = info_result["plugin"].get("version", "1.0.0")
 
-            # Compare versions (simple string comparison)
-            if latest_version <= current_version:
+            # Compare versions (proper semver tuple comparison)
+            def _ver_tuple(v):
+                try:
+                    return tuple(int(x) for x in v.split('.'))
+                except (ValueError, AttributeError):
+                    return (0,)
+            if _ver_tuple(latest_version) <= _ver_tuple(current_version):
                 return {
                     "success": True,
                     "message": f"Plugin '{plugin_id}' is up to date",

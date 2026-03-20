@@ -12,7 +12,32 @@ declare const browser: typeof chrome | undefined;
 const ext: typeof chrome =
   typeof browser !== 'undefined' ? (browser as typeof chrome) : chrome;
 
-const BACKEND = 'http://localhost:8000' as const;
+// Dynamic backend URL — reads from storage, falls back to localhost
+let BACKEND = 'http://localhost:8000';
+let BACKEND_API_KEY = '';
+
+// Load saved backend URL and API key from extension storage
+(async () => {
+  try {
+    const data = await ext.storage.local.get(['backendUrl', 'apiKey']);
+    if (data.backendUrl) BACKEND = data.backendUrl.replace(/\/+$/, '');
+    if (data.apiKey) BACKEND_API_KEY = data.apiKey;
+  } catch {}
+})();
+
+// Listen for settings changes
+ext.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local') {
+    if (changes.backendUrl?.newValue) BACKEND = changes.backendUrl.newValue.replace(/\/+$/, '');
+    if (changes.apiKey?.newValue) BACKEND_API_KEY = changes.apiKey.newValue;
+  }
+});
+
+function backendHeaders(): Record<string, string> {
+  const h: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (BACKEND_API_KEY) h['X-API-Key'] = BACKEND_API_KEY;
+  return h;
+}
 
 // ── URL validation helpers ──────────────────────────────────────────────────
 
@@ -644,7 +669,7 @@ ext.contextMenus.onClicked.addListener(
     if (menuId === MENU_IDS.saveMemory) {
       fetch(`${BACKEND}/api/knowledge/save`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: backendHeaders(),
         body: JSON.stringify({
           text: selectedText,
           url: pageUrl,

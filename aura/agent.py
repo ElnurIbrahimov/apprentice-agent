@@ -52,7 +52,7 @@ FORBIDDEN_PATTERNS = [
     "os.system", "subprocess", "eval(", "exec(", "__import__",
     "shutil.rmtree", "shutil.move", "socket", "requests.get",
     "urllib.request", "urllib.urlopen", "importlib", "ctypes", "pickle", "marshal",
-    "compile(", "globals(", "locals(", "vars(",
+    "compile(", "globals(", "locals(", "vars(", "open(",
     "__builtins__", "__code__", "__class__",
 ]
 
@@ -647,6 +647,11 @@ class ApprenticeAgent:
             try:
                 from .tools.deep_research import DeepResearchTool
                 self.tools['deep_research'] = DeepResearchTool()
+                # Inject LLM for SOTA research capabilities
+                if hasattr(self, 'brain') and self.brain:
+                    self.tools['deep_research'].set_llm(
+                        lambda p, s=None: self.brain.think(p, s, use_history=False)
+                    )
                 logger.info("[LOADED] deep_research")
             except Exception as e:
                 logger.warning(f"deep_research not loaded: {e}")
@@ -1296,7 +1301,11 @@ class ApprenticeAgent:
                     tool_file_resolved = tool_file.resolve()
                 except Exception:
                     continue
-                if not str(tool_file_resolved).startswith(str(tools_base)):
+                # SECURITY: Use Path.relative_to() instead of string startswith() to prevent
+                # sibling-directory bypass (e.g., tools_evil/ matching tools/ prefix).
+                try:
+                    tool_file_resolved.relative_to(tools_base)
+                except ValueError:
                     logger.warning(f"[SECURITY] Custom tool path outside project directory: {tool_file}")
                     continue
                 if not tool_file_resolved.exists():
@@ -1651,8 +1660,9 @@ IMPORTANT: If the user asks about something you are not sure about, something re
         context = context or {}  # NOTE: reserved for future use, not yet wired into agent loop
         self.brain._last_screenshot_path = None
         self.metacognition.start_goal(goal)
-        self.monologue.start_session()
-        self.monologue.think("perceive", f"Received: '{goal[:80]}{'...' if len(goal) > 80 else ''}'")
+        if self.monologue:
+            self.monologue.start_session()
+            self.monologue.think("perceive", f"Received: '{goal[:80]}{'...' if len(goal) > 80 else ''}'")
 
         logger.info(f"[AGENT] Starting ReAct loop for: {goal[:80]}")
 
@@ -1957,21 +1967,6 @@ IMPORTANT: If the user asks about something you are not sure about, something re
 
         return core_schemas
 
-    # Tool name mapping: Ollama schema names → agent tool dispatch
-    _TOOL_NAME_MAP = {
-        "read_file": ("filesystem", "read"),
-        "grep": ("code_search", "grep"),
-        "glob": ("code_search", "glob"),
-        "list_dir": ("filesystem", "list"),
-        "edit_file": ("code_edit", "edit"),
-        "write_file": ("filesystem", "write"),
-        "shell": ("shell_executor", "execute"),
-        "git": ("git", "execute"),
-        "search_web": (None, None),  # Special: try tavily, brave, web_search
-        "project_structure": ("code_search", "project_structure"),
-        "spawn_agent": (None, None),  # Not dispatched via self.tools
-    }
-
     def _execute_tool_call(self, tool_name: str, args: dict) -> str:
         """Execute a tool call and return result as string for the LLM.
 
@@ -2122,7 +2117,7 @@ IMPORTANT: If the user asks about something you are not sure about, something re
         tool_calls = step.get("tool_calls", [])
 
         # Record thought in inner monologue
-        if thought:
+        if thought and self.monologue:
             self.monologue.think("reason", thought[:200])
 
         # === No tool calls: LLM is done, content is the final answer ===
@@ -2196,7 +2191,8 @@ IMPORTANT: If the user asks about something you are not sure about, something re
                             "warning": f"Multiple failures ({consecutive_failures}). Try a different tool or approach.",
                         }),
                     })
-                    consecutive_failures = 0
+                    # Don't reset to 0 — let the outer loop's >= 3 check work.
+                    # The warning nudges the LLM, but persistent failures still abort.
             else:
                 consecutive_failures = 0
 
@@ -2345,7 +2341,7 @@ IMPORTANT: If the user asks about something you are not sure about, something re
         code = step.get("code")
 
         # Record thought
-        if thought:
+        if thought and self.monologue:
             self.monologue.think("reason", f"[code-mode] {thought[:200]}")
 
         # No code block = LLM is done, final answer
@@ -3119,6 +3115,12 @@ Python code:"""
                         code_to_run = generated.strip()
 
         if not code_to_run:
+            return None
+
+        # Validate LLM-generated code before execution
+        is_safe, reason = validate_custom_tool_code(code_to_run, "<llm_generated>")
+        if not is_safe:
+            logger.warning(f"[Agent] Blocked unsafe LLM-generated code: {reason}")
             return None
 
         # Execute the code

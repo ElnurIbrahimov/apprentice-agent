@@ -17,6 +17,7 @@ Roadmap item #4 — Priority 1, High Impact.
 
 import json
 import logging
+import os
 import threading
 import time
 from collections import deque
@@ -1111,10 +1112,19 @@ class SelfImprovementEngine:
                 "strategy_results": self._strategy_results[-100:],
                 "saved_at": datetime.now().isoformat(),
             }
-            self._state_file().write_text(
-                json.dumps(data, indent=2, default=str),
-                encoding="utf-8",
-            )
+            import tempfile
+            state_path = self._state_file()
+            fd, tmp_path = tempfile.mkstemp(dir=str(state_path.parent), suffix=".tmp")
+            try:
+                with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, indent=2, default=str)
+                os.replace(tmp_path, str(state_path))
+            except Exception:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
         except Exception as e:
             logger.error(f"[SelfImprovement] Failed to save state: {e}")
 

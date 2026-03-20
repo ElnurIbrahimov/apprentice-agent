@@ -241,6 +241,18 @@ class AlwaysOnContextEngine:
         if _httpx is None:
             return None
         try:
+            # SSRF protection: block private/loopback/link-local IPs
+            from urllib.parse import urlparse
+            import ipaddress, socket
+            hostname = urlparse(url).hostname or ""
+            try:
+                for info in socket.getaddrinfo(hostname, None, socket.AF_UNSPEC):
+                    ip = ipaddress.ip_address(info[4][0])
+                    if ip.is_private or ip.is_loopback or ip.is_link_local:
+                        logger.debug(f"[ACE] SSRF blocked: {url} resolves to private IP {ip}")
+                        return None
+            except (socket.gaierror, ValueError):
+                pass
             resp = _httpx.get(url, timeout=3.0, follow_redirects=True)
             text = re.sub(r'<[^>]+>', ' ', resp.text)
             text = re.sub(r'\s+', ' ', text).strip()[:600]

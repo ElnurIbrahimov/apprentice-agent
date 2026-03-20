@@ -604,6 +604,40 @@ async def get_available_tools():
 
 
 # ============================================================================
+# PREDICTIVE TASKS FEEDBACK
+# ============================================================================
+
+class PredictionFeedbackRequest(BaseModel):
+    prediction_id: str
+    tool: str
+    action: str
+    accepted: bool
+
+
+@router.post("/predictions/feedback")
+async def submit_prediction_feedback(request: PredictionFeedbackRequest):
+    """Submit feedback on a prediction (accepted/rejected)."""
+    try:
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(
+            None, lambda: _prediction_feedback_sync(
+                request.prediction_id, request.tool, request.action, request.accepted
+            )
+        )
+        return result
+    except Exception as e:
+        return {"success": False, "error": safe_error_detail(e)}
+
+
+def _prediction_feedback_sync(prediction_id: str, tool: str, action: str, accepted: bool) -> dict:
+    agent = _get_agent_service().agent
+    if "predictive_tasks" not in agent.tools:
+        return {"success": False, "error": "Predictive tasks not available"}
+    pred_tool = agent.tools["predictive_tasks"]
+    return pred_tool.execute("feedback", prediction_id=prediction_id, tool=tool, action_name=action, accepted=accepted)
+
+
+# ============================================================================
 # TOKEN COST DASHBOARD  (Tier 4)
 # ============================================================================
 

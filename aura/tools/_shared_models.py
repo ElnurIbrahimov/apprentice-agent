@@ -3,16 +3,16 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-_st_model = None
+_st_models: dict = {}
 
 def get_sentence_transformer(model_name="all-MiniLM-L6-v2"):
-    """Return a shared SentenceTransformer instance, loading once on first call."""
-    global _st_model
-    if _st_model is None:
+    """Return a shared SentenceTransformer instance, loading once per model name."""
+    global _st_models
+    if model_name not in _st_models:
         from sentence_transformers import SentenceTransformer
         logger.info(f"[SharedModels] Loading SentenceTransformer: {model_name}")
-        _st_model = SentenceTransformer(model_name)
-    return _st_model
+        _st_models[model_name] = SentenceTransformer(model_name)
+    return _st_models[model_name]
 
 
 _florence2_model = None

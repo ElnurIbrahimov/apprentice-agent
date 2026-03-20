@@ -365,10 +365,12 @@ class OllamaBrain:
             self._warmup_models()
 
     def _get_client_for_model(self, model: str) -> tuple:
-        """Get the appropriate client (local, cloud, or ChatGPT) based on model name.
+        """Get the appropriate client (local, cloud, ChatGPT, or direct API) based on model name.
 
         Routing:
         - chatgpt:* models → ChatGPT OAuth client (Codex Responses API)
+        - anthropic:*/openai:*/gemini:*/grok:*/perplexity:*/deepseek:*/minimax:*/qwen:*/kimi:*/glm:*
+          → Direct API provider client
         - *-cloud / *:cloud models → Ollama cloud client (or local bridge)
         - everything else → local Ollama client
 
@@ -387,16 +389,36 @@ class OllamaBrain:
                     return self._cloud_client, Config.MODEL_FAST
                 return self.client, Config.MODEL_FAST
 
+        # Direct API providers (anthropic:, openai:, gemini:, grok:, etc.)
+        if ":" in model and not model.endswith(("-cloud", ":cloud", ":latest")):
+            prefix = model.split(":")[0]
+            try:
+                from aura.providers import get_provider
+                provider = get_provider(prefix)
+                if provider and provider.is_configured():
+                    logger.debug(f"[BRAIN] Using {provider.display_name} API for model: {model}")
+                    return provider, model
+                elif provider:
+                    logger.warning(f"[BRAIN] {provider.display_name} API key not set, cannot use {model}")
+                    # Fall back to fast model instead of silently routing
+                    # the provider-prefixed name to local Ollama (which would fail).
+                    if self._cloud_client:
+                        return self._cloud_client, Config.MODEL_FAST
+                    return self.client, Config.MODEL_FAST
+            except Exception as e:
+                logger.debug(f"[BRAIN] Provider lookup failed for {prefix}: {e}")
+                # Same fallback on provider error
+                if self._cloud_client:
+                    return self._cloud_client, Config.MODEL_FAST
+                return self.client, Config.MODEL_FAST
+
         if model.endswith(("-cloud", ":cloud")):
-            if self._cloud_client:
-                logger.debug(f"[BRAIN] Using cloud client for model: {model}")
-                return self._cloud_client, model
-            else:
-                # No OLLAMA_API_KEY — try local Ollama bridge as last resort.
-                # On a server without local Ollama this will fail, but the
-                # caller's fallback chain + timeout will handle it gracefully.
-                logger.warning(f"[BRAIN] No OLLAMA_API_KEY — routing {model} via local Ollama bridge (may fail without local Ollama)")
-                return self.client, model
+            # Ollama Pro routes cloud models through the local client automatically.
+            # The local Ollama app handles auth and proxying to cloud infrastructure.
+            # Direct cloud API (api.ollama.com) requires separate auth that may fail,
+            # so prefer the local bridge which is more reliable.
+            logger.debug(f"[BRAIN] Using local Ollama bridge for cloud model: {model}")
+            return self.client, model
         return self.client, model
 
     def _get_fallback_chain(self, model: str) -> list:
@@ -537,7 +559,7 @@ class OllamaBrain:
         parses <tool_call> blocks from the text response.
         Returns same format as think_with_tools() for transparent integration.
         """
-        from aura.core.prompt_tool_adapter import build_tool_prompt, parse_tool_calls
+        from aura.core.prompt_tool_adapter import parse_tool_calls
 
         # Build tool-augmented messages
         aug_messages = self._inject_tool_prompt(messages, tools)
@@ -984,7 +1006,12 @@ class OllamaBrain:
         # Capture path so a concurrent conversation switch
         # cannot cause us to write to the wrong file in the background.
         path = self._history_file
-        _BG_EXECUTOR.submit(lambda p=path, d=data_str: p.write_text(d, encoding="utf-8"))
+        def _bg_write(p, d):
+            try:
+                p.write_text(d, encoding="utf-8")
+            except OSError as _e:
+                logger.warning(f"[BRAIN] Background history write failed: {_e}")
+        _BG_EXECUTOR.submit(_bg_write, path, data_str)
         self._update_conversation_index_entry(
             snap_message_count=snap_count, snap_last_content=snap_last,
             snap_history=snap_history,
@@ -1006,7 +1033,12 @@ class OllamaBrain:
                 indent=2, ensure_ascii=False,
             )
             path = history_path or self._history_file
-            _BG_EXECUTOR.submit(lambda p=path, d=data_str: p.write_text(d, encoding="utf-8"))
+            def _bg_write_snap(p, d):
+                try:
+                    p.write_text(d, encoding="utf-8")
+                except OSError as _e:
+                    logger.warning(f"[BRAIN] Background history write failed: {_e}")
+            _BG_EXECUTOR.submit(_bg_write_snap, path, data_str)
             self._update_conversation_index_entry(
                 snap_message_count=len(history),
                 snap_last_content=history[-1].get("content", "") if history else None,
@@ -2188,6 +2220,7 @@ class OllamaBrain:
         llm_options = self._build_neuro_llm_options(prompt, neuro)
 
         full_response = ""
+        _all_models_failed = False
 
         # ===== Phase 4 Fix 4C: Compaction notice on streaming path =====
         if self._compaction_pending:
@@ -2241,6 +2274,7 @@ class OllamaBrain:
                     fallback = "I'm having trouble processing that right now. Please try again."
                     yield fallback
                     full_response += fallback
+                    _all_models_failed = True
                 else:
                     logger.warning(f"[BRAIN] Stream model {_try_model} failed, trying next: {e}")
                 continue
@@ -2248,8 +2282,9 @@ class OllamaBrain:
         if _stream_in_tok or _stream_out_tok:
             self._record_tokens(actual_model, _stream_in_tok, _stream_out_tok)
 
-        # Update history after streaming completes
-        if use_history:
+        # Update history after streaming completes (skip if all models failed —
+        # don't pollute conversation history with the error fallback string)
+        if use_history and not _all_models_failed:
             with self._history_lock:
                 self.conversation_history.append({"role": "user", "content": prompt})
                 self.conversation_history.append({"role": "assistant", "content": full_response})

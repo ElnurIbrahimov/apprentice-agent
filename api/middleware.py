@@ -36,7 +36,6 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         "/api/status",
         "/api/auth/chatgpt/status",
         "/api/auth/chatgpt/login",
-        "/api/auth/chatgpt/logout",
         "/docs",
         "/openapi.json",
         "/redoc",

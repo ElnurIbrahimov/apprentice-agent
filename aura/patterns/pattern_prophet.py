@@ -12,6 +12,7 @@ Makes AURA anticipate needs and provide contextual help.
 
 import json
 import logging
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
@@ -118,8 +119,19 @@ class PatternProphet:
     def _save_patterns(self) -> None:
         """Save patterns to file."""
         try:
+            import tempfile
             data = {name: p.to_dict() for name, p in self.patterns.items()}
-            self.patterns_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            fd, tmp_path = tempfile.mkstemp(dir=str(self.patterns_file.parent), suffix=".tmp")
+            try:
+                with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, indent=2)
+                os.replace(tmp_path, str(self.patterns_file))
+            except Exception:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
         except IOError as e:
             logger.error(f"Error saving patterns: {e}")
 

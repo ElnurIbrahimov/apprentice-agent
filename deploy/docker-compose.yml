@@ -7,7 +7,7 @@ services:
       dockerfile: deploy/Dockerfile
     container_name: aura-backend
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"  # Bind to localhost only — use Nginx for public access
     env_file:
       - ../.env
     environment:

@@ -8,8 +8,10 @@ import ext from './ext';
 // On startup, initBackendUrl() loads the saved URL and updates HTTP + WS_URL.
 // ---------------------------------------------------------------------------
 
+// Server URL is the default remote backend.
+// API key should be set in the extension Settings panel (not hardcoded here).
 const DEFAULT_HTTP = 'http://89.167.107.134';
-const DEFAULT_API_KEY = 'i-L5ShpMkY2B7loNb8VS4EAAT-Ronh-K8cIgRILGjnQ';
+const DEFAULT_API_KEY = '';
 
 export let HTTP = DEFAULT_HTTP;
 export let WS_URL = deriveWsUrl(DEFAULT_HTTP);

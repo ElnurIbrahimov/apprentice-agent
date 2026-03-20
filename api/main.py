@@ -25,7 +25,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from api.routes import chat, status, upload, features, multi_agent, reasoning_tree, proactive, memory, context, conversation_starters, thinking, idle_behaviors, self_improvement, thinking_mode, tools_new, activity, multi_model, knowledge, search, pdf, transcribe, ocr, image_gen, agent_action, models as models_route, summarize, youtube, math as math_route, research, evolution, artifacts, feed
+from api.routes import chat, status, upload, features, multi_agent, reasoning_tree, proactive, memory, context, conversation_starters, thinking, idle_behaviors, self_improvement, thinking_mode, tools_new, activity, multi_model, knowledge, search, pdf, transcribe, ocr, image_gen, agent_action, models as models_route, summarize, youtube, math as math_route, research, evolution, artifacts, feed, providers as providers_route
 try:
     from api.routes import reliability as reliability_route
     _reliability_available = True
@@ -406,6 +406,7 @@ app.include_router(research.router)
 app.include_router(evolution.router)
 app.include_router(artifacts.router)
 app.include_router(feed.router)
+app.include_router(providers_route.router)
 if _reliability_available and reliability_route:
     app.include_router(reliability_route.router)
 if _auth_available and auth_route:

@@ -1,8 +1,9 @@
 """
 Memory Retriever - Makes AURA Actually Remember
 
-This retrieves relevant memories and injects them into every response.
-The key to making AURA feel like it knows you.
+DEPRECATED: This module is superseded by aura.memory.unified_memory (SQLite-based).
+It writes flat files (learned_facts.md, user_profile.md) parallel to the SQLite store.
+Use UnifiedMemory for all new code. This module is retained for backward compatibility.
 """
 
 import logging

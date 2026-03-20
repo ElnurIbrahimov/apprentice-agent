@@ -370,6 +370,14 @@ class GatewayDaemon:
             except asyncio.CancelledError:
                 pass
 
+        # Cancel event bus subscription task
+        if self._sub_task:
+            self._sub_task.cancel()
+            try:
+                await self._sub_task
+            except asyncio.CancelledError:
+                pass
+
         # Stop event bus
         await self.event_bus.stop()
 

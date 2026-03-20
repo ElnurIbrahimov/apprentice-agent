@@ -24,11 +24,10 @@ _validation_session_lock = threading.Lock()
 
 def _get_validation_session():
     global _validation_session
-    if _validation_session is None:
-        with _validation_session_lock:
-            if _validation_session is None:
-                import requests
-                _validation_session = requests.Session()
+    with _validation_session_lock:
+        if _validation_session is None:
+            import requests
+            _validation_session = requests.Session()
     return _validation_session
 
 
@@ -86,7 +85,7 @@ def validate_model(model_name: str, ollama_host: str = None) -> bool:
         if now - _tags_cache_ts < 30.0 and _tags_cache:
             available_models = _tags_cache.get(host)
             if available_models is not None:
-                _tags_cache_ts = now  # Refresh timestamp on cache hit
+                # Don't refresh TTL on cache hit — let it expire after 30s
                 if model_name in available_models:
                     return True
                 base_name = model_name.split(":")[0]
@@ -389,6 +388,20 @@ class Config:
     TRUST_TRUSTED_MESSAGES: int = int(os.getenv("TRUST_TRUSTED_MESSAGES", "100"))
     TRUST_FAMILIAR_SCORE: float = float(os.getenv("TRUST_FAMILIAR_SCORE", "0.6"))
     TRUST_TRUSTED_SCORE: float = float(os.getenv("TRUST_TRUSTED_SCORE", "0.7"))
+
+    # ============================================================
+    # DIRECT API PROVIDER KEYS (loaded from env or set at runtime)
+    # ============================================================
+    ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+    GROK_API_KEY: str = os.getenv("GROK_API_KEY", "")
+    PERPLEXITY_API_KEY: str = os.getenv("PERPLEXITY_API_KEY", "")
+    DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
+    MINIMAX_API_KEY: str = os.getenv("MINIMAX_API_KEY", "")
+    QWEN_API_KEY: str = os.getenv("QWEN_API_KEY", "")
+    KIMI_API_KEY: str = os.getenv("KIMI_API_KEY", "")
+    GLM_API_KEY: str = os.getenv("GLM_API_KEY", "")
 
     # API Security Configuration (primary definition is above, line ~143)
     API_KEY: str = os.getenv("AURA_API_KEY", "")  # Set to enable API key auth
