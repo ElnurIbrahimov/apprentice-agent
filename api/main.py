@@ -322,11 +322,7 @@ except Exception:
 # Default to localhost origins instead of wildcard for security.
 # Set API_CORS_ORIGINS="*" explicitly to allow all origins.
 if _cors_origins_str == "*":
-    _cors_origins = [
-        "http://localhost:5173", "http://127.0.0.1:5173",
-        "http://localhost:3000", "http://127.0.0.1:3000",
-        "http://localhost:8000", "http://127.0.0.1:8000",
-    ]
+    _cors_origins = ["*"]
 else:
     _cors_origins = [o.strip() for o in _cors_origins_str.split(",")]
 
