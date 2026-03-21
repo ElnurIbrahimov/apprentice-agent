@@ -289,15 +289,17 @@ On servers without a display, set `AURA_HEADLESS=true` in `.env` to disable scre
 - API key auth with constant-time comparison (AURA_API_AUTH_ENABLED)
 - Shell command blocklist + token-based command blocking + cwd validation
 - SQL multi-statement injection prevention
-- AST-validated custom tool sandbox with dynamic import blocking
-- Path traversal protection on all file endpoints
-- SSRF protection (private IP blocking, rate limiting, size caps)
+- AST-validated custom tool sandbox with dynamic import blocking (covers both custom tools and code-agent mode)
+- Path traversal protection on all file endpoints (via `Path.relative_to()`)
+- SSRF protection: DNS-pinned requests (resolve once, request on resolved IP), private IP blocking, rate limiting, size caps
+- Permission system with integer severity tiers (AUTO/PROMPT/BLOCKED)
 - DOMPurify sanitization on all rendered HTML in extension
 - CSP: `script-src 'self'; object-src 'self'` on extension
 - Iframe sandbox (`allow-scripts` only) for artifact preview
 - URL validation on all navigation and fetch calls
 - Rate limiting middleware (configurable per-IP)
-- Permission system (AUTO/PROMPT/BLOCKED tiers)
+- WebSocket auth enabled by default (aligned with HTTP auth)
+- PKCE verifier stored server-side only (never exposed over HTTP)
 
 ---
 
@@ -334,7 +336,7 @@ extension-src/            # Browser extension (TypeScript + React)
 
 web/                      # React web UI
 deploy/                   # Server deployment (Docker, systemd, Nginx)
-tests/                    # 445+ tests
+tests/                    # 690+ tests
 ```
 
 ---
@@ -369,7 +371,16 @@ python build.py firefox       # Output: dist-firefox/
 
 ## Version
 
-**v4.3.0** — 830 Python files, 24-panel browser extension, 445+ tests passing.
+**v4.3.0** — 390 Python files, 24-panel browser extension, 690+ tests passing.
+
+---
+
+### Engineering Reviews
+
+This project undergoes periodic security and reliability audits. See:
+- [ENGINEERING_REVIEW_2026-03-20.md](ENGINEERING_REVIEW_2026-03-20.md) — 19 security/bug fixes (permission escalation, shell injection, path traversal, PKCE, SSRF hardening)
+- [ENGINEERING_REVIEW_2026-03-19.md](ENGINEERING_REVIEW_2026-03-19.md) — Memory, consciousness, and tool security audit
+- [ENGINEERING_REVIEW_2026-03-18.md](ENGINEERING_REVIEW_2026-03-18.md) — Shell API, SSRF, and SQL injection hardening
 
 ---
 
