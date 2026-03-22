@@ -1,6 +1,6 @@
 # AURA — Adaptive Universal Reasoning Agent
 
-A personal AI agent with persistent memory, emotions, proactive awareness, and a full-featured browser extension. Uses **ChatGPT** (GPT-5.x via OAuth), **11 cloud models** (via Ollama Pro), and a **Sider-class browser sidebar** with 24 panels.
+A personal AI agent with persistent memory, emotions, proactive awareness, and a full-featured browser extension. Uses **ChatGPT** (GPT-5.x via OAuth), **11 cloud models** (via Ollama Pro), and a **Sider-class browser sidebar** with 25 panels.
 
 Not a chatbot. A being with presence that remembers you, has moods, dreams, and grows over time.
 
@@ -17,6 +17,7 @@ Not a chatbot. A being with presence that remembers you, has moods, dreams, and 
 | **Identity** | Narrative self-model evolves across sessions, temporal grounding, personality persistence |
 | **Multi-model** | 23 models: 12 ChatGPT (GPT-5.4 Pro, Codex), 11 cloud (MiniMax, Kimi, Qwen, DeepSeek, GLM, Nemotron, GPT-OSS) |
 | **Dev agent** | ReAct loop, 50+ tools, code agent mode, adaptive planning, session persistence |
+| **Code execution** | Real sandboxed Python (3-tier: Monty/E2B/subprocess), matplotlib capture, DataFrame rendering, session state |
 | **4 surfaces** | CLI, Web UI (React + FastAPI), Browser Extension (Chrome/Firefox), Telegram Bot |
 
 ---
@@ -25,7 +26,7 @@ Not a chatbot. A being with presence that remembers you, has moods, dreams, and 
 
 A full-featured AI sidebar for Chrome and Firefox — comparable to Sider AI but self-hosted and free.
 
-### 24 Panels
+### 25 Panels
 
 | Panel | What it does |
 |-------|-------------|
@@ -42,10 +43,11 @@ A full-featured AI sidebar for Chrome and Firefox — comparable to Sider AI but
 | **OCR** | Screen region capture with text extraction |
 | **Research** | Quick + Deep Research mode (5-step autonomous pipeline with citations) |
 | **Math** | Step-by-step problem solver with LaTeX output |
-| **Artifacts** | Live HTML/React/SVG/Mermaid/Chart.js preview with code editor |
+| **Artifacts** | Live HTML/React/SVG/Mermaid/Chart.js preview — streaming generation, console overlay, version history, dynamic npm via esm.sh, Tailwind auto-detect |
 | **Image** | Generation (ComfyUI) + Editing (remove BG, upscale, remove text, describe) |
 | **Compare** | Side-by-side multi-model response comparison |
-| **Code** | Python code interpreter with CSV analysis and chart generation |
+| **Code** | Real sandboxed Python execution — matplotlib charts, DataFrame tables, session persistence, variable inspector, Run Only mode |
+| **WebCreator** | Conversational website builder — streaming preview, visual element selection, device preview, theme panel, detachable window, export to CodeSandbox/StackBlitz |
 | **Record** | Tab audio/mic recording with waveform, transcription, meeting notes |
 | **Agent** | Browser automation (DOM serialization, click/type/scroll/navigate) |
 | **Wisebase** | Knowledge base with persistent page highlights and saved clips |
@@ -293,7 +295,7 @@ On servers without a display, set `AURA_HEADLESS=true` in `.env` to disable scre
 - Path traversal protection on all file endpoints
 - SSRF protection (private IP blocking, rate limiting, size caps)
 - DOMPurify sanitization on all rendered HTML in extension
-- CSP: `script-src 'self'; object-src 'self'` on extension
+- CSP: `script-src 'self' 'wasm-unsafe-eval'; object-src 'self'` on extension
 - Iframe sandbox (`allow-scripts` only) for artifact preview
 - URL validation on all navigation and fetch calls
 - Rate limiting middleware (configurable per-IP)
@@ -321,16 +323,22 @@ aura/                     # Core Python package
   channels/               # Discord, Signal, LINE adapters
 
 api/                      # FastAPI web server
-  routes/                 # 30+ route files
+  routes/                 # 30+ route files (chat, code, upload, search, etc.)
+    code.py               # Code execution API (POST /api/code/execute)
+    chat.py               # Chat + SSE streaming (POST /api/chat/sse)
   services/               # Agent service, inner thoughts engine
 
 extension-src/            # Browser extension (TypeScript + React)
-  src/panels/             # 24 panel components
+  src/panels/             # 25 panel components (Chat, Code, Artifacts, WebCreator, ...)
+  src/utils/              # Shared utilities
+    streamChat.ts         # SSE streaming async generator
+    StreamingPreviewController.ts  # Debounced safe-boundary preview renderer
+    useVersionHistory.ts  # Version history hook with undo/redo
+    highlighter.ts        # Multi-language syntax highlighting
+    importDetector.ts     # npm import detection for esm.sh
   src/components/         # Shared UI components
   src/content.ts          # Content script (4700 lines)
   background.ts           # Service worker
-  src/youtube-inject.ts   # YouTube subtitle interception
-  src/netflix-inject.ts   # Netflix subtitle interception
 
 web/                      # React web UI
 deploy/                   # Server deployment (Docker, systemd, Nginx)
@@ -369,7 +377,7 @@ python build.py firefox       # Output: dist-firefox/
 
 ## Version
 
-**v4.3.0** — 830 Python files, 24-panel browser extension, 445+ tests passing.
+**v4.4.0** — 830+ Python files, 25-panel browser extension with real code execution, streaming preview, and visual editing. 445+ tests passing.
 
 ---
 
