@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import List
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Depends
+from starlette.responses import StreamingResponse
 from api.auth import verify_api_key_ws, require_api_key
 from api.utils import safe_error_detail
 
@@ -257,6 +258,77 @@ async def chat(request: ChatRequest) -> ChatResponse:
     except Exception as e:
         logger.error(f"[Chat] Error: {e}")
         raise HTTPException(status_code=500, detail=safe_error_detail(e))
+
+
+@router.post("/sse")
+async def chat_sse(request: ChatRequest):
+    """SSE streaming chat endpoint.
+
+    Streams response chunks as Server-Sent Events.
+    """
+    message = request.message
+    model = request.model
+
+    loop = asyncio.get_running_loop()
+    chunk_queue: asyncio.Queue = asyncio.Queue()
+    stop_event = threading.Event()
+
+    def stream_worker():
+        """Run streaming in a separate thread."""
+        try:
+            for item in _get_agent_service().chat_stream(message, model_override=model, action_mode=None):
+                if stop_event.is_set():
+                    break
+                loop.call_soon_threadsafe(chunk_queue.put_nowait, item)
+        except Exception as e:
+            loop.call_soon_threadsafe(chunk_queue.put_nowait, {"type": "error", "error": safe_error_detail(e)})
+        finally:
+            loop.call_soon_threadsafe(chunk_queue.put_nowait, None)
+
+    async def event_generator():
+        stream_thread = threading.Thread(target=stream_worker, daemon=True)
+        stream_thread.start()
+
+        stream_deadline = asyncio.get_running_loop().time() + 90
+        try:
+            while True:
+                remaining = max(0.1, stream_deadline - asyncio.get_running_loop().time())
+                try:
+                    item = await asyncio.wait_for(chunk_queue.get(), timeout=remaining)
+                except asyncio.TimeoutError:
+                    logger.warning("[SSE] Stream timed out after 90 seconds")
+                    yield f"data: {json.dumps({'type': 'error', 'error': 'Response timed out after 90 seconds.'})}\n\n"
+                    return
+
+                if item is None:
+                    yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                    return
+
+                if isinstance(item, str):
+                    item = {"type": "chunk", "content": item}
+
+                if item.get("type") == "chunk":
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': item.get('content', '')})}\n\n"
+                elif item.get("type") == "done":
+                    yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                    return
+                elif item.get("type") == "error":
+                    yield f"data: {json.dumps({'type': 'error', 'error': item.get('error', 'Unknown error')})}\n\n"
+                    return
+        except Exception as e:
+            logger.error(f"[SSE] Error: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'error': safe_error_detail(e)})}\n\n"
+        finally:
+            stop_event.set()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @router.post("/run", response_model=RunResponse)

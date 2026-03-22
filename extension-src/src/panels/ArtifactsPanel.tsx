@@ -2,12 +2,17 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Copy, Download, Maximize2, Minimize2, Code2, Eye, SplitSquareHorizontal,
   Sparkles, Wand2, Wrench, RotateCcw, Globe, BarChart3, GitBranch,
-  Gamepad2, Presentation, FileCode, ChevronRight, Radio, X,
+  Gamepad2, Presentation, FileCode, ChevronRight, Radio, X, Terminal, Undo2, Redo2,
 } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { useStore } from '../store';
 import ModelPill from '../components/ModelPill';
 import { HTTP, getAuthHeaders } from '../api';
+import { streamChat } from '../utils/streamChat';
+import { StreamingPreviewController } from '../utils/StreamingPreviewController';
+import { useVersionHistory } from '../utils/useVersionHistory';
+import { highlightCode, detectLanguage } from '../utils/highlighter';
+import { generateDynamicImports } from '../utils/importDetector';
 
 /* ─── Types ─── */
 type ArtifactType = 'html' | 'react' | 'svg' | 'mermaid' | 'chart' | 'markdown' | 'css';
@@ -40,7 +45,7 @@ const QUICK_STARTS: QuickStart[] = [
 
 const SYSTEM_PROMPTS: Record<string, string> = {
   html: 'You are an expert web developer. Respond with ONLY a complete, self-contained HTML document (including <!DOCTYPE html>, <html>, <head>, <body>). Include all CSS in a <style> tag and all JS in a <script> tag. No markdown fences, no explanation. Make it visually polished with modern CSS.',
-  react: 'You are an expert React developer. Respond with ONLY the JavaScript code for a React component. Do NOT include import statements — React and ReactDOM are available globally. Render your root component using: ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App)). No markdown fences, no explanation. Use inline styles or a <style> tag injected via JS.',
+  react: 'You are an expert React developer. Respond with ONLY the JavaScript code for a React component. You may use ES module import statements — React, ReactDOM, recharts, lucide-react, framer-motion, three, d3, @tanstack/react-query, zustand, clsx, date-fns, and any npm package are available via esm.sh. Start with imports like: import React from "react"; import { createRoot } from "react-dom/client"; Then render: createRoot(document.getElementById("root")).render(<App />);. No markdown fences, no explanation. Use inline styles or Tailwind CSS classes (Tailwind is auto-detected and loaded).',
   svg: 'You are an expert SVG artist. Respond with ONLY valid SVG markup. No markdown fences, no explanation.',
   mermaid: 'You are an expert at Mermaid.js diagrams. Respond with ONLY the mermaid diagram definition (e.g., starting with "graph TD", "mindmap", "sequenceDiagram", "flowchart LR", etc.). No markdown fences, no explanation, no HTML wrapping.',
   chart: 'You are an expert data visualization developer using Chart.js. Respond with ONLY JavaScript code that creates Chart.js charts. The canvas elements should be created in JS and appended to document.getElementById("root"). Chart.js is available globally as Chart. No markdown fences, no explanation. Create beautiful charts with good color schemes.',
@@ -59,14 +64,33 @@ window.onerror = function(msg, src, line, col, err) {
 window.addEventListener('unhandledrejection', function(e) {
   parent.postMessage({ type: 'artifact-error', msg: String(e.reason), line: 0 }, '*');
 });
+['log','warn','error','info'].forEach(function(method) {
+  var orig = console[method];
+  console[method] = function() {
+    var args = Array.prototype.slice.call(arguments);
+    orig.apply(console, arguments);
+    try {
+      parent.postMessage({
+        type: 'console',
+        level: method,
+        args: args.map(function(a) { try { return JSON.stringify(a); } catch(e) { return String(a); } }),
+        timestamp: Date.now()
+      }, '*');
+    } catch(e) {}
+  };
+});
 </script>`
     : '';
 
+  // Auto-detect Tailwind usage for html and react types
+  const hasTailwind = /\bclass(?:Name)?=["'][^"']*(?:flex|grid|p-|m-|text-|bg-|rounded|shadow|border|w-|h-|gap-|items-|justify-)/.test(code);
+  const tailwindCdn = hasTailwind ? '<script src="https://cdn.tailwindcss.com"><\/script>' : '';
+
   if (type === 'html') {
     if (code.includes('</head>')) {
-      return code.replace('</head>', errorScript + '</head>');
+      return code.replace('</head>', tailwindCdn + errorScript + '</head>');
     }
-    return errorScript + code;
+    return tailwindCdn + errorScript + code;
   }
 
   if (type === 'svg') {
@@ -82,17 +106,89 @@ window.addEventListener('unhandledrejection', function(e) {
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{font-family:system-ui,-apple-system,sans-serif;padding:24px;line-height:1.7;max-width:720px;margin:0 auto;color:#e8e6f0;background:#0a0a0f}h1,h2,h3{color:#a78bfa;margin:20px 0 8px}h1{font-size:1.8em;border-bottom:1px solid rgba(167,139,250,0.2);padding-bottom:8px}h2{font-size:1.4em}h3{font-size:1.15em}a{color:#818cf8}code{background:rgba(167,139,250,0.12);padding:2px 6px;border-radius:4px;font-size:0.9em}pre{background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:16px;overflow-x:auto}pre code{background:none;padding:0}blockquote{border-left:3px solid #7c3aed;margin:12px 0;padding:8px 16px;color:#9ca3af;background:rgba(124,58,237,0.06);border-radius:0 6px 6px 0}table{border-collapse:collapse;width:100%;margin:12px 0}th,td{border:1px solid rgba(255,255,255,0.1);padding:8px 12px;text-align:left}th{background:rgba(124,58,237,0.1)}</style></head><body>${htmlContent}</body></html>`;
   }
 
-  // For react, chart, mermaid — use the full runtime template
+  // For react with ES module imports — use import map + esm.sh
+  if (type === 'react') {
+    const hasImports = /\bimport\s+/.test(code);
+
+    if (hasImports) {
+      // Module mode: build dynamic import map and use <script type="module">
+      const dynamicImports = generateDynamicImports(code);
+      const importMap = {
+        imports: {
+          'react': 'https://esm.sh/react@19',
+          'react-dom': 'https://esm.sh/react-dom@19',
+          'react-dom/client': 'https://esm.sh/react-dom@19/client',
+          'recharts': 'https://esm.sh/recharts?external=react,react-dom',
+          'lucide-react': 'https://esm.sh/lucide-react?external=react',
+          'framer-motion': 'https://esm.sh/framer-motion?external=react,react-dom',
+          'three': 'https://esm.sh/three',
+          'd3': 'https://esm.sh/d3',
+          '@tanstack/react-query': 'https://esm.sh/@tanstack/react-query?external=react',
+          'zustand': 'https://esm.sh/zustand?external=react',
+          'clsx': 'https://esm.sh/clsx',
+          'date-fns': 'https://esm.sh/date-fns',
+          ...dynamicImports,
+        },
+      };
+
+      return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+${errorScript}
+${tailwindCdn}
+<script type="importmap">${JSON.stringify(importMap)}<\/script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,sans-serif;background:#0a0a0f;color:#e8e6f0;min-height:100vh}
+#root{padding:16px;min-height:100vh}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="module">
+${code}
+<\/script>
+</body>
+</html>`;
+    }
+
+    // UMD fallback: legacy non-import React code (React/ReactDOM available globally)
+    return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"><\/script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"><\/script>
+${tailwindCdn}
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,sans-serif;background:#0a0a0f;color:#e8e6f0;min-height:100vh}
+#root{padding:16px;min-height:100vh}
+</style>
+${errorScript}
+</head>
+<body>
+<div id="root"></div>
+<script>
+try {
+${code}
+} catch(e) {
+  parent.postMessage({ type: 'artifact-error', msg: e.message, line: 0, stack: e.stack }, '*');
+}
+<\/script>
+</body>
+</html>`;
+  }
+
+  // For chart, mermaid — use the full runtime template
   const cdnScripts: string[] = [];
   let bodyContent = '<div id="root"></div>';
   let userScript = code;
 
-  if (type === 'react') {
-    cdnScripts.push(
-      '<script src="https://unpkg.com/react@18/umd/react.production.min.js"><\/script>',
-      '<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"><\/script>',
-    );
-  } else if (type === 'chart') {
+  if (type === 'chart') {
     cdnScripts.push(
       '<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"><\/script>',
     );
@@ -308,6 +404,27 @@ function useArtifactsWS(enabled: boolean) {
 }
 
 
+/* ─── Action button helper (outside component to avoid re-creation on each render) ─── */
+function ActionBtn({ id, icon, label, onClick, accent, hoveredBtn, setHoveredBtn }: {
+  id: string; icon: React.ReactNode; label: string; onClick: () => void; accent?: boolean;
+  hoveredBtn: string | null; setHoveredBtn: (v: string | null) => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHoveredBtn(id)}
+      onMouseLeave={() => setHoveredBtn(null)}
+      style={{
+        ...btnBase,
+        ...(hoveredBtn === id ? btnHover : {}),
+        ...(accent ? { background: 'var(--pg)', borderColor: 'rgba(124,58,237,0.2)', color: 'var(--pl)' } : {}),
+      }}
+    >
+      {icon} {label}
+    </button>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    Component
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -327,6 +444,9 @@ export default function ArtifactsPanel() {
   const [iframeError, setIframeError] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [hoveredBtn, setHoveredBtn] = useState<string | null>(null);
+  const [consoleLogs, setConsoleLogs] = useState<Array<{level: string, args: string[], timestamp: number}>>([]);
+  const [consoleOpen, setConsoleOpen] = useState(false);
+  const { versions, currentIdx, pushVersion, goToVersion, undo, redo, canUndo, canRedo } = useVersionHistory();
 
   // --- Live mode state ---
   const [liveActiveFile, setLiveActiveFile] = useState<string | null>(null);
@@ -360,7 +480,6 @@ export default function ArtifactsPanel() {
   const liveIframeRef = useRef<HTMLIFrameElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const codeRef = useRef('');
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   /* ─── Abort fetch on unmount ─── */
@@ -373,12 +492,16 @@ export default function ArtifactsPanel() {
   /* ─── iframe error listener ─── */
   useEffect(() => {
     const handler = (e: MessageEvent) => {
+      if (!e.data || typeof e.data !== 'object') return;
       const targetIframe = panelMode === 'live' ? liveIframeRef.current : iframeRef.current;
       if (e.source !== targetIframe?.contentWindow) return;
       if (e.data?.type === 'artifact-error') {
         const msg = e.data.msg || 'Unknown error';
         const line = e.data.line ? ` (line ${e.data.line})` : '';
         setIframeError(`${msg}${line}`);
+      }
+      if (e.data?.type === 'console') {
+        setConsoleLogs(prev => [...prev.slice(-99), { level: e.data.level, args: e.data.args, timestamp: e.data.timestamp }]);
       }
     };
     window.addEventListener('message', handler);
@@ -392,13 +515,6 @@ export default function ArtifactsPanel() {
     liveIframeRef.current.srcdoc = buildSrcdoc(activeLiveFile.type, activeLiveFile.code);
   }, [panelMode, activeLiveFile?.code, activeLiveFile?.type, activeLiveFile?.filename]);
 
-  /* ─── Update iframe preview (generate mode) ─── */
-  const updatePreview = useCallback((rawCode: string, type: ArtifactType) => {
-    if (!iframeRef.current) return;
-    setIframeError(null);
-    iframeRef.current.srcdoc = buildSrcdoc(type, rawCode);
-  }, []);
-
   /* ─── Generate artifact ─── */
   const generate = useCallback(async (overridePrompt?: string, overrideType?: ArtifactType) => {
     const text = (overridePrompt ?? prompt).trim();
@@ -410,6 +526,7 @@ export default function ArtifactsPanel() {
     setStatus('Generating...');
     setCode('');
     setIframeError(null);
+    setConsoleLogs([]);
     codeRef.current = '';
     if (iframeRef.current) iframeRef.current.srcdoc = '';
 
@@ -418,32 +535,35 @@ export default function ArtifactsPanel() {
     abortRef.current = ctrl;
 
     const systemPrompt = SYSTEM_PROMPTS[type] || SYSTEM_PROMPTS.html;
+    const promptMessage = `${systemPrompt}\n\nTask: ${text}`;
+    const model = getModel('artifacts') || undefined;
+
+    const previewCtrl = new StreamingPreviewController((html) => {
+      if (iframeRef.current) {
+        iframeRef.current.srcdoc = buildSrcdoc(type, html, true);
+      }
+    });
 
     try {
-      const resp = await fetch(`${HTTP}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        body: JSON.stringify({
-          message: `${systemPrompt}\n\nTask: ${text}`,
-          model: getModel('artifacts') || undefined,
-        }),
-        signal: ctrl.signal,
-      });
-
-      if (!resp.ok) {
-        const d = await resp.json().catch(() => ({}));
-        setStatus((d as any).detail || resp.statusText);
-        setLoading(false);
-        return;
+      let streamedCode = '';
+      for await (const chunk of streamChat(promptMessage, model, ctrl.signal)) {
+        streamedCode += chunk;
+        // Update code display progressively
+        setCode(streamedCode);
+        // Update preview via debounced controller
+        previewCtrl.append(chunk);
       }
 
-      const data = await resp.json();
-      const responseText = data.response || data.text || data.content || data.reply || data.message || '';
-
-      const finalCode = stripFences(responseText);
+      // Cancel any pending timer without rendering to avoid fenced content flash
+      previewCtrl.reset();
+      const finalCode = stripFences(streamedCode);
       codeRef.current = finalCode;
       setCode(finalCode);
-      updatePreview(finalCode, type);
+      pushVersion(text, finalCode);
+      // Final preview render with clean code
+      if (iframeRef.current) {
+        iframeRef.current.srcdoc = buildSrcdoc(type, finalCode, true);
+      }
       setStatus('');
       setViewMode('preview');
     } catch (err: any) {
@@ -453,8 +573,9 @@ export default function ArtifactsPanel() {
     } finally {
       setLoading(false);
       abortRef.current = null;
+      previewCtrl.dispose();
     }
-  }, [prompt, artifactType, getModel, updatePreview]);
+  }, [prompt, artifactType, getModel, pushVersion]);
 
   /* ─── Actions ─── */
   const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -512,24 +633,6 @@ export default function ArtifactsPanel() {
     generate(qs.template, qs.type);
   }, [generate]);
 
-  /* ─── Button helper ─── */
-  const ActionBtn = ({ id, icon, label, onClick, accent }: {
-    id: string; icon: React.ReactNode; label: string; onClick: () => void; accent?: boolean;
-  }) => (
-    <button
-      onClick={onClick}
-      onMouseEnter={() => setHoveredBtn(id)}
-      onMouseLeave={() => setHoveredBtn(null)}
-      style={{
-        ...btnBase,
-        ...(hoveredBtn === id ? btnHover : {}),
-        ...(accent ? { background: 'var(--pg)', borderColor: 'rgba(124,58,237,0.2)', color: 'var(--pl)' } : {}),
-      }}
-    >
-      {icon} {label}
-    </button>
-  );
-
   /* ─── View mode tabs ─── */
   const viewTabs: { mode: ViewMode; icon: React.ReactNode; label: string }[] = [
     { mode: 'preview', icon: <Eye size={13} />, label: 'Preview' },
@@ -540,19 +643,8 @@ export default function ArtifactsPanel() {
   /* ─── Syntax-highlighted code display ─── */
   const highlightedCode = React.useMemo(() => {
     if (!activeCode) return '';
-    let h = escHtml(activeCode);
-    h = h.replace(/(&quot;|&#39;)(.*?)\1/g, '<span style="color:#a5d6ff">$1$2$1</span>');
-    h = h.replace(/(&lt;\/?)([\w-]+)/g, '$1<span style="color:#ff7b72">$2</span>');
-    h = h.replace(/\s([\w-]+)=/g, ' <span style="color:#d2a8ff">$1</span>=');
-    h = h.replace(/(\/\/.*?)(\n|$)/g, '<span style="color:#6a737d">$1</span>$2');
-    h = h.replace(/(&lt;!--[\s\S]*?--&gt;)/g, '<span style="color:#6a737d">$1</span>');
-    const kw = ['const', 'let', 'var', 'function', 'return', 'if', 'else', 'for', 'while', 'class', 'import', 'export', 'from', 'new', 'try', 'catch', 'async', 'await'];
-    for (const k of kw) {
-      h = h.replace(new RegExp(`\\b(${k})\\b`, 'g'), '<span style="color:#ff7b72">$1</span>');
-    }
-    h = h.replace(/\b(\d+\.?\d*)\b/g, '<span style="color:#79c0ff">$1</span>');
-    return h;
-  }, [activeCode]);
+    return highlightCode(activeCode, detectLanguage(activeCode, activeType));
+  }, [activeCode, activeType]);
 
   /* ─── Current view mode based on panel mode ─── */
   const currentViewMode = panelMode === 'live' ? liveViewMode : viewMode;
@@ -928,7 +1020,7 @@ export default function ArtifactsPanel() {
                 background: '#0a0a0f',
               }}
             />
-            {loading && panelMode === 'generate' && (
+            {loading && panelMode === 'generate' && !code && (
               <div style={{
                 position: 'absolute', inset: 0, display: 'flex',
                 flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12,
@@ -941,6 +1033,50 @@ export default function ArtifactsPanel() {
                 <span style={{ fontSize: '12px', color: 'var(--pl)', fontWeight: 500 }}>
                   Generating...
                 </span>
+              </div>
+            )}
+            {loading && panelMode === 'generate' && code && (
+              <div style={{
+                position: 'absolute', bottom: 12, right: 12, zIndex: 5,
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '6px 14px', borderRadius: 'var(--r-pill)',
+                background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.25)',
+                backdropFilter: 'blur(8px)',
+              }}>
+                <span style={{
+                  width: 8, height: 8, borderRadius: '50%',
+                  background: 'var(--pl)',
+                  animation: 'pulse 1.5s ease-in-out infinite',
+                }} />
+                <span style={{ fontSize: '11px', color: 'var(--pl)', fontWeight: 500 }}>
+                  Streaming... {code.length.toLocaleString()} chars
+                </span>
+              </div>
+            )}
+            {/* Console Drawer */}
+            {consoleOpen && (
+              <div style={{
+                position: 'absolute', bottom: 0, left: 0, right: 0, maxHeight: 200,
+                background: '#1e1e1e', borderTop: '1px solid #333', overflow: 'auto',
+                fontFamily: 'monospace', fontSize: '11px', zIndex: 10,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', padding: '4px 8px', background: '#252526', borderBottom: '1px solid #333' }}>
+                  <span style={{ color: '#ccc', fontSize: '10px', fontWeight: 600 }}>Console</span>
+                  <span style={{ flex: 1 }} />
+                  <button onClick={() => setConsoleLogs([])} style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: '10px', padding: '2px 6px' }}>Clear</button>
+                  <button onClick={() => setConsoleOpen(false)} style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: '14px', padding: '2px 6px' }}>&times;</button>
+                </div>
+                {consoleLogs.map((log, i) => (
+                  <div key={i} style={{
+                    padding: '3px 8px', borderBottom: '1px solid #2a2a2a',
+                    color: log.level === 'error' ? '#f44747' : log.level === 'warn' ? '#cca700' : log.level === 'info' ? '#3794ff' : '#d4d4d4',
+                  }}>
+                    {log.args.map((a) => {
+                      try { return JSON.parse(a); } catch { return a; }
+                    }).join(' ')}
+                  </div>
+                ))}
+                {consoleLogs.length === 0 && <div style={{ padding: '8px', color: '#666', textAlign: 'center' }}>No console output</div>}
               </div>
             )}
           </div>
@@ -1042,8 +1178,11 @@ export default function ArtifactsPanel() {
             <div className="aura-thinking">
               <span /><span /><span />
             </div>
-            <span style={{ fontSize: '12px', color: 'var(--pl)', fontWeight: 500 }}>
-              Creating your artifact...
+            <span style={{
+              fontSize: '12px', color: 'var(--pl)', fontWeight: 500,
+              animation: 'pulse 1.5s ease-in-out infinite',
+            }}>
+              Generating...
             </span>
           </div>
         )}
@@ -1055,13 +1194,51 @@ export default function ArtifactsPanel() {
           display: 'flex', flexWrap: 'wrap', gap: 6, padding: '8px 10px', flexShrink: 0,
           borderTop: '1px solid var(--b1)',
         }}>
-          <ActionBtn id="copy" icon={<Copy size={13} />} label="Copy Code" onClick={copyCode} />
-          <ActionBtn id="download" icon={<Download size={13} />} label="Download" onClick={downloadFile} />
+          <ActionBtn id="copy" icon={<Copy size={13} />} label="Copy Code" onClick={copyCode} hoveredBtn={hoveredBtn} setHoveredBtn={setHoveredBtn} />
+          <ActionBtn id="download" icon={<Download size={13} />} label="Download" onClick={downloadFile} hoveredBtn={hoveredBtn} setHoveredBtn={setHoveredBtn} />
+          <button
+            onClick={() => { const v = undo(); if (v) { setCode(v.code); codeRef.current = v.code; if (iframeRef.current) iframeRef.current.srcdoc = buildSrcdoc(artifactType, v.code, true); } }}
+            disabled={!canUndo}
+            title="Undo"
+            style={{ background: 'var(--s2)', border: '1px solid var(--b1)', borderRadius: 'var(--r-sm)', color: canUndo ? 'var(--mu)' : 'var(--s3)', padding: '3px 6px', cursor: canUndo ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', opacity: canUndo ? 1 : 0.4 }}
+          >
+            <Undo2 size={12} />
+          </button>
+          <button
+            onClick={() => { const v = redo(); if (v) { setCode(v.code); codeRef.current = v.code; if (iframeRef.current) iframeRef.current.srcdoc = buildSrcdoc(artifactType, v.code, true); } }}
+            disabled={!canRedo}
+            title="Redo"
+            style={{ background: 'var(--s2)', border: '1px solid var(--b1)', borderRadius: 'var(--r-sm)', color: canRedo ? 'var(--mu)' : 'var(--s3)', padding: '3px 6px', cursor: canRedo ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', opacity: canRedo ? 1 : 0.4 }}
+          >
+            <Redo2 size={12} />
+          </button>
+          <button
+            onClick={() => setConsoleOpen(!consoleOpen)}
+            title="Console"
+            style={{
+              background: consoleOpen ? 'rgba(55,148,255,0.15)' : 'var(--s2)',
+              border: `1px solid ${consoleOpen ? 'rgba(55,148,255,0.4)' : 'var(--b1)'}`,
+              borderRadius: 'var(--r-sm)', color: consoleOpen ? '#3794ff' : 'var(--mu)',
+              padding: '3px 6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3,
+              fontSize: '10px', fontFamily: 'inherit', position: 'relative',
+            }}
+          >
+            <Terminal size={12} /> Console
+            {consoleLogs.filter(l => l.level === 'error').length > 0 && (
+              <span style={{
+                position: 'absolute', top: -4, right: -4, background: '#f44747',
+                color: 'white', borderRadius: '50%', width: 14, height: 14,
+                fontSize: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                {consoleLogs.filter(l => l.level === 'error').length}
+              </span>
+            )}
+          </button>
           {panelMode === 'generate' && (
-            <ActionBtn id="remix" icon={<RotateCcw size={13} />} label="Remix" onClick={remix} />
+            <ActionBtn id="remix" icon={<RotateCcw size={13} />} label="Remix" onClick={remix} hoveredBtn={hoveredBtn} setHoveredBtn={setHoveredBtn} />
           )}
           {iframeError && panelMode === 'generate' && (
-            <ActionBtn id="fix" icon={<Wrench size={13} />} label="Fix Error" onClick={fixError} accent />
+            <ActionBtn id="fix" icon={<Wrench size={13} />} label="Fix Error" onClick={fixError} accent hoveredBtn={hoveredBtn} setHoveredBtn={setHoveredBtn} />
           )}
           <div style={{ flex: 1 }} />
           <ActionBtn
@@ -1069,7 +1246,34 @@ export default function ArtifactsPanel() {
             icon={fullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
             label={fullscreen ? 'Exit' : 'Full Screen'}
             onClick={() => setFullscreen(f => !f)}
+            hoveredBtn={hoveredBtn}
+            setHoveredBtn={setHoveredBtn}
           />
+        </div>
+      )}
+      {/* Version timeline */}
+      {versions.length > 1 && (
+        <div style={{
+          display: 'flex', gap: 4, padding: '4px 8px', borderTop: '1px solid var(--b1)',
+          overflowX: 'auto', background: 'var(--s1)', flexShrink: 0,
+        }}>
+          {versions.map((v, i) => (
+            <button
+              key={v.id}
+              onClick={() => { const ver = goToVersion(i); if (ver) { setCode(ver.code); codeRef.current = ver.code; if (iframeRef.current) iframeRef.current.srcdoc = buildSrcdoc(artifactType, ver.code, true); } }}
+              title={v.prompt}
+              style={{
+                flexShrink: 0, padding: '2px 8px', fontSize: '10px',
+                background: i === currentIdx ? 'var(--p)' : 'var(--s2)',
+                color: i === currentIdx ? 'white' : 'var(--mu)',
+                border: '1px solid ' + (i === currentIdx ? 'var(--p)' : 'var(--b1)'),
+                borderRadius: 'var(--r-pill)', cursor: 'pointer', fontFamily: 'inherit',
+                maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}
+            >
+              v{i + 1}
+            </button>
+          ))}
         </div>
       )}
     </div>

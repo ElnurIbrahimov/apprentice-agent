@@ -2,12 +2,17 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Copy, Download, Maximize2, Minimize2, Code2, Eye,
   Monitor, Tablet, Smartphone, Globe, Layout, Sparkles,
-  Send, Trash2, RotateCcw, Upload, ChevronRight, User, Bot,
+  Send, Trash2, RotateCcw, Upload, User, Bot,
+  Undo2, Redo2, MousePointer2, Pencil, Palette, ExternalLink,
 } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { useStore } from '../store';
 import ModelPill from '../components/ModelPill';
 import { HTTP, getAuthHeaders } from '../api';
+import { streamChat } from '../utils/streamChat';
+import { StreamingPreviewController } from '../utils/StreamingPreviewController';
+import { useVersionHistory } from '../utils/useVersionHistory';
+import { highlightCode } from '../utils/highlighter';
 
 /* ─── Types ─── */
 type ViewMode = 'preview' | 'code';
@@ -98,8 +103,63 @@ function stripFences(s: string): string {
   return s.replace(/^```[\w\-\.]*\r?\n?/, '').replace(/\r?\n?```[\w\-\.]*\s*$/, '').trim();
 }
 
-function escHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+/** Inject error-handler + element-selection scripts into HTML for iframe srcdoc */
+function injectIframeScripts(html: string): string {
+  const script = `<script>
+window.onerror = function(msg, src, line, col, err) {
+  parent.postMessage({ type: 'artifact-error', msg: String(msg), line: line, col: col, stack: err ? err.stack : '' }, '*');
+};
+window.addEventListener('unhandledrejection', function(e) {
+  parent.postMessage({ type: 'artifact-error', msg: String(e.reason), line: 0 }, '*');
+});
+var _auraSelectMode = false;
+window.addEventListener('message', function(e) {
+  if (e.data && e.data.type === 'toggle-select-mode') _auraSelectMode = e.data.enabled;
+});
+var _auraStyle = document.createElement('style');
+_auraStyle.textContent = '.aura-highlight { outline: 2px solid #3b82f6 !important; outline-offset: 2px; cursor: crosshair !important; }';
+document.head.appendChild(_auraStyle);
+function _auraGetPath(el) {
+  var parts = [];
+  while (el && el !== document.body && el !== document.documentElement) {
+    var tag = el.tagName.toLowerCase();
+    if (el.id) { parts.unshift(tag + '#' + el.id); break; }
+    else if (el.className && typeof el.className === 'string') { parts.unshift(tag + '.' + el.className.trim().split(/\\s+/).join('.')); }
+    else { parts.unshift(tag); }
+    el = el.parentElement;
+  }
+  return parts.join(' > ');
+}
+document.addEventListener('mouseover', function(e) {
+  if (!_auraSelectMode) return;
+  document.querySelectorAll('.aura-highlight').forEach(function(el) { el.classList.remove('aura-highlight'); });
+  if (e.target !== document.body && e.target !== document.documentElement) e.target.classList.add('aura-highlight');
+}, true);
+document.addEventListener('mouseout', function(e) {
+  if (!_auraSelectMode) return;
+  e.target.classList.remove('aura-highlight');
+}, true);
+document.addEventListener('click', function(e) {
+  if (!_auraSelectMode) return;
+  e.preventDefault();
+  e.stopPropagation();
+  var el = e.target;
+  el.classList.remove('aura-highlight');
+  parent.postMessage({
+    type: 'element-selected',
+    tagName: el.tagName,
+    classes: (typeof el.className === 'string') ? el.className : '',
+    id: el.id || '',
+    text: (el.textContent || '').slice(0, 100).trim(),
+    outerHTML: el.outerHTML.slice(0, 500),
+    path: _auraGetPath(el)
+  }, '*');
+}, true);
+</script>`;
+  if (html.includes('</head>')) {
+    return html.replace('</head>', script + '</head>');
+  }
+  return script + html;
 }
 
 /* ─── Shared styles ─── */
@@ -126,11 +186,38 @@ const btnHover: React.CSSProperties = {
   color: 'var(--pl)',
 };
 
+const exportItemStyle: React.CSSProperties = {
+  display: 'block', width: '100%', textAlign: 'left', background: 'none',
+  border: 'none', color: '#ccc', padding: '6px 12px', fontSize: '11px',
+  cursor: 'pointer', fontFamily: 'inherit',
+};
+
+/* ─── ActionBtn (outside component to avoid re-creation each render) ─── */
+function ActionBtn({ id, icon, label, onClick, hoveredBtn, setHoveredBtn }: {
+  id: string; icon: React.ReactNode; label: string; onClick: () => void;
+  hoveredBtn: string | null; setHoveredBtn: (v: string | null) => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHoveredBtn(id)}
+      onMouseLeave={() => setHoveredBtn(null)}
+      style={{
+        ...btnBase,
+        ...(hoveredBtn === id ? btnHover : {}),
+      }}
+    >
+      {icon} {label}
+    </button>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    WebCreatorPanel
    ═══════════════════════════════════════════════════════════════════════════ */
 export default function WebCreatorPanel() {
   const { getModel } = useStore();
+  const { versions, currentIdx, pushVersion, goToVersion, undo, redo, canUndo, canRedo, clear: clearVersions } = useVersionHistory();
 
   /* ─── State ─── */
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -145,6 +232,18 @@ export default function WebCreatorPanel() {
   const [hoveredBtn, setHoveredBtn] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(true);
   const [conversationHistory, setConversationHistory] = useState<Array<{ role: string; content: string }>>([]);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedElement, setSelectedElement] = useState<{tagName: string, classes: string, id: string, text: string, outerHTML: string, path: string} | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [detached, setDetached] = useState(false);
+  const [themeOpen, setThemeOpen] = useState(false);
+  const [themeColors, setThemeColors] = useState({
+    primary: '#3b82f6',
+    secondary: '#6366f1',
+    accent: '#f59e0b',
+    background: '#ffffff',
+    text: '#111827',
+  });
 
   /* ─── Refs ─── */
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -152,23 +251,35 @@ export default function WebCreatorPanel() {
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const detachedWindowRef = useRef<Window | null>(null);
 
   /* ─── Cleanup ─── */
   useEffect(() => {
     return () => {
       if (abortRef.current) abortRef.current.abort();
       if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+      if (detachedWindowRef.current && !detachedWindowRef.current.closed) {
+        detachedWindowRef.current.close();
+      }
     };
   }, []);
 
   /* ─── iframe error listener ─── */
   useEffect(() => {
     const handler = (e: MessageEvent) => {
+      if (!e.data || typeof e.data !== 'object') return;
       if (e.source !== iframeRef.current?.contentWindow) return;
-      if (e.data?.type === 'artifact-error') {
+      if (e.data.type === 'artifact-error') {
         const msg = e.data.msg || 'Unknown error';
         const line = e.data.line ? ` (line ${e.data.line})` : '';
         setIframeError(`${msg}${line}`);
+      }
+      if (e.data.type === 'element-selected') {
+        setSelectedElement(e.data);
+        setSelectMode(false);
+        if (iframeRef.current?.contentWindow) {
+          iframeRef.current.contentWindow.postMessage({ type: 'toggle-select-mode', enabled: false }, '*');
+        }
       }
     };
     window.addEventListener('message', handler);
@@ -186,22 +297,43 @@ export default function WebCreatorPanel() {
   const updatePreview = useCallback((html: string) => {
     if (!iframeRef.current || !html) return;
     setIframeError(null);
-    const errorScript = `<script>
-window.onerror = function(msg, src, line, col, err) {
-  parent.postMessage({ type: 'artifact-error', msg: String(msg), line: line, col: col, stack: err ? err.stack : '' }, '*');
-};
-window.addEventListener('unhandledrejection', function(e) {
-  parent.postMessage({ type: 'artifact-error', msg: String(e.reason), line: 0 }, '*');
-});
-</script>`;
-    let srcdoc = html;
-    if (html.includes('</head>')) {
-      srcdoc = html.replace('</head>', errorScript + '</head>');
-    } else {
-      srcdoc = errorScript + html;
+    iframeRef.current.srcdoc = injectIframeScripts(html);
+
+    // Sync to detached window if open
+    if (detachedWindowRef.current && !detachedWindowRef.current.closed) {
+      detachedWindowRef.current.document.open();
+      detachedWindowRef.current.document.write(html);
+      detachedWindowRef.current.document.close();
     }
-    iframeRef.current.srcdoc = srcdoc;
   }, []);
+
+  /* ─── Detach preview to separate window ─── */
+  const detachPreview = useCallback(() => {
+    if (detached && detachedWindowRef.current && !detachedWindowRef.current.closed) {
+      detachedWindowRef.current.focus();
+      return;
+    }
+    const win = window.open('', 'aura-preview', 'width=1024,height=768');
+    if (!win) return;
+    detachedWindowRef.current = win;
+    setDetached(true);
+
+    // Write current HTML to the new window
+    if (currentHtml) {
+      win.document.open();
+      win.document.write(currentHtml);
+      win.document.close();
+    }
+
+    // Listen for window close
+    const checkClosed = setInterval(() => {
+      if (win.closed) {
+        clearInterval(checkClosed);
+        setDetached(false);
+        detachedWindowRef.current = null;
+      }
+    }, 500);
+  }, [detached, currentHtml]);
 
   /* ─── Extract HTML from AI response ─── */
   const extractHtml = useCallback((text: string): string => {
@@ -248,36 +380,40 @@ window.addEventListener('unhandledrejection', function(e) {
     ];
 
     // Build the message with system prompt + full conversation
+    let elementContext = '';
+    if (selectedElement) {
+      elementContext = `\n\nThe user has selected a specific element to modify:\nElement: <${selectedElement.tagName.toLowerCase()}>\nCSS path: ${selectedElement.path}\nElement HTML: ${selectedElement.outerHTML}\n\nOnly modify this specific element. Keep all other elements unchanged.`;
+    }
     const contextMessage = currentHtml
-      ? `${SYSTEM_PROMPT}\n\nCurrent HTML page code:\n\`\`\`html\n${currentHtml}\n\`\`\`\n\nUser request: ${text}`
+      ? `${SYSTEM_PROMPT}\n\nCurrent HTML page code:\n\`\`\`html\n${currentHtml}\n\`\`\`${elementContext}\n\nUser request: ${text}`
       : `${SYSTEM_PROMPT}\n\nUser request: ${text}`;
 
-    try {
-      const resp = await fetch(`${HTTP}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        body: JSON.stringify({
-          message: contextMessage,
-          model: getModel('webcreator') || undefined,
-        }),
-        signal: ctrl.signal,
-      });
+    const model = getModel('webcreator') || undefined;
 
-      if (!resp.ok) {
-        const d = await resp.json().catch(() => ({}));
-        const errMsg = (d as any).detail || resp.statusText;
-        setStatus(errMsg);
-        setLoading(false);
-        return;
+    // Set up streaming preview controller (declared outside try so finally can reset it)
+    const previewCtrl = new StreamingPreviewController((html) => {
+      if (iframeRef.current) {
+        iframeRef.current.srcdoc = injectIframeScripts(html);
+      }
+    });
+
+    try {
+      let streamedText = '';
+      for await (const chunk of streamChat(contextMessage, model, ctrl.signal)) {
+        streamedText += chunk;
+        // Try to extract HTML progressively for preview
+        const htmlMatch = streamedText.match(/<!DOCTYPE html>[\s\S]*/i) || streamedText.match(/<html[\s\S]*/i);
+        if (htmlMatch) {
+          previewCtrl.append(chunk);
+        }
       }
 
-      const data = await resp.json();
-      const responseText = data.response || data.text || data.content || data.reply || data.message || '';
-      const html = extractHtml(responseText);
-
-      if (html) {
-        setCurrentHtml(html);
-        updatePreview(html);
+      // Final extraction using the existing extractHtml
+      const finalHtml = extractHtml(streamedText);
+      if (finalHtml) {
+        setCurrentHtml(finalHtml);
+        updatePreview(finalHtml);
+        pushVersion(text, finalHtml);
         setViewMode('preview');
       }
 
@@ -285,7 +421,7 @@ window.addEventListener('unhandledrejection', function(e) {
       const aiMsg: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'ai',
-        text: html ? 'Page updated. Preview is live below.' : responseText,
+        text: finalHtml ? 'Page updated. Preview is live below.' : streamedText,
         timestamp: Date.now(),
       };
       setMessages(prev => [...prev, aiMsg]);
@@ -293,7 +429,7 @@ window.addEventListener('unhandledrejection', function(e) {
       // Update conversation history
       setConversationHistory([
         ...newHistory,
-        { role: 'assistant', content: responseText },
+        { role: 'assistant', content: streamedText },
       ]);
 
       setStatus('');
@@ -309,10 +445,11 @@ window.addEventListener('unhandledrejection', function(e) {
         setMessages(prev => [...prev, errMsg]);
       }
     } finally {
+      previewCtrl.reset();
       setLoading(false);
       abortRef.current = null;
     }
-  }, [input, loading, currentHtml, conversationHistory, getModel, extractHtml, updatePreview]);
+  }, [input, loading, currentHtml, conversationHistory, getModel, extractHtml, updatePreview, pushVersion, selectedElement]);
 
   /* ─── Template click ─── */
   const handleTemplate = useCallback((t: Template) => {
@@ -329,15 +466,70 @@ window.addEventListener('unhandledrejection', function(e) {
     });
   }, [currentHtml]);
 
-  const downloadFile = useCallback(() => {
+  const downloadHtml = useCallback(() => {
     if (!currentHtml) return;
     const blob = new Blob([currentHtml], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
+    a.href = url;
     a.download = 'website.html';
     a.click();
-    URL.revokeObjectURL(a.href);
+    URL.revokeObjectURL(url);
   }, [currentHtml]);
+
+  const copyDataUrl = useCallback(async () => {
+    if (!currentHtml) return;
+    const dataUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(currentHtml);
+    try {
+      await navigator.clipboard.writeText(dataUrl);
+      setStatus('Data URL copied!');
+      setTimeout(() => setStatus(''), 1500);
+    } catch {
+      // fallback
+    }
+  }, [currentHtml]);
+
+  const openInCodeSandbox = useCallback(() => {
+    if (!currentHtml) return;
+    const params = new URLSearchParams({
+      parameters: btoa(JSON.stringify({
+        files: {
+          'index.html': { content: currentHtml, isBinary: false },
+          'package.json': { content: JSON.stringify({ dependencies: {} }), isBinary: false },
+        },
+      })),
+    });
+    window.open(`https://codesandbox.io/api/v1/sandboxes/define?${params}`, '_blank');
+  }, [currentHtml]);
+
+  const openInStackBlitz = useCallback(() => {
+    if (!currentHtml) return;
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = 'https://stackblitz.com/run';
+    form.target = '_blank';
+    const addField = (name: string, value: string) => {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = name;
+      input.value = value;
+      form.appendChild(input);
+    };
+    addField('project[template]', 'html');
+    addField('project[files][index.html]', currentHtml);
+    addField('project[title]', 'AURA WebCreator Export');
+    document.body.appendChild(form);
+    form.submit();
+    document.body.removeChild(form);
+  }, [currentHtml]);
+
+  /* ─── Close export dropdown on outside click ─── */
+  useEffect(() => {
+    if (!exportOpen) return;
+    const close = () => setExportOpen(false);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [exportOpen]);
 
   const sendToCli = useCallback(async () => {
     if (!currentHtml) return;
@@ -367,42 +559,49 @@ window.addEventListener('unhandledrejection', function(e) {
     setConversationHistory([]);
     setStatus('');
     setIframeError(null);
+    clearVersions();
     if (iframeRef.current) iframeRef.current.srcdoc = '';
-  }, []);
+  }, [clearVersions]);
+
+  /* ─── Toggle element select mode ─── */
+  const toggleSelectMode = useCallback(() => {
+    const next = !selectMode;
+    setSelectMode(next);
+    setSelectedElement(null);
+    if (iframeRef.current?.contentWindow) {
+      iframeRef.current.contentWindow.postMessage({ type: 'toggle-select-mode', enabled: next }, '*');
+    }
+  }, [selectMode]);
+
+  /* ─── Apply theme ─── */
+  const applyTheme = useCallback((colors: typeof themeColors) => {
+    if (!currentHtml) return;
+    const cssVars = `<!-- AURA_THEME --><style>:root { --primary: ${colors.primary}; --secondary: ${colors.secondary}; --accent: ${colors.accent}; --bg: ${colors.background}; --text: ${colors.text}; } body { background-color: ${colors.background}; color: ${colors.text}; }</style><!-- /AURA_THEME -->`;
+    // Remove previous theme block if exists
+    let html = currentHtml.replace(/<!-- AURA_THEME -->[\s\S]*?<!-- \/AURA_THEME -->/g, '');
+    if (html.includes('</head>')) {
+      html = html.replace('</head>', cssVars + '</head>');
+    } else {
+      html = cssVars + html;
+    }
+    setCurrentHtml(html);
+    updatePreview(html);
+  }, [currentHtml, updatePreview]);
+
+  /* ─── Version restore ─── */
+  const restoreVersion = useCallback((idx: number) => {
+    const v = goToVersion(idx);
+    if (v) {
+      setCurrentHtml(v.code);
+      updatePreview(v.code);
+    }
+  }, [goToVersion, updatePreview]);
 
   /* ─── Syntax highlighting ─── */
   const highlightedCode = React.useMemo(() => {
     if (!currentHtml) return '';
-    let h = escHtml(currentHtml);
-    h = h.replace(/(&quot;|&#39;)(.*?)\1/g, '<span style="color:#a5d6ff">$1$2$1</span>');
-    h = h.replace(/(&lt;\/?)([\w-]+)/g, '$1<span style="color:#ff7b72">$2</span>');
-    h = h.replace(/\s([\w-]+)=/g, ' <span style="color:#d2a8ff">$1</span>=');
-    h = h.replace(/(\/\/.*?)(\n|$)/g, '<span style="color:#6a737d">$1</span>$2');
-    h = h.replace(/(&lt;!--[\s\S]*?--&gt;)/g, '<span style="color:#6a737d">$1</span>');
-    const kw = ['const', 'let', 'var', 'function', 'return', 'if', 'else', 'for', 'while', 'class', 'import', 'export', 'from', 'new', 'try', 'catch', 'async', 'await'];
-    for (const k of kw) {
-      h = h.replace(new RegExp(`\\b(${k})\\b`, 'g'), '<span style="color:#ff7b72">$1</span>');
-    }
-    h = h.replace(/\b(\d+\.?\d*)\b/g, '<span style="color:#79c0ff">$1</span>');
-    return h;
+    return highlightCode(currentHtml, 'html');
   }, [currentHtml]);
-
-  /* ─── Button helper ─── */
-  const ActionBtn = ({ id, icon, label, onClick }: {
-    id: string; icon: React.ReactNode; label: string; onClick: () => void;
-  }) => (
-    <button
-      onClick={onClick}
-      onMouseEnter={() => setHoveredBtn(id)}
-      onMouseLeave={() => setHoveredBtn(null)}
-      style={{
-        ...btnBase,
-        ...(hoveredBtn === id ? btnHover : {}),
-      }}
-    >
-      {icon} {label}
-    </button>
-  );
 
   /* ─── Device mode tabs ─── */
   const deviceTabs: { mode: DeviceMode; icon: React.ReactNode; label: string }[] = [
@@ -455,6 +654,57 @@ window.addEventListener('unhandledrejection', function(e) {
               </button>
             ))}
           </div>
+        )}
+
+        {/* Select element mode */}
+        {hasHtml && viewMode === 'preview' && (
+          <button
+            onClick={toggleSelectMode}
+            title={selectMode ? 'Exit selection mode' : 'Select element to edit'}
+            style={{
+              background: selectMode ? 'rgba(59,130,246,0.15)' : 'var(--s2)',
+              border: `1px solid ${selectMode ? 'rgba(59,130,246,0.4)' : 'var(--b1)'}`,
+              borderRadius: 'var(--r-sm)', color: selectMode ? '#3b82f6' : 'var(--mu)',
+              padding: '3px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+              fontSize: '10px', fontFamily: 'inherit', marginLeft: 4,
+            }}
+          >
+            <MousePointer2 size={12} /> {selectMode ? 'Selecting...' : 'Select'}
+          </button>
+        )}
+
+        {/* Pop out preview */}
+        {currentHtml && viewMode === 'preview' && (
+          <button
+            onClick={detachPreview}
+            title={detached ? 'Preview detached — click to focus' : 'Pop out preview'}
+            style={{
+              background: detached ? 'rgba(34,197,94,0.15)' : 'var(--s2)',
+              border: `1px solid ${detached ? 'rgba(34,197,94,0.4)' : 'var(--b1)'}`,
+              borderRadius: 'var(--r-sm)', color: detached ? '#22c55e' : 'var(--mu)',
+              padding: '3px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+              fontSize: '10px', fontFamily: 'inherit',
+            }}
+          >
+            <ExternalLink size={12} /> {detached ? 'Detached' : 'Pop Out'}
+          </button>
+        )}
+
+        {/* Theme toggle */}
+        {hasHtml && viewMode === 'preview' && (
+          <button
+            onClick={() => setThemeOpen(!themeOpen)}
+            title="Theme"
+            style={{
+              background: themeOpen ? 'rgba(245,158,11,0.15)' : 'var(--s2)',
+              border: `1px solid ${themeOpen ? 'rgba(245,158,11,0.4)' : 'var(--b1)'}`,
+              borderRadius: 'var(--r-sm)', color: themeOpen ? '#f59e0b' : 'var(--mu)',
+              padding: '3px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+              fontSize: '10px', fontFamily: 'inherit',
+            }}
+          >
+            <Palette size={12} /> Theme
+          </button>
         )}
 
         {/* View mode: Preview / Code */}
@@ -516,6 +766,104 @@ window.addEventListener('unhandledrejection', function(e) {
           }}>
             {iframeError ? `Error: ${iframeError}` : status}
           </span>
+        </div>
+      )}
+
+      {/* ═══ Selected element toolbar ═══ */}
+      {selectedElement && (
+        <div style={{
+          padding: '6px 10px', background: 'rgba(59,130,246,0.08)', borderBottom: '1px solid rgba(59,130,246,0.2)',
+          display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', flexShrink: 0,
+        }}>
+          <span style={{ fontSize: '10px', color: '#3b82f6', fontWeight: 600 }}>
+            &lt;{selectedElement.tagName.toLowerCase()}&gt;
+          </span>
+          {selectedElement.text && (
+            <span style={{ fontSize: '10px', color: 'var(--mu)', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              "{selectedElement.text}"
+            </span>
+          )}
+          <span style={{ flex: 1 }} />
+          <button
+            onClick={() => {
+              const desc = selectedElement.text ? `"${selectedElement.text.slice(0, 40)}"` : `<${selectedElement.tagName.toLowerCase()}>`;
+              setInput(`Edit the ${selectedElement.tagName.toLowerCase()} element ${desc}: `);
+              setSelectedElement(null);
+              inputRef.current?.focus();
+            }}
+            style={{
+              background: '#3b82f6', border: 'none', borderRadius: 'var(--r-sm)',
+              color: 'white', padding: '3px 10px', fontSize: '10px', cursor: 'pointer',
+              fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 4,
+            }}
+          >
+            <Pencil size={10} /> Edit with AI
+          </button>
+          <button
+            onClick={() => setSelectedElement(null)}
+            style={{
+              background: 'var(--s2)', border: '1px solid var(--b1)', borderRadius: 'var(--r-sm)',
+              color: 'var(--mu)', padding: '3px 8px', fontSize: '10px', cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {/* ═══ Theme panel ═══ */}
+      {themeOpen && currentHtml && (
+        <div style={{
+          padding: '8px 10px', borderBottom: '1px solid var(--b1)', background: 'var(--s1)',
+        }}>
+          <div style={{ fontSize: '10px', color: 'var(--mu)', fontWeight: 600, marginBottom: 6 }}>Theme Colors</div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {Object.entries(themeColors).map(([key, value]) => (
+              <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '10px', color: 'var(--mu)' }}>
+                <input
+                  type="color"
+                  value={value}
+                  onChange={e => {
+                    const newColors = { ...themeColors, [key]: e.target.value };
+                    setThemeColors(newColors);
+                    applyTheme(newColors);
+                  }}
+                  style={{ width: 20, height: 20, border: '1px solid var(--b1)', borderRadius: 3, padding: 0, cursor: 'pointer' }}
+                />
+                {key}
+              </label>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+            <button
+              onClick={() => {
+                const darkColors = { primary: '#3b82f6', secondary: '#8b5cf6', accent: '#f59e0b', background: '#0f172a', text: '#f1f5f9' };
+                setThemeColors(darkColors);
+                applyTheme(darkColors);
+              }}
+              style={{ fontSize: '9px', padding: '2px 8px', background: '#1e293b', color: '#94a3b8', border: '1px solid #334155', borderRadius: 'var(--r-sm)', cursor: 'pointer', fontFamily: 'inherit' }}
+            >
+              Dark
+            </button>
+            <button
+              onClick={() => {
+                const lightColors = { primary: '#3b82f6', secondary: '#6366f1', accent: '#f59e0b', background: '#ffffff', text: '#111827' };
+                setThemeColors(lightColors);
+                applyTheme(lightColors);
+              }}
+              style={{ fontSize: '9px', padding: '2px 8px', background: '#f8fafc', color: '#475569', border: '1px solid #e2e8f0', borderRadius: 'var(--r-sm)', cursor: 'pointer', fontFamily: 'inherit' }}
+            >
+              Light
+            </button>
+            <button
+              onClick={() => {
+                setInput('Suggest a harmonious color palette for this design and update the CSS accordingly');
+              }}
+              style={{ fontSize: '9px', padding: '2px 8px', background: 'var(--s2)', color: 'var(--mu)', border: '1px solid var(--b1)', borderRadius: 'var(--r-sm)', cursor: 'pointer', fontFamily: 'inherit' }}
+            >
+              AI Suggest
+            </button>
+          </div>
         </div>
       )}
 
@@ -647,6 +995,13 @@ window.addEventListener('unhandledrejection', function(e) {
                     <div className="aura-thinking" style={{ transform: 'scale(0.7)', transformOrigin: 'left center' }}>
                       <span /><span /><span />
                     </div>
+                    <span style={{
+                      fontSize: '10.5px', color: 'var(--pl)', fontWeight: 500,
+                      marginLeft: 4, animation: 'streamPulse 1.5s ease-in-out infinite',
+                    }}>
+                      Generating...
+                    </span>
+                    <style>{`@keyframes streamPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }`}</style>
                   </div>
                 )}
               </div>
@@ -656,36 +1011,61 @@ window.addEventListener('unhandledrejection', function(e) {
             <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
               {/* Preview iframe */}
               {hasHtml && viewMode === 'preview' && (
-                <div style={{
-                  width: '100%', height: '100%',
-                  display: 'flex', justifyContent: 'center',
-                  background: deviceMode !== 'desktop' ? 'var(--s1)' : 'transparent',
-                  overflow: 'hidden',
-                }}>
+                detached ? (
                   <div style={{
-                    width: DEVICE_WIDTHS[deviceMode],
-                    maxWidth: '100%',
-                    height: '100%',
-                    position: 'relative',
-                    transition: 'width 0.3s ease',
-                    ...(deviceMode !== 'desktop' ? {
-                      border: '1px solid var(--b1)',
-                      borderRadius: '8px',
-                      overflow: 'hidden',
-                      margin: '8px 0',
-                      boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
-                    } : {}),
+                    flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center',
+                    justifyContent: 'center', gap: 8, color: 'var(--mu)',
                   }}>
-                    <iframe
-                      ref={iframeRef}
-                      sandbox="allow-scripts"
-                      style={{
-                        width: '100%', height: '100%', border: 'none',
-                        background: '#fff',
+                    <ExternalLink size={24} />
+                    <div style={{ fontSize: '12px' }}>Preview detached to separate window</div>
+                    <button
+                      onClick={() => {
+                        if (detachedWindowRef.current && !detachedWindowRef.current.closed) {
+                          detachedWindowRef.current.close();
+                        }
+                        setDetached(false);
+                        detachedWindowRef.current = null;
                       }}
-                    />
+                      style={{
+                        background: 'var(--s2)', border: '1px solid var(--b1)', borderRadius: 'var(--r-sm)',
+                        color: 'var(--mu)', padding: '4px 12px', fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit',
+                      }}
+                    >
+                      Bring Back
+                    </button>
                   </div>
-                </div>
+                ) : (
+                  <div style={{
+                    width: '100%', height: '100%',
+                    display: 'flex', justifyContent: 'center',
+                    background: deviceMode !== 'desktop' ? 'var(--s1)' : 'transparent',
+                    overflow: 'hidden',
+                  }}>
+                    <div style={{
+                      width: DEVICE_WIDTHS[deviceMode],
+                      maxWidth: '100%',
+                      height: '100%',
+                      position: 'relative',
+                      transition: 'width 0.3s ease',
+                      ...(deviceMode !== 'desktop' ? {
+                        border: '1px solid var(--b1)',
+                        borderRadius: '8px',
+                        overflow: 'hidden',
+                        margin: '8px 0',
+                        boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
+                      } : {}),
+                    }}>
+                      <iframe
+                        ref={iframeRef}
+                        sandbox="allow-scripts"
+                        style={{
+                          width: '100%', height: '100%', border: 'none',
+                          background: '#fff',
+                        }}
+                      />
+                    </div>
+                  </div>
+                )
               )}
 
               {/* Code view */}
@@ -835,21 +1215,105 @@ window.addEventListener('unhandledrejection', function(e) {
         </button>
       </div>
 
+      {/* ═══ Version timeline strip ═══ */}
+      {versions.length > 1 && (
+        <div style={{
+          display: 'flex', gap: 4, padding: '4px 8px', borderTop: '1px solid var(--b1)',
+          overflowX: 'auto', background: 'var(--s1)', flexShrink: 0,
+        }}>
+          {versions.map((v, i) => (
+            <button
+              key={v.id}
+              onClick={() => restoreVersion(i)}
+              title={v.prompt}
+              style={{
+                flexShrink: 0, padding: '2px 8px', fontSize: '10px',
+                background: i === currentIdx ? 'var(--p)' : 'var(--s2)',
+                color: i === currentIdx ? 'white' : 'var(--mu)',
+                border: '1px solid ' + (i === currentIdx ? 'var(--p)' : 'var(--b1)'),
+                borderRadius: 'var(--r-pill)', cursor: 'pointer', fontFamily: 'inherit',
+                maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}
+            >
+              v{i + 1}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* ═══ Footer action bar ═══ */}
       {hasHtml && (
         <div style={{
           display: 'flex', flexWrap: 'wrap', gap: 6, padding: '6px 10px', flexShrink: 0,
           borderTop: '1px solid var(--b1)',
         }}>
-          <ActionBtn id="copy" icon={<Copy size={13} />} label="Copy HTML" onClick={copyCode} />
-          <ActionBtn id="download" icon={<Download size={13} />} label="Download" onClick={downloadFile} />
-          <ActionBtn id="sendcli" icon={<Upload size={13} />} label="Send to CLI" onClick={sendToCli} />
+          <button
+            onClick={() => { const v = undo(); if (v) { setCurrentHtml(v.code); updatePreview(v.code); } }}
+            disabled={!canUndo}
+            title="Undo"
+            style={{
+              background: 'var(--s2)', border: '1px solid var(--b1)', borderRadius: 'var(--r-sm)',
+              color: canUndo ? 'var(--mu)' : 'var(--s3)', padding: '3px 6px', cursor: canUndo ? 'pointer' : 'not-allowed',
+              display: 'flex', alignItems: 'center', opacity: canUndo ? 1 : 0.4,
+            }}
+          >
+            <Undo2 size={12} />
+          </button>
+          <button
+            onClick={() => { const v = redo(); if (v) { setCurrentHtml(v.code); updatePreview(v.code); } }}
+            disabled={!canRedo}
+            title="Redo"
+            style={{
+              background: 'var(--s2)', border: '1px solid var(--b1)', borderRadius: 'var(--r-sm)',
+              color: canRedo ? 'var(--mu)' : 'var(--s3)', padding: '3px 6px', cursor: canRedo ? 'pointer' : 'not-allowed',
+              display: 'flex', alignItems: 'center', opacity: canRedo ? 1 : 0.4,
+            }}
+          >
+            <Redo2 size={12} />
+          </button>
+          <ActionBtn id="copy" icon={<Copy size={13} />} label="Copy HTML" onClick={copyCode} hoveredBtn={hoveredBtn} setHoveredBtn={setHoveredBtn} />
+          <div style={{ position: 'relative' }}>
+            <button
+              onClick={() => setExportOpen(!exportOpen)}
+              title="Export"
+              style={{
+                background: 'var(--s2)', border: '1px solid var(--b1)', borderRadius: 'var(--r-sm)',
+                color: 'var(--mu)', padding: '3px 8px', cursor: 'pointer', display: 'flex',
+                alignItems: 'center', gap: 4, fontSize: '10px', fontFamily: 'inherit',
+              }}
+            >
+              <Download size={12} /> Export
+            </button>
+            {exportOpen && (
+              <div style={{
+                position: 'absolute', bottom: '100%', left: 0, marginBottom: 4,
+                background: '#1e1e1e', border: '1px solid #333', borderRadius: 'var(--r-md)',
+                padding: '4px 0', minWidth: 160, zIndex: 20, boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+              }}>
+                <button onClick={() => { downloadHtml(); setExportOpen(false); }} style={exportItemStyle}>
+                  Download HTML
+                </button>
+                <button onClick={() => { copyDataUrl(); setExportOpen(false); }} style={exportItemStyle}>
+                  Copy as Data URL
+                </button>
+                <button onClick={() => { openInCodeSandbox(); setExportOpen(false); }} style={exportItemStyle}>
+                  Open in CodeSandbox
+                </button>
+                <button onClick={() => { openInStackBlitz(); setExportOpen(false); }} style={exportItemStyle}>
+                  Open in StackBlitz
+                </button>
+              </div>
+            )}
+          </div>
+          <ActionBtn id="sendcli" icon={<Upload size={13} />} label="Send to CLI" onClick={sendToCli} hoveredBtn={hoveredBtn} setHoveredBtn={setHoveredBtn} />
           <div style={{ flex: 1 }} />
           <ActionBtn
             id="fullscreen"
             icon={fullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
             label={fullscreen ? 'Exit' : 'Full Screen'}
             onClick={() => setFullscreen(f => !f)}
+            hoveredBtn={hoveredBtn}
+            setHoveredBtn={setHoveredBtn}
           />
         </div>
       )}
