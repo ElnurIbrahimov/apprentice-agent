@@ -1,30 +1,47 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Terminal, ChevronRight, Copy, Play, Upload, X, Check, Pencil, Bug } from 'lucide-react';
+import { Terminal, ChevronRight, Copy, Play, Upload, Check, Pencil, Bug, RotateCcw, Zap, Square } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { useStore } from '../store';
 import { HTTP, getAuthHeaders } from '../api';
 import ModelPill from '../components/ModelPill';
 
 /* ── Types ── */
-interface CodeOutput {
-  type: 'text' | 'image' | 'table' | 'error';
-  content: string;       // text, base64 data-uri, HTML table, or error message
+interface OutputBlock {
+  type: 'stdout' | 'image' | 'html' | 'error' | 'result';
+  // stdout: text field; image: mime+data; html: content; error: ename+evalue+traceback; result: repr+type_name
+  text?: string;
+  mime?: string;
+  data?: string;
+  content?: string;
+  ename?: string;
+  evalue?: string;
+  traceback?: string;
+  repr?: string;
+  type_name?: string;
+}
+
+interface VariableInfo {
+  name: string;
+  type_name: string;
+  repr: string;
 }
 
 interface Exchange {
   id: string;
   prompt: string;
   code: string;
-  outputs: CodeOutput[];
+  outputs: OutputBlock[];
+  variables: VariableInfo[];
   codeVisible: boolean;
   editing: boolean;
   editCode: string;
-  loading: boolean;
+  phase: 'idle' | 'generating' | 'executing';
+  executionStartTime?: number;
 }
 
 const SYSTEM_PROMPT =
   'You are a Python data analyst. Write and explain code to accomplish the user\'s request. ' +
-  'Use matplotlib for charts (call plt.savefig to a temp file). Format output clearly. ' +
+  'Use matplotlib for charts (call plt.show()). Use print() for output. ' +
   'Return ONLY a JSON object: {"code": "...", "explanation": "..."}. No markdown fences.';
 
 const QUICK_ACTIONS = [
@@ -37,24 +54,181 @@ const QUICK_ACTIONS = [
 let _exchangeCounter = 0;
 function newId() { return `ex-${Date.now()}-${++_exchangeCounter}`; }
 
+/* ── Sub-components ── */
+
+function OutputBlockRenderer({ block, idx, exchangeId, code, onFix }: {
+  block: OutputBlock; idx: number; exchangeId: string; code: string;
+  onFix: (id: string, error: string, code: string) => void;
+}) {
+  if (block.type === 'image') {
+    return (
+      <div key={idx} style={{ marginTop: 8 }}>
+        <img
+          src={`data:${block.mime || 'image/png'};base64,${block.data}`}
+          alt="Chart output"
+          style={{ maxWidth: '100%', borderRadius: 'var(--r-sm)', border: '1px solid var(--b1)' }}
+        />
+      </div>
+    );
+  }
+  if (block.type === 'html') {
+    return (
+      <div
+        key={idx}
+        className="code-table-wrap"
+        style={{ marginTop: 8, overflow: 'auto', maxHeight: 300 }}
+        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(block.content || '') }}
+      />
+    );
+  }
+  if (block.type === 'error') {
+    return (
+      <div key={idx} style={{
+        marginTop: 8, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)',
+        borderRadius: 'var(--r-sm)', padding: '8px 10px',
+      }}>
+        <div style={{ fontSize: '11px', fontWeight: 600, color: '#ef4444', marginBottom: 4 }}>
+          {block.ename}: {block.evalue}
+        </div>
+        {block.traceback && (
+          <div style={{ fontFamily: 'monospace', fontSize: '10.5px', color: '#f87171', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 200, overflow: 'auto' }}>
+            {block.traceback}
+          </div>
+        )}
+        <button
+          onClick={() => onFix(exchangeId, `${block.ename}: ${block.evalue}\n${block.traceback || ''}`, code)}
+          style={{
+            marginTop: 6, display: 'inline-flex', alignItems: 'center', gap: 4,
+            background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)',
+            borderRadius: 'var(--r-sm)', color: '#ef4444', padding: '4px 10px',
+            fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit',
+          }}
+        >
+          <Bug size={12} /> Fix Error
+        </button>
+      </div>
+    );
+  }
+  if (block.type === 'result') {
+    return (
+      <div key={idx} style={{
+        marginTop: 8, display: 'flex', gap: 6, alignItems: 'baseline',
+      }}>
+        <span style={{ color: '#f97316', fontFamily: 'monospace', fontSize: '11px', fontWeight: 600 }}>Out:</span>
+        <pre style={{
+          margin: 0, fontFamily: 'monospace', fontSize: '11.5px', color: '#e6edf3',
+          whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+        }}>
+          {block.repr}
+        </pre>
+        {block.type_name && (
+          <span style={{ color: '#8b949e', fontSize: '10px' }}>({block.type_name})</span>
+        )}
+      </div>
+    );
+  }
+  // stdout
+  return (
+    <pre key={idx} style={{
+      marginTop: 8, background: '#0d1117', border: '1px solid var(--b1)',
+      borderRadius: 'var(--r-sm)', padding: '10px 12px', fontFamily: 'monospace',
+      fontSize: '11.5px', color: '#e6edf3', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+      overflow: 'auto', maxHeight: 300,
+    }}>
+      {block.text}
+    </pre>
+  );
+}
+
+function VariableInspector({ variables }: { variables: VariableInfo[] }) {
+  const [open, setOpen] = useState(false);
+  if (!variables.length) return null;
+  return (
+    <div style={{ marginTop: 6 }}>
+      <button
+        onClick={() => setOpen(!open)}
+        style={{
+          background: 'none', border: 'none', color: '#8b949e', fontSize: '10.5px',
+          cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 4, padding: 0,
+        }}
+      >
+        <ChevronRight size={10} style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }} />
+        Variables ({variables.length})
+      </button>
+      {open && (
+        <div style={{
+          marginTop: 4, background: '#161b22', border: '1px solid #30363d', borderRadius: 'var(--r-sm)',
+          padding: '6px 8px', fontSize: '10.5px', fontFamily: 'monospace',
+        }}>
+          {variables.map((v, i) => (
+            <div key={i} style={{ display: 'flex', gap: 8, padding: '2px 0', color: '#e6edf3' }}>
+              <span style={{ color: '#79c0ff', minWidth: 60 }}>{v.name}</span>
+              <span style={{ color: '#8b949e' }}>{v.type_name}</span>
+              <span style={{ color: '#a5d6ff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>
+                {v.repr}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ExecutionIndicator({ phase, startTime, onStop }: {
+  phase: 'idle' | 'generating' | 'executing'; startTime?: number;
+  onStop: () => void;
+}) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (phase !== 'executing' || !startTime) { setElapsed(0); return; }
+    const iv = setInterval(() => setElapsed(Math.floor((Date.now() - startTime) / 1000)), 200);
+    return () => clearInterval(iv);
+  }, [phase, startTime]);
+
+  if (phase === 'idle') return null;
+  return (
+    <div style={{ padding: '12px 0', display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div className="dots"><span /><span /><span /></div>
+      <span style={{ fontSize: '11px', color: 'var(--mu)' }}>
+        {phase === 'generating' ? 'Generating code…' : `Executing… ${elapsed}s`}
+      </span>
+      {phase === 'executing' && (
+        <button onClick={onStop} style={{
+          background: 'none', border: '1px solid var(--b1)', borderRadius: 'var(--r-sm)',
+          color: '#ef4444', padding: '2px 6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3,
+          fontSize: '10px', fontFamily: 'inherit',
+        }}>
+          <Square size={9} /> Stop
+        </button>
+      )}
+    </div>
+  );
+}
+
 /* ── Component ── */
 export default function CodePanel() {
   const { getModel } = useStore();
   const [exchanges, setExchanges] = useState<Exchange[]>([]);
-  const [sessionId] = useState(() => `code-${Date.now()}`);
+  const exchangesRef = useRef<Exchange[]>([]);
+  exchangesRef.current = exchanges;
+  const [sessionId, setSessionId] = useState(() => `code-${Date.now()}`);
+  const [hasSessionState, setHasSessionState] = useState(false);
+  const [runOnlyMode, setRunOnlyMode] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  const generateAbortRef = useRef<AbortController | null>(null);
+  const executeAbortRef = useRef<AbortController | null>(null);
 
-  // Cleanup timers and abort on unmount
   useEffect(() => {
     return () => {
       if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
-      if (abortRef.current) abortRef.current.abort();
+      if (generateAbortRef.current) generateAbortRef.current.abort();
+      if (executeAbortRef.current) executeAbortRef.current.abort();
     };
   }, []);
 
@@ -64,24 +238,25 @@ export default function CodePanel() {
     });
   }, []);
 
-  /* ── Helpers ── */
   const updateExchange = useCallback((id: string, patch: Partial<Exchange>) => {
     setExchanges(prev => prev.map(e => e.id === id ? { ...e, ...patch } : e));
   }, []);
 
-  const copyCode = useCallback((code: string, id: string) => {
-    navigator.clipboard.writeText(code);
-    setCopiedId(id);
-    if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
-    copiedTimerRef.current = setTimeout(() => setCopiedId(null), 1500);
+  const copyCode = useCallback(async (code: string, id: string) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopiedId(id);
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = setTimeout(() => setCopiedId(null), 1500);
+    } catch { /* clipboard not available (unfocused, permissions) — skip visual feedback */ }
   }, []);
 
   /* ── Generate code via chat endpoint ── */
   const generateCode = useCallback(async (prompt: string): Promise<{ code: string; explanation: string }> => {
     const model = getModel('code');
-    if (abortRef.current) abortRef.current.abort();
+    if (generateAbortRef.current) generateAbortRef.current.abort();
     const ctrl = new AbortController();
-    abortRef.current = ctrl;
+    generateAbortRef.current = ctrl;
     try {
       const resp = await fetch(`${HTTP}/api/chat`, {
         method: 'POST',
@@ -95,117 +270,141 @@ export default function CodePanel() {
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
       const text = data.response || data.text || data.content || '';
-      // Try parsing JSON from the response
       try {
         const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
         const parsed = JSON.parse(cleaned);
         return { code: parsed.code || '', explanation: parsed.explanation || '' };
       } catch {
-        // If not JSON, treat whole response as code if it looks like Python
         if (text.includes('import ') || text.includes('def ') || text.includes('print(')) {
-          // Extract code from markdown fences if present
           const fenceMatch = text.match(/```(?:python)?\s*([\s\S]*?)```/);
           return { code: fenceMatch ? fenceMatch[1].trim() : text, explanation: '' };
         }
         return { code: text, explanation: '' };
       }
     } catch (err: any) {
+      if (err.name === 'AbortError') throw err; // let caller handle cancellation
       throw new Error('Failed to generate code: ' + (err.message || err));
     }
   }, [getModel]);
 
-  /* ── Execute code via chat (simulated execution) ── */
-  const executeCode = useCallback(async (code: string): Promise<CodeOutput[]> => {
-    const model = getModel('code');
-    if (abortRef.current) abortRef.current.abort();
+  /* ── Execute code via real backend executor ── */
+  const executeCode = useCallback(async (code: string): Promise<{ outputs: OutputBlock[]; variables: VariableInfo[] }> => {
+    if (executeAbortRef.current) executeAbortRef.current.abort();
     const ctrl = new AbortController();
-    abortRef.current = ctrl;
+    executeAbortRef.current = ctrl;
     try {
-      const resp = await fetch(`${HTTP}/api/chat`, {
+      const resp = await fetch(`${HTTP}/api/code/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        body: JSON.stringify({
-          message: `You are a Python code executor. Execute this Python code and return ONLY the output, nothing else. No explanations, no markdown fences, just the raw output as if running in a terminal.\n\n\`\`\`python\n${code}\n\`\`\``,
-          model: model || undefined,
-        }),
+        body: JSON.stringify({ code, session_id: sessionId, timeout: 60 }),
         signal: ctrl.signal,
       });
       if (!resp.ok) {
         const d = await resp.json().catch(() => ({}));
-        return [{ type: 'error', content: (d as any).detail || `Execution failed (HTTP ${resp.status})` }];
+        return {
+          outputs: [{ type: 'error', ename: 'HTTPError', evalue: (d as any).detail || `HTTP ${resp.status}`, traceback: '' }],
+          variables: [],
+        };
       }
       const data = await resp.json();
-      const text = data.response || data.text || data.content || data.reply || '';
-      if (!text) return [{ type: 'text', content: 'Code executed successfully (no output).' }];
-      // Check if the response indicates an error
-      if (text.toLowerCase().includes('traceback') || text.toLowerCase().includes('error:')) {
-        return [{ type: 'error', content: text }];
+      if (data.variables?.length) setHasSessionState(true);
+      const outputs: OutputBlock[] = data.outputs || [];
+      if (!outputs.length && data.success) {
+        outputs.push({ type: 'stdout', text: '(no output)' });
       }
-      return [{ type: 'text', content: text }];
+      return { outputs, variables: data.variables || [] };
     } catch (err: any) {
-      return [{ type: 'error', content: 'Code execution failed: ' + (err.message || 'Unknown error') }];
+      if (err.name === 'AbortError') {
+        return { outputs: [{ type: 'stdout', text: 'Execution cancelled.' }], variables: [] };
+      }
+      return {
+        outputs: [{ type: 'error', ename: 'Error', evalue: err.message || 'Unknown error', traceback: '' }],
+        variables: [],
+      };
     }
-  }, [getModel]);
+  }, [sessionId]);
 
-  /* ── Main submit ── */
+  /* ── Main submit (generate + execute) ── */
   const submit = useCallback(async (prompt: string) => {
     if (!prompt.trim()) return;
     const id = newId();
     const exchange: Exchange = {
-      id, prompt: prompt.trim(), code: '', outputs: [],
-      codeVisible: false, editing: false, editCode: '', loading: true,
+      id, prompt: prompt.trim(), code: '', outputs: [], variables: [],
+      codeVisible: false, editing: false, editCode: '', phase: 'generating',
     };
     setExchanges(prev => [...prev, exchange]);
     setInputValue('');
     scrollToBottom();
 
     try {
-      // Build context from previous exchanges
-      const contextParts = exchanges.slice(-3).map(e =>
-        `Previous code:\n${e.code}\nOutput: ${e.outputs.map(o => o.content).join('\n')}`
+      const recentExchanges = exchangesRef.current.slice(-3);
+      const contextParts = recentExchanges.map(e =>
+        `Previous code:\n${e.code}\nOutput: ${e.outputs.map(o => o.text || o.evalue || '').join('\n')}`
       );
       const fullPrompt = contextParts.length
         ? `${contextParts.join('\n---\n')}\n\nNew request: ${prompt.trim()}`
         : prompt.trim();
 
       const { code } = await generateCode(fullPrompt);
-      updateExchange(id, { code });
+      updateExchange(id, { code, phase: 'executing', executionStartTime: Date.now() });
       scrollToBottom();
 
-      const outputs = await executeCode(code);
-      updateExchange(id, { outputs, loading: false });
+      const { outputs, variables } = await executeCode(code);
+      updateExchange(id, { outputs, variables, phase: 'idle' });
     } catch (err: any) {
-      updateExchange(id, {
-        outputs: [{ type: 'error', content: err.message || 'Unknown error' }],
-        loading: false,
-      });
+      if (err.name === 'AbortError') {
+        updateExchange(id, { outputs: [{ type: 'stdout', text: 'Cancelled.' }], phase: 'idle' });
+      } else {
+        updateExchange(id, {
+          outputs: [{ type: 'error', ename: 'Error', evalue: err.message || 'Unknown error', traceback: '' }],
+          phase: 'idle',
+        });
+      }
     }
     scrollToBottom();
-  }, [exchanges, generateCode, executeCode, updateExchange, scrollToBottom]);
+  }, [generateCode, executeCode, updateExchange, scrollToBottom]);
+
+  /* ── Run Only (Shift+Enter) — skip LLM, run code directly ── */
+  const submitDirect = useCallback(async (code: string) => {
+    if (!code.trim()) return;
+    const id = newId();
+    const exchange: Exchange = {
+      id, prompt: '(direct execution)', code: code.trim(), outputs: [], variables: [],
+      codeVisible: true, editing: false, editCode: '', phase: 'executing',
+      executionStartTime: Date.now(),
+    };
+    setExchanges(prev => [...prev, exchange]);
+    setInputValue('');
+    scrollToBottom();
+
+    const { outputs, variables } = await executeCode(code.trim());
+    updateExchange(id, { outputs, variables, phase: 'idle' });
+    scrollToBottom();
+  }, [executeCode, updateExchange, scrollToBottom]);
 
   /* ── Re-run edited code ── */
   const rerun = useCallback(async (id: string, code: string) => {
-    updateExchange(id, { code, editing: false, loading: true, outputs: [] });
+    updateExchange(id, { code, editing: false, phase: 'executing', outputs: [], variables: [], executionStartTime: Date.now() });
     scrollToBottom();
-    const outputs = await executeCode(code);
-    updateExchange(id, { outputs, loading: false });
+    const { outputs, variables } = await executeCode(code);
+    updateExchange(id, { outputs, variables, phase: 'idle' });
     scrollToBottom();
   }, [executeCode, updateExchange, scrollToBottom]);
 
   /* ── Fix error ── */
   const fixError = useCallback(async (id: string, errorMsg: string, originalCode: string) => {
-    updateExchange(id, { loading: true, outputs: [] });
+    updateExchange(id, { phase: 'generating', outputs: [], variables: [] });
     scrollToBottom();
     try {
       const fixPrompt = `The following Python code produced an error. Fix it.\n\nCode:\n${originalCode}\n\nError:\n${errorMsg}`;
       const { code } = await generateCode(fixPrompt);
-      updateExchange(id, { code });
-      const outputs = await executeCode(code);
-      updateExchange(id, { outputs, loading: false });
+      updateExchange(id, { code, phase: 'executing', executionStartTime: Date.now() });
+      const { outputs, variables } = await executeCode(code);
+      updateExchange(id, { outputs, variables, phase: 'idle' });
     } catch (err: any) {
       updateExchange(id, {
-        outputs: [{ type: 'error', content: err.message || 'Fix failed' }],
-        loading: false,
+        outputs: [{ type: 'error', ename: 'Error', evalue: err.message || 'Fix failed', traceback: '' }],
+        phase: 'idle',
       });
     }
     scrollToBottom();
@@ -215,13 +414,12 @@ export default function CodePanel() {
   const handleCsvUpload = useCallback(async (file: File) => {
     const id = newId();
     setExchanges(prev => [...prev, {
-      id, prompt: `Analyze uploaded CSV: ${file.name}`, code: '', outputs: [],
-      codeVisible: false, editing: false, editCode: '', loading: true,
+      id, prompt: `Analyze uploaded CSV: ${file.name}`, code: '', outputs: [], variables: [],
+      codeVisible: false, editing: false, editCode: '', phase: 'generating' as const,
     }]);
     scrollToBottom();
 
     try {
-      // Try uploading to backend
       const form = new FormData();
       form.append('file', file);
       let filePath = file.name;
@@ -239,13 +437,13 @@ export default function CodePanel() {
         'Print everything clearly. Suggest 3 follow-up analyses.';
 
       const { code } = await generateCode(analysisPrompt);
-      updateExchange(id, { code });
-      const outputs = await executeCode(code);
-      updateExchange(id, { outputs, loading: false });
+      updateExchange(id, { code, phase: 'executing', executionStartTime: Date.now() });
+      const { outputs, variables } = await executeCode(code);
+      updateExchange(id, { outputs, variables, phase: 'idle' });
     } catch (err: any) {
       updateExchange(id, {
-        outputs: [{ type: 'error', content: err.message || 'CSV analysis failed' }],
-        loading: false,
+        outputs: [{ type: 'error', ename: 'Error', evalue: err.message || 'CSV analysis failed', traceback: '' }],
+        phase: 'idle',
       });
     }
     scrollToBottom();
@@ -270,65 +468,24 @@ export default function CodePanel() {
     }
   }, [submit]);
 
-  /* ── Render output block ── */
-  const renderOutput = (output: CodeOutput, idx: number, exchangeId: string, code: string) => {
-    if (output.type === 'image') {
-      const src = output.content.startsWith('data:') ? output.content : `data:image/png;base64,${output.content}`;
-      return (
-        <div key={idx} style={{ marginTop: 8 }}>
-          <img
-            src={src}
-            alt="Chart output"
-            style={{ maxWidth: '100%', borderRadius: 'var(--r-sm)', border: '1px solid var(--b1)' }}
-          />
-        </div>
-      );
-    }
-    if (output.type === 'table') {
-      return (
-        <div
-          key={idx}
-          className="code-table-wrap"
-          style={{ marginTop: 8, overflow: 'auto', maxHeight: 300 }}
-          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(output.content) }}
-        />
-      );
-    }
-    if (output.type === 'error') {
-      return (
-        <div key={idx} style={{
-          marginTop: 8, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)',
-          borderRadius: 'var(--r-sm)', padding: '8px 10px',
-        }}>
-          <div style={{ fontFamily: 'monospace', fontSize: '11.5px', color: '#ef4444', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-            {output.content}
-          </div>
-          <button
-            onClick={() => fixError(exchangeId, output.content, code)}
-            style={{
-              marginTop: 6, display: 'inline-flex', alignItems: 'center', gap: 4,
-              background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)',
-              borderRadius: 'var(--r-sm)', color: '#ef4444', padding: '4px 10px',
-              fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit',
-            }}
-          >
-            <Bug size={12} /> Fix Error
-          </button>
-        </div>
-      );
-    }
-    // text
-    return (
-      <pre key={idx} style={{
-        marginTop: 8, background: '#0d1117', border: '1px solid var(--b1)',
-        borderRadius: 'var(--r-sm)', padding: '10px 12px', fontFamily: 'monospace',
-        fontSize: '11.5px', color: '#e6edf3', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-        overflow: 'auto', maxHeight: 300,
-      }}>
-        {output.content}
-      </pre>
-    );
-  };
+  /* ── Reset session ── */
+  const resetSession = useCallback(async () => {
+    try {
+      await fetch(`${HTTP}/api/code/session/reset`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ session_id: sessionId }),
+      });
+    } catch { /* ignore */ }
+    setExchanges([]);
+    setSessionId(`code-${Date.now()}`);
+    setHasSessionState(false);
+  }, [sessionId]);
+
+  const stopExecution = useCallback(() => {
+    if (generateAbortRef.current) generateAbortRef.current.abort();
+    if (executeAbortRef.current) executeAbortRef.current.abort();
+  }, []);
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -336,18 +493,28 @@ export default function CodePanel() {
       <div className="flex items-center gap-2 px-3 pt-3 pb-1">
         <Terminal size={16} style={{ color: 'var(--pl)' }} />
         <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--tx)' }}>Code Interpreter</span>
+        {hasSessionState && (
+          <span style={{
+            fontSize: '10px', color: '#3fb950', background: 'rgba(63,185,80,0.1)',
+            border: '1px solid rgba(63,185,80,0.3)', borderRadius: 'var(--r-pill)',
+            padding: '1px 6px', fontWeight: 500,
+          }}>
+            Session
+          </span>
+        )}
         <span style={{ flex: 1 }} />
         <ModelPill featureKey="code" />
         {exchanges.length > 0 && (
           <button
-            onClick={() => setExchanges([])}
-            title="Clear session"
+            onClick={resetSession}
+            title="Reset session"
             style={{
               background: 'var(--s2)', border: '1px solid var(--b1)', borderRadius: 'var(--r-sm)',
-              color: 'var(--mu)', padding: '3px 6px', cursor: 'pointer', display: 'flex', alignItems: 'center',
+              color: 'var(--mu)', padding: '3px 6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3,
+              fontSize: '10px', fontFamily: 'inherit',
             }}
           >
-            <X size={12} />
+            <RotateCcw size={10} /> Reset
           </button>
         )}
       </div>
@@ -360,7 +527,6 @@ export default function CodePanel() {
             <div style={{ fontSize: '12px', color: 'var(--mu)', textAlign: 'center', lineHeight: 1.5 }}>
               Ask me to analyze data, create charts, or run code.
             </div>
-            {/* Quick actions */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', maxWidth: 280 }}>
               {QUICK_ACTIONS.map(qa => (
                 <button
@@ -385,9 +551,7 @@ export default function CodePanel() {
         {exchanges.map(ex => (
           <div key={ex.id} style={{ marginBottom: 16 }}>
             {/* User prompt */}
-            <div style={{
-              display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 8,
-            }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 8 }}>
               <ChevronRight size={14} style={{ color: 'var(--pl)', marginTop: 2, flexShrink: 0 }} />
               <div style={{ fontSize: '12.5px', color: 'var(--tx)', fontWeight: 500 }}>{ex.prompt}</div>
             </div>
@@ -398,7 +562,6 @@ export default function CodePanel() {
                 background: '#0d1117', border: '1px solid var(--b1)', borderRadius: 'var(--r-md)',
                 overflow: 'hidden', marginBottom: 8,
               }}>
-                {/* Code header */}
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px',
                   background: '#161b22', borderBottom: ex.codeVisible ? '1px solid #30363d' : 'none',
@@ -410,39 +573,29 @@ export default function CodePanel() {
                       cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 4, padding: 0,
                     }}
                   >
-                    <ChevronRight
-                      size={12}
-                      style={{
-                        transform: ex.codeVisible ? 'rotate(90deg)' : 'rotate(0deg)',
-                        transition: 'transform 0.15s ease',
-                      }}
-                    />
+                    <ChevronRight size={12} style={{
+                      transform: ex.codeVisible ? 'rotate(90deg)' : 'rotate(0deg)',
+                      transition: 'transform 0.15s ease',
+                    }} />
                     {ex.codeVisible ? 'Hide Code' : 'Show Code'}
                   </button>
                   <span style={{ flex: 1 }} />
                   <button
                     onClick={() => copyCode(ex.code, ex.id)}
-                    style={{
-                      background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer',
-                      padding: '2px', display: 'flex', alignItems: 'center',
-                    }}
+                    style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center' }}
                     title="Copy code"
                   >
                     {copiedId === ex.id ? <Check size={12} style={{ color: '#3fb950' }} /> : <Copy size={12} />}
                   </button>
                   <button
                     onClick={() => updateExchange(ex.id, { editing: !ex.editing, editCode: ex.code, codeVisible: true })}
-                    style={{
-                      background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer',
-                      padding: '2px', display: 'flex', alignItems: 'center',
-                    }}
+                    style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center' }}
                     title="Edit & Re-run"
                   >
                     <Pencil size={12} />
                   </button>
                 </div>
 
-                {/* Code content */}
                 {ex.codeVisible && !ex.editing && (
                   <pre style={{
                     margin: 0, padding: '10px 12px', fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
@@ -453,7 +606,6 @@ export default function CodePanel() {
                   </pre>
                 )}
 
-                {/* Edit mode */}
                 {ex.editing && (
                   <div style={{ padding: '8px' }}>
                     <textarea
@@ -492,25 +644,22 @@ export default function CodePanel() {
               </div>
             )}
 
-            {/* Loading indicator */}
-            {ex.loading && (
-              <div style={{ padding: '12px 0', display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div className="dots"><span /><span /><span /></div>
-                <span style={{ fontSize: '11px', color: 'var(--mu)' }}>
-                  {ex.code ? 'Executing…' : 'Generating code…'}
-                </span>
-              </div>
-            )}
+            {/* Execution indicator */}
+            <ExecutionIndicator phase={ex.phase} startTime={ex.executionStartTime} onStop={stopExecution} />
 
             {/* Outputs */}
-            {ex.outputs.map((out, i) => renderOutput(out, i, ex.id, ex.code))}
+            {ex.outputs.map((out, i) => (
+              <OutputBlockRenderer key={i} block={out} idx={i} exchangeId={ex.id} code={ex.code} onFix={fixError} />
+            ))}
+
+            {/* Variable inspector */}
+            <VariableInspector variables={ex.variables} />
           </div>
         ))}
       </div>
 
       {/* Input area */}
       <div style={{ padding: '8px 12px 12px', borderTop: '1px solid var(--b1)' }}>
-        {/* Quick actions row when conversation started */}
         {exchanges.length > 0 && (
           <div style={{ display: 'flex', gap: 4, marginBottom: 6, flexWrap: 'wrap' }}>
             {QUICK_ACTIONS.map(qa => (
@@ -519,8 +668,7 @@ export default function CodePanel() {
                 onClick={() => handleQuickAction(qa.action)}
                 style={{
                   background: 'var(--s2)', border: '1px solid var(--b1)', borderRadius: 'var(--r-pill)',
-                  color: 'var(--mu)', padding: '3px 8px', fontSize: '10px', cursor: 'pointer',
-                  fontFamily: 'inherit',
+                  color: 'var(--mu)', padding: '3px 8px', fontSize: '10px', cursor: 'pointer', fontFamily: 'inherit',
                 }}
               >
                 {qa.icon} {qa.label}
@@ -535,8 +683,7 @@ export default function CodePanel() {
             title="Upload CSV"
             style={{
               background: 'var(--s2)', border: '1px solid var(--b1)', borderRadius: 'var(--r-sm)',
-              color: 'var(--mu)', padding: '7px', cursor: 'pointer', display: 'flex', alignItems: 'center',
-              flexShrink: 0,
+              color: 'var(--mu)', padding: '7px', cursor: 'pointer', display: 'flex', alignItems: 'center', flexShrink: 0,
             }}
           >
             <Upload size={14} />
@@ -545,23 +692,38 @@ export default function CodePanel() {
             ref={inputRef}
             value={inputValue}
             onChange={e => setInputValue(e.target.value)}
-            placeholder="Ask me to analyze data, create charts, or run code..."
+            placeholder={runOnlyMode ? 'Enter Python code… (Shift+Enter to run)' : 'Ask me to analyze data, create charts, or run code...'}
             onKeyDown={e => {
-              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+              if (e.key === 'Enter' && e.shiftKey) {
                 e.preventDefault();
-                submit(inputValue);
+                submitDirect(inputValue);
+              } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                runOnlyMode ? submitDirect(inputValue) : submit(inputValue);
               }
             }}
             rows={1}
             style={{
               flex: 1, background: 'var(--s2)', border: '1px solid var(--b1)',
               borderRadius: 'var(--r-md)', color: 'var(--tx)', fontSize: '12px',
-              padding: '8px 10px', resize: 'none', outline: 'none', fontFamily: 'inherit',
+              padding: '8px 10px', resize: 'none', outline: 'none', fontFamily: runOnlyMode ? "'JetBrains Mono', monospace" : 'inherit',
               minHeight: 36, maxHeight: 100,
             }}
           />
           <button
-            onClick={() => submit(inputValue)}
+            onClick={() => setRunOnlyMode(!runOnlyMode)}
+            title={runOnlyMode ? 'Run Only mode (click for AI mode)' : 'AI mode (click for Run Only)'}
+            style={{
+              background: runOnlyMode ? 'rgba(249,115,22,0.15)' : 'var(--s2)',
+              border: `1px solid ${runOnlyMode ? 'rgba(249,115,22,0.4)' : 'var(--b1)'}`,
+              borderRadius: 'var(--r-sm)', color: runOnlyMode ? '#f97316' : 'var(--mu)',
+              padding: '7px', cursor: 'pointer', display: 'flex', alignItems: 'center', flexShrink: 0,
+            }}
+          >
+            <Zap size={14} />
+          </button>
+          <button
+            onClick={() => runOnlyMode ? submitDirect(inputValue) : submit(inputValue)}
             disabled={!inputValue.trim()}
             style={{
               background: inputValue.trim() ? 'var(--p)' : 'var(--s3)',
@@ -574,9 +736,11 @@ export default function CodePanel() {
             <Play size={13} /> Run
           </button>
         </div>
+        <div style={{ fontSize: '9.5px', color: 'var(--mu)', marginTop: 4, opacity: 0.7 }}>
+          {runOnlyMode ? 'Shift+Enter: run code directly' : 'Ctrl+Enter: generate & run · Shift+Enter: run directly'}
+        </div>
       </div>
 
-      {/* Hidden file input */}
       <input
         ref={fileRef}
         type="file"
@@ -605,30 +769,28 @@ function highlightPython(code: string): React.ReactNode[] {
 
 function highlightLine(line: string): React.ReactNode[] {
   const tokens: React.ReactNode[] = [];
-  // Simple token-based highlighting
-  const regex = /(#.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|("""[\s\S]*?"""|'''[\s\S]*?''')|\b(import|from|as|def|class|return|if|elif|else|for|while|in|not|and|or|is|with|try|except|finally|raise|yield|lambda|pass|break|continue|True|False|None|print|len|range|list|dict|set|tuple|int|float|str|bool|type|isinstance|open|self)\b|(\d+\.?\d*(?:e[+-]?\d+)?)\b/g;
+  // Note: triple-quoted strings removed — they span multiple lines and can't match in per-line highlighting
+  const regex = /(#.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|\b(import|from|as|def|class|return|if|elif|else|for|while|in|not|and|or|is|with|try|except|finally|raise|yield|lambda|pass|break|continue|True|False|None|print|len|range|list|dict|set|tuple|int|float|str|bool|type|isinstance|open|self)\b|(\d+\.?\d*(?:e[+-]?\d+)?)\b/g;
 
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
   while ((match = regex.exec(line)) !== null) {
-    // Plain text before match
     if (match.index > lastIndex) {
       tokens.push(line.slice(lastIndex, match.index));
     }
-
     if (match[1]) {
       // Comment
       tokens.push(<span key={match.index} style={{ color: '#8b949e', fontStyle: 'italic' }}>{match[1]}</span>);
-    } else if (match[2] || match[3]) {
+    } else if (match[2]) {
       // String
-      tokens.push(<span key={match.index} style={{ color: '#a5d6ff' }}>{match[2] || match[3]}</span>);
-    } else if (match[4]) {
+      tokens.push(<span key={match.index} style={{ color: '#a5d6ff' }}>{match[2]}</span>);
+    } else if (match[3]) {
       // Keyword
-      tokens.push(<span key={match.index} style={{ color: '#ff7b72' }}>{match[4]}</span>);
-    } else if (match[5]) {
+      tokens.push(<span key={match.index} style={{ color: '#ff7b72' }}>{match[3]}</span>);
+    } else if (match[4]) {
       // Number
-      tokens.push(<span key={match.index} style={{ color: '#79c0ff' }}>{match[5]}</span>);
+      tokens.push(<span key={match.index} style={{ color: '#79c0ff' }}>{match[4]}</span>);
     } else {
       tokens.push(match[0]);
     }

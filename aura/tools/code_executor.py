@@ -5,7 +5,7 @@ import sys
 import tempfile
 import os
 import ast
-from typing import Optional, Set, List, Tuple
+from typing import Optional, Set
 
 
 class CodeExecutorTool:
@@ -45,9 +45,14 @@ class CodeExecutorTool:
         '__aura_stdout_cap__', '__aura_stderr_cap__',
     }
 
-    def __init__(self, timeout: int = 30, max_output_length: int = 5000):
+    def __init__(self, timeout: int = 30, max_output_length: int = 5000,
+                 allowed_modules: Optional[Set[str]] = None):
         self.timeout = timeout
         self.max_output_length = max_output_length
+        # When allowed_modules is provided, create a per-instance copy with those removed.
+        # The default (None) keeps the class-level blocklist intact for the agent path.
+        if allowed_modules:
+            self.BLOCKED_MODULES = self.__class__.BLOCKED_MODULES - allowed_modules
 
     def _execute_monty(self, code: str) -> Optional[dict]:
         """Tier 1: Monty safe sandbox for pure computation (no IO, instant).
