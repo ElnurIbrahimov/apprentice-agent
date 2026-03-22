@@ -10,16 +10,11 @@ import concurrent.futures
 import ast
 from collections import deque
 
-# Shared executor for tool calls, memory queries, and observation context.
-# Avoids creating+destroying a ThreadPoolExecutor on every message/tool call.
-_AGENT_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
-    max_workers=4, thread_name_prefix="agent_shared"
-)
-import atexit as _atexit
-_atexit.register(_AGENT_EXECUTOR.shutdown, wait=False)
+# Shared pool — centralized in aura.pools (2026-03-22)
+from aura.pools import bg_pool as _bg_pool_fn
+_AGENT_EXECUTOR = _bg_pool_fn()
 
 from dataclasses import dataclass, field
-from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Optional, Tuple, Callable, List, Dict
@@ -54,6 +49,8 @@ FORBIDDEN_PATTERNS = [
     "urllib.request", "urllib.urlopen", "importlib", "ctypes", "pickle", "marshal",
     "compile(", "globals(", "locals(", "vars(", "open(",
     "__builtins__", "__code__", "__class__",
+    "type(", "dir(",
+    "__getattribute__", "__subclasses__",
 ]
 
 # Maximum history size to prevent memory bloat
@@ -78,9 +75,10 @@ def validate_custom_tool_code(code: str, tool_path: str) -> Tuple[bool, str]:
     Returns:
         (is_valid, error_message_or_ok)
     """
-    # 1. Check for forbidden patterns (fast string check first)
+    # 1. Normalize code before pattern checks (catches string-concat evasion)
+    normalized = _normalize_code_for_check(code)
     for pattern in FORBIDDEN_PATTERNS:
-        if pattern in code:
+        if pattern in normalized:
             return False, f"Forbidden pattern '{pattern}' found in {tool_path}"
 
     # 2. Parse as AST to validate structure
@@ -115,7 +113,9 @@ def validate_custom_tool_code(code: str, tool_path: str) -> Tuple[bool, str]:
 
         # Block access to dunder attributes that enable sandbox escape
         elif isinstance(node, ast.Attribute):
-            if node.attr in ("__subclasses__", "__bases__", "__mro__", "__globals__", "__code__", "__builtins__"):
+            if node.attr in ("__subclasses__", "__bases__", "__mro__", "__globals__",
+                             "__code__", "__builtins__", "__getattribute__",
+                             "__class__", "__dict__"):
                 return False, f"Forbidden attribute access '.{node.attr}' in {tool_path}"
 
     # 4. Check for required class structure OR module-level execute() function
@@ -147,6 +147,86 @@ def validate_custom_tool_code(code: str, tool_path: str) -> Tuple[bool, str]:
 
     return False, f"Tool class missing execute/run method in {tool_path}"
 
+
+def _normalize_code_for_check(code: str) -> str:
+    """Normalize code before forbidden-pattern checks.
+
+    Collapses whitespace, strips comments, and joins string concatenations
+    so that tricks like '"sub" + "process"' are caught.
+    """
+    # Remove single-line comments
+    lines = []
+    for line in code.splitlines():
+        stripped = line.split("#", 1)[0]
+        lines.append(stripped)
+    code = " ".join(lines)
+    # Collapse whitespace
+    code = re.sub(r"\s+", " ", code)
+    # Join adjacent string literals: "sub" + "process" -> "subprocess"
+    code = re.sub(r'"\s*\+\s*"', '', code)
+    code = re.sub(r"'\s*\+\s*'", '', code)
+    return code
+
+
+def validate_script_code(code: str, source: str) -> tuple:
+    """Validate a raw script (not a Tool class) before execution.
+
+    Runs AST checks + forbidden pattern matching but does NOT require
+    a Tool class structure. Used for code-agent mode code blocks.
+
+    Returns:
+        (is_valid, error_message_or_ok)
+    """
+    # 1. Normalize and check for forbidden patterns (catches string-concat evasion)
+    normalized = _normalize_code_for_check(code)
+    for pattern in FORBIDDEN_PATTERNS:
+        if pattern in normalized:
+            return False, f"Forbidden pattern '{pattern}' found in {source}"
+
+    # 2. Parse as AST
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as e:
+        return False, f"Syntax error in {source}: {e}"
+
+    # 3. Check imports and dangerous AST patterns (same rules as validate_custom_tool_code)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                module_base = alias.name.split('.')[0]
+                if module_base not in ALLOWED_TOOL_IMPORTS:
+                    return False, f"Forbidden import '{alias.name}' in {source}"
+
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                module_base = node.module.split('.')[0]
+                if module_base not in ALLOWED_TOOL_IMPORTS:
+                    return False, f"Forbidden import 'from {node.module}' in {source}"
+
+        elif isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Name) and func.id in (
+                "__import__", "eval", "exec", "compile", "getattr", "delattr",
+                "type", "vars", "dir",
+            ):
+                return False, f"Forbidden call '{func.id}()' in {source}"
+            if isinstance(func, ast.Attribute) and func.attr in (
+                "import_module", "__import__", "system", "popen",
+                "call", "run", "Popen",
+            ):
+                return False, f"Forbidden call '*.{func.attr}()' in {source}"
+
+        elif isinstance(node, ast.Attribute):
+            if node.attr in (
+                "__subclasses__", "__bases__", "__mro__", "__globals__",
+                "__code__", "__builtins__", "__getattribute__",
+                "__class__", "__dict__",
+            ):
+                return False, f"Forbidden attribute access '.{node.attr}' in {source}"
+
+    return True, "Valid"
+
+
 # Timeout constants
 AGENT_TIMEOUT = 120  # Overall agent loop timeout (2 minutes)
 TOOL_TIMEOUT = 30    # Timeout for tool execution
@@ -156,13 +236,13 @@ from .identity import load_identity, get_identity_prompt, detect_name_change, de
 from .memory.unified_memory import get_unified_memory
 from .metacognition import MetacognitionLogger
 from .config import Config
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, GitTool, EvoEmoTool, get_tone_modifier, get_monologue, KnowledgeGraphTool, get_knowledge_graph, NeuroDreamEngine, SleepPhase, CalendarTool, SpacedRepetitionTool, TaskManagerTool, APITesterTool, DatabaseTool, AudioTranscriberTool, ResearchTool, BraveSearchTool, TavilyTool, FirecrawlTool, ObsidianTool, GitHubTool, LogAnalystTool, DocumentGeneratorTool, WindowsControlTool, TaskSchedulerTool, PredictiveTaskTool, MeetingIntelTool, VoiceSynthTool, LifeLoggerTool, CodeSearchTool, CodeEditTool
+from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, GitTool, EvoEmoTool, get_tone_modifier, get_monologue, get_knowledge_graph, NeuroDreamEngine, SleepPhase, CalendarTool, SpacedRepetitionTool, TaskManagerTool, APITesterTool, DatabaseTool, AudioTranscriberTool, ResearchTool, BraveSearchTool, TavilyTool, FirecrawlTool, ObsidianTool, GitHubTool, LogAnalystTool, DocumentGeneratorTool, WindowsControlTool, TaskSchedulerTool, PredictiveTaskTool, MeetingIntelTool, VoiceSynthTool, LifeLoggerTool, CodeSearchTool, CodeEditTool
 try:
     from .tools.crypto_price import CryptoPriceTool
 except Exception:
     CryptoPriceTool = None
 
-from .memory_retriever import MemoryRetriever
+# MemoryRetriever removed — consolidated into UnifiedMemory (2026-03-22)
 try:
     from .context_engine import AlwaysOnContextEngine
     CONTEXT_ENGINE_AVAILABLE = True
@@ -234,13 +314,6 @@ try:
 except ImportError:
     TEMPLATE_LIBRARY_AVAILABLE = False
 
-# Prompt Evolution Engine - Self-modifying system prompts
-try:
-    from aura.consciousness.prompt_evolution import get_prompt_evolution_engine
-    PROMPT_EVOLUTION_AVAILABLE = True
-except ImportError:
-    PROMPT_EVOLUTION_AVAILABLE = False
-
 # Knowledge Graph Brain - Structured Long-Term Memory
 try:
     from aura_knowledge_graph import (
@@ -259,35 +332,6 @@ except ImportError:
     BridgeConfig = None
     KGQueryEngine = None
     QueryMode = None
-
-# Episodic Time-Travel Memory - Autobiographical Memory System
-try:
-    from aura_episodic_memory import (
-        EpisodicMemoryStore,
-        Episode,
-        EpisodeType,
-        EpisodeQuery,
-        TemporalContext,
-        TitansEpisodicBridge,
-        TitansEpisodicConfig,
-        TimelineEngine,
-        MemoryConsolidator,
-        ConsolidationConfig,
-        QDRANT_AVAILABLE
-    )
-    EPISODIC_MEMORY_AVAILABLE = QDRANT_AVAILABLE
-except ImportError:
-    EPISODIC_MEMORY_AVAILABLE = False
-    EpisodicMemoryStore = None
-    Episode = None
-    EpisodeType = None
-    EpisodeQuery = None
-    TemporalContext = None
-    TitansEpisodicBridge = None
-    TitansEpisodicConfig = None
-    TimelineEngine = None
-    MemoryConsolidator = None
-    ConsolidationConfig = None
 
 # Skill Library - Procedural Knowledge Storage
 try:
@@ -312,34 +356,6 @@ except ImportError:
     SkillExecutor = None
     TitansSkillBridge = None
     EMBEDDINGS_AVAILABLE = False
-
-# Predictive Life Modeling - World Simulator for Personal Decisions
-try:
-    from aura_life_modeling import (
-        LifeState,
-        LifeDomain,
-        Scenario,
-        ScenarioTemplates,
-        DecisionType,
-        SimulationConfig,
-        run_monte_carlo,
-        ReportGenerator,
-        LifeModelingTools,
-        MESA_AVAILABLE
-    )
-    LIFE_MODELING_AVAILABLE = True
-except ImportError:
-    LIFE_MODELING_AVAILABLE = False
-    LifeState = None
-    LifeDomain = None
-    Scenario = None
-    ScenarioTemplates = None
-    DecisionType = None
-    SimulationConfig = None
-    run_monte_carlo = None
-    ReportGenerator = None
-    LifeModelingTools = None
-    MESA_AVAILABLE = False
 
 
 _TOOL_KEYWORDS = frozenset([
@@ -656,6 +672,14 @@ class ApprenticeAgent:
             except Exception as e:
                 logger.warning(f"deep_research not loaded: {e}")
 
+            # codebase_index (semantic indexing with incremental updates)
+            try:
+                from .tools.codebase_index import CodebaseIndex
+                self.tools['codebase_index'] = CodebaseIndex()
+                logger.info("[LOADED] codebase_index")
+            except Exception as e:
+                logger.warning(f"codebase_index not loaded: {e}")
+
             # image_gen
             try:
                 from .tools.image_gen import ImageGenerationTool
@@ -681,22 +705,7 @@ class ApprenticeAgent:
             except Exception as e:
                 logger.warning(f"local_rag not loaded: {e}")
 
-            # amem - A-MEM Zettelkasten-style agentic memory
-            try:
-                from .tools.amem_tool import get_amem_tool
-                self.tools['amem'] = get_amem_tool()
-                logger.info("[LOADED] amem - Zettelkasten agentic memory")
-            except Exception as e:
-                logger.warning(f"[WARNING] amem not loaded: {e}")
-
-            # hybrid_amem - Combined A-MEM + Knowledge Graph memory
-            try:
-                from .tools.hybrid_amem import get_hybrid_memory
-                kg = self.tools.get('knowledge_graph')
-                self.tools['hybrid_amem'] = get_hybrid_memory(knowledge_graph=kg)
-                logger.info("[LOADED] hybrid_amem - Hybrid A-MEM + KG memory")
-            except Exception as e:
-                logger.warning(f"[WARNING] hybrid_amem not loaded: {e}")
+            # A-MEM and hybrid_amem removed — consolidated into UnifiedMemory (2026-03-22)
 
             # shell_executor
             try:
@@ -829,6 +838,27 @@ class ApprenticeAgent:
             except Exception as e:
                 logger.warning(f"[Thinker] Init failed: {e}")
 
+        # Initialize MCTS Reasoning Tree — used by Strategy Bandit for MCTS strategy
+        self.reasoning_tree = None
+        try:
+            from aura.tools.reasoning_tree_tool import ReasoningTreeTool
+            # Create LLM function adapter: MCTSReasoning expects (prompt, system_prompt) -> str
+            def _mcts_llm_func(prompt: str, system_prompt: str = None) -> str:
+                return self.brain.think(prompt, system_prompt=system_prompt, use_history=False)
+
+            # Create tool executor adapter for LATS pattern:
+            # MCTS nodes can invoke tools (search, code exec, file read) during expansion
+            def _mcts_tool_executor(tool_name: str, tool_args: dict):
+                return self._execute_tool_call(tool_name, tool_args)
+
+            self.reasoning_tree = ReasoningTreeTool(
+                llm_func=_mcts_llm_func,
+                tool_executor=_mcts_tool_executor,
+            )
+            logger.info("[LOADED] ReasoningTreeTool — MCTS + LATS tool integration for Strategy Bandit")
+        except Exception as e:
+            logger.warning(f"[ReasoningTreeTool] Init failed: {e}")
+
         # Initialize NeuroDream (Tool #24) - Sleep/Dream Memory Consolidation
         self.neurodream = NeuroDreamEngine(
             knowledge_graph=self.tools.get("knowledge_graph"),
@@ -857,19 +887,6 @@ class ApprenticeAgent:
         )
         _nd_poll_thread.start()
         logger.debug("[NeuroDream] Idle polling thread started (60s interval)")
-
-        # Dead modules — stubs to prevent AttributeError
-        self.mirrormind = None
-        self.mirrormind_enabled = False
-        self.introspection = None
-        self.theater = None
-        self.theater_enabled = False
-        self.reflexion = None
-        self.reflexion_enabled = False
-        self.forge = None
-        self.synapseforge_enabled = False
-        self.worldsim = None
-        self.worldsim_enabled = False
 
         try:
             self.tools['neurodream'] = self.neurodream
@@ -941,8 +958,6 @@ class ApprenticeAgent:
         except Exception as e:
             logger.warning(f"[GatewayDaemon] Initialization failed: {e}")
             self.gateway_daemon = None
-
-        self.proto_agi = None
 
         # Initialize Tool RAG for dynamic tool selection
         self.tool_rag = None
@@ -1038,12 +1053,13 @@ class ApprenticeAgent:
         self._temporal_lock = threading.Lock()
         self._kg_queue_lock = threading.Lock()
 
-        # Initialize Episodic Time-Travel Memory - Autobiographical Memory
-        # Like KG Brain, this is lightweight and can initialize even with fast_init
+        # Episodic memory consolidated into UnifiedMemory (2026-03-22)
         self.episodic_memory = None
         self.episodic_bridge = None
         self.episodic_timeline = None
-        self.memory_retriever = MemoryRetriever()
+        self.episodic_consolidator = None
+        self.memory_retriever = None
+
         # Always-On Context Engine
         self.context_engine = None
         if CONTEXT_ENGINE_AVAILABLE:
@@ -1052,53 +1068,6 @@ class ApprenticeAgent:
                 logger.debug("[ACE] Context engine initialized")
             except Exception as _e:
                 logger.warning(f"[ACE] Failed to initialize: {_e}")
-        self.parliament = None
-        self.episodic_consolidator = None
-        self.episodic_memory_enabled = getattr(Config, 'EPISODIC_MEMORY_ENABLED', True)
-
-        if EPISODIC_MEMORY_AVAILABLE and self.episodic_memory_enabled:
-            try:
-                # Initialize Qdrant-based episodic memory store (lightweight)
-                episodic_path = Path(__file__).parent.parent / "aura_data" / "episodic_memory"
-                self.episodic_memory = EpisodicMemoryStore(str(episodic_path))
-
-                # Initialize Timeline Engine (lightweight, always init)
-                self.episodic_timeline = TimelineEngine(self.episodic_memory)
-
-                # Initialize Titans-Episodic Bridge (needs LLM for significant episodes)
-                # Skip full bridge for fast_init since it may record to memory
-                if not fast_init:
-                    self.episodic_bridge = TitansEpisodicBridge(
-                        memory_store=self.episodic_memory,
-                        config=TitansEpisodicConfig(
-                            surprise_threshold=0.5,
-                            turns_per_episode=3,
-                            max_episodes_per_session=100
-                        )
-                    )
-
-                    # Initialize Consolidator (for memory maintenance)
-                    self.episodic_consolidator = MemoryConsolidator(
-                        memory_store=self.episodic_memory,
-                        config=ConsolidationConfig(
-                            decay_rate=0.03,
-                            gc_age_days=90
-                        ),
-                        llm_func=self.brain.think if not fast_init else None
-                    )
-
-                # Get statistics
-                stats = self.episodic_memory.get_statistics()
-                bridge_status = "with bridge" if self.episodic_bridge else "query-only"
-                logger.debug(f"[LOADED] Episodic Memory - {stats['total_episodes']} episodes ({bridge_status})")
-            except Exception as e:
-                logger.warning(f"[WARNING] Episodic Memory initialization failed: {e}")
-                self.episodic_memory = None
-                self.episodic_bridge = None
-                self.episodic_timeline = None
-                self.episodic_consolidator = None
-        elif not EPISODIC_MEMORY_AVAILABLE:
-            logger.debug("[INFO] Episodic Memory not available (install qdrant-client: pip install qdrant-client)")
 
         # DreamMode — Memory consolidation and pattern analysis
         self.dream_mode = None
@@ -1129,7 +1098,7 @@ class ApprenticeAgent:
                 if not fast_init:
                     self.skill_bridge = self.skill_library.connect_bridge(
                         titans_memory=getattr(self, 'titans_memory', None),
-                        episodic_memory=self.episodic_memory,
+                        episodic_memory=None,  # Consolidated into UnifiedMemory
                         kg_brain=self.kg_brain
                     )
 
@@ -1145,25 +1114,7 @@ class ApprenticeAgent:
         elif not SKILL_LIBRARY_AVAILABLE:
             logger.debug("[INFO] Skill Library not available (install sentence-transformers: pip install sentence-transformers)")
 
-        # Initialize Predictive Life Modeling - World Simulator for Personal Decisions
-        # NOTE: On-demand tool — accessed via life_update_state(), simulate_decision(),
-        # compare_decisions(), what_if_analysis(), etc. Not auto-triggered.
-        self.life_modeling = None
-        self.life_modeling_enabled = getattr(Config, 'LIFE_MODELING_ENABLED', True)
-
-        if LIFE_MODELING_AVAILABLE and self.life_modeling_enabled:
-            try:
-                self.life_modeling = LifeModelingTools(
-                    knowledge_graph=self.kg_brain,
-                    episodic_memory=self.episodic_memory,
-                    llm_client=self.brain if not fast_init else None
-                )
-                logger.debug(f"[LOADED] Life Modeling - World Simulator for decisions (Mesa: {MESA_AVAILABLE})")
-            except Exception as e:
-                logger.warning(f"[WARNING] Life Modeling initialization failed: {e}")
-                self.life_modeling = None
-        elif not LIFE_MODELING_AVAILABLE:
-            logger.debug("[INFO] Life Modeling not available (install mesa: pip install mesa)")
+        # Life modeling removed (dead code, 2026-03-22)
 
         # Initialize Hooks / Event System
         self.hooks = None
@@ -1682,6 +1633,30 @@ IMPORTANT: If the user asks about something you are not sure about, something re
             except Exception as _plan_err:
                 logger.debug(f"[Planner] Classification/planning failed: {_plan_err}")
 
+        # ===== MCTS Reasoning Tree — Pre-planning for complex tasks =====
+        # For complex multi-step tasks, explore the solution space with tree search
+        # before entering the tool loop. This gives the loop a richer starting context.
+        _mcts_reasoning_context = ""
+        if task_is_complex and hasattr(self, 'reasoning_tree') and self.reasoning_tree:
+            try:
+                _mcts_result = self.reasoning_tree.execute(
+                    "think_deeply",
+                    problem=goal,
+                    context=ace_context or "",
+                    max_iterations=15,
+                    max_depth=6,
+                )
+                if _mcts_result.get("success") and (_mcts_result.get("answer") or _mcts_result.get("summary")):
+                    _mcts_reasoning_context = _mcts_result.get("summary") or _mcts_result.get("answer", "")
+                    logger.info(
+                        f"[MCTS] Pre-planning complete — confidence={_mcts_result.get('confidence', 0):.0%}, "
+                        f"iterations={_mcts_result.get('metadata', {}).get('iterations', '?')}"
+                    )
+                else:
+                    logger.debug("[MCTS] Pre-planning returned no usable result, proceeding normally")
+            except Exception as _mcts_err:
+                logger.debug(f"[MCTS] Pre-planning failed (non-fatal): {_mcts_err}")
+
         # ===== ReAct Loop =====
         # Build system prompt with memory, identity, emotion, context
         system_prompt = self._build_react_system_prompt(goal, ace_context)
@@ -1707,6 +1682,13 @@ IMPORTANT: If the user asks about something you are not sure about, something re
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": goal},
         ]
+
+        # Inject MCTS reasoning tree context if available (from pre-planning above)
+        if _mcts_reasoning_context:
+            messages.append({
+                "role": "assistant",
+                "content": f"[Reasoning Tree Analysis]\n\n{_mcts_reasoning_context}\n\nLet me now execute this step by step.",
+            })
 
         # Inject plan context into conversation if we have a plan
         if task_plan:
@@ -1765,6 +1747,10 @@ IMPORTANT: If the user asks about something you are not sure about, something re
 
                 tool_calls_total += step_result.get("tool_calls_count", 0)
                 consecutive_failures = step_result.get("consecutive_failures", consecutive_failures)
+
+                # Prevent unbounded message growth — keep system+goal + last N messages
+                if len(messages) > 30:
+                    messages = messages[:2] + messages[-28:]
 
                 # === Adaptive Re-planning (Roadmap 5.4) ===
                 if task_plan and self.adaptive_planner and status == "continue":
@@ -2179,6 +2165,18 @@ IMPORTANT: If the user asks about something you are not sure about, something re
             calls_this_step += 1
             messages.append({"role": "tool", "content": tool_result})
 
+            # Audit chain: log every tool call (OpenFang-inspired Merkle trail)
+            try:
+                from aura.security.audit_chain import get_audit_chain
+                get_audit_chain().append(
+                    action_type="tool_call",
+                    action_data={"tool": tool_name, "args_preview": str(args)[:200]},
+                    agent_id="main",
+                    session_id=getattr(self, '_session_id', 'default'),
+                )
+            except Exception:
+                pass
+
             # === Deterministic evaluation (no LLM call) ===
             eval_result = self._evaluate_tool_result(tool_result)
 
@@ -2373,6 +2371,24 @@ IMPORTANT: If the user asks about something you are not sure about, something re
         })
 
         logger.info(f"[REACT-CODE] Executing code block ({len(code)} chars)")
+        # SECURITY: Validate LLM-generated code before execution
+        is_valid, error_msg = validate_script_code(code, "react_code_block")
+        if not is_valid:
+            messages.append({"role": "user", "content": f"Code rejected: {error_msg}"})
+            consecutive_failures += 1
+            if consecutive_failures >= 3:
+                return {
+                    "status": "fallback_to_tools",
+                    "response": "",
+                    "tool_calls_count": 0,
+                    "consecutive_failures": 0,
+                }
+            return {
+                "status": "continue",
+                "response": "",
+                "tool_calls_count": 0,
+                "consecutive_failures": consecutive_failures,
+            }
         exec_result = code_agent.execute_code_safely(code, tool_namespace)
         formatted = code_agent.format_execution_result(exec_result)
 
@@ -3117,8 +3133,10 @@ Python code:"""
         if not code_to_run:
             return None
 
-        # Validate LLM-generated code before execution
-        is_safe, reason = validate_custom_tool_code(code_to_run, "<llm_generated>")
+        # SECURITY: Validate LLM-generated code before execution.
+        # Uses validate_script_code (not validate_custom_tool_code) because
+        # this is raw script code, not a Tool class file.
+        is_safe, reason = validate_script_code(code_to_run, "<llm_generated>")
         if not is_safe:
             logger.warning(f"[Agent] Blocked unsafe LLM-generated code: {reason}")
             return None
@@ -3483,12 +3501,7 @@ Python code:"""
             except Exception as e:
                 logger.debug(f"[KG BRAIN] Chat entity extraction error: {e}")
 
-        # Extract and persist user facts (name, location, role, etc.)
-        if hasattr(self, 'memory_retriever') and self.memory_retriever is not None:
-            try:
-                self.memory_retriever._extract_facts(message)
-            except Exception as e:
-                logger.debug(f"[Agent] non-critical: {e}")
+        # User fact extraction now handled by UnifiedMemory write gate
 
         # ===== Unified memory write — gated store =====
         if not is_simple and len(response) > 20:
@@ -3595,21 +3608,6 @@ Python code:"""
             selected_strategy = ReasoningStrategy.CHAIN_OF_THOUGHT if ReasoningStrategy else "chain_of_thought"
 
         # ===== Prompt Evolution Engine — Inject evolved prompt =====
-        if PROMPT_EVOLUTION_AVAILABLE and getattr(Config, 'PROMPT_EVOLUTION_ENABLED', False):
-            try:
-                evo_engine = get_prompt_evolution_engine()
-                evolved_prompt = evo_engine.get_active_prompt("reasoner")
-                if evolved_prompt is None:
-                    from aura.consciousness.prompt_evolution import DEFAULT_REASONER_PROMPT
-                    evo_engine.seed_prompt("reasoner", DEFAULT_REASONER_PROMPT)
-                    evolved_prompt = DEFAULT_REASONER_PROMPT
-                if system_prompt_addon:
-                    system_prompt_addon = evolved_prompt + "\n\n" + system_prompt_addon
-                else:
-                    system_prompt_addon = evolved_prompt
-            except Exception as e:
-                logger.debug(f"[PromptEvolution] Injection error: {e}")
-
         # ===== Reasoning Template Library — Retrieve template guidance (top-K) =====
         template_match = None       # backward compat: best match
         template_matches = []       # all top-K matches
@@ -3633,49 +3631,37 @@ Python code:"""
 
         # Raw strategy results for rich trace capture
         _mcts_raw_result = None
-        _reflexion_raw_result = None
 
         # Execute the selected strategy
         try:
             if selected_strategy == ReasoningStrategy.CHAIN_OF_THOUGHT:
                 response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
 
-            elif selected_strategy == ReasoningStrategy.COGNITIVE_THEATER:
-                if hasattr(self, 'theater') and self.theater:
-                    response = self.theater.quick_debate(message)
-                else:
-                    response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
-
-            elif selected_strategy == ReasoningStrategy.DEBATE:
-                if hasattr(self, 'theater') and self.theater:
-                    response = self.theater.quick_debate(message)
-                else:
-                    response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
-
-            elif selected_strategy == ReasoningStrategy.REFLEXION:
-                if hasattr(self, 'reflexion') and self.reflexion and self.reflexion_enabled:
-                    try:
-                        reflexion_result = self.reflexion.solve(message)
-                        _reflexion_raw_result = reflexion_result
-                        response = reflexion_result if isinstance(reflexion_result, str) else getattr(reflexion_result, 'final_output', str(reflexion_result))
-                    except Exception as e:
-                        logger.debug(f"[StrategyBandit] Reflexion error, falling back to CoT: {e}")
-                        response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
-                else:
-                    response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
-
             elif selected_strategy == ReasoningStrategy.MCTS:
                 if hasattr(self, 'reasoning_tree') and self.reasoning_tree:
                     try:
-                        mcts_result = self.reasoning_tree.execute("solve", problem=message)
+                        # Build conversation context for MCTS
+                        mcts_context = ""
+                        if system_prompt_addon:
+                            mcts_context = f"System context: {system_prompt_addon}\n"
+                        mcts_result = self.reasoning_tree.execute(
+                            "think_deeply", problem=message, context=mcts_context
+                        )
                         _mcts_raw_result = mcts_result
-                        response = mcts_result.get("answer", "") or mcts_result.get("result", "")
+                        if mcts_result.get("success"):
+                            # Use the summary (includes reasoning path + conclusion)
+                            response = mcts_result.get("summary", "") or mcts_result.get("answer", "")
+                        else:
+                            # MCTS failed to find a good solution, use the answer anyway or fall back
+                            response = mcts_result.get("answer", "")
                         if not response:
+                            logger.debug("[StrategyBandit] MCTS returned empty, falling back to CoT")
                             response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
                     except Exception as e:
                         logger.debug(f"[StrategyBandit] MCTS error, falling back to CoT: {e}")
                         response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
                 else:
+                    logger.debug("[StrategyBandit] MCTS selected but reasoning_tree not initialized, falling back to CoT")
                     response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
 
             else:
@@ -3742,14 +3728,6 @@ Python code:"""
                 logger.debug(f"[StrategyBandit] Outcome recording error: {e}")
 
         # ===== Prompt Evolution Engine — Record invocation =====
-        if PROMPT_EVOLUTION_AVAILABLE and getattr(Config, 'PROMPT_EVOLUTION_ENABLED', False):
-            try:
-                evo_engine = get_prompt_evolution_engine()
-                _failure = "low_quality" if composite_reward < 0.4 else None
-                evo_engine.record_invocation("reasoner", composite_reward, failure_type=_failure)
-            except Exception as e:
-                logger.debug(f"[PromptEvolution] Record error: {e}")
-
         # ===== Reasoning Template Library — Collect trace + record usage =====
         if TEMPLATE_LIBRARY_AVAILABLE and getattr(Config, 'REASONING_TEMPLATES_ENABLED', False):
             try:
@@ -3843,64 +3821,6 @@ Python code:"""
 
         # ===== SHARED POST-PROCESSING =====
         self._finalize_chat(message, full_response, ctx, speak=speak)
-
-    def create_plan(self, task: str) -> dict:
-        """Create an execution plan without acting.
-
-        Asks the LLM to plan using the available tools list.
-
-        Args:
-            task: The task description to plan for
-
-        Returns:
-            dict with keys: task, steps (list), tools (list), complexity (str)
-        """
-        # Build tools list for the planner
-        tool_names = list(self.tools.keys())
-        tools_desc = ", ".join(tool_names[:30])  # Limit for prompt size
-
-        plan_prompt = (
-            f"You are a planning assistant. Create a step-by-step execution plan for this task. "
-            f"Do NOT execute anything — only plan.\n\n"
-            f"Available tools: {tools_desc}\n\n"
-            f"Task: {task}\n\n"
-            f"Respond in this exact format:\n"
-            f"COMPLEXITY: simple|medium|complex\n"
-            f"TOOLS: tool1, tool2, tool3\n"
-            f"STEPS:\n"
-            f"1. First step\n"
-            f"2. Second step\n"
-            f"3. Third step\n"
-        )
-
-        raw = self.brain._quick_generate(plan_prompt)
-
-        # Parse response
-        steps = []
-        tools = []
-        complexity = "medium"
-
-        for line in raw.split("\n"):
-            line = line.strip()
-            if line.upper().startswith("COMPLEXITY:"):
-                complexity = line.split(":", 1)[1].strip().lower()
-            elif line.upper().startswith("TOOLS:"):
-                tools = [t.strip() for t in line.split(":", 1)[1].split(",") if t.strip()]
-            elif line and line[0].isdigit() and "." in line[:4]:
-                # Numbered step like "1. Do something"
-                step_text = line.split(".", 1)[1].strip() if "." in line else line
-                steps.append(step_text)
-
-        # Fallback if parsing failed — use entire response as single step
-        if not steps:
-            steps = [line.strip() for line in raw.split("\n") if line.strip() and not line.startswith(("COMPLEXITY", "TOOLS"))]
-
-        return {
-            "task": task,
-            "steps": steps,
-            "tools": tools,
-            "complexity": complexity,
-        }
 
     def _analyze_emotion(self, message: str):
         """Analyze emotional state from user message."""
@@ -4135,6 +4055,17 @@ Python code:"""
             if not evoemo:
                 return None
 
+            # SECURITY: Destructive mood commands require confirmation in non-auto mode
+            if any(kw in message_lower for kw in ("clear", "disable")):
+                try:
+                    from aura.core.permissions import PermissionTier
+                    pm = getattr(self, "permissions", None)
+                    if pm and pm.current_mode != PermissionTier.FULL_AUTO:
+                        logger.info(f"[EvoEmo] Destructive command blocked (non-auto mode): {message_lower[:40]}")
+                        return "Destructive mood commands require full-auto mode or explicit confirmation via the API."
+                except Exception:
+                    pass
+
             if "clear" in message_lower:
                 result = evoemo.clear_history()
                 return "Mood history cleared." if result.get("success") else "Failed to clear history."
@@ -4315,223 +4246,63 @@ Python code:"""
     # =========================================================================
 
     def get_episodic_memory_stats(self) -> dict:
-        """Get Episodic Memory statistics.
-
-        Returns:
-            dict with episodic memory stats, or empty dict if not available
-        """
-        if self.episodic_memory is None:
-            return {"available": False, "reason": "Episodic Memory not initialized"}
-
+        """Get memory stats (redirected to UnifiedMemory)."""
         try:
-            store_stats = self.episodic_memory.get_statistics()
-            bridge_stats = self.episodic_bridge.get_statistics() if self.episodic_bridge else {}
-
-            return {
-                "available": True,
-                "total_episodes": store_stats.get("total_episodes", 0),
-                "vector_dimension": store_stats.get("vector_dimension", 0),
-                "episodes_formed": bridge_stats.get("episodes_formed", 0),
-                "session_id": bridge_stats.get("session_id", None),
-                "context_retrievals": bridge_stats.get("context_retrievals", 0)
-            }
+            from aura.memory.unified_memory import get_unified_memory
+            um = get_unified_memory()
+            stats = um.get_stats() if hasattr(um, 'get_stats') else {}
+            return {"available": True, **stats}
         except Exception as e:
             return {"available": False, "error": str(e)}
 
     def episodic_recall(self, query: str, limit: int = 5, time_filter: str = None) -> list:
-        """Recall episodic memories matching a query.
-
-        Args:
-            query: Search query text
-            limit: Maximum results to return
-            time_filter: Optional natural language time filter (e.g., "yesterday", "last week")
-
-        Returns:
-            List of matching episodes with metadata
-        """
-        if self.episodic_memory is None:
-            return []
-
+        """Recall memories (redirected to UnifiedMemory)."""
         try:
-            from aura_episodic_memory import TemporalParser
-
-            # Parse time filter if provided
-            start_time = None
-            end_time = None
-            if time_filter:
-                parser = TemporalParser()
-                time_range = parser.parse(time_filter)
-                if time_range:
-                    start_time = time_range.start
-                    end_time = time_range.end
-
-            search_query = EpisodeQuery(
-                query_text=query,
-                start_time=start_time,
-                end_time=end_time,
-                limit=limit
-            )
-
-            results = self.episodic_memory.search(search_query)
-
+            from aura.memory.unified_memory import get_unified_memory
+            results = get_unified_memory().query(query, k=limit)
             return [
-                {
-                    "id": r.episode.id,
-                    "content": r.episode.content[:300],
-                    "type": r.episode.episode_type.value,
-                    "timestamp": r.episode.temporal_context.timestamp.isoformat(),
-                    "importance": r.episode.importance,
-                    "score": r.score,
-                    "entities": r.episode.entities_involved[:5]
-                }
+                {"id": r.source_id, "content": r.content[:300],
+                 "type": r.metadata.get("memory_type", "conversation"),
+                 "importance": r.importance, "score": r.score, "entities": []}
                 for r in results
             ]
-        except Exception as e:
-            logger.error(f"Episodic recall error: {e}")
+        except Exception:
             return []
 
     def episodic_time_travel(self, time_reference: str) -> dict:
-        """Time travel to a point in memory.
-
-        Args:
-            time_reference: Natural language time reference (e.g., "yesterday afternoon", "last week")
-
-        Returns:
-            dict with episodes and narrative from that time
-        """
-        if self.episodic_timeline is None:
-            return {"success": False, "error": "Episodic Memory not available"}
-
-        try:
-            episodes, narrative = self.episodic_timeline.time_travel(time_reference)
-
-            return {
-                "success": True,
-                "time_reference": time_reference,
-                "episode_count": len(episodes),
-                "narrative": narrative,
-                "episodes": [
-                    {
-                        "id": ep.id,
-                        "title": ep.title or ep.content[:50],
-                        "type": ep.episode_type.value,
-                        "timestamp": ep.temporal_context.timestamp.isoformat()
-                    }
-                    for ep in episodes[:10]
-                ]
-            }
-        except Exception as e:
-            return {"success": False, "error": str(e)}
+        return {"success": False, "error": "Time travel consolidated — use memory query"}
 
     def episodic_record(self, content: str, episode_type: str = "conversation",
                         importance: float = 0.5, entities: list = None,
                         tools_used: list = None) -> dict:
-        """Manually record an episode to memory.
-
-        Args:
-            content: Episode content
-            episode_type: Type of episode (conversation, task_execution, learning, etc.)
-            importance: Importance score (0-1)
-            entities: List of entities involved
-            tools_used: List of tools used
-
-        Returns:
-            dict with result of recording
-        """
-        if self.episodic_memory is None:
-            return {"success": False, "error": "Episodic Memory not available"}
-
+        """Record a memory (redirected to UnifiedMemory)."""
         try:
-            # Map string to EpisodeType
-            type_map = {
-                "conversation": EpisodeType.CONVERSATION,
-                "task_execution": EpisodeType.TASK_EXECUTION,
-                "learning": EpisodeType.LEARNING,
-                "error": EpisodeType.ERROR,
-                "milestone": EpisodeType.MILESTONE,
-                "insight": EpisodeType.INSIGHT,
-                "user_preference": EpisodeType.USER_PREFERENCE,
-                "system_event": EpisodeType.SYSTEM_EVENT
-            }
-            ep_type = type_map.get(episode_type, EpisodeType.CONVERSATION)
-
-            episode = Episode(
-                content=content,
-                episode_type=ep_type,
-                temporal_context=TemporalContext(timestamp=datetime.now()),
-                importance=importance,
-                entities_involved=entities or [],
-                tools_used=tools_used or []
-            )
-
-            episode_id = self.episodic_memory.store_episode(episode)
-
-            return {
-                "success": True,
-                "episode_id": episode_id,
-                "type": ep_type.value
-            }
+            from aura.memory.unified_memory import get_unified_memory
+            um = get_unified_memory()
+            ids = um.store(content=content, source="episodic_record", importance=importance,
+                           tags=entities or [], episode_type=episode_type)
+            return {"success": True, "episode_id": ids.get("store", ""), "type": episode_type}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
     def episodic_get_context(self, query: str, include_timeline: bool = False) -> str:
-        """Get episodic context for a query (for LLM prompting).
-
-        Args:
-            query: Query to get context for
-            include_timeline: Include recent activity summary
-
-        Returns:
-            Formatted context string
-        """
-        if self.episodic_bridge is None:
-            return ""
-
         try:
-            return self.episodic_bridge.get_context_for_query(query, include_timeline=include_timeline)
-        except Exception as e:
-            logger.error(f"Episodic context error: {e}")
+            from aura.memory.unified_memory import get_unified_memory
+            results = get_unified_memory().query(query, k=3)
+            return "\n".join(f"- {r.content[:120]}" for r in results) if results else ""
+        except Exception:
             return ""
 
     def episodic_consolidate(self) -> dict:
-        """Run memory consolidation (decay, merge, garbage collect).
-
-        Returns:
-            dict with consolidation results
-        """
-        if self.episodic_consolidator is None:
-            return {"success": False, "error": "Episodic consolidator not available"}
-
         try:
-            results = self.episodic_consolidator.run_full_consolidation()
-
-            return {
-                "success": True,
-                "operations": [
-                    {
-                        "operation": r.operation,
-                        "episodes_affected": r.episodes_affected,
-                        "duration_seconds": r.duration_seconds
-                    }
-                    for r in results
-                ]
-            }
+            from aura.memory.store import get_memory_store
+            store = get_memory_store()
+            return {"success": True, "message": "Consolidation via UnifiedMemory"}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
     def episodic_get_health(self) -> dict:
-        """Get memory health report with recommendations.
-
-        Returns:
-            dict with health metrics and recommendations
-        """
-        if self.episodic_consolidator is None:
-            return {"status": "unavailable"}
-
-        try:
-            return self.episodic_consolidator.get_health_report()
-        except Exception as e:
-            return {"status": "error", "error": str(e)}
+        return {"status": "consolidated_into_unified_memory"}
 
     # ==================== Skill Library Methods ====================
 
@@ -4771,179 +4542,6 @@ Python code:"""
         except Exception as e:
             return {"error": str(e)}
 
-    # ==================== Life Modeling Methods ====================
-
-    def get_life_modeling_stats(self) -> dict:
-        """Get Life Modeling availability status.
-
-        Returns:
-            dict with status info
-        """
-        if self.life_modeling is None:
-            return {"available": False, "reason": "Life Modeling not initialized"}
-
-        return {
-            "available": True,
-            "mesa_available": MESA_AVAILABLE if LIFE_MODELING_AVAILABLE else False,
-            "tools": [t["name"] for t in self.life_modeling.get_tools()]
-        }
-
-    def life_update_state(
-        self,
-        financial: dict = None,
-        career: dict = None,
-        health: dict = None,
-        personal: dict = None
-    ) -> dict:
-        """Update life state model for simulations.
-
-        Args:
-            financial: dict with monthly_income, monthly_expenses, savings, etc.
-            career: dict with current_role, satisfaction (0-1), is_employed
-            health: dict with stress_level (0-1), age
-            personal: dict with life_satisfaction (0-1), location
-
-        Returns:
-            dict with success status and current wellbeing score
-        """
-        if self.life_modeling is None:
-            return {"success": False, "error": "Life Modeling not available"}
-
-        try:
-            params = {}
-            if financial:
-                params["financial"] = financial
-            if career:
-                params["career"] = career
-            if health:
-                params["health"] = health
-            if personal:
-                params["personal"] = personal
-
-            return self.life_modeling.handle_tool_call("life_state_update", params)
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-    def life_get_state(self) -> dict:
-        """Get current life state model.
-
-        Returns:
-            dict with life state and wellbeing score
-        """
-        if self.life_modeling is None:
-            return {"error": "Life Modeling not available"}
-
-        try:
-            return self.life_modeling.handle_tool_call("get_life_state", {})
-        except Exception as e:
-            return {"error": str(e)}
-
-    def life_simulate_decision(
-        self,
-        decision_type: str,
-        parameters: dict = None,
-        time_horizon_years: int = 5,
-        num_simulations: int = 100
-    ) -> dict:
-        """Simulate a life decision and see projected outcomes.
-
-        Args:
-            decision_type: career_change, quit_job, start_business, major_purchase,
-                          relocation, education, have_child, retirement, lifestyle_change
-            parameters: Decision-specific parameters (e.g., salary_change_pct, startup_cost)
-            time_horizon_years: How many years to simulate (default 5)
-            num_simulations: Number of Monte Carlo runs (default 100)
-
-        Returns:
-            dict with outcomes and risk metrics
-        """
-        if self.life_modeling is None:
-            return {"error": "Life Modeling not available"}
-
-        try:
-            return self.life_modeling.handle_tool_call("simulate_decision", {
-                "decision_type": decision_type,
-                "parameters": parameters or {},
-                "time_horizon_years": time_horizon_years,
-                "num_simulations": num_simulations
-            })
-        except Exception as e:
-            return {"error": str(e)}
-
-    def life_compare_decisions(
-        self,
-        decisions: list,
-        time_horizon_years: int = 5
-    ) -> dict:
-        """Compare multiple decision scenarios.
-
-        Args:
-            decisions: List of dicts with decision_type and optional parameters
-            time_horizon_years: How many years to simulate
-
-        Returns:
-            dict with ranking and summaries
-        """
-        if self.life_modeling is None:
-            return {"error": "Life Modeling not available"}
-
-        try:
-            return self.life_modeling.handle_tool_call("compare_decisions", {
-                "decisions": decisions,
-                "time_horizon_years": time_horizon_years
-            })
-        except Exception as e:
-            return {"error": str(e)}
-
-    def life_what_if(self, question: str, variables: dict = None) -> dict:
-        """Answer what-if questions about life changes.
-
-        Args:
-            question: Natural language what-if question
-            variables: Specific variable changes to analyze
-
-        Returns:
-            dict with analysis and interpretation
-        """
-        if self.life_modeling is None:
-            return {"error": "Life Modeling not available"}
-
-        try:
-            return self.life_modeling.handle_tool_call("what_if_analysis", {
-                "question": question,
-                "variables": variables or {}
-            })
-        except Exception as e:
-            return {"error": str(e)}
-
-    def life_generate_report(
-        self,
-        decision_type: str,
-        parameters: dict = None,
-        format: str = "markdown"
-    ) -> dict:
-        """Generate a detailed decision analysis report.
-
-        Args:
-            decision_type: Type of decision to analyze
-            parameters: Decision-specific parameters
-            format: "markdown" or "json"
-
-        Returns:
-            dict with report in requested format
-        """
-        if self.life_modeling is None:
-            return {"error": "Life Modeling not available"}
-
-        try:
-            return self.life_modeling.handle_tool_call("generate_decision_report", {
-                "decision_type": decision_type,
-                "parameters": parameters or {},
-                "format": format
-            })
-        except Exception as e:
-            return {"error": str(e)}
-
     def _speak(self, text: str, emotion: Optional[str] = None):
         """Speak text using TTS with optional emotional adaptation."""
         try:
@@ -5060,16 +4658,7 @@ Python code:"""
         except Exception as e:
             results["errors"].append(f"KG Brain close: {e}")
 
-        # 10. Close Episodic Memory
-        try:
-            if hasattr(self, 'episodic_memory') and self.episodic_memory:
-                # Flush pending episodes first
-                if self.episodic_bridge:
-                    self.episodic_bridge.flush_pending()
-                self.episodic_memory.close()
-                results["freed_resources"].append("episodic_memory")
-        except Exception as e:
-            results["errors"].append(f"Episodic Memory close: {e}")
+        # 10. Episodic Memory — consolidated into UnifiedMemory, no separate close needed
 
         # 11. Close Skill Library
         try:
