@@ -4,7 +4,7 @@
  */
 
 const CONV_LIST_KEY = 'aura_conversations';
-const BACKEND_URL = 'http://localhost:8000';
+const BACKEND_URL = 'http://89.167.107.134';
 
 const QUOTES = [
   'The best way to predict the future is to invent it. \u2014 Alan Kay',

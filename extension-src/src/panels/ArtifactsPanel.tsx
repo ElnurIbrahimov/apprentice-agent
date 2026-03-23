@@ -52,7 +52,7 @@ const SYSTEM_PROMPTS: Record<string, string> = {
   markdown: 'You are a technical writer. Respond with ONLY well-formatted Markdown content. No HTML, no fences around the whole thing, no explanation.',
 };
 
-const ARTIFACTS_WS_URL = `ws://localhost:8000/api/artifacts/stream`;
+const ARTIFACTS_WS_URL = `ws://89.167.107.134/api/artifacts/stream`;
 
 /** Build the full srcdoc HTML for the iframe given the artifact type and user code. */
 function buildSrcdoc(type: ArtifactType, code: string, includeErrorHandler = true): string {

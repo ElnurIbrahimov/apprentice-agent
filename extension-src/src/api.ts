@@ -8,9 +8,9 @@ import ext from './ext';
 // On startup, initBackendUrl() loads the saved URL and updates HTTP + WS_URL.
 // ---------------------------------------------------------------------------
 
-// Default to local dev server. Users configure their remote server in Settings.
-const DEFAULT_HTTP = 'http://localhost:8000';
-const DEFAULT_API_KEY = '';
+// Default to the Aura server. Override in Settings panel if running locally.
+const DEFAULT_HTTP = 'http://89.167.107.134';
+const DEFAULT_API_KEY = 'i-L5ShpMkY2B7loNb8VS4EAAT-Ronh-K8cIgRILGjnQ';
 
 export let HTTP = DEFAULT_HTTP;
 export let WS_URL = deriveWsUrl(DEFAULT_HTTP);
