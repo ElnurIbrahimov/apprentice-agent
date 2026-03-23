@@ -4607,16 +4607,35 @@ function safeSend(msg: OutboundMessage, cb?: (response: any) => void): void {
 
   // ── Google SERP AI Answer Card ───────────────────────────────────────────
 
-  const SERP_DEFAULT_BACKEND = 'http://89.167.107.134';
-  const SERP_DEFAULT_API_KEY = 'i-L5ShpMkY2B7loNb8VS4EAAT-Ronh-K8cIgRILGjnQ';
-  let SERP_BACKEND = SERP_DEFAULT_BACKEND;
-  let SERP_API_KEY = SERP_DEFAULT_API_KEY;
+  let SERP_BACKEND = 'http://localhost:8000';
+  let SERP_API_KEY = '';
 
-  // Load configured backend URL from storage (same source as sidebar)
-  if (ext?.storage?.local) {
-    ext.storage.local.get(['backendUrl', 'apiKey'], (d: any) => {
-      if (d?.backendUrl?.trim()) SERP_BACKEND = d.backendUrl.trim().replace(/\/+$/, '');
-      if (d?.apiKey?.trim()) SERP_API_KEY = d.apiKey.trim();
+  /** Read backend URL and API key from chrome.storage.local (same source as sidebar). */
+  function loadSerpConfig(): Promise<void> {
+    return new Promise((resolve) => {
+      if (!ext?.storage?.local) {
+        resolve();
+        return;
+      }
+      ext.storage.local.get(['backendUrl', 'apiKey'], (d: any) => {
+        if (d?.backendUrl?.trim()) SERP_BACKEND = d.backendUrl.trim().replace(/\/+$/, '');
+        if (d?.apiKey?.trim()) SERP_API_KEY = d.apiKey.trim();
+        resolve();
+      });
+    });
+  }
+
+  // Load config on init and also listen for storage changes so Settings updates propagate
+  loadSerpConfig();
+  if (ext?.storage?.onChanged) {
+    ext.storage.onChanged.addListener((changes: any, area: string) => {
+      if (area !== 'local') return;
+      if (changes.backendUrl?.newValue) {
+        SERP_BACKEND = changes.backendUrl.newValue.trim().replace(/\/+$/, '');
+      }
+      if (changes.apiKey?.newValue !== undefined) {
+        SERP_API_KEY = changes.apiKey.newValue?.trim() || '';
+      }
     });
   }
 

@@ -60,7 +60,7 @@ export default function SummaryPanel() {
     setStatus('Summarizing...');
 
     setActiveStream({
-      type: 'write',
+      type: 'summary',
       rawText: '',
       onFirstChunk: () => setStatus(''),
       onDone: (rawText) => {
@@ -88,8 +88,8 @@ export default function SummaryPanel() {
   };
 
   const stream = useStore(s => s.activeStream);
-  const isStreaming = stream && stream !== true;
-  const streamText = isStreaming ? (stream as any).rawText : null;
+  const isStreaming = stream && stream !== true && stream.type === 'summary';
+  const streamText = isStreaming ? stream.rawText : null;
 
   const btnStyle = (active: boolean): React.CSSProperties => ({
     flex: 1,

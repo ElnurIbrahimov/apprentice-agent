@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Copy, Check } from 'lucide-react';
 import { useStore } from '../store';
 import ModelPill from '../components/ModelPill';
 import { HTTP, getAuthHeaders } from '../api';
@@ -41,6 +42,7 @@ export default function WritePanel() {
 
   // Top-level mode
   const [writeMode, setWriteMode] = useState<WriteMode>('compose');
+  const [error, setError] = useState('');
 
   // Compose mode state
   const [tab, setTab] = useState<'write' | 'improve'>('write');
@@ -52,7 +54,9 @@ export default function WritePanel() {
   const [outlineFirst, setOutlineFirst] = useState(false);
   const [outline, setOutline] = useState('');
   const [outlineApproved, setOutlineApproved] = useState(false);
+  const [composeCopied, setComposeCopied] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const composeCopiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Chat Draft mode state
   const [draftMessages, setDraftMessages] = useState<DraftMessage[]>([]);
@@ -74,7 +78,7 @@ export default function WritePanel() {
 
   // Stream text reader for compose/chat-draft
   const stream = useStore(s => s.activeStream);
-  const streamText = (stream && stream !== true && (stream.type === 'write')) ? stream.rawText : null;
+  const streamText = (stream && stream !== true && (stream.type === 'compose' || stream.type === 'chat-draft')) ? stream.rawText : null;
 
   // Auto-scroll for draft chat
   useEffect(() => {
@@ -94,6 +98,7 @@ export default function WritePanel() {
   useEffect(() => {
     return () => {
       if (rwAbortRef.current) rwAbortRef.current.abort();
+      if (composeCopiedTimerRef.current) clearTimeout(composeCopiedTimerRef.current);
     };
   }, []);
 
@@ -104,14 +109,14 @@ export default function WritePanel() {
   const doCompose = useCallback(() => {
     const text = inputRef.current?.value.trim();
     if (!text) return;
-    if (!wsReady || ws?.readyState !== WebSocket.OPEN) { alert('AURA is offline.'); return; }
+    if (!wsReady || ws?.readyState !== WebSocket.OPEN) { setError('AURA is offline. Check your connection.'); setTimeout(() => setError(''), 5000); return; }
     if (activeStream) return;
 
     // If outline mode is on and we don't have an approved outline yet, generate outline first
     if (outlineFirst && !outlineApproved && tab === 'write') {
       setOutline('');
       setActiveStream({
-        type: 'write',
+        type: 'compose',
         rawText: '',
         onFirstChunk: () => setOutline(''),
         onDone: (rawText) => setOutline(rawText),
@@ -134,7 +139,7 @@ export default function WritePanel() {
     }
 
     setActiveStream({
-      type: 'write',
+      type: 'compose',
       rawText: '',
       onFirstChunk: () => setResult(''),
       onDone: (rawText) => setResult(rawText),
@@ -157,7 +162,7 @@ export default function WritePanel() {
   const composeDisplay = composeStreamText !== null ? composeStreamText : result;
 
   // Outline display
-  const outlineStreamText = (stream && stream !== true && stream.type === 'write' && outlineFirst && !outlineApproved)
+  const outlineStreamText = (stream && stream !== true && stream.type === 'compose' && outlineFirst && !outlineApproved)
     ? stream.rawText
     : null;
   const outlineDisplay = outlineStreamText !== null ? outlineStreamText : outline;
@@ -169,7 +174,7 @@ export default function WritePanel() {
   const sendDraftMessage = useCallback(() => {
     const text = draftInput.trim();
     if (!text) return;
-    if (!wsReady || ws?.readyState !== WebSocket.OPEN) { alert('AURA is offline.'); return; }
+    if (!wsReady || ws?.readyState !== WebSocket.OPEN) { setError('AURA is offline. Check your connection.'); setTimeout(() => setError(''), 5000); return; }
     if (activeStream) return;
 
     const userMsg: DraftMessage = { id: 'u' + Date.now(), role: 'user', text };
@@ -194,7 +199,7 @@ export default function WritePanel() {
       : `${systemContext}\n\nUser feedback: ${text}`;
 
     setActiveStream({
-      type: 'write',
+      type: 'chat-draft',
       rawText: '',
       onFirstChunk: () => {},
       onDone: (rawText) => {
@@ -322,7 +327,7 @@ Write a polished article with:
 Output only the article.`;
 
       setActiveStream({
-        type: 'write',
+        type: 'research-write',
         rawText: '',
         onFirstChunk: () => setRwArticle(''),
         onDone: (rawText) => {
@@ -349,7 +354,7 @@ Output only the article.`;
   }, []);
 
   // Research-write article display
-  const rwStreamText = (stream && stream !== true && stream.type === 'write' && writeMode === 'research-write' && rwPhase === 'writing')
+  const rwStreamText = (stream && stream !== true && stream.type === 'research-write' && writeMode === 'research-write' && rwPhase === 'writing')
     ? stream.rawText
     : null;
   const rwDisplay = rwStreamText !== null ? rwStreamText : rwArticle;
@@ -427,6 +432,22 @@ Output only the article.`;
           </button>
         ))}
       </div>
+
+      {/* Error banner */}
+      {error && (
+        <div style={{
+          background: 'rgba(239, 68, 68, 0.1)',
+          border: '1px solid rgba(239, 68, 68, 0.3)',
+          borderRadius: 'var(--r-md)',
+          padding: '8px 12px',
+          margin: '8px 12px 0',
+          fontSize: '12px',
+          color: '#ef4444',
+          flexShrink: 0,
+        }}>
+          {error}
+        </div>
+      )}
 
       {/* ============ COMPOSE MODE ============ */}
       {writeMode === 'compose' && (
@@ -614,9 +635,38 @@ Output only the article.`;
 
             {/* Result */}
             {(composeDisplay || (activeStream && outlineApproved)) && !(!outlineApproved && outlineFirst && outlineDisplay) && (
-              <div className="flex-1 overflow-y-auto" style={resultBoxStyle}>
+              <div className="flex-1 overflow-y-auto" style={{ ...resultBoxStyle, position: 'relative', paddingRight: '36px' }}>
                 {composeDisplay ? (
                   <>
+                    {/* Copy compose result button */}
+                    {!activeStream && (
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(composeDisplay).then(() => {
+                            setComposeCopied(true);
+                            if (composeCopiedTimerRef.current) clearTimeout(composeCopiedTimerRef.current);
+                            composeCopiedTimerRef.current = setTimeout(() => setComposeCopied(false), 2000);
+                          }).catch(() => {});
+                        }}
+                        title="Copy result"
+                        style={{
+                          position: 'absolute',
+                          top: 8,
+                          right: 8,
+                          background: 'var(--s2)',
+                          border: '1px solid var(--b1)',
+                          borderRadius: 'var(--r-sm)',
+                          color: composeCopied ? 'var(--green, #22c55e)' : 'var(--mu)',
+                          cursor: 'pointer',
+                          padding: '4px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          zIndex: 1,
+                        }}
+                      >
+                        {composeCopied ? <Check size={13} /> : <Copy size={13} />}
+                      </button>
+                    )}
                     <div
                       className="md-body"
                       style={{ fontSize: '12.5px', lineHeight: 1.65 }}

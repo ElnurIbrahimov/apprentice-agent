@@ -340,7 +340,7 @@ export default function SlidesPanel() {
     const prompt = `${SLIDES_SYSTEM_PROMPT}\n\nCreate a ${slideCount}-slide ${style} presentation about: ${topic.trim()}`;
 
     setActiveStream({
-      type: 'write',
+      type: 'slides',
       rawText: '',
       onFirstChunk: () => setStatus('Writing slides...'),
       onDone: (rawText) => {
@@ -383,7 +383,7 @@ export default function SlidesPanel() {
     const prompt = `${SLIDES_SYSTEM_PROMPT}\n\nCreate a ${slideCount}-slide ${style} presentation based on this content:\n\nTitle: ${resp.title || 'Untitled'}\n\n${pageText}`;
 
     setActiveStream({
-      type: 'write',
+      type: 'slides',
       rawText: '',
       onFirstChunk: () => setStatus('Writing slides...'),
       onDone: (rawText) => {
@@ -420,7 +420,7 @@ export default function SlidesPanel() {
     const prompt = `${SLIDES_SYSTEM_PROMPT}\n\nI have a ${slides.length}-slide presentation. Regenerate ONLY slide ${idx + 1} with a fresh take. Return the full deck JSON.\n\nCurrent deck outline:\n${slideContext}\n\nThe overall topic context from slide 1: "${slides[0].title}".\nReturn the complete slide deck as JSON with all ${slides.length} slides, but make slide ${idx + 1} different and better.`;
 
     setActiveStream({
-      type: 'write',
+      type: 'slides',
       rawText: '',
       onFirstChunk: () => {},
       onDone: (rawText) => {
@@ -517,7 +517,7 @@ export default function SlidesPanel() {
 
   // Stream state for loading indicator
   const stream = useStore(s => s.activeStream);
-  const isStreaming = stream && stream !== true && stream.type === 'write';
+  const isStreaming = stream && stream !== true && stream.type === 'slides';
 
   /* ── Render ── */
   const hasSlides = slides.length > 0;

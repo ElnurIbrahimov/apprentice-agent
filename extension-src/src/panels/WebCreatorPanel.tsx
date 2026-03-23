@@ -3,7 +3,7 @@ import {
   Copy, Download, Maximize2, Minimize2, Code2, Eye,
   Monitor, Tablet, Smartphone, Globe, Layout, Sparkles,
   Send, Trash2, RotateCcw, Upload, User, Bot,
-  Undo2, Redo2, MousePointer2, Pencil, Palette, ExternalLink,
+  Undo2, Redo2, MousePointer2, Pencil, Palette, ExternalLink, Square,
 } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { useStore } from '../store';
@@ -1188,31 +1188,49 @@ export default function WebCreatorPanel() {
             el.style.height = Math.min(el.scrollHeight, 80) + 'px';
           }}
         />
-        <button
-          onClick={() => sendMessage()}
-          disabled={loading || !input.trim()}
-          style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: loading ? 'var(--s3)' : 'var(--p)',
-            border: 'none', borderRadius: 'var(--r-md)', color: '#fff',
-            padding: '0 14px', cursor: loading || !input.trim() ? 'not-allowed' : 'pointer',
-            fontSize: '12px', fontFamily: 'inherit', fontWeight: 600,
-            alignSelf: 'stretch', minWidth: 40, minHeight: 36,
-            opacity: !input.trim() && !loading ? 0.5 : 1,
-            transition: 'all 0.2s ease',
-            boxShadow: loading ? 'none' : '0 2px 10px rgba(124,58,237,0.3)',
-          }}
-        >
-          {loading ? (
-            <div style={{ display: 'flex', gap: 3 }}>
-              <span style={{ width: 4, height: 4, borderRadius: '50%', background: '#fff', animation: 'dotPulse 1.2s ease-in-out infinite' }} />
-              <span style={{ width: 4, height: 4, borderRadius: '50%', background: '#fff', animation: 'dotPulse 1.2s ease-in-out infinite 0.2s' }} />
-              <span style={{ width: 4, height: 4, borderRadius: '50%', background: '#fff', animation: 'dotPulse 1.2s ease-in-out infinite 0.4s' }} />
-            </div>
-          ) : (
+        {loading ? (
+          <button
+            onClick={() => {
+              if (abortRef.current) abortRef.current.abort();
+              abortRef.current = null;
+              setLoading(false);
+              setStatus('Cancelled');
+              setMessages(prev => [...prev, {
+                id: crypto.randomUUID(),
+                role: 'ai' as const,
+                text: 'Generation stopped.',
+                timestamp: Date.now(),
+              }]);
+            }}
+            className="stop-stream-btn"
+            aria-label="Stop generating"
+            style={{
+              alignSelf: 'stretch', minWidth: 40, minHeight: 36,
+              padding: '0 12px',
+            }}
+          >
+            <Square size={10} />
+            <span>Stop</span>
+          </button>
+        ) : (
+          <button
+            onClick={() => sendMessage()}
+            disabled={!input.trim()}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'var(--p)',
+              border: 'none', borderRadius: 'var(--r-md)', color: '#fff',
+              padding: '0 14px', cursor: !input.trim() ? 'not-allowed' : 'pointer',
+              fontSize: '12px', fontFamily: 'inherit', fontWeight: 600,
+              alignSelf: 'stretch', minWidth: 40, minHeight: 36,
+              opacity: !input.trim() ? 0.5 : 1,
+              transition: 'all 0.2s ease',
+              boxShadow: '0 2px 10px rgba(124,58,237,0.3)',
+            }}
+          >
             <Send size={14} />
-          )}
-        </button>
+          </button>
+        )}
       </div>
 
       {/* ═══ Version timeline strip ═══ */}

@@ -1,5 +1,5 @@
 import { WS_URL, HTTP, API_KEY } from './api';
-import { useStore } from './store';
+import { useStore, registerReconnectHandler } from './store';
 
 let _wsRetryDelay = 1000;
 let _wsConsecutiveFailures = 0;
@@ -90,6 +90,7 @@ export function connectWS() {
     useStore.getState().setWsReady(true);
     useStore.getState().setWs(socket);
     useStore.getState().setBackendStatus('online');
+    useStore.getState().setConnectionAbandoned(false);
     _wsRetryDelay = 1000;
     _wsConsecutiveFailures = 0;
   };
@@ -137,6 +138,10 @@ export function connectWS() {
         _wsRetryDelay = Math.min(_wsRetryDelay * 2, 30000);
         connectWS();
       }, _wsRetryDelay + jitter);
+    } else {
+      // All retries exhausted — flag so panels can show reconnect UI
+      useStore.getState().setConnectionAbandoned(true);
+      console.warn('[Aura] WebSocket reconnection abandoned after 8 failures');
     }
   };
 
@@ -242,6 +247,23 @@ export function resetWsRetry() {
   _wsRetryDelay = 1000;
   _wsConsecutiveFailures = 0;
 }
+
+/** Manual reconnect -- resets retry counter, clears abandoned flag, and connects. */
+export function reconnectWS() {
+  _wsRetryDelay = 1000;
+  _wsConsecutiveFailures = 0;
+  useStore.getState().setConnectionAbandoned(false);
+  // Close existing dead socket if any
+  const { ws } = useStore.getState();
+  if (ws) {
+    try { ws.close(); } catch { /* ignore */ }
+    useStore.getState().setWs(null);
+  }
+  connectWS();
+}
+
+// Register with the store so panels can call store.reconnect() without circular imports
+registerReconnectHandler(reconnectWS);
 
 export async function fetchStatus() {
   try {

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Copy, Check } from 'lucide-react';
 import { useStore } from '../store';
 import ModelPill from '../components/ModelPill';
 import { HTTP, getAuthHeaders } from '../api';
@@ -57,11 +58,14 @@ export default function YoutubePanel() {
   const [searchQuery, setSearchQuery] = useState('');
   const transcriptRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const [copied, setCopied] = useState(false);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Cleanup abort on unmount
   useEffect(() => {
     return () => {
       if (abortRef.current) abortRef.current.abort();
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
     };
   }, []);
 
@@ -145,7 +149,7 @@ export default function YoutubePanel() {
       setResult(data);
       setStatus('');
     } catch (err: any) {
-      setStatus('Error: ' + (err.name === 'TimeoutError' ? 'Request timed out.' : err.message || 'Unknown error'));
+      setStatus('Error: ' + (err.name === 'AbortError' ? 'Request timed out.' : err.message || 'Unknown error'));
     } finally {
       setLoading(false);
     }
@@ -441,12 +445,44 @@ export default function YoutubePanel() {
 
         {/* Server-side summary result */}
         {result && (
-          <div className="flex flex-col gap-3">
-            <div style={{ fontWeight: 600, fontSize: '13.5px', color: 'var(--tx)' }}>{result.title || 'Untitled'}</div>
+          <div className="flex flex-col gap-3" style={{ position: 'relative' }}>
+            <div style={{ fontWeight: 600, fontSize: '13.5px', color: 'var(--tx)', paddingRight: 32 }}>{result.title || 'Untitled'}</div>
             <div className="flex gap-3" style={{ fontSize: '11px', color: 'var(--mu)' }}>
               {result.channel && <span>{result.channel}</span>}
               {result.duration && <span>{result.duration}</span>}
             </div>
+
+            {/* Copy summary button */}
+            <button
+              onClick={() => {
+                const text = [
+                  result.title || '',
+                  result.summary || '',
+                  result.key_points?.length ? '\nKey Points:\n' + result.key_points.join('\n') : '',
+                ].filter(Boolean).join('\n\n');
+                navigator.clipboard.writeText(text).then(() => {
+                  setCopied(true);
+                  if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+                  copiedTimerRef.current = setTimeout(() => setCopied(false), 2000);
+                }).catch(() => {});
+              }}
+              title="Copy summary"
+              style={{
+                position: 'absolute',
+                top: 0,
+                right: 0,
+                background: 'var(--s2)',
+                border: '1px solid var(--b1)',
+                borderRadius: 'var(--r-sm)',
+                color: copied ? 'var(--green, #22c55e)' : 'var(--mu)',
+                cursor: 'pointer',
+                padding: '4px',
+                display: 'flex',
+                alignItems: 'center',
+              }}
+            >
+              {copied ? <Check size={13} /> : <Copy size={13} />}
+            </button>
 
             <div
               className="md-body"

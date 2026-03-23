@@ -93,6 +93,7 @@ export default function RecordPanel() {
   // Transcript + notes
   const [transcript, setTranscript] = useState('');
   const [notesHtml, setNotesHtml] = useState('');
+  const [notesRawText, setNotesRawText] = useState('');
   const [copied, setCopied] = useState<'transcript' | 'notes' | null>(null);
 
   // Refs
@@ -273,6 +274,7 @@ export default function RecordPanel() {
     if (activeStream) return;
 
     setNotesHtml('');
+    setNotesRawText('');
 
     const prompt = mode === 'meeting'
       ? `Turn this transcript into structured meeting notes with these sections:\n\n## Agenda / Topics Discussed\n## Key Decisions\n## Action Items\n## Follow-ups\n\nTranscript:\n\n${transcript}`
@@ -284,6 +286,7 @@ export default function RecordPanel() {
       onFirstChunk: () => setNotesHtml(''),
       onDone: (rawText) => {
         setNotesHtml(md(rawText));
+        setNotesRawText(rawText);
       },
     });
 
@@ -555,12 +558,7 @@ export default function RecordPanel() {
               {/* Copy notes button */}
               {notesHtml && !isStreaming && (
                 <button
-                  onClick={() => {
-                    // Extract text content from the rendered notes
-                    const el = document.createElement('div');
-                    el.innerHTML = notesHtml;
-                    copyText(el.textContent || '', 'notes');
-                  }}
+                  onClick={() => copyText(notesRawText, 'notes')}
                   title="Copy notes"
                   style={{
                     position: 'absolute', top: 6, right: 6,
@@ -604,7 +602,7 @@ export default function RecordPanel() {
                 setAudioBlob(null);
                 setTranscript('');
                 setNotesHtml('');
-            
+                setNotesRawText('');
               }}
               style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,

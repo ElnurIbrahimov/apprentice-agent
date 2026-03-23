@@ -3,14 +3,13 @@ import ext from './ext';
 // ---------------------------------------------------------------------------
 // Backend URL configuration
 //
-// Defaults to the remote server. Users can configure a different URL via the
-// Settings panel, which persists to chrome.storage.local.
+// Defaults to localhost:8000 for local development. Users can configure a
+// different URL via the Settings panel, which persists to chrome.storage.local.
 // On startup, initBackendUrl() loads the saved URL and updates HTTP + WS_URL.
 // ---------------------------------------------------------------------------
 
-// Server URL is the default remote backend.
-// API key should be set in the extension Settings panel (not hardcoded here).
-const DEFAULT_HTTP = 'http://89.167.107.134';
+// Default to local dev server. Users configure their remote server in Settings.
+const DEFAULT_HTTP = 'http://localhost:8000';
 const DEFAULT_API_KEY = '';
 
 export let HTTP = DEFAULT_HTTP;
@@ -30,8 +29,8 @@ export function deriveWsUrl(httpUrl: string): string {
 
 /**
  * Extract a display-friendly server label from the HTTP URL.
- * e.g. "http://89.167.107.134" -> "89.167.107.134"
- *      "http://localhost:8000" -> "localhost:8000"
+ * e.g. "http://localhost:8000" -> "localhost:8000"
+ *      "https://aura.example.com" -> "aura.example.com"
  */
 export function getServerLabel(): string {
   try {

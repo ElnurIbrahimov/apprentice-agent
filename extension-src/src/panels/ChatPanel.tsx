@@ -9,7 +9,7 @@ import { PAGE_KEYWORDS } from '../ws';
 import { getPageContentCached, getCurrentTab } from '../ext';
 import type { StreamState, FileAttachment } from '../types';
 import { speak } from '../tts';
-import { ChevronDown, Brain, Pen } from 'lucide-react';
+import { ChevronDown, Brain, Pen, Square } from 'lucide-react';
 
 export default function ChatPanel() {
   const { messages, addMessage, activeStream, setActiveStream, setPendingCtx, saveCurrentConversation } = useStore();
@@ -247,6 +247,25 @@ export default function ChatPanel() {
     }
   }, [sysmsg, addMessage, setActiveStream, setPendingCtx, fileAttachments]);
 
+  // Stop streaming — send stop signal, finalize with current text, clear stream
+  const handleStopStream = useCallback(() => {
+    const st = useStore.getState();
+    const stream = st.activeStream;
+    if (!stream) return;
+
+    // Send stop signal via WebSocket if connected
+    const { ws, wsReady } = st;
+    if (wsReady && ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'stop' }));
+    }
+
+    // Finalize stream with whatever text we have so far
+    if (stream !== true && stream.onDone) {
+      stream.onDone(stream.rawText || '', stream.thinkingText || undefined);
+    }
+    setActiveStream(null);
+  }, [setActiveStream]);
+
   // Handle aura-send events dispatched by AskPanel / ToolsPanel
   const sendMessageRef = useRef(sendMessage);
   sendMessageRef.current = sendMessage;
@@ -449,6 +468,20 @@ export default function ChatPanel() {
           <ChevronDown size={14} />
           <span>{newMsgCount} new message{newMsgCount > 1 ? 's' : ''}</span>
         </button>
+      )}
+
+      {/* Stop streaming button */}
+      {!!activeStream && (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '6px 0 2px' }}>
+          <button
+            onClick={handleStopStream}
+            className="stop-stream-btn"
+            aria-label="Stop generating"
+          >
+            <Square size={10} />
+            <span>Stop</span>
+          </button>
+        </div>
       )}
 
       {/* Input */}

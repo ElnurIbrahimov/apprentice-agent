@@ -216,8 +216,8 @@ body::after {
 /* Respect reduced motion preference */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
-    animation: none !important;
-    transition-duration: 0s !important;
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
   }
 }
 
@@ -237,7 +237,7 @@ body::after {
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
-/* Scrollbar styling */
+/* Scrollbar styling — thin 4px */
 ::-webkit-scrollbar {
   width: 4px;
 }
@@ -245,11 +245,11 @@ body::after {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--di);
+  background: rgba(255, 255, 255, 0.12);
   border-radius: 2px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--mu);
+  background: rgba(255, 255, 255, 0.22);
 }
 
 /* ===== Panel cross-fade transitions ===== */
@@ -712,25 +712,26 @@ pre code {
   box-shadow: var(--aura-pulse-lo-shadow);
 }
 
-/* ===== Streaming cursor — blinking purple block ===== */
-.streaming-cursor {
-  display: inline-block;
-  width: 7px;
-  height: 14px;
-  background: var(--pl);
-  border-radius: 1px;
-  margin-left: 2px;
-  vertical-align: text-bottom;
-  animation: cursorBlink 1s steps(2) infinite;
-  box-shadow: 0 0 6px rgba(167, 139, 250, 0.5);
-}
-@keyframes cursorBlink {
-  0% { opacity: 1; }
+/* ===== Streaming cursor — smooth thin bar ===== */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
   50% { opacity: 0; }
 }
-:root.light .streaming-cursor {
-  background: var(--pl);
-  box-shadow: 0 0 6px rgba(59, 130, 246, 0.35);
+.streaming-cursor,
+.stream-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: currentColor;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  border-radius: 1px;
+  animation: blink 0.9s ease-in-out infinite;
+}
+.stream-cursor.cursor-exiting {
+  animation: none;
+  opacity: 0;
+  transition: opacity 200ms ease;
 }
 
 /* ===== New message indicator ===== */
@@ -1396,6 +1397,47 @@ header,
 @keyframes inputSendPulseLight {
   0%, 100% { box-shadow: 0 2px 10px rgba(37, 99, 235, 0.3); }
   50%      { box-shadow: 0 2px 16px rgba(37, 99, 235, 0.45), 0 0 20px rgba(37, 99, 235, 0.12); }
+}
+
+/* ---- Stop stream button ---- */
+.stop-stream-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 5px 14px;
+  border-radius: var(--r-md);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.1);
+  color: #f87171;
+  font-size: 11.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  animation: stopBtnFadeIn 0.2s ease-out;
+}
+.stop-stream-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.5);
+  color: #fca5a5;
+}
+.stop-stream-btn:active {
+  transform: scale(0.96);
+}
+@keyframes stopBtnFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+:root.light .stop-stream-btn {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(220, 38, 38, 0.25);
+  color: #dc2626;
+}
+:root.light .stop-stream-btn:hover {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(220, 38, 38, 0.4);
+  color: #b91c1c;
 }
 
 /* ---- Light theme context bar ---- */
@@ -2440,4 +2482,43 @@ pre .chdr span {
   letter-spacing: 0.08em;
   color: var(--mu);
   margin-bottom: 8px;
+}
+
+/* ===== Scroll container performance ===== */
+.messages-scroll {
+  will-change: scroll-position;
+  contain: layout style;
+}
+
+/* ===== Moving shimmer sweep (loading skeleton) ===== */
+.shimmer-bar {
+  background: linear-gradient(90deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.09) 40%, rgba(255,255,255,0.04) 60%);
+  background-size: 300% 100%;
+  animation: shimmer-sweep 1.8s ease-in-out infinite;
+  border-radius: 4px;
+  will-change: background-position;
+}
+@keyframes shimmer-sweep {
+  0%   { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+/* ===== Button press feedback ===== */
+.btn-press {
+  transition: transform 100ms cubic-bezier(0.34, 1.56, 0.64, 1), background 150ms ease;
+}
+.btn-press:active {
+  transform: scale(0.94);
+}
+.btn-press:hover {
+  transform: scale(1.03);
+}
+
+/* ===== Message entry animation ===== */
+@keyframes slide-up-fade {
+  0%   { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.msg-enter {
+  animation: slide-up-fade 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }

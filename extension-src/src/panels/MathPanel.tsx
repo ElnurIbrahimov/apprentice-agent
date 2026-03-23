@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { Copy, Check } from 'lucide-react';
 import { useStore } from '../store';
 import ModelPill from '../components/ModelPill';
 import { HTTP, getAuthHeaders } from '../api';
@@ -11,11 +12,14 @@ export default function MathPanel() {
   const [loading, setLoading] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const [copied, setCopied] = useState(false);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Cleanup abort on unmount
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (abortRef.current) abortRef.current.abort();
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
     };
   }, []);
 
@@ -122,12 +126,45 @@ export default function MathPanel() {
         <div
           className="flex-1 overflow-y-auto flex flex-col gap-3"
           style={{
+            position: 'relative',
             background: 'var(--s1)',
             border: '1px solid var(--b1)',
             borderRadius: 'var(--r-md)',
             padding: '12px',
+            paddingRight: '36px',
           }}
         >
+          {/* Copy button */}
+          <button
+            onClick={() => {
+              const parts: string[] = [];
+              if (result.solution) parts.push('Solution: ' + result.solution);
+              if (result.steps?.length) parts.push('Steps:\n' + result.steps.map((s: string, i: number) => `${i + 1}. ${s}`).join('\n'));
+              if (result.latex) parts.push('LaTeX: ' + result.latex);
+              const text = parts.join('\n\n');
+              navigator.clipboard.writeText(text).then(() => {
+                setCopied(true);
+                if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+                copiedTimerRef.current = setTimeout(() => setCopied(false), 2000);
+              }).catch(() => {});
+            }}
+            title="Copy solution"
+            style={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              background: 'var(--s2)',
+              border: '1px solid var(--b1)',
+              borderRadius: 'var(--r-sm)',
+              color: copied ? 'var(--green, #22c55e)' : 'var(--mu)',
+              cursor: 'pointer',
+              padding: '4px',
+              display: 'flex',
+              alignItems: 'center',
+            }}
+          >
+            {copied ? <Check size={13} /> : <Copy size={13} />}
+          </button>
           {result.solution && (
             <div>
               <div style={{ fontSize: '10px', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--mu)', marginBottom: 6 }}>

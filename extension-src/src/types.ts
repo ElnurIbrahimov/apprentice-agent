@@ -29,7 +29,7 @@ export interface Message {
 }
 
 export interface StreamState {
-  type: 'chat' | 'translate' | 'write' | 'search';
+  type: 'chat' | 'translate' | 'write' | 'search' | 'grammar' | 'summary' | 'slides' | 'compose' | 'chat-draft' | 'research-write';
   rawText: string;
   thinkingText?: string;
   isThinkingPhase?: boolean;

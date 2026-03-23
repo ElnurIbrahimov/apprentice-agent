@@ -27,6 +27,12 @@ function storageRemove(keys: string[]): Promise<void> {
   });
 }
 
+// Late-bound reconnect handler — set by ws.ts to avoid circular imports
+let _reconnectHandler: (() => void) | null = null;
+export function registerReconnectHandler(handler: () => void) {
+  _reconnectHandler = handler;
+}
+
 interface AuraStore {
   // WebSocket
   ws: WebSocket | null;
@@ -38,6 +44,7 @@ interface AuraStore {
   modelName: string;
   backendStatus: 'online' | 'offline' | 'connecting';
   agentReady: boolean;
+  connectionAbandoned: boolean;
 
   // UI
   activePanel: PanelId;
@@ -80,6 +87,8 @@ interface AuraStore {
   setModelName: (name: string) => void;
   setBackendStatus: (status: 'online' | 'offline' | 'connecting') => void;
   setAgentReady: (ready: boolean) => void;
+  setConnectionAbandoned: (abandoned: boolean) => void;
+  reconnect: () => void;
   setPanel: (panel: PanelId) => void;
   setMoreOpen: (open: boolean) => void;
   toggleTheme: () => void;
@@ -165,6 +174,7 @@ export const useStore = create<AuraStore>((set, get) => {
     modelName: '',
     backendStatus: 'connecting' as 'online' | 'offline' | 'connecting',
     agentReady: false,
+    connectionAbandoned: false,
     activePanel: 'chat',
     moreOpen: false,
     theme: 'dark' as 'dark' | 'light',
@@ -194,6 +204,12 @@ export const useStore = create<AuraStore>((set, get) => {
     setModelName: (modelName) => set({ modelName }),
     setBackendStatus: (backendStatus) => set({ backendStatus }),
     setAgentReady: (agentReady) => set({ agentReady }),
+    setConnectionAbandoned: (connectionAbandoned) => set({ connectionAbandoned }),
+    reconnect: () => {
+      // Calls the registered reconnect handler from ws.ts
+      // (set via registerReconnectHandler to avoid circular imports)
+      if (_reconnectHandler) _reconnectHandler();
+    },
     setPanel: (activePanel) => set({ activePanel }),
     setMoreOpen: (moreOpen) => set({ moreOpen }),
     toggleTheme: () => {

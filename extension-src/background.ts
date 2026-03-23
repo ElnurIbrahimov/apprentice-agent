@@ -799,7 +799,7 @@ ext.runtime.onMessage.addListener(
       case 'SAVE_KNOWLEDGE': {
         fetch(`${BACKEND}/api/knowledge/save`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: backendHeaders(),
           body: JSON.stringify({
             text: msg.text,
             url: msg.url,
@@ -1046,7 +1046,7 @@ ext.runtime.onMessage.addListener(
                       );
                       const resp: Response = await fetch(`${BACKEND}/api/ocr`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: backendHeaders(),
                         body: JSON.stringify({ image_b64: b64 }),
                       });
                       if (!resp.ok) {
@@ -1249,7 +1249,7 @@ ext.runtime.onMessage.addListener(
         const payload = (msg as SaveToCliFeedMessage).payload;
         fetch(`${BACKEND}/api/feed/save`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: backendHeaders(),
           body: JSON.stringify(payload),
         })
           .then((r) => r.json())
@@ -1291,7 +1291,7 @@ ext.runtime.onMessage.addListener(
 
         fetch(`${BACKEND}/api/chat`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: backendHeaders(),
           body: JSON.stringify({
             message: prompt,
             conversation_id: '__quick_action__',
@@ -1375,7 +1375,7 @@ ext.runtime.onMessage.addListener(
 
         fetch(`${BACKEND}/api/chat`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: backendHeaders(),
           body: JSON.stringify({
             message: prompt,
             conversation_id: '__page_translate__',

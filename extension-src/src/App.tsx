@@ -179,9 +179,27 @@ export default function App() {
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
         <Header />
         <div className={`flex-1 relative panel-container ${transitioning ? 'panel-transitioning' : ''}`}>
-          {PANEL_ENTRIES.map(({ id, Component }) => {
+          {/* ChatPanel always mounted — keeps WebSocket alive */}
+          <div
+            id="panel-chat"
+            className={`panel-wrapper ${
+              transitioning
+                ? visiblePanel === 'chat'
+                  ? slideDirection === 'right' ? 'panel-slide-out-left' : 'panel-slide-out-right'
+                  : activePanel === 'chat'
+                    ? slideDirection === 'right' ? 'panel-slide-in-right' : 'panel-slide-in-left'
+                    : 'panel-hidden'
+                : activePanel === 'chat' ? 'panel-visible' : 'panel-hidden'
+            }`}
+          >
+            <ChatPanel />
+          </div>
+          {/* Other panels: only mount active + previous (for exit animation) */}
+          {PANEL_ENTRIES.filter(({ id }) => id !== 'chat').map(({ id, Component }) => {
             const isVisible = id === visiblePanel;
             const isActive = id === activePanel;
+            // Only mount if this panel is active or transitioning out
+            if (!isActive && !isVisible) return null;
             let cls = 'panel-hidden';
             if (transitioning) {
               if (isVisible) cls = slideDirection === 'right' ? 'panel-slide-out-left' : 'panel-slide-out-right';

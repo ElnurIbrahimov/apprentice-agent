@@ -79,6 +79,7 @@ export default function PdfPanel() {
   const [currentPage, setCurrentPage] = useState(0);
   const [translateLang, setTranslateLang] = useState('');
   const [copied, setCopied] = useState(false);
+  const [truncatedLen, setTruncatedLen] = useState(0); // original char count when truncated
 
   // Translation state
   const [translateMode, setTranslateMode] = useState(false);
@@ -236,12 +237,14 @@ export default function PdfPanel() {
   const ask = () => {
     const question = inputRef.current?.value.trim();
     if (!question || !pdfCtx) return;
+    setTruncatedLen(pdfCtx.text.length > 20000 ? pdfCtx.text.length : 0);
     const prompt = `Based on this PDF content, answer: ${question}\n\nPDF Content:\n${pdfCtx.text.slice(0, 20000)}`;
     sendPrompt(prompt);
   };
 
   const summarizePdf = () => {
     if (!pdfCtx) return;
+    setTruncatedLen(pdfCtx.text.length > 20000 ? pdfCtx.text.length : 0);
     const prompt = `Provide a comprehensive summary of this PDF document. Include the main topics, key findings, and important details. Format with clear headings and bullet points.\n\nPDF Content:\n${pdfCtx.text.slice(0, 20000)}`;
     sendPrompt(prompt);
   };
@@ -830,6 +833,23 @@ export default function PdfPanel() {
                 {activeStream ? '...' : 'Ask'}
               </button>
             </div>
+
+            {/* Truncation warning */}
+            {truncatedLen > 0 && (isStreaming || resultHtml) && (
+              <div
+                style={{
+                  background: 'rgba(234, 179, 8, 0.12)',
+                  border: '1px solid rgba(234, 179, 8, 0.3)',
+                  borderRadius: 'var(--r-md)',
+                  padding: '6px 10px',
+                  fontSize: '11px',
+                  color: 'rgb(202, 138, 4)',
+                  flexShrink: 0,
+                }}
+              >
+                Note: This PDF has {truncatedLen.toLocaleString()} characters. Analysis is limited to the first 20,000 characters.
+              </div>
+            )}
 
             {/* Results */}
             {(isStreaming || resultHtml) && (

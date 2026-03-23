@@ -1,4 +1,5 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Copy, Check } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { useStore } from '../store';
 import ModelPill from '../components/ModelPill';
@@ -58,12 +59,22 @@ export default function GrammarPanel() {
   const { ws, wsReady, activeStream, setActiveStream, getModel } = useStore();
   const [mode, setMode] = useState('grammar');
   const [resultHtml, setResultHtml] = useState('');
+  const [correctedText, setCorrectedText] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+    };
+  }, []);
 
   const doCheck = () => {
     const text = inputRef.current?.value.trim();
     if (!text) return;
-    if (!wsReady || ws?.readyState !== WebSocket.OPEN) { alert('AURA is offline.'); return; }
+    if (!wsReady || ws?.readyState !== WebSocket.OPEN) { setError('AURA is offline. Check your connection.'); setTimeout(() => setError(''), 5000); return; }
     if (activeStream) return;
 
     setResultHtml('');
@@ -76,17 +87,30 @@ export default function GrammarPanel() {
     };
 
     setActiveStream({
-      type: 'write',
+      type: 'grammar',
       rawText: '',
       onFirstChunk: () => setResultHtml(''),
-      onDone: (rawText) => setResultHtml(renderGrammarResult(origText, rawText)),
+      onDone: (rawText) => {
+        setResultHtml(renderGrammarResult(origText, rawText));
+        const sep = rawText.indexOf('---CHANGES---');
+        setCorrectedText(sep === -1 ? rawText.trim() : rawText.slice(0, sep).trim());
+      },
     });
 
     ws!.send(JSON.stringify({ type: 'chat', message: prompts[mode], model: getModel('grammar'), conversation_id: null }));
   };
 
+  const handleCopy = () => {
+    if (!correctedText) return;
+    navigator.clipboard.writeText(correctedText).then(() => {
+      setCopied(true);
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = setTimeout(() => setCopied(false), 2000);
+    }).catch(() => {});
+  };
+
   const stream = useStore(s => s.activeStream);
-  const isStreaming = stream && stream !== true && stream.type === 'write';
+  const isStreaming = stream && stream !== true && stream.type === 'grammar';
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -154,15 +178,32 @@ export default function GrammarPanel() {
           </button>
         </div>
 
+        {/* Error banner */}
+        {error && (
+          <div style={{
+            background: 'rgba(239, 68, 68, 0.1)',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            borderRadius: 'var(--r-md)',
+            padding: '8px 12px',
+            fontSize: '12px',
+            color: '#ef4444',
+            flexShrink: 0,
+          }}>
+            {error}
+          </div>
+        )}
+
         {/* Result */}
         {(isStreaming || resultHtml) && (
           <div
             className="flex-1 overflow-y-auto"
             style={{
+              position: 'relative',
               background: 'var(--s1)',
               border: '1px solid var(--b1)',
               borderRadius: 'var(--r-md)',
               padding: '10px',
+              paddingRight: '36px',
               fontSize: '12.5px',
               lineHeight: 1.65,
             }}
@@ -171,6 +212,27 @@ export default function GrammarPanel() {
               <div className="dots"><span /><span /><span /></div>
             ) : (
               <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(resultHtml) }} />
+            )}
+            {resultHtml && !isStreaming && (
+              <button
+                onClick={handleCopy}
+                title="Copy corrected text"
+                style={{
+                  position: 'absolute',
+                  top: 8,
+                  right: 8,
+                  background: 'var(--s2)',
+                  border: '1px solid var(--b1)',
+                  borderRadius: 'var(--r-sm)',
+                  color: copied ? 'var(--green, #22c55e)' : 'var(--mu)',
+                  cursor: 'pointer',
+                  padding: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                }}
+              >
+                {copied ? <Check size={13} /> : <Copy size={13} />}
+              </button>
             )}
           </div>
         )}
