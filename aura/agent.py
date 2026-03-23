@@ -478,6 +478,9 @@ class ApprenticeAgent(KGBrainMixin, SkillManagerMixin, NarrativeMixin, DirectHan
         if KG_BRAIN_AVAILABLE and self.kg_brain_enabled:
             try:
                 # Initialize Knowledge Graph database (lightweight, always init)
+                # NOTE: Kuzu only allows one process to hold the DB lock at a time.
+                # If another process (e.g., main aura service) holds it, this will
+                # fail gracefully and the agent runs without KG.
                 kg_path = Path(__file__).parent.parent / "aura_data" / "knowledge_graph_brain"
                 self.kg_brain = AURAKnowledgeGraph(str(kg_path))
 
@@ -521,7 +524,7 @@ class ApprenticeAgent(KGBrainMixin, SkillManagerMixin, NarrativeMixin, DirectHan
                         get_unified_memory().set_kg_brain(self.kg_bridge)
                     except (AttributeError, TypeError) as e:
                         logger.debug(f"[KG Brain] UnifiedMemory bridge wiring failed: {e}")
-            except (ImportError, AttributeError, TypeError, ValueError, OSError) as e:
+            except (ImportError, AttributeError, TypeError, ValueError, OSError, RuntimeError) as e:
                 logger.warning(f"[WARNING] Knowledge Graph Brain initialization failed: {e}")
                 self.kg_brain = None
                 self.kg_bridge = None
