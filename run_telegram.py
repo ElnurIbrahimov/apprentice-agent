@@ -109,56 +109,52 @@ class TelegramAgentWrapper:
                 pass
 
     def generate_response(self, user_message: str, chat_id: str = None) -> str:
-        """Route message through the agent."""
+        """Route ALL messages through agent.run() (full ReAct loop with tools).
+
+        The agent's own fast-path and tool-routing logic decides whether to use
+        tools or respond directly — no keyword matching needed here.
+
+        Note: The Telegram bot now calls agent.run() directly via
+        _run_agent_sync() instead of this method. This is kept for any
+        external callers that still use the wrapper.
+        """
         import time
         start_time = time.time()
 
-        msg_lower = user_message.lower()
-
-        # Tool detection - certain queries need the full agent loop
-        tool_triggers = [
-            "search", "look up", "find out", "google", "browse", "open website",
-            "what files", "list files", "read file", "create file", "delete file",
-            "run code", "execute", "python", "screenshot", "take a picture",
-            "download", "fetch", "get the", "check the web", "latest news",
-            "current price", "weather", "stock", "bitcoin", "crypto",
-            "arxiv", "paper", "research", "pdf", "document"
-        ]
-
-        research_triggers = ["deep research", "research thoroughly", "thorough research", "investigate"]
-        is_research = any(trigger in msg_lower for trigger in research_triggers)
-        needs_tools = any(trigger in msg_lower for trigger in tool_triggers)
-
         try:
-            if needs_tools:
-                if is_research:
-                    self._send_progress("Researching... This may take up to 60 seconds.")
-                    logger.info("RESEARCH starting: %s", user_message[:80])
-                else:
-                    logger.info("TOOLS routing to agent.run(): %s", user_message[:80])
+            logger.info("agent.run() starting: %s", user_message[:80])
+            result = self.agent.run(user_message, timeout_seconds=115)
 
-                result = self.agent.run(user_message, timeout_seconds=90)
-
-                if isinstance(result, dict) and result.get("timeout"):
+            if isinstance(result, dict):
+                if result.get("timeout"):
                     return "That request took too long. Please try a simpler query."
 
-                if isinstance(result, dict):
-                    response = result.get("response") or result.get("final_evaluation", {}).get("progress", "")
-                    if not response:
-                        history = result.get("history", [])
-                        if history:
-                            last_entry = history[-1]
+                response = result.get("response", "")
+                if not response:
+                    fe = result.get("final_evaluation", {})
+                    response = fe.get("progress", "")
+                if not response:
+                    history = result.get("history", [])
+                    if history:
+                        last_entry = history[-1]
+                        if isinstance(last_entry, dict):
                             response = last_entry.get("result", {}).get("output", str(last_entry))
-                    elapsed = time.time() - start_time
-                    logger.info("TOOLS completed in %.1fs", elapsed)
-                    return response if response else "I processed your request but couldn't find a clear answer."
-                return str(result)
-            else:
-                response = self.agent.chat(user_message)
-                elapsed = time.time() - start_time
-                logger.info("CHAT completed in %.1fs", elapsed)
-                return response
 
+                elapsed = time.time() - start_time
+                logger.info("agent.run() completed in %.1fs", elapsed)
+                return response if response else "I processed your request but couldn't find a clear answer."
+
+            return str(result) if result else "No response generated."
+
+        except Exception as e:
+            logger.warning("agent.run() failed: %s, falling back to chat()", e)
+
+        # Fallback to chat() if run() fails
+        try:
+            response = self.agent.chat(user_message)
+            elapsed = time.time() - start_time
+            logger.info("agent.chat() fallback completed in %.1fs", elapsed)
+            return response if response else "I couldn't generate a response."
         except Exception as e:
             logger.error("generate_response failed: %s\n%s", e, traceback.format_exc())
             return f"Sorry, something went wrong: {str(e)[:100]}"

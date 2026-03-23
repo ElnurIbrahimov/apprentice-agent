@@ -3950,15 +3950,34 @@ ${description}
         return void 0;
       }
     );
-    const SERP_DEFAULT_BACKEND = "http://89.167.107.134";
-    const SERP_DEFAULT_API_KEY = "i-L5ShpMkY2B7loNb8VS4EAAT-Ronh-K8cIgRILGjnQ";
-    let SERP_BACKEND = SERP_DEFAULT_BACKEND;
-    let SERP_API_KEY = SERP_DEFAULT_API_KEY;
-    if ((_a = ext == null ? void 0 : ext.storage) == null ? void 0 : _a.local) {
-      ext.storage.local.get(["backendUrl", "apiKey"], (d) => {
-        var _a2, _b;
-        if ((_a2 = d == null ? void 0 : d.backendUrl) == null ? void 0 : _a2.trim()) SERP_BACKEND = d.backendUrl.trim().replace(/\/+$/, "");
-        if ((_b = d == null ? void 0 : d.apiKey) == null ? void 0 : _b.trim()) SERP_API_KEY = d.apiKey.trim();
+    let SERP_BACKEND = "http://89.167.107.134";
+    let SERP_API_KEY = "";
+    function loadSerpConfig() {
+      return new Promise((resolve) => {
+        var _a2;
+        if (!((_a2 = ext == null ? void 0 : ext.storage) == null ? void 0 : _a2.local)) {
+          resolve();
+          return;
+        }
+        ext.storage.local.get(["backendUrl", "apiKey"], (d) => {
+          var _a3, _b;
+          if ((_a3 = d == null ? void 0 : d.backendUrl) == null ? void 0 : _a3.trim()) SERP_BACKEND = d.backendUrl.trim().replace(/\/+$/, "");
+          if ((_b = d == null ? void 0 : d.apiKey) == null ? void 0 : _b.trim()) SERP_API_KEY = d.apiKey.trim();
+          resolve();
+        });
+      });
+    }
+    loadSerpConfig();
+    if ((_a = ext == null ? void 0 : ext.storage) == null ? void 0 : _a.onChanged) {
+      ext.storage.onChanged.addListener((changes, area) => {
+        var _a2, _b, _c;
+        if (area !== "local") return;
+        if ((_a2 = changes.backendUrl) == null ? void 0 : _a2.newValue) {
+          SERP_BACKEND = changes.backendUrl.newValue.trim().replace(/\/+$/, "");
+        }
+        if (((_b = changes.apiKey) == null ? void 0 : _b.newValue) !== void 0) {
+          SERP_API_KEY = ((_c = changes.apiKey.newValue) == null ? void 0 : _c.trim()) || "";
+        }
       });
     }
     function isGoogleSearchPage() {

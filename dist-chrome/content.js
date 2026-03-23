@@ -23,6 +23,7 @@
     }
   }
   (function() {
+    var _a;
     if (window.__auraToolbarMounted) return;
     window.__auraToolbarMounted = true;
     const _prevDock = document.getElementById("aura-dock-shadow");
@@ -1224,7 +1225,7 @@ ${url}`;
       }
     });
     quickLaunch.addEventListener("click", (e) => {
-      var _a;
+      var _a2;
       const target = e.target;
       e.stopPropagation();
       if (target.closest('[data-action="ql-close"]')) {
@@ -1233,7 +1234,7 @@ ${url}`;
       }
       if (target.id === "ql-submit-btn" || target.closest("#ql-submit-btn")) {
         const inputEl = shadow.getElementById("ql-prompt-input");
-        const prompt = ((_a = inputEl == null ? void 0 : inputEl.value) == null ? void 0 : _a.trim()) || "";
+        const prompt = ((_a2 = inputEl == null ? void 0 : inputEl.value) == null ? void 0 : _a2.trim()) || "";
         const text = getSelectionText();
         if (!text && !prompt) return;
         safeSend({ type: "OPEN_WITH_TEXT", action: "ask", text: prompt ? `${prompt}
@@ -1276,7 +1277,7 @@ ${text}` : text, url: window.location.href, title: document.title });
       }
     });
     function bestSelector(el) {
-      var _a;
+      var _a2;
       if (el.id) return "#" + CSS.escape(el.id);
       const al = el.getAttribute("aria-label");
       if (al) return `[aria-label="${al}"]`;
@@ -1288,7 +1289,7 @@ ${text}` : text, url: window.location.href, title: document.title });
           path.unshift("#" + CSS.escape(cur.id));
           break;
         }
-        const siblings = [...((_a = cur.parentElement) == null ? void 0 : _a.children) || []];
+        const siblings = [...((_a2 = cur.parentElement) == null ? void 0 : _a2.children) || []];
         const idx = siblings.indexOf(cur) + 1;
         path.unshift(s + ":nth-child(" + idx + ")");
       }
@@ -1551,7 +1552,7 @@ ${text}` : text, url: window.location.href, title: document.title });
         "BR"
       ]);
       function walk(node) {
-        var _a;
+        var _a2;
         if (node.nodeType === Node.TEXT_NODE) {
           const text = (node.textContent || "").replace(/\s+/g, " ");
           if (text.trim()) parts.push(text);
@@ -1560,7 +1561,7 @@ ${text}` : text, url: window.location.href, title: document.title });
         if (node.nodeType !== Node.ELEMENT_NODE) return;
         const el = node;
         const tag = el.tagName;
-        if (el.hasAttribute("hidden") || ((_a = el.style) == null ? void 0 : _a.display) === "none") return;
+        if (el.hasAttribute("hidden") || ((_a2 = el.style) == null ? void 0 : _a2.display) === "none") return;
         if (/^H[1-6]$/.test(tag)) {
           const level = parseInt(tag[1]);
           const prefix = "#".repeat(Math.min(level, 3)) + " ";
@@ -1611,13 +1612,13 @@ ${text}` : text, url: window.location.href, title: document.title });
       return parts.join("").replace(/\n{3,}/g, "\n\n").replace(/[ \t]+/g, " ").trim();
     }
     function extractMainContent() {
-      var _a, _b, _c, _d;
+      var _a2, _b, _c, _d;
       try {
         const url = window.location.href;
         const title = document.title;
         if (url.match(/\.pdf($|\?|#)/i) || document.contentType === "application/pdf") {
           return {
-            text: ((_b = (_a = document.body) == null ? void 0 : _a.innerText) == null ? void 0 : _b.slice(0, MAX_TEXT_BYTES)) || "[PDF document]",
+            text: ((_b = (_a2 = document.body) == null ? void 0 : _a2.innerText) == null ? void 0 : _b.slice(0, MAX_TEXT_BYTES)) || "[PDF document]",
             title,
             url,
             wordCount: 0,
@@ -1649,12 +1650,12 @@ ${text}` : text, url: window.location.href, title: document.title });
       }
     }
     function extractYouTubeContent() {
-      var _a, _b;
+      var _a2, _b;
       const url = window.location.href;
       const titleEl = document.querySelector(
         "h1.ytd-watch-metadata, h1.ytd-video-primary-info-renderer, #title h1"
       );
-      const videoTitle = ((_a = titleEl == null ? void 0 : titleEl.textContent) == null ? void 0 : _a.trim()) || document.title.replace(/ - YouTube$/, "").trim();
+      const videoTitle = ((_a2 = titleEl == null ? void 0 : titleEl.textContent) == null ? void 0 : _a2.trim()) || document.title.replace(/ - YouTube$/, "").trim();
       let transcript = "";
       const transcriptSegments = document.querySelectorAll(
         "ytd-transcript-segment-renderer .segment-text, yt-formatted-string.ytd-transcript-segment-renderer, #segments-container ytd-transcript-segment-renderer"
@@ -1662,8 +1663,8 @@ ${text}` : text, url: window.location.href, title: document.title });
       if (transcriptSegments.length > 0) {
         const lines = [];
         transcriptSegments.forEach((seg) => {
-          var _a2;
-          const text2 = (_a2 = seg.textContent) == null ? void 0 : _a2.trim();
+          var _a3;
+          const text2 = (_a3 = seg.textContent) == null ? void 0 : _a3.trim();
           if (text2) lines.push(text2);
         });
         transcript = lines.join(" ");
@@ -1682,9 +1683,9 @@ ${text}` : text, url: window.location.href, title: document.title });
       if (commentEls.length > 0) {
         const commentLines = [];
         commentEls.forEach((el, i) => {
-          var _a2;
+          var _a3;
           if (i >= 10) return;
-          const text2 = (_a2 = el.textContent) == null ? void 0 : _a2.trim();
+          const text2 = (_a3 = el.textContent) == null ? void 0 : _a3.trim();
           if (text2) commentLines.push("- " + text2);
         });
         if (commentLines.length > 0) {
@@ -2386,8 +2387,8 @@ ${description}
       if (bodies.length === 0) return "";
       const parts = [];
       bodies.forEach((body) => {
-        var _a;
-        const text = (_a = body.innerText) == null ? void 0 : _a.trim();
+        var _a2;
+        const text = (_a2 = body.innerText) == null ? void 0 : _a2.trim();
         if (text) parts.push(text);
       });
       return parts.join("\n\n---\n\n").slice(0, 2e4);
@@ -2435,10 +2436,10 @@ ${description}
       return composeEl.querySelector('div[contenteditable="true"][role="textbox"]');
     }
     function getComposeText(composeEl) {
-      var _a;
+      var _a2;
       const body = getComposeBody(composeEl);
       if (!body) return "";
-      return ((_a = body.innerText) == null ? void 0 : _a.trim()) || "";
+      return ((_a2 = body.innerText) == null ? void 0 : _a2.trim()) || "";
     }
     function escapeHtml(s) {
       return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -2825,14 +2826,14 @@ ${description}
       if (!isGmailPage()) return;
       scanGmailComposeWindows();
       const gmailObserver = new MutationObserver((mutations) => {
-        var _a, _b, _c;
+        var _a2, _b, _c;
         let shouldScan = false;
         for (const mutation of mutations) {
           if (mutation.addedNodes.length > 0) {
             for (const node of mutation.addedNodes) {
               if (node.nodeType !== Node.ELEMENT_NODE) continue;
               const el = node;
-              if (((_a = el.matches) == null ? void 0 : _a.call(el, 'div[role="dialog"]')) || ((_b = el.querySelector) == null ? void 0 : _b.call(el, 'div[role="dialog"]')) || ((_c = el.querySelector) == null ? void 0 : _c.call(el, 'div[contenteditable="true"]'))) {
+              if (((_a2 = el.matches) == null ? void 0 : _a2.call(el, 'div[role="dialog"]')) || ((_b = el.querySelector) == null ? void 0 : _b.call(el, 'div[role="dialog"]')) || ((_c = el.querySelector) == null ? void 0 : _c.call(el, 'div[contenteditable="true"]'))) {
                 shouldScan = true;
                 break;
               }
@@ -3949,7 +3950,36 @@ ${description}
         return void 0;
       }
     );
-    const SERP_BACKEND = "http://localhost:8000";
+    let SERP_BACKEND = "http://89.167.107.134";
+    let SERP_API_KEY = "";
+    function loadSerpConfig() {
+      return new Promise((resolve) => {
+        var _a2;
+        if (!((_a2 = ext == null ? void 0 : ext.storage) == null ? void 0 : _a2.local)) {
+          resolve();
+          return;
+        }
+        ext.storage.local.get(["backendUrl", "apiKey"], (d) => {
+          var _a3, _b;
+          if ((_a3 = d == null ? void 0 : d.backendUrl) == null ? void 0 : _a3.trim()) SERP_BACKEND = d.backendUrl.trim().replace(/\/+$/, "");
+          if ((_b = d == null ? void 0 : d.apiKey) == null ? void 0 : _b.trim()) SERP_API_KEY = d.apiKey.trim();
+          resolve();
+        });
+      });
+    }
+    loadSerpConfig();
+    if ((_a = ext == null ? void 0 : ext.storage) == null ? void 0 : _a.onChanged) {
+      ext.storage.onChanged.addListener((changes, area) => {
+        var _a2, _b, _c;
+        if (area !== "local") return;
+        if ((_a2 = changes.backendUrl) == null ? void 0 : _a2.newValue) {
+          SERP_BACKEND = changes.backendUrl.newValue.trim().replace(/\/+$/, "");
+        }
+        if (((_b = changes.apiKey) == null ? void 0 : _b.newValue) !== void 0) {
+          SERP_API_KEY = ((_c = changes.apiKey.newValue) == null ? void 0 : _c.trim()) || "";
+        }
+      });
+    }
     function isGoogleSearchPage() {
       const hostname = window.location.hostname;
       const pathname = window.location.pathname;
@@ -3982,7 +4012,6 @@ ${description}
       return "light";
     }
     async function initGoogleSerpIntegration() {
-      var _a;
       if (!isGoogleSearchPage()) return;
       const stored = await new Promise((resolve) => {
         ext.storage.local.get(["aura_serp_hidden"], resolve);
@@ -4351,96 +4380,62 @@ ${description}
         serpHost.remove();
       });
       try {
-        const resp = await fetch(`${SERP_BACKEND}/api/chat`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            message: query,
-            conversation_id: "__serp_answer__",
-            stream: true,
-            system_context: `The user searched Google for: "${query}". Provide a concise, direct answer to their query. Be helpful and factual. Use markdown formatting sparingly — bold for emphasis, lists where appropriate. If you reference sources, format them as [Source Title](URL) and they will be rendered as citation chips. Keep the answer focused and under 200 words unless the topic requires more detail.`
-          })
+        const fetchBody = JSON.stringify({
+          message: query,
+          conversation_id: "__serp_answer__",
+          stream: false,
+          system_context: `The user searched Google for: "${query}". Provide a concise, direct answer to their query. Be helpful and factual. Use markdown formatting sparingly — bold for emphasis, lists where appropriate. If you reference sources, format them as [Source Title](URL) and they will be rendered as citation chips. Keep the answer focused and under 200 words unless the topic requires more detail.`
         });
-        if (!resp.ok) {
-          throw new Error(`HTTP ${resp.status}`);
+        let proxyResult = null;
+        try {
+          proxyResult = await new Promise((resolve, reject) => {
+            ext.runtime.sendMessage(
+              { type: "SERP_FETCH", url: `${SERP_BACKEND}/api/chat`, body: fetchBody, apiKey: SERP_API_KEY },
+              (response) => {
+                if (ext.runtime.lastError) {
+                  reject(new Error(ext.runtime.lastError.message));
+                } else {
+                  resolve(response);
+                }
+              }
+            );
+          });
+        } catch {
+          const serpHeaders = { "Content-Type": "application/json" };
+          if (SERP_API_KEY) serpHeaders["X-API-Key"] = SERP_API_KEY;
+          const directResp = await fetch(`${SERP_BACKEND}/api/chat`, {
+            method: "POST",
+            headers: serpHeaders,
+            body: fetchBody,
+            signal: AbortSignal.timeout(3e4)
+          });
+          if (!directResp.ok) throw new Error(`HTTP ${directResp.status}`);
+          proxyResult = { ok: true, text: await directResp.text() };
+        }
+        if (!(proxyResult == null ? void 0 : proxyResult.ok)) {
+          throw new Error((proxyResult == null ? void 0 : proxyResult.error) || "Backend unreachable");
         }
         serpLoading.remove();
         const answerEl = document.createElement("div");
         answerEl.className = "serp-answer";
         serpBody.appendChild(answerEl);
-        const reader = (_a = resp.body) == null ? void 0 : _a.getReader();
-        if (!reader) {
-          answerEl.textContent = await resp.text();
-          serpAddCitations(serpBody, answerEl.textContent);
-          serpAddFooter(card, query, answerEl.textContent);
-          return;
-        }
-        const decoder = new TextDecoder();
         let fullText = "";
-        let streamBuffer = "";
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          streamBuffer += decoder.decode(value, { stream: true });
-          const lines = streamBuffer.split("\n");
-          streamBuffer = lines.pop() || "";
-          for (const line of lines) {
-            if (!line.trim()) continue;
-            try {
-              const chunk = JSON.parse(line);
-              if (chunk.token || chunk.delta || chunk.content) {
-                const token = chunk.token || chunk.delta || chunk.content || "";
-                fullText += token;
-                answerEl.innerHTML = serpRenderMarkdown(fullText);
-              } else if (chunk.response) {
-                fullText = chunk.response;
-                answerEl.innerHTML = serpRenderMarkdown(fullText);
-              } else if (chunk.error) {
-                answerEl.innerHTML = `<div class="serp-error">${serpEscapeHtml(chunk.error)}</div>`;
-                return;
-              }
-            } catch {
-              if (line.startsWith("data: ")) {
-                const data = line.slice(6).trim();
-                if (data === "[DONE]") continue;
-                try {
-                  const chunk = JSON.parse(data);
-                  const token = chunk.token || chunk.delta || chunk.content || chunk.response || "";
-                  if (token) {
-                    fullText += token;
-                    answerEl.innerHTML = serpRenderMarkdown(fullText);
-                  }
-                } catch {
-                  fullText += line;
-                  answerEl.innerHTML = serpRenderMarkdown(fullText);
-                }
-              }
-            }
-          }
-        }
-        if (streamBuffer.trim()) {
+        const responseText = proxyResult.text || "";
+        const lines = responseText.split("\n").filter((l) => l.trim());
+        for (const line of lines) {
           try {
-            const chunk = JSON.parse(streamBuffer);
-            if (chunk.token || chunk.delta || chunk.content) {
-              fullText += chunk.token || chunk.delta || chunk.content || "";
-            } else if (chunk.response) {
-              fullText = chunk.response;
-            }
+            const parsed = JSON.parse(line);
+            if (parsed.chunk) fullText += parsed.chunk;
+            else if (parsed.response) fullText = parsed.response;
+            else if (parsed.content) fullText = parsed.content;
           } catch {
-          }
-          answerEl.innerHTML = serpRenderMarkdown(fullText);
-        }
-        if (!fullText.trim()) {
-          try {
-            const fallbackText = decoder.decode();
-            if (fallbackText.trim()) {
-              const parsed = JSON.parse(fallbackText);
-              fullText = parsed.response || parsed.message || fallbackText;
-              answerEl.innerHTML = serpRenderMarkdown(fullText);
-            }
-          } catch {
+            fullText += line;
           }
         }
+        if (!fullText.trim() && responseText.trim()) {
+          fullText = responseText;
+        }
+        answerEl.innerHTML = serpRenderMarkdown(fullText);
         if (!fullText.trim()) {
           answerEl.innerHTML = '<span class="serp-error">No response from AI.</span>';
           return;
@@ -4455,7 +4450,7 @@ ${description}
         offDot.className = "serp-offline-dot";
         const offText = document.createElement("span");
         offText.className = "serp-offline-text";
-        offText.textContent = "AURA is offline — start the backend to see AI answers";
+        offText.textContent = `AURA is offline — backend did not respond (${(_err == null ? void 0 : _err.message) || "timeout"})`;
         offline.appendChild(offDot);
         offline.appendChild(offText);
         serpBody.appendChild(offline);

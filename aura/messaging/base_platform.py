@@ -89,7 +89,7 @@ class BasePlatform(ABC):
         Returns the response text.
         """
 
-        if message.message_type != MessageType.TEXT:
+        if message.message_type not in (MessageType.TEXT, MessageType.VOICE):
             return "I can only process text messages right now."
 
         if not message.text:

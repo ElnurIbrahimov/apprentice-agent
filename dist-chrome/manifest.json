@@ -3,7 +3,7 @@
   "name": "AURA",
   "version": "4.3.0",
   "description": "Your private AI assistant — always present, never clouds.",
-  "permissions": ["sidePanel", "contextMenus", "storage", "activeTab", "tabs", "scripting"],
+  "permissions": ["sidePanel", "contextMenus", "storage", "activeTab", "tabs", "scripting", "unlimitedStorage"],
   "optional_permissions": ["tabCapture"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "background.js" },
@@ -35,6 +35,6 @@
     "128": "icons/icon128.png"
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self';"
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
   }
 }
