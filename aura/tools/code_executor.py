@@ -287,6 +287,66 @@ class CodeExecutorTool:
             return node.func.attr
         return ""
 
+    def _run_subprocess(self, script: str, code: str) -> dict:
+        """Run a complete Python script in a subprocess with timeout and env sanitization.
+
+        Args:
+            script: The full Python script to execute (written to a temp file).
+            code:   The original user code (returned in the result dict for reference).
+        """
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write(script)
+            temp_path = f.name
+
+        proc = None
+        try:
+            # Sanitize environment to avoid leaking API keys/tokens
+            safe_env = {k: v for k, v in os.environ.items()
+                        if k in ("PATH", "HOME", "USERPROFILE", "TEMP", "TMP",
+                                 "SYSTEMROOT", "WINDIR", "COMSPEC", "PYTHONPATH")}
+            proc = subprocess.Popen(
+                [sys.executable, temp_path],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                cwd=tempfile.gettempdir(),
+                env=safe_env,
+            )
+            try:
+                stdout_data, stderr_data = proc.communicate(timeout=self.timeout)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.communicate()  # Drain pipes to avoid zombie
+                return {
+                    "success": False,
+                    "error": f"Code execution timed out after {self.timeout} seconds",
+                    "code": code
+                }
+
+            stdout = stdout_data[:self.max_output_length] if stdout_data else ""
+            stderr = stderr_data[:self.max_output_length] if stderr_data else ""
+
+            if proc.returncode == 0:
+                return {
+                    "success": True,
+                    "output": stdout.strip(),
+                    "errors": stderr.strip() if stderr else None,
+                    "code": code
+                }
+            else:
+                return {
+                    "success": False,
+                    "output": stdout.strip() if stdout else None,
+                    "error": stderr.strip() if stderr else "Unknown error",
+                    "code": code
+                }
+
+        finally:
+            try:
+                os.unlink(temp_path)
+            except (OSError, FileNotFoundError):
+                pass
+
     def _run_sandboxed(self, code: str) -> dict:
         """Run code in a separate process with restrictions."""
         # Create a wrapper script that captures output
@@ -346,61 +406,24 @@ except Exception as _e:
     __aura_stderr_cap__.write(f"Error: {{type(_e).__name__}}: {{_e}}\\n")
 '''
 
-        # Write to temp file and execute
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-            f.write(wrapper_code)
-            temp_path = f.name
+        return self._run_subprocess(wrapper_code, code)
 
-        proc = None
-        try:
-            # Run in subprocess with timeout
-            # Sanitize environment to avoid leaking API keys/tokens
-            safe_env = {k: v for k, v in os.environ.items()
-                        if k in ("PATH", "HOME", "USERPROFILE", "TEMP", "TMP",
-                                 "SYSTEMROOT", "WINDIR", "COMSPEC", "PYTHONPATH")}
-            proc = subprocess.Popen(
-                [sys.executable, temp_path],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                cwd=tempfile.gettempdir(),  # Run in temp directory
-                env=safe_env,
-            )
-            try:
-                stdout_data, stderr_data = proc.communicate(timeout=self.timeout)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.communicate()  # Drain pipes to avoid zombie
-                return {
-                    "success": False,
-                    "error": f"Code execution timed out after {self.timeout} seconds",
-                    "code": code
-                }
+    def execute_raw(self, full_script: str, user_code: str = "") -> dict:
+        """Execute a pre-built script directly in a subprocess.
 
-            stdout = stdout_data[:self.max_output_length] if stdout_data else ""
-            stderr = stderr_data[:self.max_output_length] if stderr_data else ""
+        This is for callers (like the CodePanel API) that have already:
+        1. Validated the user code with their own AST safety check
+        2. Wrapped the user code with their own preamble/epilogue
 
-            if proc.returncode == 0:
-                return {
-                    "success": True,
-                    "output": stdout.strip(),
-                    "errors": stderr.strip() if stderr else None,
-                    "code": code
-                }
-            else:
-                return {
-                    "success": False,
-                    "output": stdout.strip() if stdout else None,
-                    "error": stderr.strip() if stderr else "Unknown error",
-                    "code": code
-                }
+        The full_script is run as-is in a subprocess — no additional safety
+        check or wrapper is applied.  The caller is responsible for ensuring
+        the user code portion was validated before calling this method.
 
-        finally:
-            # Clean up temp file
-            try:
-                os.unlink(temp_path)
-            except (OSError, FileNotFoundError):
-                pass  # File already deleted or doesn't exist
+        Args:
+            full_script: Complete Python script ready to execute.
+            user_code:   Original user code (for the result dict).
+        """
+        return self._run_subprocess(full_script, user_code)
 
     def _indent_code(self, code: str, spaces: int) -> str:
         """Indent code by specified number of spaces."""

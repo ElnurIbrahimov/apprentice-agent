@@ -230,10 +230,10 @@ async def chat(request: ChatRequest) -> ChatResponse:
                     None,
                     lambda: _get_agent_service().chat(request.message, speak=request.speak, model_override=request.model)
                 ),
-                timeout=120.0
+                timeout=180.0
             )
         except asyncio.TimeoutError:
-            raise HTTPException(status_code=504, detail="Request timed out after 120 seconds")
+            raise HTTPException(status_code=504, detail="Request timed out after 180 seconds")
 
         # === Track assistant response and emotion in ContextHeatmap ===
         try:
@@ -270,6 +270,19 @@ async def chat_sse(request: ChatRequest):
     message = request.message
     model = request.model
 
+    # Check if agent is ready before starting stream
+    svc = _get_agent_service()
+    if not svc.is_ready:
+        # Wait up to 30s for initialization
+        for _ in range(60):
+            if svc.is_ready:
+                break
+            await asyncio.sleep(0.5)
+        if not svc.is_ready:
+            async def init_error():
+                yield f"data: {json.dumps({'type': 'error', 'error': 'Agent is still initializing. Please try again in a few seconds.'})}\n\n"
+            return StreamingResponse(init_error(), media_type="text/event-stream")
+
     loop = asyncio.get_running_loop()
     chunk_queue: asyncio.Queue = asyncio.Queue()
     stop_event = threading.Event()
@@ -290,15 +303,16 @@ async def chat_sse(request: ChatRequest):
         stream_thread = threading.Thread(target=stream_worker, daemon=True)
         stream_thread.start()
 
-        stream_deadline = asyncio.get_running_loop().time() + 90
+        # SSE timeout: 300s for complex operations (web creator uses this path)
+        stream_deadline = asyncio.get_running_loop().time() + 300
         try:
             while True:
                 remaining = max(0.1, stream_deadline - asyncio.get_running_loop().time())
                 try:
                     item = await asyncio.wait_for(chunk_queue.get(), timeout=remaining)
                 except asyncio.TimeoutError:
-                    logger.warning("[SSE] Stream timed out after 90 seconds")
-                    yield f"data: {json.dumps({'type': 'error', 'error': 'Response timed out after 90 seconds.'})}\n\n"
+                    logger.warning("[SSE] Stream timed out after 300 seconds")
+                    yield f"data: {json.dumps({'type': 'error', 'error': 'Response timed out after 300 seconds.'})}\n\n"
                     return
 
                 if item is None:
@@ -618,9 +632,26 @@ async def websocket_chat(websocket: WebSocket):
                 })
                 continue
 
+            # Handle auth message (extension sends this right after connect)
+            if msg.get("type") == "auth":
+                # Auth is already handled during connection via header/query param.
+                # Acknowledge it so the client knows it was received.
+                await websocket.send_json({"type": "auth_ok"})
+                continue
+
             # Handle ping/pong for keepalive
             if msg.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
+                continue
+
+            # Handle readiness check from client
+            if msg.get("type") == "ready_check":
+                svc = _get_agent_service()
+                await websocket.send_json({
+                    "type": "ready_status",
+                    "ready": svc.is_ready,
+                    "initializing": getattr(svc, '_initializing', False),
+                })
                 continue
 
             # Handle stop request
@@ -765,8 +796,19 @@ async def websocket_chat(websocket: WebSocket):
                 stream_thread.start()
 
                 # Send chunks as they arrive (truly async, no busy-wait)
-                # Max 90 seconds for any single response, then timeout
-                stream_deadline = asyncio.get_running_loop().time() + 90
+                # Timeout depends on operation complexity:
+                #   - deep_research, swarm, agent: 600s (10 min)
+                #   - research, code: 300s (5 min)
+                #   - default chat/search: 120s
+                _TIMEOUT_BY_MODE = {
+                    "deep_research": 600,
+                    "swarm": 600,
+                    "agent": 600,
+                    "research": 300,
+                    "code": 300,
+                }
+                stream_timeout = _TIMEOUT_BY_MODE.get(action_mode, 120)
+                stream_deadline = asyncio.get_running_loop().time() + stream_timeout
                 while True:
                     if stop_generation.is_set():
                         logger.info("[WebSocket] Breaking loop due to stop request")
@@ -776,11 +818,11 @@ async def websocket_chat(websocket: WebSocket):
                         remaining = max(0.1, stream_deadline - asyncio.get_running_loop().time())
                         item = await asyncio.wait_for(chunk_queue.get(), timeout=remaining)
                     except asyncio.TimeoutError:
-                        logger.warning("[WebSocket] Stream timed out after 90 seconds")
+                        logger.warning(f"[WebSocket] Stream timed out after {stream_timeout}s (mode={action_mode})")
                         stop_generation.set()
                         await websocket.send_json({
                             "type": "error",
-                            "error": "Response timed out after 90 seconds. Try again."
+                            "error": f"Response timed out after {stream_timeout} seconds. Try again."
                         })
                         break
 

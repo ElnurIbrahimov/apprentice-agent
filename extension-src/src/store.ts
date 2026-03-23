@@ -37,6 +37,7 @@ interface AuraStore {
   mood: string;
   modelName: string;
   backendStatus: 'online' | 'offline' | 'connecting';
+  agentReady: boolean;
 
   // UI
   activePanel: PanelId;
@@ -78,6 +79,7 @@ interface AuraStore {
   setMood: (mood: string) => void;
   setModelName: (name: string) => void;
   setBackendStatus: (status: 'online' | 'offline' | 'connecting') => void;
+  setAgentReady: (ready: boolean) => void;
   setPanel: (panel: PanelId) => void;
   setMoreOpen: (open: boolean) => void;
   toggleTheme: () => void;
@@ -162,6 +164,7 @@ export const useStore = create<AuraStore>((set, get) => {
     mood: '',
     modelName: '',
     backendStatus: 'connecting' as 'online' | 'offline' | 'connecting',
+    agentReady: false,
     activePanel: 'chat',
     moreOpen: false,
     theme: 'dark' as 'dark' | 'light',
@@ -190,6 +193,7 @@ export const useStore = create<AuraStore>((set, get) => {
     setMood: (mood) => set({ mood }),
     setModelName: (modelName) => set({ modelName }),
     setBackendStatus: (backendStatus) => set({ backendStatus }),
+    setAgentReady: (agentReady) => set({ agentReady }),
     setPanel: (activePanel) => set({ activePanel }),
     setMoreOpen: (moreOpen) => set({ moreOpen }),
     toggleTheme: () => {

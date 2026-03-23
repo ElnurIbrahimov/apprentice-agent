@@ -1809,6 +1809,19 @@ class OllamaBrain:
                 return self._cached_system_additions
 
             additions = []
+            _PER_SOURCE_CAP = 500   # max chars per subsystem
+            _TOTAL_CAP = 2000       # max chars for all additions combined
+
+            def _cap(text: str, source: str) -> str:
+                """Cap a subsystem's contribution and log if it was oversized."""
+                if text and len(text) > _PER_SOURCE_CAP:
+                    logger.warning(
+                        f"[BRAIN] Subsystem '{source}' returned {len(text)} chars, capping to {_PER_SOURCE_CAP}"
+                    )
+                    # Try to cut at a sentence boundary; fall back to hard cut
+                    cut = text[:_PER_SOURCE_CAP].rfind('. ')
+                    return text[:cut + 1] if cut > _PER_SOURCE_CAP // 2 else text[:_PER_SOURCE_CAP]
+                return text
 
             # === LEARNED CONTEXT INJECTION (Phase 4D: Letta-style) ===
             try:
@@ -1816,7 +1829,7 @@ class OllamaBrain:
                 nd = get_neurodream()
                 learned_ctx = nd.get_learned_context_prompt()
                 if learned_ctx:
-                    additions.append(learned_ctx)
+                    additions.append(_cap(learned_ctx, "NeuroDream"))
             except Exception as e:
                 logger.debug(f"[Brain] non-critical: {e}")
             # === CALENDAR CONTEXT INJECTION (Phase 5D) ===
@@ -1825,7 +1838,7 @@ class OllamaBrain:
                 cm = get_calendar_monitor()
                 cal_ctx = cm.get_context_for_prompt()
                 if cal_ctx:
-                    additions.append(cal_ctx)
+                    additions.append(_cap(cal_ctx, "CalendarMonitor"))
             except Exception as e:
                 logger.debug(f"[Brain] non-critical: {e}")
             # === SELF-MODEL INJECTION (Phase 6B: Metacognitive Self-Improvement) ===
@@ -1834,7 +1847,7 @@ class OllamaBrain:
                 mc = get_metacognitive_engine()
                 self_model_ctx = mc.get_self_model_prompt()
                 if self_model_ctx:
-                    additions.append(self_model_ctx)
+                    additions.append(_cap(self_model_ctx, "MetacognitionEngine"))
             except Exception as e:
                 logger.debug(f"[Brain] non-critical: {e}")
             # === USER MODEL INJECTION (Phase 6C / ADV-04: Theory of Mind) ===
@@ -1846,13 +1859,13 @@ class OllamaBrain:
                     if user_model:
                         user_model_ctx = user_model.get_context_for_prompt()
                         if user_model_ctx:
-                            additions.append(user_model_ctx)
+                            additions.append(_cap(user_model_ctx, "TheoryOfMind/MultiUser"))
                 else:
                     from aura.proactive.theory_of_mind import get_theory_of_mind
                     tom = get_theory_of_mind()
                     user_model_ctx = tom.get_context_for_prompt()
                     if user_model_ctx:
-                        additions.append(user_model_ctx)
+                        additions.append(_cap(user_model_ctx, "TheoryOfMind"))
             except Exception as e:
                 logger.debug(f"[Brain] non-critical: {e}")
             # === MOTIVATION INJECTION (Phase 6E: Intrinsic Motivation) ===
@@ -1861,7 +1874,7 @@ class OllamaBrain:
                 im = get_intrinsic_motivation()
                 motivation_ctx = im.get_context_for_prompt()
                 if motivation_ctx:
-                    additions.append(motivation_ctx)
+                    additions.append(_cap(motivation_ctx, "IntrinsicMotivation"))
             except Exception as e:
                 logger.debug(f"[Brain] non-critical: {e}")
             # Global Workspace Theory injection removed
@@ -1871,14 +1884,14 @@ class OllamaBrain:
                 wm = get_world_model()
                 world_ctx = wm.get_context_summary()
                 if world_ctx:
-                    additions.append(world_ctx)
+                    additions.append(_cap(world_ctx, "WorldModel"))
             except Exception as e:
                 logger.debug(f"[Brain] non-critical: {e}")
             result = "\n\n".join(additions)
-            # Cap module additions to 4K chars to prevent context overflow
-            if len(result) > 4000:
-                logger.warning(f"[BRAIN] System additions too large ({len(result)} chars), truncating to 4000")
-                result = result[:4000]
+            # Cap total additions to prevent context overflow
+            if len(result) > _TOTAL_CAP:
+                logger.warning(f"[BRAIN] System additions total {len(result)} chars (from {len(additions)} sources), truncating to {_TOTAL_CAP}")
+                result = result[:_TOTAL_CAP]
             self._cached_system_additions = result
             self._system_additions_ts = time.time()
             return result

@@ -293,12 +293,16 @@ async def execute_code(body: dict):
     # Build the full code with capture infrastructure
     full_code = _build_full_code(code, session_preamble)
 
-    # Execute
+    # Execute via execute_raw: the user code was already AST-validated above,
+    # and full_code includes preamble/epilogue that use builtins/hasattr/locals
+    # which would be false-positived by the executor's own safety_check.
     executor = _get_executor(timeout=timeout)
 
     loop = asyncio.get_running_loop()
     start_time = time.time()
-    result = await loop.run_in_executor(None, executor.execute, full_code)
+    result = await loop.run_in_executor(
+        None, lambda: executor.execute_raw(full_code, user_code=code)
+    )
     execution_time = round(time.time() - start_time, 3)
 
     # Parse outputs

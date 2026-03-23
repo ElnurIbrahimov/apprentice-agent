@@ -9,7 +9,7 @@ let _rafId: number | null = null;
 let _connTimer: ReturnType<typeof setTimeout> | null = null;
 let _staleTimer: ReturnType<typeof setTimeout> | null = null;
 const WS_CONNECT_TIMEOUT = 5_000;
-const WS_STALE_TIMEOUT = 90_000;
+const WS_STALE_TIMEOUT = 300_000; // 5 min — complex ops (deep research, web creator) can be slow
 
 function clearWsTimers() {
   if (_connTimer) { clearTimeout(_connTimer); _connTimer = null; }
@@ -21,7 +21,7 @@ function resetStaleTimer(socket: WebSocket) {
   const { activeStream } = useStore.getState();
   if (activeStream && activeStream !== true) {
     _staleTimer = setTimeout(() => {
-      console.warn('[Aura] WebSocket stale (no message for 90s during stream), reconnecting');
+      console.warn('[Aura] WebSocket stale (no message for 5min during stream), reconnecting');
       socket.close();
     }, WS_STALE_TIMEOUT);
   }
@@ -84,6 +84,8 @@ export function connectWS() {
     if (API_KEY) {
       socket.send(JSON.stringify({ type: 'auth', api_key: API_KEY }));
     }
+    // Ask if the agent is ready
+    socket.send(JSON.stringify({ type: 'ready_check' }));
     console.log('[Aura] WebSocket connected');
     useStore.getState().setWsReady(true);
     useStore.getState().setWs(socket);
@@ -148,6 +150,13 @@ export function connectWS() {
 
     let d: any;
     try { d = JSON.parse(ev.data); } catch { return; }
+
+    // Handle control messages that don't require an active stream
+    if (d.type === 'auth_ok' || d.type === 'pong') return;
+    if (d.type === 'ready_status') {
+      useStore.getState().setAgentReady(d.ready);
+      return;
+    }
 
     const { activeStream } = useStore.getState();
     if (!activeStream || activeStream === true) return;
@@ -254,8 +263,11 @@ export async function fetchStatus() {
       const store = useStore.getState();
       // HTTP works -- server is online regardless of WS state
       store.setBackendStatus('online');
+      // Agent is ready if model is reported (not "initializing...")
+      const modelStr = d.last_model_used || d.model || '';
+      store.setAgentReady(modelStr !== '' && modelStr !== 'initializing...');
       if (!store.wsReady) connectWS();
-      const m = (d.last_model_used || d.model || '').replace(/:cloud$/, '');
+      const m = modelStr.replace(/:cloud$/, '');
       store.setModelName(m.length > 22 ? m.slice(-22) : m);
       if (d.mood?.emoji) store.setMood(d.mood.emoji);
     } finally {
