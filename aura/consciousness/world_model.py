@@ -1538,38 +1538,45 @@ class WorldModel:
 
         sections = []
 
-        # Active projects
+        # Active projects (top 5 by priority)
         active = self.get_projects_by_status(ProjectStatus.ACTIVE)
         if active:
-            # Sort by priority descending
             active.sort(key=lambda p: p.priority, reverse=True)
             parts = []
-            for p in active:
+            for p in active[:5]:
                 staleness = self._days_since(p.last_activity)
                 if staleness is not None and staleness > 0:
-                    parts.append(f"{p.name} ({p.health}, {staleness}d stale)")
+                    parts.append(f"{p.name} ({staleness}d stale)")
                 else:
-                    parts.append(f"{p.name} ({p.health}, today)")
+                    parts.append(f"{p.name} (today)")
+            if len(active) > 5:
+                parts.append(f"+{len(active) - 5} more")
             sections.append(f"Active projects: {', '.join(parts)}")
 
-        # Current goals
+        # Current goals (top 3 by progress)
         goals = self.get_active_goals()
         if goals:
+            goals.sort(key=lambda g: g.progress, reverse=True)
             parts = []
-            for g in goals:
+            for g in goals[:3]:
                 pct = int(g.progress * 100)
-                horizon_short = g.horizon.value.replace("_term", "")
-                parts.append(f"{g.description} ({horizon_short}, {pct}%)")
+                parts.append(f"{g.description[:60]} ({pct}%)")
+            if len(goals) > 3:
+                parts.append(f"+{len(goals) - 3} more")
             sections.append(f"Current goals: {', '.join(parts)}")
 
-        # Active blockers (from all active projects)
+        # Active blockers (top 3 from active projects)
         if active:
             all_blockers = []
-            for p in active:
+            for p in active[:5]:
                 blockers = self.get_project_blockers(p.id)
                 for b in blockers:
                     if b.get("status") == "ongoing":
-                        all_blockers.append(f"{b['description']} ({b['severity']})")
+                        all_blockers.append(f"{b['description'][:60]} ({b['severity']})")
+                    if len(all_blockers) >= 3:
+                        break
+                if len(all_blockers) >= 3:
+                    break
             if all_blockers:
                 sections.append(f"Blockers: {', '.join(all_blockers)}")
 
@@ -1596,10 +1603,13 @@ class WorldModel:
                     parts.append(f"{r.name} ({r.role or r.relationship_type}, today)")
             sections.append(f"People: {', '.join(parts)}")
 
-        # Contradictions
-        unresolved = self.get_unresolved_contradictions()
-        if unresolved:
-            sections.append(f"Contradictions: {len(unresolved)} unresolved")
+        # Contradictions (just count — 7000+ contradictions don't need detail)
+        try:
+            unresolved_count = len(self.get_unresolved_contradictions())
+            if unresolved_count > 0:
+                sections.append(f"Contradictions: {unresolved_count} unresolved")
+        except Exception:
+            pass
 
         # Pending proactive insight
         try:
