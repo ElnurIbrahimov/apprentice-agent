@@ -356,7 +356,7 @@ class ThinkingStateManager:
                 self.generate_thought()
 
             active = [t.to_dict() for t in self._active_thoughts]
-            recent_history = [t.to_dict() for t in self._thought_history[-5:]]
+            recent_history = [t.to_dict() for t in list(self._thought_history)[-5:]]
 
             return {
                 "is_thinking": len(active) > 0,
