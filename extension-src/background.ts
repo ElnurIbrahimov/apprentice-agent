@@ -20,16 +20,16 @@ let BACKEND_API_KEY = '';
 (async () => {
   try {
     const data = await ext.storage.local.get(['backendUrl', 'apiKey']);
-    if (data.backendUrl) BACKEND = data.backendUrl.replace(/\/+$/, '');
-    if (data.apiKey) BACKEND_API_KEY = data.apiKey;
+    if (data.backendUrl) BACKEND = String(data.backendUrl).replace(/\/+$/, '');
+    if (data.apiKey) BACKEND_API_KEY = String(data.apiKey);
   } catch {}
 })();
 
 // Listen for settings changes
 ext.storage.onChanged.addListener((changes, area) => {
   if (area === 'local') {
-    if (changes.backendUrl?.newValue) BACKEND = changes.backendUrl.newValue.replace(/\/+$/, '');
-    if (changes.apiKey?.newValue) BACKEND_API_KEY = changes.apiKey.newValue;
+    if (changes.backendUrl?.newValue) BACKEND = String(changes.backendUrl.newValue).replace(/\/+$/, '');
+    if (changes.apiKey?.newValue) BACKEND_API_KEY = String(changes.apiKey.newValue);
   }
 });
 
