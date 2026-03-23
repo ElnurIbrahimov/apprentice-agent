@@ -476,10 +476,11 @@ class OllamaBrain:
                 return self.client, Config.MODEL_FAST
 
         if model.endswith(("-cloud", ":cloud")):
-            # Ollama Pro routes cloud models through the local client automatically.
-            # The local Ollama app handles auth and proxying to cloud infrastructure.
-            # Direct cloud API (api.ollama.com) requires separate auth that may fail,
-            # so prefer the local bridge which is more reliable.
+            # Cloud models: prefer the dedicated cloud client (api.ollama.com) if available,
+            # fall back to local Ollama bridge (for setups where Ollama Pro runs locally).
+            if self._cloud_client:
+                logger.debug(f"[BRAIN] Using Ollama cloud API for model: {model}")
+                return self._cloud_client, model
             logger.debug(f"[BRAIN] Using local Ollama bridge for cloud model: {model}")
             return self.client, model
         return self.client, model
