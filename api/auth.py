@@ -25,8 +25,13 @@ async def require_api_key(x_api_key: str = Header(default="")) -> str:
     # Consistent with APIKeyAuthMiddleware and verify_api_key_ws.
     api_auth_enabled = os.environ.get("AURA_API_AUTH_ENABLED", "true").lower() in ("true", "1", "yes")
     if api_auth_enabled and not os.environ.get("AURA_API_KEY"):
-        logger.warning("AURA_API_AUTH_ENABLED is true but no AURA_API_KEY set — auth disabled")
-        api_auth_enabled = False
+        # SECURITY: Fail CLOSED — if auth is enabled but no key is configured,
+        # reject all requests instead of silently disabling auth
+        logger.error("AURA_API_AUTH_ENABLED is true but no AURA_API_KEY set — blocking all requests")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Auth is enabled but AURA_API_KEY is not configured. Set it or disable auth.",
+        )
     if not api_auth_enabled:
         return ""
 

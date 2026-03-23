@@ -195,8 +195,8 @@ class MetacognitiveEngine:
         now = datetime.now().isoformat()
 
         # Gather signals from each source
-        reflexion_signals = self._gather_reflexion_signals()
-        guardian_signals = self._gather_guardian_signals()
+        reflexion_signals = {}
+        guardian_signals = {}
         skill_signals = self._gather_skill_signals()
         outcome_signals = self._gather_outcome_signals()
 
@@ -650,14 +650,6 @@ class MetacognitiveEngine:
     # Signal Gathering (from subsystems)
     # ====================================================================
 
-    def _gather_reflexion_signals(self) -> Dict[str, Dict]:
-        """Reflexion removed -- returns empty signals."""
-        return {}
-
-    def _gather_guardian_signals(self) -> Dict[str, Dict]:
-        """Guardian removed — returns empty signals."""
-        return {}
-
     def _gather_skill_signals(self) -> Dict[str, Dict]:
         """Gather signals from Skill Library success rates."""
         signals = {}
@@ -749,22 +741,6 @@ class MetacognitiveEngine:
                 best_domain = domain
 
         return best_domain
-
-    def _domain_keywords(self, domain: str) -> List[str]:
-        """Get keywords associated with a capability domain."""
-        keyword_map = {
-            "coding": ["code", "python", "function", "bug", "program", "script", "api"],
-            "research": ["search", "find", "research", "investigate", "lookup", "source"],
-            "writing": ["write", "essay", "document", "summarize", "email", "text"],
-            "analysis": ["analyze", "data", "chart", "statistics", "compare", "evaluate"],
-            "conversation": ["chat", "talk", "discuss", "conversation", "respond", "clarify"],
-            "tool_use": ["tool", "execute", "command", "run", "browser", "file"],
-            "memory": ["remember", "recall", "memory", "context", "history", "forget"],
-            "emotional": ["emotion", "feeling", "empathy", "support", "mood", "tone"],
-            "proactive": ["suggest", "remind", "notify", "proactive", "anticipate"],
-            "creative": ["creative", "imagine", "brainstorm", "idea", "generate", "story"],
-        }
-        return keyword_map.get(domain, [domain])
 
     # ====================================================================
     # Full Metacognitive Cycle (for NeuroDream integration)

@@ -1,9 +1,11 @@
 """
-Knowledge clip API — save and search web selections from the AURA Chrome extension.
+Knowledge clip API -- save and search web selections from the AURA Chrome extension.
+
+Rewired to UnifiedMemory (2026-03-22) after aura_episodic_memory was deleted
+during the memory consolidation.
 """
 
 import logging
-from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Depends
@@ -16,24 +18,18 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/knowledge", tags=["knowledge"], dependencies=[Depends(require_api_key)])
 
-# Lazy-load the episodic store so the API boots even if Qdrant is unavailable
-def _get_store():
-    """Reuse the agent's existing EpisodicMemoryStore to avoid Qdrant lock conflicts."""
+
+def _get_unified_memory():
+    """Get the UnifiedMemory singleton, or None if unavailable."""
     try:
-        from api.services.agent_service import agent_service
-        agent = getattr(agent_service, 'agent', None)
-        if agent and hasattr(agent, 'episodic_memory') and agent.episodic_memory is not None:
-            store = agent.episodic_memory
-            if getattr(store, '_available', False):
-                return store
-            logger.warning("[Knowledge] Agent episodic store exists but is unavailable")
-            return None
+        from aura.memory.unified_memory import get_unified_memory
+        return get_unified_memory()
     except Exception as e:
-        logger.warning("[Knowledge] Could not get agent episodic store: %s", e)
-    return None
+        logger.warning("[Knowledge] UnifiedMemory unavailable: %s", e)
+        return None
 
 
-# ── Models ────────────────────────────────────────────────────────────────────
+# -- Models ---------------------------------------------------------------
 
 class SaveRequest(BaseModel):
     text: str = Field(..., max_length=50_000)
@@ -65,38 +61,36 @@ class SearchResponse(BaseModel):
     count: int
 
 
-# ── Endpoints ─────────────────────────────────────────────────────────────────
+# -- Endpoints -------------------------------------------------------------
 
 @router.post("/save", response_model=SaveResponse)
 async def save_knowledge(body: SaveRequest):
-    """Save a web selection into AURA's episodic memory."""
-    store = _get_store()
-    if store is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Episodic memory store unavailable. Is Qdrant running?"
-        )
+    """Save a web selection into AURA's unified memory."""
+    mem = _get_unified_memory()
+    if mem is None:
+        raise HTTPException(status_code=503, detail="Memory store unavailable.")
 
     try:
-        from aura_episodic_memory import Episode, EpisodeType, TemporalContext
+        tags = list(body.tags or [])
+        if body.source_type:
+            tags.append(f"source:{body.source_type}")
 
-        episode = Episode(
-            content=body.text.strip(),
-            episode_type=EpisodeType.LEARNING,
-            temporal_context=TemporalContext(timestamp=datetime.now()),
-            importance=body.importance,
-            metadata={
-                "url": body.url,
-                "title": body.title,
-                "tags": body.tags,
-                "source_type": body.source_type,
-            },
+        content = body.text.strip()
+        if body.title:
+            content = f"[{body.title}] {content}"
+
+        ids = mem.store(
+            content=content,
+            source="knowledge_clip",
+            importance=body.importance or 0.7,
+            tags=tags,
+            episode_type="learning",
         )
-        episode_id = store.store_episode(episode)
-        logger.info("[Knowledge] Saved episode %s from %s", episode_id, body.url)
+        episode_id = ids.get("store", "unknown")
+        logger.info("[Knowledge] Saved clip %s from %s", episode_id, body.url)
 
         return SaveResponse(
-            episode_id=episode_id,
+            episode_id=str(episode_id),
             status="saved",
             message=f"Saved '{body.title or body.url or 'clip'}' to AURA memory.",
         )
@@ -110,42 +104,34 @@ async def list_knowledge(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
-    """List saved knowledge clips (LEARNING episodes) with pagination."""
-    store = _get_store()
-    if store is None:
-        raise HTTPException(503, "Episodic memory store unavailable.")
+    """List saved knowledge clips with pagination."""
+    mem = _get_unified_memory()
+    if mem is None:
+        raise HTTPException(503, "Memory store unavailable.")
 
     try:
-        from qdrant_client.models import Filter, FieldCondition, MatchValue
+        # Query UnifiedMemory; filter to knowledge_clip source post-query
+        all_results = mem.query("knowledge clip", k=(limit + offset) * 3)
+        results = [r for r in all_results if r.source == "knowledge_clip"]
 
-        with store._lock:
-            results, next_page_offset = store.client.scroll(
-                collection_name="episodic_memory",
-                scroll_filter=Filter(
-                    must=[FieldCondition(key="episode_type", match=MatchValue(value="learning"))]
-                ),
-                limit=limit,
-                offset=offset,
-                with_payload=True,
-                with_vectors=False,
-            )
+        # Apply offset/limit
+        paged = results[offset:][:limit]
 
         items = []
-        for r in results:
-            p = r.payload or {}
-            meta = p.get("metadata", {}) or {}
-            items.append(
-                {
-                    "episode_id": p.get("id", str(r.id)),
-                    "content": p.get("content", ""),
-                    "title": meta.get("title", ""),
-                    "url": meta.get("url", ""),
-                    "saved_at": p.get("timestamp", ""),
-                    "tags": meta.get("tags", []),
-                }
-            )
+        for r in paged:
+            meta = r.metadata or {}
+            tags_raw = meta.get("tags", "")
+            tags = tags_raw.split(",") if isinstance(tags_raw, str) and tags_raw else (tags_raw if isinstance(tags_raw, list) else [])
+            items.append({
+                "episode_id": r.source_id or r.content_hash,
+                "content": r.content,
+                "title": meta.get("title", ""),
+                "url": meta.get("url", ""),
+                "saved_at": meta.get("created_at", ""),
+                "tags": tags,
+            })
 
-        return {"items": items, "has_more": next_page_offset is not None}
+        return {"items": items, "has_more": len(results) > offset + limit}
 
     except Exception as e:
         logger.error("[Knowledge] List failed: %s", e)
@@ -154,16 +140,22 @@ async def list_knowledge(
 
 @router.delete("/{episode_id}")
 async def delete_knowledge(episode_id: str):
-    """Delete a saved knowledge clip by episode ID."""
-    store = _get_store()
-    if store is None:
-        raise HTTPException(503, "Episodic memory store unavailable.")
+    """Delete a saved knowledge clip by ID."""
+    mem = _get_unified_memory()
+    if mem is None:
+        raise HTTPException(503, "Memory store unavailable.")
 
     try:
-        ok = store.delete_episode(episode_id)
-        if not ok:
-            raise HTTPException(404, f"Episode '{episode_id}' not found.")
-        return {"deleted": episode_id}
+        store = getattr(mem, '_store', None)
+        if store is None:
+            mem._ensure_store()
+            store = getattr(mem, '_store', None)
+        if store and hasattr(store, 'delete'):
+            ok = store.delete(episode_id)
+            if not ok:
+                raise HTTPException(404, f"Clip '{episode_id}' not found.")
+            return {"deleted": episode_id}
+        raise HTTPException(503, "Delete not supported on current memory backend.")
     except HTTPException:
         raise
     except Exception as e:
@@ -176,37 +168,25 @@ async def search_knowledge(
     q: str = Query(..., description="Search query"),
     limit: int = Query(10, ge=1, le=50),
 ):
-    """Semantic search over saved web clips in episodic memory."""
-    store = _get_store()
-    if store is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Episodic memory store unavailable."
-        )
+    """Semantic search over saved web clips via UnifiedMemory."""
+    mem = _get_unified_memory()
+    if mem is None:
+        raise HTTPException(status_code=503, detail="Memory store unavailable.")
 
     try:
-        from aura_episodic_memory import EpisodeQuery, EpisodeType
-
-        query = EpisodeQuery(
-            query_text=q,
-            episode_types=[EpisodeType.LEARNING],
-            limit=limit,
-        )
-        raw_results = store.search(query)
+        all_results = mem.query(q, k=limit * 3)
+        raw_results = [r for r in all_results if r.source == "knowledge_clip"][:limit]
 
         results = []
         for r in raw_results:
-            ep = r.episode
-            meta = getattr(ep, "metadata", {}) or {}
+            meta = r.metadata or {}
             results.append(KnowledgeResult(
-                episode_id=ep.id,
-                content=ep.content,
+                episode_id=r.source_id or r.content_hash,
+                content=r.content,
                 title=meta.get("title", ""),
                 url=meta.get("url", ""),
                 score=round(r.score, 4),
-                saved_at=ep.temporal_context.timestamp.isoformat()
-                         if ep.temporal_context and ep.temporal_context.timestamp
-                         else "",
+                saved_at=meta.get("created_at", ""),
             ))
 
         return SearchResponse(query=q, results=results, count=len(results))

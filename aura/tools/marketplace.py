@@ -290,6 +290,8 @@ class MarketplaceTool:
         try:
             if not plugin_id:
                 return {"success": False, "error": "Plugin ID is required"}
+            if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}', plugin_id):
+                return {"success": False, "error": "Invalid plugin ID format"}
 
             registry = self._fetch_registry()
             plugins = registry.get("plugins", [])
@@ -345,6 +347,10 @@ class MarketplaceTool:
         try:
             if not plugin_id:
                 return {"success": False, "error": "Plugin ID is required"}
+
+            # SECURITY: Sanitize plugin_id — prevent path traversal and URL injection
+            if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}', plugin_id):
+                return {"success": False, "error": "Invalid plugin ID: must be 1-64 alphanumeric/underscore/dash characters"}
 
             # Check if already installed
             installed = self._read_json(self.installed_plugins_file)
@@ -501,6 +507,8 @@ class MarketplaceTool:
         try:
             if not plugin_id:
                 return {"success": False, "error": "Plugin ID is required"}
+            if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}', plugin_id):
+                return {"success": False, "error": "Invalid plugin ID format"}
 
             # Check if installed
             installed = self._read_json(self.installed_plugins_file)

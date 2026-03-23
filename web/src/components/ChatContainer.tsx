@@ -11,6 +11,8 @@ import { useMoodTheme } from '../hooks/useMoodTheme';
 import type { FileAttachment, ModelResult } from '../types';
 import { FleetDashboard } from './FleetDashboard';
 import { ProactiveCard } from './ProactiveCard';
+import { ResearchProgress } from './ResearchProgress';
+import { CitationsPanel } from './CitationsPanel';
 import {
   ChatBubbleLeftRightIcon,
   MagnifyingGlassIcon,
@@ -18,6 +20,7 @@ import {
   CpuChipIcon,
   ChevronDownIcon,
   XMarkIcon,
+  BookOpenIcon,
 } from '@heroicons/react/24/outline';
 
 // Swipe drawer constants
@@ -89,7 +92,7 @@ const FOLLOW_UP_SETS = [
 
 export function ChatContainer() {
   useMoodTheme();
-  const { messages, isLoading, error, setError, connectionStatus, toolStatus, isSwitchingConversation, suggestions, setSuggestions, clearSuggestions, fleetData, clearFleetData } = useChatStore();
+  const { messages, isLoading, error, setError, connectionStatus, toolStatus, isSwitchingConversation, suggestions, setSuggestions, clearSuggestions, fleetData, clearFleetData, clearResearchProgress, citationsPanelOpen, toggleCitationsPanel } = useChatStore();
   const { sendMessage, stopGeneration, connect: reconnect } = useWebSocket();
   const { settings } = useSettingsStore();
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -236,6 +239,7 @@ export function ChatContainer() {
 
   const handleSend = async (message: string, attachments?: FileAttachment[], actionMode?: string | null) => {
     clearSuggestions();
+    clearResearchProgress();
     setThinkingHistory(null);
     setThinkingExpanded(false);
     initialMessageCountRef.current = messages.length;
@@ -283,9 +287,12 @@ export function ChatContainer() {
   };
 
   const isDisabled = isLoading || connectionStatus !== 'connected';
+  const hasCitationsInConversation = messages.some(m => m.citations && m.citations.length > 0);
 
   return (
-    <div className="flex flex-col h-full" style={{ background: 'transparent' }}>
+    <div className="flex h-full" style={{ background: 'transparent' }}>
+    {/* Main chat column */}
+    <div className="flex flex-col flex-1 min-w-0">
       {/* Proactive notification cards */}
       {proactiveMessages.length > 0 && (
         <div className="proactive-container">
@@ -467,6 +474,7 @@ export function ChatContainer() {
                 />
               );
             })}
+            <ResearchProgress />
             <div ref={messagesEndRef} />
           </div>
         )}
@@ -598,6 +606,32 @@ export function ChatContainer() {
             : 'Message AURA...'
         }
       />
+
+      {/* Citations panel toggle — floating button */}
+      {hasCitationsInConversation && (
+        <button
+          onClick={toggleCitationsPanel}
+          className="fixed bottom-24 right-6 z-20 flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-medium transition-all duration-200"
+          style={{
+            background: citationsPanelOpen
+              ? 'rgba(139, 92, 246, 0.3)'
+              : 'rgba(20, 20, 28, 0.8)',
+            border: `1px solid ${citationsPanelOpen ? 'rgba(139, 92, 246, 0.5)' : 'rgba(255, 255, 255, 0.1)'}`,
+            color: citationsPanelOpen ? '#e9d5ff' : '#a1a1aa',
+            backdropFilter: 'blur(12px)',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+            display: citationsPanelOpen ? 'none' : 'flex',
+          }}
+          aria-label="Toggle sources panel"
+        >
+          <BookOpenIcon className="w-4 h-4" />
+          Sources
+        </button>
+      )}
+    </div>
+
+    {/* Citations panel (right sidebar) */}
+    <CitationsPanel />
     </div>
   );
 }

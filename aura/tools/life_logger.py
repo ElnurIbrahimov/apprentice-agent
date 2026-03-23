@@ -72,12 +72,14 @@ class LifeLogger:
         try:
             with _db_lock:
                 conn = _get_db()
-                conn.execute(
-                    "INSERT INTO life_events (source, event_type, title, description, tags, timestamp, date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (source, event_type, title[:200], description[:1000], json.dumps(tags or []), now_str, date_str),
-                )
-                conn.commit()
-                conn.close()
+                try:
+                    conn.execute(
+                        "INSERT INTO life_events (source, event_type, title, description, tags, timestamp, date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (source, event_type, title[:200], description[:1000], json.dumps(tags or []), now_str, date_str),
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
             return {"success": True, "logged": title, "source": source, "date": date_str}
         except Exception as e:
             return {"success": False, "error": str(e)}
@@ -88,11 +90,13 @@ class LifeLogger:
         try:
             with _db_lock:
                 conn = _get_db()
-                rows = conn.execute(
-                    "SELECT * FROM life_events WHERE date = ? ORDER BY timestamp",
-                    (target,),
-                ).fetchall()
-                conn.close()
+                try:
+                    rows = conn.execute(
+                        "SELECT * FROM life_events WHERE date = ? ORDER BY timestamp",
+                        (target,),
+                    ).fetchall()
+                finally:
+                    conn.close()
 
             events = [dict(r) for r in rows]
             by_source: Dict[str, List] = {}
@@ -128,16 +132,18 @@ class LifeLogger:
         try:
             with _db_lock:
                 conn = _get_db()
-                placeholders = ",".join("?" for _ in days)
-                rows = conn.execute(
-                    f"SELECT date, source, COUNT(*) as count FROM life_events WHERE date IN ({placeholders}) GROUP BY date, source ORDER BY date DESC",
-                    days,
-                ).fetchall()
-                total_row = conn.execute(
-                    f"SELECT COUNT(*) as n FROM life_events WHERE date IN ({placeholders})",
-                    days,
-                ).fetchone()
-                conn.close()
+                try:
+                    placeholders = ",".join("?" for _ in days)
+                    rows = conn.execute(
+                        f"SELECT date, source, COUNT(*) as count FROM life_events WHERE date IN ({placeholders}) GROUP BY date, source ORDER BY date DESC",
+                        days,
+                    ).fetchall()
+                    total_row = conn.execute(
+                        f"SELECT COUNT(*) as n FROM life_events WHERE date IN ({placeholders})",
+                        days,
+                    ).fetchone()
+                finally:
+                    conn.close()
 
             by_day: Dict[str, Dict] = {}
             for r in rows:
@@ -158,17 +164,19 @@ class LifeLogger:
         try:
             with _db_lock:
                 conn = _get_db()
-                if source:
-                    rows = conn.execute(
-                        "SELECT * FROM life_events WHERE date >= ? AND source = ? AND (title LIKE ? OR description LIKE ?) ORDER BY timestamp DESC LIMIT 50",
-                        (since, source, q, q),
-                    ).fetchall()
-                else:
-                    rows = conn.execute(
-                        "SELECT * FROM life_events WHERE date >= ? AND (title LIKE ? OR description LIKE ?) ORDER BY timestamp DESC LIMIT 50",
-                        (since, q, q),
-                    ).fetchall()
-                conn.close()
+                try:
+                    if source:
+                        rows = conn.execute(
+                            "SELECT * FROM life_events WHERE date >= ? AND source = ? AND (title LIKE ? OR description LIKE ?) ORDER BY timestamp DESC LIMIT 50",
+                            (since, source, q, q),
+                        ).fetchall()
+                    else:
+                        rows = conn.execute(
+                            "SELECT * FROM life_events WHERE date >= ? AND (title LIKE ? OR description LIKE ?) ORDER BY timestamp DESC LIMIT 50",
+                            (since, q, q),
+                        ).fetchall()
+                finally:
+                    conn.close()
 
             return {
                 "success": True,
@@ -252,12 +260,14 @@ class LifeLogger:
         try:
             with _db_lock:
                 conn = _get_db()
-                total = conn.execute("SELECT COUNT(*) as n FROM life_events").fetchone()["n"]
-                by_source = conn.execute(
-                    "SELECT source, COUNT(*) as count FROM life_events GROUP BY source ORDER BY count DESC"
-                ).fetchall()
-                oldest = conn.execute("SELECT date FROM life_events ORDER BY timestamp LIMIT 1").fetchone()
-                conn.close()
+                try:
+                    total = conn.execute("SELECT COUNT(*) as n FROM life_events").fetchone()["n"]
+                    by_source = conn.execute(
+                        "SELECT source, COUNT(*) as count FROM life_events GROUP BY source ORDER BY count DESC"
+                    ).fetchall()
+                    oldest = conn.execute("SELECT date FROM life_events ORDER BY timestamp LIMIT 1").fetchone()
+                finally:
+                    conn.close()
 
             return {
                 "success": True,

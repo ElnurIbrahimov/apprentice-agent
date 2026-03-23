@@ -354,15 +354,15 @@ async def shell_run(request: ShellRunRequest):
 _SHELL_ALLOWED_COMMANDS = {
     # File inspection
     "ls", "dir", "cat", "head", "tail", "less", "more", "wc", "file", "stat",
-    "find", "grep", "rg", "awk", "sed", "sort", "uniq", "diff", "tr", "cut",
+    "grep", "rg", "sort", "uniq", "diff", "tr", "cut",
     # Directory navigation
     "pwd", "cd", "tree", "basename", "dirname", "realpath",
     # System info (read-only)
     "whoami", "date", "uptime", "uname", "hostname", "df", "du", "free", "top",
     "env", "printenv", "echo", "printf",
-    # Dev tools
-    "python", "python3", "pip", "pip3", "node", "npm", "npx", "yarn", "pnpm",
-    "git", "make", "cargo", "go", "ruby", "java", "javac",
+    # Dev tools (read-only / build / version control)
+    "pip", "pip3", "npm", "npx", "yarn", "pnpm",
+    "git", "make", "cargo",
     # File manipulation (non-destructive)
     "cp", "mv", "mkdir", "touch", "ln", "tar", "zip", "unzip", "gzip", "gunzip",
     # Process info (read-only)
@@ -377,8 +377,18 @@ _SHELL_DANGER_PATTERNS = [
     "chmod -R 777 /", "shutdown", "reboot", "init 0", "init 6",
     "taskkill //F //IM node", "pkill -f node", "killall node",
     "> /dev/sd", "| base64 -d | sh", "| bash", "| sh",
+    "| /bin/bash", "| /usr/bin/sh", "| /bin/sh",
     "$(", "`",  # Command substitution — block to prevent injection
+    "sed -i", "sed -i=",  # In-place file modification
+    "git push --force", "git push -f",  # Destructive remote operation
+    "ln -s /", "ln -sf /",  # Symlink to sensitive dirs
 ]
+
+# Explicitly blocked commands — shells and interpreters that enable RCE
+_SHELL_BLOCKED_COMMANDS = {
+    "powershell", "pwsh", "cmd", "cmd.exe",
+    "python", "python3", "node", "ruby", "java", "javac", "go",
+}
 
 # Interpreters that accept code-execution flags — block these flag combos
 # to prevent `python -c "os.system(...)"` style bypasses of the allowlist.
@@ -389,7 +399,7 @@ _INTERPRETER_EXEC_FLAGS = {
     "ruby": {"-e"},
     "perl": {"-e"},
     "java": {},  # java doesn't have direct eval, safe
-    "go": {"run"},  # `go run arbitrary.go` can execute anything
+    "go": {"run", "generate", "build", "install", "test"},  # all can execute arbitrary code
 }
 
 
@@ -465,6 +475,9 @@ def _shell_run_sync(request: ShellRunRequest) -> dict:
         return {"success": False, "error": "Blocked: could not parse command"}
 
     for cmd_name in cmd_names:
+        # Explicit blocklist takes priority (shells, interpreters)
+        if cmd_name in _SHELL_BLOCKED_COMMANDS:
+            return {"success": False, "error": f"Blocked: '{cmd_name}' is not allowed (interpreter/shell)"}
         if cmd_name not in _SHELL_ALLOWED_COMMANDS:
             return {"success": False, "error": f"Blocked: '{cmd_name}' is not in the allowed commands list"}
 
@@ -801,6 +814,11 @@ async def database_query(request: SQLQueryRequest):
     _sql_no_strings = _re.sub(r'"[^"]*"', "", _sql_no_strings)
     if ";" in _sql_no_strings:
         return {"success": False, "error": "Multi-statement queries are not allowed"}
+    # Block DML keywords that can appear inside WITH CTEs without semicolons
+    _DML_KEYWORDS = {"insert", "update", "delete", "drop", "alter", "create", "replace", "truncate"}
+    _sql_words = set(_re.findall(r'\b\w+\b', _sql_no_strings.lower()))
+    if _sql_words & _DML_KEYWORDS:
+        return {"success": False, "error": "DML statements (INSERT/UPDATE/DELETE/DROP/etc.) are not allowed"}
     try:
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, lambda: _database_query_sync(request))
@@ -849,7 +867,7 @@ def _database_import_sync(request: CSVImportRequest) -> dict:
     # Validate CSV path — restrict to project data directory
     import os as _os
     from pathlib import Path as _Path
-    _safe_base = _Path(_os.getenv("AURA_DATA_DIR", "data")).resolve()
+    _safe_base = _Path(_os.getenv("AURA_DATA_DIR", str(_Path(__file__).parent.parent.parent / "data"))).resolve()
     try:
         csv_resolved = _Path(request.csv_path).resolve(strict=True)
     except OSError:
@@ -892,7 +910,7 @@ def _audio_transcribe_sync(request: TranscribeRequest) -> dict:
     # Validate file path — restrict to project data directory
     import os as _os
     from pathlib import Path as _Path
-    _safe_base = _Path(_os.getenv("AURA_DATA_DIR", "data")).resolve()
+    _safe_base = _Path(_os.getenv("AURA_DATA_DIR", str(_Path(__file__).parent.parent.parent / "data"))).resolve()
     fp = _Path(request.file_path).resolve()
     try:
         fp.relative_to(_safe_base)
@@ -954,6 +972,7 @@ def _audio_status_sync() -> dict:
 @router.get("/clipboard/history")
 async def clipboard_history(limit: int = 20, category: Optional[str] = None):
     """Get clipboard history."""
+    limit = max(1, min(limit, 100))  # Clamp to prevent memory exhaustion
     try:
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, lambda: _clipboard_history_sync(limit, category))

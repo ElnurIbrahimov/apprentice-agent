@@ -1,0 +1,210 @@
+"""Researcher Hand — autonomous deep research on topics of interest.
+
+Runs on schedule (or when curiosity drive is high), picks topics from:
+- Knowledge graph gaps (orphan nodes, low-confidence facts)
+- World model's active projects (stale ones that need updates)
+- Intrinsic motivation's curiosity targets
+
+Produces: memory entries, KG updates, research summaries.
+"""
+
+import logging
+import time
+from typing import Any
+
+from aura.hands.base import Hand, HandManifest, HandResult
+
+logger = logging.getLogger(__name__)
+
+
+class ResearcherHand(Hand):
+    """Autonomous research Hand — explores knowledge gaps without prompting."""
+
+    def get_manifest(self) -> HandManifest:
+        return HandManifest(
+            name="researcher",
+            version="0.1.0",
+            description="Autonomous deep research on topics from KG gaps and curiosity drive",
+            interval_minutes=240,       # Every 4 hours
+            idle_only=True,
+            min_idle_seconds=600,       # 10 min idle
+            max_tokens=40000,
+            max_cost_usd=0.40,
+            max_duration_seconds=1200,  # 20 min max
+            model_preference="reasoning",
+            require_approval_for=["send_message", "write_file", "publish"],
+            extra_blocked_tools=["code_executor"],
+            max_iterations=8,
+            trigger_on_drive="curiosity",
+            trigger_drive_threshold=0.7,
+        )
+
+    def get_system_prompt(self) -> str:
+        return (
+            "You are Aura's autonomous research hand. Your job is to explore "
+            "knowledge gaps, verify uncertain facts, and discover new connections. "
+            "You operate independently — no human is watching. Be thorough but efficient.\n\n"
+            "Rules:\n"
+            "1. Pick ONE topic per run — depth over breadth.\n"
+            "2. Cross-reference at least 2 sources before updating knowledge.\n"
+            "3. If you find contradictions with existing knowledge, flag them explicitly.\n"
+            "4. Store findings in memory with clear source attribution.\n"
+            "5. Never publish, send messages, or modify files without approval.\n"
+            "6. If a topic turns out to be a dead end, record why and move on.\n"
+        )
+
+    async def execute(self, brain: Any, tools: dict, context: dict) -> HandResult:
+        """Run autonomous research cycle."""
+        start = time.time()
+        iterations = 0
+        artifacts = []
+        topic = None
+
+        try:
+            # Step 1: Pick a research topic
+            topic = await self._pick_topic(brain, context)
+            if not topic:
+                return HandResult(
+                    hand_name="researcher",
+                    success=True,
+                    summary="No research topics found — knowledge is up to date.",
+                    iterations=0,
+                )
+
+            logger.info(f"[Researcher] Researching: {topic}")
+
+            # Step 2: Research the topic using available tools
+            findings = []
+            search_tool = tools.get("web_search") or tools.get("brave_search")
+
+            # Check existing knowledge via UnifiedMemory
+            # (memory_retriever was consolidated into UnifiedMemory — use it directly)
+            try:
+                from aura.memory.unified_memory import get_unified_memory
+                umem = get_unified_memory()
+                results = umem.query(topic, k=5)
+                if results:
+                    existing = "\n".join(r.content for r in results if r.content)
+                    if existing:
+                        findings.append({"source": "memory", "content": existing[:2000]})
+                        iterations += 1
+            except Exception as e:
+                logger.debug(f"[Researcher] Memory lookup failed: {e}")
+
+            # Web search for new information
+            if search_tool:
+                try:
+                    results = search_tool.execute(query=topic, num_results=5) if hasattr(search_tool, 'execute') else ""
+                    if results:
+                        findings.append({"source": "web", "content": str(results)[:3000]})
+                        iterations += 1
+                except Exception as e:
+                    logger.debug(f"[Researcher] Web search failed: {e}")
+
+            if not findings:
+                return HandResult(
+                    hand_name="researcher",
+                    success=False,
+                    summary=f"Could not find information on: {topic}",
+                    iterations=iterations,
+                    error="No search tools available or all searches failed",
+                )
+
+            # Step 3: Synthesize findings via LLM
+            synthesis_prompt = (
+                f"Research topic: {topic}\n\n"
+                f"Findings:\n" + "\n---\n".join(
+                    f"[{f['source']}]: {f['content']}" for f in findings
+                ) + "\n\n"
+                "Synthesize these findings into a concise knowledge update. "
+                "Note any contradictions with what was already known. "
+                "Format: one paragraph summary + key facts as bullet points."
+            )
+
+            response = brain.think(
+                synthesis_prompt,
+                system=self.get_system_prompt(),
+                model=None,  # Use default for model_preference
+            )
+            iterations += 1
+
+            if response:
+                summary = str(response)[:2000]
+                artifacts.append({
+                    "type": "research_finding",
+                    "topic": topic,
+                    "summary": summary[:500],
+                    "sources": [f["source"] for f in findings],
+                })
+
+                # Step 4: Store in memory (if memory write tools available)
+                # This happens through the normal tool system
+                logger.info(f"[Researcher] Completed research on: {topic}")
+
+                return HandResult(
+                    hand_name="researcher",
+                    success=True,
+                    summary=f"Researched '{topic}': {summary[:200]}...",
+                    iterations=iterations,
+                    artifacts=artifacts,
+                    duration_seconds=time.time() - start,
+                )
+
+            return HandResult(
+                hand_name="researcher",
+                success=False,
+                summary=f"LLM synthesis failed for topic: {topic}",
+                iterations=iterations,
+                error="Brain returned empty response",
+            )
+
+        except Exception as e:
+            return HandResult(
+                hand_name="researcher",
+                success=False,
+                summary=f"Research failed for topic: {topic or 'unknown'}",
+                iterations=iterations,
+                error=str(e),
+                duration_seconds=time.time() - start,
+            )
+
+    async def _pick_topic(self, brain: Any, context: dict) -> str | None:
+        """Pick the most valuable research topic."""
+        candidates = []
+
+        # Source 1: Curiosity scanner targets
+        try:
+            drives = context.get("drive_urgencies", {})
+            curiosity_targets = context.get("curiosity_targets", [])
+            if curiosity_targets:
+                candidates.extend(curiosity_targets[:3])
+        except Exception:
+            pass
+
+        # Source 2: KG gaps (orphan nodes, low-confidence)
+        try:
+            from aura.consciousness.intrinsic_motivation import get_motivation_engine
+            engine = get_motivation_engine()
+            if engine:
+                state = engine.get_drive_state("curiosity")
+                if state and state.triggers:
+                    candidates.extend(state.triggers[:3])
+        except Exception:
+            pass
+
+        # Source 3: World model stale projects
+        try:
+            from aura.consciousness.world_model import get_world_model
+            wm = get_world_model()
+            if wm:
+                projects = wm.get_stale_projects(days=7)
+                if projects:
+                    candidates.extend([f"updates on {p['name']}" for p in projects[:2]])
+        except Exception:
+            pass
+
+        if not candidates:
+            return None
+
+        # Pick the first viable candidate (could use LLM to rank later)
+        return candidates[0] if isinstance(candidates[0], str) else str(candidates[0])

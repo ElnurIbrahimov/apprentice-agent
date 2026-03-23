@@ -4,7 +4,6 @@ Embeds all tool descriptions at startup using nomic-embed-text,
 then retrieves the top-K most relevant tools per query via cosine similarity.
 """
 
-import json
 import logging
 import math
 from typing import Optional
@@ -88,7 +87,11 @@ class ToolRAG:
 
         try:
             resp = self._client.embed(model="nomic-embed-text", input=texts)
-            embeddings = resp.get("embeddings") or []
+            # Handle both dict (old API) and object (new API) response formats
+            if isinstance(resp, dict):
+                embeddings = resp.get("embeddings") or []
+            else:
+                embeddings = getattr(resp, "embeddings", None) or []
             for i, name in enumerate(names):
                 if i < len(embeddings) and embeddings[i]:
                     self._tool_embeddings[name] = embeddings[i]
@@ -156,7 +159,11 @@ class ToolRAG:
             return None
         try:
             resp = self._client.embed(model="nomic-embed-text", input=[text[:2000]])
-            embeddings = resp.get("embeddings") or []
+            # Handle both dict (old API) and object (new API) response formats
+            if isinstance(resp, dict):
+                embeddings = resp.get("embeddings") or []
+            else:
+                embeddings = getattr(resp, "embeddings", None) or []
             return embeddings[0] if embeddings else None
         except Exception:
             return None

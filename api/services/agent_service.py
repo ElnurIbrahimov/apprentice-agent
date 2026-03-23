@@ -65,7 +65,7 @@ def _record_thought(thought_type: str, content: str, intensity: float = 0.6, sou
         from api.routes.thinking import record_thought
         record_thought(thought_type, content, intensity, source)
     except Exception:
-        pass
+        logger.debug("record_thought_failed", exc_info=True)
 
 # =============================================================================
 #                    ACTION MODE TRIGGER SYSTEM
@@ -397,7 +397,12 @@ class AgentService:
 
         Returns:
             Dict with response, fast_path flag, and mood
+
+        Note:
+            CRITICAL FIX: Lock is only held briefly for setup/teardown, NOT during
+            LLM inference. Mirrors chat_stream() pattern to prevent 30-60s contention.
         """
+        # ===== SETUP PHASE — Brief lock =====
         with self._agent_lock:
             # Handle /think command for System 1/2 switching
             if message.strip().startswith("/think"):
@@ -415,7 +420,7 @@ class AgentService:
                 if alma_engine is not None:
                     alma_engine.record_interaction(success=True)
             except Exception:
-                pass
+                logger.debug("alma_interaction_record_failed", exc_info=True)
 
             # Active inference outcome learning: if user replied within 60s
             # of a proactive message, record as engaged
@@ -427,21 +432,21 @@ class AgentService:
                 if 0 < time_since_proactive < 60:
                     daemon.record_user_response(engaged=True, response_type="replied")
             except Exception:
-                pass
+                logger.debug("proactive_response_record_failed", exc_info=True)
 
             # Track context for heatmap (covers direct handlers that bypass agent.chat)
             try:
                 from api.routes.context import track_context_from_message
                 track_context_from_message(message, is_user=True)
             except Exception:
-                pass
+                logger.debug("chat_context_heatmap_track_failed", exc_info=True)
 
             # Record activity for idle panel
             try:
                 from api.routes.idle_behaviors import record_user_activity
                 record_user_activity()
             except Exception:
-                pass
+                logger.debug("chat_idle_activity_record_failed", exc_info=True)
 
             if not effective_model and detected_action:
                 effective_model = get_model_for_action(detected_action)
@@ -454,164 +459,168 @@ class AgentService:
                 self.agent.brain.set_model_override(effective_model)
                 logger.info(f"[AgentService] Using model: {effective_model}")
 
-            try:
-                # ===== SWARM MODE HANDLER (via MultiAgentOrchestrator) =====
-                if detected_action == "swarm":
-                    logger.info(f"[AgentService] Multi-agent mode for: {message[:50]}...")
-                    _record_thought("connecting", "activating multi-agent orchestrator", 0.8, "service")
+            # Get references we need (agent is thread-safe for reads)
+            agent = self.agent
+        # ===== END SETUP — Lock released, LLM calls proceed without blocking =====
 
-                    try:
-                        from aura.multi_agent.orchestrator import MultiAgentOrchestrator
+        try:
+            # ===== SWARM MODE HANDLER (via MultiAgentOrchestrator) =====
+            if detected_action == "swarm":
+                logger.info(f"[AgentService] Multi-agent mode for: {message[:50]}...")
+                _record_thought("connecting", "activating multi-agent orchestrator", 0.8, "service")
 
-                        # Get or create orchestrator for this session
-                        if not hasattr(self, '_orchestrator') or self._orchestrator is None:
-                            tool_registry = getattr(self.agent, 'tool_registry', {})
-                            def llm_func(system_prompt, user_message):
-                                # Read model dynamically from brain's current override
-                                current_override = self.agent.brain._model_override if hasattr(self.agent.brain, '_model_override') else None
-                                return self.agent.brain.think(user_message, system_prompt=system_prompt, use_history=False, model_override=current_override)
-                            self._orchestrator = MultiAgentOrchestrator(
-                                tool_registry=tool_registry,
-                                llm_func=llm_func,
-                            )
+                try:
+                    from aura.multi_agent.orchestrator import MultiAgentOrchestrator
 
-                        # Optionally gather search context for real-time queries
-                        needs_search_keywords = [
-                            "news", "latest", "current", "recent", "today", "now",
-                            "update", "happening", "trending", "2024", "2025", "2026",
-                            "research", "developments", "breakthroughs", "announced"
-                        ]
-                        msg_lower = message.lower()
-                        query = message
-                        if any(kw in msg_lower for kw in needs_search_keywords):
-                            try:
-                                from aura.tools.web_search import WebSearchTool
-                                topic = msg_lower
-                                for trigger in ["swarm", "multi-agent", "multiple agents", "team research", "collaborative", "all agents", "agent team"]:
-                                    topic = topic.replace(trigger, "").strip()
-                                topic = topic.strip(" :,.-")
-                                search_results = WebSearchTool().search(topic, num_results=8)
-                                if search_results.get("success") and search_results.get("results"):
-                                    ctx = "\n".join([f"- {r.get('title','')}: {r.get('snippet','')}" for r in search_results["results"][:8]])
-                                    query = f"{message}\n\nSearch context:\n{ctx}"
-                            except Exception as e:
-                                logger.warning(f"[AgentService] Swarm search error: {e}")
+                    # Get or create orchestrator for this session
+                    if not hasattr(self, '_orchestrator') or self._orchestrator is None:
+                        tool_registry = getattr(agent, 'tool_registry', {})
+                        def llm_func(system_prompt, user_message):
+                            # Read model dynamically from brain's current override
+                            current_override = agent.brain._model_override if hasattr(agent.brain, '_model_override') else None
+                            return agent.brain.think(user_message, system_prompt=system_prompt, use_history=False, model_override=current_override)
+                        self._orchestrator = MultiAgentOrchestrator(
+                            tool_registry=tool_registry,
+                            llm_func=llm_func,
+                        )
 
-                        # Route through the proper orchestrator
-                        response = self._orchestrator.chat(query)
+                    # Optionally gather search context for real-time queries
+                    needs_search_keywords = [
+                        "news", "latest", "current", "recent", "today", "now",
+                        "update", "happening", "trending", "2024", "2025", "2026",
+                        "research", "developments", "breakthroughs", "announced"
+                    ]
+                    msg_lower = message.lower()
+                    query = message
+                    if any(kw in msg_lower for kw in needs_search_keywords):
+                        try:
+                            from aura.tools.web_search import WebSearchTool
+                            topic = msg_lower
+                            for trigger in ["swarm", "multi-agent", "multiple agents", "team research", "collaborative", "all agents", "agent team"]:
+                                topic = topic.replace(trigger, "").strip()
+                            topic = topic.strip(" :,.-")
+                            search_results = WebSearchTool().search(topic, num_results=8)
+                            if search_results.get("success") and search_results.get("results"):
+                                ctx = "\n".join([f"- {r.get('title','')}: {r.get('snippet','')}" for r in search_results["results"][:8]])
+                                query = f"{message}\n\nSearch context:\n{ctx}"
+                        except Exception as e:
+                            logger.warning(f"[AgentService] Swarm search error: {e}")
 
-                        return {
-                            "response": response,
-                            "fast_path": False,
-                            "mood": self._get_mood(),
-                            "model_used": effective_model or "multi-agent"
-                        }
-
-                    except Exception as e:
-                        logger.error(f"[AgentService] Multi-agent error: {e}")
-                        return {
-                            "response": f"Multi-agent system error: {e}. Falling back to single agent.",
-                            "fast_path": False,
-                            "mood": self._get_mood(),
-                            "model_used": effective_model
-                        }
-
-                # ===== DEEP RESEARCH HANDLER =====
-                if detected_action == "deep_research":
-                    _record_thought("analyzing", "initiating deep research pipeline...", 0.8, "service")
-                    from aura.tools.deep_research import DeepResearchTool
-                    deep_tool = DeepResearchTool()
-
-                    topic = message.lower()
-                    for trigger in ["deep research", "thorough research", "extensive research"]:
-                        topic = topic.replace(trigger, "").strip()
-                    topic = topic.strip(" on about for")
-
-                    result = deep_tool.research(topic, depth="deep")
-
-                    if result.get("success"):
-                        synthesis_prompt = f"""Summarize this research on '{topic}':
-{result.get('content', '')[:8000]}
-
-Provide key findings and cite sources."""
-                        synthesized = self.agent.brain.think(synthesis_prompt, model_override=effective_model)
-                        response = f"## Deep Research: {topic}\n\n{synthesized}\n\n---\n*{result.get('summary', '')}*"
-                    else:
-                        response = f"Research failed: {result.get('error', 'Unknown error')}"
+                    # Route through the proper orchestrator
+                    response = self._orchestrator.chat(query)
 
                     return {
                         "response": response,
                         "fast_path": False,
                         "mood": self._get_mood(),
-                        "model_used": effective_model or "deep_research"
+                        "model_used": effective_model or "multi-agent"
                     }
 
-                # Screen context injection (Phase 3D)
-                screen_hint = ""
-                try:
-                    from aura.tools.screenpipe import get_screenpipe_client
-                    sp = get_screenpipe_client()
-                    if sp.is_available():
-                        ctx = sp.get_screen_context(minutes=1, max_chars=500)
-                        if ctx.get("available") and ctx.get("current_app"):
-                            screen_hint = (
-                                f"\n[Screen context: user is in {ctx['current_app']}"
-                                + (f" — {ctx['current_window']}" if ctx.get("current_window") else "")
-                                + (". Error visible on screen." if ctx.get("has_errors") else "")
-                                + "]"
-                            )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error(f"[AgentService] Multi-agent error: {e}")
+                    return {
+                        "response": f"Multi-agent system error: {e}. Falling back to single agent.",
+                        "fast_path": False,
+                        "mood": self._get_mood(),
+                        "model_used": effective_model
+                    }
 
-                enriched_msg = message + screen_hint if screen_hint else message
+            # ===== DEEP RESEARCH HANDLER =====
+            if detected_action == "deep_research":
+                _record_thought("analyzing", "initiating deep research pipeline...", 0.8, "service")
+                from aura.tools.deep_research import DeepResearchTool
+                deep_tool = DeepResearchTool()
 
-                # Use agent.chat() which has direct handlers for search/crypto
-                response = self.agent.chat(enriched_msg, speak=speak)
+                topic = message.lower()
+                for trigger in ["deep research", "thorough research", "extensive research"]:
+                    topic = topic.replace(trigger, "").strip()
+                topic = topic.strip(" on about for")
 
-                # Truth Spine: classify response and tag to VerifiedMemory (non-blocking)
-                # Uses module-level singleton to avoid per-call disk reads.
-                try:
-                    _verified_mem = _get_truth_spine()
-                    _resp_lower = response.lower()
-                    import re as _re
-                    # FACT: actual URL present (not just the word "verified")
-                    _has_url = bool(_re.search(r'https?://\S+', response))
-                    _has_artifact = any(m in response for m in ["sha256:", "✓"])
-                    if _has_url or _has_artifact:
-                        _tier = MemoryTier.BELIEF  # URL ≠ verified fact; downgrade to BELIEF
-                        _verified_mem.store_belief(
-                            content=response[:500],
-                            source="chat",
-                            reasoning="Response cites a URL or artifact (unverified by agent)"
-                        )
-                    elif any(m in _resp_lower for m in ["i think", "i believe", "likely", "probably", "it seems"]):
-                        _tier = MemoryTier.BELIEF
-                        _verified_mem.store_belief(
-                            content=response[:500],
-                            source="chat",
-                            reasoning="Response contains inference or belief language"
-                        )
-                    else:
-                        _tier = MemoryTier.SPECULATION
-                        _verified_mem.store_speculation(
-                            content=response[:500],
-                            source="chat",
-                            reason="Unverified LLM output"
-                        )
-                    logger.debug(f"[TruthSpine] Response classified as {_tier.value}")
-                except Exception as _ts_err:
-                    logger.debug(f"[TruthSpine] Classification error: {_ts_err}")
+                result = deep_tool.research(topic, depth="deep")
+
+                if result.get("success"):
+                    synthesis_prompt = f"""Summarize this research on '{topic}':
+{result.get('content', '')[:8000]}
+
+Provide key findings and cite sources."""
+                    synthesized = agent.brain.think(synthesis_prompt, model_override=effective_model)
+                    response = f"## Deep Research: {topic}\n\n{synthesized}\n\n---\n*{result.get('summary', '')}*"
+                else:
+                    response = f"Research failed: {result.get('error', 'Unknown error')}"
 
                 return {
                     "response": response,
-                    "fast_path": self._was_fast_path(message),
+                    "fast_path": False,
                     "mood": self._get_mood(),
-                    "model_used": self.agent.brain.get_last_model_used()
+                    "model_used": effective_model or "deep_research"
                 }
-            finally:
-                # Clear model override after request
-                if effective_model:
-                    self.agent.brain.set_model_override(None)
+
+            # Screen context injection (Phase 3D)
+            screen_hint = ""
+            try:
+                from aura.tools.screenpipe import get_screenpipe_client
+                sp = get_screenpipe_client()
+                if sp.is_available():
+                    ctx = sp.get_screen_context(minutes=1, max_chars=500)
+                    if ctx.get("available") and ctx.get("current_app"):
+                        screen_hint = (
+                            f"\n[Screen context: user is in {ctx['current_app']}"
+                            + (f" — {ctx['current_window']}" if ctx.get("current_window") else "")
+                            + (". Error visible on screen." if ctx.get("has_errors") else "")
+                            + "]"
+                        )
+            except Exception:
+                logger.debug("chat_screenpipe_context_failed", exc_info=True)
+
+            enriched_msg = message + screen_hint if screen_hint else message
+
+            # Use agent.chat() which has direct handlers for search/crypto
+            response = agent.chat(enriched_msg, speak=speak)
+
+            # Truth Spine: classify response and tag to VerifiedMemory (non-blocking)
+            # Uses module-level singleton to avoid per-call disk reads.
+            try:
+                _verified_mem = _get_truth_spine()
+                _resp_lower = response.lower()
+                import re as _re
+                # FACT: actual URL present (not just the word "verified")
+                _has_url = bool(_re.search(r'https?://\S+', response))
+                _has_artifact = any(m in response for m in ["sha256:", "✓"])
+                if _has_url or _has_artifact:
+                    _tier = MemoryTier.BELIEF  # URL ≠ verified fact; downgrade to BELIEF
+                    _verified_mem.store_belief(
+                        content=response[:500],
+                        source="chat",
+                        reasoning="Response cites a URL or artifact (unverified by agent)"
+                    )
+                elif any(m in _resp_lower for m in ["i think", "i believe", "likely", "probably", "it seems"]):
+                    _tier = MemoryTier.BELIEF
+                    _verified_mem.store_belief(
+                        content=response[:500],
+                        source="chat",
+                        reasoning="Response contains inference or belief language"
+                    )
+                else:
+                    _tier = MemoryTier.SPECULATION
+                    _verified_mem.store_speculation(
+                        content=response[:500],
+                        source="chat",
+                        reason="Unverified LLM output"
+                    )
+                logger.debug(f"[TruthSpine] Response classified as {_tier.value}")
+            except Exception as _ts_err:
+                logger.debug(f"[TruthSpine] Classification error: {_ts_err}")
+
+            return {
+                "response": response,
+                "fast_path": self._was_fast_path(message),
+                "mood": self._get_mood(),
+                "model_used": agent.brain.get_last_model_used()
+            }
+        finally:
+            # Clear model override after request
+            if effective_model:
+                agent.brain.set_model_override(None)
 
     def chat_stream(self, message: str, model_override: Optional[str] = None, action_mode: Optional[str] = None):
         """Stream a chat response from the agent.
@@ -659,14 +668,14 @@ Provide key findings and cite sources."""
                 from api.routes.context import track_context_from_message
                 track_context_from_message(message, is_user=True)
             except Exception:
-                pass
+                logger.debug("stream_context_heatmap_track_failed", exc_info=True)
 
             # Record activity for idle panel
             try:
                 from api.routes.idle_behaviors import record_user_activity
                 record_user_activity()
             except Exception:
-                pass
+                logger.debug("stream_idle_activity_record_failed", exc_info=True)
 
             # ===== DIRECT SEARCH HANDLER =====
             # Check for direct search before streaming to prevent query hallucination
@@ -690,6 +699,7 @@ Provide key findings and cite sources."""
             # ===== DEEP RESEARCH HANDLER =====
             if detected_action == "deep_research":
                 try:
+                    import queue as _queue
                     from aura.tools.deep_research import DeepResearchTool
                     deep_tool = DeepResearchTool()
 
@@ -702,8 +712,36 @@ Provide key findings and cite sources."""
                     yield {"type": "chunk", "content": f"## Deep Research: {topic}\n\n"}
                     yield {"type": "tool_trace", "event": "start", "tool": "deep_research", "detail": f'Researching "{topic[:50]}"', "timestamp": time.time()}
 
+                    # Wire WebSocket progress emitter — research() runs in
+                    # a thread pool, but chat_stream is consumed from another
+                    # thread that feeds asyncio.Queue → WebSocket.  We use a
+                    # plain queue.Queue so the emitter callback (called inside
+                    # research()) can safely push events that we drain below.
+                    _progress_q: _queue.Queue = _queue.Queue()
+                    deep_tool.set_ws_callback(lambda evt: _progress_q.put(evt))
+
+                    # Run research in a background thread so we can drain
+                    # progress events while it's running.
                     _dr_start = time.time()
-                    result = deep_tool.research(topic, depth="deep")
+                    _research_future = deep_tool._executor.submit(
+                        deep_tool.research, topic, "deep"
+                    )
+
+                    # Drain progress events until research finishes
+                    while not _research_future.done():
+                        try:
+                            evt = _progress_q.get(timeout=0.25)
+                            yield evt
+                        except _queue.Empty:
+                            pass
+                    # Drain any remaining events
+                    while not _progress_q.empty():
+                        try:
+                            yield _progress_q.get_nowait()
+                        except _queue.Empty:
+                            break
+
+                    result = _research_future.result(timeout=5)
                     _dr_elapsed = int((time.time() - _dr_start) * 1000)
                     yield {"type": "tool_trace", "event": "done", "tool": "deep_research", "detail": f'{result.get("urls_found", 0)} sources, {result.get("pages_read", 0)} pages', "elapsed_ms": _dr_elapsed, "timestamp": time.time()}
 
@@ -726,17 +764,19 @@ Provide a well-structured, informative summary with key findings and cite source
                             yield {"type": "chunk", "content": brain.think(synthesis_prompt, model_override=effective_model)}
                         yield {"type": "chunk", "content": f"\n\n---\n*{result.get('summary', '')}*"}
 
-                        # Yield citations from deep research sources
-                        raw_sources = result.get("sources", [])
-                        if raw_sources:
-                            citations = []
+                        # Yield structured citations from deep research
+                        # v3: use pre-built citations with claim-source mapping
+                        citations = result.get("citations", [])
+                        if not citations:
+                            # Fallback: build from raw sources (backward compat)
+                            raw_sources = result.get("sources", [])
                             for i, s in enumerate(raw_sources[:15], 1):
                                 if isinstance(s, dict):
                                     citations.append({"id": i, "title": s.get("title", s.get("url", "")), "url": s.get("url", ""), "snippet": s.get("snippet", "")})
                                 elif isinstance(s, str):
                                     citations.append({"id": i, "title": s, "url": s, "snippet": ""})
-                            if citations:
-                                yield {"type": "citations", "citations": citations}
+                        if citations:
+                            yield {"type": "citations", "citations": citations}
                     else:
                         yield {"type": "chunk", "content": f"Research failed: {result.get('error', 'Unknown error')}"}
 
@@ -839,7 +879,7 @@ Provide a well-structured, informative summary with key findings and cite source
                             + "]"
                         )
             except Exception:
-                pass
+                logger.debug("stream_screenpipe_context_failed", exc_info=True)
 
             enriched_message = message + screen_hint if screen_hint else message
 
@@ -854,50 +894,23 @@ Provide a well-structured, informative summary with key findings and cite source
                     yield {"type": "chunk", "content": chunk}
                 yield {"type": "tool_status", "tool_name": "", "tool_action": ""}  # clear status
 
-                # Memory writes after streaming completes (non-blocking daemon threads)
+                # Single memory write via UnifiedMemory (consolidated from 3 systems, 2026-03-22)
                 _clean_msg = message.split("\n[Screen context:")[0].strip()
-                if hasattr(agent, 'memory_retriever') and agent.memory_retriever is not None:
+                if len(full_response) > 30:
                     try:
-                        threading.Thread(
-                            target=agent.memory_retriever.store_interaction,
-                            args=(_clean_msg, full_response[:500]),
-                            daemon=True
-                        ).start()
+                        def _store_to_unified():
+                            try:
+                                from aura.memory.unified_memory import get_unified_memory
+                                get_unified_memory().store_gated(
+                                    content=f"Q: {_clean_msg[:300]}\nA: {full_response[:500]}",
+                                    source="conversation",
+                                    importance=0.6,
+                                )
+                            except Exception:
+                                logger.debug("unified_memory_store_failed", exc_info=True)
+                        threading.Thread(target=_store_to_unified, daemon=True).start()
                     except Exception:
-                        pass
-                # NOTE: This A-MEM write is NOT redundant with agent.chat_stream()'s
-                # UnifiedMemory.store(). This code path calls brain.think_stream() directly,
-                # bypassing agent.chat_stream() entirely, so the agent's own post-processing
-                # (including UnifiedMemory.store → amem.add) never runs. This is the sole
-                # A-MEM write for the direct-brain streaming path.
-                if hasattr(agent, 'tools') and 'amem' in agent.tools and len(full_response) > 50:
-                    try:
-                        amem_tool = agent.tools['amem']
-                        mem_content = f"[Conversation] User: {_clean_msg[:200]}\nAURA: {full_response[:300]}"
-                        threading.Thread(
-                            target=amem_tool.amem.add,
-                            kwargs={
-                                "content": mem_content,
-                                "category": "episodic",
-                                "source": "conversation",
-                                "importance": 0.5,
-                                "auto_extract": False,  # Disabled: background LLM call competes with chat stream
-                                "auto_link": True,
-                                "auto_evolve": False,
-                            },
-                            daemon=True
-                        ).start()
-                    except Exception:
-                        pass
-
-                # Auto-store exchange in episodic memory (best-effort, daemon thread)
-                _clean_msg_ep = message.split("\n[Screen context:")[0].strip()
-                if hasattr(brain, '_episodic_memory') and brain._episodic_memory and len(full_response) > 30:
-                    brain._episodic_memory.quick_store(
-                        content=f"Q: {_clean_msg_ep[:300]}\nA: {full_response[:500]}",
-                        title=_clean_msg_ep[:60],
-                        importance=0.6,
-                    )
+                        logger.debug("unified_memory_thread_start_failed", exc_info=True)
 
                 yield {"type": "done", "mood": self._get_mood(), "model_used": brain.get_last_model_used()}
             else:
@@ -924,18 +937,26 @@ Provide a well-structured, informative summary with key findings and cite source
 
         Returns:
             Run result dict
-        """
-        with self._agent_lock:
-            # Set max iterations temporarily
-            original_max = getattr(self.agent, 'max_iterations', 10)
-            self.agent.max_iterations = max_iterations
 
-            try:
-                result = self.agent.run(goal, context=context, use_fastpath=use_fastpath)
-                result["mood"] = self._get_mood()
-                return result
-            finally:
-                self.agent.max_iterations = original_max
+        Note:
+            CRITICAL FIX: Lock is only held briefly for setup/teardown, NOT during
+            agent.run(). Mirrors chat() pattern to prevent long lock contention.
+        """
+        # ===== SETUP PHASE — Brief lock =====
+        with self._agent_lock:
+            agent = self.agent
+            original_max = getattr(agent, 'max_iterations', 10)
+            agent.max_iterations = max_iterations
+        # ===== END SETUP — Lock released =====
+
+        try:
+            result = agent.run(goal, context=context, use_fastpath=use_fastpath)
+            result["mood"] = self._get_mood()
+            return result
+        finally:
+            # ===== TEARDOWN — Brief lock =====
+            with self._agent_lock:
+                agent.max_iterations = original_max
 
     def get_status(self) -> Dict[str, Any]:
         """Get agent status information.
@@ -1057,14 +1078,14 @@ Provide a well-structured, informative summary with key findings and cite source
             from api.routes.context import get_tracker
             get_tracker().clear()
         except Exception:
-            pass
+            logger.debug("context_tracker_clear_failed", exc_info=True)
 
         # Clear active thinking state
         try:
             from api.routes.thinking import get_manager
             get_manager().clear_active()
         except Exception:
-            pass
+            logger.debug("thinking_manager_clear_failed", exc_info=True)
 
     def _get_mood(self) -> Optional[MoodState]:
         """Extract AURA's current mood from ALMA emotional engine.
@@ -1213,6 +1234,7 @@ Provide a well-structured, informative summary with key findings and cite source
         try:
             return self.agent._is_simple_query(message)
         except Exception:
+            logger.debug("fast_path_check_failed", exc_info=True)
             return False
 
     def get_available_models(self) -> Dict[str, Any]:

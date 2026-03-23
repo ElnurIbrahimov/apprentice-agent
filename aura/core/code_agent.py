@@ -399,6 +399,12 @@ class CodeAgentMode:
 
         # --- execute_code ---
         def execute_code(code: str) -> dict:
+            # SECURITY: AST-validate LLM-generated code before execution
+            from aura.agent import validate_script_code
+            is_valid, validation_msg = validate_script_code(code, "<code_agent_execute>")
+            if not is_valid:
+                logger.warning(f"[CodeAgent] Blocked unsafe code in execute_code(): {validation_msg}")
+                return {"success": False, "error": f"Code blocked for safety: {validation_msg}"}
             tool = agent.tools.get("code_executor")
             if tool and hasattr(tool, "execute"):
                 try:
@@ -455,6 +461,7 @@ class CodeAgentMode:
             "eval", "exec", "compile", "__import__", "open",
             "input", "breakpoint", "exit", "quit",
             "globals", "locals", "vars",
+            "getattr", "setattr", "delattr", "hasattr",
         }
         _blocked_attrs = {
             "__class__", "__bases__", "__subclasses__", "__mro__",

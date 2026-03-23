@@ -1236,10 +1236,10 @@ class ALMAEngine:
 
             # 3. Curiosity from event bus activity
             try:
-                from aura.proactive.gateway_daemon import get_daemon
-                daemon = get_daemon()
-                if daemon and daemon._stats.get("events_processed", 0) > 0:
-                    recent_events = daemon._stats.get("events_processed", 0)
+                from aura.proactive.gateway_daemon import get_gateway_daemon
+                daemon = get_gateway_daemon()
+                if daemon and daemon._stats.get("events_received", 0) > 0:
+                    recent_events = daemon._stats.get("events_received", 0)
                     if recent_events > 5:
                         curiosity_strength = min(0.02, recent_events * 0.002)
                         curiosity_pad = PADState(pleasure=0.3, arousal=0.4, dominance=0.1)

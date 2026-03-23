@@ -66,7 +66,6 @@ class CognitiveLoadState:
     daemon_load: float = 0.0          # From Gateway Daemon
     inner_thoughts_load: float = 0.0  # From inner thoughts engine
     metacognition_load: float = 0.0   # From metacognitive engine
-    workspace_load: float = 0.0       # From Global Workspace engine
     last_computed: float = 0.0
 
     def to_dict(self) -> Dict[str, float]:
@@ -77,7 +76,6 @@ class CognitiveLoadState:
             "daemon_load": round(self.daemon_load, 3),
             "inner_thoughts_load": round(self.inner_thoughts_load, 3),
             "metacognition_load": round(self.metacognition_load, 3),
-            "workspace_load": round(self.workspace_load, 3),
         }
 
 
@@ -452,7 +450,7 @@ class IdlePresenceEngine:
             mgr = get_manager()
             return mgr.get_idle_duration()
         except Exception as e:
-            logger.debug(f"[IdlePresence] idle duration check failed: {e}")
+            logger.warning("idle_duration_check_failed", exc_info=True)
             return 0.0
 
     def _run_idle_tasks(self, idle_seconds: float) -> None:
@@ -477,6 +475,11 @@ class IdlePresenceEngine:
         # Task 3.6: Skill health check — suggest evolving weak skills (>5min idle, 6h cooldown)
         if idle_seconds > 300:
             self._run_skill_health_check()
+
+        # Task 3.7: Autonomous Hands — trigger eligible Hands during idle
+        # (OpenFang-inspired: self-contained autonomous task packages)
+        if idle_seconds > 300:
+            self._trigger_hands(idle_seconds)
 
         # Task 4: Auto-trigger NeuroDream sleep when idle long enough
         if idle_seconds > self._sleep_idle_threshold:
@@ -589,6 +592,44 @@ class IdlePresenceEngine:
 
         except Exception as e:
             logger.debug(f"[IdlePresence] Skill health check error: {e}")
+
+    # ====================================================================
+    # Autonomous Hands (OpenFang-inspired)
+    # ====================================================================
+
+    def _trigger_hands(self, idle_seconds: float) -> None:
+        """Check and trigger eligible autonomous Hands during idle."""
+        try:
+            from aura.hands.manager import get_hand_manager
+            manager = get_hand_manager()
+
+            # Get drive urgencies from intrinsic motivation
+            drive_urgencies = {}
+            try:
+                from aura.consciousness.intrinsic_motivation import get_intrinsic_motivation
+                engine = get_intrinsic_motivation()
+                if engine:
+                    for drive_name in ("curiosity", "competence", "social", "coherence"):
+                        drive_urgencies[drive_name] = engine.get_drives_summary().get(drive_name, 0.0)
+            except Exception as e:
+                logger.debug(f"[IdlePresence] Drive urgencies unavailable: {e}")
+
+            # Check and run eligible hands
+            triggered = manager.check_and_run(
+                brain=None,  # Will be set by the hand manager if available
+                tools={},    # Hands bring their own tool access
+                idle_seconds=idle_seconds,
+                drive_urgencies=drive_urgencies,
+            )
+
+            if triggered:
+                self._record_activity(
+                    IdleActivity.IDLE_MONITORING,
+                    f"Triggered autonomous hand: {triggered}",
+                    cognitive_load=0.6,
+                )
+        except Exception as e:
+            logger.debug(f"[IdlePresence] Hand trigger error: {e}")
 
     # ====================================================================
     # Sleep Scheduling

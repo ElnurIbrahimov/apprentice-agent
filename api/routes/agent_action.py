@@ -28,7 +28,7 @@ from api.auth import require_api_key
 from api.utils import safe_error_detail
 
 # Session ID validation: alphanumeric + hyphens, max 64 chars
-_SESSION_ID_RE = re.compile(r'^[a-zA-Z0-9\-]{0,64}$')
+_SESSION_ID_RE = re.compile(r'^[a-zA-Z0-9\-]{1,64}$')
 
 logger = logging.getLogger(__name__)
 

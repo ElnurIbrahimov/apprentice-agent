@@ -33,6 +33,8 @@ export function useWebSocket() {
     setIsLoading,
     setError,
     setToolStatus,
+    addResearchStep,
+    clearResearchProgress,
   } = useChatStore();
 
   // Calculate exponential backoff delay
@@ -74,7 +76,25 @@ export function useWebSocket() {
   // Handle incoming messages - defined before connect to avoid closure issues
   const handleMessage = useCallback((data: WebSocketMessage) => {
     switch (data.type) {
+      case 'research_progress':
+        if (data.stage) {
+          addResearchStep({
+            stage: data.stage,
+            data: data.data || {},
+            timestamp: Date.now(),
+          });
+        }
+        break;
+
       case 'chunk':
+        // When streaming starts, deactivate research progress
+        if (!currentMessageId.current) {
+          useChatStore.getState().addResearchStep({
+            stage: 'synthesis',
+            data: {},
+            timestamp: Date.now(),
+          });
+        }
         if (data.content) {
           if (!currentMessageId.current) {
             currentMessageId.current = addMessage({
@@ -90,6 +110,7 @@ export function useWebSocket() {
 
       case 'done':
         clearResponseTimeout();
+        clearResearchProgress();
         if (currentMessageId.current) {
           setMessageStreaming(currentMessageId.current, false);
           if (data.model_used) {
@@ -196,7 +217,7 @@ export function useWebSocket() {
       default:
         console.warn('[WebSocket] Unknown message type:', data.type);
     }
-  }, [addMessage, appendToMessage, setMessageStreaming, setMessageModelUsed, setCitationsForMessage, appendToolTrace, setMood, setIsLoading, setError, clearResponseTimeout, setToolStatus]);
+  }, [addMessage, appendToMessage, setMessageStreaming, setMessageModelUsed, setCitationsForMessage, appendToolTrace, setMood, setIsLoading, setError, clearResponseTimeout, setToolStatus, addResearchStep, clearResearchProgress]);
 
   // Connect function
   const connect = useCallback(() => {

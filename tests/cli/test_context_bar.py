@@ -43,7 +43,9 @@ def test_get_context_limit_default():
     assert get_context_limit("unknown-model") == 128_000
 
 def test_get_context_limit_minimax():
-    assert get_context_limit("minimax-m2.5") == 1_000_000
+    # minimax-m2.7 is 1M, minimax-m2.5 is 196K (per token_manager)
+    assert get_context_limit("minimax-m2.7:cloud") == 1_048_576
+    assert get_context_limit("minimax-m2.5:cloud") == 196_608
 
 def test_context_gauge_low_usage():
     gauge = build_context_gauge(used=5000, limit=128000)

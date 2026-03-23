@@ -90,6 +90,9 @@ class PermissionManager:
         """
         perms = config.get("permissions", {})
         for key, value in perms.items():
+            if key not in DEFAULT_PERMISSIONS:
+                logger.warning(f"[Permissions] Unknown permission key '{key}' in AURA.md — skipped")
+                continue
             try:
                 new_tier = PermissionTier(value)
                 current = self._permissions.get(key)

@@ -55,6 +55,9 @@ async def transcribe(file: UploadFile = File(...)):
         chunks.append(chunk)
     data = b"".join(chunks)
     suffix = os.path.splitext(file.filename or ".webm")[1] or ".webm"
+    _ALLOWED_AUDIO_SUFFIXES = {".webm", ".mp3", ".wav", ".ogg", ".flac", ".m4a", ".mp4", ".mpeg", ".mpga"}
+    if suffix.lower() not in _ALLOWED_AUDIO_SUFFIXES:
+        raise HTTPException(400, f"Unsupported audio format: {suffix}")
 
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
         f.write(data)

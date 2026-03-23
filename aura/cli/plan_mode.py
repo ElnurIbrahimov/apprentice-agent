@@ -177,3 +177,49 @@ Approach: [1-2 sentence approach description]
 3. [Continue as needed...]
 
 Keep steps concrete and actionable. Include file paths where relevant. 5-10 steps max."""
+
+
+def show_plan_approval(console: Console, plan: ExecutionPlan) -> str:
+    """Render the plan and prompt for approval.
+
+    Returns:
+        'y' if approved, 'n' if cancelled, 'e' if user wants to edit.
+    """
+    render_plan(console, plan)
+    console.print()
+    console.print("[bold]Approve this plan?[/bold]  [green]y[/green]es / [red]n[/red]o / [yellow]e[/yellow]dit")
+    try:
+        choice = input("> ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return "n"
+    if choice in ("y", "yes"):
+        return "y"
+    elif choice in ("e", "edit"):
+        return "e"
+    return "n"
+
+
+def edit_plan_text(console: Console, plan_text: str) -> str:
+    """Open the plan text in an editor for the user to modify.
+
+    Falls back to inline editing if no editor is available.
+    Returns the edited plan text.
+    """
+    import os
+    import tempfile
+    import subprocess
+    from pathlib import Path
+
+    editor = os.environ.get("EDITOR", "notepad" if os.name == "nt" else "nano")
+    with tempfile.NamedTemporaryFile(suffix=".md", delete=False, mode="w", encoding="utf-8") as f:
+        f.write(plan_text)
+        tmp_path = f.name
+    try:
+        subprocess.call([editor, tmp_path])
+        edited = Path(tmp_path).read_text(encoding="utf-8").strip()
+        return edited if edited else plan_text
+    except (FileNotFoundError, OSError) as e:
+        console.print(f"[red]Editor failed: {e}[/red]")
+        return plan_text
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)

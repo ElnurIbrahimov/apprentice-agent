@@ -175,6 +175,17 @@ class CodeExecutorTool:
         # Unescape literal \n, \t from LLM output to actual newlines/tabs
         code = self._unescape_code(code)
 
+        # SECURITY: AST validation runs BEFORE any execution tier.
+        # Previously this only guarded Tier 3 (subprocess), allowing Tier 1
+        # (Monty) and Tier 2 (E2B) to execute unchecked LLM-generated code.
+        safety_check = self._safety_check(code)
+        if not safety_check["safe"]:
+            return {
+                "success": False,
+                "error": f"Code blocked for safety: {safety_check['reason']}",
+                "code": code,
+            }
+
         # Tier 1: Monty for pure computation
         if self._is_pure_computation(code):
             monty_result = self._execute_monty(code)
@@ -187,15 +198,7 @@ class CodeExecutorTool:
             return e2b_result
 
         # Tier 3: Subprocess sandbox (offline fallback)
-        # Check for potentially dangerous operations before subprocess
-        safety_check = self._safety_check(code)
-        if not safety_check["safe"]:
-            return {
-                "success": False,
-                "error": f"Code blocked for safety: {safety_check['reason']}",
-                "code": code
-            }
-
+        # AST safety check already passed at the top of execute().
         try:
             result = self._run_sandboxed(code)
             return result
@@ -315,6 +318,18 @@ try:
         # SECURITY: Remove wrapper internals from namespace before user code runs
         # to prevent escalation via __aura_stdout_cap__ -> sys -> os
         del _io, _redirect_stdout, _redirect_stderr
+        # SECURITY: Restrict builtins to prevent getattr/eval/exec sandbox escapes
+        # e.g. getattr(__builtins__, 'op'+'en') bypasses AST checks
+        import builtins as _b
+        _safe_builtins = {{k: v for k, v in vars(_b).items() if k not in {{
+            'eval', 'exec', 'compile', '__import__', 'open', 'input',
+            'breakpoint', 'getattr', 'setattr', 'delattr', 'hasattr',
+            'globals', 'locals', 'vars', 'dir', 'memoryview', 'type',
+            'object', 'exit', 'quit',
+        }}}}
+        _safe_builtins['__build_class__'] = _b.__build_class__
+        __builtins__ = _safe_builtins
+        del _b, _safe_builtins
         # User code starts here
 {self._indent_code(code, 8)}
         # User code ends here

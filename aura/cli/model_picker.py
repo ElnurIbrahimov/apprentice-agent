@@ -1,9 +1,17 @@
 """Interactive model picker for AURA CLI — arrow-key navigable, shows ALL models."""
+from __future__ import annotations
 
 import os
+import logging
+import time
+from typing import Any, Optional
+
+from rich.console import Console as _Console
+
+_logger = logging.getLogger(__name__)
 
 # Model roles with display info (updated from Config on startup)
-MODEL_ROLES = [
+MODEL_ROLES: list[tuple[str, str, str]] = [
     ("fast", "nemotron-3-super:cloud", "fast inference"),
     ("reason", "kimi-k2.5:cloud", "256K ctx, top agentic"),
     ("code", "minimax-m2.7:cloud", "1M ctx, SWE-Pro 56.2%"),
@@ -12,28 +20,32 @@ MODEL_ROLES = [
     ("longctx", "minimax-m2.7:cloud", "1M ctx"),
 ]
 
-# Cache for all available models
-_all_models_cache = []
+# TTL-based cache for fetched Ollama models (avoids permanent stale list)
+_MODELS_CACHE_TTL: float = 60.0
+_models_cache_result: list[str] = []
+_models_cache_ts: float = 0.0
 
 
-def _fetch_all_models() -> list:
-    """Fetch all available models from Ollama."""
-    global _all_models_cache
-    if _all_models_cache:
-        return _all_models_cache
+def _fetch_all_models() -> list[str]:
+    """Fetch all available models from Ollama (cached for 60s)."""
+    global _models_cache_result, _models_cache_ts
+    now = time.monotonic()
+    if _models_cache_result and (now - _models_cache_ts) < _MODELS_CACHE_TTL:
+        return _models_cache_result
     try:
         import requests
         host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
         resp = requests.get(f"{host}/api/tags", timeout=5)
         if resp.status_code == 200:
             models = resp.json().get("models", [])
-            _all_models_cache = [m["name"] for m in models]
+            _models_cache_result = [m["name"] for m in models]
+            _models_cache_ts = now
     except Exception:
-        pass
-    return _all_models_cache
+        _logger.debug("ollama_model_fetch_failed", exc_info=True)
+    return _models_cache_result
 
 
-def _fetch_chatgpt_models() -> list:
+def _fetch_chatgpt_models() -> list[str]:
     """Get available ChatGPT models if authenticated."""
     try:
         from aura.auth.chatgpt_oauth import is_authenticated
@@ -45,9 +57,9 @@ def _fetch_chatgpt_models() -> list:
     return []
 
 
-def _build_model_list(current_model: str) -> list:
+def _build_model_list(current_model: str) -> list[tuple[str, str, str]]:
     """Build the full model list: auto first, then ChatGPT, then role models, then all others."""
-    items = []
+    items: list[tuple[str, str, str]] = []
 
     # First item: auto
     role_tag = "auto-route"
@@ -55,7 +67,7 @@ def _build_model_list(current_model: str) -> list:
 
     # ChatGPT OAuth models (if authenticated)
     chatgpt_models = _fetch_chatgpt_models()
-    seen = set()
+    seen: set[str] = set()
     for m in chatgpt_models:
         if m not in seen:
             seen.add(m)
@@ -103,7 +115,7 @@ def _build_model_list(current_model: str) -> list:
     return items
 
 
-def pick_model(console, current_model: str = "auto") -> "str | None":
+def pick_model(console: _Console, current_model: str = "auto") -> Optional[str]:
     """Show interactive model picker with arrow-key navigation.
 
     Returns model name, 'auto', or None (cancelled).
@@ -115,250 +127,42 @@ def pick_model(console, current_model: str = "auto") -> "str | None":
         return _pick_model_fallback(console, current_model)
 
 
-def _pick_model_interactive(current_model: str) -> "str | None":
-    """Full interactive picker using prompt_toolkit Application."""
-    from prompt_toolkit import Application
-    from prompt_toolkit.layout import Layout, HSplit, Window, FormattedTextControl
-    from prompt_toolkit.key_binding import KeyBindings
-    from prompt_toolkit.layout.dimension import Dimension
+def _pick_model_interactive(current_model: str) -> Optional[str]:
+    """Full interactive picker using shared picker component."""
+    from aura.cli.picker import PickerItem, run_picker
 
-    items = _build_model_list(current_model)
-    if not items:
+    raw_items = _build_model_list(current_model)
+    if not raw_items:
         return None
 
-    # State
-    selected_idx = 0
-    filter_text = [""]  # mutable container for closure
-    result = [None]  # mutable container for closure
-
-    # Find current model index
-    for i, (model, _, _) in enumerate(items):
+    # Build PickerItem list with pre-formatted descriptions
+    picker_items: list[Any] = []
+    for model, role, ctx in raw_items:
+        model_display = model.replace(":cloud", "").replace(":latest", "")
+        # Build description from role tag + context + current marker
+        desc_parts = []
+        if role:
+            desc_parts.append(role)
+        if ctx:
+            desc_parts.append(ctx)
         if model == current_model:
-            selected_idx = i
-            break
+            desc_parts.append("<-")
+        description = "  ".join(desc_parts)
+        picker_items.append(PickerItem(
+            id=model,
+            label=model_display,
+            description=description,
+        ))
 
-    state = {"idx": selected_idx, "scroll_offset": 0}
-
-    def _get_filtered_items():
-        ft = filter_text[0].lower()
-        if not ft:
-            return list(enumerate(items))
-        return [(i, item) for i, item in enumerate(items)
-                if ft in item[0].lower() or ft in item[1].lower()]
-
-    def _get_display_text():
-        filtered = _get_filtered_items()
-        if not filtered:
-            return [("class:dim", "\n  No models match filter.\n")]
-
-        # Terminal height budget: leave room for header/footer (~8 lines)
-        max_visible = 20
-
-        # Find where selected_idx is in filtered list
-        sel_pos = 0
-        for j, (orig_i, _) in enumerate(filtered):
-            if orig_i == state["idx"]:
-                sel_pos = j
-                break
-
-        # Adjust scroll offset
-        if sel_pos < state["scroll_offset"]:
-            state["scroll_offset"] = sel_pos
-        elif sel_pos >= state["scroll_offset"] + max_visible:
-            state["scroll_offset"] = sel_pos - max_visible + 1
-
-        offset = state["scroll_offset"]
-        visible = filtered[offset:offset + max_visible]
-
-        fragments = []
-        fragments.append(("class:title", "  Model Picker"))
-        cur = current_model.replace(":cloud", "").replace(":latest", "")
-        fragments.append(("class:dim", f"  (current: {cur})"))
-        fragments.append(("", "\n"))
-
-        if filter_text[0]:
-            fragments.append(("class:dim", "  Filter: "))
-            fragments.append(("class:filter", filter_text[0]))
-            fragments.append(("", "\n"))
-
-        fragments.append(("class:dim", "  " + "-" * 55 + "\n"))
-
-        for j, (orig_i, (model, role, ctx)) in enumerate(visible):
-            is_selected = (orig_i == state["idx"])
-            is_current = (model == current_model)
-            global_j = offset + j
-
-            # Cursor
-            if is_selected:
-                fragments.append(("class:cursor", "  > "))
-            else:
-                fragments.append(("", "    "))
-
-            # Model name
-            model_display = model.replace(":cloud", "").replace(":latest", "")
-            if len(model_display) > 30:
-                model_display = model_display[:27] + "..."
-
-            if is_selected and is_current:
-                fragments.append(("class:selected-current", f"{model_display:<32s}"))
-            elif is_selected:
-                fragments.append(("class:selected", f"{model_display:<32s}"))
-            elif is_current:
-                fragments.append(("class:current", f"{model_display:<32s}"))
-            else:
-                fragments.append(("class:model", f"{model_display:<32s}"))
-
-            # Role/tag
-            if role:
-                if role in ("fast", "reason", "code", "think", "vision", "longctx", "auto-route"):
-                    fragments.append(("class:role", f" {role:<12s}"))
-                elif role == "cloud":
-                    fragments.append(("class:cloud", f" {'cloud':<12s}"))
-                elif role == "chatgpt":
-                    fragments.append(("class:cloud", f" {'chatgpt':<12s}"))
-                elif ctx == "api":
-                    fragments.append(("class:api", f" {role:<12s}"))
-                else:
-                    fragments.append(("class:local", f" {'local':<12s}"))
-
-            # Context size
-            if ctx:
-                fragments.append(("class:dim", f" {ctx}"))
-
-            # Current marker
-            if is_current:
-                fragments.append(("class:current-marker", " <-"))
-
-            fragments.append(("", "\n"))
-
-        # Scroll indicator
-        total = len(filtered)
-        if total > max_visible:
-            if offset > 0:
-                fragments.append(("class:dim", "  ... more above\n"))
-            if offset + max_visible < total:
-                fragments.append(("class:dim", f"  ... {total - offset - max_visible} more below\n"))
-
-        fragments.append(("class:dim", "  " + "-" * 55 + "\n"))
-        fragments.append(("class:hint", "  Up/Down"))
-        fragments.append(("class:dim", " navigate  "))
-        fragments.append(("class:hint", "Enter"))
-        fragments.append(("class:dim", " select  "))
-        fragments.append(("class:hint", "Esc"))
-        fragments.append(("class:dim", " cancel  "))
-        fragments.append(("class:hint", "Type"))
-        fragments.append(("class:dim", " to filter"))
-
-        return fragments
-
-    # Keybindings
-    kb = KeyBindings()
-
-    @kb.add("up")
-    def _up(event):
-        filtered = _get_filtered_items()
-        if not filtered:
-            return
-        # Find current position in filtered list
-        pos = 0
-        for j, (orig_i, _) in enumerate(filtered):
-            if orig_i == state["idx"]:
-                pos = j
-                break
-        if pos > 0:
-            state["idx"] = filtered[pos - 1][0]
-
-    @kb.add("down")
-    def _down(event):
-        filtered = _get_filtered_items()
-        if not filtered:
-            return
-        pos = 0
-        for j, (orig_i, _) in enumerate(filtered):
-            if orig_i == state["idx"]:
-                pos = j
-                break
-        if pos < len(filtered) - 1:
-            state["idx"] = filtered[pos + 1][0]
-
-    @kb.add("enter")
-    def _select(event):
-        filtered = _get_filtered_items()
-        for orig_i, (model, _, _) in filtered:
-            if orig_i == state["idx"]:
-                result[0] = model
-                event.app.exit()
-                return
-        event.app.exit()
-
-    @kb.add("escape")
-    def _cancel(event):
-        result[0] = None
-        event.app.exit()
-
-    @kb.add("c-c")
-    def _ctrl_c(event):
-        result[0] = None
-        event.app.exit()
-
-    @kb.add("backspace")
-    def _backspace(event):
-        if filter_text[0]:
-            filter_text[0] = filter_text[0][:-1]
-            # Reset selection to first filtered item
-            filtered = _get_filtered_items()
-            if filtered:
-                state["idx"] = filtered[0][0]
-                state["scroll_offset"] = 0
-
-    # Type to filter — catch printable characters
-    @kb.add("<any>")
-    def _type_char(event):
-        data = event.data
-        if data and len(data) == 1 and data.isprintable():
-            filter_text[0] += data
-            # Reset selection to first filtered item
-            filtered = _get_filtered_items()
-            if filtered:
-                state["idx"] = filtered[0][0]
-                state["scroll_offset"] = 0
-
-    from prompt_toolkit.styles import Style
-    style = Style.from_dict({
-        "title": "bold cyan",
-        "dim": "#666666",
-        "filter": "bold yellow",
-        "cursor": "bold cyan",
-        "selected": "bold white",
-        "selected-current": "bold green",
-        "current": "green",
-        "current-marker": "bold green",
-        "model": "#cccccc",
-        "role": "bold yellow",
-        "cloud": "bold cyan",
-        "api": "bold magenta",
-        "local": "#888888",
-        "hint": "bold cyan",
-    })
-
-    control = FormattedTextControl(_get_display_text)
-    window = Window(content=control, wrap_lines=False)
-
-    layout = Layout(HSplit([window]))
-
-    app = Application(
-        layout=layout,
-        key_bindings=kb,
-        style=style,
-        full_screen=False,
-        mouse_support=False,
+    cur_display = current_model.replace(":cloud", "").replace(":latest", "")
+    return run_picker(
+        picker_items,
+        title=f"Model Picker  (current: {cur_display})",
+        max_visible=20,
     )
 
-    app.run()
-    return result[0]
 
-
-def _pick_model_fallback(console, current_model: str) -> "str | None":
+def _pick_model_fallback(console: _Console, current_model: str) -> Optional[str]:
     """Simple fallback picker when prompt_toolkit can't create an Application."""
     items = _build_model_list(current_model)
     console.print("\n[bold cyan]  Model Picker[/bold cyan]")
@@ -390,7 +194,7 @@ def _pick_model_fallback(console, current_model: str) -> "str | None":
     return pick
 
 
-def update_model_roles_from_config():
+def update_model_roles_from_config() -> None:
     """Refresh MODEL_ROLES from Config at runtime."""
     global MODEL_ROLES
     try:

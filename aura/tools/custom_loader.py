@@ -46,6 +46,20 @@ def load_custom_tools(custom_dir: Path | None = None) -> dict:
             logger.warning(f"[CustomLoader] Failed to read {tool_file.name}: {e}")
             continue
 
+        # SECURITY: Verify tool signature if available (OpenFang-inspired Ed25519 signing)
+        try:
+            from aura.security.tool_signing import verify_tool, is_tool_signed
+            if is_tool_signed(str(tool_file)):
+                sig_valid, sig_error = verify_tool(str(tool_file))
+                if not sig_valid:
+                    logger.warning(f"[CustomLoader] BLOCKED {tool_file.name}: signature verification failed — {sig_error}")
+                    continue
+                logger.debug(f"[CustomLoader] Signature verified: {tool_file.name}")
+            else:
+                logger.debug(f"[CustomLoader] No signature for {tool_file.name} (unsigned tools allowed in dev mode)")
+        except Exception as e:
+            logger.debug(f"[CustomLoader] Signature check skipped: {e}")
+
         validator = _get_validator()
         if not callable(validator):
             logger.error(f"[CustomLoader] REFUSED to load {tool_file.name}: security validator unavailable")

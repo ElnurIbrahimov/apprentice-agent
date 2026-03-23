@@ -9,7 +9,6 @@ Handles: aura init, aura doctor, aura config, aura models, aura commit, aura cos
 
 import json
 import os
-import sys
 import subprocess
 from pathlib import Path
 

@@ -83,9 +83,11 @@ def reinforce(
         memory_id,
     )
     with store._lock:
-        cur = store._get_conn().execute(sql, params)
-        store._get_conn().commit()
-    if cur.rowcount == 0:
+        conn = store._get_conn()
+        cur = conn.execute(sql, params)
+        conn.commit()
+        affected = cur.rowcount
+    if affected == 0:
         return None
 
     # Read back the new strength for the return value

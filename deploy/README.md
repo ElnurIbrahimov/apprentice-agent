@@ -298,9 +298,9 @@ cat /opt/aura/.env          # Verify config
 
 ### Rate limiting (429 errors)
 
-- Default is 60 requests/minute per IP
+- Default is 300 requests/minute per IP
 - Adjust `AURA_API_RATE_LIMIT` in `.env` if needed
-- The extension makes multiple requests per interaction (chat + streaming + status), so increase to 200+ for heavy use
+- The extension makes multiple requests per interaction (chat + streaming + status)
 
 ### Model not found
 

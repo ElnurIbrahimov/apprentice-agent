@@ -43,12 +43,7 @@ def unified_memory():
     """
     from aura.memory.unified_memory import UnifiedMemory
     um = UnifiedMemory()
-    um._backends_checked = True  # Skip lazy init that would hit real DBs
-    um._amem = None
-    um._kg = None
-    um._rag = None
-    um._episodic = None
-    um._kg_brain = None
+    um._kg_brain = None  # No KG backend in tests
     return um
 
 

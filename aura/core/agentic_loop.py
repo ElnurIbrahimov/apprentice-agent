@@ -15,8 +15,8 @@ import logging
 import os
 import re
 import sys
+import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
@@ -34,9 +34,11 @@ console = Console()
 
 MAX_ITERATIONS = 50
 MAX_TOOL_OUTPUT_CHARS = 15000
-_TOOL_POOL = ThreadPoolExecutor(max_workers=4)
-import atexit as _atexit
-_atexit.register(_TOOL_POOL.shutdown, wait=True)
+from aura.pools import tool_pool as _tool_pool_fn
+
+def _get_tool_pool():
+    """Lazy accessor — pool created on first parallel tool call, not at import."""
+    return _tool_pool_fn()
 
 
 AGENTIC_SYSTEM_PROMPT = """You are Aura, an AI coding agent with persistent memory. You help users with software engineering tasks by reading files, writing code, running commands, and iterating until the task is complete.
@@ -174,10 +176,20 @@ class ToolExecutor:
         return self._git
 
     def _resolve_path(self, path: str) -> str:
-        """Resolve relative paths against project root."""
+        """Resolve relative paths against project root with containment check."""
         if os.path.isabs(path):
-            return path
-        return os.path.join(self.project_root, path)
+            resolved = os.path.realpath(path)
+        else:
+            resolved = os.path.realpath(os.path.join(self.project_root, path))
+        # Allow project root and home directory, block everything else
+        allowed_roots = [os.path.realpath(self.project_root)]
+        home = os.path.realpath(os.path.expanduser("~"))
+        if home:
+            allowed_roots.append(home)
+        for root in allowed_roots:
+            if resolved.startswith(root + os.sep) or resolved == root:
+                return resolved
+        raise PermissionError(f"Path outside allowed directories: {path}")
 
     def execute(self, tool_name: str, args: dict) -> str:
         """Execute a tool call, return result as string for the LLM."""
@@ -580,6 +592,9 @@ class AgenticLoop:
         self._has_test_failure = False
         self._last_tools_were_reads = True
 
+        # Cancellation event for mid-loop abort (Ctrl+C)
+        self._cancel_event = threading.Event()
+
         # MCP client for external tool servers
         from .mcp_client import MCPClientManager
         self._mcp_client = MCPClientManager()
@@ -597,6 +612,10 @@ class AgenticLoop:
                 self._mcp_client.disconnect_all()
         except Exception:
             pass
+
+    def cancel(self):
+        """Signal the loop to stop after the current LLM/tool call finishes."""
+        self._cancel_event.set()
 
     def _get_active_tools(self) -> list:
         """Get all active tools including MCP tools if connected."""
@@ -638,7 +657,37 @@ class AgenticLoop:
             memories=memories or "(No relevant memories found)",
         )
 
-    def run(self, prompt: str, on_tool_call=None, on_response=None, steering_queue=None) -> dict:
+    def plan_first(self, prompt: str) -> dict:
+        """Generate a plan without executing anything. Returns plan dict.
+
+        Uses the LLM to create a step-by-step plan for the given prompt.
+        The plan can be displayed to the user for approval before execution.
+
+        Returns:
+            {"plan_text": str, "plan": ExecutionPlan, "prompt": str}
+        """
+        from aura.cli.plan_mode import (
+            PLAN_GENERATION_PROMPT, parse_plan_from_llm,
+        )
+
+        plan_prompt = PLAN_GENERATION_PROMPT.format(task=prompt)
+        system_prompt = self._build_system_prompt(prompt)
+
+        try:
+            response = self.brain.think(
+                plan_prompt,
+                system_prompt=system_prompt,
+                use_history=False,
+            )
+            if isinstance(response, dict):
+                response = response.get("response", response.get("content", str(response)))
+        except (ConnectionError, TimeoutError, OSError, RuntimeError) as e:
+            return {"plan_text": "", "plan": None, "prompt": prompt, "error": str(e)}
+
+        plan = parse_plan_from_llm(response)
+        return {"plan_text": response, "plan": plan, "prompt": prompt}
+
+    def run(self, prompt: str, on_tool_call=None, on_response=None, steering_queue=None, on_chunk=None) -> dict:
         """Run the agentic loop until completion.
 
         Args:
@@ -646,6 +695,7 @@ class AgenticLoop:
             on_tool_call: Callback(tool_name, args, result) for UI updates
             on_response: Callback(text, iteration) for streaming text
             steering_queue: Optional SteeringQueue for mid-turn user messages
+            on_chunk: Callback(text) for live token streaming
 
         Returns:
             {success, response, iterations, tool_calls, model}
@@ -657,6 +707,16 @@ class AgenticLoop:
         self._has_edits = False
         self._has_test_failure = False
         self._last_tools_were_reads = True
+        self._loop_error = False
+
+        # Reset cancellation for this run
+        self._cancel_event.clear()
+
+        # Wire in loop guard to prevent infinite tool cycles
+        from aura.reliability.loop_guard import get_guard
+        _session_id = self.session.session_id if self.session else "default"
+        guard = get_guard(_session_id)
+        guard.reset()
 
         system_prompt = self._build_system_prompt(prompt)
 
@@ -679,6 +739,11 @@ class AgenticLoop:
         model_used = ""
 
         while self.iteration < self.max_iterations:
+            # ── Cancellation check: top of iteration ──
+            if self._cancel_event.is_set():
+                final_response = "Cancelled by user."
+                break
+
             self.iteration += 1
             self._edits_this_turn = 0  # Reset per iteration to avoid redundant auto-test
 
@@ -687,6 +752,7 @@ class AgenticLoop:
                 stats = self.brain.get_session_stats()
                 if stats["cost_usd"] >= self.budget_usd:
                     final_response = f"Budget limit reached (${self.budget_usd:.2f}). Stopping."
+                    self._loop_error = True
                     break
 
             # Mid-turn steering: inject queued user messages (after budget check,
@@ -719,24 +785,27 @@ class AgenticLoop:
             stream_error = None
 
             try:
-                # Show spinner
-                model_tag = f" [{step_model.split(':')[0]}]" if step_model else ""
-                sys.stdout.write(f"  \033[90m● thinking{model_tag}...\033[0m")
-                sys.stdout.flush()
+                # Show spinner (suppressed when on_chunk handles display)
+                if not on_chunk:
+                    model_tag = f" [{step_model.split(':')[0]}]" if step_model else ""
+                    sys.stdout.write(f"  \033[90m● thinking{model_tag}...\033[0m")
+                    sys.stdout.flush()
 
                 for chunk_type, data in self.brain.think_with_tools_stream(
                     messages=messages, tools=active_tools,
                     model_override=step_model,
                 ):
                     if chunk_type == "content":
-                        if not accumulated:
+                        if not on_chunk and not accumulated:
                             # Clear the "thinking..." spinner but keep cursor on same line
                             sys.stdout.write("\r\033[K")
                             sys.stdout.write(f"  \033[90m● generating...\033[0m")
                             sys.stdout.flush()
                         accumulated += data
+                        if on_chunk:
+                            on_chunk(data)
                     elif chunk_type == "tool_calls":
-                        if not accumulated:
+                        if not on_chunk and not accumulated:
                             sys.stdout.write("\r\033[K")
                         tool_calls = data
                     elif chunk_type == "done":
@@ -748,12 +817,13 @@ class AgenticLoop:
                         stream_error = data.get("error", "Unknown stream error")
                         break
 
-                if accumulated:
-                    sys.stdout.write("\r\033[K")  # Clear "generating..." status
-                    sys.stdout.flush()
-                elif not tool_calls:
-                    sys.stdout.write("\r\033[K")  # Clear spinner if no output
-                    sys.stdout.flush()
+                if not on_chunk:
+                    if accumulated:
+                        sys.stdout.write("\r\033[K")  # Clear "generating..." status
+                        sys.stdout.flush()
+                    elif not tool_calls:
+                        sys.stdout.write("\r\033[K")  # Clear spinner if no output
+                        sys.stdout.flush()
 
             except Exception as e:
                 stream_error = str(e)
@@ -769,6 +839,7 @@ class AgenticLoop:
                 )
                 if "error" in result:
                     final_response = f"Error: {result['error']}"
+                    self._loop_error = True
                     break
 
                 msg = result["message"]
@@ -826,7 +897,15 @@ class AgenticLoop:
                         args = {}
                 except (json.JSONDecodeError, TypeError) as _parse_err:
                     logger.warning(f"[AgenticLoop] Failed to parse tool args for {tool_name}: {str(args)[:200]}")
-                    args = {}
+                    # Return error instead of calling tool with empty/wrong args
+                    error_result = json.dumps({
+                        "error": f"Malformed arguments for {tool_name}: could not parse JSON. "
+                                 f"Please provide valid JSON arguments. Raw: {str(args)[:200]}"
+                    })
+                    messages.append({"role": "tool", "content": error_result})
+                    if self.session:
+                        self.session.append({"role": "tool", "content": error_result})
+                    continue
                 parsed_calls.append((tool_name, args))
 
             # Permission checks + status display on main thread
@@ -840,6 +919,11 @@ class AgenticLoop:
                     self._show_tool_status(tool_name, args)
                     approved.append((tool_name, args, None))  # None = needs execution
 
+            # ── Cancellation check: before tool execution ──
+            if self._cancel_event.is_set():
+                final_response = f"Cancelled after {self.iteration} iterations."
+                break
+
             # Execute: parallel if 2+ calls, direct if 1
             needs_exec = [(i, t, a) for i, (t, a, r) in enumerate(approved) if r is None]
             if len(needs_exec) == 1:
@@ -848,8 +932,9 @@ class AgenticLoop:
                 approved[idx] = (t, a, result)
             elif len(needs_exec) > 1:
                 futures = {}
+                _pool = _get_tool_pool()
                 for idx, t, a in needs_exec:
-                    fut = _TOOL_POOL.submit(self.executor.execute, t, a)
+                    fut = _pool.submit(self.executor.execute, t, a)
                     futures[idx] = fut
                 for idx, fut in futures.items():
                     try:
@@ -860,6 +945,7 @@ class AgenticLoop:
                     approved[idx] = (t, a, result)
 
             # Collect results in original order
+            _guard_tripped = False
             for tool_name, args, tool_result in approved:
                 if tool_name in ("edit_file", "write_file") and not self._tool_result_has_error(tool_result):
                     self._edits_this_turn += 1
@@ -876,6 +962,22 @@ class AgenticLoop:
                 if self.session:
                     self.session.append(tool_msg)
 
+                # Loop guard: detect infinite tool cycles
+                guard_result = guard.record(tool_name, str(args))
+                if guard_result and guard_result.triggered:
+                    final_response = guard_result.fallback_message
+                    _guard_tripped = True
+                    break
+
+                # ── Cancellation check: after each tool result ──
+                if self._cancel_event.is_set():
+                    final_response = f"Cancelled after {self.iteration} iterations."
+                    _guard_tripped = True  # reuse flag to break outer loop
+                    break
+
+            if _guard_tripped:
+                break
+
             # Auto-test: after processing all tool calls in this iteration,
             # if any edits were made, run tests and feed results back to LLM
             if self._edits_this_turn > 0:
@@ -883,8 +985,8 @@ class AgenticLoop:
                 if test_result:
                     self._has_test_failure = True
                     messages.append({
-                        "role": "tool",
-                        "content": test_result,
+                        "role": "user",
+                        "content": f"[Auto-test result] {test_result}",
                     })
 
         else:
@@ -911,8 +1013,11 @@ class AgenticLoop:
             _store_interaction(prompt, final_response)
         except Exception as e:
             logger.debug(f"[AgenticLoop] non-critical: {e}")
+        # Determine success via explicit flag rather than string prefix matching.
+        # The loop sets _loop_error when it hits a real failure (LLM error, budget, guard trip).
+        hit_error = getattr(self, '_loop_error', False)
         return {
-            "success": not final_response.startswith("Error:"),
+            "success": not hit_error,
             "response": final_response,
             "iterations": self.iteration,
             "tool_calls": self.tool_calls_total,

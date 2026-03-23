@@ -37,24 +37,10 @@ def format_token_count(count: int) -> str:
     else:
         return f"{count / 1_000_000:.1f}M"
 
-MODEL_CONTEXT_LIMITS = {
-    "default": 128_000,
-    "qwen": 128_000,
-    "deepseek": 128_000,
-    "gemma": 128_000,
-    "llama": 128_000,
-    "minimax": 1_000_000,
-    "chatgpt": 128_000,
-    "gpt-5": 1_000_000,
-}
-
 def get_context_limit(model_name: str) -> int:
-    """Get context window limit for a model."""
-    model_lower = (model_name or "").lower()
-    for prefix, limit in MODEL_CONTEXT_LIMITS.items():
-        if prefix in model_lower:
-            return limit
-    return MODEL_CONTEXT_LIMITS["default"]
+    """Get context window limit for a model — delegates to the authoritative token_manager."""
+    from aura.core.token_manager import get_context_window
+    return get_context_window(model_name)
 
 def _usage_color(pct: float) -> str:
     if pct < 0.50:

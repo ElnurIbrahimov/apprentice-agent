@@ -1,4 +1,11 @@
 """Rich-based display for AURA CLI — panels, syntax highlighting, streaming."""
+from __future__ import annotations
+
+import logging
+import os
+from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 from rich.console import Console
 from rich.markdown import Markdown
@@ -10,19 +17,17 @@ from rich.text import Text
 
 from aura.cli.tool_output import ToolOutputRenderer, format_elapsed
 
-console = Console(highlight=True, soft_wrap=True)
+_no_color = os.environ.get("NO_COLOR") is not None
+console: Console = Console(highlight=True, soft_wrap=True, no_color=_no_color)
 
-# Module-level tool output renderer (lazy init)
-_tool_renderer = None
+import functools
 
-def _get_tool_renderer():
-    global _tool_renderer
-    if _tool_renderer is None:
-        _tool_renderer = ToolOutputRenderer(console=console)
-    return _tool_renderer
+@functools.lru_cache(maxsize=1)
+def _get_tool_renderer() -> ToolOutputRenderer:
+    return ToolOutputRenderer(console=console)
 
 
-def show_banner():
+def show_banner() -> None:
     """Display ASCII art banner with gradient colors."""
     from .banner import get_banner, get_welcome_line
     from aura import __version__
@@ -32,19 +37,19 @@ def show_banner():
     console.print()
 
 
-def show_welcome_info(agent):
+def show_welcome_info(agent: Any) -> None:
     """Show a brief info line after the banner: model, session, tool count."""
     model = "auto"
     try:
         model = agent.brain._model_override or "auto"
-    except Exception:
-        pass
+    except AttributeError:
+        logger.debug("welcome_model_read_failed", exc_info=True)
 
     tool_count = 0
     try:
         tool_count = len(agent.tools)
-    except Exception:
-        pass
+    except (TypeError, AttributeError):
+        logger.debug("welcome_tool_count_failed", exc_info=True)
 
     session = "new"
     try:
@@ -52,8 +57,8 @@ def show_welcome_info(agent):
             sid = agent.memory.session_id
             if sid:
                 session = str(sid)[:8]
-    except Exception:
-        pass
+    except (AttributeError, TypeError):
+        logger.debug("welcome_session_read_failed", exc_info=True)
 
     info = Text()
     info.append("  Model: ", style="dim")
@@ -84,8 +89,8 @@ def show_status_bar(
     research_indicator: str = "",
     mood_indicator: str = "",
     watch_indicator: str = "",
-    steering_queue=None,
-):
+    steering_queue: Any = None,
+) -> None:
     """Print the status bar line."""
     from .status_bar import build_status_bar
     width = console.size.width
@@ -105,7 +110,7 @@ def show_status_bar(
     console.print(bar, style="on grey11", end="\n")
 
 
-def show_thinking(label: str = "Working..."):
+def show_thinking(label: str = "Working...") -> Live:
     """Context manager — shows spinner while agent runs. Disappears when done."""
     return Live(
         Spinner("dots", text=f"  [dim]{label}[/dim]"),
@@ -145,7 +150,7 @@ def get_thinking_label(tool_name: str | None = None) -> str:
     return "Thinking..."
 
 
-def show_tool_call(tool_name: str, description: str = "", result=None, elapsed: float = 0.0):
+def show_tool_call(tool_name: str, description: str = "", result: Any = None, elapsed: float = 0.0) -> None:
     """Print a tool call in a compact styled format with elapsed time.
 
     If result is provided and contains diff info for edit/write, show a compact diff summary.
@@ -167,14 +172,14 @@ def show_tool_call(tool_name: str, description: str = "", result=None, elapsed: 
             )
             console.print(f"  {summary}")
             return
-        except Exception:
+        except (ImportError, ValueError, KeyError, TypeError):
             pass  # Fall through to default display
 
     # Get theme-aware tool color
     try:
         from aura.cli.themes import get_theme
         tool_color = get_theme().tool_color
-    except Exception:
+    except (ImportError, AttributeError):
         tool_color = "yellow"
 
     line = Text()
@@ -202,7 +207,7 @@ def show_tool_call(tool_name: str, description: str = "", result=None, elapsed: 
             pass
 
 
-def show_response(text: str, model: str = "", stream: bool = True):
+def show_response(text: str, model: str = "", stream: bool = True) -> None:
     """Render agent response as markdown with a left-border panel.
 
     Args:
@@ -217,7 +222,7 @@ def show_response(text: str, model: str = "", stream: bool = True):
         border_style = f"dim {theme.response_border}"
         header_style = theme.response_header
         code_theme = theme.code_theme
-    except Exception:
+    except (ImportError, AttributeError):
         border_style = "dim cyan"
         header_style = "bold cyan"
         code_theme = "monokai"
@@ -254,7 +259,7 @@ def show_response(text: str, model: str = "", stream: bool = True):
                     block_text = blocks[finalized_count]
                     try:
                         block_md = Markdown(block_text, code_theme=code_theme)
-                    except Exception:
+                    except (ValueError, TypeError):  # Status bar: cosmetic, Rich parse fallback
                         block_md = Text(block_text)
                     # Exit live temporarily to print finalized block permanently
                     live.update(Text(""))
@@ -266,7 +271,7 @@ def show_response(text: str, model: str = "", stream: bool = True):
                     active_block = blocks[-1]
                     try:
                         active_md = Markdown(active_block, code_theme=code_theme)
-                    except Exception:
+                    except (ValueError, TypeError):  # Status bar: cosmetic, Rich parse fallback
                         active_md = Text(active_block)
                     live.update(Padding(active_md, (0, 4)))
 
@@ -278,7 +283,7 @@ def show_response(text: str, model: str = "", stream: bool = True):
             for i in range(finalized_count, len(blocks)):
                 try:
                     block_md = Markdown(blocks[i], code_theme=code_theme)
-                except Exception:
+                except (ValueError, TypeError):  # Status bar: cosmetic, Rich parse fallback
                     block_md = Text(blocks[i])
                 console.print(Padding(block_md, (0, 4)))
 
@@ -288,7 +293,7 @@ def show_response(text: str, model: str = "", stream: bool = True):
         # Non-streaming: render the full panel as before
         try:
             md = Markdown(text, code_theme=code_theme)
-        except Exception:
+        except (ValueError, TypeError):  # Rich Markdown parse fallback
             md = Text(text)
 
         panel = Panel(
@@ -381,8 +386,8 @@ def show_context_summary(
     mood: str = "",
     model: str = "",
     tool_count: int = 0,
-    memory_snippets: list[str] | None = None,
-):
+    memory_snippets: Optional[list[str]] = None,
+) -> None:
     """Show a one-line context summary before the response, with optional memory snippets.
 
     Example:
@@ -427,12 +432,12 @@ def show_context_summary(
         console.print(Text.from_markup(snippet_line))
 
 
-def show_error(message: str):
+def show_error(message: str) -> None:
     """Display error in a styled format."""
     try:
         from aura.cli.themes import get_theme
         error_color = get_theme().error_color
-    except Exception:
+    except (ImportError, AttributeError):
         error_color = "red"
     err = Text()
     err.append("  ✗ ", style=f"bold {error_color}")
@@ -440,7 +445,7 @@ def show_error(message: str):
     console.print(err)
 
 
-def show_info(message: str):
+def show_info(message: str) -> None:
     """Display info message."""
     info = Text()
     info.append("  ● ", style="dim cyan")
@@ -448,7 +453,7 @@ def show_info(message: str):
     console.print(info)
 
 
-def show_help():
+def show_help() -> None:
     """Display quick help with available commands and shortcuts."""
     from rich.table import Table
 
@@ -467,7 +472,8 @@ def show_help():
     table.add_row("Ctrl+K", "Command palette (fuzzy search)")
     table.add_row("Ctrl+G", "Open editor for long prompt")
     table.add_row("Shift+Tab", "Cycle permission mode (Plan / Careful / Full Auto)")
-    table.add_row("Esc Esc", "Rewind to checkpoint")
+    table.add_row("Ctrl+Z", "Rewind to checkpoint")
+    table.add_row("Alt+Enter", "Insert newline (multiline input)")
     table.add_row("Ctrl+C / Ctrl+D", "Exit")
     table.add_row("?", "Show this help")
 
@@ -499,6 +505,7 @@ def show_help():
 
     # --- Parallel & background ---
     table.add_row("/fleet <task>", "Run parallel sub-agents on decomposed task")
+    table.add_row("/chain step1 -> step2", "Run prompt pipeline (output feeds forward)")
     table.add_row("& <prompt>", "Run prompt as background task")
     table.add_row("/tasks", "Show background tasks")
 
@@ -541,6 +548,31 @@ def show_help():
 
     table.add_row("", "")
 
+    # --- Git & Diff ---
+    table.add_row("/diff [args]", "Show git diff with syntax highlighting")
+    table.add_row("/git <command>", "Run read-only git commands (status, log, blame, ...)")
+
+    table.add_row("", "")
+
+    # --- MCP & Audit ---
+    table.add_row("/mcp [connect|list|disconnect]", "Manage MCP server connections")
+    table.add_row("/audit [verify|tail|count]", "Inspect Merkle audit chain")
+
+    table.add_row("", "")
+
+    # --- Autonomous ---
+    table.add_row("/hand [list|spawn|kill]", "Manage autonomous Hands")
+    table.add_row("/evolve [--skill-ids ...]", "Evolve skills with GEPA")
+
+    table.add_row("", "")
+
+    # --- Recovery ---
+    table.add_row("/retry", "Re-run the last prompt (useful after 429 errors)")
+    table.add_row("/cost", "Show session token usage and cost")
+    table.add_row("/trust", "Toggle trust mode (auto-approve all tools)")
+
+    table.add_row("", "")
+
     # --- Exit ---
     table.add_row("/quit, /exit", "Exit AURA")
 
@@ -549,7 +581,107 @@ def show_help():
     console.print()
 
 
-def show_checkpoint_picker(checkpoints: list[dict]) -> str | None:
+class StreamingResponse:
+    """Manages live token streaming to terminal via Rich."""
+
+    def __init__(self, model: str = "") -> None:
+        self._accumulated: str = ""
+        self._live: Optional[Live] = None
+        self._model: str = model
+        self._displayed: bool = False
+
+    def start(self) -> None:
+        """Begin live rendering context."""
+        self._live = Live("", console=console, refresh_per_second=15, transient=True)
+        self._live.start()
+
+    def chunk(self, text: str) -> None:
+        """Append a text chunk and re-render."""
+        self._accumulated += text
+        if self._live:
+            try:
+                md = Markdown(self._accumulated)
+                self._live.update(md)
+            except (ValueError, TypeError):  # Status bar: cosmetic, Rich parse fallback
+                self._live.update(Text(self._accumulated))
+
+    def pause(self) -> None:
+        """Pause live rendering for tool call display."""
+        if self._live:
+            self._live.stop()
+            self._live = None
+
+    def resume(self) -> None:
+        """Resume live rendering after tool call."""
+        self._live = Live(Markdown(self._accumulated), console=console, refresh_per_second=15, transient=True)
+        self._live.start()
+
+    def _build_final_panel(self) -> Panel:
+        """Build the final styled panel matching show_response() static output."""
+        try:
+            from aura.cli.themes import get_theme
+            theme = get_theme()
+            border_style = f"dim {theme.response_border}"
+            header_style = theme.response_header
+            code_theme = theme.code_theme
+        except (ImportError, AttributeError):
+            border_style = "dim cyan"
+            header_style = "bold cyan"
+            code_theme = "monokai"
+
+        label = Text()
+        label.append(" ◆ ", style=header_style)
+        label.append("AURA", style=header_style)
+        if self._model:
+            label.append(f"  ({self._model})", style="dim")
+
+        try:
+            md = Markdown(self._accumulated, code_theme=code_theme)
+        except (ValueError, TypeError):  # Rich Markdown parse fallback
+            md = Text(self._accumulated)
+
+        return Panel(
+            md,
+            title=label,
+            title_align="left",
+            border_style=border_style,
+            padding=(0, 2),
+            expand=True,
+        )
+
+    def finish(self) -> None:
+        """Finalize display — freeze the final styled panel in place.
+
+        Renders the final Markdown panel into the Live context, then stops
+        Live with transient=False so the content stays on screen without
+        re-rendering (no flicker).
+        """
+        if self._live and self._accumulated.strip():
+            # Build the same styled panel that show_response() would produce
+            final_panel = self._build_final_panel()
+            # Wrap in Padding to match show_response() non-streaming layout
+            padded = Padding(final_panel, (1, 2, 1, 2))
+            # Update Live with the final panel, then freeze it in place
+            self._live.update(padded)
+            self._live.transient = False
+            self._live.stop()
+            self._live = None
+            self._displayed = True
+        elif self._live:
+            self._live.stop()
+            self._live = None
+
+    @property
+    def displayed(self) -> bool:
+        """Whether the response was already rendered to the terminal."""
+        return self._displayed
+
+    @property
+    def text(self) -> str:
+        return self._accumulated
+
+
+def show_checkpoint_picker(checkpoints: list[dict[str, Any]]) -> Optional[str]:
     """Display checkpoints in a numbered list and let the user pick one.
 
     Args:
@@ -623,7 +755,7 @@ def show_checkpoint_picker(checkpoints: list[dict]) -> str | None:
         return None
 
 
-def show_rewind_result(success: bool, checkpoint_id: str):
+def show_rewind_result(success: bool, checkpoint_id: str) -> None:
     """Display the result of a rewind operation.
 
     Args:

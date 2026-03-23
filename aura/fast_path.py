@@ -103,8 +103,6 @@ class FastPathHandler:
 
         if cmd in ["status", "state"]:
             return self._get_status()
-        elif cmd in ["mood", "feeling", "how are you"]:
-            return self._get_mood()
         elif cmd in ["memory", "memories", "remember", "what do you remember"]:
             return self._get_memory_summary()
         elif cmd in ["help", "commands", "?"]:
@@ -173,18 +171,6 @@ Energy: {energy}
 Memory: Online
 
 Ready to chat!"""
-
-    def _get_mood(self) -> str:
-        """Get current mood."""
-        if self.emotions:
-            try:
-                state = self.emotions.state
-                mood = state.mood.value
-                reason = getattr(state, 'mood_reason', None) or "Just being me"
-                return f"Feeling **{mood}**. {reason}"
-            except (AttributeError, TypeError, KeyError) as e:
-                logger.debug(f"[FastPath] Mood error: {e}")
-        return "Feeling good and ready to help!"
 
     def _get_memory_summary(self) -> str:
         """Get memory system status."""

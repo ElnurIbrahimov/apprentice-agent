@@ -7,7 +7,6 @@ import time
 import logging
 import threading
 import concurrent.futures
-import ast
 from collections import deque
 
 # Shared pool — centralized in aura.pools (2026-03-22)
@@ -21,211 +20,42 @@ from typing import Any, Optional, Tuple, Callable, List, Dict
 
 logger = logging.getLogger(__name__)
 
-
-# Thinking system integration — safe import
-def _record_thought(thought_type: str, content: str, intensity: float = 0.6, source: str = "agent"):
-    """Record a real thought event. Safe to call even if thinking system isn't ready."""
-    try:
-        from api.routes.thinking import record_thought
-        record_thought(thought_type, content, intensity, source)
-    except Exception as e:
-        logger.debug(f"[Agent] non-critical: {e}")
 # ============================================================================
-#                    SECURITY: Safe Custom Tool Validator
+# Re-exports for backward compatibility — other files import these from here
 # ============================================================================
+from aura.security.tool_validator import (          # noqa: F401
+    validate_custom_tool_code,
+    validate_script_code,
+    ALLOWED_TOOL_IMPORTS,
+    FORBIDDEN_PATTERNS,
+)
+from aura.tools.loader import (                     # noqa: F401
+    _TOOL_KEYWORDS,
+    _TOOL_KEYWORDS_RE,
+    load_core_tools,
+    load_heavy_tools,
+    load_synthesized_tools,
+    ensure_tool as _ensure_tool_fn,
+)
+from aura.tools.custom_registry import (             # noqa: F401
+    load_custom_tools_from_registry,
+    generate_default_keywords,
+)
 
-# Allowed imports for custom tools
-ALLOWED_TOOL_IMPORTS = {
-    "typing", "dataclasses", "json", "re", "datetime",
-    "pathlib", "collections", "enum", "abc", "math",
-    "itertools", "functools", "operator", "string",
-    "urllib.parse",  # urllib.parse is safe (URL encoding/decoding)
-}
+# ============================================================================
+# Mixins — extracted domain-specific method groups (2026-03-23)
+# ============================================================================
+from aura.core.kg_brain import KGBrainMixin
+from aura.core.skill_manager import SkillManagerMixin
+from aura.core.narrative import NarrativeMixin
+from aura.core.direct_handlers import DirectHandlersMixin
 
-# Forbidden patterns that indicate potentially malicious code
-FORBIDDEN_PATTERNS = [
-    "os.system", "subprocess", "eval(", "exec(", "__import__",
-    "shutil.rmtree", "shutil.move", "socket", "requests.get",
-    "urllib.request", "urllib.urlopen", "importlib", "ctypes", "pickle", "marshal",
-    "compile(", "globals(", "locals(", "vars(", "open(",
-    "__builtins__", "__code__", "__class__",
-    "type(", "dir(",
-    "__getattribute__", "__subclasses__",
-]
+
+# Thinking system integration — re-export from shared module for backward compat
+from aura.core.thought_recorder import record_thought as _record_thought
 
 # Maximum history size to prevent memory bloat
 MAX_HISTORY_SIZE = 100
-
-
-def validate_custom_tool_code(code: str, tool_path: str) -> Tuple[bool, str]:
-    """
-    Validate custom tool code before dynamic import.
-
-    SECURITY: Prevents arbitrary code execution via malicious custom tools.
-    Checks:
-    - No forbidden imports (os.system, subprocess, etc.)
-    - No forbidden patterns (eval, exec, __import__)
-    - Has required Tool class with execute method
-    - Valid Python syntax
-
-    Args:
-        code: The tool source code
-        tool_path: Path for error messages
-
-    Returns:
-        (is_valid, error_message_or_ok)
-    """
-    # 1. Normalize code before pattern checks (catches string-concat evasion)
-    normalized = _normalize_code_for_check(code)
-    for pattern in FORBIDDEN_PATTERNS:
-        if pattern in normalized:
-            return False, f"Forbidden pattern '{pattern}' found in {tool_path}"
-
-    # 2. Parse as AST to validate structure
-    try:
-        tree = ast.parse(code)
-    except SyntaxError as e:
-        return False, f"Syntax error in {tool_path}: {e}"
-
-    # 3. Check imports and dangerous AST patterns
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                module_base = alias.name.split('.')[0]
-                if module_base not in ALLOWED_TOOL_IMPORTS:
-                    return False, f"Forbidden import '{alias.name}' in {tool_path}"
-
-        elif isinstance(node, ast.ImportFrom):
-            if node.module:
-                module_base = node.module.split('.')[0]
-                if module_base not in ALLOWED_TOOL_IMPORTS:
-                    return False, f"Forbidden import 'from {node.module}' in {tool_path}"
-
-        # Block dynamic import calls: importlib.import_module(), __import__(), etc.
-        elif isinstance(node, ast.Call):
-            func = node.func
-            # Check for direct calls: __import__("os"), eval("code"), exec("code")
-            if isinstance(func, ast.Name) and func.id in ("__import__", "eval", "exec", "compile", "getattr", "delattr"):
-                return False, f"Forbidden call '{func.id}()' in {tool_path}"
-            # Check for attribute calls: importlib.import_module(), builtins.__import__()
-            if isinstance(func, ast.Attribute) and func.attr in ("import_module", "__import__", "system", "popen", "call", "run", "Popen"):
-                return False, f"Forbidden call '*.{func.attr}()' in {tool_path}"
-
-        # Block access to dunder attributes that enable sandbox escape
-        elif isinstance(node, ast.Attribute):
-            if node.attr in ("__subclasses__", "__bases__", "__mro__", "__globals__",
-                             "__code__", "__builtins__", "__getattribute__",
-                             "__class__", "__dict__"):
-                return False, f"Forbidden attribute access '.{node.attr}' in {tool_path}"
-
-    # 4. Check for required class structure OR module-level execute() function
-    has_tool_class = False
-    has_execute = False
-    has_module_execute = False
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ClassDef):
-            # Look for Tool class or any class ending with 'Tool'
-            if node.name == "Tool" or node.name.endswith("Tool"):
-                has_tool_class = True
-                for item in node.body:
-                    if isinstance(item, ast.FunctionDef):
-                        if item.name in ("execute", "run", "__call__"):
-                            has_execute = True
-        elif isinstance(node, ast.FunctionDef) and node.name == "execute":
-            # Synthesized tools may use a module-level execute() function
-            has_module_execute = True
-
-    if has_tool_class and has_execute:
-        return True, "Valid"
-
-    if has_module_execute:
-        return True, "Valid (module-level execute)"
-
-    if not has_tool_class:
-        return False, f"No Tool class found in {tool_path}"
-
-    return False, f"Tool class missing execute/run method in {tool_path}"
-
-
-def _normalize_code_for_check(code: str) -> str:
-    """Normalize code before forbidden-pattern checks.
-
-    Collapses whitespace, strips comments, and joins string concatenations
-    so that tricks like '"sub" + "process"' are caught.
-    """
-    # Remove single-line comments
-    lines = []
-    for line in code.splitlines():
-        stripped = line.split("#", 1)[0]
-        lines.append(stripped)
-    code = " ".join(lines)
-    # Collapse whitespace
-    code = re.sub(r"\s+", " ", code)
-    # Join adjacent string literals: "sub" + "process" -> "subprocess"
-    code = re.sub(r'"\s*\+\s*"', '', code)
-    code = re.sub(r"'\s*\+\s*'", '', code)
-    return code
-
-
-def validate_script_code(code: str, source: str) -> tuple:
-    """Validate a raw script (not a Tool class) before execution.
-
-    Runs AST checks + forbidden pattern matching but does NOT require
-    a Tool class structure. Used for code-agent mode code blocks.
-
-    Returns:
-        (is_valid, error_message_or_ok)
-    """
-    # 1. Normalize and check for forbidden patterns (catches string-concat evasion)
-    normalized = _normalize_code_for_check(code)
-    for pattern in FORBIDDEN_PATTERNS:
-        if pattern in normalized:
-            return False, f"Forbidden pattern '{pattern}' found in {source}"
-
-    # 2. Parse as AST
-    try:
-        tree = ast.parse(code)
-    except SyntaxError as e:
-        return False, f"Syntax error in {source}: {e}"
-
-    # 3. Check imports and dangerous AST patterns (same rules as validate_custom_tool_code)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                module_base = alias.name.split('.')[0]
-                if module_base not in ALLOWED_TOOL_IMPORTS:
-                    return False, f"Forbidden import '{alias.name}' in {source}"
-
-        elif isinstance(node, ast.ImportFrom):
-            if node.module:
-                module_base = node.module.split('.')[0]
-                if module_base not in ALLOWED_TOOL_IMPORTS:
-                    return False, f"Forbidden import 'from {node.module}' in {source}"
-
-        elif isinstance(node, ast.Call):
-            func = node.func
-            if isinstance(func, ast.Name) and func.id in (
-                "__import__", "eval", "exec", "compile", "getattr", "delattr",
-                "type", "vars", "dir",
-            ):
-                return False, f"Forbidden call '{func.id}()' in {source}"
-            if isinstance(func, ast.Attribute) and func.attr in (
-                "import_module", "__import__", "system", "popen",
-                "call", "run", "Popen",
-            ):
-                return False, f"Forbidden call '*.{func.attr}()' in {source}"
-
-        elif isinstance(node, ast.Attribute):
-            if node.attr in (
-                "__subclasses__", "__bases__", "__mro__", "__globals__",
-                "__code__", "__builtins__", "__getattribute__",
-                "__class__", "__dict__",
-            ):
-                return False, f"Forbidden attribute access '.{node.attr}' in {source}"
-
-    return True, "Valid"
-
 
 # Timeout constants
 AGENT_TIMEOUT = 120  # Overall agent loop timeout (2 minutes)
@@ -236,11 +66,7 @@ from .identity import load_identity, get_identity_prompt, detect_name_change, de
 from .memory.unified_memory import get_unified_memory
 from .metacognition import MetacognitionLogger
 from .config import Config
-from .tools import FileSystemTool, WebSearchTool, CodeExecutorTool, ScreenshotTool, VisionTool, PDFReaderTool, ClipboardTool, ArxivSearchTool, BrowserTool, SystemControlTool, NotificationTool, ToolBuilderTool, MarketplaceTool, GitTool, EvoEmoTool, get_tone_modifier, get_monologue, get_knowledge_graph, NeuroDreamEngine, SleepPhase, CalendarTool, SpacedRepetitionTool, TaskManagerTool, APITesterTool, DatabaseTool, AudioTranscriberTool, ResearchTool, BraveSearchTool, TavilyTool, FirecrawlTool, ObsidianTool, GitHubTool, LogAnalystTool, DocumentGeneratorTool, WindowsControlTool, TaskSchedulerTool, PredictiveTaskTool, MeetingIntelTool, VoiceSynthTool, LifeLoggerTool, CodeSearchTool, CodeEditTool
-try:
-    from .tools.crypto_price import CryptoPriceTool
-except Exception:
-    CryptoPriceTool = None
+from .tools import get_tone_modifier, get_knowledge_graph, NeuroDreamEngine, SleepPhase
 
 # MemoryRetriever removed — consolidated into UnifiedMemory (2026-03-22)
 try:
@@ -358,154 +184,6 @@ except ImportError:
     EMBEDDINGS_AVAILABLE = False
 
 
-_TOOL_KEYWORDS = frozenset([
-    # --- Tool 0a: code_search (grep/glob/definitions) ---
-    'grep', 'search code', 'find in code', 'search in files', 'code search',
-    'find definition', 'find class', 'find function', 'find method',
-    'find references', 'where is', 'where does', 'which file',
-    'project structure', 'show structure', 'codebase', 'repo map',
-    'detect project', 'project type', 'what stack',
-    'glob', 'find files', 'search files', 'file pattern',
-
-    # --- Tool 0b: code_edit (surgical edits) ---
-    'edit file', 'edit code', 'modify file', 'change code', 'update code',
-    'replace in file', 'find and replace', 'search replace',
-    'refactor', 'rename', 'fix bug', 'fix error', 'patch',
-    'add import', 'add function', 'add class', 'add method',
-    'remove line', 'delete line', 'insert line',
-    'rollback edit', 'undo edit',
-
-    # --- Tool 1: filesystem ---
-    'list files', 'show files', 'what files', 'read file', 'write file',
-    'open file', 'save file', 'delete file', 'create file', 'file contents',
-    'list directory', 'show directory', 'folder contents', 'dir contents',
-    'find file', 'search file', 'file system', 'filesystem',
-
-    # --- Tool 2: web_search ---
-    'search', 'google', 'look up', 'lookup', 'find online', 'search online',
-    'search the web', 'web search', 'search for', 'find out',
-    'stock price',
-    'weather', 'current weather', 'weather in', 'forecast',
-    'news', 'latest news', 'news about', 'headlines',
-    'who is', 'what is the current', 'how much does',
-
-    # --- Tool 2b: crypto_price (real-time crypto prices) ---
-    'bitcoin price', 'btc price', 'ethereum price', 'eth price',
-    'crypto price', 'cryptocurrency price', 'price of bitcoin',
-    'price of ethereum', 'price of btc', 'price of eth', 'price of crypto',
-    'how much is bitcoin', 'how much is ethereum', 'how much is btc',
-    'current bitcoin', 'current ethereum', 'current btc', 'current eth',
-    'solana price', 'sol price', 'dogecoin price', 'doge price',
-    'cardano price', 'ada price', 'xrp price', 'ripple price',
-
-    # --- Tool 3: code_executor ---
-    'run code', 'execute code', 'run python', 'execute python', 'run this',
-    'calculate', 'compute', 'factorial', 'fibonacci', 'prime number',
-    'write code', 'code to', 'python code', 'script', 'program',
-
-    # --- Tool 4: screenshot ---
-    'screenshot', 'take screenshot', 'capture screen', 'capture my screen',
-    'screen capture', 'grab screen', 'print screen', 'snapshot', 'screen shot',
-    "what's on my screen", 'what is on my screen', 'show my screen',
-
-    # --- Tool 5: vision ---
-    'analyze image', 'analyze this image', 'analyze the image',
-    'describe image', 'describe this image', 'describe the image',
-    'look at image', 'look at this image', 'look at the image',
-    "what's in this image", 'what is in this image', 'read image',
-    'image analysis', 'picture analysis', 'photo analysis',
-    'ocr', 'read text from image', 'extract text from image',
-
-    # --- Tool 6: pdf_reader ---
-    'read pdf', 'open pdf', 'pdf file', 'extract pdf', 'pdf contents',
-    "what's in this pdf", 'summarize pdf', 'summarize the pdf',
-    'search pdf', 'pdf document',
-
-    # --- Tool 7: browser ---
-    'browse', 'open website', 'go to website', 'visit website', 'open url',
-    'go to url', 'visit url', 'navigate to', 'open page', 'web page',
-    'click on', 'click the', 'scroll', 'browser',
-
-    # --- Tool 8: git ---
-    'git', 'commit', 'git commit', 'git push', 'git pull', 'git status',
-    'git log', 'git diff', 'git stash', 'git branch', 'clone repo',
-    'repository', 'repo', 'staged files', 'unstaged', 'untracked',
-    'what branch', 'which branch', 'current branch', 'show commits',
-    'recent commits', 'show changes', 'list branches',
-
-    # --- Tool 9: arxiv_search ---
-    'arxiv', 'research paper', 'academic paper', 'find papers',
-    'search papers', 'download paper', 'summarize paper', 'compare papers',
-    'scientific paper', 'journal article', 'academic research',
-
-    # --- Tool 10: system_control ---
-    'volume', 'set volume', 'get volume', 'brightness', 'set brightness',
-    'system info', 'cpu usage', 'ram usage', 'memory usage', 'gpu usage',
-    'disk usage', 'disk space', 'open app', 'launch app', 'start app',
-    'open notepad', 'open calculator', 'open browser', 'open chrome',
-    'open firefox', 'open vscode', 'open terminal', 'lock screen',
-
-    # --- Tool 11: clipboard ---
-    'clipboard', 'copy to clipboard', 'paste from clipboard', 'read clipboard',
-    'write clipboard', 'clipboard contents', 'what is in clipboard',
-    "what's in my clipboard", 'copy this', 'paste this',
-
-    # --- Tool 12: notifications ---
-    'remind me', 'reminder', 'set reminder', 'create reminder',
-    'notification', 'notify me', 'alert me', 'schedule',
-    'in 5 minutes', 'in 10 minutes', 'in 30 minutes', 'in an hour',
-    'every day', 'every morning', 'every evening', 'daily at', 'weekly',
-    'set alarm', 'timer',
-
-    # --- Tool 13: knowledge_graph / KG Brain ---
-    'remember this', 'store this', 'save this fact', 'add to knowledge',
-    'what do you know about', 'recall', 'knowledge graph',
-    'kg brain', 'kg stats', 'kg query', 'extract entities',
-    'learn that', 'remember that', 'consolidate memory', 'graph stats',
-
-    # --- Tool 14: tool_builder ---
-    'create tool', 'build tool', 'make tool', 'new tool', 'custom tool',
-    'generate tool', 'tool builder', 'design tool',
-
-    # --- Tool 15: marketplace ---
-    'marketplace', 'plugin', 'download tool', 'install plugin',
-    'browse plugins', 'search plugins', 'uninstall plugin',
-    'my plugins', 'installed plugins', 'share tool', 'publish tool',
-
-    # --- Tool 16: regex_builder ---
-    'regex', 'regular expression', 'build regex', 'test regex',
-    'regex pattern', 'match pattern', 'validate regex', 'explain regex',
-
-    # --- Cognitive System 23: NeuroDream (memory consolidation) ---
-    'neurodream', 'go to sleep', 'sleep now', 'dream status',
-    'dream journal', 'show dreams', 'sleep insights', 'dream insights',
-    'sleep patterns', 'memory consolidation',
-
-    # --- Cognitive System 24: EvoEmo (emotional) ---
-    'evoemo', 'my mood', 'how am i feeling', 'mood history',
-    'emotional state', 'analyze emotion', 'detect emotion',
-
-    # --- Cognitive System 25: InnerMonologue ---
-    'inner monologue', 'show thoughts', 'your thoughts', 'think aloud',
-    'reasoning chain', 'what were you thinking', 'export thoughts',
-
-    # --- Tool: deep_research ---
-    'deep research', 'research thoroughly', 'thorough research',
-    'in-depth research', 'comprehensive research', 'research topic',
-    'investigate thoroughly', 'deep dive',
-
-    # --- Tool: image_gen ---
-    'generate image', 'create image', 'make image', 'draw image',
-    'image generation', 'create picture', 'generate picture',
-
-
-    # --- Tool: voice/tts ---
-    'text to speech', 'speak this', 'say this', 'read aloud',
-    'tts', 'sesame tts',
-])
-
-# Pre-compiled combined regex for _TOOL_KEYWORDS (avoids re-compiling ~150 patterns per message)
-_TOOL_KEYWORDS_RE = re.compile(r'\b(?:' + '|'.join(re.escape(kw) for kw in _TOOL_KEYWORDS) + r')\b')
 
 
 class AgentPhase(Enum):
@@ -548,11 +226,17 @@ class AgentState:
 
 
 # Actions that require user confirmation before execution
-class ApprenticeAgent:
+class ApprenticeAgent(KGBrainMixin, SkillManagerMixin, NarrativeMixin, DirectHandlersMixin):
     """An AI agent that learns and acts using a ReAct loop (single LLM call per step).
 
     The main loop (run()) uses brain.react_step() for combined thought+action,
     with deterministic tool result evaluation (no LLM call for eval).
+
+    Domain-specific methods are organized into mixins:
+    - KGBrainMixin: Knowledge graph commands, stats, queries, episodic stubs
+    - SkillManagerMixin: Skill CRUD, search, context, learning
+    - NarrativeMixin: Emotion, soul, AURA context, coherent loop, temporal grounding
+    - DirectHandlersMixin: Monologue, neurodream, git, search, crypto, code handlers
     """
 
     def __init__(self, fast_init: bool = False):
@@ -566,239 +250,23 @@ class ApprenticeAgent:
         try:
             validated = Config.validate_models_on_startup()
             logger.info(f"[MODELS] Validated: {validated}")
-        except Exception as e:
+        except (AttributeError, ConnectionError, TimeoutError, OSError) as e:
             logger.warning(f"[MODELS] Validation failed: {e}")
 
         # Skip Ollama warmup for fast init
         self.brain = OllamaBrain(warmup=not fast_init)
         self.memory = get_unified_memory()
 
-        # Core lightweight tools (always load)
-        # Each instantiation is guarded: if a tool class is None (failed import)
-        # or its constructor throws, we skip it instead of crashing the agent.
-        self.tools = {}
-        _core_tools = [
-            ("code_search", CodeSearchTool),
-            ("code_edit", CodeEditTool),
-            ("filesystem", FileSystemTool),
-            ("web_search", WebSearchTool),
-            ("brave_search", BraveSearchTool),
-            ("tavily_search", TavilyTool),
-            ("firecrawl", FirecrawlTool),
-            ("crypto_price", CryptoPriceTool),
-            ("code_executor", CodeExecutorTool),
-            ("clipboard", ClipboardTool),
-            ("notifications", NotificationTool),
-            ("git", GitTool),
-            ("evoemo", EvoEmoTool),
-            ("calendar", CalendarTool),
-            ("spaced_repetition", SpacedRepetitionTool),
-            ("task_manager", TaskManagerTool),
-            ("research", ResearchTool),
-            ("obsidian", ObsidianTool),
-            ("github", GitHubTool),
-            ("log_analyst", LogAnalystTool),
-            ("document_generator", DocumentGeneratorTool),
-            # Tier 2 High-Impact Tools
-            ("windows_control", WindowsControlTool),
-            ("task_scheduler", TaskSchedulerTool),
-            # Tier 3 Moonshot Tools
-            ("predictive_tasks", PredictiveTaskTool),
-            ("meeting_intel", MeetingIntelTool),
-            ("voice_synth", VoiceSynthTool),
-            ("life_logger", LifeLoggerTool),
-        ]
-        for _tool_name, _tool_cls in _core_tools:
-            try:
-                if _tool_cls is None:
-                    logger.warning(f"[TOOLS] {_tool_name} skipped — import failed (class is None)")
-                    continue
-                self.tools[_tool_name] = _tool_cls()
-                logger.debug(f"[TOOLS] {_tool_name} loaded")
-            except Exception as _e:
-                logger.warning(f"[TOOLS] {_tool_name} skipped — init failed: {_e}")
+        # Core lightweight tools (always load) — delegated to tools.loader
+        self.tools = load_core_tools(brain=self.brain)
 
-        # inner_monologue is a factory function, not a class
-        try:
-            if get_monologue is not None:
-                self.tools["inner_monologue"] = get_monologue()
-        except Exception as _e:
-            logger.warning(f"[TOOLS] inner_monologue skipped — init failed: {_e}")
-
-        # Wire LifeLogger to sibling tools for cross-source sync
-        if "life_logger" in self.tools:
-            try:
-                self.tools["life_logger"].set_tools(self.tools)
-            except Exception as _e:
-                logger.warning(f"[TOOLS] life_logger.set_tools failed: {_e}")
-        logger.info(f"[TOOLS] {len(self.tools)} core tools loaded")
-
-        # Heavier tools - load lazily or skip for fast init
+        # Heavy tools + synthesized + custom — delegated to tools.loader
         if not fast_init:
-            _heavy_tools = [
-                ("screenshot", lambda: ScreenshotTool()),
-                ("vision", lambda: VisionTool(brain=self.brain)),
-                ("pdf_reader", lambda: PDFReaderTool()),
-                ("arxiv_search", lambda: ArxivSearchTool()),
-                ("browser", lambda: BrowserTool()),
-                ("system_control", lambda: SystemControlTool()),
-                ("tool_builder", lambda: ToolBuilderTool()),
-                ("marketplace", lambda: MarketplaceTool()),
-                ("knowledge_graph", lambda: get_knowledge_graph()),
-            ]
-            for _tool_name, _tool_factory in _heavy_tools:
-                try:
-                    _cls_or_fn = _tool_factory  # it's a lambda wrapping the call
-                    inst = _cls_or_fn()
-                    if inst is not None:
-                        self.tools[_tool_name] = inst
-                        logger.debug(f"[TOOLS] {_tool_name} loaded (heavy)")
-                    else:
-                        logger.warning(f"[TOOLS] {_tool_name} skipped — factory returned None")
-                except Exception as _e:
-                    logger.warning(f"[TOOLS] {_tool_name} skipped — init failed: {_e}")
-
-            # === LOAD ADDITIONAL TOOLS ===
-            # deep_research
+            load_heavy_tools(self.tools, brain=self.brain)
             try:
-                from .tools.deep_research import DeepResearchTool
-                self.tools['deep_research'] = DeepResearchTool()
-                # Inject LLM for SOTA research capabilities
-                if hasattr(self, 'brain') and self.brain:
-                    self.tools['deep_research'].set_llm(
-                        lambda p, s=None: self.brain.think(p, s, use_history=False)
-                    )
-                logger.info("[LOADED] deep_research")
-            except Exception as e:
-                logger.warning(f"deep_research not loaded: {e}")
-
-            # codebase_index (semantic indexing with incremental updates)
-            try:
-                from .tools.codebase_index import CodebaseIndex
-                self.tools['codebase_index'] = CodebaseIndex()
-                logger.info("[LOADED] codebase_index")
-            except Exception as e:
-                logger.warning(f"codebase_index not loaded: {e}")
-
-            # image_gen
-            try:
-                from .tools.image_gen import ImageGenerationTool
-                self.tools['image_gen'] = ImageGenerationTool()
-                logger.info("[LOADED] image_gen")
-            except Exception as e:
-                logger.warning(f"image_gen not loaded: {e}")
-
-
-            # voice
-            try:
-                from .tools.voice import VoiceTool
-                self.tools['voice'] = VoiceTool()
-                logger.info("[LOADED] voice")
-            except Exception as e:
-                logger.warning(f"voice not loaded: {e}")
-
-            # local_rag - Local document RAG system
-            try:
-                from .tools.local_rag import LocalRAGTool
-                self.tools['local_rag'] = LocalRAGTool()
-                logger.info("[LOADED] local_rag - Index and search local documents")
-            except Exception as e:
-                logger.warning(f"local_rag not loaded: {e}")
-
-            # A-MEM and hybrid_amem removed — consolidated into UnifiedMemory (2026-03-22)
-
-            # shell_executor
-            try:
-                from .tools.shell_executor import ShellExecutorTool
-                self.tools['shell_executor'] = ShellExecutorTool()
-                logger.info("[LOADED] shell_executor")
-            except Exception as e:
-                logger.warning(f"shell_executor not loaded: {e}")
-
-            # screen_reader
-            try:
-                from .tools.screen_reader import ScreenReaderTool
-                self.tools['screen_reader'] = ScreenReaderTool()
-                logger.info("[LOADED] screen_reader")
-            except Exception as e:
-                logger.warning(f"screen_reader not loaded: {e}")
-
-            # email
-            try:
-                from .tools.email_tool import EmailTool
-                self.tools['email'] = EmailTool()
-                logger.info("[LOADED] email")
-            except Exception as e:
-                logger.warning(f"email not loaded: {e}")
-
-            # api_tester
-            try:
-                self.tools['api_tester'] = APITesterTool()
-                logger.info("[LOADED] api_tester")
-            except Exception as e:
-                logger.warning(f"api_tester not loaded: {e}")
-
-            # database
-            try:
-                self.tools['database'] = DatabaseTool()
-                logger.info("[LOADED] database")
-            except Exception as e:
-                logger.warning(f"database not loaded: {e}")
-
-            # audio_transcriber
-            try:
-                self.tools['audio_transcriber'] = AudioTranscriberTool()
-                logger.info("[LOADED] audio_transcriber")
-            except Exception as e:
-                logger.warning(f"audio_transcriber not loaded: {e}")
-
-            # Auto-load ALL synthesized tools (with security validation)
-            try:
-                import os
-                synth_path = os.path.join(os.path.dirname(__file__), 'tools', 'synthesized')
-                if os.path.exists(synth_path):
-                    for file in os.listdir(synth_path):
-                        if file.endswith('.py') and file != '__init__.py':
-                            tool_name = file[:-3]
-                            tool_file_path = os.path.join(synth_path, file)
-                            try:
-                                # SECURITY: Validate tool code before import
-                                with open(tool_file_path, 'r', encoding='utf-8') as f:
-                                    tool_code = f.read()
-
-                                is_valid, validation_msg = validate_custom_tool_code(tool_code, tool_file_path)
-                                if not is_valid:
-                                    logger.warning(f"synthesized/{tool_name} BLOCKED: {validation_msg}")
-                                    continue
-
-                                module = __import__(f'aura.tools.synthesized.{tool_name}', fromlist=[tool_name])
-                                # Try different class name patterns
-                                class_name = ''.join(word.title() for word in tool_name.split('_')) + 'Tool'
-                                tool_class = getattr(module, class_name, None)
-                                if not tool_class:
-                                    # Try simpler name
-                                    tool_class = getattr(module, f'{tool_name}Tool', None)
-                                if tool_class:
-                                    self.tools[tool_name] = tool_class()
-                                    logger.info(f"[LOADED] synthesized/{tool_name}")
-                                elif hasattr(module, 'execute'):
-                                    # Synthesized tools with module-level execute()
-                                    # Wrap in a simple object so tool dispatch works uniformly
-                                    exec_fn = module.execute
-                                    wrapper = type(f'{tool_name}_tool', (), {
-                                        'execute': staticmethod(exec_fn),
-                                        'run': staticmethod(exec_fn),
-                                        'name': tool_name,
-                                        'description': getattr(module, '__doc__', '') or tool_name,
-                                    })()
-                                    self.tools[tool_name] = wrapper
-                                    logger.info(f"[LOADED] synthesized/{tool_name}")
-                            except Exception as e:
-                                logger.warning(f"synthesized/{tool_name} not loaded: {e}")
-            except Exception as e:
+                load_synthesized_tools(self.tools)
+            except (ImportError, AttributeError, OSError, ValueError) as e:
                 logger.warning(f"Could not load synthesized tools: {e}")
-
-            # Load custom and marketplace tools dynamically
             try:
                 from .tools.custom_loader import load_custom_tools
                 _custom_tools = load_custom_tools()
@@ -806,7 +274,7 @@ class ApprenticeAgent:
                     if _tool_name not in self.tools:
                         self.tools[_tool_name] = _tool_instance
                         logger.info(f"[Agent] Registered custom tool: {_tool_name}")
-            except Exception as _e:
+            except (ImportError, AttributeError, OSError, ValueError) as _e:
                 logger.warning(f"[Agent] Custom tool loading failed: {_e}")
 
         # Connect inner monologue to EvoEmo for emotional awareness
@@ -835,7 +303,7 @@ class ApprenticeAgent:
             try:
                 self.thinker = get_thinker(brain=self.brain)
                 logger.info("[LOADED] Thinker — MIRROR dual-process background reasoning")
-            except Exception as e:
+            except (ImportError, AttributeError, TypeError, ValueError, OSError) as e:
                 logger.warning(f"[Thinker] Init failed: {e}")
 
         # Initialize MCTS Reasoning Tree — used by Strategy Bandit for MCTS strategy
@@ -856,7 +324,7 @@ class ApprenticeAgent:
                 tool_executor=_mcts_tool_executor,
             )
             logger.info("[LOADED] ReasoningTreeTool — MCTS + LATS tool integration for Strategy Bandit")
-        except Exception as e:
+        except (ImportError, AttributeError, TypeError, ValueError) as e:
             logger.warning(f"[ReasoningTreeTool] Init failed: {e}")
 
         # Initialize NeuroDream (Tool #24) - Sleep/Dream Memory Consolidation
@@ -880,18 +348,15 @@ class ApprenticeAgent:
                 try:
                     if self.neurodream and self.neurodream.current_phase.value == "awake":
                         self.neurodream.check_idle_trigger()
-                except Exception as e:
-                    logger.debug(f"[Agent] non-critical: {e}")
+                except Exception as e:  # Catch-all: protects daemon polling thread
+                    logger.debug(f"[NeuroDream] Idle poll error: {e}")
         _nd_poll_thread = _threading.Thread(
             target=_neurodream_idle_poll, daemon=True, name="NeuroDream-IdlePoll"
         )
         _nd_poll_thread.start()
         logger.debug("[NeuroDream] Idle polling thread started (60s interval)")
 
-        try:
-            self.tools['neurodream'] = self.neurodream
-        except Exception as e:
-            logger.debug(f"[SKIP] NeuroDream registry: {e}")
+        self.tools['neurodream'] = self.neurodream
 
         # AURA v3.0 ALIVE — AURAEngine removed; context/humanization via ALMA helpers.
         # self.aura_enabled controls whether _build_aura_context runs.
@@ -905,7 +370,7 @@ class ApprenticeAgent:
             self._soul_loader = SoulLoader()
             self._soul = self._soul_loader.load("SOUL_PERSONAL")
             logger.info(f"[LOADED] Soul: {self._soul.get('name', 'AURA')}")
-        except Exception as e:
+        except (ImportError, AttributeError, OSError, ValueError) as e:
             self._soul = None
             logger.debug(f"[SKIP] Soul: {e}")
 
@@ -915,7 +380,7 @@ class ApprenticeAgent:
             from aura.thinking.visible_thinking import VisibleThinking
             self._visible_thinking = VisibleThinking()
             logger.info("[LOADED] VisibleThinking")
-        except Exception as e:
+        except (ImportError, AttributeError, OSError, ValueError) as e:
             logger.debug(f"[SKIP] VisibleThinking: {e}")
 
         self._humanizer = None
@@ -929,7 +394,7 @@ class ApprenticeAgent:
                 )
                 self.fast_path_handler._agent = self
                 logger.debug("[LOADED] AURA Fast Path - Instant emotional responses")
-            except Exception as e:
+            except (ImportError, AttributeError, TypeError, ValueError, OSError) as e:
                 logger.warning(f"[WARNING] Fast Path initialization failed: {e}")
                 self.fast_path_handler = None
         else:
@@ -949,13 +414,13 @@ class ApprenticeAgent:
                 """Delivery callback: log proactive messages; API wires WebSocket push separately."""
                 try:
                     logger.info(f"[GatewayDaemon] Proactive: {getattr(msg, 'content', str(msg))[:120]}")
-                except Exception as e:
-                    logger.debug(f"[Agent] non-critical: {e}")
+                except (AttributeError, TypeError) as e:
+                    logger.debug(f"[GatewayDaemon] Callback format error: {e}")
             # Only set fallback callback if none wired yet (api/main.py sets a richer one)
             if getattr(self.gateway_daemon, '_notification_callback', None) is None:
                 self.gateway_daemon.set_notification_callback(_on_proactive_agent)
             logger.info("[LOADED] GatewayDaemon - Proactive intelligence system (singleton)")
-        except Exception as e:
+        except (ImportError, AttributeError, TypeError, OSError) as e:
             logger.warning(f"[GatewayDaemon] Initialization failed: {e}")
             self.gateway_daemon = None
 
@@ -966,7 +431,7 @@ class ApprenticeAgent:
             from aura.core.tool_schemas import AGENTIC_TOOLS
             self.tool_rag = ToolRAG()
             self.tool_rag.initialize(self.tools, AGENTIC_TOOLS)
-        except Exception as e:
+        except (ImportError, AttributeError, TypeError, ValueError, OSError) as e:
             logger.debug(f"[ToolRAG] Init failed (will use fallback): {e}")
 
         # Initialize Adaptive Planner (Roadmap 5.4)
@@ -977,7 +442,7 @@ class ApprenticeAgent:
                     brain=self.brain, planning_interval=3
                 )
                 logger.debug("[LOADED] AdaptivePlanner — adaptive planning for complex tasks")
-            except Exception as e:
+            except (AttributeError, TypeError, ValueError) as e:
                 logger.debug(f"[AdaptivePlanner] Init failed: {e}")
 
         # Initialize ToolExecutor for ReAct loop (handles dev tools without sandbox)
@@ -988,16 +453,19 @@ class ApprenticeAgent:
             try:
                 from aura.core.context import find_project_root
                 _project_root = find_project_root() or _project_root
-            except Exception:
+            except (ImportError, OSError):
                 pass
             self._tool_executor = ToolExecutor(project_root=_project_root)
             logger.debug(f"[ToolExecutor] Initialized at {_project_root}")
-        except Exception as e:
+        except (ImportError, AttributeError, TypeError, OSError) as e:
             logger.debug(f"[ToolExecutor] Init failed: {e}")
 
         # CLI permission confirmation callback (set by main.py for interactive mode)
         self._cli_confirm_callback: Optional[Callable] = None
         self._approved_patterns: set = set()
+
+        # Permission manager — set by CLI layer when permission manager is available
+        self.permissions = None
 
         # Initialize Knowledge Graph Brain - Structured Long-Term Memory
         # KG Brain is lightweight and can initialize even with fast_init
@@ -1035,13 +503,25 @@ class ApprenticeAgent:
                 bridge_status = "with bridge" if self.kg_bridge else "query-only"
                 logger.debug(f"[LOADED] Knowledge Graph Brain - {stats['total_entities']} entities, {stats['total_relationships']} relationships ({bridge_status})")
 
+                # Wire KG Sync Bridge: keep NetworkX runtime KG and Kuzu persistent KG in sync
+                nx_kg = self.tools.get("knowledge_graph")
+                if nx_kg is not None:
+                    try:
+                        from aura.core.kg_sync import KGSyncBridge
+                        _kg_sync = KGSyncBridge(nx_kg, self.kg_brain)
+                        nx_kg.set_sync_bridge(_kg_sync)
+                        _kg_sync.sync_from_kuzu()
+                        logger.debug("[KGSync] Bridge wired — NetworkX <-> Kuzu sync active")
+                    except Exception as _sync_err:
+                        logger.debug(f"[KGSync] Bridge wiring failed (non-fatal): {_sync_err}")
+
                 # Register KG Brain with UnifiedMemory so it's included in unified context queries
                 if self.kg_bridge is not None:
                     try:
                         get_unified_memory().set_kg_brain(self.kg_bridge)
-                    except Exception as e:
-                        logger.debug(f"[Agent] non-critical: {e}")
-            except Exception as e:
+                    except (AttributeError, TypeError) as e:
+                        logger.debug(f"[KG Brain] UnifiedMemory bridge wiring failed: {e}")
+            except (ImportError, AttributeError, TypeError, ValueError, OSError) as e:
                 logger.warning(f"[WARNING] Knowledge Graph Brain initialization failed: {e}")
                 self.kg_brain = None
                 self.kg_bridge = None
@@ -1066,7 +546,7 @@ class ApprenticeAgent:
             try:
                 self.context_engine = AlwaysOnContextEngine(self)
                 logger.debug("[ACE] Context engine initialized")
-            except Exception as _e:
+            except (AttributeError, TypeError, ValueError, OSError) as _e:
                 logger.warning(f"[ACE] Failed to initialize: {_e}")
 
         # DreamMode — Memory consolidation and pattern analysis
@@ -1075,7 +555,7 @@ class ApprenticeAgent:
             try:
                 self.dream_mode = DreamMode()
                 logger.debug("[LOADED] DreamMode — Memory consolidation")
-            except Exception as e:
+            except (ImportError, AttributeError, TypeError, ValueError, OSError) as e:
                 logger.warning(f"[WARNING] DreamMode init failed: {e}")
 
         # Initialize Skill Library - Procedural Knowledge Storage
@@ -1107,12 +587,21 @@ class ApprenticeAgent:
                 total_skills = stats['store']['total_skills']
                 bridge_status = "with bridge" if self.skill_bridge else "library-only"
                 logger.debug(f"[LOADED] Skill Library - {total_skills} skills ({bridge_status})")
-            except Exception as e:
+            except (ImportError, AttributeError, TypeError, ValueError, OSError) as e:
                 logger.warning(f"[WARNING] Skill Library initialization failed: {e}")
                 self.skill_library = None
                 self.skill_bridge = None
         elif not SKILL_LIBRARY_AVAILABLE:
             logger.debug("[INFO] Skill Library not available (install sentence-transformers: pip install sentence-transformers)")
+
+        # Wire skill library into the load_skill tool for progressive loading
+        if self.skill_library and "load_skill" in self.tools:
+            try:
+                from aura.tools.load_skill import set_skill_library
+                set_skill_library(self.skill_library)
+                logger.debug("[TOOLS] load_skill wired to skill library")
+            except Exception as e:
+                logger.warning(f"[TOOLS] Failed to wire load_skill: {e}")
 
         # Life modeling removed (dead code, 2026-03-22)
 
@@ -1127,7 +616,7 @@ class ApprenticeAgent:
                 logger.debug(f"[LOADED] Hooks - {hook_count} active hooks")
             else:
                 logger.debug("[LOADED] Hooks - event system ready")
-        except Exception as e:
+        except (ImportError, AttributeError, TypeError, OSError) as e:
             logger.debug(f"[INFO] Hooks system not available: {e}")
 
         # Initialize Multi-Agent Orchestrator
@@ -1144,7 +633,7 @@ class ApprenticeAgent:
             )
             specialists = list(self.orchestrator.specialists.keys())
             logger.debug(f"[LOADED] Multi-Agent Orchestrator - {', '.join(specialists)}")
-        except Exception as e:
+        except (ImportError, AttributeError, TypeError) as e:
             logger.debug(f"[INFO] Multi-Agent Orchestrator not available: {e}")
 
     def _make_response(
@@ -1180,171 +669,15 @@ class ApprenticeAgent:
 
     def _ensure_tool(self, tool_name: str):
         """Lazily load a tool if not already loaded."""
-        if tool_name in self.tools:
-            return self.tools[tool_name]
-
-        # Lazy load heavy tools
-        if tool_name == "knowledge_graph":
-            self.tools["knowledge_graph"] = get_knowledge_graph()
-        elif tool_name == "screenshot":
-            self.tools["screenshot"] = ScreenshotTool()
-        elif tool_name == "vision":
-            self.tools["vision"] = VisionTool(brain=self.brain)
-        elif tool_name == "pdf_reader":
-            self.tools["pdf_reader"] = PDFReaderTool()
-        elif tool_name == "arxiv_search":
-            self.tools["arxiv_search"] = ArxivSearchTool()
-        elif tool_name == "browser":
-            self.tools["browser"] = BrowserTool()
-        elif tool_name == "system_control":
-            self.tools["system_control"] = SystemControlTool()
-        elif tool_name == "tool_builder":
-            self.tools["tool_builder"] = ToolBuilderTool()
-        elif tool_name == "marketplace":
-            self.tools["marketplace"] = MarketplaceTool()
-        elif tool_name == "shell_executor":
-            from .tools.shell_executor import ShellExecutorTool
-            self.tools["shell_executor"] = ShellExecutorTool()
-        elif tool_name == "screen_reader":
-            from .tools.screen_reader import ScreenReaderTool
-            self.tools["screen_reader"] = ScreenReaderTool()
-        elif tool_name == "email":
-            from .tools.email_tool import EmailTool
-            self.tools["email"] = EmailTool()
-        elif tool_name == "calendar":
-            self.tools["calendar"] = CalendarTool()
-        elif tool_name == "spaced_repetition":
-            self.tools["spaced_repetition"] = SpacedRepetitionTool()
-        elif tool_name == "task_manager":
-            self.tools["task_manager"] = TaskManagerTool()
-        elif tool_name == "api_tester":
-            self.tools["api_tester"] = APITesterTool()
-        elif tool_name == "database":
-            self.tools["database"] = DatabaseTool()
-        elif tool_name == "audio_transcriber":
-            self.tools["audio_transcriber"] = AudioTranscriberTool()
-        elif tool_name == "research":
-            self.tools["research"] = ResearchTool()
-
-        return self.tools.get(tool_name)
+        return _ensure_tool_fn(self.tools, tool_name, brain=self.brain)
 
     def _load_custom_tools(self) -> None:
-        """Load active custom tools from registry."""
-        import importlib.util
-
-        registry_path = Path(__file__).parent.parent / "data" / "custom_tools.json"
-        if not registry_path.exists():
-            return
-
-        try:
-            with open(registry_path, "r", encoding="utf-8") as f:
-                registry = json.load(f)
-
-            for tool_entry in registry.get("tools", []):
-                if tool_entry.get("status") != "active":
-                    continue
-
-                tool_name = tool_entry["name"]
-                # SECURITY: Resolve path and verify it stays within the project tools directory
-                tools_base = (Path(__file__).parent / "tools").resolve()
-                tool_file = Path(tool_entry.get("file", ""))
-                try:
-                    tool_file_resolved = tool_file.resolve()
-                except Exception:
-                    continue
-                # SECURITY: Use Path.relative_to() instead of string startswith() to prevent
-                # sibling-directory bypass (e.g., tools_evil/ matching tools/ prefix).
-                try:
-                    tool_file_resolved.relative_to(tools_base)
-                except ValueError:
-                    logger.warning(f"[SECURITY] Custom tool path outside project directory: {tool_file}")
-                    continue
-                if not tool_file_resolved.exists():
-                    continue
-                tool_file = tool_file_resolved
-
-                try:
-                    # SECURITY: Validate tool code before dynamic import
-                    tool_code = tool_file.read_text()
-                    is_valid, validation_msg = validate_custom_tool_code(tool_code, str(tool_file))
-
-                    if not is_valid:
-                        logger.debug(f"[SECURITY] Rejected custom tool {tool_name}: {validation_msg}")
-                        logger.warning(f"Custom tool {tool_name} failed security validation: {validation_msg}")
-                        continue
-
-                    # Dynamic import of validated custom tool
-                    spec = importlib.util.spec_from_file_location(
-                        tool_name,
-                        tool_file
-                    )
-                    if spec and spec.loader:
-                        module = importlib.util.module_from_spec(spec)
-                        spec.loader.exec_module(module)
-
-                        # Get the tool class
-                        class_name = tool_entry.get("class_name")
-                        if class_name and hasattr(module, class_name):
-                            tool_class = getattr(module, class_name)
-                            self.tools[tool_name] = tool_class()
-                            logger.debug(f"[LOADED] Custom tool: {tool_name} (validated)")
-
-                            # Load keywords for this tool
-                            keywords = tool_entry.get("keywords", [])
-                            if not keywords:
-                                # Generate default keywords from name and description
-                                keywords = self._generate_default_keywords(
-                                    tool_name,
-                                    tool_entry.get("description", ""),
-                                    tool_entry.get("functions", [])
-                                )
-                            for kw in keywords:
-                                self.custom_tool_keywords[kw.lower()] = tool_name
-                except Exception as e:
-                    logger.error(f"[ERROR] Failed to load custom tool {tool_name}: {e}")
-        except (json.JSONDecodeError, IOError) as e:
-            logger.error(f"[ERROR] Failed to load custom tools registry: {e}")
+        """Load active custom tools from registry — delegated to tools.custom."""
+        load_custom_tools_from_registry(self.tools, self.custom_tool_keywords)
 
     def _generate_default_keywords(self, name: str, description: str, functions: list) -> list[str]:
-        """Generate default keywords for a custom tool if not provided.
-
-        Args:
-            name: Tool name
-            description: Tool description
-            functions: List of function names
-
-        Returns:
-            List of keywords for tool detection
-        """
-        keywords = set()
-
-        # Add words from tool name
-        for word in name.lower().split('_'):
-            if len(word) > 2:
-                keywords.add(word)
-        keywords.add(name.lower().replace('_', ' '))
-
-        # Add words from description
-        stop_words = {'a', 'an', 'the', 'is', 'are', 'to', 'of', 'in', 'for', 'on',
-                      'with', 'at', 'by', 'from', 'and', 'or', 'but', 'can', 'will'}
-        desc_words = re.findall(r'\b[a-zA-Z]+\b', description.lower())
-        for word in desc_words:
-            if word not in stop_words and len(word) > 2:
-                keywords.add(word)
-
-        # Add function names
-        for func in functions:
-            for word in func.lower().split('_'):
-                if len(word) > 2:
-                    keywords.add(word)
-
-        # Add common variations
-        if 'bmi' in name.lower():
-            keywords.update(['body mass index', 'height and weight'])
-        if 'temperature' in name.lower():
-            keywords.update(['celsius', 'fahrenheit', 'temp'])
-
-        return list(keywords)
+        """Generate default keywords for a custom tool if not provided."""
+        return generate_default_keywords(name, description, functions)
 
     def _is_simple_query(self, goal: str) -> bool:
         """Check if the goal is a simple conversational query.
@@ -1505,7 +838,7 @@ IMPORTANT: If the user asks about something you are not sure about, something re
                 response = f"I'll try to be more {new_personality}. Thanks for the feedback!"
                 logger.debug(f"\n[IDENTITY] Personality updated to: {updated}")
                 return self._make_response(goal, response, fast_path=True, metadata={"identity_update": True})
-        except Exception as e:
+        except (AttributeError, KeyError, TypeError, ValueError, OSError) as e:
             logger.warning(f"[IDENTITY] Check failed (non-fatal): {e}")
 
         return None
@@ -1538,7 +871,7 @@ IMPORTANT: If the user asks about something you are not sure about, something re
                         self.tools[_name] = _inst
                 _sentinel.unlink(missing_ok=True)
                 logger.info("[Agent] Reloaded custom tools after marketplace install")
-        except Exception as _e:
+        except (ImportError, AttributeError, OSError) as _e:
             logger.warning(f"[Agent] Custom tool reload check failed: {_e}")
 
         # Record user activity for NeuroDream idle detection
@@ -1556,7 +889,7 @@ IMPORTANT: If the user asks about something you are not sure about, something re
                     logger.info(f"[IntrinsicMotivation] Self-generated goal: {goal[:80]}")
                 else:
                     return self._make_response(goal or "", "Nothing urgent on my mind right now.", fast_path=True)
-            except Exception as _im_err:
+            except (ImportError, AttributeError, TypeError, ValueError) as _im_err:
                 logger.debug(f"[IntrinsicMotivation] Goal gen failed: {_im_err}")
                 if not goal:
                     return self._make_response("", "I'm idle.", fast_path=True)
@@ -1600,13 +933,35 @@ IMPORTANT: If the user asks about something you are not sure about, something re
         if fastpath_enabled and self._is_simple_query(goal):
             return self._fast_path_response(goal)
 
+        # ===== Multi-Agent Orchestrator — route complex multi-agent queries =====
+        # Try pattern-based routing (no LLM call). If the router picks a multi-agent
+        # mode (PARALLEL, SEQUENTIAL, DEBATE), delegate to the orchestrator.
+        # SINGLE mode falls through to the standard brain.think() ReAct loop below.
+        if self.orchestrator is not None:
+            try:
+                from aura.multi_agent.protocol import CollaborationMode
+                _routing = self.orchestrator.router.route(goal, llm_func=None)
+                if _routing.mode in (CollaborationMode.PARALLEL, CollaborationMode.SEQUENTIAL, CollaborationMode.DEBATE):
+                    logger.info(
+                        f"[AGENT] Routing to Multi-Agent Orchestrator: "
+                        f"agents={_routing.agents}, mode={_routing.mode.value}, "
+                        f"confidence={_routing.confidence:.0%}"
+                    )
+                    _orch_response = self.orchestrator.chat(goal)
+                    return self._make_response(
+                        goal, _orch_response, fast_path=False,
+                        metadata={"orchestrator": True, "agents": _routing.agents, "mode": _routing.mode.value},
+                    )
+            except Exception as _orch_err:
+                logger.warning(f"[AGENT] Orchestrator failed, falling back to direct path: {_orch_err}")
+
         # Always-On Context
         ace_context = ""
         if self.context_engine is not None:
             try:
                 _bundle = self.context_engine.gather(goal)
                 ace_context = _bundle.to_system_prompt()
-            except Exception as _ace_err:
+            except (AttributeError, TypeError, ValueError, OSError) as _ace_err:
                 logger.warning(f"[Agent] ACE context gather failed: {_ace_err}")
         context = context or {}  # NOTE: reserved for future use, not yet wired into agent loop
         self.brain._last_screenshot_path = None
@@ -1630,7 +985,7 @@ IMPORTANT: If the user asks about something you are not sure about, something re
                         logger.info(f"[Planner] Plan generated: {len(task_plan.steps)} steps")
                     else:
                         logger.debug("[Planner] Complex task but plan generation failed, proceeding without plan")
-            except Exception as _plan_err:
+            except (AttributeError, TypeError, ValueError, ConnectionError, TimeoutError) as _plan_err:
                 logger.debug(f"[Planner] Classification/planning failed: {_plan_err}")
 
         # ===== MCTS Reasoning Tree — Pre-planning for complex tasks =====
@@ -1654,7 +1009,7 @@ IMPORTANT: If the user asks about something you are not sure about, something re
                     )
                 else:
                     logger.debug("[MCTS] Pre-planning returned no usable result, proceeding normally")
-            except Exception as _mcts_err:
+            except (AttributeError, TypeError, ValueError, KeyError, ConnectionError, TimeoutError) as _mcts_err:
                 logger.debug(f"[MCTS] Pre-planning failed (non-fatal): {_mcts_err}")
 
         # ===== ReAct Loop =====
@@ -1775,10 +1130,10 @@ IMPORTANT: If the user asks about something you are not sure about, something re
                                     "content": f"[Re-planning after {iteration} steps]\n{task_plan.to_prompt_context()}",
                                 })
                                 logger.info(f"[Planner] Re-planned at iteration {iteration}: {len(task_plan.remaining_steps)} steps remaining")
-                    except Exception as _replan_err:
+                    except (AttributeError, TypeError, ValueError, ConnectionError, TimeoutError) as _replan_err:
                         logger.debug(f"[Planner] Re-plan check failed: {_replan_err}")
 
-            except Exception as e:
+            except Exception as e:  # Catch-all: protects main agent ReAct loop
                 logger.error(f"[AGENT] Error in iteration {iteration}: {e}")
                 consecutive_failures += 1
                 if consecutive_failures >= 3:
@@ -1866,7 +1221,7 @@ IMPORTANT: If the user asks about something you are not sure about, something re
             tone = get_emotional_tone_modifier()
             if tone:
                 parts.append(tone[:300])
-        except Exception as _tone_err:
+        except (ImportError, AttributeError, KeyError, TypeError) as _tone_err:
             logger.debug(f"[Agent] Emotional tone modifier unavailable: {_tone_err}")
 
         # ACE context
@@ -1880,7 +1235,7 @@ IMPORTANT: If the user asks about something you are not sure about, something re
             _profile_str = _profile.to_system_prompt()
             if _profile_str:
                 parts.append(_profile_str)
-        except Exception as _profile_err:
+        except (ImportError, AttributeError, OSError, ValueError) as _profile_err:
             logger.debug(f"[Agent] User profile load failed: {_profile_err}")
 
         # Memory recall (parallel) — unified store + KG
@@ -1899,9 +1254,9 @@ IMPORTANT: If the user asks about something you are not sure about, something re
                         parts.append(f"[Relevant memories]\n{mem_text}")
                     elif _key == "kg" and _result:
                         parts.append(f"[Knowledge context]\n{str(_result)[:300]}")
-                except Exception as _ctx_err:
+                except (AttributeError, KeyError, TypeError, ValueError, TimeoutError, OSError) as _ctx_err:
                     logger.debug(f"[Agent] {_key} context retrieval failed: {_ctx_err}")
-        except Exception as _mem_err:
+        except (AttributeError, TypeError, OSError) as _mem_err:
             logger.debug(f"[Agent] Memory/KG context setup failed: {_mem_err}")
 
         # ReAct instructions (plan-aware when a plan exists)
@@ -1989,7 +1344,7 @@ IMPORTANT: If the user asks about something you are not sure about, something re
                 if hasattr(tool, 'execute'):
                     result = tool.execute(action)
                     return json.dumps(result, default=str)[:MAX_RESULT]
-            except Exception as e:
+            except Exception as e:  # Catch-all: unknown tool implementations may raise anything
                 return json.dumps({"error": f"Tool '{tool_name}' failed: {e}"})
 
         # 3. Web search fallback chain
@@ -2000,7 +1355,8 @@ IMPORTANT: If the user asks about something you are not sure about, something re
                     try:
                         result = self.tools[sn].execute(f"search {query}")
                         return json.dumps(result, default=str)[:MAX_RESULT]
-                    except Exception:
+                    except (AttributeError, KeyError, TypeError, ValueError, ConnectionError, TimeoutError, OSError) as e:
+                        logger.debug(f"[Agent] Search fallback {sn} failed: {e}")
                         continue
 
         return json.dumps({"error": f"No handler for tool: {tool_name}"})
@@ -2043,7 +1399,7 @@ IMPORTANT: If the user asks about something you are not sure about, something re
                     source="react_loop",
                     importance=0.5,
                 )
-        except Exception as e:
+        except (AttributeError, TypeError, OSError) as e:
             logger.debug(f"[AGENT] Episode storage failed: {e}")
 
     # =================================================================
@@ -2174,8 +1530,8 @@ IMPORTANT: If the user asks about something you are not sure about, something re
                     agent_id="main",
                     session_id=getattr(self, '_session_id', 'default'),
                 )
-            except Exception:
-                pass
+            except (ImportError, AttributeError, TypeError, OSError) as _audit_err:
+                logger.debug(f"[AuditChain] Append failed: {_audit_err}")
 
             # === Deterministic evaluation (no LLM call) ===
             eval_result = self._evaluate_tool_result(tool_result)
@@ -2429,742 +1785,15 @@ IMPORTANT: If the user asks about something you are not sure about, something re
             "consecutive_failures": consecutive_failures,
         }
 
-    def _handle_monologue_command(self, message: str) -> Optional[str]:
-        """Handle inner monologue commands directly, bypassing the LLM.
-
-        Args:
-            message: The user's message
-
-        Returns:
-            Formatted result string if monologue command, None otherwise
-        """
-        msg_lower = message.lower()
-
-        monologue_keywords = [
-            'show thoughts', 'your thoughts', 'recent thoughts',
-            'think aloud', 'verbosity', 'why did you do that',
-            'explain your reasoning', 'reasoning chain', 'export thoughts'
-        ]
-
-        if not any(kw in msg_lower for kw in monologue_keywords):
-            return None
-
-        if "inner_monologue" not in self.tools:
-            return "Inner monologue not available."
-
-        monologue = self.tools["inner_monologue"]
-        result = monologue.execute(message)
-
-        if result.get("success"):
-            if "thoughts" in result:
-                return result["thoughts"]
-            if "reasoning_chain" in result:
-                return result["reasoning_chain"]
-            if "message" in result:
-                return result["message"]
-            return str(result)
-
-        return result.get("error", "Unknown error")
-
-    def _handle_knowledge_graph_command(self, message: str) -> Optional[str]:
-        """Handle knowledge graph commands directly, bypassing the LLM.
-
-        Supports both the legacy KnowledgeGraphTool and the new KG Brain.
-
-        Args:
-            message: The user's message
-
-        Returns:
-            Formatted result string if KG command, None otherwise
-        """
-        msg_lower = message.lower()
-
-        kg_keywords = [
-            'what do you know about', 'knowledge graph', 'show graph',
-            'how is', 'related to', 'connected to', 'find path between',
-            'what have you learned', 'consolidate memory', 'graph stats',
-            'kg brain', 'kg stats', 'add to knowledge', 'remember that',
-            'learn that', 'extract entities', 'kg query'
-        ]
-
-        if not any(kw in msg_lower for kw in kg_keywords):
-            return None
-
-        # Try KG Brain first (new system)
-        if self.kg_brain is not None and self.kg_query_engine is not None:
-            # Handle KG Brain specific commands
-            if "kg brain" in msg_lower or "kg stats" in msg_lower:
-                stats = self.kg_brain.get_statistics()
-                bridge_stats = self.kg_bridge.get_statistics() if self.kg_bridge else {}
-                return (
-                    f"**Knowledge Graph Brain Statistics**\n"
-                    f"- Total Entities: {stats.get('total_entities', 0)}\n"
-                    f"- Total Relationships: {stats.get('total_relationships', 0)}\n"
-                    f"- Average Importance: {stats.get('average_importance', 0):.2f}\n"
-                    f"- Entity Types: {stats.get('entity_type_distribution', {})}\n"
-                    f"- Entities Extracted: {bridge_stats.get('total_entities_extracted', 0)}\n"
-                    f"- Extractions Triggered: {bridge_stats.get('total_extractions_triggered', 0)}"
-                )
-
-            if "what do you know about" in msg_lower:
-                topic = msg_lower.split("what do you know about")[-1].strip().rstrip("?")
-                # Query KG Brain
-                result = self.kg_query_engine.query(topic, mode=QueryMode.HYBRID, max_entities=10)
-                if result.entities:
-                    return result.context_string
-                # Fall through to legacy KG if no results
-
-            if "how is" in msg_lower and "related to" in msg_lower:
-                parts = msg_lower.replace("?", "").split("related to")
-                if len(parts) == 2:
-                    source = parts[0].replace("how is", "").strip()
-                    target = parts[1].strip()
-                    # Try to find path in KG Brain
-                    path = self.kg_query_engine.find_path(source, target)
-                    if path:
-                        return f"Connection found: {path}"
-
-            if "extract entities" in msg_lower or "learn that" in msg_lower or "remember that" in msg_lower:
-                # Force extraction from message
-                text_to_extract = message.split("that", 1)[-1].strip() if "that" in message else message
-                if self.kg_bridge:
-                    entity_ids = self.kg_bridge.force_extract(text_to_extract, context="user command")
-                    if entity_ids:
-                        return f"Extracted and stored {len(entity_ids)} entities in knowledge graph."
-                    return "No entities could be extracted from that text."
-
-            if "consolidate memory" in msg_lower:
-                # Apply decay and prune
-                self.kg_brain.decay_importance(decay_rate=0.05)
-                self.kg_brain.prune_low_importance(threshold=0.03)
-                if self.kg_bridge:
-                    self.kg_bridge.flush()
-                stats = self.kg_brain.get_statistics()
-                return f"Memory consolidated. Current state: {stats['total_entities']} entities, {stats['total_relationships']} relationships."
-
-            # Generic KG Brain query
-            if "kg query" in msg_lower:
-                query = msg_lower.replace("kg query", "").strip()
-                result = self.kg_query_engine.query(query, mode=QueryMode.HYBRID)
-                return result.context_string if result.entities else "No matching entities found."
-
-        # Fall back to legacy knowledge_graph tool
-        if "knowledge_graph" not in self.tools:
-            if self.kg_brain is None:
-                return "Knowledge graph not available. Install kuzu: pip install kuzu"
-            return "No results found in knowledge graph."
-
-        kg = self.tools["knowledge_graph"]
-
-        # Handle specific patterns with legacy tool
-        if "what do you know about" in msg_lower:
-            topic = msg_lower.split("what do you know about")[-1].strip().rstrip("?")
-            result = kg.execute(f"query {topic}")
-            if result.get("success") and result.get("results"):
-                return "Here's what I know:\n" + "\n".join(result["results"])
-            return f"I don't have much knowledge about '{topic}' yet."
-
-        if "how is" in msg_lower and "related to" in msg_lower:
-            parts = msg_lower.replace("?", "").split("related to")
-            if len(parts) == 2:
-                source = parts[0].replace("how is", "").strip()
-                target = parts[1].strip()
-                result = kg.execute(f"path {source} to {target}")
-                if result.get("success") and result.get("path"):
-                    return f"Connection: {result['path']}"
-                return f"No direct connection found between '{source}' and '{target}'."
-
-        if "consolidate memory" in msg_lower:
-            result = kg.execute("consolidate")
-            return f"Memory consolidated: {result.get('merged_nodes', 0)} nodes merged, {result.get('pruned_edges', 0)} edges pruned."
-
-        if "graph stats" in msg_lower or "knowledge graph" in msg_lower:
-            result = kg.execute("stats")
-            if result.get("success"):
-                return f"Knowledge Graph: {result['total_nodes']} nodes, {result['total_edges']} edges, {result['clusters']} clusters"
-
-        # Generic query
-        result = kg.execute(message)
-        if result.get("success"):
-            if result.get("results"):
-                return "\n".join(result["results"])
-            return str(result)
-
-        return result.get("error", "Unknown error")
-
-    def _handle_neurodream_command(self, message: str) -> Optional[str]:
-        """Handle NeuroDream sleep/dream commands directly.
-
-        Args:
-            message: The user's message
-
-        Returns:
-            Formatted result string if NeuroDream command, None otherwise
-        """
-        msg_lower = message.lower()
-
-        neurodream_keywords = [
-            'go to sleep', 'sleep now', 'start sleeping', 'enter sleep',
-            'dream status', 'sleep status', 'neurodream status',
-            'wake up', 'stop sleeping',
-            'dream journal', 'show dreams', 'recent dreams',
-            'dream insights', 'show insights',
-            'sleep patterns', 'consolidated patterns'
-        ]
-
-        if not any(kw in msg_lower for kw in neurodream_keywords):
-            return None
-
-        if not hasattr(self, 'neurodream') or self.neurodream is None:
-            return "NeuroDream not available."
-
-        # Handle specific patterns
-        if any(kw in msg_lower for kw in ['go to sleep', 'sleep now', 'start sleeping', 'enter sleep']):
-            if self.neurodream.current_phase != SleepPhase.AWAKE:
-                return f"Already in {self.neurodream.current_phase.value} phase."
-            result = self.neurodream.enter_sleep(trigger="manual")
-            if result.get("success"):
-                return "Entering sleep mode... Beginning memory consolidation cycle."
-            return f"Could not enter sleep: {result.get('error', 'Unknown error')}"
-
-        if any(kw in msg_lower for kw in ['dream status', 'sleep status', 'neurodream status']):
-            status = self.neurodream.get_status()
-            phase_emoji = {
-                "awake": "Awake",
-                "light": "Light Sleep",
-                "deep": "Deep Sleep",
-                "rem": "REM Sleep",
-                "waking": "Waking Up"
-            }
-            return (f"**NeuroDream Status**\n"
-                   f"- Phase: {phase_emoji.get(status['phase'], status['phase'])}\n"
-                   f"- Total Sessions: {status['total_sessions']}\n"
-                   f"- Total Insights: {status['total_insights']}\n"
-                   f"- Idle Minutes: {status['idle_minutes']:.1f}\n"
-                   f"- Last Sleep: {status['last_sleep'] or 'Never'}")
-
-        if any(kw in msg_lower for kw in ['wake up', 'stop sleeping']):
-            if self.neurodream.current_phase == SleepPhase.AWAKE:
-                return "Already awake."
-            result = self.neurodream.wake_up(reason="manual")
-            summary = result.get("summary", {})
-            return (f"Waking up...\n"
-                   f"- Phases completed: {', '.join(summary.get('phases_completed', []))}\n"
-                   f"- Insights generated: {summary.get('insights_generated', 0)}\n"
-                   f"- Patterns found: {summary.get('patterns_found', 0)}")
-
-        if any(kw in msg_lower for kw in ['dream journal', 'show dreams', 'recent dreams']):
-            entries = self.neurodream.get_dream_journal(n=5)
-            if not entries:
-                return "No dream journal entries yet."
-            lines = ["**Recent Dream Sessions:**"]
-            for entry in entries[-5:]:
-                phases = ', '.join(entry.get('phases_completed', []))
-                insights = entry.get('insights_generated', 0)
-                lines.append(f"- {entry.get('start_time', 'Unknown')[:16]}: {phases} ({insights} insights)")
-            return '\n'.join(lines)
-
-        if any(kw in msg_lower for kw in ['dream insights', 'show insights']):
-            insights = self.neurodream.get_insights(n=5)
-            if not insights:
-                return "No dream insights generated yet."
-            lines = ["**Recent Dream Insights:**"]
-            for insight in insights[-5:]:
-                lines.append(f"- [{insight.get('insight_type', 'unknown')}] {insight.get('content', '')[:100]}...")
-            return '\n'.join(lines)
-
-        if any(kw in msg_lower for kw in ['sleep patterns', 'consolidated patterns']):
-            patterns = self.neurodream.get_patterns(n=5)
-            if not patterns:
-                return "No patterns consolidated yet."
-            lines = ["**Consolidated Patterns:**"]
-            for pattern in patterns[-5:]:
-                lines.append(f"- [{pattern.get('pattern_type', 'unknown')}] {pattern.get('description', '')[:80]}...")
-            return '\n'.join(lines)
-
-        return None
-
-    def _handle_git_command(self, message: str) -> Optional[str]:
-        """Handle Git commands directly, bypassing the LLM.
-
-        Args:
-            message: The user's message
-
-        Returns:
-            Formatted result string if Git command, None otherwise
-        """
-        message_lower = message.lower()
-
-        # Check if this is a Git command - expanded natural language patterns
-        git_keywords = [
-            # Explicit git commands
-            'git status', 'git log', 'git diff', 'git branch', 'git stash',
-            # Branch queries
-            'what branch', 'which branch', 'current branch', 'show branches', 'list branches',
-            # Commit queries
-            'show commits', 'recent commits', 'commit history', 'last commit',
-            # Status queries
-            'staged files', 'unstaged', 'untracked', 'show changes',
-            'what changed', 'pending changes', 'working tree'
-        ]
-        if not any(kw in message_lower for kw in git_keywords):
-            return None  # Not a Git command
-
-        # Get the git tool
-        git_tool = self.tools.get('git')
-        if not git_tool:
-            return "Git tool is not available."
-
-        # Map natural language to specific git actions
-        if any(kw in message_lower for kw in ['what branch', 'which branch', 'current branch', 'show branches', 'list branches']):
-            result = git_tool.branch('.')
-        elif any(kw in message_lower for kw in ['show commits', 'recent commits', 'commit history', 'last commit', 'git log']):
-            result = git_tool.log('.', count=5)
-        elif any(kw in message_lower for kw in ['staged files', 'unstaged', 'untracked', 'git status', 'what changed', 'pending changes', 'working tree']):
-            result = git_tool.status('.')
-        elif any(kw in message_lower for kw in ['show changes', 'git diff']):
-            result = git_tool.diff('.')
-        elif 'git stash' in message_lower:
-            if 'list' in message_lower:
-                result = git_tool.stash('.', 'list')
-            elif 'pop' in message_lower:
-                result = git_tool.stash('.', 'pop')
-            else:
-                result = git_tool.stash('.', 'push')
-        else:
-            # Fallback to execute() for other commands
-            result = git_tool.execute(message)
-
-        if result.get('success'):
-            return result.get('output', str(result))
-        else:
-            return f"Git error: {result.get('error', 'Unknown error')}"
-
-    def _handle_direct_search(self, message: str, synthesize: bool = True) -> Optional[str]:
-        """Handle explicit search requests directly, bypassing agent loop.
-
-        This prevents the LLM's planning phase from hallucinating different queries.
-        User says "search for AI news" -> searches for "AI news" exactly.
-        Results are then synthesized by the LLM for better presentation.
-
-        Args:
-            message: The user's message
-            synthesize: Whether to use LLM to synthesize results
-
-        Returns:
-            Formatted search results if search request, None otherwise
-        """
-        message_lower = message.lower().strip()
-
-        # If user wants comprehensive/detailed research, let it go through full agent loop
-        comprehensive_keywords = ['comprehensive', 'detailed', 'in-depth', 'thorough', 'deep dive', 'extensive', 'full analysis']
-        if any(kw in message_lower for kw in comprehensive_keywords):
-            return None  # Let full agent loop handle this
-
-        # Strip common greeting/name prefixes to allow "hey aura search for X"
-        prefix_patterns = [
-            r'^(?:hey\s+)?(?:aura|assistant|ai|bot)[,!.]?\s*',
-            r'^(?:hi|hello|hey)[,!.]?\s*',
-            r'^(?:okay|ok|yo)[,!.]?\s*',
-            r'^(?:alright|sure|yeah|yep|yes)[,!.]?\s*',
-            r'^(?:let\'?s|lets|can\s+you|could\s+you|please|pls)[,!.]?\s*',
-            r'^(?:i\s+want\s+(?:you\s+)?to|i\s+need\s+(?:you\s+)?to)[,!.]?\s*',
-            r'^(?:go\s+ahead\s+and|now)[,!.]?\s*',
-        ]
-        for prefix in prefix_patterns:
-            message_lower = re.sub(prefix, '', message_lower, flags=re.IGNORECASE).strip()
-
-        # Keywords that indicate "search online" intent
-        online_keywords = ['online', 'web', 'internet', 'google', 'latest', 'current', 'recent', 'news', 'today']
-
-        # Check if this is an ambiguous research request (no topic or unclear intent)
-        ambiguous_patterns = [
-            r'^(?:do\s+)?(?:a\s+)?research$',
-            r'^(?:do\s+)?(?:a\s+)?(?:deep\s+)?search$',
-            r'^(?:can\s+you\s+)?research$',
-            r'^(?:please\s+)?research$',
-            r'^look\s+(?:something\s+)?up$',
-            r'^find\s+(?:something|info|information)$',
-        ]
-
-        for pattern in ambiguous_patterns:
-            if re.match(pattern, message_lower, re.IGNORECASE):
-                return ("I'd be happy to help with research! 🔍\n\n"
-                        "**What would you like me to do?**\n"
-                        "1. **Search online** - Get the latest info from the web\n"
-                        "2. **Use my knowledge** - Answer from what I already know\n\n"
-                        "Just tell me the topic! For example:\n"
-                        "- \"Search online for quantum computing\"\n"
-                        "- \"Tell me about quantum computing\"\n"
-                        "- \"Research latest AI news online\"")
-
-        # Patterns for EXPLICIT ONLINE search requests
-        search_patterns = [
-            # Direct search commands
-            r'^search\s+(?:online\s+)?(?:the\s+web\s+)?(?:for\s+)?["\']?(.+?)["\']?$',
-            r'^(?:web\s+)?search[:\s]+["\']?(.+?)["\']?$',
-            r'^look\s+up\s+["\']?(.+?)["\']?$',
-            r'^google\s+["\']?(.+?)["\']?$',
-            r'^find\s+(?:online|on the web)\s+["\']?(.+?)["\']?$',
-            r'^search\s+for\s+["\']?(.+?)["\']?[.,!?]?$',
-            # Flexible patterns
-            r'^do\s+(?:a\s+)?(?:deep\s+)?search\s+(?:online\s+)?(?:for\s+|about\s+|on\s+)?["\']?(.+?)["\']?$',
-            r'^(?:please\s+)?(?:can\s+you\s+)?search\s+(?:online\s+)?(?:for\s+|about\s+)?["\']?(.+?)["\']?$',
-            r'^(?:deep\s+)?search\s+(?:online\s+)?(?:for\s+|about\s+|on\s+)?["\']?(.+?)["\']?$',
-            # Research with online intent
-            r'^research\s+(?:online\s+)?(?:about\s+|on\s+)?["\']?(.+?)["\']?\s+online$',
-            r'^research\s+online\s+(?:about\s+|on\s+|for\s+)?["\']?(.+?)["\']?$',
-            # News/latest patterns (always online)
-            r'^(?:get|find|show)\s+(?:me\s+)?(?:the\s+)?(?:latest|recent|current)\s+(?:news\s+)?(?:on|about|for)\s+["\']?(.+?)["\']?$',
-            r'^what(?:\'s|\s+is)\s+(?:the\s+)?(?:latest|recent|current)\s+(?:news\s+)?(?:on|about)\s+["\']?(.+?)["\']?$',
-            # Lookup patterns
-            r'^look\s+(?:this\s+)?up[:\s]+["\']?(.+?)["\']?$',
-            r'^(?:can\s+you\s+)?(?:please\s+)?look\s+up\s+["\']?(.+?)["\']?$',
-            # Find info patterns
-            r'^find\s+(?:me\s+)?(?:info|information)\s+(?:on|about)\s+["\']?(.+?)["\']?$',
-            r'^get\s+(?:me\s+)?(?:info|information)\s+(?:on|about)\s+["\']?(.+?)["\']?$',
-        ]
-
-        # Extract the search query
-        query = None
-        for pattern in search_patterns:
-            match = re.match(pattern, message_lower, re.IGNORECASE)
-            if match:
-                query = match.group(1).strip()
-                # Remove trailing punctuation
-                query = re.sub(r'[.,!?]+$', '', query).strip()
-                break
-
-        # If no explicit pattern matched, check for "research X" with online keywords
-        if not query:
-            research_match = re.match(r'^(?:do\s+)?(?:a\s+)?research\s+(?:about\s+|on\s+)?["\']?(.+?)["\']?$', message_lower)
-            if research_match:
-                potential_query = research_match.group(1).strip()
-                # Check if any online keyword is present
-                if any(kw in message_lower for kw in online_keywords):
-                    query = potential_query
-                else:
-                    # Ambiguous - has topic but unclear if online or knowledge
-                    return (f"I can help you research **{potential_query}**! 🔍\n\n"
-                            f"Would you like me to:\n"
-                            f"1. **Search online** - \"search online for {potential_query}\"\n"
-                            f"2. **Use my knowledge** - \"tell me about {potential_query}\"\n\n"
-                            f"Which would you prefer?")
-
-        if not query:
-            return None  # Not an explicit search request
-
-        # Check if web_search tool is available
-        if 'web_search' not in self.tools:
-            return "Web search tool not available."
-
-        logger.debug(f"[DIRECT SEARCH] User query: '{query}'")
-
-        try:
-            # Call web search directly with the exact user query
-            tool = self.tools['web_search']
-            result = tool.search(query, num_results=5)
-
-            if not result.get("success"):
-                return f"Search failed: {result.get('error', 'Unknown error')}"
-
-            results = result.get("results", [])
-            if not results:
-                return f"No results found for '{query}'."
-
-            # Format raw results
-            raw_results = ""
-            for i, r in enumerate(results[:5], 1):
-                title = r.get("title", "No title")
-                snippet = r.get("snippet", "No description")
-                url = r.get("url", "")
-                raw_results += f"{i}. {title}\n   {snippet}\n   URL: {url}\n\n"
-
-            # Synthesize with LLM if available and requested
-            if synthesize and hasattr(self, 'brain'):
-                try:
-                    synthesis_prompt = f"""Based on these web search results for '{query}', provide a helpful summary:
-
-{raw_results}
-
-Instructions:
-- Summarize the key information from these results
-- Include relevant URLs as references
-- Keep it concise but informative
-- Format nicely with markdown"""
-
-                    synthesized = self.brain.think(synthesis_prompt)
-                    if synthesized and len(synthesized) > 50:
-                        return synthesized
-                except Exception as e:
-                    logger.debug(f"[DIRECT SEARCH] Synthesis failed, returning raw: {e}")
-
-            # Fallback to formatted raw results
-            formatted = f"Here's what I found for '{query}':\n\n"
-            for i, r in enumerate(results[:5], 1):
-                title = r.get("title", "No title")
-                snippet = r.get("snippet", "No description")
-                url = r.get("url", "")
-                formatted += f"{i}. **{title}**\n   {snippet}\n   {url}\n\n"
-
-            return formatted.strip()
-
-        except Exception as e:
-            logger.debug(f"[DIRECT SEARCH] Error: {e}")
-            return f"Search error: {e}"
-
-    def _handle_direct_crypto(self, message: str) -> Optional[str]:
-        """Handle crypto price requests directly, bypassing agent loop.
-
-        This prevents the LLM from hallucinating crypto prices.
-        User says "BTC price" -> fetches real BTC price from API.
-
-        Args:
-            message: The user's message
-
-        Returns:
-            Formatted price info if crypto request, None otherwise
-        """
-        message_lower = message.lower().strip()
-
-        # Crypto symbols and names mapping
-        crypto_map = {
-            'btc': 'bitcoin', 'bitcoin': 'bitcoin',
-            'eth': 'ethereum', 'ethereum': 'ethereum',
-            'sol': 'solana', 'solana': 'solana',
-            'ada': 'cardano', 'cardano': 'cardano',
-            'doge': 'dogecoin', 'dogecoin': 'dogecoin',
-            'xrp': 'ripple', 'ripple': 'ripple',
-            'dot': 'polkadot', 'polkadot': 'polkadot',
-            'bnb': 'binancecoin', 'binance': 'binancecoin',
-            'avax': 'avalanche-2', 'avalanche': 'avalanche-2',
-            'matic': 'matic-network', 'polygon': 'matic-network',
-        }
-
-        # Patterns for crypto price requests
-        crypto_patterns = [
-            r'(?:what(?:\'s| is) )?(?:the )?(?:current )?(?:price (?:of )?)?(\w+)\s*price',
-            r'(?:what(?:\'s| is) )?(?:the )?(?:current )?price (?:of )?(\w+)',
-            r'how much (?:is|does) (\w+)(?: cost)?',
-            r'^(\w+)\s*price$',
-            r'^price\s*(?:of\s+)?(\w+)$',
-            r'(\w+) (?:price|value|cost)',
-        ]
-
-        # Try to extract crypto name
-        crypto_id = None
-        for pattern in crypto_patterns:
-            match = re.search(pattern, message_lower)
-            if match:
-                potential_crypto = match.group(1).strip()
-                if potential_crypto in crypto_map:
-                    crypto_id = crypto_map[potential_crypto]
-                    break
-
-        if not crypto_id:
-            return None  # Not a crypto price request
-
-        # Check if crypto_price tool is available
-        if 'crypto_price' not in self.tools:
-            return "Crypto price tool not available."
-
-        logger.debug(f"[DIRECT CRYPTO] Fetching price for: {crypto_id}")
-
-        try:
-            tool = self.tools['crypto_price']
-            result = tool.get_price(crypto_id)
-
-            if not result.get("success"):
-                return f"Failed to get price: {result.get('error', 'Unknown error')}"
-
-            # Format the response
-            price = result.get("price", 0)
-            change_24h = result.get("change_24h", 0)
-            name = result.get("name", crypto_id.title())
-            symbol = result.get("symbol", "").upper()
-
-            change_emoji = "📈" if change_24h >= 0 else "📉"
-            change_sign = "+" if change_24h >= 0 else ""
-
-            formatted = f"**{name} ({symbol})** {change_emoji}\n"
-            formatted += f"💰 Current Price: **${price:,.2f}**\n"
-            formatted += f"📊 24h Change: {change_sign}{change_24h:.2f}%"
-
-            return formatted
-
-        except Exception as e:
-            logger.debug(f"[DIRECT CRYPTO] Error: {e}")
-            return f"Crypto price error: {e}"
-
-    def _handle_direct_code(self, message: str) -> Optional[str]:
-        """Handle code execution requests directly, bypassing agent loop.
-
-        This ensures code is actually executed when the user asks for it.
-        Handles: "calculate X", "run python for X", "execute code for X", "what is X!" (factorial)
-
-        Args:
-            message: The user's message
-
-        Returns:
-            Formatted execution result if code request, None otherwise
-        """
-        message_lower = message.lower().strip()
-
-        # Check if code_executor tool is available
-        if 'code_executor' not in self.tools:
-            return None
-
-        # Patterns that indicate code execution intent
-        execute_patterns = [
-            r'^(?:please\s+)?(?:run|execute)\s+(?:python\s+)?(?:code\s+)?(?:for|to)\s+(.+)$',
-            r'^(?:please\s+)?(?:write\s+and\s+)?(?:run|execute)\s+(?:python\s+)?(?:code\s+)?(?:for|to)\s+(.+)$',
-            r'^(?:please\s+)?calculate\s+(.+)$',
-            r'^(?:please\s+)?compute\s+(.+)$',
-            r'^what\s+is\s+(\d+)\s*[!]$',  # "what is 20!" -> factorial
-            r'^(\d+)\s*[!]$',  # "20!" -> factorial
-            r'^(?:please\s+)?(?:find|generate|show)\s+(?:the\s+)?(?:first\s+)?(\d+)\s+(?:fibonacci|fib)\s*(?:numbers?)?$',
-            r'^(?:please\s+)?(?:fibonacci|fib)\s+(?:sequence\s+)?(?:of\s+)?(\d+)$',
-        ]
-
-        task_description = None
-        code_to_run = None
-
-        for pattern in execute_patterns:
-            match = re.match(pattern, message_lower, re.IGNORECASE)
-            if match:
-                task_description = match.group(1).strip()
-                break
-
-        # Also check for explicit code in the message (```python ... ```)
-        # When attachment context is present, only scan the user's actual request — not document content
-        scan_target = message
-        if '[FILE_ATTACHMENT_CONTEXT]' in message and 'User request:' in message:
-            scan_target = message.split('User request:', 1)[-1]
-        code_block_match = re.search(r'```(?:python)?\s*\n?(.*?)\n?```', scan_target, re.DOTALL | re.IGNORECASE)
-        if code_block_match:
-            code_to_run = code_block_match.group(1).strip()
-            task_description = "provided code"
-
-        if not task_description and not code_to_run:
-            return None  # Not a code execution request
-
-        logger.debug(f"[DIRECT CODE] Task: '{task_description}'")
-
-        # Generate code if not provided
-        if not code_to_run:
-            # Handle common patterns directly without LLM
-            if re.match(r'^\d+\s*!?$', task_description) or 'factorial' in task_description:
-                # Factorial
-                num_match = re.search(r'(\d+)', task_description)
-                if num_match:
-                    n = num_match.group(1)
-                    code_to_run = f"import math\nresult = math.factorial({n})\nprint(f'{n}! = {{result}}')"
-
-            elif 'fibonacci' in task_description or 'fib' in task_description:
-                # Fibonacci
-                num_match = re.search(r'(\d+)', task_description)
-                n = num_match.group(1) if num_match else "10"
-                code_to_run = f"""def fibonacci(n):
-    fib = [0, 1]
-    for i in range(2, n):
-        fib.append(fib[i-1] + fib[i-2])
-    return fib[:n]
-
-result = fibonacci({n})
-print(f"First {n} Fibonacci numbers: {{result}}")"""
-
-            elif 'prime' in task_description:
-                # Prime numbers or prime check
-                num_match = re.search(r'(\d+)', task_description)
-                if num_match:
-                    n = num_match.group(1)
-                    if 'first' in task_description or 'generate' in task_description:
-                        code_to_run = f"""def sieve_of_eratosthenes(limit):
-    primes = []
-    is_prime = [True] * (limit + 1)
-    for num in range(2, limit + 1):
-        if is_prime[num]:
-            primes.append(num)
-            for multiple in range(num * num, limit + 1, num):
-                is_prime[multiple] = False
-    return primes
-
-# Generate enough primes
-primes = sieve_of_eratosthenes({int(n) * 15})[:{int(n)}]
-print(f"First {int(n)} prime numbers: " + str(primes))"""
-                    else:
-                        code_to_run = f"""def is_prime(n):
-    if n < 2:
-        return False
-    for i in range(2, int(n**0.5) + 1):
-        if n % i == 0:
-            return False
-    return True
-
-result = is_prime({n})
-print(f"{n} is{'' if result else ' not'} a prime number")"""
-
-            else:
-                # Use LLM to generate code for complex requests
-                code_prompt = f"""Write Python code to: {task_description}
-
-Requirements:
-- Include print statements to show the output
-- Keep it simple and readable
-- Only output the Python code, nothing else
-
-Python code:"""
-
-                generated = self.brain.think(code_prompt, use_history=False, task_type=TaskType.CODE)
-
-                # Extract code from response
-                code_match = re.search(r'```(?:python)?\s*\n?(.*?)\n?```', generated, re.DOTALL)
-                if code_match:
-                    code_to_run = code_match.group(1).strip()
-                else:
-                    # Try to use the whole response if it looks like code
-                    lines = generated.strip().split('\n')
-                    code_lines = [l for l in lines if any(c in l for c in ['print', 'def ', 'import ', '=', 'for ', 'if ', 'return'])]
-                    if code_lines:
-                        code_to_run = '\n'.join(code_lines)
-                    else:
-                        code_to_run = generated.strip()
-
-        if not code_to_run:
-            return None
-
-        # SECURITY: Validate LLM-generated code before execution.
-        # Uses validate_script_code (not validate_custom_tool_code) because
-        # this is raw script code, not a Tool class file.
-        is_safe, reason = validate_script_code(code_to_run, "<llm_generated>")
-        if not is_safe:
-            logger.warning(f"[Agent] Blocked unsafe LLM-generated code: {reason}")
-            return None
-
-        # Execute the code
-        try:
-            tool = self.tools['code_executor']
-            result = tool.execute(code_to_run)
-
-            # Format the response
-            formatted = f"**Code Execution Result**\n\n"
-            formatted += f"```python\n{code_to_run}\n```\n\n"
-
-            if result.get("success"):
-                output = result.get("output", "").strip()
-                if output:
-                    formatted += f"**Output:**\n```\n{output}\n```"
-                else:
-                    formatted += "**Output:** (no output)"
-            else:
-                error = result.get("errors", result.get("error", "Unknown error"))
-                formatted += f"**Error:**\n```\n{error}\n```"
-
-            return formatted
-
-        except Exception as e:
-            logger.debug(f"[DIRECT CODE] Error: {e}")
-            return f"Code execution error: {e}"
+    # _handle_monologue_command — moved to DirectHandlersMixin
+    # _handle_knowledge_graph_command — moved to KGBrainMixin
+
+    # _handle_neurodream_command — moved to DirectHandlersMixin
+    # _handle_git_command — moved to DirectHandlersMixin
+
+    # _handle_direct_search — moved to DirectHandlersMixin
+    # _handle_direct_crypto — moved to DirectHandlersMixin
+    # _handle_direct_code — moved to DirectHandlersMixin
 
     # ------------------------------------------------------------------
     # Shared pre/post processing for chat() and chat_stream()
@@ -3192,8 +1821,8 @@ Python code:"""
         try:
             from api.routes.context import track_context_from_message
             track_context_from_message(message, is_user=True)
-        except Exception as e:
-            logger.debug(f"[Agent] non-critical: {e}")
+        except (ImportError, AttributeError, TypeError) as e:
+            logger.debug(f"[Agent] Context tracking unavailable: {e}")
 
         # NeuroDream: check idle trigger FIRST (before resetting the timer), then record activity
         if hasattr(self, 'neurodream') and self.neurodream:
@@ -3202,8 +1831,8 @@ Python code:"""
                         and self.neurodream.current_phase == SleepPhase.AWAKE):
                     self.neurodream.enter_sleep(trigger="idle")
                 self.neurodream.record_activity()
-            except Exception as e:
-                logger.debug(f"[Agent] non-critical: {e}")
+            except (AttributeError, TypeError, ValueError, OSError) as e:
+                logger.debug(f"[NeuroDream] Idle check/activity error: {e}")
 
         # ===== COHERENT LOOP: Post-response feedback (Phase 3.1) =====
         self._post_response_feedback(message)
@@ -3215,7 +1844,7 @@ Python code:"""
             try:
                 from aura.tools.project_context import init_project
                 ctx["early_return"] = init_project(target_path)
-            except Exception as e:
+            except (ImportError, OSError, ValueError) as e:
                 ctx["early_return"] = f"Failed to initialize project: {e}"
             return ctx
 
@@ -3238,7 +1867,7 @@ Python code:"""
         if self.aura_enabled:
             try:
                 aura_context = self._build_aura_context(message)
-            except Exception as e:
+            except (ImportError, AttributeError, KeyError, TypeError, ValueError) as e:
                 logger.debug(f"[AURA] Input processing error: {e}")
         ctx["aura_context"] = aura_context
 
@@ -3254,8 +1883,8 @@ Python code:"""
             try:
                 from api.routes.context import track_context_from_emotion
                 track_context_from_emotion(emotion_reading.emotion, emotion_reading.confidence / 100.0)
-            except Exception as e:
-                logger.debug(f"[Agent] non-critical: {e}")
+            except (ImportError, AttributeError, TypeError) as e:
+                logger.debug(f"[Agent] Emotion context tracking unavailable: {e}")
 
         # Check for EvoEmo commands
         evoemo_result = self._handle_evoemo_command(message)
@@ -3353,14 +1982,14 @@ Python code:"""
                         from api.routes.memory import record_memory_recall
                         record_memory_recall("unified", len(unified_results), message,
                                              [r.content[:100] for r in unified_results[:5]])
-                    except Exception as e:
-                        logger.debug(f"[Agent] non-critical: {e}")
+                    except (ImportError, AttributeError, TypeError) as e:
+                        logger.debug(f"[Agent] Memory recall tracking unavailable: {e}")
                     try:
                         from api.routes.context import track_context_from_memory
                         track_context_from_memory([r.content[:100] for r in unified_results[:5]])
-                    except Exception as e:
-                        logger.debug(f"[Agent] non-critical: {e}")
-            except Exception as e:
+                    except (ImportError, AttributeError, TypeError) as e:
+                        logger.debug(f"[Agent] Memory context tracking unavailable: {e}")
+            except (ImportError, AttributeError, KeyError, TypeError, ValueError, TimeoutError, OSError) as e:
                 logger.debug(f"[UnifiedMemory] Query error: {e}")
 
         # ===== TONE MODIFIER =====
@@ -3385,7 +2014,7 @@ Python code:"""
             _grounding = self._temporal_grounding()
             if _grounding:
                 context_parts.append(_grounding)
-        except Exception as _tg_err:
+        except (ImportError, AttributeError, TypeError, OSError) as _tg_err:
             logger.debug(f"[Agent] Temporal grounding failed: {_tg_err}")
 
         # Soul personality
@@ -3406,8 +2035,8 @@ Python code:"""
                     profile_text = profile_path.read_text(encoding='utf-8').strip()
                     if profile_text:
                         context_parts.append(f"USER PROFILE:\n{profile_text}")
-        except Exception as e:
-            logger.debug(f"[Agent] non-critical: {e}")
+        except (ImportError, AttributeError, OSError, ValueError) as e:
+            logger.debug(f"[Agent] User profile load failed: {e}")
 
         if unified_context:
             context_parts.append(unified_context)
@@ -3418,8 +2047,8 @@ Python code:"""
                 nd_context = self.neurodream.get_learned_context_prompt()
                 if nd_context:
                     context_parts.append(f"LEARNED CONTEXT (from memory consolidation):\n{nd_context}")
-        except Exception as e:
-            logger.debug(f"[Agent] non-critical: {e}")
+        except (AttributeError, TypeError, OSError) as e:
+            logger.debug(f"[NeuroDream] Learned context error: {e}")
 
         # Skill Library context
         try:
@@ -3428,7 +2057,7 @@ Python code:"""
                 if _skill_context:
                     context_parts.append(f"SKILL CONTEXT:\n{_skill_context}")
                     logger.debug("[SkillLibrary] Injected skill context for: %s", message[:40])
-        except Exception as e:
+        except (AttributeError, KeyError, TypeError, ValueError, OSError) as e:
             logger.debug("[SkillLibrary] Skill lookup error: %s", e)
 
         # Thinker context — MIRROR dual-process private reflection (roadmap 3.6)
@@ -3440,7 +2069,7 @@ Python code:"""
                 _thinker_ctx = self.monologue.generate_thinking_context(brain=self.brain)
             if _thinker_ctx:
                 context_parts.append(_thinker_ctx)
-        except Exception as _thinker_err:
+        except (AttributeError, TypeError, ValueError, ConnectionError, TimeoutError) as _thinker_err:
             logger.debug(f"[Agent] Thinker context failed: {_thinker_err}")
 
         system_prompt_addon = None
@@ -3469,7 +2098,7 @@ Python code:"""
         # Close the coherent loop — feed outcome back to ALMA
         try:
             self.brain.update_emotional_state(success=bool(response and len(response) > 10))
-        except Exception as _alma_err:
+        except (AttributeError, TypeError, ValueError) as _alma_err:
             logger.debug(f"[Agent] ALMA emotional update failed: {_alma_err}")
 
         # Update narrative self-model for significant interactions (background)
@@ -3477,7 +2106,7 @@ Python code:"""
             try:
                 from aura.narrative_self import get_narrative_self
                 _AGENT_EXECUTOR.submit(get_narrative_self().update_from_interaction, message, response, self.brain)
-            except Exception as _narr_err:
+            except (ImportError, AttributeError, TypeError) as _narr_err:
                 logger.debug(f"[Agent] Narrative self update failed: {_narr_err}")
 
         # TTS
@@ -3498,7 +2127,7 @@ Python code:"""
                         })
                         if len(self.kg_bridge.extraction_queue) >= self.kg_bridge.config.batch_size:
                             self.kg_bridge.flush()
-            except Exception as e:
+            except (AttributeError, KeyError, TypeError, ValueError, OSError) as e:
                 logger.debug(f"[KG BRAIN] Chat entity extraction error: {e}")
 
         # User fact extraction now handled by UnifiedMemory write gate
@@ -3519,18 +2148,18 @@ Python code:"""
                         _pad = {"pleasure": _s.get("pleasure", 0.0),
                                 "arousal": _s.get("arousal", 0.0),
                                 "dominance": _s.get("dominance", 0.0)}
-                except Exception as e:
-                    logger.debug(f"[Agent] non-critical: {e}")
+                except (ImportError, AttributeError, KeyError, TypeError) as e:
+                    logger.debug(f"[ALMA] PAD retrieval failed: {e}")
                 _umem_ref = _get_umem()
                 import threading as _threading
                 _store_fn = getattr(_umem_ref, "store_gated", _umem_ref.store)
                 def _safe_store(_fn=_store_fn, _c=_mem_content, _p=_pad):
                     try:
                         _fn(content=_c, source="conversation", importance=0.5, emotional_pad=_p)
-                    except Exception as _e:
+                    except Exception as _e:  # Catch-all: runs in background executor thread
                         logger.debug("[UnifiedMemory] Background store error: %s", _e)
                 _AGENT_EXECUTOR.submit(_safe_store)
-            except Exception as e:
+            except (AttributeError, TypeError, OSError) as e:
                 logger.debug(f"[UnifiedMemory] Conversation store error: {e}")
 
         # Record interaction for skill learning (background, non-blocking)
@@ -3544,7 +2173,7 @@ Python code:"""
                     user_input=_sl_msg, output=_sl_resp,
                     success=True, context={}
                 )
-        except Exception as e:
+        except (AttributeError, TypeError, ValueError, OSError) as e:
             logger.debug("[SkillLibrary] Record interaction error: %s", e)
 
         # End monologue session
@@ -3556,7 +2185,7 @@ Python code:"""
             try:
                 _conv_hist = self.brain.conversation_history if hasattr(self.brain, 'conversation_history') else None
                 self.thinker.run_async(message, response, _conv_hist)
-            except Exception as e:
+            except (AttributeError, TypeError, ValueError, RuntimeError) as e:
                 logger.debug(f"[Thinker] Async kickoff error: {e}")
 
         # ===== COHERENT LOOP: Track exchange for next-turn feedback =====
@@ -3601,7 +2230,7 @@ Python code:"""
                     bandit_selection = bandit.select_strategy(message)
                     selected_strategy = bandit_selection.strategy
                     logger.debug(f"[StrategyBandit] selected: {selected_strategy.value} for {bandit_selection.category.value}")
-            except Exception as e:
+            except (ImportError, AttributeError, KeyError, TypeError, ValueError) as e:
                 logger.debug(f"[StrategyBandit] Selection error, falling back to CoT: {e}")
                 selected_strategy = ReasoningStrategy.CHAIN_OF_THOUGHT if ReasoningStrategy else "chain_of_thought"
         else:
@@ -3626,7 +2255,7 @@ Python code:"""
                         else:
                             system_prompt_addon = guidance
                     logger.debug(f"[TemplateLib] Injected {len(template_matches)} template(s), best: {template_match.template.name}")
-            except Exception as e:
+            except (ImportError, AttributeError, KeyError, TypeError, ValueError) as e:
                 logger.debug(f"[TemplateLib] Retrieval error: {e}")
 
         # Raw strategy results for rich trace capture
@@ -3657,7 +2286,7 @@ Python code:"""
                         if not response:
                             logger.debug("[StrategyBandit] MCTS returned empty, falling back to CoT")
                             response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
-                    except Exception as e:
+                    except (AttributeError, KeyError, TypeError, ValueError, ConnectionError, TimeoutError) as e:
                         logger.debug(f"[StrategyBandit] MCTS error, falling back to CoT: {e}")
                         response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
                 else:
@@ -3668,7 +2297,7 @@ Python code:"""
                 # Unknown strategy — safe fallback
                 response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
 
-        except Exception as e:
+        except Exception as e:  # Catch-all: strategy dispatch covers LLM + MCTS + tools
             logger.debug(f"[StrategyBandit] Strategy execution error, falling back to CoT: {e}")
             response = self.brain.think(message, task_type=task_type, tone_modifier=tone_modifier, system_prompt=system_prompt_addon)
 
@@ -3708,10 +2337,10 @@ Python code:"""
                                     response_length=len(response),
                                     metrics=eval_metrics,
                                 )
-                            except Exception as ex:
+                            except Exception as ex:  # Catch-all: runs in background future callback
                                 logger.debug(f"[StrategyBandit] Async eval error: {ex}")
                         eval_future.add_done_callback(_on_eval_done)
-                    except Exception as e:
+                    except (ImportError, AttributeError, TypeError, ValueError) as e:
                         logger.debug(f"[StrategyBandit] Eval setup error: {e}")
 
                 # Always record basic outcome with latency
@@ -3723,7 +2352,7 @@ Python code:"""
                     response_length=len(response),
                     metrics=metrics,
                 )
-            except Exception as e:
+            except (AttributeError, KeyError, TypeError, ValueError) as e:
                 composite_reward = 0.5
                 logger.debug(f"[StrategyBandit] Outcome recording error: {e}")
 
@@ -3746,7 +2375,8 @@ Python code:"""
                                 {"step": "problem_understanding", "content": message[:500]},
                                 {"step": "reasoning", "content": response[:1000]},
                             ])
-                    except Exception:
+                    except (AttributeError, KeyError, TypeError, ValueError) as _trace_err:
+                        logger.debug(f"[TemplateLib] Trace build fallback: {_trace_err}")
                         full_trace = json.dumps([
                             {"step": "problem_understanding", "content": message[:500]},
                             {"step": "reasoning", "content": response[:1000]},
@@ -3766,7 +2396,7 @@ Python code:"""
                         _tm.template.template_id,
                         _cr,
                     )
-            except Exception as e:
+            except (AttributeError, KeyError, TypeError, ValueError, OSError) as e:
                 logger.debug(f"[TemplateLib] Trace/usage recording error: {e}")
 
         # ===== SHARED POST-PROCESSING =====
@@ -3798,7 +2428,7 @@ Python code:"""
                         self.tools[_name] = _inst
                 _sentinel.unlink(missing_ok=True)
                 logger.info("[Agent] Reloaded custom tools after marketplace install")
-        except Exception as _e:
+        except (ImportError, AttributeError, OSError) as _e:
             logger.warning(f"[Agent] Custom tool reload check failed: {_e}")
 
         # ===== SHARED PRE-PROCESSING =====
@@ -3822,725 +2452,16 @@ Python code:"""
         # ===== SHARED POST-PROCESSING =====
         self._finalize_chat(message, full_response, ctx, speak=speak)
 
-    def _analyze_emotion(self, message: str):
-        """Analyze emotional state from user message."""
-        try:
-            if "evoemo" in self.tools and self.tools["evoemo"].is_enabled():
-                return self.tools["evoemo"].analyze_text(message)
-        except Exception as e:
-            logger.debug(f"[EvoEmo] Analysis error: {e}")
-        return None
-
-    def _get_soul_prompt(self) -> str:
-        """Get soul's system prompt addition for personality injection."""
-        if self._soul is None:
-            return ""
-        try:
-            return self._soul.get_system_prompt_addition()
-        except Exception:
-            return ""
-
-    def _temporal_grounding(self) -> Optional[str]:
-        """Build temporal grounding context if this is a new session.
-
-        Detects session start (>5 min since last interaction), loads narrative
-        self-model, calculates time elapsed, returns grounding context.
-        """
-        with self._temporal_lock:
-            now = time.time()
-            last = getattr(self, '_last_interaction_ts', 0)
-            self._last_interaction_ts = now
-
-        if last == 0:
-            # First call ever — skip grounding
-            return None
-
-        elapsed_minutes = (now - last) / 60
-        if elapsed_minutes < 5:
-            # Same session — no grounding needed
-            return None
-
-        # This is a session start
-        elapsed_hours = elapsed_minutes / 60
-        parts = []
-
-        # Time awareness
-        if elapsed_hours < 1:
-            parts.append(f"It's been about {int(elapsed_minutes)} minutes since we last talked.")
-        elif elapsed_hours < 24:
-            parts.append(f"It's been about {elapsed_hours:.0f} hours since we last talked.")
-        else:
-            days = elapsed_hours / 24
-            parts.append(f"It's been about {days:.0f} days since we last talked.")
-
-        # Load narrative relationship state
-        try:
-            from aura.narrative_self import get_narrative_self
-            narrative = get_narrative_self()
-            if narrative.relationship_state:
-                parts.append(narrative.relationship_state)
-        except Exception:
-            pass
-
-        # Load dream insights from last sleep cycle (Phase 4)
-        try:
-            _project_root = Path(__file__).resolve().parent.parent
-            dream_queue = _project_root / "data" / "neurodream" / "dream_proactive_queue.json"
-            if dream_queue.exists():
-                import json as _json
-                queue_data = _json.loads(dream_queue.read_text(encoding='utf-8'))
-                dream_msgs = queue_data.get("messages", [])
-                if dream_msgs:
-                    dream_text = "\n".join(
-                        f"- [{m['type']}] {m['content']}" for m in dream_msgs[:3]
-                    )
-                    parts.append(
-                        "Thoughts from my last sleep cycle:\n" + dream_text
-                    )
-                # Clear the queue so it doesn't repeat
-                dream_queue.unlink(missing_ok=True)
-        except Exception:
-            pass
-
-        if not parts:
-            return None
-
-        return "SESSION CONTEXT:\n" + " ".join(parts)
-
-    def _build_aura_context(self, message: str) -> dict:
-        """Build AURA context using ALMA and unified memory."""
-        context = {"mood": "neutral", "tone": None, "memory_context": "", "thinking_prefix": ""}
-        try:
-            # Get mood from ALMA if available — drives both mood label and tone.
-            # tone=None lets _build_full_system_prompt use get_emotional_style_prompt()
-            # which reads live ALMA state instead of a hardcoded "warm".
-            from aura.emotion.alma_engine import get_alma_engine
-            alma = get_alma_engine()
-            if alma:
-                state = alma.get_emotional_state()
-                context["mood"] = state.get("dominant_emotion", "neutral")
-        except Exception as e:
-            logger.debug(f"[Agent] non-critical: {e}")
-        # Generate thinking prefix via VisibleThinking
-        if self._visible_thinking:
-            try:
-                prefix = self._visible_thinking.generate_thinking_prefix(message)
-                if prefix:
-                    context["thinking_prefix"] = prefix
-            except Exception as e:
-                logger.debug(f"[Agent] non-critical: {e}")
-        return context
-
-    # =================================================================
-    # Coherent Loop — Phase 3.1: Pre-response appraisal & post-response feedback
-    # =================================================================
-
-    def _pre_response_appraisal(self, message: str) -> None:
-        """Run chain-of-emotion appraisal BEFORE generating a response.
-
-        Calls the fast model to ask "how would I naturally feel about this
-        message?" and feeds the result into ALMA so the mood is updated
-        before the response style prompt is generated.
-
-        Must be synchronous (with a short timeout) so the mood is ready
-        by the time the response generation starts.
-        """
-        try:
-            from aura.emotion.integration import appraise_message
-            result = appraise_message(message, self.brain)
-            if result:
-                _record_thought(
-                    "observing",
-                    f"emotional appraisal: {result.get('emotion', '?')} "
-                    f"(intensity={result.get('intensity', 0):.1f})",
-                    0.4, "emotion",
-                )
-        except Exception as e:
-            logger.debug("[ALMA] Pre-response appraisal error: %s", e)
-
-    def _post_response_feedback(self, current_message: str) -> None:
-        """Analyze the user's new message as a reaction to our previous response.
-
-        Closes the coherent loop: response outcome feeds back into ALMA so
-        the mood drifts based on how the user actually reacted.  Runs only
-        when there is a previous exchange to compare against.
-        """
-        if not self._prev_message or not self._prev_response:
-            return
-        try:
-            from aura.emotion.integration import analyze_user_reaction
-            result = analyze_user_reaction(
-                current_message, self._prev_response, self.brain,
-            )
-            if result:
-                _record_thought(
-                    "reflecting",
-                    f"user reaction: {result.get('emotion', '?')} "
-                    f"(sat={result.get('satisfaction', 0):.1f} "
-                    f"eng={result.get('engagement', 0):.1f})",
-                    0.4, "emotion",
-                )
-        except Exception as e:
-            logger.debug("[ALMA] Post-response feedback error: %s", e)
-
-    def _handle_aura_command(self, message: str) -> Optional[str]:
-        """Handle AURA system commands (legacy AURAEngine removed; uses ALMA/unified memory)."""
-        message_lower = message.lower()
-
-        aura_commands = [
-            "aura status", "aura mood", "aura soul", "aura memory",
-            "aura patterns", "aura insights", "remember this",
-            "aura remember", "what do you remember"
-        ]
-
-        if not any(cmd in message_lower for cmd in aura_commands):
-            return None
-
-        try:
-            if "status" in message_lower:
-                tool_count = len(self.tools)
-                name = self.identity.get('name', 'AURA')
-                return f"AURA Status:\n- Name: {name}\n- Tools: {tool_count} loaded\n- Status: Online"
-
-            elif "mood" in message_lower:
-                evoemo = self.tools.get("evoemo")
-                if evoemo and hasattr(evoemo, 'get_state'):
-                    state = evoemo.get_state()
-                    return f"Current mood: {state.get('dominant_emotion', 'neutral')}"
-                return "Mood system active. Feeling ready!"
-
-            elif "soul" in message_lower:
-                name = self.identity.get('name', 'AURA')
-                personality = self.identity.get('personality', 'friendly and helpful')
-                return f"My Identity:\n- Name: {name}\n- Personality: {personality}"
-
-            elif "remember this" in message_lower or "aura remember" in message_lower:
-                fact = message.replace("remember this:", "").replace("aura remember:", "").strip()
-                fact = fact.replace("remember this", "").replace("aura remember", "").strip()
-                if fact:
-                    try:
-                        self.memory.store(content=fact, source="user_fact", importance=0.7)
-                        return f"Got it, I'll remember: '{fact[:50]}...'"
-                    except Exception:
-                        return "I couldn't store that memory."
-                return "What would you like me to remember?"
-
-            elif "memory" in message_lower or "what do you remember" in message_lower:
-                return "Memory system active. I store and recall conversations automatically."
-
-            elif "patterns" in message_lower or "insights" in message_lower:
-                return "Pattern detection is handled by ALMA and EvoEmo subsystems."
-
-        except Exception as e:
-            logger.debug(f"[AURA] Command error: {e}")
-            return f"AURA command error: {e}"
-
-        return None
-
-    def _handle_evoemo_command(self, message: str) -> Optional[str]:
-        """Handle EvoEmo-specific commands."""
-        message_lower = message.lower()
-
-        evoemo_commands = [
-            "my mood", "how am i feeling", "current mood", "mood status",
-            "mood history", "emotion history", "clear mood", "disable mood",
-            "enable mood", "mood patterns"
-        ]
-
-        if not any(cmd in message_lower for cmd in evoemo_commands):
-            return None
-
-        try:
-            evoemo = self.tools.get("evoemo")
-            if not evoemo:
-                return None
-
-            # SECURITY: Destructive mood commands require confirmation in non-auto mode
-            if any(kw in message_lower for kw in ("clear", "disable")):
-                try:
-                    from aura.core.permissions import PermissionTier
-                    pm = getattr(self, "permissions", None)
-                    if pm and pm.current_mode != PermissionTier.FULL_AUTO:
-                        logger.info(f"[EvoEmo] Destructive command blocked (non-auto mode): {message_lower[:40]}")
-                        return "Destructive mood commands require full-auto mode or explicit confirmation via the API."
-                except Exception:
-                    pass
-
-            if "clear" in message_lower:
-                result = evoemo.clear_history()
-                return "Mood history cleared." if result.get("success") else "Failed to clear history."
-
-            elif "disable" in message_lower:
-                evoemo.set_enabled(False)
-                return "Mood tracking disabled."
-
-            elif "enable" in message_lower:
-                evoemo.set_enabled(True)
-                return "Mood tracking enabled."
-
-            elif "history" in message_lower:
-                history = evoemo.get_history(days=7)
-                if not history:
-                    return "No mood history yet."
-                # Summarize
-                from collections import Counter
-                emotions = [h["emotion"] for h in history]
-                dist = Counter(emotions)
-                summary = ", ".join(f"{e}: {c}" for e, c in dist.most_common())
-                return f"Mood history (7 days, {len(history)} readings): {summary}"
-
-            elif "pattern" in message_lower:
-                patterns = evoemo.get_patterns()
-                if patterns.get("status") == "insufficient_data":
-                    return f"Not enough data for patterns yet ({patterns.get('readings', 0)} readings)."
-                dominant = patterns.get("dominant_emotion", "calm")
-                stress_hours = patterns.get("stress_hours", [])
-                stress_info = f" Stress tends to peak around: {stress_hours}" if stress_hours else ""
-                return f"Your dominant mood: {dominant}.{stress_info}"
-
-            else:
-                # Current mood
-                mood = evoemo.get_current_mood()
-                if mood:
-                    emoji = evoemo.get_mood_emoji()
-                    return f"Current mood: {emoji} {mood.emotion} ({mood.confidence}% confidence)"
-                return "No mood data yet. Keep chatting and I'll pick up on how you're feeling."
-
-        except Exception as e:
-            logger.debug(f"[EvoEmo] Command error: {e}")
-            return None
-
-    def get_current_mood(self):
-        """Get current emotional state (for external use)."""
-        try:
-            if "evoemo" in self.tools:
-                return self.tools["evoemo"].get_current_mood()
-        except (AttributeError, KeyError, TypeError):
-            pass  # EvoEmo tool not properly initialized
-        return None
-
-    def get_mood_emoji(self) -> str:
-        """Get emoji for current mood (for GUI)."""
-        try:
-            if "evoemo" in self.tools:
-                return self.tools["evoemo"].get_mood_emoji()
-        except (AttributeError, KeyError, TypeError):
-            pass  # EvoEmo tool not properly initialized
-        return "😐"
-
-    # =========================================================================
-    #                    KNOWLEDGE GRAPH BRAIN METHODS
-    # =========================================================================
-
-    def get_kg_brain_stats(self) -> dict:
-        """Get Knowledge Graph Brain statistics.
-
-        Returns:
-            dict with KG Brain stats, or empty dict if not available
-        """
-        if self.kg_brain is None:
-            return {"available": False, "reason": "KG Brain not initialized"}
-
-        try:
-            kg_stats = self.kg_brain.get_statistics()
-            bridge_stats = self.kg_bridge.get_statistics() if self.kg_bridge else {}
-
-            return {
-                "available": True,
-                "total_entities": kg_stats.get("total_entities", 0),
-                "total_relationships": kg_stats.get("total_relationships", 0),
-                "entity_types": kg_stats.get("entity_type_distribution", {}),
-                "average_importance": kg_stats.get("average_importance", 0),
-                "entities_extracted": bridge_stats.get("total_entities_extracted", 0),
-                "extractions_triggered": bridge_stats.get("total_extractions_triggered", 0),
-                "queue_size": bridge_stats.get("queue_size", 0)
-            }
-        except Exception as e:
-            return {"available": False, "error": str(e)}
-
-    def kg_brain_query(self, query: str, max_entities: int = 10) -> str:
-        """Query the Knowledge Graph Brain.
-
-        Args:
-            query: Search query
-            max_entities: Maximum entities to return
-
-        Returns:
-            Formatted context string with matching entities
-        """
-        if self.kg_query_engine is None:
-            return "Knowledge Graph Brain not available."
-
-        try:
-            result = self.kg_query_engine.query(query, mode=QueryMode.HYBRID, max_entities=max_entities)
-            return result.context_string if result.entities else "No matching entities found."
-        except Exception as e:
-            return f"Query error: {e}"
-
-    def kg_brain_add_knowledge(self, text: str, context: str = "manual") -> dict:
-        """Manually add knowledge to the KG Brain.
-
-        Args:
-            text: Text to extract entities from
-            context: Context for the extraction
-
-        Returns:
-            dict with extraction results
-        """
-        if self.kg_bridge is None:
-            return {"success": False, "error": "KG Brain not available"}
-
-        try:
-            entity_ids = self.kg_bridge.force_extract(text, context=context)
-            return {
-                "success": True,
-                "entities_extracted": len(entity_ids),
-                "entity_ids": entity_ids
-            }
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-    def kg_brain_consolidate(self, decay_rate: float = 0.01, prune_threshold: float = 0.05) -> dict:
-        """Consolidate KG Brain memory (decay importance, prune low entities).
-
-        Args:
-            decay_rate: Rate of importance decay
-            prune_threshold: Threshold below which to prune entities
-
-        Returns:
-            dict with consolidation results
-        """
-        if self.kg_brain is None:
-            return {"success": False, "error": "KG Brain not available"}
-
-        try:
-            # Flush any pending extractions
-            if self.kg_bridge:
-                self.kg_bridge.flush()
-
-            # Get stats before
-            stats_before = self.kg_brain.get_statistics()
-
-            # Apply decay
-            self.kg_brain.decay_importance(decay_rate)
-
-            # Prune low importance
-            self.kg_brain.prune_low_importance(prune_threshold)
-
-            # Get stats after
-            stats_after = self.kg_brain.get_statistics()
-
-            return {
-                "success": True,
-                "entities_before": stats_before.get("total_entities", 0),
-                "entities_after": stats_after.get("total_entities", 0),
-                "entities_pruned": stats_before.get("total_entities", 0) - stats_after.get("total_entities", 0),
-                "decay_rate": decay_rate,
-                "prune_threshold": prune_threshold
-            }
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-    # =========================================================================
-    #                    EPISODIC TIME-TRAVEL MEMORY METHODS
-    # =========================================================================
-
-    def get_episodic_memory_stats(self) -> dict:
-        """Get memory stats (redirected to UnifiedMemory)."""
-        try:
-            from aura.memory.unified_memory import get_unified_memory
-            um = get_unified_memory()
-            stats = um.get_stats() if hasattr(um, 'get_stats') else {}
-            return {"available": True, **stats}
-        except Exception as e:
-            return {"available": False, "error": str(e)}
-
-    def episodic_recall(self, query: str, limit: int = 5, time_filter: str = None) -> list:
-        """Recall memories (redirected to UnifiedMemory)."""
-        try:
-            from aura.memory.unified_memory import get_unified_memory
-            results = get_unified_memory().query(query, k=limit)
-            return [
-                {"id": r.source_id, "content": r.content[:300],
-                 "type": r.metadata.get("memory_type", "conversation"),
-                 "importance": r.importance, "score": r.score, "entities": []}
-                for r in results
-            ]
-        except Exception:
-            return []
-
-    def episodic_time_travel(self, time_reference: str) -> dict:
-        return {"success": False, "error": "Time travel consolidated — use memory query"}
-
-    def episodic_record(self, content: str, episode_type: str = "conversation",
-                        importance: float = 0.5, entities: list = None,
-                        tools_used: list = None) -> dict:
-        """Record a memory (redirected to UnifiedMemory)."""
-        try:
-            from aura.memory.unified_memory import get_unified_memory
-            um = get_unified_memory()
-            ids = um.store(content=content, source="episodic_record", importance=importance,
-                           tags=entities or [], episode_type=episode_type)
-            return {"success": True, "episode_id": ids.get("store", ""), "type": episode_type}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-    def episodic_get_context(self, query: str, include_timeline: bool = False) -> str:
-        try:
-            from aura.memory.unified_memory import get_unified_memory
-            results = get_unified_memory().query(query, k=3)
-            return "\n".join(f"- {r.content[:120]}" for r in results) if results else ""
-        except Exception:
-            return ""
-
-    def episodic_consolidate(self) -> dict:
-        try:
-            from aura.memory.store import get_memory_store
-            store = get_memory_store()
-            return {"success": True, "message": "Consolidation via UnifiedMemory"}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-    def episodic_get_health(self) -> dict:
-        return {"status": "consolidated_into_unified_memory"}
-
-    # ==================== Skill Library Methods ====================
-
-    def get_skill_library_stats(self) -> dict:
-        """Get Skill Library statistics.
-
-        Returns:
-            dict with skill library stats, or empty dict if not available
-        """
-        if self.skill_library is None:
-            return {"available": False, "reason": "Skill Library not initialized"}
-
-        try:
-            return self.skill_library.get_stats()
-        except Exception as e:
-            return {"available": False, "error": str(e)}
-
-    def skill_search(self, query: str, limit: int = 5, category: str = None) -> list:
-        """Search for relevant skills.
-
-        Args:
-            query: Search query
-            limit: Maximum results
-            category: Optional category filter
-
-        Returns:
-            list of (skill_id, score) tuples
-        """
-        if self.skill_library is None:
-            return []
-
-        try:
-            return self.skill_library.search(query, limit=limit, category=category)
-        except Exception as e:
-            logger.error(f"Skill search error: {e}")
-            return []
-
-    def skill_get(self, skill_id: str) -> dict:
-        """Get a skill by ID.
-
-        Args:
-            skill_id: ID of the skill to retrieve
-
-        Returns:
-            dict with skill data, or error dict
-        """
-        if self.skill_library is None:
-            return {"error": "Skill Library not available"}
-
-        try:
-            skill = self.skill_library.get_skill(skill_id)
-            if skill:
-                return skill.to_dict()
-            return {"error": f"Skill not found: {skill_id}"}
-        except Exception as e:
-            return {"error": str(e)}
-
-    def skill_create(
-        self,
-        name: str,
-        description: str,
-        category: str,
-        trigger_patterns: list,
-        procedure: str,
-        tags: list = None
-    ) -> dict:
-        """Create a new skill.
-
-        Args:
-            name: Skill name (2-4 words)
-            description: What the skill does
-            category: coding, writing, research, automation, analysis, communication, learning, custom
-            trigger_patterns: Phrases that trigger this skill
-            procedure: Step-by-step procedure
-            tags: Optional tags
-
-        Returns:
-            dict with created skill ID
-        """
-        if self.skill_library is None:
-            return {"success": False, "error": "Skill Library not available"}
-
-        try:
-            skill_id = self.skill_library.create_skill(
-                name=name,
-                description=description,
-                category=category,
-                trigger_patterns=trigger_patterns,
-                procedure=procedure,
-                tags=tags
-            )
-            return {"success": True, "skill_id": skill_id}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-    def skill_record_use(
-        self,
-        skill_id: str,
-        input_context: str,
-        output: str,
-        success: bool,
-        feedback: str = None
-    ) -> dict:
-        """Record usage of a skill for learning.
-
-        Args:
-            skill_id: ID of the skill used
-            input_context: What triggered the skill
-            output: What the skill produced
-            success: Whether it worked
-            feedback: Optional user feedback
-
-        Returns:
-            dict with success status
-        """
-        if self.skill_library is None:
-            return {"success": False, "error": "Skill Library not available"}
-
-        try:
-            result = self.skill_library.record_use(
-                skill_id=skill_id,
-                input_context=input_context,
-                output=output,
-                success=success,
-                feedback=feedback
-            )
-            return {"success": result}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-    def skill_find_applicable(self, user_input: str, max_skills: int = 3) -> list:
-        """Find skills applicable to a user request.
-
-        Args:
-            user_input: User's request
-            max_skills: Maximum skills to return
-
-        Returns:
-            list of (skill, score) tuples
-        """
-        if self.skill_library is None:
-            return []
-
-        try:
-            return self.skill_library.find_applicable(user_input, max_skills=max_skills)
-        except Exception as e:
-            logger.error(f"Skill find error: {e}")
-            return []
-
-    def skill_get_context(self, user_input: str) -> str:
-        """Get skill context for LLM prompting.
-
-        Args:
-            user_input: User's request
-
-        Returns:
-            Formatted context string for LLM injection
-        """
-        if self.skill_library is None:
-            return ""
-
-        try:
-            return self.skill_library.get_skill_context(user_input)
-        except Exception as e:
-            logger.error(f"Skill context error: {e}")
-            return ""
-
-    def skill_record_interaction(
-        self,
-        user_input: str,
-        output: str,
-        success: bool,
-        context: dict = None,
-        feedback: str = None
-    ) -> str:
-        """Record an interaction for potential skill learning.
-
-        Args:
-            user_input: What the user asked
-            output: What was produced
-            success: Whether successful
-            context: Optional context
-            feedback: Optional feedback
-
-        Returns:
-            skill_id if a skill was learned/updated, None otherwise
-        """
-        if self.skill_library is None:
-            return None
-
-        try:
-            return self.skill_library.record_interaction(
-                user_input=user_input,
-                output=output,
-                success=success,
-                context=context,
-                feedback=feedback
-            )
-        except Exception as e:
-            logger.error(f"Skill record error: {e}")
-            return None
-
-    def skill_list(self, category: str = None, sort_by: str = "success_rate") -> list:
-        """List all skills.
-
-        Args:
-            category: Optional category filter
-            sort_by: Sort order (success_rate, uses, name, updated)
-
-        Returns:
-            list of skill info dicts
-        """
-        if self.skill_library is None:
-            return []
-
-        try:
-            return self.skill_library.list_skills(category=category, sort_by=sort_by)
-        except Exception as e:
-            logger.error(f"Skill list error: {e}")
-            return []
-
-    def skill_improve(self, skill_id: str, apply: bool = False) -> dict:
-        """Analyze and optionally improve a skill.
-
-        Args:
-            skill_id: Skill to improve
-            apply: Whether to apply improvements
-
-        Returns:
-            Improvement suggestions
-        """
-        if self.skill_library is None:
-            return {"error": "Skill Library not available"}
-
-        try:
-            return self.skill_library.improve_skill(skill_id, apply=apply)
-        except Exception as e:
-            return {"error": str(e)}
+    # _analyze_emotion, _get_soul_prompt, _temporal_grounding — moved to NarrativeMixin
+    # _build_aura_context — moved to NarrativeMixin
+    # _pre_response_appraisal, _post_response_feedback — moved to NarrativeMixin
+    # _handle_aura_command, _handle_evoemo_command — moved to NarrativeMixin
+    # get_current_mood, get_mood_emoji — moved to NarrativeMixin
+
+    # KG Brain methods (get_kg_brain_stats, kg_brain_query, etc.) — moved to KGBrainMixin
+    # Episodic memory stubs — moved to KGBrainMixin
+
+    # Skill Library methods — moved to SkillManagerMixin
 
     def _speak(self, text: str, emotion: Optional[str] = None):
         """Speak text using TTS with optional emotional adaptation."""
@@ -4549,7 +2470,7 @@ Python code:"""
             vps = get_voice_presence()
             if vps._enabled:
                 vps.speak(text, emotion=emotion, block=False)
-        except Exception as e:
+        except (ImportError, AttributeError, TypeError, OSError) as e:
             logger.debug(f"TTS error: {e}")
 
     def recall_memories(self, query: str, n: int = 5) -> list:
@@ -4564,7 +2485,7 @@ Python code:"""
                 result = self.dream_mode.dream()
                 logger.info(f"[DREAM] Consolidation: {result}")
                 return result
-            except Exception as e:
+            except (AttributeError, TypeError, ValueError, OSError) as e:
                 logger.warning(f"[DREAM] Failed: {e}")
         return {"success": False, "error": "DreamMode not available"}
 
@@ -4594,7 +2515,7 @@ Python code:"""
                     results["freed_resources"].append("neurodream_sleep_thread")
                 if hasattr(self.neurodream, 'shutdown'):
                     self.neurodream.shutdown()
-        except Exception as e:
+        except Exception as e:  # Catch-all: shutdown must continue even if one step fails
             results["errors"].append(f"NeuroDream shutdown: {e}")
 
         # 1.5. AURA v3.0 ALIVE system — removed (migrated to ALMA helpers)
@@ -4606,7 +2527,7 @@ Python code:"""
                 for model, success in unload_result.items():
                     if success:
                         results["freed_resources"].append(f"ollama:{model}")
-        except Exception as e:
+        except Exception as e:  # Catch-all: shutdown must continue even if one step fails
             results["errors"].append(f"Ollama unload: {e}")
 
         # 3. Close browser if open
@@ -4614,7 +2535,7 @@ Python code:"""
             if "browser" in self.tools and hasattr(self.tools["browser"], 'close'):
                 self.tools["browser"].close()
                 results["freed_resources"].append("browser")
-        except Exception as e:
+        except Exception as e:  # Catch-all: shutdown must continue even if one step fails
             results["errors"].append(f"Browser close: {e}")
 
         # 4. Unload voice/TTS models
@@ -4628,7 +2549,7 @@ Python code:"""
                     elif hasattr(tool, 'unload_whisper'):
                         tool.unload_whisper()
                         results["freed_resources"].append(f"{tool_name}:whisper")
-        except Exception as e:
+        except Exception as e:  # Catch-all: shutdown must continue even if one step fails
             results["errors"].append(f"Voice unload: {e}")
 
         # 5. Save knowledge graph
@@ -4636,7 +2557,7 @@ Python code:"""
             if "knowledge_graph" in self.tools:
                 self.tools["knowledge_graph"].save()
                 results["freed_resources"].append("knowledge_graph:saved")
-        except Exception as e:
+        except Exception as e:  # Catch-all: shutdown must continue even if one step fails
             results["errors"].append(f"KG save: {e}")
 
         # 7. Save conversation history (preserve on disk, only clear in-memory)
@@ -4644,7 +2565,7 @@ Python code:"""
             if hasattr(self, 'brain') and self.brain:
                 self.brain._save_history()
                 results["freed_resources"].append("conversation_history:saved")
-        except Exception as e:
+        except Exception as e:  # Catch-all: shutdown must continue even if one step fails
             results["errors"].append(f"History save: {e}")
 
         # 9. Close Knowledge Graph Brain
@@ -4655,7 +2576,7 @@ Python code:"""
                     self.kg_bridge.flush()
                 self.kg_brain.close()
                 results["freed_resources"].append("kg_brain")
-        except Exception as e:
+        except Exception as e:  # Catch-all: shutdown must continue even if one step fails
             results["errors"].append(f"KG Brain close: {e}")
 
         # 10. Episodic Memory — consolidated into UnifiedMemory, no separate close needed
@@ -4665,7 +2586,7 @@ Python code:"""
             if hasattr(self, 'skill_library') and self.skill_library:
                 self.skill_library.shutdown()
                 results["freed_resources"].append("skill_library")
-        except Exception as e:
+        except Exception as e:  # Catch-all: shutdown must continue even if one step fails
             results["errors"].append(f"Skill Library close: {e}")
 
         # 12. Save ALMA emotional state for cross-session continuity
@@ -4673,7 +2594,7 @@ Python code:"""
             from aura.emotion.alma_engine import save_state as alma_save_state
             alma_save_state()
             results["freed_resources"].append("alma_emotional_state:saved")
-        except Exception as e:
+        except Exception as e:  # Catch-all: shutdown must continue even if one step fails
             results["errors"].append(f"ALMA state save: {e}")
 
         results["success"] = len(results["errors"]) == 0

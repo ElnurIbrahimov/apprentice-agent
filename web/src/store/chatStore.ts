@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Message, MoodState, StatusResponse, ConnectionStatus, Conversation, Citation, ToolTrace, FleetTask } from '../types';
+import type { Message, MoodState, StatusResponse, ConnectionStatus, Conversation, Citation, ToolTrace, FleetTask, ResearchProgress, ResearchProgressStep } from '../types';
 
 interface ChatState {
   // Messages
@@ -63,6 +63,20 @@ interface ChatState {
   fleetData: { goal: string; tasks: FleetTask[]; totalElapsed: number } | null;
   setFleetData: (data: { goal: string; tasks: FleetTask[]; totalElapsed: number } | null) => void;
   clearFleetData: () => void;
+
+  // Research progress
+  researchProgress: ResearchProgress | null;
+  addResearchStep: (step: ResearchProgressStep) => void;
+  clearResearchProgress: () => void;
+
+  // Citations panel
+  citationsPanelOpen: boolean;
+  setCitationsPanelOpen: (open: boolean) => void;
+  toggleCitationsPanel: () => void;
+  hoveredCitation: { id: number; messageId: string } | null;
+  setHoveredCitation: (hovered: { id: number; messageId: string } | null) => void;
+  activeCitationRef: { id: number; messageId: string } | null;
+  setActiveCitationRef: (ref: { id: number; messageId: string } | null) => void;
 }
 
 const generateId = () => `msg_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
@@ -187,4 +201,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
   fleetData: null,
   setFleetData: (data) => set({ fleetData: data }),
   clearFleetData: () => set({ fleetData: null }),
+
+  // Research progress
+  researchProgress: null,
+  addResearchStep: (step) => set((state) => {
+    const current = state.researchProgress;
+    const isSynthesis = step.stage === 'synthesis';
+    return {
+      researchProgress: {
+        active: !isSynthesis,
+        stage: step.stage,
+        steps: [...(current?.steps || []), step],
+      },
+    };
+  }),
+  clearResearchProgress: () => set({ researchProgress: null }),
+
+  // Citations panel
+  citationsPanelOpen: false,
+  setCitationsPanelOpen: (open) => set({ citationsPanelOpen: open }),
+  toggleCitationsPanel: () => set((state) => ({ citationsPanelOpen: !state.citationsPanelOpen })),
+  hoveredCitation: null,
+  setHoveredCitation: (hovered) => set({ hoveredCitation: hovered }),
+  activeCitationRef: null,
+  setActiveCitationRef: (ref) => set({ activeCitationRef: ref }),
 }));

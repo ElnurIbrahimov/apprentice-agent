@@ -226,8 +226,17 @@ class KnowledgeGraphTool:
         # Thread safety (RLock allows reentrant locking for nested method calls)
         self._lock = threading.RLock()
 
+        # Dedicated flush lock — serializes ALL disk-write paths (save, flush_if_dirty,
+        # atexit) to prevent concurrent file writes from racing. The _lock guards
+        # in-memory state; _flush_lock guards the on-disk persistence step.
+        # RLock so flush_if_dirty can call save() while already holding it.
+        self._flush_lock = threading.RLock()
+
         # Dirty flag for deferred saves (e.g. access_count updates in get_node)
         self._dirty = False
+
+        # Consolidation flag — when True, save() is a no-op to avoid N×full-save
+        self._consolidating = False
 
         # File paths
         self.nodes_file = self.db_path / "nodes.jsonl"
@@ -235,8 +244,19 @@ class KnowledgeGraphTool:
         self.embeddings_file = self.db_path / "embeddings.npy"
         self.stats_file = self.db_path / "stats.json"
 
+        # Sync bridge for Kuzu persistence (set externally via set_sync_bridge)
+        self._sync_bridge = None
+
         # Load existing graph
         self.load()
+
+    def set_sync_bridge(self, bridge) -> None:
+        """Set the KGSyncBridge for bidirectional Kuzu synchronization.
+
+        Args:
+            bridge: KGSyncBridge instance (from aura.core.kg_sync)
+        """
+        self._sync_bridge = bridge
 
     # =========================================================================
     # NODE OPERATIONS
@@ -316,16 +336,19 @@ class KnowledgeGraphTool:
             # Persist
             self._append_node(node)
 
+            # Sync to Kuzu (non-blocking)
+            if self._sync_bridge is not None and source != "kuzu_sync":
+                self._sync_bridge.sync_entity_to_kuzu(
+                    name=label,
+                    entity_type=node_type,
+                    properties=node.properties,
+                )
+
             # Contradiction detection: run in background so add_node stays fast
             if getattr(__import__("aura.config", fromlist=["Config"]).Config,
                        "ENABLE_KG_CONTRADICTIONS", True):
-                import threading as _threading
-                _threading.Thread(
-                    target=self._check_contradictions_bg,
-                    args=(node_id,),
-                    daemon=True,
-                    name=f"kg-contradict-{node_id[:8]}",
-                ).start()
+                from aura.pools import bg_pool
+                bg_pool().submit(self._check_contradictions_bg, node_id)
 
             return node
 
@@ -552,6 +575,18 @@ class KnowledgeGraphTool:
 
             # Persist
             self._append_edge(edge)
+
+            # Sync to Kuzu (non-blocking)
+            if self._sync_bridge is not None:
+                src_node = self._nodes.get(source_id)
+                tgt_node = self._nodes.get(target_id)
+                if src_node and tgt_node and not (properties or {}).get("_from_kuzu"):
+                    self._sync_bridge.sync_relation_to_kuzu(
+                        source_label=src_node.label,
+                        target_label=tgt_node.label,
+                        relation_type=edge_type,
+                        properties=properties or {},
+                    )
 
             return edge
 
@@ -1111,46 +1146,53 @@ class KnowledgeGraphTool:
         strengthened = 0
 
         with self._lock:
-            # 1. Prune weak, old edges
-            edges_to_prune = []
-            now = datetime.now()
+            self._consolidating = True
+            try:
+                # 1. Prune weak, old edges
+                edges_to_prune = []
+                now = datetime.now()
 
-            for edge_id, edge in self._edges.items():
-                # Parse last_reinforced
-                try:
-                    last_reinforced = datetime.fromisoformat(edge.last_reinforced)
-                    age_days = (now - last_reinforced).days
-                except (ValueError, TypeError, AttributeError):
-                    age_days = 0  # Default to 0 if timestamp is invalid
+                for edge_id, edge in self._edges.items():
+                    # Parse last_reinforced
+                    try:
+                        last_reinforced = datetime.fromisoformat(edge.last_reinforced)
+                        age_days = (now - last_reinforced).days
+                    except (ValueError, TypeError, AttributeError):
+                        age_days = 0  # Default to 0 if timestamp is invalid
 
-                # Prune weak edges older than 7 days
-                if edge.weight < 0.2 and age_days > 7:
-                    edges_to_prune.append(edge_id)
+                    # Prune weak edges older than 7 days
+                    if edge.weight < 0.2 and age_days > 7:
+                        edges_to_prune.append(edge_id)
 
-            for edge_id in edges_to_prune:
-                self.delete_edge(edge_id)
-                pruned += 1
+                for edge_id in edges_to_prune:
+                    self.delete_edge(edge_id)
+                    pruned += 1
 
-            # 2. Find and merge very similar nodes
-            # (Simple approach: exact label match after normalization)
-            label_groups: Dict[str, List[str]] = {}
-            for node_id, node in self._nodes.items():
-                normalized = node.label.lower().strip()
-                if normalized not in label_groups:
-                    label_groups[normalized] = []
-                label_groups[normalized].append(node_id)
+                # 2. Find and merge very similar nodes
+                # (Simple approach: exact label match after normalization)
+                label_groups: Dict[str, List[str]] = {}
+                for node_id, node in self._nodes.items():
+                    normalized = node.label.lower().strip()
+                    if normalized not in label_groups:
+                        label_groups[normalized] = []
+                    label_groups[normalized].append(node_id)
 
-            for label, node_ids in label_groups.items():
-                if len(node_ids) > 1:
-                    # Keep the one with highest confidence
-                    nodes = [(self._nodes[nid], nid) for nid in node_ids]
-                    nodes.sort(key=lambda x: x[0].confidence, reverse=True)
+                for label, node_ids in label_groups.items():
+                    if len(node_ids) > 1:
+                        # Keep the one with highest confidence
+                        nodes = [(self._nodes[nid], nid) for nid in node_ids]
+                        nodes.sort(key=lambda x: x[0].confidence, reverse=True)
 
-                    # Merge into first
-                    keeper = nodes[0][1]
-                    for _, to_remove in nodes[1:]:
-                        self._merge_nodes(keeper, to_remove)
-                        merged += 1
+                        # Merge into first
+                        keeper = nodes[0][1]
+                        for _, to_remove in nodes[1:]:
+                            self._merge_nodes(keeper, to_remove)
+                            merged += 1
+            finally:
+                self._consolidating = False
+
+        # Single save after all consolidation changes
+        self.save()
 
         return {
             "merged_nodes": merged,
@@ -1360,57 +1402,76 @@ class KnowledgeGraphTool:
             raise
 
     def save(self):
-        """Persist entire graph to disk (atomic writes to prevent data loss on crash)."""
+        """Persist entire graph to disk (atomic writes to prevent data loss on crash).
+
+        Lock ordering: _lock (in-memory snapshot) -> _flush_lock (disk I/O).
+        _lock is acquired first to get a consistent snapshot, then _flush_lock
+        serializes the actual file writes so concurrent save() / flush_if_dirty() /
+        atexit calls don't interleave disk operations.
+
+        _lock is an RLock, so callers that already hold it (e.g. delete_node)
+        can safely call save() without deadlocking. _flush_lock is also an RLock
+        so flush_if_dirty can nest into save().
+        """
+        # Skip disk writes during consolidation — one save() at the end
+        if self._consolidating:
+            return
         with self._lock:
-            # Save nodes (atomic temp+rename)
-            fd, tmp_path = tempfile.mkstemp(dir=self.nodes_file.parent, suffix='.tmp')
-            try:
-                with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                    for node in self._nodes.values():
-                        f.write(json.dumps(node.to_dict()) + '\n')
-                os.replace(tmp_path, str(self.nodes_file))
-            except Exception:
+            with self._flush_lock:
+                # Save nodes (atomic temp+rename)
+                fd, tmp_path = tempfile.mkstemp(dir=self.nodes_file.parent, suffix='.tmp')
                 try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-                raise
+                    with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                        for node in self._nodes.values():
+                            f.write(json.dumps(node.to_dict()) + '\n')
+                    os.replace(tmp_path, str(self.nodes_file))
+                except Exception:
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
+                    raise
 
-            # Save edges (atomic temp+rename)
-            fd, tmp_path = tempfile.mkstemp(dir=self.edges_file.parent, suffix='.tmp')
-            try:
-                with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                    for edge in self._edges.values():
-                        f.write(json.dumps(edge.to_dict()) + '\n')
-                os.replace(tmp_path, str(self.edges_file))
-            except Exception:
+                # Save edges (atomic temp+rename)
+                fd, tmp_path = tempfile.mkstemp(dir=self.edges_file.parent, suffix='.tmp')
                 try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-                raise
+                    with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                        for edge in self._edges.values():
+                            f.write(json.dumps(edge.to_dict()) + '\n')
+                    os.replace(tmp_path, str(self.edges_file))
+                except Exception:
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
+                    raise
 
-            # Save stats (atomic JSON write)
-            stats = {
-                "node_count": len(self._nodes),
-                "edge_count": len(self._edges),
-                "last_saved": datetime.now().isoformat(),
-                "node_types": {},
-                "edge_types": {}
-            }
+                # Save stats (atomic JSON write)
+                stats = {
+                    "node_count": len(self._nodes),
+                    "edge_count": len(self._edges),
+                    "last_saved": datetime.now().isoformat(),
+                    "node_types": {},
+                    "edge_types": {}
+                }
 
-            for node in self._nodes.values():
-                stats["node_types"][node.type] = stats["node_types"].get(node.type, 0) + 1
-            for edge in self._edges.values():
-                stats["edge_types"][edge.type] = stats["edge_types"].get(edge.type, 0) + 1
+                for node in self._nodes.values():
+                    stats["node_types"][node.type] = stats["node_types"].get(node.type, 0) + 1
+                for edge in self._edges.values():
+                    stats["edge_types"][edge.type] = stats["edge_types"].get(edge.type, 0) + 1
 
-            self._atomic_write_json(self.stats_file, stats)
-            self._dirty = False
+                self._atomic_write_json(self.stats_file, stats)
+                self._dirty = False
 
     def flush_if_dirty(self):
-        """Save to disk only if there are pending access-count updates."""
-        if self._dirty:
-            self.save()
+        """Save to disk only if there are pending access-count updates.
+
+        Acquires _lock first (consistent lock ordering with save()), then
+        checks _dirty under the lock to avoid TOCTOU races.
+        """
+        with self._lock:
+            if self._dirty:
+                self.save()  # save() re-acquires _lock (RLock, reentrant)
 
     def load(self):
         """Load graph from disk."""
@@ -1462,13 +1523,15 @@ class KnowledgeGraphTool:
 
     def _append_node(self, node: Node):
         """Append a single node to the JSONL file."""
-        with open(self.nodes_file, 'a', encoding='utf-8') as f:
-            f.write(json.dumps(node.to_dict()) + '\n')
+        with self._flush_lock:
+            with open(self.nodes_file, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(node.to_dict()) + '\n')
 
     def _append_edge(self, edge: Edge):
         """Append a single edge to the JSONL file."""
-        with open(self.edges_file, 'a', encoding='utf-8') as f:
-            f.write(json.dumps(edge.to_dict()) + '\n')
+        with self._flush_lock:
+            with open(self.edges_file, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(edge.to_dict()) + '\n')
 
     # =========================================================================
     # STATISTICS
@@ -1823,6 +1886,7 @@ class KnowledgeGraphTool:
 
 # Singleton instance
 _kg_instance: Optional[KnowledgeGraphTool] = None
+_kg_lock = threading.Lock()
 
 
 def seed_initial_knowledge(kg: 'KnowledgeGraphTool') -> Dict[str, int]:
@@ -1925,7 +1989,11 @@ _kg_atexit_registered: bool = False
 
 
 def _kg_atexit_save():
-    """Save KG data on interpreter shutdown to prevent data loss."""
+    """Save KG data on interpreter shutdown to prevent data loss.
+
+    Calls save() which acquires _lock -> _flush_lock, ensuring it
+    doesn't race with in-flight save/flush calls from other threads.
+    """
     global _kg_instance
     if _kg_instance is not None:
         try:
@@ -1939,11 +2007,13 @@ def get_knowledge_graph() -> KnowledgeGraphTool:
     """Get or create the global KnowledgeGraphTool instance."""
     global _kg_instance, _kg_atexit_registered
     if _kg_instance is None:
-        _kg_instance = KnowledgeGraphTool()
-        if not _kg_atexit_registered:
-            import atexit
-            atexit.register(_kg_atexit_save)
-            _kg_atexit_registered = True
+        with _kg_lock:
+            if _kg_instance is None:
+                _kg_instance = KnowledgeGraphTool()
+                if not _kg_atexit_registered:
+                    import atexit
+                    atexit.register(_kg_atexit_save)
+                    _kg_atexit_registered = True
     return _kg_instance
 
 

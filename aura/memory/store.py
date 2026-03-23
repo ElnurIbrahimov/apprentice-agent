@@ -53,7 +53,7 @@ class MemoryRecord:
     source: str = "conversation"         # conversation, task_execution, learning, insight, dream, rag_chunk
     memory_type: str = "episodic"        # episodic, semantic, procedural, fact
     importance: float = 0.5
-    # A-MEM fields
+    # Memory record fields
     keywords: str = ""                   # comma-separated
     tags: str = ""                       # comma-separated
     category: str = ""
@@ -558,7 +558,15 @@ class MemoryStore:
     def batch_decay(self) -> int:
         """Apply exponential decay to all active memories in one SQL UPDATE.
 
-        strength = strength * exp(-decay_rate * hours_since_last_access)
+        strength_new = strength * exp(-decay_rate * hours_since_last_access)
+
+        IMPORTANT: After computing new strength, we also update last_accessed
+        to NOW so that the next batch_decay call only decays for the elapsed
+        interval, not from the original last_accessed. Without this, each call
+        would re-apply decay over the full cumulative time on an already-decayed
+        value, causing exponential double-decay (the root cause of aggressive
+        memory forgetting).
+
         Returns number of rows affected.
         """
         now = datetime.now().isoformat()
@@ -571,23 +579,27 @@ class MemoryStore:
         with self._lock:
             conn = self._get_conn()
             rows = conn.execute(sql).fetchall()
-            if not rows:
-                return 0
 
-            updates: List[Tuple[float, str, str]] = []
-            for mem_id, strength, decay_rate, last_accessed in rows:
-                try:
-                    la_ts = datetime.fromisoformat(last_accessed).timestamp()
-                except (ValueError, TypeError):
-                    la_ts = now_ts
-                hours = max(0, (now_ts - la_ts) / 3600)
-                new_strength = strength * math.exp(-decay_rate * hours)
-                new_strength = max(0.0, min(1.0, new_strength))
-                updates.append((new_strength, now, mem_id))
+        if not rows:
+            return 0
 
+        # Compute updates outside lock — pure math, no DB access
+        updates: List[Tuple[float, str, str, str]] = []
+        for mem_id, strength, decay_rate, last_accessed in rows:
+            try:
+                la_ts = datetime.fromisoformat(last_accessed).timestamp()
+            except (ValueError, TypeError):
+                la_ts = now_ts
+            hours = max(0, (now_ts - la_ts) / 3600)
+            new_strength = strength * math.exp(-decay_rate * hours)
+            new_strength = max(0.0, min(1.0, new_strength))
+            updates.append((new_strength, now, now, mem_id))
+
+        with self._lock:
+            conn = self._get_conn()
             try:
                 conn.executemany(
-                    "UPDATE memories SET strength=?, updated_at=? WHERE id=?",
+                    "UPDATE memories SET strength=?, last_accessed=?, updated_at=? WHERE id=?",
                     updates,
                 )
                 conn.commit()
@@ -601,13 +613,19 @@ class MemoryStore:
         Returns number of rows affected."""
         now = datetime.now().isoformat()
         with self._lock:
-            cur = self._get_conn().execute(
-                """UPDATE memories SET lifecycle_state='forgotten', updated_at=?
-                   WHERE strength < ? AND lifecycle_state NOT IN ('forgotten', 'archived')""",
-                (now, threshold),
-            )
-            self._get_conn().commit()
-        return cur.rowcount
+            conn = self._get_conn()
+            try:
+                cur = conn.execute(
+                    """UPDATE memories SET lifecycle_state='forgotten', updated_at=?
+                       WHERE strength < ? AND lifecycle_state NOT IN ('forgotten', 'archived')""",
+                    (now, threshold),
+                )
+                conn.commit()
+                count = cur.rowcount
+            except Exception:
+                conn.rollback()
+                raise
+        return count
 
     # ------------------------------------------------------------------
     # User Profile
@@ -617,11 +635,12 @@ class MemoryStore:
         """Upsert user profile as JSON string."""
         now = datetime.now().isoformat()
         with self._lock:
-            self._get_conn().execute(
+            conn = self._get_conn()
+            conn.execute(
                 "INSERT OR REPLACE INTO user_profile(user_id, profile, updated_at) VALUES(?,?,?)",
                 (user_id, profile_json, now),
             )
-            self._get_conn().commit()
+            conn.commit()
 
     def load_user_profile(self, user_id: str) -> Optional[str]:
         """Load user profile JSON string. Returns None if not found."""

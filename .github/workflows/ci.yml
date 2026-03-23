@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint & Format
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+
+      - run: uv sync --all-extras
+
+      - name: Ruff lint
+        run: uv run ruff check aura/ api/ tests/
+
+      - name: Ruff format check
+        run: uv run ruff format --check aura/ api/ tests/
+
+  typecheck:
+    name: Type Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+
+      - run: uv sync --all-extras
+
+      - name: Mypy
+        run: uv run mypy aura/ api/ --ignore-missing-imports
+
+  tests:
+    name: Tests (py${{ matrix.python-version }}, group ${{ matrix.group }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: true
+      matrix:
+        python-version: ["3.12", "3.13"]
+        group: [1, 2, 3, 4]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/cache/restore@v4
+        id: cache-restore
+        with:
+          path: |
+            ~/.cache/uv
+            .venv
+          key: uv-py${{ matrix.python-version }}-${{ hashFiles('uv.lock', 'pyproject.toml') }}
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - run: uv sync --all-extras
+
+      - name: Run tests
+        run: |
+          uv run pytest tests/ \
+            -vv \
+            --splits 4 \
+            --group ${{ matrix.group }} \
+            --maxfail=3 \
+            --durations=10 \
+            --cov=aura \
+            --cov-report=xml
+
+      - uses: actions/cache/save@v4
+        if: steps.cache-restore.outputs.cache-hit != 'true'
+        with:
+          path: |
+            ~/.cache/uv
+            .venv
+          key: uv-py${{ matrix.python-version }}-${{ hashFiles('uv.lock', 'pyproject.toml') }}
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+
+      - run: uv sync --all-extras
+
+      - name: Bandit security scan
+        run: uv run bandit -r aura/ -f json -o bandit-report.json || true
+
+      - name: Dependency audit
+        run: uv run pip-audit --desc || true
+
+      - name: Upload security reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-reports
+          path: |
+            bandit-report.json
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+
+      - name: CodeQL Analysis
+        uses: github/codeql-action/analyze@v3

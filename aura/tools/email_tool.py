@@ -1139,7 +1139,9 @@ class EmailTool:
             target_dir.mkdir(parents=True, exist_ok=True)
             safe_name = Path(att["filename"]).name  # Strip directory components
             filepath = (target_dir / safe_name).resolve()
-            if not str(filepath).startswith(str(target_dir.resolve())):
+            try:
+                filepath.relative_to(target_dir.resolve())
+            except ValueError:
                 return {"success": False, "error": "Invalid attachment filename"}
             filepath.write_bytes(data)
 
@@ -1183,7 +1185,9 @@ class EmailTool:
             target_dir.mkdir(parents=True, exist_ok=True)
             safe_name = Path(filename).name  # Strip directory components
             filepath = (target_dir / safe_name).resolve()
-            if not str(filepath).startswith(str(target_dir.resolve())):
+            try:
+                filepath.relative_to(target_dir.resolve())
+            except ValueError:
                 return {"success": False, "error": "Invalid attachment filename"}
             filepath.write_bytes(payload)
 

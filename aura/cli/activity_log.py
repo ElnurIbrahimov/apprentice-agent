@@ -63,6 +63,16 @@ class ActivityLog:
                 CREATE VIRTUAL TABLE IF NOT EXISTS interactions_fts
                 USING fts5(prompt, response)
             """)
+            conn.execute("""
+                CREATE TRIGGER IF NOT EXISTS interactions_ai AFTER INSERT ON interactions BEGIN
+                    INSERT INTO interactions_fts(rowid, prompt, response) VALUES (new.id, new.prompt, new.response);
+                END
+            """)
+            conn.execute("""
+                CREATE TRIGGER IF NOT EXISTS interactions_ad AFTER DELETE ON interactions BEGIN
+                    INSERT INTO interactions_fts(interactions_fts, rowid, prompt, response) VALUES('delete', old.id, old.prompt, old.response);
+                END
+            """)
             conn.commit()
         finally:
             conn.close()
@@ -81,11 +91,6 @@ class ActivityLog:
                  tokens_in, tokens_out, cost, tool_calls),
             )
             row_id = cursor.lastrowid
-            # Update FTS
-            conn.execute(
-                "INSERT INTO interactions_fts(rowid, prompt, response) VALUES (?, ?, ?)",
-                (row_id, prompt[:10000], response[:50000]),
-            )
             conn.commit()
             return row_id
         except Exception as e:

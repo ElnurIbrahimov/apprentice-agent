@@ -167,9 +167,9 @@ class SalienceFilter:
             "llm_skipped_type": 0,
         }
 
-        # Persistent thread pool for LLM scoring (avoids per-event executor creation)
-        self._llm_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="salience_llm")
-        atexit.register(self._llm_pool.shutdown, False)
+        # Shared LLM pool for scoring
+        from aura.pools import llm_pool
+        self._llm_pool = llm_pool()
 
         # Load persisted seen events (graceful degradation)
         try:

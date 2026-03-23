@@ -9,10 +9,26 @@ import asyncio
 import logging
 import os
 import random
+import time as _time
+from collections import defaultdict
 from datetime import datetime
 from typing import Optional, Dict, List
 from pathlib import Path
 import json
+
+# Per-user rate limiting
+_msg_timestamps: Dict[str, list] = defaultdict(list)
+
+
+def _check_rate_limit(user_id: str, max_per_min: int = 20) -> bool:
+    """Return True if the user is within rate limits, False if throttled."""
+    now = _time.time()
+    stamps = _msg_timestamps[user_id]
+    stamps[:] = [t for t in stamps if now - t < 60]
+    if len(stamps) >= max_per_min:
+        return False
+    stamps.append(now)
+    return True
 
 try:
     from telegram import Update, Bot
@@ -373,6 +389,14 @@ Status: Online and ready!"""
         if not self._is_user_allowed(user.id):
             return
 
+        # Per-user rate limit (max_messages_per_minute from config, default 20)
+        max_per_min = self.config.get("max_messages_per_minute", 20)
+        if not _check_rate_limit(str(user.id), max_per_min):
+            await update.message.reply_text(
+                "You're sending messages too fast. Please wait a moment."
+            )
+            return
+
         text = update.message.text
 
         # Check for forget confirmation
@@ -487,21 +511,17 @@ Status: Online and ready!"""
         """
         Process message through ApprenticeAgent.
 
-        Uses agent.chat() which handles:
-        - Fast-path for simple queries
-        - Memory retrieval and storage
-        - Emotion analysis
-        - LLM generation with full context
-        - Humanization post-processing
+        Uses asyncio.to_thread to avoid blocking the event loop, since
+        agent.chat() / generate_response() are synchronous LLM calls.
         """
         try:
             # Try generate_response (TelegramAgentWrapper), then chat (direct agent)
             if hasattr(self.aura, 'generate_response'):
-                response = self.aura.generate_response(text)
+                response = await asyncio.to_thread(self.aura.generate_response, text)
                 if response:
                     return response
             elif hasattr(self.aura, 'chat'):
-                response = self.aura.chat(text)
+                response = await asyncio.to_thread(self.aura.chat, text)
                 if response:
                     return response
             else:

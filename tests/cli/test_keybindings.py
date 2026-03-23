@@ -7,7 +7,7 @@ def test_default_keybindings_exist():
     assert "ctrl+n" in DEFAULT_KEYBINDINGS
     assert "ctrl+k" in DEFAULT_KEYBINDINGS
     assert "ctrl+g" in DEFAULT_KEYBINDINGS
-    assert "escape escape" in DEFAULT_KEYBINDINGS
+    assert "ctrl+z" in DEFAULT_KEYBINDINGS
     assert "shift+tab" in DEFAULT_KEYBINDINGS
 
 def test_registry_get_action():

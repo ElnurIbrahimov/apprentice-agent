@@ -94,8 +94,23 @@ export interface StatusResponse {
   last_model_used: string | null;
 }
 
+// Research Progress
+export type ResearchStage = 'plan' | 'search' | 'source' | 'finding' | 'synthesis';
+
+export interface ResearchProgressStep {
+  stage: ResearchStage;
+  data: Record<string, unknown>;
+  timestamp: number;
+}
+
+export interface ResearchProgress {
+  active: boolean;
+  stage: ResearchStage;
+  steps: ResearchProgressStep[];
+}
+
 export interface WebSocketMessage {
-  type: 'chat' | 'chunk' | 'done' | 'error' | 'ping' | 'pong' | 'stopped' | 'proactive' | 'tool_status' | 'citations' | 'tool_trace';
+  type: 'chat' | 'chunk' | 'done' | 'error' | 'ping' | 'pong' | 'stopped' | 'proactive' | 'tool_status' | 'citations' | 'tool_trace' | 'research_progress';
   content?: string;
   message?: string;
   response?: string;
@@ -115,6 +130,9 @@ export interface WebSocketMessage {
   tool?: string;
   detail?: string;
   elapsed_ms?: number;
+  // research_progress fields
+  stage?: ResearchStage;
+  data?: Record<string, unknown>;
 }
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';

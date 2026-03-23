@@ -1,128 +1,34 @@
 # ============================================================
-# AURA Requirements
+# AURA Requirements — Core Only
 # ============================================================
-# Core deps are required. Optional deps are commented out with
-# install instructions. All imports in AURA use try/except so
-# missing optional deps degrade gracefully.
+# This file lists ONLY the packages needed for basic CLI usage:
+#   pip install -r requirements.txt
+#
+# For optional features, install extras via pyproject.toml:
+#   pip install .[ml]          — PyTorch, transformers, embeddings
+#   pip install .[api]         — FastAPI web server
+#   pip install .[voice]       — Text-to-speech, audio
+#   pip install .[windows]     — Windows-specific (notifications, brightness, audio control)
+#   pip install .[telegram]    — Telegram bot integration
+#   pip install .[tools]       — PDF, clipboard, screenshots, image hashing
+#   pip install .[calendar]    — iCal / scheduling
+#   pip install .[memory]      — Knowledge graph (networkx)
+#   pip install .[security]    — Cryptography for token encryption
+#   pip install .[scheduler]   — APScheduler for background tasks
+#   pip install .[treesitter]  — AST-based code search
+#   pip install .[all]         — Everything
+#
+# Core install is ~200MB. Full install (.[all]) is ~4GB (mostly PyTorch).
+# All optional imports use try/except so missing deps degrade gracefully.
 # ============================================================
 
-# --- Core ---
-ollama>=0.4.0
-requests>=2.31.0
-python-dotenv>=1.0.0
-psutil>=5.9.0
-pyyaml>=6.0
+# --- Core (required for aura CLI) ---
+ollama>=0.4.0,<1.0.0
+requests>=2.31.0,<3.0.0
 pydantic>=2.0.0,<3.0.0
-tenacity>=8.2.0
-rich>=13.0.0
-
-# --- ML / AI ---
-torch>=2.0.0,<3.0.0
-numpy>=1.24.0,<3.0.0
-transformers>=4.40.0,<5.0.0
-accelerate>=0.25.0
-sentence-transformers>=2.2.0
-
-# --- Memory ---
-chromadb>=1.0.0
-networkx>=3.0
-
-# --- Tools ---
-arxiv>=2.0.0
-pymupdf>=1.23.0
-pyperclip>=1.8.0
-pillow>=10.0.0
-imagehash>=4.3.0
-mss>=9.0.0
-
-# --- Calendar ---
-icalendar>=5.0.0
-recurring-ical-events>=3.0.0
-python-dateutil>=2.8.0
-
-# --- Web API ---
-fastapi>=0.109.0,<1.0.0
-uvicorn[standard]>=0.27.0,<1.0.0
-
-# --- Messaging ---
-python-telegram-bot>=20.0
-websockets>=12.0
-
-# --- Security ---
-cryptography>=41.0.0
-
-# ============================================================
-# Optional: Knowledge Graph Brain (requires Kuzu graph DB)
-# ============================================================
-kuzu>=0.4.0,<1.0.0
-
-# ============================================================
-# Optional: Code Search (tree-sitter AST parsing)
-# ============================================================
-# tree-sitter>=0.24.0
-# tree-sitter-language-pack>=0.13.0
-
-# ============================================================
-# Optional: Episodic Memory (requires Qdrant vector DB)
-# ============================================================
-qdrant-client>=1.7.0
-dateparser>=1.2.0
-
-# ============================================================
-# Optional: Predictive Life Modeling
-# ============================================================
-mesa>=2.0.0,<3.0.0
-# dowhy>=0.10.0  # Causal inference — large dependency tree
-
-# ============================================================
-# Optional: Active Inference
-# ============================================================
-# inferactively-pymdp>=0.0.7  # Falls back to heuristic if unavailable
-
-# ============================================================
-# Optional: Windows-specific (voice, notifications, display)
-# These packages only work on Windows. On Linux/macOS, skip them.
-# ============================================================
-comtypes>=1.2.0              # Windows only (COM automation)
-pyttsx3>=2.90
-pycaw>=20230407               # Windows only (audio control)
-winotify>=1.1.0               # Windows only (notifications)
-screen-brightness-control>=0.22.0
-sounddevice>=0.4.6
-
-# ============================================================
-# Optional: GPU monitoring
-# ============================================================
-# nvidia-ml-py3>=7.352.0  # Requires NVIDIA GPU
-# gputil>=1.4.0
-
-# ============================================================
-# Optional: Image generation / Gradio UI
-# ============================================================
-# diffusers>=0.25.0
-# gradio>=4.0.0
-
-# ============================================================
-# Optional: Voice transcription
-# ============================================================
-# openai-whisper>=20231117  # Large download (~1.5GB model)
-
-# ============================================================
-# Optional: Task scheduling
-# ============================================================
-apscheduler>=3.10.0,<4.0.0
-
-# ============================================================
-# Optional: Monty safe sandbox (pure-computation code execution)
-# pip install pydantic-monty
-# ============================================================
-# pydantic-monty>=0.1.0
-
-# ============================================================
-# Optional: E2B cloud code sandbox (real Python + packages, VM-isolated)
-# pip install e2b-code-interpreter
-# Requires E2B_API_KEY env var
-# ============================================================
-# e2b-code-interpreter>=0.0.1
-
-# PersonaPlex and Sesame voice modules removed — using external voice provider
+python-dotenv>=1.0.0,<2.0.0
+psutil>=5.9.0,<7.0.0
+pyyaml>=6.0,<7.0
+tenacity>=8.2.0,<10.0.0
+rich>=13.0.0,<14.0.0
+prompt_toolkit>=3.0.0,<4.0.0

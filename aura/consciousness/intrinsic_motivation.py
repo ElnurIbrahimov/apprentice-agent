@@ -152,11 +152,11 @@ class IntrinsicMotivationEngine:
         Queries knowledge graph, metacognition, user model, and
         recent interaction patterns to update drive intensities.
         """
-        now = time.time()
-        if now - self._last_full_assessment < self._assess_interval:
-            return dict(self._drives)
-
         with self._lock:
+            now = time.time()
+            if now - self._last_full_assessment < self._assess_interval:
+                return dict(self._drives)
+
             self._assess_curiosity()
             self._assess_competence()
             self._assess_social()

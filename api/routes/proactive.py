@@ -118,7 +118,7 @@ async def get_daemon_status(session_id: str = Query(default="default")):
         return DaemonStatusResponse(
             running=False,
             state="error",
-            stats={"error": str(e)},
+            stats={"error": safe_error_detail(e)},
             pending_messages=0
         )
 
@@ -480,7 +480,7 @@ async def get_screen_context():
         return {"available": False, "message": "Screenpipe client not installed"}
     except Exception as e:
         logger.error(f"[Proactive API] Screen context error: {e}")
-        return {"available": False, "error": str(e)}
+        return {"available": False, "error": safe_error_detail(e)}
 
 
 @router.get("/motivation")
@@ -493,7 +493,7 @@ async def get_motivation_status():
     except ImportError:
         return {"error": "MotivationAccumulator not available"}
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": safe_error_detail(e)}
 
 
 @router.get("/curiosity")
@@ -506,7 +506,7 @@ async def get_curiosity_status():
     except ImportError:
         return {"error": "CuriosityScanner not available"}
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": safe_error_detail(e)}
 
 
 @router.get("/workflow")
@@ -522,7 +522,7 @@ async def get_workflow_state():
     except ImportError:
         return {"error": "Workflow detector not available"}
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": safe_error_detail(e)}
 
 
 @router.get("/suggestion")
@@ -553,4 +553,4 @@ async def get_proactive_suggestion(session_id: str = Query(default="default")):
             },
         }
     except Exception as e:
-        return {"suggestion": None, "error": str(e)}
+        return {"suggestion": None, "error": safe_error_detail(e)}

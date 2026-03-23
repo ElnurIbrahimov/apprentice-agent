@@ -98,7 +98,8 @@ class AlwaysOnContextEngine:
 
     def __init__(self, agent):
         self.agent = agent
-        self._executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="ace")
+        from aura.pools import bg_pool
+        self._executor = bg_pool()
         self._screen_cache = {"content": "", "ts": 0.0}
         self._screen_cache_ttl = 5.0
         self._screen_cache_lock = threading.Lock()

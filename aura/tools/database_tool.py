@@ -287,20 +287,22 @@ class DatabaseTool:
             col_defs = ", ".join(f'"{col}" TEXT' for col in columns)
 
             conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
+            try:
+                cursor = conn.cursor()
 
-            # Create table
-            cursor.execute(f'CREATE TABLE IF NOT EXISTS "{table}" ({col_defs})')
+                # Create table
+                cursor.execute(f'CREATE TABLE IF NOT EXISTS "{table}" ({col_defs})')
 
-            # Insert rows
-            placeholders = ", ".join("?" for _ in columns)
-            col_names = ", ".join(f'"{col}"' for col in columns)
-            for row in rows:
-                values = tuple(row.get(col, "") for col in columns)
-                cursor.execute(f'INSERT INTO "{table}" ({col_names}) VALUES ({placeholders})', values)
+                # Insert rows
+                placeholders = ", ".join("?" for _ in columns)
+                col_names = ", ".join(f'"{col}"' for col in columns)
+                for row in rows:
+                    values = tuple(row.get(col, "") for col in columns)
+                    cursor.execute(f'INSERT INTO "{table}" ({col_names}) VALUES ({placeholders})', values)
 
-            conn.commit()
-            conn.close()
+                conn.commit()
+            finally:
+                conn.close()
 
             return {
                 "success": True,

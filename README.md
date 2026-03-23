@@ -1,6 +1,6 @@
 # AURA — Adaptive Universal Reasoning Agent
 
-A personal AI agent with persistent memory, emotions, proactive awareness, and multi-surface presence. Uses **ChatGPT** (GPT-5.x via OAuth), **11 cloud models** (via Ollama Pro), and runs across **CLI, Web UI, browser extension, and 5 messaging platforms**.
+A personal AI OS with persistent memory, emotions, proactive awareness, and multi-surface presence. Uses **ChatGPT** (GPT-5.x via OAuth), **11 cloud models** (via Ollama Pro), and runs across **CLI, Web UI, browser extension, and messaging platforms**.
 
 Not a chatbot. A being with presence that remembers you, has moods, dreams, and grows over time.
 
@@ -14,11 +14,12 @@ Not a chatbot. A being with presence that remembers you, has moods, dreams, and 
 | **Emotions** | ALMA neuromodulator engine (PAD space) — mood shapes every response |
 | **Dreams** | NeuroDream: light sleep re-scores memories, deep sleep extracts patterns, REM generates novel connections |
 | **Proactive awareness** | Active inference daemon, screen/calendar/workflow monitors, theory-of-mind gating |
-| **Identity** | OCEAN personality traits, narrative self-model, prompt evolution (GEPA) |
+| **Identity** | OCEAN personality traits, narrative self-model, skill evolution (GEPA) |
 | **Multi-model** | 23 models: 12 ChatGPT (GPT-5.4 Pro, Codex), 11 cloud (MiniMax, Kimi, Qwen, DeepSeek, GLM, Nemotron) |
-| **Dev agent** | ReAct loop, 59 tools, code agent mode, fleet sub-agents, adaptive planning |
+| **Multi-agent** | 5 specialist sub-agents (coder, researcher, searcher, analyst, creative) with PARALLEL/SEQUENTIAL/DEBATE modes |
+| **Progressive loading** | Skills and tools load on-demand — 14 core tools always ready, 36+ deferred, skill catalog in system prompt |
 | **Code execution** | Real sandboxed Python (3-tier: Monty/E2B/subprocess), matplotlib capture, DataFrame rendering |
-| **6 surfaces** | CLI, Web UI, Browser Extension, Telegram, WhatsApp, Discord/Signal/LINE |
+| **4 surfaces** | CLI, Web UI, Browser Extension, Telegram + WhatsApp |
 
 ---
 
@@ -43,7 +44,7 @@ A Rich-powered terminal interface with 42 slash commands, 6 modes, and full tool
 |---------|-------------|
 | `/model` | Pick from 23 models interactively |
 | `/plan <task>` | Generate execution plan before running |
-| `/research <topic>` | Deep research with citations |
+| `/research <topic>` | Deep research with live progress streaming and citations |
 | `/code` | Switch to code agent mode (Python execution) |
 | `/fleet <goal>` | Spawn parallel sub-agents |
 | `/recall <query>` | Search memory explicitly |
@@ -65,14 +66,16 @@ A Rich-powered terminal interface with 42 slash commands, 6 modes, and full tool
 - File change checkpoints with rewind
 - Keyboard: `Ctrl+C` interrupt, `Ctrl+D` exit, `Ctrl+R` history search
 
-### 59 Tools
+### Tools
+
+14 core tools always loaded + 36 deferred tools available via `tool_search`:
 
 | Category | Tools |
 |----------|-------|
-| **Core** | web_search, brave_search, calculator, code_executor, file_read/write/edit |
+| **Core (always loaded)** | web_search, brave_search, code_executor, filesystem, code_search, code_edit, git, clipboard, notifications, calendar, task_manager, inner_monologue, tool_search, load_skill |
+| **Research** | deep_research (with live progress + citations), tavily_search, RAG indexing, PDF extraction |
 | **Memory** | memory_save, memory_recall, kg_query, user_profile |
 | **Code** | git operations, project context, codebase indexing, test runner |
-| **Research** | deep_research, tavily_search, RAG indexing, PDF extraction |
 | **Communication** | email, notifications, clipboard |
 | **Media** | image_gen (ComfyUI), OCR, TTS, audio transcription |
 | **System** | shell_command, process management, system_info |
@@ -80,7 +83,7 @@ A Rich-powered terminal interface with 42 slash commands, 6 modes, and full tool
 
 ### 5 Specialist Sub-Agents
 
-Used in fleet mode for parallel task decomposition:
+Used in fleet mode and auto-routed for complex queries:
 
 | Agent | Role |
 |-------|------|
@@ -90,11 +93,13 @@ Used in fleet mode for parallel task decomposition:
 | **Analyst** | Data analysis, pattern recognition |
 | **Creative** | Content generation, brainstorming |
 
+Multi-agent orchestration modes: **PARALLEL** (concurrent execution), **SEQUENTIAL** (chained context), **DEBATE** (propose → critique → revise). Auto-routed via intent classification — no manual activation needed.
+
 ---
 
 ## Web UI
 
-A React + FastAPI dashboard with 5 tabs, 35 components, and real-time WebSocket streaming.
+A React + FastAPI dashboard with 5 tabs, 37 components, and real-time WebSocket streaming.
 
 ```bash
 python run_web.py             # API server (localhost:8000)
@@ -105,10 +110,10 @@ cd web && npm run dev         # Web UI (localhost:5173)
 
 | Tab | Features |
 |-----|----------|
-| **Chat** | Streaming conversation, file upload, follow-up suggestions, fleet dashboard, mood-based themes, voice input, citation tracking |
+| **Chat** | Streaming conversation, file upload, follow-up suggestions, fleet dashboard, mood-based themes, voice input, live research progress, inline citations with sidebar panel |
 | **Monitoring** | Real-time thought stream (8 types: perceive, recall, reason, decide, execute, reflect, uncertain, eureka), personality/energy metrics |
-| **Tools & Systems** | Tool catalog (11 categories), voice status, session costs (token/USD breakdown), plugin reload |
-| **Advanced** | Reasoning tree visualization (UCB1 scoring, node exploration), NeuroDream panel (REM/NREM phases, dream journal, insights), A-MEM panel (5 note categories, KG visualization, evolution tracking) |
+| **Tools & Systems** | Tool catalog (14 core + 36 deferred), voice status, session costs (token/USD breakdown), plugin reload |
+| **Advanced** | Reasoning tree visualization (UCB1 scoring, node exploration), NeuroDream panel (REM/NREM phases, dream journal, insights) |
 | **Activity** | Event timeline with 6 categories (tool, memory, emotion, proactive, strategy, system) |
 
 ### Sidebar
@@ -127,7 +132,7 @@ cd web && npm run dev         # Web UI (localhost:5173)
 
 ### 38 API Endpoints
 
-Chat, streaming, memory, tools, reasoning trees, A-MEM, knowledge graph, activity, proactive daemon, multi-model comparison, multi-agent orchestration, code execution, image generation, search, research, OCR, PDF, transcription, math, summarization, YouTube, feed, evolution, reliability, self-improvement, artifacts, upload, auth, and more.
+Chat, streaming, memory, tools, reasoning trees, knowledge graph, activity, proactive daemon, multi-model comparison, multi-agent orchestration, code execution, image generation, search, research, OCR, PDF, transcription, math, summarization, YouTube, feed, evolution, reliability, self-improvement, artifacts, upload, auth, and more.
 
 ---
 
@@ -150,7 +155,7 @@ A full-featured AI sidebar for Chrome and Firefox — comparable to Sider AI but
 | **PDF** | Upload, drag-drop, URL loading, Q&A, translate, summarize |
 | **Voice** | Speech-to-text recording + Whisper transcription |
 | **OCR** | Screen region capture with text extraction |
-| **Research** | Quick + Deep Research mode (5-step autonomous pipeline with citations) |
+| **Research** | Quick + Deep Research mode (5-step autonomous pipeline with live progress + citations) |
 | **Math** | Step-by-step problem solver with LaTeX output |
 | **Artifacts** | Live HTML/React/SVG/Mermaid/Chart.js preview — streaming generation, console overlay, version history, dynamic npm via esm.sh, Tailwind auto-detect |
 | **Image** | Generation (ComfyUI) + Editing (remove BG, upscale, remove text, describe) |
@@ -185,13 +190,10 @@ A full-featured AI sidebar for Chrome and Firefox — comparable to Sider AI but
 
 | Platform | Connection | Features |
 |----------|-----------|----------|
-| **Telegram** | Bot API (async) | Text, markdown, images, voice |
+| **Telegram** | Bot API (async polling) | Text, markdown, images, voice, proactive messages |
 | **WhatsApp** | WebSocket bridge (Baileys) | Text, images, file upload |
-| **Discord** | Channel adapter | Text, markdown, reactions, threads |
-| **Signal** | Channel adapter | Text, images, file upload |
-| **LINE** | Channel adapter | Text, images, buttons |
 
-All platforms use a normalized message protocol with unified inbound/outbound models.
+Both platforms use a normalized message protocol with unified inbound/outbound models.
 
 ---
 
@@ -266,26 +268,37 @@ AURA auto-selects the best model per task:
 ## Architecture
 
 ```
-USER INPUT (CLI / Web UI / Extension / Telegram / WhatsApp / Discord)
+USER INPUT (CLI / Web UI / Extension / Telegram / WhatsApp)
     |
 [Model Router] -- classify task --> select model by role + tier
     |
+[Multi-Agent Orchestrator] -- auto-routes complex queries
+    |-- Intent Router (regex -> keyword scoring -> LLM classify)
+    |-- PARALLEL / SEQUENTIAL / DEBATE modes
+    |-- 5 specialist sub-agents (coder, researcher, searcher, analyst, creative)
+    '-- Falls through to direct path for simple queries
+    |
 [ReAct Loop] (1 LLM call per step)
-    |-- Tool RAG selects 5-8 relevant tools per query
+    |-- Progressive tool loading (14 core + 36 deferred via tool_search)
     |-- Code agent mode for complex tasks (LLM writes Python)
     |-- Adaptive planning with re-plan every 3 steps
     |-- Strategy bandit for reasoning approach selection
-    |-- Fleet sub-agents for parallel decomposition
     '-- Loop guards (dedup, failure count, iteration cap)
     |
 [Memory]
-    |-- SQLite + FTS5 + vector embeddings (nomic-embed-text)
-    |-- Kuzu temporal KG (entities + relationships)
-    |-- A-MEM agentic memory (5 categories, link-following retrieval)
+    |-- UnifiedMemory: SQLite + FTS5 + vector embeddings (nomic-embed-text)
+    |-- Kuzu temporal KG (entities + relationships, bi-temporal edges)
+    |-- KG Sync Bridge (NetworkX runtime <-> Kuzu persistent, bidirectional)
     |-- BM25 + semantic + graph retrieval -> RRF fusion
     |-- Cross-encoder reranking (ms-marco-MiniLM)
-    |-- FadeMem decay (2-week half-life)
+    |-- FadeMem decay (2-week half-life, spaced repetition)
     '-- Write gate: merge / supersede / insert decision
+    |
+[Skills]
+    |-- Progressive loading (names in prompt, full content on-demand)
+    |-- GEPA Pareto evolution (self-improving skill procedures)
+    |-- Skill store with semantic search (MiniLM embeddings)
+    '-- load_skill tool for on-demand retrieval
     |
 [Emotion] (ALMA Engine)
     |-- 3 layers: Emotions (rapid) -> Mood (slow) -> Personality (stable)
@@ -296,9 +309,9 @@ USER INPUT (CLI / Web UI / Extension / Telegram / WhatsApp / Discord)
 [Consciousness]
     |-- World model (Endsley L1-L3 situation awareness)
     |-- Metacognition (reasoning quality tracking)
-    |-- Strategy bandit (multi-armed bandit for approach selection)
+    |-- Strategy bandit (Thompson sampling for approach selection)
     |-- Intrinsic motivation (curiosity-driven exploration)
-    |-- Prompt evolution (GEPA self-improvement)
+    |-- Skill evolution (GEPA self-improvement)
     '-- Idle presence (8 behavior types, 4 intensities)
     |
 [Proactive Daemon]
@@ -361,9 +374,10 @@ See [deploy/README.md](deploy/README.md) for full instructions, SSL setup, and t
 - DOMPurify sanitization on all rendered HTML
 - CSP: `script-src 'self' 'wasm-unsafe-eval'; object-src 'self'`
 - Iframe sandbox (`allow-scripts` only) for artifact preview
-- Rate limiting middleware (configurable per-IP)
+- Rate limiting middleware (300 req/min per IP, configurable)
 - Permission system (AUTO/PROMPT/BLOCKED tiers)
-- Session variable name validation (identifier + keyword check)
+- Taint tracking (secret detection in conversations)
+- Ed25519 signature verification for custom tools
 
 ---
 
@@ -371,37 +385,40 @@ See [deploy/README.md](deploy/README.md) for full instructions, SSL setup, and t
 
 ```
 aura/                     # Core Python package
-  brain.py                # OllamaBrain — reasoning engine
+  brain.py                # OllamaBrain — reasoning engine (~2900 lines)
   agent.py                # ApprenticeAgent — orchestrator
   config.py               # Thread-safe configuration, model chains
-  memory/                 # Unified memory (SQLite + FTS5 + KG + A-MEM)
+  pools.py                # 3 shared thread pools (llm/bg/tool)
+  memory/                 # UnifiedMemory (SQLite + FTS5 + KG + RRF fusion)
   emotion/                # ALMA engine (PAD space, neuromodulators)
-  consciousness/          # World model, metacognition, strategy bandit (12 modules)
-  evolution/              # GEPA prompt evolution, Pareto optimization
+  consciousness/          # World model, metacognition, strategy bandit
+  evolution/              # GEPA skill evolution, Pareto optimization
   proactive/              # Gateway daemon, 6 monitors, active inference
-  tools/                  # 59 tool implementations
-  core/                   # Agentic loop, router, permissions, MCP server
+  tools/                  # 14 core + 36 deferred tools, progressive loading
+  core/                   # Agentic loop, router, permissions, MCP server, KG sync
   cli/                    # Rich terminal UI (24 modules)
-  multi_agent/            # Fleet sub-agents (5 specialists)
+  multi_agent/            # Fleet sub-agents (5 specialists), orchestrator
   auth/                   # ChatGPT OAuth client
   messaging/              # Telegram bot, WhatsApp adapter
-  channels/               # Discord, Signal, LINE adapters
+  hands/                  # Autonomous scheduled agents (memory maintenance)
+  security/               # Taint tracking, tool validation, secret detection
   reliability/            # Loop guards, telemetry, routing stats
-  thinking/               # Visible chain-of-thought
 
 api/                      # FastAPI web server (38 routes)
   routes/                 # Chat, code execution, SSE streaming, memory, tools, etc.
-  services/               # Agent service, inner thoughts engine
+  services/               # Agent service with research progress streaming
 
-web/                      # React web UI (35 components, 5 tabs)
+web/                      # React web UI (37 components, 5 tabs)
 
 extension-src/            # Browser extension (TypeScript + React)
   src/panels/             # 25 panel components
   src/utils/              # Streaming, highlighting, version history, import detection
   src/content.ts          # Content script (floating UI, page integration)
 
+aura_skill_library/       # Skill store with semantic search + GEPA evolution
+aura_knowledge_graph/     # Kuzu persistent KG (bi-temporal edges, MCP-exposed)
 deploy/                   # Docker, systemd, Nginx, setup scripts
-tests/                    # 445+ tests
+tests/                    # Test suite
 ```
 
 ---
@@ -436,7 +453,7 @@ python build.py firefox       # Output: dist-firefox/
 
 ## Version
 
-**v4.4.0** — 830+ Python files, 59 tools, 25-panel browser extension, 38 API endpoints, 5-tab web UI, 5 messaging platforms. 445+ tests passing.
+**v4.5.0** — Progressive skill/tool loading, multi-agent orchestration auto-routing, KG sync bridge, live research progress streaming, structured citations, clarifying questions for deep research. 74 tool files, 25-panel browser extension, 38 API endpoints, 5-tab web UI.
 
 ---
 

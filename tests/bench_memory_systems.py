@@ -163,120 +163,7 @@ def _fmt_rate(count: int, seconds: float) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Benchmark 1: A-MEM write throughput
-# ---------------------------------------------------------------------------
-
-def bench_amem_write(n: int = 1000):
-    """Insert n memories into A-MEM. Measure throughput."""
-    if not HAS_QDRANT:
-        print("[SKIP] bench_amem_write: qdrant-client not installed")
-        return None
-
-    from aura.tools.amem import AMEMSystem
-
-    tmpdir = tempfile.mkdtemp(prefix="bench_amem_write_")
-    try:
-        # Create A-MEM with no LLM, no evolution (pure storage benchmark)
-        amem = AMEMSystem(
-            db_path=tmpdir,
-            evolution_enabled=False,
-            llm_func=None,
-        )
-
-        timings = []
-        for i in range(n):
-            content = _random_content(i)
-            t0 = time.perf_counter()
-            amem.add(
-                content=content,
-                tags=["bench", f"topic_{i % 10}"],
-                category="semantic",
-                source="benchmark",
-                importance=random.uniform(0.3, 0.9),
-                auto_extract=False,
-                auto_link=False,
-                auto_evolve=False,
-            )
-            t1 = time.perf_counter()
-            timings.append(t1 - t0)
-
-        total = sum(timings)
-        avg = statistics.mean(timings)
-        return {
-            "name": "A-MEM Write Throughput",
-            "count": n,
-            "total_s": total,
-            "avg_ms": avg * 1000,
-            "rate": n / total if total > 0 else float("inf"),
-            "p50_ms": _percentile(timings, 50) * 1000,
-            "p95_ms": _percentile(timings, 95) * 1000,
-            "p99_ms": _percentile(timings, 99) * 1000,
-        }
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
-
-
-# ---------------------------------------------------------------------------
-# Benchmark 2: A-MEM search latency at scale
-# ---------------------------------------------------------------------------
-
-def bench_amem_search(n_inserts: int = 1000, n_queries: int = 100):
-    """Insert n_inserts memories, then run n_queries searches."""
-    if not HAS_QDRANT:
-        print("[SKIP] bench_amem_search: qdrant-client not installed")
-        return None
-
-    from aura.tools.amem import AMEMSystem
-
-    tmpdir = tempfile.mkdtemp(prefix="bench_amem_search_")
-    try:
-        amem = AMEMSystem(
-            db_path=tmpdir,
-            evolution_enabled=False,
-            llm_func=None,
-        )
-
-        # Populate
-        print(f"  Populating {n_inserts} memories for search benchmark...")
-        for i in range(n_inserts):
-            amem.add(
-                content=_random_content(i),
-                tags=["bench"],
-                category="semantic",
-                source="benchmark",
-                importance=random.uniform(0.3, 0.9),
-                auto_extract=False,
-                auto_link=False,
-                auto_evolve=False,
-            )
-
-        # Search
-        timings = []
-        for _ in range(n_queries):
-            query = _random_query()
-            t0 = time.perf_counter()
-            amem.search(query=query, k=5)
-            t1 = time.perf_counter()
-            timings.append(t1 - t0)
-
-        total = sum(timings)
-        avg = statistics.mean(timings)
-        return {
-            "name": "A-MEM Search Latency",
-            "corpus_size": n_inserts,
-            "query_count": n_queries,
-            "total_s": total,
-            "avg_ms": avg * 1000,
-            "p50_ms": _percentile(timings, 50) * 1000,
-            "p95_ms": _percentile(timings, 95) * 1000,
-            "p99_ms": _percentile(timings, 99) * 1000,
-        }
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
-
-
-# ---------------------------------------------------------------------------
-# Benchmark 3: Write gate throughput
+# Benchmark 1: Write gate throughput
 # ---------------------------------------------------------------------------
 
 def bench_write_gate(n: int = 1000):
@@ -437,29 +324,6 @@ def bench_episodic(n_inserts: int = 500, n_queries: int = 50):
 # pytest-compatible test functions
 # ---------------------------------------------------------------------------
 
-def test_bench_amem_write():
-    result = bench_amem_write(n=1000)
-    if result is None:
-        import pytest
-        pytest.skip("qdrant-client not installed")
-    assert result["count"] == 1000
-    assert result["avg_ms"] < 5000, f"Avg insert too slow: {result['avg_ms']:.1f}ms"
-    print(f"\n  {result['name']}: {result['count']} inserts in {result['total_s']:.2f}s "
-          f"({_fmt_rate(result['count'], result['total_s'])})")
-
-
-def test_bench_amem_search():
-    result = bench_amem_search(n_inserts=1000, n_queries=100)
-    if result is None:
-        import pytest
-        pytest.skip("qdrant-client not installed")
-    assert result["query_count"] == 100
-    print(f"\n  {result['name']}: avg={_fmt_ms(result['avg_ms']/1000)} "
-          f"p50={_fmt_ms(result['p50_ms']/1000)} "
-          f"p95={_fmt_ms(result['p95_ms']/1000)} "
-          f"p99={_fmt_ms(result['p99_ms']/1000)}")
-
-
 def test_bench_write_gate():
     result = bench_write_gate(n=1000)
     if result is None:
@@ -557,23 +421,17 @@ if __name__ == "__main__":
     _print_separator()
     print("Aura Memory Systems Benchmark Suite")
     _print_separator()
-    print(f"  qdrant-client:        {'YES' if HAS_QDRANT else 'NO (skip A-MEM & Episodic)'}")
-    print(f"  sentence-transformers: {'YES' if HAS_ST else 'NO (A-MEM will use fallback)'}")
+    print(f"  qdrant-client:        {'YES' if HAS_QDRANT else 'NO (skip Episodic)'}")
+    print(f"  sentence-transformers: {'YES' if HAS_ST else 'NO'}")
     print(f"  write_gate:           {'YES' if HAS_WRITE_GATE else 'NO (skip)'}")
     _print_separator()
 
     results = []
 
-    print("\n[1/4] A-MEM Write Throughput (1000 inserts)...")
-    results.append(bench_amem_write(n=1000))
-
-    print("\n[2/4] A-MEM Search Latency (1000 corpus, 100 queries)...")
-    results.append(bench_amem_search(n_inserts=1000, n_queries=100))
-
-    print("\n[3/4] Write Gate Throughput (1000 candidates)...")
+    print("\n[1/2] Write Gate Throughput (1000 candidates)...")
     results.append(bench_write_gate(n=1000))
 
-    print("\n[4/4] Episodic Memory Write + Search (500 episodes, 50 queries)...")
+    print("\n[2/2] Episodic Memory Write + Search (500 episodes, 50 queries)...")
     results.append(bench_episodic(n_inserts=500, n_queries=50))
 
     print()

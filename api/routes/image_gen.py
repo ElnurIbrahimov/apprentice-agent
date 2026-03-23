@@ -110,8 +110,9 @@ async def generate_image(body: ImageGenRequest):
                 if pid in hist:
                     outputs = hist[pid].get("outputs", {})
                     if outputs:
+                        from urllib.parse import quote
                         fname = list(outputs.values())[0]["images"][0]["filename"]
-                        img_r = await c.get(f"{COMFY}/view?filename={fname}")
+                        img_r = await c.get(f"{COMFY}/view?filename={quote(fname)}")
                         b64 = base64.b64encode(img_r.content).decode()
                         return {"image_b64": b64}
             except Exception as poll_err:

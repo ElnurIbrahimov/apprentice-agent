@@ -60,6 +60,7 @@ BLOCKED_COMMANDS = {
     "rm -rf /", "rm -rf ~", "mkfs", ":(){ :|:& };:",
     "chmod -R 777 /", "> /dev/sda", "shutdown", "reboot",
     "format c:", "del /f /s /q c:\\",
+    "powershell", "pwsh", "cmd", "cmd.exe",
 }
 
 # Security: blocked patterns (regex)
@@ -68,6 +69,9 @@ BLOCKED_PATTERNS = [
     r"rm\s+-rf\s+~",                # rm -rf ~
     r">\s*/dev/sd",                  # overwrite disk devices
     r"\|\s*(?:/(?:usr/)?(?:local/)?bin/)?(?:ba|da|z|k|fi|c)?sh\b",  # pipe to any shell variant
+    r"\|\s*/bin/bash\b",             # pipe to /bin/bash
+    r"\|\s*/usr/bin/sh\b",           # pipe to /usr/bin/sh
+    r"\|\s*/bin/sh\b",               # pipe to /bin/sh
     r"mkfs\.",                       # format filesystem
     r"dd\s+if=.*/dev/",             # dd from devices
     r":\(\)\s*\{",                   # fork bomb
@@ -78,11 +82,11 @@ BLOCKED_PATTERNS = [
 # Security: allowed command prefixes (safe for direct execution)
 ALLOWED_COMMANDS_PREFIX = [
     "ls", "dir", "cd", "pwd", "echo", "cat", "head", "tail",
-    "grep", "find", "wc", "sort", "uniq", "diff", "mkdir", "cp",
+    "grep", "wc", "sort", "uniq", "diff", "mkdir", "cp",
     "mv", "touch", "git",
     "docker", "tar", "zip", "unzip",
     "type", "where", "whoami", "hostname", "ping", "nslookup",
-    "tree", "more", "less", "awk", "sed", "cut", "tr",
+    "tree", "more", "less", "cut", "tr",
     "export", "which", "man", "help", "cls", "clear",
     "cargo", "rustc", "go", "java", "javac", "dotnet", "cmake",
     "make", "gcc", "g++", "clang",
@@ -190,7 +194,22 @@ class ShellExecutorTool:
             if base_cmd in SANDBOX_REQUIRED_COMMANDS:
                 return True, "SANDBOX_REQUIRED"
 
-            is_allowed = any(base_cmd == prefix.lower() or base_cmd.startswith(prefix.lower() + ".")
+            # Block interpreter code-execution flags (e.g. python -c, node -e)
+            _INTERP_FLAGS = {
+                "python": {"-c", "--command"}, "python3": {"-c", "--command"},
+                "node": {"-e", "--eval", "--print", "-p"},
+                "ruby": {"-e"}, "perl": {"-e"},
+                "pwsh": {"-c", "-command", "-encodedcommand", "-enc"},
+                "powershell": {"-c", "-command", "-encodedcommand", "-enc"},
+                "git": {"-c"},
+            }
+            if base_cmd in _INTERP_FLAGS:
+                blocked_flags = _INTERP_FLAGS[base_cmd]
+                for token in parts[1:]:
+                    if token.lower() in blocked_flags:
+                        return False, f"Code-execution flag '{token}' blocked for '{base_cmd}'"
+
+            is_allowed = any(base_cmd == prefix.lower()
                              for prefix in ALLOWED_COMMANDS_PREFIX)
             if not is_allowed:
                 return False, f"Command '{base_cmd}' not in allowed list. Allowed: {', '.join(ALLOWED_COMMANDS_PREFIX[:15])}..."
@@ -623,6 +642,12 @@ class ShellExecutorTool:
                     )
                 except ImportError:
                     # Sandbox unavailable — safe fallback with shell=False
+                    # Validate command before fallback execution
+                    is_valid, reason = self._validate_command(command)
+                    if not is_valid:
+                        return {"success": False, "error": f"Security: {reason}"}
+                    if _contains_shell_injection(command):
+                        return {"success": False, "error": "Command contains disallowed characters or flags", "exit_code": 1}
                     try:
                         cmd_args = shlex.split(command)
                         result = subprocess.run(

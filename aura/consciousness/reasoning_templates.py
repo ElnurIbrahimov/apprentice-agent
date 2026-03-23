@@ -147,7 +147,7 @@ class TemplateMatch:
 class _EmbeddingHelper:
     """Lazy-loaded sentence-transformers wrapper for embedding operations.
 
-    Uses all-MiniLM-L6-v2 (same model as amem.py, episodic memory, skill library).
+    Uses all-MiniLM-L6-v2 (same model as episodic memory, skill library).
     384-dimensional float32 embeddings stored as packed bytes in SQLite BLOBs.
     """
 

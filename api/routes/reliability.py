@@ -70,19 +70,19 @@ async def reliability_summary():
         from aura.reliability.telemetry import get_telemetry
         result["telemetry"] = get_telemetry().stats()
     except Exception as e:
-        result["telemetry_error"] = str(e)
+        result["telemetry_error"] = safe_error_detail(e)
 
     try:
         from aura.reliability.routing_stats import get_routing_stats
         result["routing"] = get_routing_stats().summary()
     except Exception as e:
-        result["routing"] = {"error": str(e)}
+        result["routing"] = {"error": safe_error_detail(e)}
 
     try:
         from aura.memory.unified_memory import get_unified_memory
         result["memory"] = get_unified_memory().get_stats()
     except Exception as e:
-        result["memory"] = {"error": str(e)}
+        result["memory"] = {"error": safe_error_detail(e)}
 
     return result
 

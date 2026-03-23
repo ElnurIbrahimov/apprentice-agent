@@ -266,8 +266,9 @@ class RewardSignalCollector:
         self._self_consistency = SelfConsistencyEvaluator()
         self._judge = JudgeEvaluator()
         self._coherence = StepwiseCoherenceEvaluator()
-        self._executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="reward_eval")
-        atexit.register(self.shutdown)
+        from aura.pools import llm_pool
+        self._executor = llm_pool()
+        # atexit cleanup now handled by aura.pools
 
     def collect_sync(
         self,

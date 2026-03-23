@@ -65,6 +65,7 @@ async def _broadcast_json(payload: dict) -> None:
         try:
             await ws.send_json(payload)
         except Exception:
+            logger.debug("broadcast_ws_send_failed", exc_info=True)
             unregister_websocket(ws)
 
 
@@ -150,7 +151,7 @@ async def process_attachments(attachments: List[dict], loop) -> str:
                     logger.info(f"[Attachments] Analyzed zip: {filename} ({len(zip_context)} chars)")
                 except Exception as e:
                     logger.error(f"[Attachments] Zip analysis error for {filename}: {e}")
-                    context_parts.append(f"[Archive: {filename}] (Could not analyze: {str(e)})")
+                    context_parts.append(f"[Archive: {filename}] (Could not analyze: {safe_error_detail(e, 'analysis failed')})")
 
             else:
                 # Read text/code files
@@ -178,7 +179,7 @@ async def process_attachments(attachments: List[dict], loop) -> str:
 
                 except Exception as e:
                     logger.error(f"[Attachments] Error reading {filename}: {e}")
-                    context_parts.append(f"[File: {filename}] (Could not read: {str(e)})")
+                    context_parts.append(f"[File: {filename}] (Could not read: {safe_error_detail(e, 'read failed')})")
 
         except Exception as e:
             logger.error(f"[Attachments] Error processing attachment: {e}")
@@ -242,7 +243,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
             if mood_raw and isinstance(mood_raw, dict) and mood_raw.get("emotion"):
                 track_context_from_emotion(mood_raw["emotion"], mood_raw.get("confidence", 50) / 100.0)
         except Exception:
-            pass
+            logger.debug("chat_context_tracking_failed", exc_info=True)
 
         mood = result.get("mood")
         if mood and isinstance(mood, dict):
@@ -364,7 +365,7 @@ async def run(request: RunRequest) -> RunResponse:
             from api.routes.context import track_context_from_message
             track_context_from_message(request.goal, is_user=True)
         except Exception:
-            pass
+            logger.debug("run_context_tracking_failed", exc_info=True)
 
         mood = result.get("mood")
         if mood and isinstance(mood, dict):
@@ -603,6 +604,11 @@ async def websocket_chat(websocket: WebSocket):
             # Receive message from client
             data = await websocket.receive_text()
 
+            # Reject oversized messages to prevent memory exhaustion
+            if len(data) > 1_000_000:  # 1MB limit
+                await websocket.send_json({"type": "error", "error": "Message too large (max 1MB)"})
+                continue
+
             try:
                 msg = json.loads(data)
             except json.JSONDecodeError:
@@ -673,14 +679,14 @@ async def websocket_chat(websocket: WebSocket):
                 if message and not message.startswith("[FILE_ATTACHMENT_CONTEXT]"):
                     track_context_from_message(message, is_user=True)
             except Exception:
-                pass  # Non-critical, don't break chat
+                logger.debug("ws_context_tracking_failed", exc_info=True)
 
             # Record user activity for IdleBehaviorPanel
             try:
                 from api.routes.idle_behaviors import record_user_activity
                 record_user_activity()
             except Exception:
-                pass
+                logger.debug("ws_idle_activity_record_failed", exc_info=True)
 
             # Record interaction for Gateway Daemon (proactive system)
             try:
@@ -689,7 +695,7 @@ async def websocket_chat(websocket: WebSocket):
                 if daemon.state.value == "running":
                     daemon.record_interaction()
             except Exception:
-                pass
+                logger.debug("ws_daemon_interaction_record_failed", exc_info=True)
             if attachments:
                 logger.debug(f"[WebSocket] Attachment details: {attachments}")
             logger.info(f"[WebSocket] Received: {message[:50]}..." + (f" (model: {model_override})" if model_override else "") + (f" ({len(attachments)} attachments)" if attachments else ""))
@@ -807,7 +813,7 @@ async def websocket_chat(websocket: WebSocket):
                             if full_response:
                                 track_context_from_message(full_response, is_user=False)
                         except Exception:
-                            pass
+                            logger.debug("ws_response_context_tracking_failed", exc_info=True)
 
                         # Track emotion if mood data available
                         try:
@@ -818,7 +824,7 @@ async def websocket_chat(websocket: WebSocket):
                                     mood_dict.get("confidence", 50) / 100.0
                                 )
                         except Exception:
-                            pass
+                            logger.debug("ws_emotion_tracking_failed", exc_info=True)
 
                         # Build audio_url for frontend
                         audio_url = None
@@ -827,7 +833,7 @@ async def websocket_chat(websocket: WebSocket):
                             if get_voice_presence()._enabled:
                                 audio_url = "/api/voice/synthesize"
                         except Exception:
-                            pass
+                            logger.debug("ws_voice_presence_check_failed", exc_info=True)
 
                         await websocket.send_json({
                             "type": "done",
@@ -854,6 +860,12 @@ async def websocket_chat(websocket: WebSocket):
                         })
                     elif item.get("type") == "tool_trace":
                         await websocket.send_json(item)
+                    elif item.get("type") == "research_progress":
+                        await websocket.send_json({
+                            "type": "research_progress",
+                            "stage": item.get("stage", "search"),
+                            "data": item.get("data", {}),
+                        })
 
             except Exception as e:
                 logger.error(f"[WebSocket] Processing error: {e}")
@@ -876,7 +888,7 @@ async def websocket_chat(websocket: WebSocket):
             await websocket.send_json({"type": "error", "error": "Connection cancelled"})
             await websocket.close(code=1001)
         except Exception:
-            pass
+            pass  # Intentional: client already disconnected during cancellation
     except Exception as e:
         logger.error(f"[WebSocket] Connection error: {e}")
         stop_generation.set()
@@ -887,7 +899,7 @@ async def websocket_chat(websocket: WebSocket):
             })
             await websocket.close(code=1011)
         except Exception:
-            pass  # Client already gone
+            pass  # Intentional: client already gone, nothing to send to
     finally:
         unregister_websocket(websocket)
         # Safety net: cleanup leftover attachment files if the outer loop
@@ -896,4 +908,4 @@ async def websocket_chat(websocket: WebSocket):
             try:
                 cleanup_attachment_files(_last_attachments)
             except Exception:
-                pass
+                logger.debug("ws_attachment_cleanup_failed", exc_info=True)

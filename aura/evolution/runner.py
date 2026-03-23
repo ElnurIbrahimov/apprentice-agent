@@ -18,6 +18,8 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+
 
 def create_llm_func(model: str, base_url: str = None):
     """Create an LLM function using Ollama's API."""
@@ -84,7 +86,7 @@ def run_evolution(
 
     # Timestamp the run
     run_name = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    config.run_dir = f"./aura_data/evolution_runs/{run_name}"
+    config.run_dir = str(_PROJECT_ROOT / "aura_data" / "evolution_runs" / run_name)
 
     # Create LLM functions
     reflect_llm = create_llm_func(config.reflection_model, config.ollama_base_url)
@@ -94,7 +96,7 @@ def run_evolution(
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
     from aura_skill_library.skill_store import SkillStore
 
-    store = SkillStore(storage_path="./aura_data/skill_library")
+    store = SkillStore(storage_path=str(_PROJECT_ROOT / "aura_data" / "skill_library"))
 
     if not store.index:
         logger.error("No skills found in skill library. Learn some skills first.")

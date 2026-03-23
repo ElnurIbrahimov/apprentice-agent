@@ -99,6 +99,10 @@ async def remove_provider_key(name: str):
 
 def _update_env_file(env_var: str, value: str | None):
     """Add, update, or remove an env var in the project .env file."""
+    # SECURITY: Reject newlines to prevent .env injection
+    if value is not None and ('\n' in value or '\r' in value):
+        raise HTTPException(400, "API key must not contain newline characters")
+
     env_path = Path(__file__).resolve().parent.parent.parent / ".env"
 
     lines = []

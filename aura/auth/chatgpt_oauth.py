@@ -144,8 +144,25 @@ class _OAuthCallbackHandler(BaseHTTPRequestHandler):
         pass
 
 
+def _get_fernet_key():
+    """Derive a Fernet key from machine-specific data (user + hostname).
+
+    This is NOT high-security encryption — it prevents casual reading of
+    the token file but any process running as the same user can derive the key.
+    Good enough for a personal AI OS.
+    """
+    try:
+        from cryptography.fernet import Fernet
+        import hashlib, base64, getpass, socket
+        seed = f"{getpass.getuser()}@{socket.gethostname()}:aura-oauth-tokens"
+        key = base64.urlsafe_b64encode(hashlib.sha256(seed.encode()).digest())
+        return Fernet(key)
+    except ImportError:
+        return None
+
+
 def _save_tokens(access: str, refresh: str, expires: int):
-    """Save tokens to disk."""
+    """Save tokens to disk, encrypted if cryptography is available."""
     tf = _get_token_file()
     tf.parent.mkdir(parents=True, exist_ok=True)
     data = {
@@ -154,13 +171,17 @@ def _save_tokens(access: str, refresh: str, expires: int):
         "expires": expires,
         "account_id": _extract_account_id(access),
     }
-    tf.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    payload = json.dumps(data, indent=2).encode("utf-8")
+    fernet = _get_fernet_key()
+    if fernet:
+        payload = fernet.encrypt(payload)
+    tf.write_bytes(payload)
     try:
         import stat
         tf.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0600 — owner read/write only
     except (OSError, NotImplementedError):
         pass  # Windows may not support Unix permissions
-    logger.info("[CHATGPT_AUTH] Tokens saved to %s", tf)
+    logger.info("[CHATGPT_AUTH] Tokens saved to %s (encrypted=%s)", tf, fernet is not None)
 
 
 def load_tokens() -> Optional[dict]:
@@ -168,7 +189,16 @@ def load_tokens() -> Optional[dict]:
     try:
         tf = _get_token_file()
         if tf.exists():
-            data = json.loads(tf.read_text(encoding="utf-8"))
+            raw = tf.read_bytes()
+            fernet = _get_fernet_key()
+            if fernet:
+                try:
+                    raw = fernet.decrypt(raw)
+                except Exception:
+                    pass  # May be plaintext from before encryption was added
+            if isinstance(raw, bytes):
+                raw = raw.decode("utf-8")
+            data = json.loads(raw)
             if data.get("access") or data.get("refresh"):
                 return data
     except Exception as e:

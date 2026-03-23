@@ -5,7 +5,9 @@ Consolidated from clipboard.py, clipboard_history.py, and clipboard_memory.py.
 
 import json
 import logging
+import os
 import re
+import tempfile
 import threading
 import uuid
 from datetime import datetime
@@ -52,8 +54,16 @@ class ClipboardTool:
             try:
                 if len(data.get("entries", [])) > MAX_HISTORY:
                     data["entries"] = data["entries"][-MAX_HISTORY:]
-                with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-                    json.dump(data, f, indent=2)
+                tmp_fd, tmp_path = tempfile.mkstemp(
+                    dir=str(HISTORY_FILE.parent), suffix=".tmp"
+                )
+                try:
+                    with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+                        json.dump(data, f, indent=2)
+                    os.replace(tmp_path, str(HISTORY_FILE))
+                except BaseException:
+                    os.unlink(tmp_path)
+                    raise
                 return True
             except IOError:
                 return False

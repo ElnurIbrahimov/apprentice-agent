@@ -596,6 +596,10 @@ class MCTSReasoning:
     def _expand(self, node: MCTSNode) -> List[MCTSNode]:
         """
         Expansion phase: Generate candidate next thoughts using LLM.
+
+        LATS extension: When tool_executor is available, candidates can include
+        tool actions. Action nodes are executed immediately and their results
+        become observation child nodes, grounding the search in real data.
         """
         if node.is_terminal:
             return []
@@ -606,6 +610,19 @@ class MCTSReasoning:
         # Build prompt for generating candidate thoughts
         path_context = self._build_path_context(node)
         reflection_context = self._build_reflection_context()
+
+        # Include tool-use instructions when tool_executor is available
+        tool_action_guidance = ""
+        if self.tool_executor:
+            tool_action_guidance = """
+You can also suggest TOOL ACTIONS that gather real information. For tool actions, set type to "action" and include a "tool" field with the tool name and "tool_args" with the arguments.
+
+Available tool actions:
+- {{"type": "action", "tool": "search_web", "tool_args": {{"query": "..."}}, "thought": "Search for X to verify...", "rationale": "...", "confidence": 0.X}}
+- {{"type": "action", "tool": "code_executor", "tool_args": {{"code": "..."}}, "thought": "Calculate X to check...", "rationale": "...", "confidence": 0.X}}
+- {{"type": "action", "tool": "read_file", "tool_args": {{"path": "..."}}, "thought": "Read file to understand...", "rationale": "...", "confidence": 0.X}}
+
+Tool actions get executed and their results are used as evidence. Mix reasoning steps with tool actions for best results."""
 
         prompt = f"""You are reasoning step by step to solve a problem. Generate {self.config.branching_factor} different possible next thoughts or actions.
 
@@ -622,6 +639,7 @@ For each candidate, provide:
 1. The thought/action (what to think or do next)
 2. A brief rationale (why this might be good)
 3. Estimated confidence (0.0 to 1.0)
+{tool_action_guidance}
 
 Format your response as JSON:
 {{
@@ -644,11 +662,19 @@ Think creatively and consider multiple angles. Include at least one unconvention
         # Create child nodes for each candidate
         new_nodes = []
         for candidate in candidates[:self.config.branching_factor]:
+            thought_type = self._parse_thought_type(candidate.get("type", "reasoning"))
+            tool_name = candidate.get("tool")
+            tool_args = candidate.get("tool_args", {})
+
             thought = Thought(
-                type=self._parse_thought_type(candidate.get("type", "reasoning")),
+                type=thought_type,
                 content=candidate.get("thought", ""),
                 confidence=float(candidate.get("confidence", 0.5)),
-                metadata={"rationale": candidate.get("rationale", "")}
+                metadata={
+                    "rationale": candidate.get("rationale", ""),
+                    "tool": tool_name,
+                    "tool_args": tool_args,
+                }
             )
 
             # Build new context
@@ -661,8 +687,18 @@ Think creatively and consider multiple angles. Include at least one unconvention
             if thought.type == ThoughtType.CONCLUSION:
                 child.is_terminal = True
 
-            new_nodes.append(child)
-            self.nodes_created += 1
+            # LATS: Execute tool actions and create observation child nodes
+            if thought_type == ThoughtType.ACTION and tool_name and self.tool_executor:
+                observation_node = self._execute_tool_action(child, tool_name, tool_args)
+                if observation_node:
+                    new_nodes.append(observation_node)
+                    self.nodes_created += 2  # action + observation
+                else:
+                    new_nodes.append(child)
+                    self.nodes_created += 1
+            else:
+                new_nodes.append(child)
+                self.nodes_created += 1
 
             if self.on_node_created:
                 self.on_node_created(child)
@@ -670,6 +706,82 @@ Think creatively and consider multiple angles. Include at least one unconvention
         node.state = NodeState.EVALUATED
 
         return new_nodes
+
+    def _execute_tool_action(
+        self, action_node: MCTSNode, tool_name: str, tool_args: Dict
+    ) -> Optional[MCTSNode]:
+        """
+        LATS tool integration: Execute a tool call and create an observation node.
+
+        This grounds MCTS reasoning in real external data by actually running
+        tools (search, code execution, file reads, etc.) and feeding results
+        back into the tree as observation nodes.
+
+        Args:
+            action_node: The action node that requested the tool call
+            tool_name: Name of the tool to execute
+            tool_args: Arguments for the tool
+
+        Returns:
+            Observation child node with tool result, or None on failure
+        """
+        try:
+            logger.debug(f"[MCTS-LATS] Executing tool: {tool_name}({tool_args})")
+            result = self.tool_executor(tool_name, tool_args)
+
+            # Convert result to string for the observation
+            if isinstance(result, dict):
+                result_text = json.dumps(result, default=str)
+            elif isinstance(result, str):
+                result_text = result
+            else:
+                result_text = str(result)
+
+            # Truncate very long results to avoid blowing up context
+            max_result_len = 2000
+            if len(result_text) > max_result_len:
+                result_text = result_text[:max_result_len] + f"\n... [truncated, {len(result_text)} chars total]"
+
+            # Create observation node as child of the action node
+            obs_thought = Thought(
+                type=ThoughtType.OBSERVATION,
+                content=f"[Tool: {tool_name}] {result_text}",
+                confidence=0.7,  # External data gets moderate-high base confidence
+                metadata={
+                    "tool": tool_name,
+                    "tool_args": tool_args,
+                    "result_length": len(result_text),
+                    "source": "tool_execution",
+                }
+            )
+
+            obs_context = (
+                f"{action_node.context}\n\n"
+                f"Observation (from {tool_name}): {result_text[:500]}"
+            )
+
+            obs_node = action_node.add_child(obs_thought, obs_context)
+            obs_node.state = NodeState.EVALUATED
+
+            logger.debug(f"[MCTS-LATS] Tool {tool_name} returned {len(result_text)} chars")
+
+            if self.on_node_created:
+                self.on_node_created(obs_node)
+
+            return obs_node
+
+        except Exception as e:
+            logger.warning(f"[MCTS-LATS] Tool execution failed for {tool_name}: {e}")
+            # Create a failed observation so the tree knows this path didn't work
+            fail_thought = Thought(
+                type=ThoughtType.OBSERVATION,
+                content=f"[Tool: {tool_name}] FAILED: {str(e)[:200]}",
+                confidence=0.1,
+                metadata={"tool": tool_name, "error": str(e)},
+            )
+            fail_node = action_node.add_child(fail_thought, action_node.context)
+            fail_node.state = NodeState.EVALUATED
+            return fail_node
 
     def _evaluate(self, node: MCTSNode) -> float:
         """

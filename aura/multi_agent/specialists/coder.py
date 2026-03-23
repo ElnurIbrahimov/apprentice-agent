@@ -15,6 +15,7 @@ from typing import Any, Callable, Dict
 
 from ..base_agent import ToolUsingSpecialist
 from ..protocol import AgentMessage, AgentResult
+from aura.agent import validate_script_code
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,17 @@ For git operations, use: [TOOL: git] git_command"""
             execution_results = []
             if is_execute and code_blocks and "code_executor" in self._available_tools:
                 for i, code in enumerate(code_blocks[:2]):  # Execute max 2 blocks
+                    # SECURITY: AST-validate LLM-generated code before execution
+                    is_valid, validation_msg = validate_script_code(code["code"], f"coder_block_{i+1}")
+                    if not is_valid:
+                        logger.warning(f"[Coder] Blocked unsafe code block {i+1}: {validation_msg}")
+                        result = {"success": False, "error": f"Code blocked for safety: {validation_msg}"}
+                        tools_used.append("code_executor")
+                        execution_results.append({
+                            "language": code.get("language", "unknown"),
+                            "result": result,
+                        })
+                        continue
                     logger.info(f"[Coder] Executing code block {i+1}...")
                     result = self._execute_tool("code_executor", code["code"])
                     tools_used.append("code_executor")

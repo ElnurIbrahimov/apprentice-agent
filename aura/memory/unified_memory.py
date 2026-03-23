@@ -328,6 +328,10 @@ class UnifiedMemory:
                     importance=max(importance, 0.5),
                     lifecycle_state=decision.lifecycle_state.value,
                 )
+                # Re-embed the updated content so semantic search stays accurate
+                new_emb = self._get_embedding(content)
+                if new_emb is not None:
+                    self._store.update_embedding(decision.target_id, new_emb)
                 ids["store"] = decision.target_id
                 ids["lifecycle"] = decision.lifecycle_state.value
                 ids["merged_into"] = decision.target_id

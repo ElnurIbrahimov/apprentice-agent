@@ -6,6 +6,7 @@ from typing import Optional
 
 class PermissionMode(str, Enum):
     PLAN = "plan"
+    PLAN_APPROVE = "plan_approve"
     CAREFUL = "careful"
     AUTO_EDIT = "auto_edit"
     FULL_AUTO = "full_auto"
@@ -14,13 +15,14 @@ class PermissionMode(str, Enum):
 # auto_edit is defined but deferred from the cycle — its enforcement logic
 # (auto-approve edits, prompt for commands) is not yet wired up.
 _MODE_ORDER = [
-    PermissionMode.PLAN,
     PermissionMode.CAREFUL,
+    PermissionMode.PLAN_APPROVE,
     PermissionMode.FULL_AUTO,
 ]
 
 _MODE_DESCRIPTIONS = {
     PermissionMode.PLAN: "Plan Mode — read-only, no file edits or commands",
+    PermissionMode.PLAN_APPROVE: "Plan-Approve — agent shows plan first, then executes on approval",
     PermissionMode.CAREFUL: "Careful — approve every edit and shell command",
     PermissionMode.AUTO_EDIT: "Auto-Edit — file edits auto-apply, commands ask",
     PermissionMode.FULL_AUTO: "Full Auto — everything runs autonomously",
@@ -28,6 +30,7 @@ _MODE_DESCRIPTIONS = {
 
 _MODE_INDICATORS = {
     PermissionMode.PLAN: "[blue]◎ PLAN[/blue]",
+    PermissionMode.PLAN_APPROVE: "[magenta]◎ PLAN-APPROVE[/magenta]",
     PermissionMode.CAREFUL: "[yellow]◉ CAREFUL[/yellow]",
     PermissionMode.AUTO_EDIT: "[green]◉ AUTO-EDIT[/green]",
     PermissionMode.FULL_AUTO: "[red]● FULL-AUTO[/red]",
@@ -35,6 +38,7 @@ _MODE_INDICATORS = {
 
 _MODE_SHORT = {
     PermissionMode.PLAN: "[blue]PLAN[/blue]",
+    PermissionMode.PLAN_APPROVE: "[magenta]P-APR[/magenta]",
     PermissionMode.CAREFUL: "[yellow]CARE[/yellow]",
     PermissionMode.AUTO_EDIT: "[green]AUTO[/green]",
     PermissionMode.FULL_AUTO: "[red]FULL[/red]",
@@ -47,7 +51,10 @@ def cycle_permission_mode(current: str) -> str:
         current_mode = PermissionMode(current)
     except ValueError:
         return PermissionMode.CAREFUL.value
-    idx = _MODE_ORDER.index(current_mode)
+    try:
+        idx = _MODE_ORDER.index(current_mode)
+    except ValueError:
+        idx = 0  # Fall back to start of cycle
     next_idx = (idx + 1) % len(_MODE_ORDER)
     return _MODE_ORDER[next_idx].value
 
@@ -84,3 +91,7 @@ def should_auto_approve_command(mode: str) -> bool:
 
 def should_block_mutations(mode: str) -> bool:
     return mode == PermissionMode.PLAN.value
+
+def is_plan_approve_mode(mode: str) -> bool:
+    """Check if current mode is plan-approve-execute."""
+    return mode == PermissionMode.PLAN_APPROVE.value

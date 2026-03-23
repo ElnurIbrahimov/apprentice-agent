@@ -45,14 +45,20 @@ class RateLimiter:
 
     def wait_if_needed(self):
         """Block until rate limit allows another call."""
+        sleep_time = 0.0
         with self._lock:
             now = time.time()
             elapsed = now - self.last_call_time
             if elapsed < self.min_interval:
                 sleep_time = self.min_interval - elapsed
-                logger.debug(f"[RATE_LIMIT] Sleeping {sleep_time:.2f}s")
-                time.sleep(sleep_time)
-            self.last_call_time = time.time()
+                # Reserve the slot now so other threads compute their wait correctly
+                self.last_call_time = now + sleep_time
+            else:
+                self.last_call_time = now
+        # Sleep OUTSIDE the lock so other threads aren't blocked
+        if sleep_time > 0:
+            logger.debug(f"[RATE_LIMIT] Sleeping {sleep_time:.2f}s")
+            time.sleep(sleep_time)
 
 
 # Global rate limiter (30 calls/minute = 1 call every 2 seconds)
@@ -112,6 +118,15 @@ class WebSearchTool:
         self.max_query_length = MAX_QUERY_LENGTH
         self.max_results = 100
 
+        # SECURITY: Validate primary SearXNG URL at init time to prevent SSRF
+        # via SEARXNG_URL env var pointing to internal services
+        try:
+            from aura.security.ssrf_guard import validate_url_safe
+            validate_url_safe(self.PRIMARY_INSTANCE)
+        except (ValueError, ImportError) as e:
+            logger.warning(f"[SEARXNG] Primary instance failed SSRF validation ({e}), using fallbacks only")
+            self.PRIMARY_INSTANCE = None  # Will skip to fallback instances
+
     def search(self, query: str, num_results: int = 10, categories: str = "general") -> Dict:
         """
         Search using SearXNG with rate limiting and validation.
@@ -149,8 +164,8 @@ class WebSearchTool:
         else:
             logger.info(f"[SEARXNG] Searching: {query[:50]}...")
 
-        # Try primary instance first, then fallbacks
-        instances = [self.PRIMARY_INSTANCE] + self.FALLBACK_INSTANCES
+        # Try primary instance first, then fallbacks (skip None if SSRF-blocked)
+        instances = ([self.PRIMARY_INSTANCE] if self.PRIMARY_INSTANCE else []) + self.FALLBACK_INSTANCES
 
         for instance in instances:
             try:

@@ -14,6 +14,15 @@ MODEL_CONTEXT_WINDOWS = {
     # Utility models (local)
     "nomic-embed-text:latest": 8192,
     "glm-ocr:latest": 8192,
+    # Local models
+    "deepseek-r1:8b": 131072,
+    "qwen3:8b": 131072,
+    "qwen2.5-coder:7b": 131072,
+    "deepseek-coder:6.7b": 16384,
+    "gemma3:4b": 131072,
+    "deepcoder:1.5b": 131072,
+    "qwen2:1.5b": 32768,
+    "llava:latest": 4096,
     # Cloud models
     "minimax-m2.7:cloud": 1048576,
     "minimax-m2.5:cloud": 196608,
@@ -26,17 +35,25 @@ MODEL_CONTEXT_WINDOWS = {
     "gpt-oss:120b-cloud": 131072,
     "glm-5:cloud": 131072,
     "nemotron-3-super:cloud": 131072,
+    "cogito-2.1:671b": 131072,
+    "devstral-2:123b": 131072,
+    "kimi-k2-thinking": 131072,
 }
-DEFAULT_CONTEXT_WINDOW = 32768
+DEFAULT_CONTEXT_WINDOW = 128000
 
 
 def estimate_tokens(text: str) -> int:
-    """Rough token estimate: ~3.5 chars per token for English, ~2.5 for code."""
+    """Rough token estimate: ~3.5 chars per token for English, ~2.5 for code, ~1.2 for CJK."""
     if not text:
         return 0
-    # Heuristic: code-heavy content has more symbols
-    code_indicators = text.count("{") + text.count("}") + text.count("(") + text.count(")")
-    chars_per_token = 2.8 if code_indicators > len(text) * 0.02 else 3.5
+    # Detect CJK-heavy text (Chinese, Japanese, Korean)
+    cjk_count = sum(1 for c in text if '\u4e00' <= c <= '\u9fff' or '\u3040' <= c <= '\u30ff' or '\uac00' <= c <= '\ud7af')
+    if cjk_count / len(text) > 0.3:
+        chars_per_token = 1.2  # CJK characters are roughly 1 token each
+    else:
+        # Heuristic: code-heavy content has more symbols
+        code_indicators = text.count("{") + text.count("}") + text.count("(") + text.count(")")
+        chars_per_token = 2.8 if code_indicators > len(text) * 0.02 else 3.5
     return max(1, int(len(text) / chars_per_token))
 
 

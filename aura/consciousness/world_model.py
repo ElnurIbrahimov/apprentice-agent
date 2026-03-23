@@ -278,9 +278,10 @@ class WorldModel:
     def _init_db(self) -> None:
         """Create all 11 tables and 9 indices."""
         conn = sqlite3.connect(self._db_path)
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=5000")
-        conn.executescript("""
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=5000")
+            conn.executescript("""
             CREATE TABLE IF NOT EXISTS projects (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -432,8 +433,9 @@ class WorldModel:
             CREATE INDEX IF NOT EXISTS idx_insights_delivered
                 ON proactive_insights(delivered_at);
         """)
-        conn.commit()
-        conn.close()
+            conn.commit()
+        finally:
+            conn.close()
 
     def _load_from_db(self) -> None:
         """Hydrate in-memory cache from SQLite."""
@@ -949,7 +951,11 @@ class WorldModel:
         new_evidence: Optional[List[str]] = None,
         conversation_id: Optional[str] = None,
     ) -> Optional[Belief]:
-        """Supersede an old belief: mark valid_to=now on old, create new, log BELIEF_REVISED."""
+        """Supersede an old belief: mark valid_to=now on old, create new, log BELIEF_REVISED.
+
+        All DB writes are wrapped in a single transaction to prevent orphaned
+        beliefs if a crash occurs between the UPDATE and INSERT.
+        """
         with self._lock:
             old_belief = self._beliefs.get(old_id)
             if not old_belief:
@@ -957,41 +963,56 @@ class WorldModel:
 
             now = _now_iso()
 
-            # Mark old belief as superseded
-            old_belief.valid_to = now
-            conn = self._connect()
-            try:
-                conn.execute(
-                    "UPDATE beliefs SET valid_to=? WHERE id=?",
-                    (now, old_id),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-
-            # Remove from current beliefs cache
-            del self._beliefs[old_id]
-
-            # Create new belief
-            new_belief = self.add_belief(
+            # Build the new belief object in memory first
+            new_belief = Belief(
+                id=_gen_id("belief"),
                 statement=new_statement,
+                confidence=min(max(new_confidence, 0.0), 1.0),
                 category=new_category or old_belief.category,
-                confidence=new_confidence,
                 evidence=new_evidence or [],
-                conversation_id=conversation_id,
+                first_formed=now,
+                last_reinforced=now,
+                valid_from=now,
+                valid_to=None,
+                superseded_by=None,
+                source_conversation_ids=[conversation_id] if conversation_id else [],
             )
 
-            # Link old to new
-            old_belief.superseded_by = new_belief.id
+            # Single transaction: mark old as superseded + insert new belief
             conn = self._connect()
             try:
+                conn.execute("BEGIN")
                 conn.execute(
-                    "UPDATE beliefs SET superseded_by=? WHERE id=?",
-                    (new_belief.id, old_id),
+                    "UPDATE beliefs SET valid_to=?, superseded_by=? WHERE id=?",
+                    (now, new_belief.id, old_id),
                 )
-                conn.commit()
+                conn.execute(
+                    """INSERT INTO beliefs
+                       (id, statement, confidence, category, evidence,
+                        first_formed, last_reinforced, valid_from, valid_to,
+                        superseded_by, source_conversation_ids)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        new_belief.id, new_belief.statement, new_belief.confidence,
+                        new_belief.category.value, _json_dumps(new_belief.evidence),
+                        new_belief.first_formed, new_belief.last_reinforced,
+                        new_belief.valid_from, new_belief.valid_to,
+                        new_belief.superseded_by,
+                        _json_dumps(new_belief.source_conversation_ids),
+                    ),
+                )
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
             finally:
                 conn.close()
+
+            # Update in-memory state only after successful DB commit
+            old_belief.valid_to = now
+            old_belief.superseded_by = new_belief.id
+            del self._beliefs[old_id]
+            self._beliefs[new_belief.id] = new_belief
 
             self._log_state_change(
                 ChangeType.BELIEF_REVISED, "belief", old_id,
@@ -999,6 +1020,12 @@ class WorldModel:
                 {"statement": new_statement, "new_id": new_belief.id},
                 conversation_id,
                 reasoning=f"Belief revised: '{old_belief.statement}' -> '{new_statement}'",
+            )
+
+            self._log_state_change(
+                ChangeType.BELIEF_FORMED, "belief", new_belief.id,
+                None, asdict(new_belief), conversation_id,
+                reasoning=f"New belief formed: {new_statement}",
             )
 
             self._update_snapshot()

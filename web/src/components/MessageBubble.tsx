@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { Message, Citation } from '../types';
+import { useChatStore } from '../store/chatStore';
 import { ModelCompare } from './ModelCompare';
 import { SparklesIcon, BoltIcon } from '@heroicons/react/24/solid';
 import { ClipboardDocumentIcon, CheckIcon, ClipboardIcon, ArrowPathIcon, ShareIcon } from '@heroicons/react/24/outline';
@@ -59,29 +60,170 @@ function CodeBlock({ language, children }: { language: string; children: string 
   );
 }
 
-function CitationList({ citations }: { citations: Citation[] }) {
+/* ── Citation tooltip shown on hover of inline [N] badges ── */
+function CitationTooltip({ citation, position }: { citation: Citation; position: { x: number; y: number } }) {
+  // Clamp position to viewport
+  const left = Math.min(position.x, window.innerWidth - 280);
+  const top = position.y + 8;
+
+  return (
+    <div
+      className="fixed z-[1100] pointer-events-none animate-fade-in"
+      style={{
+        left,
+        top,
+        width: 260,
+        background: 'rgba(15, 15, 22, 0.95)',
+        border: '1px solid rgba(139, 92, 246, 0.3)',
+        borderRadius: 10,
+        padding: '10px 12px',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+        backdropFilter: 'blur(16px)',
+      }}
+    >
+      <div className="text-xs font-medium text-purple-300 truncate">{citation.title || citation.url}</div>
+      {citation.snippet && (
+        <div className="text-[11px] text-gray-400 mt-1.5 leading-relaxed line-clamp-3">{citation.snippet}</div>
+      )}
+      <div className="text-[10px] text-gray-600 mt-1.5 truncate">{citation.url}</div>
+    </div>
+  );
+}
+
+/* ── Inline [N] badge rendered inside message text ── */
+function InlineCitationBadge({
+  num,
+  citation,
+  messageId,
+}: {
+  num: number;
+  citation: Citation | undefined;
+  messageId: string;
+}) {
+  const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
+  const setHoveredCitation = useChatStore((s) => s.setHoveredCitation);
+  const setCitationsPanelOpen = useChatStore((s) => s.setCitationsPanelOpen);
+  const setActiveCitationRef = useChatStore((s) => s.setActiveCitationRef);
+  const hoveredCitation = useChatStore((s) => s.hoveredCitation);
+
+  const isHighlighted =
+    hoveredCitation !== null &&
+    hoveredCitation.id === num &&
+    hoveredCitation.messageId === messageId;
+
+  const handleMouseEnter = useCallback(
+    (e: React.MouseEvent) => {
+      const rect = (e.target as HTMLElement).getBoundingClientRect();
+      setTooltipPos({ x: rect.left, y: rect.bottom });
+      setHoveredCitation({ id: num, messageId });
+    },
+    [num, messageId, setHoveredCitation]
+  );
+
+  const handleMouseLeave = useCallback(() => {
+    setTooltipPos(null);
+    setHoveredCitation(null);
+  }, [setHoveredCitation]);
+
+  const handleClick = useCallback(() => {
+    // Open panel and scroll to this citation
+    setCitationsPanelOpen(true);
+    setActiveCitationRef({ id: num, messageId });
+  }, [num, messageId, setCitationsPanelOpen, setActiveCitationRef]);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={handleClick}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+        data-citation-id={num}
+        data-message-id={messageId}
+        className="inline-flex items-center justify-center align-super cursor-pointer transition-all duration-150"
+        style={{
+          width: 18,
+          height: 18,
+          fontSize: 10,
+          fontWeight: 700,
+          lineHeight: 1,
+          borderRadius: '50%',
+          background: isHighlighted ? 'rgba(139, 92, 246, 0.5)' : 'rgba(139, 92, 246, 0.25)',
+          color: isHighlighted ? '#e9d5ff' : '#c4b5fd',
+          border: `1px solid ${isHighlighted ? 'rgba(139, 92, 246, 0.7)' : 'rgba(139, 92, 246, 0.35)'}`,
+          marginLeft: 1,
+          marginRight: 1,
+          verticalAlign: 'super',
+          transform: isHighlighted ? 'scale(1.15)' : 'scale(1)',
+        }}
+        aria-label={citation ? `Source ${num}: ${citation.title}` : `Source ${num}`}
+      >
+        {num}
+      </button>
+      {tooltipPos && citation && <CitationTooltip citation={citation} position={tooltipPos} />}
+    </>
+  );
+}
+
+/* ── Compact source list below message (enhanced) ── */
+function CitationList({ citations, messageId }: { citations: Citation[]; messageId: string }) {
   const [expanded, setExpanded] = useState(false);
   const visible = expanded ? citations : citations.slice(0, 3);
   const hasMore = citations.length > 3;
+  const setCitationsPanelOpen = useChatStore((s) => s.setCitationsPanelOpen);
+  const hoveredCitation = useChatStore((s) => s.hoveredCitation);
+  const setHoveredCitation = useChatStore((s) => s.setHoveredCitation);
 
   return (
     <div className="mt-3 border-t border-gray-700/50 pt-2 text-xs">
-      <div className="text-gray-500 mb-1.5 font-medium">Sources</div>
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-gray-500 font-medium">Sources</span>
+        <button
+          onClick={() => setCitationsPanelOpen(true)}
+          className="text-[10px] text-purple-400 hover:text-purple-300 transition-colors"
+        >
+          View all
+        </button>
+      </div>
       <ol className="space-y-1">
-        {visible.map((c) => (
-          <li key={c.id} className="flex items-start gap-1.5">
-            <span className="flex-shrink-0 text-gray-500">[{c.id}]</span>
-            <a
-              href={/^https?:\/\//i.test(c.url) ? c.url : '#'}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-chat-accent hover:underline hover:text-chat-accent-hover truncate block"
-              title={c.snippet || c.title}
+        {visible.map((c) => {
+          const isHighlighted =
+            hoveredCitation !== null &&
+            hoveredCitation.id === c.id &&
+            hoveredCitation.messageId === messageId;
+          return (
+            <li
+              key={c.id}
+              className="flex items-start gap-1.5 rounded px-1 py-0.5 transition-colors"
+              style={{
+                background: isHighlighted ? 'rgba(139, 92, 246, 0.12)' : 'transparent',
+              }}
+              onMouseEnter={() => setHoveredCitation({ id: c.id, messageId })}
+              onMouseLeave={() => setHoveredCitation(null)}
             >
-              {c.title || c.url}
-            </a>
-          </li>
-        ))}
+              <span
+                className="flex-shrink-0 inline-flex items-center justify-center rounded-full text-[10px] font-bold"
+                style={{
+                  width: 18,
+                  height: 18,
+                  background: isHighlighted ? 'rgba(139, 92, 246, 0.4)' : 'rgba(255, 255, 255, 0.08)',
+                  color: isHighlighted ? '#e9d5ff' : '#a1a1aa',
+                }}
+              >
+                {c.id}
+              </span>
+              <a
+                href={/^https?:\/\//i.test(c.url) ? c.url : '#'}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-chat-accent hover:underline hover:text-chat-accent-hover truncate block"
+                title={c.snippet || c.title}
+              >
+                {c.title || c.url}
+              </a>
+            </li>
+          );
+        })}
       </ol>
       {hasMore && (
         <button
@@ -93,6 +235,108 @@ function CitationList({ citations }: { citations: Citation[] }) {
       )}
     </div>
   );
+}
+
+/* ── Parse message content to inject inline citation badges ── */
+function renderContentWithCitations(
+  content: string,
+  citations: Citation[] | undefined,
+  messageId: string,
+): React.ReactNode[] {
+  if (!citations || citations.length === 0) return [content];
+
+  const citationMap = new Map(citations.map((c) => [c.id, c]));
+  // Split on [N] patterns, keeping the delimiters
+  const parts = content.split(/(\[\d+\])/g);
+
+  return parts.map((part, i) => {
+    const match = /^\[(\d+)\]$/.exec(part);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      return (
+        <InlineCitationBadge
+          key={`cite-${messageId}-${num}-${i}`}
+          num={num}
+          citation={citationMap.get(num)}
+          messageId={messageId}
+        />
+      );
+    }
+    return part;
+  });
+}
+
+/* ── Markdown renderer that injects inline citation badges into text nodes ── */
+function CitationAwareMarkdown({
+  content,
+  citations,
+  messageId,
+}: {
+  content: string;
+  citations: Citation[];
+  messageId: string;
+}) {
+  return (
+    <ReactMarkdown
+      components={{
+        code({ className, children, ...props }) {
+          const match = /language-(\w+)/.exec(className || '');
+          if (!match) {
+            return (
+              <code className="bg-gray-800 px-1.5 py-0.5 rounded text-sm" {...props}>
+                {children}
+              </code>
+            );
+          }
+          return (
+            <CodeBlock language={match[1]}>
+              {String(children).replace(/\n$/, '')}
+            </CodeBlock>
+          );
+        },
+        a({ href, children }) {
+          return (
+            <a href={href} target="_blank" rel="noopener noreferrer"
+              className="text-purple-400 hover:text-purple-300 underline">
+              {children}
+            </a>
+          );
+        },
+        // Inject citation badges into paragraph text
+        p({ children }) {
+          return <p>{injectCitationsIntoChildren(children, citations, messageId)}</p>;
+        },
+        li({ children }) {
+          return <li>{injectCitationsIntoChildren(children, citations, messageId)}</li>;
+        },
+      }}
+    >
+      {content}
+    </ReactMarkdown>
+  );
+}
+
+/* ── Walk React children and replace [N] patterns in text strings ── */
+function injectCitationsIntoChildren(
+  children: React.ReactNode,
+  citations: Citation[],
+  messageId: string,
+): React.ReactNode {
+  if (!Array.isArray(children)) {
+    if (typeof children === 'string') {
+      return renderContentWithCitations(children, citations, messageId);
+    }
+    return children;
+  }
+  return children.map((child, i) => {
+    if (typeof child === 'string') {
+      const parts = renderContentWithCitations(child, citations, messageId);
+      // If no citations found, return the string as-is
+      if (parts.length === 1 && parts[0] === child) return child;
+      return <span key={i}>{parts}</span>;
+    }
+    return child;
+  });
 }
 
 interface MessageBubbleProps {
@@ -227,6 +471,8 @@ export function MessageBubble({ message, animateIn = false, animationIndex = 0 }
     setContextMenu(null);
   }, [message.content]);
 
+  const hasCitations = !!(message.citations && message.citations.length > 0);
+
   const staggerClass = animationIndex <= 4 ? `msg-stagger-${animationIndex}` : 'msg-stagger-4';
   const animClass = animateIn ? `msg-animate-in ${staggerClass}` : '';
 
@@ -337,45 +583,49 @@ export function MessageBubble({ message, animateIn = false, animationIndex = 0 }
             <ToolTrace traces={message.toolTrace} isStreaming={isStreaming} />
           )}
 
-          {/* Message content */}
+          {/* Message content with inline citation badges */}
           <div className={`prose prose-invert max-w-none text-chat-text ${isStreaming ? 'stream-container-active' : ''}`}>
-            <ReactMarkdown
-              components={{
-                code({ className, children, ...props }) {
-                  const match = /language-(\w+)/.exec(className || '');
-                  if (!match) {
+            {hasCitations && !isStreaming ? (
+              <CitationAwareMarkdown content={message.content} citations={message.citations!} messageId={message.id} />
+            ) : (
+              <ReactMarkdown
+                components={{
+                  code({ className, children, ...props }) {
+                    const match = /language-(\w+)/.exec(className || '');
+                    if (!match) {
+                      return (
+                        <code className="bg-gray-800 px-1.5 py-0.5 rounded text-sm" {...props}>
+                          {children}
+                        </code>
+                      );
+                    }
                     return (
-                      <code className="bg-gray-800 px-1.5 py-0.5 rounded text-sm" {...props}>
-                        {children}
-                      </code>
+                      <CodeBlock language={match[1]}>
+                        {String(children).replace(/\n$/, '')}
+                      </CodeBlock>
                     );
-                  }
-                  return (
-                    <CodeBlock language={match[1]}>
-                      {String(children).replace(/\n$/, '')}
-                    </CodeBlock>
-                  );
-                },
-                a({ href, children }) {
-                  return (
-                    <a href={href} target="_blank" rel="noopener noreferrer"
-                      className="text-purple-400 hover:text-purple-300 underline">
-                      {children}
-                    </a>
-                  );
-                },
-              }}
-            >
-              {message.content}
-            </ReactMarkdown>
+                  },
+                  a({ href, children }) {
+                    return (
+                      <a href={href} target="_blank" rel="noopener noreferrer"
+                        className="text-purple-400 hover:text-purple-300 underline">
+                        {children}
+                      </a>
+                    );
+                  },
+                }}
+              >
+                {message.content}
+              </ReactMarkdown>
+            )}
             {(isStreaming || cursorExiting) && (
               <span className={`stream-cursor ${cursorExiting ? 'cursor-exiting' : ''}`} />
             )}
           </div>
 
           {/* Citations */}
-          {message.citations && message.citations.length > 0 && !isStreaming && (
-            <CitationList citations={message.citations} />
+          {hasCitations && !isStreaming && (
+            <CitationList citations={message.citations!} messageId={message.id} />
           )}
 
           {/* Memory transparency */}

@@ -24,7 +24,11 @@ def _get_agent_service():
 
 # ALMA imports are done lazily inside endpoints to avoid blocking startup
 
-router = APIRouter(prefix="/api", tags=["status"])
+# Public router for unauthenticated health probes (load balancers, uptime monitors)
+public_router = APIRouter(prefix="/api", tags=["status"])
+
+# Authenticated router for all other status/admin endpoints
+router = APIRouter(prefix="/api", tags=["status"], dependencies=[Depends(require_api_key)])
 
 
 # ============================================================================
@@ -150,9 +154,12 @@ class InitStatus(BaseModel):
 _server_start_time = time.time()
 
 
-@router.get("/health", response_model=HealthResponse)
+@public_router.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
-    """Lightweight health check endpoint (for load balancers / uptime monitors)."""
+    """Lightweight health check endpoint (for load balancers / uptime monitors).
+
+    On the public_router — no auth required.
+    """
     return HealthResponse(status="ok", version="1.0.0")
 
 
@@ -180,7 +187,7 @@ async def deep_health_check() -> DeepHealthResponse:
             subsystems.append(SubsystemStatus(name="agent", status="down", detail="not started"))
             overall = "degraded"
     except Exception as e:
-        subsystems.append(SubsystemStatus(name="agent", status="down", detail=str(e)[:200]))
+        subsystems.append(SubsystemStatus(name="agent", status="down", detail=safe_error_detail(e)[:200]))
         overall = "degraded"
 
     # 2. Ollama / LLM backend
@@ -207,21 +214,21 @@ async def deep_health_check() -> DeepHealthResponse:
                 if overall == "ok":
                     overall = "degraded"
     except Exception as e:
-        subsystems.append(SubsystemStatus(name="ollama", status="down", detail=str(e)[:200]))
+        subsystems.append(SubsystemStatus(name="ollama", status="down", detail=safe_error_detail(e)[:200]))
         overall = "degraded"
 
-    # 3. Memory / ChromaDB
+    # 3. Memory / UnifiedMemory (SQLite)
     try:
-        from aura.config import Config
-        chromadb_path = Config.CHROMADB_PATH
-        if chromadb_path.exists():
-            subsystems.append(SubsystemStatus(name="chromadb", status="ok", detail=str(chromadb_path)))
+        from pathlib import Path
+        memory_db = Path(os.getenv("AURA_DATA_DIR", "data")) / "aura_memory.db"
+        if memory_db.exists():
+            subsystems.append(SubsystemStatus(name="unified_memory", status="ok", detail=str(memory_db)))
         else:
-            subsystems.append(SubsystemStatus(name="chromadb", status="degraded", detail="path does not exist"))
+            subsystems.append(SubsystemStatus(name="unified_memory", status="degraded", detail="database not found"))
             if overall == "ok":
                 overall = "degraded"
     except Exception as e:
-        subsystems.append(SubsystemStatus(name="chromadb", status="unavailable", detail=str(e)[:200]))
+        subsystems.append(SubsystemStatus(name="chromadb", status="unavailable", detail=safe_error_detail(e)[:200]))
 
     # 4. ALMA emotion engine
     try:
@@ -237,7 +244,7 @@ async def deep_health_check() -> DeepHealthResponse:
     except ImportError:
         subsystems.append(SubsystemStatus(name="alma", status="unavailable", detail="module not found"))
     except Exception as e:
-        subsystems.append(SubsystemStatus(name="alma", status="down", detail=str(e)[:200]))
+        subsystems.append(SubsystemStatus(name="alma", status="down", detail=safe_error_detail(e)[:200]))
 
     # 5. Disk space
     try:
@@ -250,7 +257,7 @@ async def deep_health_check() -> DeepHealthResponse:
         else:
             subsystems.append(SubsystemStatus(name="disk", status="ok", detail=f"{free_gb:.1f}GB free"))
     except Exception as e:
-        subsystems.append(SubsystemStatus(name="disk", status="unavailable", detail=str(e)[:100]))
+        subsystems.append(SubsystemStatus(name="disk", status="unavailable", detail=safe_error_detail(e)[:100]))
 
     # 6. Rate limit config
     try:
@@ -650,7 +657,7 @@ async def reset_personality():
     raise HTTPException(status_code=503, detail="ALMA not available")
 
 
-@router.get("/models/detailed", response_model=ModelsResponse)
+@router.get("/models/detailed", response_model=ModelsResponse, dependencies=[Depends(require_api_key)])
 async def get_models_detailed() -> ModelsResponse:
     """Get available models with detailed info (local and cloud).
 

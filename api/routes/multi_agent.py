@@ -174,7 +174,7 @@ async def list_agents(session_id: str = Query(default="default")):
 
         return {"agents": agents, "count": len(agents)}
     except Exception as e:
-        return {"agents": [], "count": 0, "error": str(e)}
+        return {"agents": [], "count": 0, "error": safe_error_detail(e)}
 
 
 @router.post("/chat", response_model=MultiAgentChatResponse)
@@ -273,4 +273,4 @@ async def get_history(session_id: str = Query(default="default")):
         return {"history": history, "total_turns": len(orchestrator.history)}
 
     except Exception as e:
-        return {"history": [], "total_turns": 0, "error": str(e)}
+        return {"history": [], "total_turns": 0, "error": safe_error_detail(e)}

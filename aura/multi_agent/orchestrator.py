@@ -64,8 +64,9 @@ class MultiAgentOrchestrator:
         # Initialize router
         self.router = IntentRouter(self.specialists)
 
-        # Shared thread pool for parallel execution
-        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=8)
+        # Shared pool — centralized in aura.pools
+        from aura.pools import bg_pool
+        self._executor = bg_pool()
 
         # Conversation history
         self.history: List[ConversationTurn] = []

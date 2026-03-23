@@ -62,6 +62,7 @@ class ReasoningTreeTool:
         self,
         llm_func: Callable[[str, Optional[str]], str],
         config: Optional[MCTSConfig] = None,
+        tool_executor: Optional[Callable[[str, Dict], Any]] = None,
     ):
         """
         Initialize the Reasoning Tree Tool.
@@ -69,8 +70,11 @@ class ReasoningTreeTool:
         Args:
             llm_func: Function that takes (prompt, system_prompt) and returns LLM response
             config: Optional MCTS configuration
+            tool_executor: Optional function to execute tool calls (LATS pattern).
+                          Signature: (tool_name: str, tool_args: dict) -> Any
         """
         self.llm_func = llm_func
+        self.tool_executor = tool_executor
         self.config = config or MCTSConfig(
             max_iterations=30,
             max_depth=10,
@@ -124,10 +128,11 @@ class ReasoningTreeTool:
             enable_pruning=self.config.enable_pruning,
         )
 
-        # Initialize MCTS
+        # Initialize MCTS (with optional LATS tool executor)
         mcts = MCTSReasoning(
             llm_func=self.llm_func,
             config=config,
+            tool_executor=self.tool_executor,
         )
 
         # Set up progress reporting
@@ -176,6 +181,7 @@ class ReasoningTreeTool:
         mcts = MCTSReasoning(
             llm_func=self.llm_func,
             config=config,
+            tool_executor=self.tool_executor,
         )
 
         result = mcts.search(question, context)

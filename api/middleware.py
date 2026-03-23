@@ -41,10 +41,14 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         "/redoc",
     }
 
-    def __init__(self, app, api_key: str = "", enabled: bool = False):
+    def __init__(self, app, api_key: str = "", enabled: bool = True):
         super().__init__(app)
         self.api_key = api_key
-        self.enabled = enabled and bool(api_key)
+        if enabled and not api_key:
+            logger.warning("[Auth] Auth enabled but no API key configured — all authenticated requests will be rejected. Set AURA_API_KEY.")
+            self.enabled = True  # Reject all rather than pass all
+        else:
+            self.enabled = enabled and bool(api_key)
         if self.enabled:
             logger.info("[Auth] API key authentication enabled")
         else:
@@ -103,6 +107,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.enabled = enabled and requests_per_minute > 0
         # Track requests: ip -> list of timestamps
         self._requests: Dict[str, list] = defaultdict(list)
+        # Track WebSocket connection attempts: ip -> list of timestamps
+        self._ws_requests: Dict[str, list] = defaultdict(list)
+        self._ws_connections_per_minute = 30  # Lower limit for WS handshakes
         self._cleanup_interval = 300  # Clean old entries every 5 min
         self._last_cleanup = time.time()
         # No lock needed: asyncio is single-threaded and there's no await
@@ -123,14 +130,43 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 stale_ips.append(ip)
         for ip in stale_ips:
             del self._requests[ip]
+        # Also clean WebSocket rate limit entries
+        stale_ws_ips = []
+        for ip, timestamps in self._ws_requests.items():
+            self._ws_requests[ip] = [t for t in timestamps if t > cutoff]
+            if not self._ws_requests[ip]:
+                stale_ws_ips.append(ip)
+        for ip in stale_ws_ips:
+            del self._ws_requests[ip]
         self._last_cleanup = now
 
     async def dispatch(self, request: Request, call_next):
         if not self.enabled:
             return await call_next(request)
 
-        # Skip rate limiting for WebSocket upgrades (handled differently)
+        # Rate limit WebSocket handshakes (lower limit than HTTP)
         if request.headers.get("upgrade", "").lower() == "websocket":
+            if _trust_proxy:
+                forwarded_for = request.headers.get("x-forwarded-for")
+                if forwarded_for:
+                    ws_ip = forwarded_for.split(",")[0].strip()
+                else:
+                    ws_ip = request.client.host if request.client else "unknown"
+            else:
+                ws_ip = request.client.host if request.client else "unknown"
+            now = time.time()
+            ws_window_start = now - 60
+            self._ws_requests[ws_ip] = [
+                t for t in self._ws_requests[ws_ip] if t > ws_window_start
+            ]
+            if len(self._ws_requests[ws_ip]) >= self._ws_connections_per_minute:
+                retry_after = int(60 - (now - self._ws_requests[ws_ip][0]))
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": f"WebSocket rate limit exceeded. Try again in {max(1, retry_after)}s."},
+                    headers={"Retry-After": str(max(1, retry_after))}
+                )
+            self._ws_requests[ws_ip].append(now)
             return await call_next(request)
 
         # Skip rate limiting for health/monitoring endpoints

@@ -75,6 +75,12 @@ def _load_aura_md(project_root: str) -> tuple[Optional[str], dict]:
     except (OSError, PermissionError):
         return None, {}
 
+    # Cap file size to 64KB to prevent yaml bomb / memory abuse
+    _MAX_AURA_MD_SIZE = 64 * 1024
+    if len(content) > _MAX_AURA_MD_SIZE:
+        logger.warning(f"[Context] AURA.md exceeds {_MAX_AURA_MD_SIZE} bytes ({len(content)}), truncating")
+        content = content[:_MAX_AURA_MD_SIZE]
+
     return parse_aura_md(content)
 
 

@@ -276,6 +276,15 @@ async def execute_code(body: dict):
     if re.search(r'(?<!\w)_aura_\w+', code):
         raise HTTPException(400, "Code cannot reference internal _aura_ variables")
 
+    # SECURITY: AST-validate user-submitted code before any execution tier.
+    # This catches dangerous imports, blocked builtins, and sandbox-escape
+    # patterns before the code reaches Monty, E2B, or the local subprocess.
+    from aura.agent import validate_script_code
+    is_valid, validation_msg = validate_script_code(code, "<api_code_execute>")
+    if not is_valid:
+        logger.warning("[CodeExec] Blocked unsafe code submission: %s", validation_msg)
+        raise HTTPException(400, f"Code blocked for safety: {validation_msg}")
+
     # Get session state preamble
     from aura.tools.code_session_manager import get_session_manager
     session_mgr = get_session_manager()

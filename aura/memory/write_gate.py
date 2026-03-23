@@ -2,7 +2,7 @@
 Memory Write Gate — Phase 1.
 
 Sits between any "I want to write something to memory" call and the actual
-fan-out into A-MEM / Episodic / KG.  Scores candidates and decides:
+store.  Scores candidates and decides:
   DISCARD          — skip entirely
   STORE_NEW        — write as a fresh memory
   MERGE_INTO       — update an existing memory in-place
@@ -87,7 +87,7 @@ class MemoryDecision:
 
     # For MERGE / SUPERSEDE
     target_id: Optional[str] = None
-    target_source: Optional[str] = None  # "amem" | "episodic"
+    target_source: Optional[str] = None
     superseded_ids: List[str] = field(default_factory=list)
 
     lifecycle_state: MemoryLifecycleState = MemoryLifecycleState.CANDIDATE
@@ -158,7 +158,7 @@ class MemoryWriteGate:
     W_CONFIDENCE   = 0.10
 
     # Default thresholds (can be overridden by Config)
-    DEFAULT_WRITE_THRESHOLD      = 0.35
+    DEFAULT_WRITE_THRESHOLD      = 0.15  # Lowered for personal AI OS — conversations should persist
     DEFAULT_MERGE_THRESHOLD      = 0.55
     DEFAULT_SUPERSEDE_THRESHOLD  = 0.45
 
@@ -206,6 +206,24 @@ class MemoryWriteGate:
                 score=1.0,
                 reason="gate_disabled",
                 lifecycle_state=MemoryLifecycleState.CANDIDATE,
+            )
+
+        # 0a. Taint check: redact secrets before storing (OpenFang-inspired)
+        try:
+            from aura.security.taint_tracker import scan_for_secrets, redact, highest_taint, TaintLabel
+            taint_matches = scan_for_secrets(candidate.content, check_pii=False)
+            if taint_matches:
+                taint_level = highest_taint(taint_matches)
+                if taint_level == TaintLabel.SECRET:
+                    # Never store raw secrets — redact them
+                    candidate.content = redact(candidate.content, taint_matches)
+                    logger.warning(
+                        f"[WriteGate] Redacted {len(taint_matches)} secret(s) from memory candidate "
+                        f"(source={candidate.source})"
+                    )
+        except Exception as e:
+            logger.warning(
+                f"[WriteGate] Secret redaction failed — candidate may contain unredacted secrets: {e}"
             )
 
         # 0. Hard noise rejection
@@ -404,9 +422,7 @@ class MemoryWriteGate:
             self._recent_hashes[c.content_hash] = time.time()
             # Hard cap to prevent unbounded growth
             if len(self._recent_hashes) > 10000:
-                sorted_items = sorted(self._recent_hashes.items(), key=lambda x: x[1])
-                for h, _ in sorted_items[:5000]:
-                    del self._recent_hashes[h]
+                self._recent_hashes.clear()
 
     def _decide(
         self,

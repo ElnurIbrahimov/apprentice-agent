@@ -9,9 +9,6 @@ Usage: python test_memory_systems.py
 import os
 import sys
 import traceback
-import tempfile
-import shutil
-from datetime import datetime
 
 # Suppress progress bars
 os.environ['TQDM_DISABLE'] = '1'
@@ -19,25 +16,6 @@ os.environ['PYTHONIOENCODING'] = 'utf-8'
 
 # Add Aura to path
 sys.path.insert(0, os.path.dirname(__file__))
-
-
-def test_amem():
-    """Test A-MEM (Zettelkasten) memory system."""
-    print('\n[1] A-MEM (Zettelkasten)')
-    try:
-        from aura.tools.amem import get_amem
-        
-        amem = get_amem()
-        amem.add('test memory about Python programming', importance=0.8)
-        results = amem.search('Python', k=1)
-        
-        assert len(results) > 0, 'Search returned no results'
-        print('    PASS: add + search works')
-        return True
-    except Exception as e:
-        print(f'    FAIL: {type(e).__name__}: {str(e)[:70]}')
-        traceback.print_exc()
-        return False
 
 
 def test_knowledge_graph():
@@ -55,59 +33,6 @@ def test_knowledge_graph():
         
         print('    PASS: add_node + show works')
         return True
-    except Exception as e:
-        print(f'    FAIL: {type(e).__name__}: {str(e)[:70]}')
-        traceback.print_exc()
-        return False
-
-
-def test_episodic_memory():
-    """Test Episodic Memory (Qdrant-based) system."""
-    print('\n[3] Episodic Memory (Qdrant-based)')
-    try:
-        from aura_episodic_memory.memory_store import EpisodicMemoryStore
-        from aura_episodic_memory.episode import (
-            Episode, EpisodeType, TemporalContext, EpisodeQuery
-        )
-        
-        tmpdir = tempfile.mkdtemp(prefix='aura_ep_')
-        try:
-            store = EpisodicMemoryStore(db_path=tmpdir)
-            
-            # Create and store episode
-            ep = Episode(
-                content='test episode content',
-                episode_type=EpisodeType.CONVERSATION,
-                temporal_context=TemporalContext(timestamp=datetime.now())
-            )
-            ep_id = store.store_episode(ep)
-            assert ep_id, 'store_episode returned empty id'
-            
-            # Retrieve episode
-            retrieved = store.get_episode(ep_id)
-            assert retrieved is not None, 'get_episode returned None'
-            
-            # Search
-            query = EpisodeQuery(query_text='test')
-            results = store.search(query=query)
-            assert isinstance(results, list), 'search returned non-list'
-            
-            # Get stats
-            stats = store.get_statistics()
-            assert stats.get('total_episodes') == 1, f'Stats wrong: {stats}'
-            
-            # Cleanup
-            store.close()
-            print('    PASS: store_episode + get_episode + search + stats works')
-            return True
-        finally:
-            try:
-                shutil.rmtree(tmpdir, ignore_errors=True)
-            except Exception:
-                pass
-    except ImportError as e:
-        print(f'    FAIL: Missing dependency: {str(e)[:70]}')
-        return False
     except Exception as e:
         print(f'    FAIL: {type(e).__name__}: {str(e)[:70]}')
         traceback.print_exc()
@@ -143,9 +68,7 @@ def main():
     print('=' * 60)
     
     results = []
-    results.append(('A-MEM', test_amem()))
     results.append(('Knowledge Graph', test_knowledge_graph()))
-    results.append(('Episodic Memory', test_episodic_memory()))
     results.append(('Context Budget', test_context_budget()))
     
     # Summary

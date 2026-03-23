@@ -4,6 +4,7 @@ import logging
 from fastapi import APIRouter, Depends
 
 from api.auth import require_api_key
+from api.utils import safe_error_detail
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ async def get_thinking_mode_state():
         tmm = get_thinking_mode_manager()
         return {"success": True, **tmm.get_state()}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": safe_error_detail(e)}
 
 
 @router.post("/set")
@@ -46,7 +47,7 @@ async def set_thinking_mode(body: dict):
         tmm.mode = mode
         return {"success": True, "mode": tmm.mode.value}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": safe_error_detail(e)}
 
 
 @router.post("/reset-load")
@@ -58,4 +59,4 @@ async def reset_cognitive_load():
         tmm.cognitive_load.reset()
         return {"success": True, "message": "Cognitive load tracker reset"}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": safe_error_detail(e)}

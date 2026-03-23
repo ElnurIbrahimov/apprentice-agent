@@ -1288,7 +1288,9 @@ def _write_files(base: Path, file_map: Dict[str, str]) -> List[str]:
             logger.warning(f"[Scaffold] Skipping path with traversal: {rel_path}")
             continue
         full = (base / rel_path).resolve()
-        if not str(full).startswith(str(base_resolved)):
+        try:
+            full.relative_to(base_resolved)
+        except ValueError:
             logger.warning(f"[Scaffold] Skipping path outside target: {rel_path}")
             continue
         full.parent.mkdir(parents=True, exist_ok=True)

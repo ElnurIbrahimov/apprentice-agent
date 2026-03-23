@@ -10,7 +10,36 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 # Fallback server-side PKCE verifier store (keyed by OAuth state).
 # Used only if aura.auth.chatgpt_oauth.store_pkce_verifier is unavailable.
-_pkce_store: dict[str, str] = {}
+# Entries are (verifier, timestamp) tuples; evicted after _PKCE_TTL seconds.
+import time as _time
+_pkce_store: dict[str, tuple[str, float]] = {}
+_PKCE_MAX_ENTRIES = 100
+_PKCE_TTL = 600  # 10 minutes
+
+
+def _pkce_store_put(state: str, verifier: str) -> None:
+    """Store a PKCE verifier with TTL and bounded size."""
+    now = _time.time()
+    # Evict expired entries
+    expired = [k for k, (_, ts) in _pkce_store.items() if now - ts > _PKCE_TTL]
+    for k in expired:
+        del _pkce_store[k]
+    # Evict oldest if at capacity
+    while len(_pkce_store) >= _PKCE_MAX_ENTRIES:
+        oldest_key = min(_pkce_store, key=lambda k: _pkce_store[k][1])
+        del _pkce_store[oldest_key]
+    _pkce_store[state] = (verifier, now)
+
+
+def _pkce_store_get(state: str) -> str | None:
+    """Retrieve and consume a PKCE verifier (one-time use)."""
+    entry = _pkce_store.pop(state, None)
+    if entry is None:
+        return None
+    verifier, ts = entry
+    if _time.time() - ts > _PKCE_TTL:
+        return None  # expired
+    return verifier
 
 
 class ChatGPTTokenRequest(BaseModel):
@@ -109,7 +138,7 @@ async def chatgpt_login_url():
             store_pkce_verifier(state, verifier)
         except ImportError:
             # Fallback: store in a module-level dict (single-process only)
-            _pkce_store[state] = verifier
+            _pkce_store_put(state, verifier)
 
         return {
             "url": url,
@@ -123,7 +152,7 @@ async def chatgpt_login_url():
         return {"error": "Failed to generate login URL — check server logs"}
 
 
-@router.post("/chatgpt/logout")
+@router.post("/chatgpt/logout", dependencies=[Depends(require_api_key)])
 async def chatgpt_logout():
     """Remove ChatGPT authentication."""
     try:

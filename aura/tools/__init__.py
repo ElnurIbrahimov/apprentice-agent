@@ -94,6 +94,31 @@ except Exception as _e:
     _safe_import_error("ClipboardTool", _e)
 
 # ---------------------------------------------------------------------------
+#  Load Skill (progressive skill loading)
+# ---------------------------------------------------------------------------
+try:
+    from .load_skill import LoadSkillTool
+except Exception as _e:
+    LoadSkillTool = None
+    _safe_import_error("LoadSkillTool", _e)
+
+# ---------------------------------------------------------------------------
+#  Tool Search (deferred tool discovery)
+# ---------------------------------------------------------------------------
+try:
+    from .tool_search import ToolSearchTool
+except Exception as _e:
+    ToolSearchTool = None
+    _safe_import_error("ToolSearchTool", _e)
+
+try:
+    from .deferred_registry import DeferredToolRegistry, deferred_registry
+except Exception as _e:
+    DeferredToolRegistry = None
+    deferred_registry = None
+    _safe_import_error("DeferredToolRegistry", _e)
+
+# ---------------------------------------------------------------------------
 #  Voice / Audio
 # ---------------------------------------------------------------------------
 try:
@@ -153,9 +178,11 @@ except Exception as _e:
 #  Tool Builder / Marketplace
 # ---------------------------------------------------------------------------
 try:
-    from .tool_builder import ToolBuilderTool
+    from .tool_builder import ToolBuilderTool, ToolUsageTracker, get_usage_tracker
 except Exception as _e:
     ToolBuilderTool = None
+    ToolUsageTracker = None
+    get_usage_tracker = None
     _safe_import_error("ToolBuilderTool", _e)
 
 try:
@@ -290,33 +317,17 @@ except Exception as _e:
 
 
 # ---------------------------------------------------------------------------
-#  A-MEM (Zettelkasten Agentic Memory)
+#  A-MEM (Zettelkasten Agentic Memory) — REMOVED 2026-03-22
+#  amem.py, amem_tool.py, hybrid_amem.py deleted; consolidated into UnifiedMemory
 # ---------------------------------------------------------------------------
-try:
-    from .amem import AMEMSystem, MemoryNote, get_amem
-except Exception as _e:
-    AMEMSystem = None
-    MemoryNote = None
-    get_amem = None
-    _safe_import_error("AMEMSystem", _e)
-
-try:
-    from .amem_tool import AMEMTool, get_amem_tool
-except Exception as _e:
-    AMEMTool = None
-    get_amem_tool = None
-    _safe_import_error("AMEMTool/get_amem_tool", _e)
-
-# ---------------------------------------------------------------------------
-#  Hybrid A-MEM + KG
-# ---------------------------------------------------------------------------
-try:
-    from .hybrid_amem import HybridAMEMSystem, HybridResult, get_hybrid_memory
-except Exception as _e:
-    HybridAMEMSystem = None
-    HybridResult = None
-    get_hybrid_memory = None
-    _safe_import_error("HybridAMEMSystem", _e)
+AMEMSystem = None
+MemoryNote = None
+get_amem = None
+AMEMTool = None
+get_amem_tool = None
+HybridAMEMSystem = None
+HybridResult = None
+get_hybrid_memory = None
 
 # ---------------------------------------------------------------------------
 #  MCTS Reasoning Tree
@@ -375,6 +386,15 @@ try:
 except Exception as _e:
     CodeEditTool = None
     _safe_import_error("CodeEditTool", _e)
+
+# ---------------------------------------------------------------------------
+#  Codebase Index (semantic codebase indexing with incremental updates)
+# ---------------------------------------------------------------------------
+try:
+    from .codebase_index import CodebaseIndex
+except Exception as _e:
+    CodebaseIndex = None
+    _safe_import_error("CodebaseIndex", _e)
 
 # ---------------------------------------------------------------------------
 #  Shell Executor
@@ -595,6 +615,8 @@ _ALL_SYMBOLS = [
     "SystemControlTool",
     "NotificationTool",
     "ToolBuilderTool",
+    "ToolUsageTracker",
+    "get_usage_tracker",
     "MarketplaceTool",
     "GitTool",
     "VoiceManager",
@@ -637,16 +659,7 @@ _ALL_SYMBOLS = [
     "ToolSafety",
     "LatencyTier",
     "get_tool_registry",
-    # A-MEM - Zettelkasten Agentic Memory
-    "AMEMSystem",
-    "MemoryNote",
-    "get_amem",
-    "AMEMTool",
-    "get_amem_tool",
-    # Hybrid A-MEM + KG Memory
-    "HybridAMEMSystem",
-    "HybridResult",
-    "get_hybrid_memory",
+    # A-MEM / HybridAMEM removed 2026-03-22 (consolidated into UnifiedMemory)
     # MCTS Reasoning Tree
     "MCTSReasoning",
     "MCTSConfig",
@@ -662,6 +675,10 @@ _ALL_SYMBOLS = [
     # Code Search & Edit
     "CodeSearchTool",
     "CodeEditTool",
+    # Load Skill (progressive skill loading)
+    "LoadSkillTool",
+    # Codebase Index
+    "CodebaseIndex",
     # Shell Executor
     "ShellExecutorTool",
     # Sandbox Executor
@@ -704,6 +721,12 @@ _ALL_SYMBOLS = [
     # Extension Feed
     "ExtensionFeedTool",
     "get_feed_tool",
+    # Tool Search / Deferred Registry
+    "ToolSearchTool",
+    "DeferredToolRegistry",
+    "deferred_registry",
+    # Load Skill
+    "LoadSkillTool",
 ]
 
 # Filter out symbols that failed to import (are None) — but keep

@@ -510,15 +510,17 @@ class APITesterTool:
             elif req_body:
                 send_data = req_body
 
-            resp = req_lib.request(
-                method=method,
+            # SSRF protection: use safe_request() which pins DNS to prevent rebinding
+            from aura.security.ssrf_guard import safe_request
+            resp = safe_request(
                 url=url,
+                method=method,
                 headers=req_headers if req_headers else None,
                 data=send_data,
                 json=send_json,
                 auth=auth,
                 timeout=timeout,
-                allow_redirects=True,
+                allow_redirects=False,  # safe_request validates each redirect hop
             )
             elapsed = (time.time() - start) * 1000
 

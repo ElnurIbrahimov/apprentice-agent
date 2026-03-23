@@ -27,7 +27,9 @@ from datetime import datetime
 from typing import Optional
 
 # Headless mode — skip screen/GUI features on servers without a display
-HEADLESS = bool(os.environ.get("AURA_HEADLESS")) or not os.environ.get("DISPLAY")
+HEADLESS = bool(os.environ.get("AURA_HEADLESS")) or (
+    sys.platform != "win32" and not os.environ.get("DISPLAY")
+)
 
 # On headless servers, prevent imports of GUI/audio modules from crashing.
 # We install import hooks that return stub modules for known Windows/desktop-only packages.
@@ -168,16 +170,16 @@ class AuraDaemon:
         try:
             self._event_bus.shutdown()
         except Exception:
-            pass
+            logger.debug("event_bus_shutdown_failed", exc_info=True)
         if self._screen_pool:
             try:
                 self._screen_pool.shutdown(wait=False)
             except Exception:
-                pass
+                logger.debug("screen_pool_shutdown_failed", exc_info=True)
         try:
             self._ipc.stop()
         except Exception:
-            pass
+            logger.debug("ipc_stop_failed", exc_info=True)
         self._remove_pid()
         logger.info("AURA daemon stopped.")
 
@@ -323,7 +325,7 @@ class AuraDaemon:
                 if self._agent and hasattr(self._agent, "user_id"):
                     user_id = self._agent.user_id or user_id
             except Exception:
-                pass
+                logger.debug("dream_user_id_lookup_failed", exc_info=True)
             consolidator.run_cycle_background(user_id=user_id)
             logger.info("DreamConsolidator cycle started in background (user=%s)", user_id)
         except ImportError as e:
@@ -459,6 +461,7 @@ class AuraDaemon:
         except (ProcessLookupError, PermissionError):
             return False
         except Exception:
+            logger.debug("pid_check_failed", exc_info=True)
             return False
 
 
@@ -468,7 +471,8 @@ class EventBus:
     def __init__(self):
         self._handlers: dict = {}
         self._lock = threading.Lock()
-        self._pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="eventbus")
+        from aura.pools import bg_pool
+        self._pool = bg_pool()
 
     def emit(self, event_type: str, data: dict = None):
         data = data or {}
@@ -495,7 +499,7 @@ class EventBus:
         try:
             self._pool.shutdown(wait=False)
         except Exception:
-            pass
+            logger.debug("event_bus_pool_shutdown_failed", exc_info=True)
 
 
 class ProactiveEngine:
@@ -614,10 +618,16 @@ class IPCServer:
     }
 
     def _handle_client(self, conn):
+        import socket
         try:
+            conn.settimeout(10.0)
             chunks = []
             while True:
-                chunk = conn.recv(4096)
+                try:
+                    chunk = conn.recv(4096)
+                except socket.timeout:
+                    logger.debug("IPC client recv timed out")
+                    break
                 if not chunk:
                     break
                 chunks.append(chunk)
@@ -690,10 +700,63 @@ def main():
         sys.exit(1)
 
     daemon = AuraDaemon()
-    signal.signal(signal.SIGTERM, lambda s, f: daemon.stop())
+    _stop_event = threading.Event()
+
+    def _signal_handler(signum, frame):
+        _stop_event.set()
+
+    signal.signal(signal.SIGTERM, _signal_handler)
     if hasattr(signal, "SIGINT"):
-        signal.signal(signal.SIGINT, lambda s, f: daemon.stop())
-    daemon.start()
+        signal.signal(signal.SIGINT, _signal_handler)
+
+    # Start agent loading and IPC in background, then run loop checking stop_event
+    daemon._write_pid()
+    daemon._running = True
+    logger.info("AURA daemon starting... (headless=%s, pid=%d)", daemon._headless, os.getpid())
+
+    daemon._load_agent_thread = threading.Thread(target=daemon._load_agent, daemon=True)
+    daemon._load_agent_thread.start()
+
+    try:
+        daemon._ipc.start()
+    except Exception as e:
+        logger.error("IPC server failed to start: %s", e)
+
+    try:
+        while not _stop_event.is_set():
+            try:
+                now = time.monotonic()
+
+                if (daemon._agent is None
+                        and daemon._agent_ready.is_set()
+                        and now - daemon._last_agent_attempt >= daemon._agent_retry_interval):
+                    logger.info("Agent is None after failed load -- retrying _load_agent")
+                    daemon._agent_ready.clear()
+                    daemon._load_agent_thread = threading.Thread(target=daemon._load_agent, daemon=True)
+                    daemon._load_agent_thread.start()
+
+                if not daemon._headless and not daemon._screen_tick_pending:
+                    daemon._screen_tick_pending = True
+                    daemon._screen_pool.submit(daemon._tick_screen_wrapper)
+
+                if now - daemon._last_hooks_tick >= daemon.TICK_HOOKS:
+                    daemon._tick_hooks()
+                    daemon._last_hooks_tick = now
+
+                if now - daemon._last_idle_tick >= daemon.TICK_IDLE:
+                    daemon._tick_idle()
+                    daemon._last_idle_tick = now
+
+                daemon._check_dream_time()
+
+            except Exception as e:
+                logger.error("Tick error (non-fatal): %s", e)
+
+            _stop_event.wait(timeout=daemon.TICK_SCREEN)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        daemon.stop()
 
 
 if __name__ == "__main__":

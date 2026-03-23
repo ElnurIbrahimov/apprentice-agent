@@ -1,10 +1,13 @@
 """Syntax-highlighted inline diff viewer for the terminal."""
 from __future__ import annotations
 import difflib
+import logging
 from typing import Optional
 
 from rich.panel import Panel
 from rich.text import Text
+
+_logger = logging.getLogger(__name__)
 
 
 # Extension to language mapping for syntax highlighting
@@ -109,7 +112,7 @@ def render_diff(old: str, new: str, filename: str = "file", context_lines: int =
                     text.append("\n")
                     continue
                 except Exception:
-                    pass
+                    _logger.debug("diff_highlight_add_failed", exc_info=True)
             text.append(line + "\n", style="green")
         elif line.startswith("-"):
             if lang:
@@ -120,7 +123,7 @@ def render_diff(old: str, new: str, filename: str = "file", context_lines: int =
                     text.append("\n")
                     continue
                 except Exception:
-                    pass
+                    _logger.debug("diff_highlight_remove_failed", exc_info=True)
             text.append(line + "\n", style="red")
         else:
             if lang:
@@ -130,7 +133,7 @@ def render_diff(old: str, new: str, filename: str = "file", context_lines: int =
                     text.append("\n")
                     continue
                 except Exception:
-                    pass
+                    _logger.debug("diff_highlight_context_failed", exc_info=True)
             text.append(line + "\n", style="dim")
 
     summary = diff_summary(old, new, filename)

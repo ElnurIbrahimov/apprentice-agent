@@ -81,7 +81,7 @@ async def lifespan(app: FastAPI):
                 if agent_service.is_ready:
                     break
             except Exception:
-                pass
+                logger.debug("agent_ready_check_failed", exc_info=True)
         else:
             logger.warning("[API] Agent not ready after 60s, starting proactive system anyway")
 
@@ -266,23 +266,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"[API] Idle Presence Engine stop failed: {e}")
 
-    # Save memory systems before shutdown (prevent data loss)
-    try:
-        from aura.tools.amem import get_amem
-        get_amem().save()
-        logger.info("[API] A-MEM data saved")
-    except Exception as e:
-        logger.warning(f"[API] A-MEM save error: {e}")
-
-    try:
-        from aura.tools.knowledge_graph import get_knowledge_graph
-        get_knowledge_graph().save()
-        logger.info("[API] Knowledge Graph data saved")
-    except Exception as e:
-        logger.warning(f"[API] KG save error: {e}")
-
-    # Note: Episodic memory (EpisodicMemoryStore) has no global singleton,
-    # so no shutdown cleanup needed — instances are closed by their owners.
+    # Memory systems — UnifiedMemory (SQLite) auto-commits, Kuzu auto-persists.
+    # A-MEM and KG NetworkX removed in memory consolidation (2026-03-22).
 
     # Close proactive persistence database
     try:
@@ -317,6 +302,7 @@ try:
     from aura.config import Config as _cfg
     _cors_origins_str = getattr(_cfg, 'API_CORS_ORIGINS', '*')
 except Exception:
+    logger.debug("cors_config_load_failed_using_default", exc_info=True)
     _cors_origins_str = '*'
 
 # Default to localhost origins instead of wildcard for security.
@@ -363,17 +349,21 @@ except Exception as e:
 
 # CORS must be added LAST — Starlette runs last-added middleware first (outermost),
 # and CORS must wrap everything to handle preflight requests before auth rejects them.
+# When origins is wildcard, credentials must be False (browser security requirement).
+# Specific origins can safely use credentials=True.
+_allow_creds = _cors_origins != ["*"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
     allow_origin_regex=_cors_origin_regex,
-    allow_credentials=True,
+    allow_credentials=_allow_creds,
     allow_methods=["*"],
     allow_headers=["*", "X-API-Key"],
 )
 
 # Include all routers - frontend uses 2s stagger + 30s intervals to prevent thread pool exhaustion
 app.include_router(chat.router)
+app.include_router(status.public_router)  # Unauthenticated: /api/health only
 app.include_router(status.router)
 app.include_router(upload.router)
 app.include_router(features.router)

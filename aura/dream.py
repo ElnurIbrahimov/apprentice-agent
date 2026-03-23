@@ -448,27 +448,17 @@ def _jaccard(a: set, b: set) -> float:
     return len(a & b) / len(a | b)
 
 
-_sentence_model = None
-_sentence_model_lock = threading.Lock()
-
-
-def _get_sentence_model():
-    """Lazy singleton for the SentenceTransformer model."""
-    global _sentence_model
-    if _sentence_model is None:
-        with _sentence_model_lock:
-            if _sentence_model is None:
-                from sentence_transformers import SentenceTransformer
-                _sentence_model = SentenceTransformer("all-MiniLM-L6-v2")
-    return _sentence_model
-
-
 def _get_embeddings(texts: List[str]) -> Optional[List[List[float]]]:
-    """Try to compute embeddings via sentence-transformers. Returns None on failure."""
+    """Compute embeddings via Ollama nomic-embed-text. Returns None on failure."""
     try:
-        model = _get_sentence_model()
-        embeddings = model.encode(texts, show_progress_bar=False)
-        return [e.tolist() for e in embeddings]
+        from aura.memory.embedding import get_embedding
+        result = []
+        for t in texts:
+            vec = get_embedding(t)
+            if vec is None:
+                return None  # All-or-nothing: fall back to Jaccard if any call fails
+            result.append(vec)
+        return result if result else None
     except Exception:
         return None
 
@@ -783,24 +773,7 @@ class DreamConsolidator:
             except Exception as e:
                 logger.debug("[DreamConsolidator] SQLite fetch error: %s", e)
 
-        # Fallback: also try legacy A-MEM if store is empty
-        if not memories:
-            try:
-                from aura.tools.amem import get_amem
-                amem = get_amem()
-                for note_id, note in list(amem._notes.items()):
-                    memories.append({
-                        "id": note_id,
-                        "content": note.content,
-                        "source": "amem",
-                        "tags": list(getattr(note, "tags", [])),
-                        "importance": getattr(note, "importance", 0.5),
-                        "ts": time.time(),
-                    })
-                    if len(memories) >= self._batch_size * 3:
-                        break
-            except Exception as e:
-                logger.debug("[DreamConsolidator] A-MEM fallback fetch error: %s", e)
+        # A-MEM fallback removed — consolidated into UnifiedMemory (2026-03-22)
 
         return memories
 
@@ -1051,29 +1024,49 @@ class DreamConsolidator:
         return self._brain
 
     def _write_summary_memory(self, summary: DreamSummary, user_id: str, store=None) -> None:
-        """Write a DreamSummary back into the SQLite store as a SUMMARY lifecycle entry."""
+        """Write a DreamSummary back into the SQLite store as a SUMMARY lifecycle entry.
+
+        Uses upsert semantics: if the dream summary already exists (stable ID),
+        update it instead of silently discarding via INSERT OR IGNORE.
+        """
         try:
             from aura.memory.store import MemoryRecord
             if store is None:
                 from aura.memory.store import get_memory_store
                 store = get_memory_store()
 
-            record = MemoryRecord(
-                id=f"dream_{summary.cluster_id}",  # Stable ID prevents duplicate summaries
-                content=summary.compressed_text,
-                title=summary.compressed_text[:80],
-                source="dream_consolidation",
-                memory_type="insight",
-                importance=0.75,
-                tags=",".join(["dream_summary"] + summary.dominant_tags[:3]),
-                lifecycle_state="summary",
-                user_id=user_id,
-                metadata=json.dumps({
-                    "cluster_id": summary.cluster_id,
-                    "source_count": len(summary.source_memory_ids),
-                }),
-            )
-            store.insert(record)
+            record_id = f"dream_{summary.cluster_id}"
+            existing = store.get(record_id)
+            if existing:
+                # Update the existing summary record
+                store.update(
+                    record_id,
+                    content=summary.compressed_text,
+                    title=summary.compressed_text[:80],
+                    importance=0.75,
+                    tags=",".join(["dream_summary"] + summary.dominant_tags[:3]),
+                    metadata=json.dumps({
+                        "cluster_id": summary.cluster_id,
+                        "source_count": len(summary.source_memory_ids),
+                    }),
+                )
+            else:
+                record = MemoryRecord(
+                    id=record_id,
+                    content=summary.compressed_text,
+                    title=summary.compressed_text[:80],
+                    source="dream_consolidation",
+                    memory_type="insight",
+                    importance=0.75,
+                    tags=",".join(["dream_summary"] + summary.dominant_tags[:3]),
+                    lifecycle_state="summary",
+                    user_id=user_id,
+                    metadata=json.dumps({
+                        "cluster_id": summary.cluster_id,
+                        "source_count": len(summary.source_memory_ids),
+                    }),
+                )
+                store.insert(record)
         except Exception as e:
             logger.debug("[DreamConsolidator] Write summary error: %s", e)
 

@@ -228,44 +228,16 @@ class SelfImprovementEngine:
             self._save_state()
 
     def _infer_domain(self, prompt: str) -> str:
-        """Infer the capability domain from prompt content using keyword matching."""
-        prompt_lower = prompt.lower()
+        """Infer the capability domain from prompt content.
 
-        # Reuse the same keyword map as metacognition
-        keyword_map = {
-            "coding": ["code", "python", "function", "bug", "program", "script",
-                        "api", "debug", "class", "variable", "compile", "syntax",
-                        "algorithm", "database", "sql", "html", "css", "javascript"],
-            "research": ["search", "find", "research", "investigate", "lookup",
-                          "source", "reference", "study", "paper", "article"],
-            "writing": ["write", "essay", "document", "summarize", "email", "text",
-                         "letter", "draft", "compose", "edit", "proofread"],
-            "analysis": ["analyze", "data", "chart", "statistics", "compare",
-                          "evaluate", "assess", "measure", "trend", "report"],
-            "conversation": ["chat", "talk", "discuss", "conversation", "respond",
-                              "clarify", "explain", "tell me", "what do you think"],
-            "tool_use": ["tool", "execute", "command", "run", "browser", "file",
-                          "download", "install", "open", "launch"],
-            "memory": ["remember", "recall", "memory", "context", "history",
-                        "forget", "previous", "earlier", "last time"],
-            "emotional": ["emotion", "feeling", "empathy", "support", "mood",
-                           "tone", "comfort", "sad", "happy", "frustrated"],
-            "proactive": ["suggest", "remind", "notify", "proactive", "anticipate",
-                           "schedule", "alert", "recommendation"],
-            "creative": ["creative", "imagine", "brainstorm", "idea", "generate",
-                          "story", "poem", "design", "invent", "novel"],
-        }
-
-        best_domain = "conversation"  # default
-        best_score = 0
-
-        for domain, keywords in keyword_map.items():
-            score = sum(1 for kw in keywords if kw in prompt_lower)
-            if score > best_score:
-                best_score = score
-                best_domain = domain
-
-        return best_domain
+        Delegates to MetacognitiveEngine.get_domain_for_query() to avoid
+        duplicating the keyword map.
+        """
+        try:
+            from aura.consciousness.metacognition import get_metacognitive_engine
+            return get_metacognitive_engine().get_domain_for_query(prompt).value
+        except Exception:
+            return "conversation"
 
     def _infer_success(self, prompt: str, response: str) -> bool:
         """Infer whether the interaction was successful using heuristics."""
@@ -723,25 +695,21 @@ class SelfImprovementEngine:
             if not weak:
                 return
 
-            from aura.consciousness.intrinsic_motivation import get_intrinsic_motivation
+            from aura.consciousness.intrinsic_motivation import get_intrinsic_motivation, DriveType
             im = get_intrinsic_motivation()
-            competence_drive = None
-            for key, drive in im._drives.items():
-                if "competence" in str(key).lower():
-                    competence_drive = drive
-                    break
-
-            if competence_drive:
-                for ws in weak[:3]:
-                    competence_drive.triggers.append(
-                        f"strategy '{ws['strategy']}' underperforms in {ws['category']} "
-                        f"(reward={ws['mean_reward']:.2f})"
+            with im._lock:
+                competence_drive = im._drives.get(DriveType.COMPETENCE)
+                if competence_drive:
+                    for ws in weak[:3]:
+                        competence_drive.triggers.append(
+                            f"strategy '{ws['strategy']}' underperforms in {ws['category']} "
+                            f"(reward={ws['mean_reward']:.2f})"
+                        )
+                        competence_drive.intensity = min(1.0, competence_drive.intensity + 0.08)
+                    logger.info(
+                        f"[SelfImprovement↔Bandit] Signalled {len(weak)} weak strategies "
+                        f"→ competence drive intensity={competence_drive.intensity:.2f}"
                     )
-                    competence_drive.intensity = min(1.0, competence_drive.intensity + 0.08)
-                logger.info(
-                    f"[SelfImprovement↔Bandit] Signalled {len(weak)} weak strategies "
-                    f"→ competence drive intensity={competence_drive.intensity:.2f}"
-                )
         except Exception as e:
             logger.debug(f"[SelfImprovement↔Bandit] Sync failed: {e}")
 

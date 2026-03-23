@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from pydantic import BaseModel, Field
 
 from api.auth import require_api_key
+from api.utils import safe_error_detail
 
 router = APIRouter(
     prefix="/api/evolution",
@@ -68,7 +69,7 @@ def _run_evolution_sync(run_id: str, request: EvolutionRunRequest):
         logger.error(f"Evolution run failed: {e}")
         with _run_lock:
             _current_run["status"] = "error"
-            _current_run["result"] = {"error": str(e)}
+            _current_run["result"] = {"error": safe_error_detail(e)}
 
 
 @router.post("/run")
@@ -122,4 +123,4 @@ async def preview_evolution(request: EvolutionRunRequest):
         result = await loop.run_in_executor(None, _preview)
         return {"status": "ok", "preview": result}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e))

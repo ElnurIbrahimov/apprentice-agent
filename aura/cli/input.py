@@ -60,6 +60,19 @@ SLASH_COMMANDS = [
     ("/test", "Run tests"),
     ("/watch", "Watch files for AI comments"),
     ("/evolve", "Evolve skills with GEPA"),
+    ("/diff", "Show git diff with syntax highlighting"),
+    ("/git", "Run read-only git commands"),
+    ("/mcp", "Manage MCP server connections"),
+    ("/audit", "Inspect Merkle audit chain"),
+    ("/hand", "Manage autonomous Hands"),
+    ("/retry", "Re-run the last prompt"),
+    ("/undo", "Undo last file edit"),
+    ("/debate", "Multi-model debate on a question"),
+    ("/fork", "Fork conversation into a new branch"),
+    ("/branches", "List conversation branches"),
+    ("/checkout", "Switch to a conversation branch"),
+    ("/merge", "Merge branch back to parent"),
+    ("/chain", "Run prompt pipelines (step1 -> step2 -> ...)"),
 ]
 
 # Subcommand completions for commands that accept them
@@ -87,6 +100,7 @@ SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
         ("list", "List saved sessions"),
         ("switch", "Switch to a session"),
         ("new", "Start a new session"),
+        ("delete", "Delete a session"),
     ],
     "/agent": [
         ("research", "Research specialist"),
@@ -118,10 +132,46 @@ SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
     "/export": [
         ("research", "Export research session to Markdown"),
     ],
+    "/git": [
+        ("status", "Show working tree status"),
+        ("log", "Show commit log"),
+        ("diff", "Show changes"),
+        ("branch", "List branches"),
+        ("blame", "Show file blame"),
+        ("stash", "Show stash list"),
+        ("show", "Show commit details"),
+    ],
+    "/mcp": [
+        ("connect", "Connect to an MCP server"),
+        ("list", "List connected MCP servers"),
+        ("disconnect", "Disconnect from an MCP server"),
+    ],
+    "/audit": [
+        ("verify", "Verify chain integrity"),
+        ("tail", "Show last N entries"),
+        ("count", "Show total entry count"),
+    ],
+    "/hand": [
+        ("list", "List active Hands"),
+        ("spawn", "Spawn a new Hand"),
+        ("kill", "Kill a Hand"),
+    ],
     "/evolve": [
         ("--skill-ids", "Comma-separated skill IDs to evolve"),
         ("--dry-run", "Preview without running"),
         ("--max-iterations", "Max evolution iterations (default 5)"),
+    ],
+    "/checkout": [
+        ("main", "Switch to main branch"),
+        ("1", "Switch to fork-1"),
+        ("2", "Switch to fork-2"),
+        ("3", "Switch to fork-3"),
+    ],
+    "/chain": [
+        ("list", "List saved chains"),
+        ("save", "Save a named chain"),
+        ("run", "Run a saved chain"),
+        ("delete", "Delete a saved chain"),
     ],
 }
 
@@ -220,10 +270,18 @@ def create_session():
             event.app.current_buffer.text = SIGNAL_CYCLE_PERMS
             event.app.current_buffer.validate_and_handle()
 
-        @kb.add('escape', 'escape')
+        @kb.add('c-z')
         def _rewind(event):
             event.app.current_buffer.text = SIGNAL_REWIND
             event.app.current_buffer.validate_and_handle()
+
+        @kb.add('escape', 'enter')  # Alt+Enter inserts a newline
+        def _newline(event):
+            event.current_buffer.insert_text('\n')
+
+        @kb.add('enter')  # Enter always submits (even in multiline mode)
+        def _submit(event):
+            event.current_buffer.validate_and_handle()
 
         session = PromptSession(
             history=FileHistory(str(HISTORY_FILE)),
@@ -231,9 +289,10 @@ def create_session():
             completer=SlashCompleter(),
             complete_while_typing=True,
             complete_in_thread=True,
+            multiline=True,
             style=_style,
             key_bindings=kb,
-            placeholder=HTML('<style fg="#666666"><i>Type a message, / for commands...</i></style>'),
+            placeholder=HTML('<style fg="#666666"><i>Type a message, / for commands... (Alt+Enter for newline)</i></style>'),
         )
         _session_ok = True
         return session

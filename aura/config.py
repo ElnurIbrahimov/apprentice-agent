@@ -63,7 +63,7 @@ VERIFIED_LOCAL_MODELS = {
 
 _tags_cache: dict = {}
 _tags_cache_ts: float = 0.0
-_tags_cache_lock = __import__("threading").Lock()
+_tags_cache_lock = threading.Lock()
 
 
 def validate_model(model_name: str, ollama_host: str = None) -> bool:
@@ -130,12 +130,12 @@ def get_best_available_model(preferred: str, fallbacks: List[str], role: str = "
 
 class Config:
     OLLAMA_HOST: str = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-    CHROMADB_PATH: Path = Path(os.getenv("CHROMADB_PATH", "./data/chromadb"))
 
     # Feature toggles (configurable via env vars)
     KG_BRAIN_ENABLED: bool = os.getenv("KG_BRAIN_ENABLED", "true").lower() in ("true", "1", "yes")
     SKILL_LIBRARY_ENABLED: bool = os.getenv("SKILL_LIBRARY_ENABLED", "true").lower() in ("true", "1", "yes")
-    LIFE_MODELING_ENABLED: bool = os.getenv("LIFE_MODELING_ENABLED", "true").lower() in ("true", "1", "yes")
+    # LIFE_MODELING_ENABLED removed — aura_life_modeling dead code, module deleted (2026-03-22)
+    # CHROMADB_PATH removed — chromadb removed, memory consolidated to SQLite (2026-03-22)
 
     # Auth (canonical flag — used by middleware + route dependency)
     API_AUTH_ENABLED: bool = os.getenv("AURA_API_AUTH_ENABLED", "true").lower() in ("true", "1", "yes")
@@ -358,9 +358,9 @@ class Config:
     # Reasoning Template Library Configuration — Phase 3
     REASONING_TEMPLATES_ENABLED: bool = os.getenv("REASONING_TEMPLATES_ENABLED", "true").lower() == "true"
 
-    # Prompt Evolution Engine Configuration — Phase 4
-    PROMPT_EVOLUTION_ENABLED: bool = os.getenv("PROMPT_EVOLUTION_ENABLED", "false").lower() == "true"
-    PROMPT_EVOLUTION_INTERVAL: int = int(os.getenv("PROMPT_EVOLUTION_INTERVAL", "50"))
+    # Prompt Evolution Engine removed — dead code (2026-03-22)
+    PROMPT_EVOLUTION_ENABLED: bool = False  # Kept for backward compat; module deleted
+    PROMPT_EVOLUTION_INTERVAL: int = 50    # Kept for backward compat; module deleted
 
     # World Model Configuration — ADV-02: Persistent situational awareness
     WORLD_MODEL_ENABLED: bool = os.getenv("WORLD_MODEL_ENABLED", "true").lower() == "true"
@@ -465,7 +465,7 @@ class Config:
 
     # Memory Write Gate
     ENABLE_MEMORY_WRITE_GATE: bool = os.getenv("ENABLE_MEMORY_WRITE_GATE", "true").lower() == "true"
-    MEMORY_WRITE_THRESHOLD: float = float(os.getenv("MEMORY_WRITE_THRESHOLD", "0.35"))
+    MEMORY_WRITE_THRESHOLD: float = float(os.getenv("MEMORY_WRITE_THRESHOLD", "0.15"))  # Lowered: personal AI OS, conversations should persist
     MEMORY_MERGE_THRESHOLD: float = float(os.getenv("MEMORY_MERGE_THRESHOLD", "0.88"))
     MEMORY_SUPERSEDE_THRESHOLD: float = float(os.getenv("MEMORY_SUPERSEDE_THRESHOLD", "0.80"))
 

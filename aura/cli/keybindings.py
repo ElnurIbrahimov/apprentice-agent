@@ -19,7 +19,7 @@ DEFAULT_KEYBINDINGS: Dict[str, str] = {
     "ctrl+k": ACTION_COMMAND_PALETTE,
     "ctrl+g": ACTION_OPEN_EDITOR,
     "ctrl+r": ACTION_SEARCH_HISTORY,
-    "escape escape": ACTION_REWIND,
+    "ctrl+z": ACTION_REWIND,
     "shift+tab": ACTION_CYCLE_PERMISSIONS,
     "alt+m": ACTION_MODEL_PICKER,
 }

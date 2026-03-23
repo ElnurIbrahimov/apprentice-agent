@@ -2,9 +2,12 @@
 
 Features:
 - Incremental indexing with SHA-256 content hashing (skip unchanged files)
+- Content-hash embedding cache: only re-embed chunks whose text actually changed
+- mtime fast-path: skip reading files whose modification time hasn't changed
 - Smart semantic chunking: Python AST, JS/TS regex-based, section-based fallback
 - Multi-signal ranking: BM25 keyword + semantic similarity + recency + importance
 - Project structure awareness: entry points, import graph, metadata, test detection
+- Aider-style repo map: compact symbol listing for LLM context windows
 - SQLite-backed persistence at data/codebase_index/index.db
 
 Search API:
@@ -12,6 +15,7 @@ Search API:
 - find_file(pattern) — glob-based file finding
 - get_project_summary() — project structure, entry points, key files
 - get_file_outline(path) — symbol outline for a file
+- generate_repo_map(max_tokens=2000) — compact file+symbol map for LLMs
 """
 
 import ast
@@ -38,6 +42,16 @@ try:
     _EMBED_URL = _CbConfig.OLLAMA_HOST + "/api/embeddings"
 except Exception:
     _EMBED_URL = os.getenv("OLLAMA_HOST", "http://localhost:11434") + "/api/embeddings"
+
+# SECURITY: Validate embedding URL against SSRF at import time
+try:
+    from aura.security.ssrf_guard import validate_url_safe
+    validate_url_safe(_EMBED_URL)
+except ValueError as _e:
+    logger.warning(f"[CodebaseIndex] Embed URL failed SSRF validation: {_e}")
+    _EMBED_URL = None  # Disable embeddings — callers must check
+except ImportError:
+    pass  # ssrf_guard not available — allow (local dev)
 
 # ── File classification ─────────────────────────────────────────
 # Higher weight = more important in search ranking
@@ -119,6 +133,92 @@ def _embed(text: str) -> Optional[list]:
     except Exception as e:
         logger.debug("[CodebaseIndex] Embedding failed: %s", e)
     return None
+
+
+# ── Embedding Cache (content-hash → embedding) ────────────────
+# Only re-embeds chunks whose content actually changed, even within
+# a modified file.  Cache is a separate SQLite DB so it survives
+# full re-indexes and can be shared across projects.
+
+class EmbeddingCache:
+    """Content-hash → embedding cache.  Only re-embed changed chunks."""
+
+    def __init__(self, cache_path: str = "data/codebase_index/embedding_cache.db"):
+        self._path = Path(cache_path)
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS chunk_embeddings (
+                content_hash TEXT PRIMARY KEY,
+                embedding BLOB,
+                file_path TEXT,
+                chunk_type TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        self._conn.commit()
+        self._hits = 0
+        self._misses = 0
+
+    def get(self, content: str) -> Optional[list]:
+        """Look up cached embedding by content hash."""
+        h = hashlib.sha256(content.encode()).hexdigest()
+        row = self._conn.execute(
+            "SELECT embedding FROM chunk_embeddings WHERE content_hash = ?", (h,)
+        ).fetchone()
+        if row:
+            import numpy as np
+            self._hits += 1
+            return np.frombuffer(row[0], dtype=np.float32).tolist()
+        self._misses += 1
+        return None
+
+    def put(self, content: str, embedding: list, file_path: str, chunk_type: str):
+        """Store embedding keyed by content hash."""
+        h = hashlib.sha256(content.encode()).hexdigest()
+        import numpy as np
+        blob = np.array(embedding, dtype=np.float32).tobytes()
+        self._conn.execute(
+            "INSERT OR REPLACE INTO chunk_embeddings "
+            "(content_hash, embedding, file_path, chunk_type) VALUES (?, ?, ?, ?)",
+            (h, blob, file_path, chunk_type),
+        )
+        self._conn.commit()
+
+    def get_or_compute(self, content: str, file_path: str, chunk_type: str) -> Optional[list]:
+        """Return cached embedding or compute + cache a new one."""
+        cached = self.get(content)
+        if cached is not None:
+            return cached
+        emb = _embed(content)
+        if emb:
+            self.put(content, emb, file_path, chunk_type)
+        return emb
+
+    def get_stats(self) -> dict:
+        """Return cache statistics."""
+        count = self._conn.execute("SELECT COUNT(*) FROM chunk_embeddings").fetchone()[0]
+        total = self._hits + self._misses
+        hit_rate = round(self._hits / total, 3) if total > 0 else 0.0
+        return {
+            "cached_chunks": count,
+            "session_hits": self._hits,
+            "session_misses": self._misses,
+            "session_hit_rate": hit_rate,
+        }
+
+    def prune_stale(self, days: int = 30):
+        """Remove embeddings older than N days (garbage collection)."""
+        self._conn.execute(
+            "DELETE FROM chunk_embeddings WHERE created_at < datetime('now', ?)",
+            (f"-{days} days",),
+        )
+        self._conn.commit()
+
+    def close(self):
+        self._conn.close()
 
 
 def _cosine(a: list, b: list) -> float:
@@ -705,6 +805,12 @@ class CodebaseIndex:
         self._conn: Optional[sqlite3.Connection] = None
         self._init_db()
 
+        # Content-hash embedding cache (shared, survives re-indexes)
+        cache_dir = self._db_path.parent
+        self._embedding_cache = EmbeddingCache(
+            cache_path=str(cache_dir / "embedding_cache.db")
+        )
+
     # ── DB setup ────────────────────────────────────────────────
 
     def _get_conn(self) -> sqlite3.Connection:
@@ -768,23 +874,30 @@ class CodebaseIndex:
 
     # ── Indexing ────────────────────────────────────────────────
 
-    def index(self, progress_callback=None) -> dict:
-        """Index or re-index the project. Only re-indexes changed files (SHA-256).
+    def index(self, progress_callback=None, force: bool = False) -> dict:
+        """Index or re-index the project incrementally.
+
+        Three-tier skip strategy (fastest to slowest):
+        1. mtime unchanged → skip without reading file (instant)
+        2. mtime changed but SHA-256 identical → skip (cheap read)
+        3. SHA-256 changed → re-chunk, but check embedding cache per-chunk
 
         Args:
             progress_callback: Optional callable(current, total, file_path)
+            force: If True, re-index everything regardless of mtime/hash
 
         Returns:
-            {indexed, skipped, removed, total_chunks, elapsed}
+            {indexed, skipped_mtime, skipped_hash, removed, total_chunks,
+             embedding_cache_stats, elapsed}
         """
         t0 = time.time()
 
-        # Get existing file hashes for incremental indexing
+        # Get existing file records for incremental checks
         with self._lock:
             rows = self._get_conn().execute(
-                "SELECT rel_path, sha256 FROM files"
+                "SELECT rel_path, sha256, mtime FROM files"
             ).fetchall()
-        existing_hashes = {r[0]: r[1] for r in rows}
+        existing = {r[0]: {"sha256": r[1], "mtime": r[2]} for r in rows}
 
         # Detect project metadata
         meta = _detect_project_metadata(self.project_path)
@@ -793,8 +906,11 @@ class CodebaseIndex:
         # Walk all files
         files = _walk_files(self.project_path)
         indexed = 0
-        skipped = 0
+        skipped_mtime = 0
+        skipped_hash = 0
         total_chunks = 0
+        cache_hits = 0
+        cache_misses = 0
         current_paths = set()
 
         for fi, fpath in enumerate(files):
@@ -804,7 +920,17 @@ class CodebaseIndex:
                 continue
             current_paths.add(rel_path)
 
-            # Read file content
+            # ── Tier 1: mtime fast-path (no file read needed) ──
+            if not force and rel_path in existing:
+                try:
+                    disk_mtime = fpath.stat().st_mtime
+                except OSError:
+                    continue
+                if existing[rel_path]["mtime"] == disk_mtime:
+                    skipped_mtime += 1
+                    continue
+
+            # ── Tier 2: content hash check (need to read file) ──
             try:
                 raw = fpath.read_bytes()
             except (OSError, PermissionError):
@@ -812,11 +938,23 @@ class CodebaseIndex:
 
             content_hash = _sha256(raw)
 
-            # Skip if hash unchanged
-            if rel_path in existing_hashes and existing_hashes[rel_path] == content_hash:
-                skipped += 1
+            if not force and rel_path in existing and existing[rel_path]["sha256"] == content_hash:
+                # mtime changed (e.g. touch, git checkout) but content is the same
+                # Update mtime in DB so next run hits tier-1
+                try:
+                    stat = fpath.stat()
+                    with self._lock:
+                        self._get_conn().execute(
+                            "UPDATE files SET mtime = ? WHERE rel_path = ?",
+                            (stat.st_mtime, rel_path)
+                        )
+                        self._get_conn().commit()
+                except OSError:
+                    pass
+                skipped_hash += 1
                 continue
 
+            # ── Tier 3: file actually changed — re-index ──
             if progress_callback:
                 progress_callback(fi + 1, len(files), rel_path)
 
@@ -855,10 +993,20 @@ class CodebaseIndex:
                 """, (rel_path, str(fpath), content_hash, stat.st_mtime, stat.st_size,
                       ext, int(is_test), int(is_entry), importance, time.time()))
 
-                # Replace chunks
+                # Replace chunks — use embedding cache per-chunk
                 conn.execute("DELETE FROM chunks WHERE file_path = ?", (rel_path,))
                 for chunk in chunks:
-                    emb = _embed(f"{chunk['kind']} {chunk['name']}: {chunk['content']}")
+                    embed_text = f"{chunk['kind']} {chunk['name']}: {chunk['content']}"
+                    # Try embedding cache first (content-hash level)
+                    hits_before = self._embedding_cache._hits
+                    emb = self._embedding_cache.get_or_compute(
+                        embed_text, rel_path, chunk["kind"]
+                    )
+                    if self._embedding_cache._hits > hits_before:
+                        cache_hits += 1
+                    else:
+                        cache_misses += 1
+
                     conn.execute("""
                         INSERT INTO chunks (id, file_path, name, kind, line_start, line_end,
                             content, docstring, decorators, embedding)
@@ -885,7 +1033,7 @@ class CodebaseIndex:
 
         # Remove files that no longer exist on disk
         removed = 0
-        stale = set(existing_hashes.keys()) - current_paths
+        stale = set(existing.keys()) - current_paths
         if stale:
             with self._lock:
                 conn = self._get_conn()
@@ -907,15 +1055,21 @@ class CodebaseIndex:
             conn.commit()
 
         elapsed = round(time.time() - t0, 1)
+        emb_stats = self._embedding_cache.get_stats()
+        total_skipped = skipped_mtime + skipped_hash
         logger.info(
             f"[CodebaseIndex] Indexed {indexed} files ({total_chunks} chunks) in {elapsed}s, "
-            f"skipped {skipped}, removed {removed}"
+            f"skipped {total_skipped} (mtime:{skipped_mtime} hash:{skipped_hash}), "
+            f"removed {removed}, cache hits:{emb_stats['session_hits']}"
         )
         return {
             "indexed": indexed,
-            "skipped": skipped,
+            "skipped": total_skipped,
+            "skipped_mtime": skipped_mtime,
+            "skipped_hash": skipped_hash,
             "removed": removed,
             "total_chunks": total_chunks,
+            "embedding_cache_stats": emb_stats,
             "elapsed": elapsed,
         }
 
@@ -1252,6 +1406,76 @@ class CodebaseIndex:
             "imported_by": [r[0] for r in imported_by if r[0] != rel],
         }
 
+    # ── Repo Map (Aider-style compact symbol listing) ──────────
+
+    def generate_repo_map(self, max_tokens: int = 2000) -> str:
+        """Generate a compact repo map showing file structure + key symbols.
+
+        Designed for LLM context windows: one line per file with its top symbols.
+        Prioritizes important/entry-point files first, then alphabetical.
+        Respects token budget (rough 4 chars/token estimate).
+
+        Args:
+            max_tokens: Approximate token budget for the map
+
+        Returns:
+            Multi-line string like:
+                aura/brain.py: OllamaBrain, _quick_generate, _SHARED_EXECUTOR
+                aura/tools/code_search.py: CodeSearchTool, grep, glob, find_definition
+        """
+        with self._lock:
+            conn = self._get_conn()
+
+            # Get all files ordered by importance (entry points first)
+            file_rows = conn.execute(
+                "SELECT rel_path, importance, is_entry_point FROM files "
+                "ORDER BY importance DESC, rel_path ASC"
+            ).fetchall()
+
+            # Get all chunks grouped by file
+            chunk_rows = conn.execute(
+                "SELECT file_path, name, kind FROM chunks "
+                "WHERE kind IN ('function', 'class', 'method', 'interface', 'type', 'struct', 'trait', 'enum') "
+                "ORDER BY file_path, line_start"
+            ).fetchall()
+
+        # Build file→symbols map
+        file_symbols: Dict[str, List[str]] = defaultdict(list)
+        for fpath, name, kind in chunk_rows:
+            if name and name not in file_symbols[fpath]:
+                file_symbols[fpath].append(name)
+
+        # Build repo map lines
+        lines = []
+        for rel_path, importance, is_entry in file_rows:
+            symbols = file_symbols.get(rel_path, [])
+            if symbols:
+                # Cap at 10 symbols per file, prioritize classes/functions
+                symbol_str = ", ".join(symbols[:10])
+                if len(symbols) > 10:
+                    symbol_str += f" (+{len(symbols) - 10} more)"
+                lines.append(f"{rel_path}: {symbol_str}")
+            else:
+                lines.append(rel_path)
+
+        # Truncate to fit token budget (rough: 4 chars per token)
+        max_chars = max_tokens * 4
+        map_text = "\n".join(lines)
+        if len(map_text) > max_chars:
+            # Truncate line-by-line to stay under budget
+            truncated_lines = []
+            char_count = 0
+            for line in lines:
+                if char_count + len(line) + 1 > max_chars - 30:  # reserve room for truncation notice
+                    break
+                truncated_lines.append(line)
+                char_count += len(line) + 1
+            remaining = len(lines) - len(truncated_lines)
+            truncated_lines.append(f"... ({remaining} more files)")
+            map_text = "\n".join(truncated_lines)
+
+        return map_text
+
     # ── Stats (backward compatible) ─────────────────────────────
 
     def stats(self) -> dict:
@@ -1269,6 +1493,7 @@ class CodebaseIndex:
             "files_indexed": total_files,
             "by_kind": {k: c for k, c in kinds},
             "chunks_with_embeddings": with_embeddings,
+            "embedding_cache": self._embedding_cache.get_stats(),
             "db_path": str(self._db_path),
         }
 
@@ -1279,3 +1504,4 @@ class CodebaseIndex:
             if self._conn:
                 self._conn.close()
                 self._conn = None
+        self._embedding_cache.close()

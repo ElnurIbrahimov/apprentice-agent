@@ -79,11 +79,13 @@ class PredictiveTaskEngine:
         try:
             with _db_lock:
                 conn = _get_db()
-                conn.execute(
-                    "INSERT INTO tool_transitions (from_tool,from_action,to_tool,to_action,timestamp) VALUES (?,?,?,?,?)",
-                    (from_tool, from_action, tool, action, datetime.now().isoformat()))
-                conn.commit()
-                conn.close()
+                try:
+                    conn.execute(
+                        "INSERT INTO tool_transitions (from_tool,from_action,to_tool,to_action,timestamp) VALUES (?,?,?,?,?)",
+                        (from_tool, from_action, tool, action, datetime.now().isoformat()))
+                    conn.commit()
+                finally:
+                    conn.close()
         except Exception as e:
             logger.warning(f"[PredictiveTasks] Transition record error: {e}")
         self._last_event = (tool, action)
@@ -107,10 +109,12 @@ class PredictiveTaskEngine:
         try:
             with _db_lock:
                 conn = _get_db()
-                row = conn.execute(
-                    "SELECT COUNT(*) as total, SUM(accepted) as acc FROM prediction_feedback WHERE tool=? AND action=?",
-                    (tool, action)).fetchone()
-                conn.close()
+                try:
+                    row = conn.execute(
+                        "SELECT COUNT(*) as total, SUM(accepted) as acc FROM prediction_feedback WHERE tool=? AND action=?",
+                        (tool, action)).fetchone()
+                finally:
+                    conn.close()
             total = row["total"] or 0
             acc = row["acc"] or 0
             if total < 3:
@@ -130,11 +134,13 @@ class PredictiveTaskEngine:
         try:
             with _db_lock:
                 conn = _get_db()
-                conn.execute(
-                    "INSERT INTO task_events (tool,action,prompt_hint,hour,day_of_week,timestamp,context_hint) VALUES (?,?,?,?,?,?,?)",
-                    (tool, action, prompt_hint[:100], now.hour, now.weekday(), now.isoformat(), (context_hint or "")[:200]))
-                conn.commit()
-                conn.close()
+                try:
+                    conn.execute(
+                        "INSERT INTO task_events (tool,action,prompt_hint,hour,day_of_week,timestamp,context_hint) VALUES (?,?,?,?,?,?,?)",
+                        (tool, action, prompt_hint[:100], now.hour, now.weekday(), now.isoformat(), (context_hint or "")[:200]))
+                    conn.commit()
+                finally:
+                    conn.close()
             self._record_transition(tool, action)
             return {"success": True, "logged": f"{tool}.{action}", "at": now.strftime("%A %H:%M")}
         except Exception as e:
@@ -147,11 +153,13 @@ class PredictiveTaskEngine:
         try:
             with _db_lock:
                 conn = _get_db()
-                rows = conn.execute("""
-                    SELECT tool, action, hour, day_of_week, COUNT(*) as count
-                    FROM task_events GROUP BY tool, action, hour, day_of_week
-                    HAVING count >= ? ORDER BY count DESC LIMIT 50""", (min_occurrences,)).fetchall()
-                conn.close()
+                try:
+                    rows = conn.execute("""
+                        SELECT tool, action, hour, day_of_week, COUNT(*) as count
+                        FROM task_events GROUP BY tool, action, hour, day_of_week
+                        HAVING count >= ? ORDER BY count DESC LIMIT 50""", (min_occurrences,)).fetchall()
+                finally:
+                    conn.close()
             patterns = [{
                 "tool": r["tool"], "action": r["action"], "hour": r["hour"],
                 "day": DAY_NAMES[r["day_of_week"]], "occurrences": r["count"],
@@ -170,22 +178,24 @@ class PredictiveTaskEngine:
         try:
             with _db_lock:
                 conn = _get_db()
-                day_rows = conn.execute(f"""
-                    SELECT tool, action, hour, timestamp, COUNT(*) as count FROM task_events
-                    WHERE hour IN ({ph}) AND day_of_week=? GROUP BY tool, action, hour
-                    HAVING count >= 2 ORDER BY count DESC LIMIT 10""", (*hours, current_dow)).fetchall()
-                any_rows = conn.execute(f"""
-                    SELECT tool, action, hour, timestamp, COUNT(*) as count FROM task_events
-                    WHERE hour IN ({ph}) GROUP BY tool, action, hour
-                    HAVING count >= 3 ORDER BY count DESC LIMIT 10""", hours).fetchall()
-                total_in_window = conn.execute(
-                    f"SELECT COUNT(*) as n FROM task_events WHERE hour IN ({ph})", hours).fetchone()["n"]
-                unique_tools = conn.execute(
-                    f"SELECT COUNT(DISTINCT tool||'.'||action) as k FROM task_events WHERE hour IN ({ph})", hours).fetchone()["k"]
-                decay_rows = conn.execute(f"""
-                    SELECT tool, action, timestamp FROM task_events
-                    WHERE hour IN ({ph}) ORDER BY timestamp DESC LIMIT 500""", hours).fetchall()
-                conn.close()
+                try:
+                    day_rows = conn.execute(f"""
+                        SELECT tool, action, hour, timestamp, COUNT(*) as count FROM task_events
+                        WHERE hour IN ({ph}) AND day_of_week=? GROUP BY tool, action, hour
+                        HAVING count >= 2 ORDER BY count DESC LIMIT 10""", (*hours, current_dow)).fetchall()
+                    any_rows = conn.execute(f"""
+                        SELECT tool, action, hour, timestamp, COUNT(*) as count FROM task_events
+                        WHERE hour IN ({ph}) GROUP BY tool, action, hour
+                        HAVING count >= 3 ORDER BY count DESC LIMIT 10""", hours).fetchall()
+                    total_in_window = conn.execute(
+                        f"SELECT COUNT(*) as n FROM task_events WHERE hour IN ({ph})", hours).fetchone()["n"]
+                    unique_tools = conn.execute(
+                        f"SELECT COUNT(DISTINCT tool||'.'||action) as k FROM task_events WHERE hour IN ({ph})", hours).fetchone()["k"]
+                    decay_rows = conn.execute(f"""
+                        SELECT tool, action, timestamp FROM task_events
+                        WHERE hour IN ({ph}) ORDER BY timestamp DESC LIMIT 500""", hours).fetchall()
+                finally:
+                    conn.close()
             # Decay-weighted counts per (tool, action)
             decay_counts: Dict[Tuple[str, str], float] = defaultdict(float)
             for row in decay_rows:
@@ -227,16 +237,18 @@ class PredictiveTaskEngine:
         try:
             with _db_lock:
                 conn = _get_db()
-                total = conn.execute("SELECT COUNT(*) as n FROM task_events").fetchone()["n"]
-                top_tools = conn.execute(
-                    "SELECT tool, COUNT(*) as count FROM task_events GROUP BY tool ORDER BY count DESC LIMIT 10").fetchall()
-                recent = conn.execute(
-                    "SELECT tool, action, timestamp FROM task_events ORDER BY id DESC LIMIT 10").fetchall()
-                peak_hour = conn.execute(
-                    "SELECT hour, COUNT(*) as count FROM task_events GROUP BY hour ORDER BY count DESC LIMIT 1").fetchone()
-                transition_count = conn.execute("SELECT COUNT(*) as n FROM tool_transitions").fetchone()["n"]
-                feedback_count = conn.execute("SELECT COUNT(*) as n FROM prediction_feedback").fetchone()["n"]
-                conn.close()
+                try:
+                    total = conn.execute("SELECT COUNT(*) as n FROM task_events").fetchone()["n"]
+                    top_tools = conn.execute(
+                        "SELECT tool, COUNT(*) as count FROM task_events GROUP BY tool ORDER BY count DESC LIMIT 10").fetchall()
+                    recent = conn.execute(
+                        "SELECT tool, action, timestamp FROM task_events ORDER BY id DESC LIMIT 10").fetchall()
+                    peak_hour = conn.execute(
+                        "SELECT hour, COUNT(*) as count FROM task_events GROUP BY hour ORDER BY count DESC LIMIT 1").fetchone()
+                    transition_count = conn.execute("SELECT COUNT(*) as n FROM tool_transitions").fetchone()["n"]
+                    feedback_count = conn.execute("SELECT COUNT(*) as n FROM prediction_feedback").fetchone()["n"]
+                finally:
+                    conn.close()
             return {
                 "success": True, "total_events": total,
                 "total_transitions": transition_count, "total_feedback": feedback_count,
@@ -252,9 +264,11 @@ class PredictiveTaskEngine:
         try:
             with _db_lock:
                 conn = _get_db()
-                rows = conn.execute(
-                    "SELECT day_of_week, hour, COUNT(*) as count FROM task_events GROUP BY day_of_week, hour").fetchall()
-                conn.close()
+                try:
+                    rows = conn.execute(
+                        "SELECT day_of_week, hour, COUNT(*) as count FROM task_events GROUP BY day_of_week, hour").fetchall()
+                finally:
+                    conn.close()
             heatmap: Dict[str, Dict[int, int]] = {d: {} for d in DAY_NAMES}
             for r in rows:
                 heatmap[DAY_NAMES[r["day_of_week"]]][r["hour"]] = r["count"]
@@ -269,9 +283,11 @@ class PredictiveTaskEngine:
         try:
             with _db_lock:
                 conn = _get_db()
-                rows = conn.execute("""SELECT from_tool, from_action, to_tool, to_action, COUNT(*) as cnt
-                    FROM tool_transitions GROUP BY from_tool, from_action, to_tool, to_action""").fetchall()
-                conn.close()
+                try:
+                    rows = conn.execute("""SELECT from_tool, from_action, to_tool, to_action, COUNT(*) as cnt
+                        FROM tool_transitions GROUP BY from_tool, from_action, to_tool, to_action""").fetchall()
+                finally:
+                    conn.close()
         except Exception:
             return {}
         totals: Dict[Tuple[str, str], int] = defaultdict(int)
@@ -322,11 +338,13 @@ class PredictiveTaskEngine:
         try:
             with _db_lock:
                 conn = _get_db()
-                conn.execute(
-                    "INSERT INTO prediction_feedback (prediction_id,tool,action,accepted,timestamp) VALUES (?,?,?,?,?)",
-                    (prediction_id or uuid.uuid4().hex[:12], tool, action, 1 if accepted else 0, datetime.now().isoformat()))
-                conn.commit()
-                conn.close()
+                try:
+                    conn.execute(
+                        "INSERT INTO prediction_feedback (prediction_id,tool,action,accepted,timestamp) VALUES (?,?,?,?,?)",
+                        (prediction_id or uuid.uuid4().hex[:12], tool, action, 1 if accepted else 0, datetime.now().isoformat()))
+                    conn.commit()
+                finally:
+                    conn.close()
             return {"success": True, "recorded": f"{tool}.{action}", "accepted": bool(accepted)}
         except Exception as e:
             return {"success": False, "error": str(e)}
@@ -342,11 +360,13 @@ class PredictiveTaskEngine:
         try:
             with _db_lock:
                 conn = _get_db()
-                rows = conn.execute("""
-                    SELECT tool, action, hour, COUNT(*) as count, MAX(timestamp) as latest_ts
-                    FROM task_events WHERE context_hint=?
-                    GROUP BY tool, action ORDER BY count DESC LIMIT 20""", (context_hint,)).fetchall()
-                conn.close()
+                try:
+                    rows = conn.execute("""
+                        SELECT tool, action, hour, COUNT(*) as count, MAX(timestamp) as latest_ts
+                        FROM task_events WHERE context_hint=?
+                        GROUP BY tool, action ORDER BY count DESC LIMIT 20""", (context_hint,)).fetchall()
+                finally:
+                    conn.close()
             if not rows:
                 result = self.get_predictions()
                 result["note"] = f"No data for context '{context_hint}', showing general predictions."

@@ -9,12 +9,17 @@ import shutil
 import concurrent.futures
 import atexit
 import uuid
+from collections import deque
+from pathlib import Path
 from enum import Enum
 from typing import Optional, Callable, Any
 import ollama
+import requests
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
 
 from .config import Config
 from .identity import get_identity_prompt
+from .core.token_manager import estimate_messages_tokens, get_context_window
 
 # ChatGPT OAuth client (optional — uses ChatGPT Plus/Pro subscription)
 try:
@@ -77,13 +82,19 @@ def _resp_get(response, key, default=None):
         return response.get(key, default)
     return getattr(response, key, default)
 
-def _run_world_model_extraction(conversation_id, messages):
+def _run_world_model_extraction(conversation_id, messages, user_inference_event=None):
     """Background thread target for world model extraction (ADV-02 Phase 2).
 
     Includes circuit breaker: after 3 consecutive failures, disables extraction
     for 5 minutes to prevent thread pool starvation.
+    Skips if user inference is active to avoid contention.
     """
     global _wm_consecutive_failures, _wm_circuit_broken_at
+
+    # Yield to user inference
+    if user_inference_event and user_inference_event.is_set():
+        logger.debug("[BRAIN] World model extraction skipped — user inference active")
+        return
 
     # Circuit breaker check (protected by lock)
     with _wm_lock:
@@ -172,23 +183,55 @@ def _neuro_scale(base_value: float, neuro_level: float, sensitivity: float = 0.5
     multiplier = max(NEURO_MIN_MULTIPLIER, min(NEURO_MAX_MULTIPLIER, multiplier))
     return base_value * multiplier
 
-# Shared thread pool to prevent thread leaks (max 12 concurrent LLM calls)
-_SHARED_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=12, thread_name_prefix="llm_worker")
+# Shared pools — centralized in aura.pools (2026-03-22)
+from aura.pools import llm_pool as _llm_pool_fn, bg_pool as _bg_pool_fn
+_SHARED_EXECUTOR = _llm_pool_fn()
+_BG_EXECUTOR = _bg_pool_fn()
+# atexit cleanup now handled by aura.pools
 
-# Dedicated background pool for long-running non-user tasks (world model, self-improvement)
-# Keeps these from starving the shared chat pool
-_BG_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=8, thread_name_prefix="aura-bg")
 
-def _cleanup_executor():
-    """Cleanup shared executor on exit."""
-    _SHARED_EXECUTOR.shutdown(wait=False, cancel_futures=True)
-    _BG_EXECUTOR.shutdown(wait=False, cancel_futures=True)
+# --- Retry decorator for transient network/connection errors ---
+_RETRYABLE_ERRORS = (ConnectionError, TimeoutError, OSError)
 
-atexit.register(_cleanup_executor)
+_llm_retry = retry(
+    retry=retry_if_exception_type(_RETRYABLE_ERRORS),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=4),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+    reraise=True,
+)
+
+
+def _ollama_health_check() -> str | None:
+    """Quick check if Ollama is reachable. Returns error message or None if OK."""
+    try:
+        resp = requests.get(f"{Config.OLLAMA_HOST}/api/tags", timeout=3)
+        if resp.status_code == 200:
+            return None
+        return f"Ollama returned HTTP {resp.status_code}. Check that `ollama serve` is running."
+    except requests.ConnectionError:
+        return "Ollama is not responding. Run `ollama serve` or check your connection."
+    except requests.Timeout:
+        return "Ollama health check timed out. The server may be overloaded."
+    except Exception as e:
+        return f"Ollama health check failed: {e}"
+
+
+def _user_facing_llm_error(original_error: Exception | None = None) -> str:
+    """Return a user-friendly error message after LLM call failure, with Ollama health context."""
+    health = _ollama_health_check()
+    if health:
+        return f"[LLM Error] {health}"
+    if original_error:
+        return f"[LLM Error] Request failed: {type(original_error).__name__}. Ollama is reachable — the model may have crashed. Try again."
+    return "[LLM Error] No response from the language model. Try again or check `ollama serve`."
 
 
 def call_with_timeout(func: Callable, timeout: int = LLM_TIMEOUT, default: Any = None) -> Any:
     """Execute a function with timeout protection using shared thread pool.
+
+    Wraps the callable with tenacity retry (3 attempts, exponential backoff)
+    for transient ConnectionError/TimeoutError/OSError before submitting.
 
     Args:
         func: Function to execute (should be a lambda or callable with no args)
@@ -198,13 +241,16 @@ def call_with_timeout(func: Callable, timeout: int = LLM_TIMEOUT, default: Any =
     Returns:
         Function result or default on timeout
     """
+    # No retry wrapping here — caller-level _retry_on_rate_limit handles retries.
+    # Double retry (tenacity + caller) caused timeout multiplication.
+
     try:
         future = _SHARED_EXECUTOR.submit(func)
         try:
             return future.result(timeout=timeout)
         except concurrent.futures.TimeoutError:
             logger.warning(f"LLM call timed out after {timeout}s")
-            future.cancel()  # Try to cancel the pending task
+            future.cancel()
             return default
         except concurrent.futures.CancelledError:
             logger.warning("LLM call was cancelled")
@@ -216,7 +262,6 @@ def call_with_timeout(func: Callable, timeout: int = LLM_TIMEOUT, default: Any =
             logger.error(f"LLM value error (bad response?): {e}")
             return default
         except Exception as e:
-            # Log unexpected errors with full context for debugging
             logger.exception(f"Unexpected LLM error: {type(e).__name__}: {e}")
             return default
     except RuntimeError as e:
@@ -232,6 +277,12 @@ def call_with_timeout(func: Callable, timeout: int = LLM_TIMEOUT, default: Any =
             except (ConnectionError, OSError, ValueError) as e:
                 logger.error(f"Fallback LLM error: {e}")
                 return default
+
+
+def _is_rate_limit_error(e: Exception) -> bool:
+    """Check if an exception is a rate limit (429) error."""
+    msg = str(e).lower()
+    return "429" in msg or "rate" in msg or "too many" in msg
 
 
 class TaskType(Enum):
@@ -280,6 +331,9 @@ class OllamaBrain:
         self._max_history: int = Config.HISTORY_LIMIT
         self.conversation_history: list[dict] = []
         self._history_lock = threading.RLock()
+        # Serialize concurrent think()/think_stream() calls to prevent
+        # interleaved conversation history and token counter corruption
+        self._think_lock = threading.Lock()
         self._last_model_used: str = self.model  # Track for metacognition
         self._query_count: int = 0  # Track queries for auto-reset (resets every 15)
         self._total_query_count: int = 0  # Total queries (never resets)
@@ -287,6 +341,21 @@ class OllamaBrain:
 
         # Phase 4 — compaction notification flag
         self._compaction_pending: bool = False
+
+        # Fix 9B — user inference priority: background tasks should yield
+        self._user_inference_active = threading.Event()
+
+        # Adaptive timeout based on recent LLM latencies (replaces serotonin-modulated timeout)
+        self._recent_latencies: deque = deque(maxlen=100)
+        self._latency_lock = threading.Lock()
+
+        # Circuit breaker for think() — prevents repeated failures from cascading
+        self._consecutive_think_failures: int = 0
+        self._think_circuit_open_at: float = 0.0
+        _THINK_CIRCUIT_BREAKER_COOLDOWN = 30  # seconds
+        self._think_cb_cooldown: float = _THINK_CIRCUIT_BREAKER_COOLDOWN
+        self._think_cb_threshold: int = 3  # consecutive failures before opening
+        self._cb_lock = threading.Lock()  # Protects circuit breaker reads + writes
 
         # Phase 4 — per-session token/cost tracking
         self._session_input_tokens: int = 0
@@ -315,12 +384,14 @@ class OllamaBrain:
         self._DEFAULT_COST_PER_1K = (0.003, 0.003)  # fallback for unknown models
 
         # Setup persistent history storage (legacy single-conversation path)
-        self._history_dir = Config.CHROMADB_PATH.parent / "conversation"
+        # CHROMADB_PATH removed (2026-03-22); conversations live under data/
+        _data_dir = Path(os.getenv("AURA_DATA_DIR", str(Path(__file__).resolve().parent.parent / "data")))
+        self._history_dir = _data_dir / "conversation"
         self._history_dir.mkdir(parents=True, exist_ok=True)
         self._history_file = self._history_dir / "history.json"
 
         # Multi-conversation support
-        self._conversations_dir = Config.CHROMADB_PATH.parent / "conversations"
+        self._conversations_dir = _data_dir / "conversations"
         self._conversations_dir.mkdir(parents=True, exist_ok=True)
         self._conversations_index_file = self._conversations_dir / "index.json"
         self._current_conversation_id: Optional[str] = None
@@ -350,16 +421,8 @@ class OllamaBrain:
         # Screenshot path tracking (set by agent, read by brain for combined screenshot+vision tasks)
         self._last_screenshot_path: Optional[str] = None
 
-        # Episodic memory auto-recall (lazy-init, best-effort)
+        # Episodic memory consolidated into UnifiedMemory (2026-03-22)
         self._episodic_memory = None
-        try:
-            from aura_episodic_memory.memory_store import EpisodicMemoryStore
-            from aura_episodic_memory.mcp_tools import QuickEpisodicMemory
-            _store = EpisodicMemoryStore()
-            self._episodic_memory = QuickEpisodicMemory(_store)
-            logger.info("[BRAIN] Episodic memory auto-recall enabled")
-        except Exception as _e:
-            logger.debug(f"[BRAIN] Episodic memory not available: {_e}")
 
         if warmup:
             self._warmup_models()
@@ -456,6 +519,98 @@ class OllamaBrain:
                 "queries": self._total_query_count,
             }
 
+    # -----------------------------------------------------------------
+    # Shared helpers for tool-calling methods (think_with_tools,
+    # think_with_tools_stream, react_step_code)
+    # -----------------------------------------------------------------
+
+    def _resolve_tool_model(
+        self,
+        model_override: str = None,
+        options: dict = None,
+    ) -> tuple:
+        """Resolve model, client, and LLM options for tool-calling methods.
+
+        Returns:
+            (client, actual_model, llm_options) tuple
+        """
+        model = model_override or self._model_override or Config.MODEL_CODE
+        client, actual_model = self._get_client_for_model(model)
+        llm_options = options or {"temperature": 0.2, "num_predict": 4096}
+        return client, actual_model, llm_options
+
+    def _tool_call_with_fallback(
+        self,
+        client,
+        actual_model: str,
+        messages: list,
+        llm_options: dict,
+        tools: list = None,
+        timeout: int = 120,
+    ) -> tuple:
+        """Execute an LLM tool call with fallback chain. Shared by tool-calling methods.
+
+        Args:
+            client: Ollama client
+            actual_model: Model name
+            messages: Message list
+            llm_options: LLM options dict
+            tools: Tool schemas (None for code-only calls)
+            timeout: Timeout in seconds
+
+        Returns:
+            (response, actual_model) tuple. response is None if all models failed.
+        """
+        chat_kwargs = {"model": actual_model, "messages": messages, "options": llm_options}
+        if tools is not None:
+            chat_kwargs["tools"] = tools
+
+        try:
+            response = call_with_timeout(
+                lambda: client.chat(**chat_kwargs),
+                timeout=timeout,
+                default=None,
+            )
+        except Exception as e:
+            logger.error(f"[BRAIN] Tool call error ({actual_model}): {e}")
+            return None, actual_model
+
+        if response is None:
+            chain = self._get_fallback_chain(actual_model)
+            for fallback_model in chain:
+                if fallback_model == actual_model:
+                    continue
+                try:
+                    fb_client, fb_actual = self._get_client_for_model(fallback_model)
+                    logger.info(f"[BRAIN] Tool-call fallback: {actual_model} -> {fb_actual}")
+                    fb_kwargs = {"model": fb_actual, "messages": messages, "options": llm_options}
+                    if tools is not None:
+                        fb_kwargs["tools"] = tools
+                    response = call_with_timeout(
+                        lambda kw=fb_kwargs, c=fb_client: c.chat(**kw),
+                        timeout=timeout,
+                        default=None,
+                    )
+                    if response is not None:
+                        actual_model = fb_actual
+                        break
+                except Exception as e:
+                    logger.warning(f"[BRAIN] Fallback model {fb_actual} failed: {e}")
+                    continue
+
+        return response, actual_model
+
+    def _extract_tool_response_tokens(self, response, actual_model: str) -> tuple:
+        """Extract and record token counts from a tool-call response.
+
+        Returns:
+            (input_tokens, output_tokens) tuple
+        """
+        input_tokens = _resp_get(response, "prompt_eval_count", 0) or 0
+        output_tokens = _resp_get(response, "eval_count", 0) or 0
+        self._record_tokens(actual_model, input_tokens, output_tokens)
+        return input_tokens, output_tokens
+
     def think_with_tools(
         self,
         messages: list[dict],
@@ -478,62 +633,20 @@ class OllamaBrain:
         Returns:
             {message, model, input_tokens, output_tokens} or {error} on failure
         """
-        # Use MODEL_CODE (devstral/minimax) — not MODEL_FAST (gemini) which
-        # crashes on tool-result turns with "missing thought_signature" error
-        model = model_override or self._model_override or Config.MODEL_CODE
-        client, actual_model = self._get_client_for_model(model)
+        client, actual_model, llm_options = self._resolve_tool_model(model_override, options)
 
         # ChatGPT: use prompt-based tool calling adapter
         if actual_model.startswith("chatgpt:"):
             return self._think_with_tools_chatgpt(messages, tools, actual_model, client)
 
-        llm_options = options or {"temperature": 0.2, "num_predict": 4096}
-
-        try:
-            response = call_with_timeout(
-                lambda: client.chat(
-                    model=actual_model,
-                    messages=messages,
-                    tools=tools,
-                    options=llm_options,
-                ),
-                timeout=120,
-                default=None,
-            )
-        except Exception as e:
-            logger.error(f"[BRAIN] think_with_tools error: {e}")
-            return {"error": str(e)}
+        response, actual_model = self._tool_call_with_fallback(
+            client, actual_model, messages, llm_options, tools=tools,
+        )
 
         if response is None:
-            # Try fallback chain
-            chain = self._get_fallback_chain(actual_model)
-            for fallback_model in chain:
-                if fallback_model == actual_model:
-                    continue
-                try:
-                    fb_client, fb_actual = self._get_client_for_model(fallback_model)
-                    logger.info(f"[BRAIN] Tool-call fallback: {actual_model} -> {fb_actual}")
-                    response = call_with_timeout(
-                        lambda m=fb_actual, c=fb_client: c.chat(
-                            model=m, messages=messages, tools=tools, options=llm_options,
-                        ),
-                        timeout=120,
-                        default=None,
-                    )
-                    if response is not None:
-                        actual_model = fb_actual
-                        break
-                except Exception as e:
-                    logger.warning(f"[BRAIN] Fallback model {fb_actual} failed: {e}")
-                    continue
+            return {"error": _user_facing_llm_error()}
 
-        if response is None:
-            return {"error": "All models failed to respond"}
-
-        # Track tokens (handle both dict and Pydantic response objects)
-        input_tokens = _resp_get(response, "prompt_eval_count", 0) or 0
-        output_tokens = _resp_get(response, "eval_count", 0) or 0
-        self._record_tokens(actual_model, input_tokens, output_tokens)
+        input_tokens, output_tokens = self._extract_tool_response_tokens(response, actual_model)
 
         return {
             "message": _resp_get(response, "message", {}),
@@ -805,45 +918,24 @@ class OllamaBrain:
             }
             or {"error": str} on failure.
         """
-        model = model_override or self._model_override or Config.MODEL_CODE
-        client, actual_model = self._get_client_for_model(model)
+        client, actual_model, llm_options = self._resolve_tool_model(model_override)
 
         # Code agent uses same prompt-based approach for ChatGPT
         if actual_model.startswith("chatgpt:"):
             return self._think_with_tools_chatgpt(messages, [], actual_model, client)
 
-        llm_options = {"temperature": 0.2, "num_predict": 4096}
-
-        try:
-            response = call_with_timeout(
-                lambda: client.chat(
-                    model=actual_model,
-                    messages=messages,
-                    options=llm_options,
-                ),
-                timeout=120,
-                default=None,
-            )
-        except Exception as e:
-            logger.error(f"[BRAIN] react_step_code error: {e}")
-            return {"error": str(e)}
+        response, actual_model = self._tool_call_with_fallback(
+            client, actual_model, messages, llm_options, tools=None,
+        )
 
         if response is None:
             return {"error": "Model failed to respond (timeout)"}
 
         # Extract content from response
-        raw_msg = response.get("message", {}) if isinstance(response, dict) else getattr(response, "message", {})
-        if isinstance(raw_msg, dict):
-            content = raw_msg.get("content", "") or ""
-        else:
-            content = getattr(raw_msg, "content", "") or ""
+        content = _resp_content(response)
 
         # Track tokens
-        input_tokens = (response.get("prompt_eval_count", 0) if isinstance(response, dict)
-                        else getattr(response, "prompt_eval_count", 0)) or 0
-        output_tokens = (response.get("eval_count", 0) if isinstance(response, dict)
-                         else getattr(response, "eval_count", 0)) or 0
-        self._record_tokens(actual_model, input_tokens, output_tokens)
+        input_tokens, output_tokens = self._extract_tool_response_tokens(response, actual_model)
 
         # Parse: extract thought and code block
         from aura.core.code_agent import _extract_code_block, _extract_thought
@@ -874,22 +966,21 @@ class OllamaBrain:
         chunk_type: "content" | "tool_calls" | "done" | "error"
         data: str for content, list for tool_calls, dict for done/error
         """
-        model = model_override or self._model_override or Config.MODEL_CODE
-        client, actual_model = self._get_client_for_model(model)
+        client, actual_model, llm_options = self._resolve_tool_model(model_override, options)
 
         if actual_model.startswith("chatgpt:"):
             yield from self._think_with_tools_stream_chatgpt(messages, tools, actual_model, client)
             return
 
-        llm_options = options or {"temperature": 0.2, "num_predict": 4096}
-
         try:
-            stream = client.chat(
-                model=actual_model,
-                messages=messages,
-                tools=tools,
-                options=llm_options,
-                stream=True,
+            stream = self._retry_on_rate_limit(
+                lambda: client.chat(
+                    model=actual_model,
+                    messages=messages,
+                    tools=tools,
+                    options=llm_options,
+                    stream=True,
+                )
             )
 
             accumulated_content = ""
@@ -945,7 +1036,8 @@ class OllamaBrain:
             })
 
         except Exception as e:
-            yield ("error", {"error": str(e)})
+            error_msg = _user_facing_llm_error(e)
+            yield ("error", {"error": error_msg})
 
     def _warmup_models(self) -> None:
         """Warm up local Ollama models with a keep-alive ping. Skipped for cloud models."""
@@ -1222,18 +1314,42 @@ class OllamaBrain:
             self.conversation_history[-1].get("content", "") if self.conversation_history else None
         )
         history_for_title = snap_history if snap_history is not None else self.conversation_history
-        index = self._load_conversations_index()
-        for entry in index:
-            if entry["id"] == self._current_conversation_id:
-                entry["updated_at"] = int(time.time())
-                entry["message_count"] = msg_count
-                if last_content is not None:
-                    entry["preview"] = last_content[:100]
-                # Update title if still "New Chat" and we have messages
-                if entry["title"] == "New Chat" and msg_count > 0:
-                    entry["title"] = self._auto_title(history_for_title)
-                break
-        self._save_conversations_index(index)
+        # Update the in-memory cache under the lock (fast, no I/O),
+        # then flush to disk outside the lock via _BG_EXECUTOR.
+        # Lock ordering invariant: _history_lock -> _conversations_index_lock
+        with self._conversations_index_lock:
+            index = self._conversations_index_cache
+            if index is None:
+                # Cold start: need disk read (rare — only if cache was invalidated)
+                try:
+                    if self._conversations_index_file.exists():
+                        index = json.loads(
+                            self._conversations_index_file.read_text(encoding="utf-8")
+                        )
+                    else:
+                        index = []
+                except Exception:
+                    index = []
+            for entry in index:
+                if entry["id"] == self._current_conversation_id:
+                    entry["updated_at"] = int(time.time())
+                    entry["message_count"] = msg_count
+                    if last_content is not None:
+                        entry["preview"] = last_content[:100]
+                    # Update title if still "New Chat" and we have messages
+                    if entry["title"] == "New Chat" and msg_count > 0:
+                        entry["title"] = self._auto_title(history_for_title)
+                    break
+            self._conversations_index_cache = index
+
+        # Disk write outside lock, in background
+        _index_snapshot = json.dumps(index, indent=2, ensure_ascii=False)
+        def _bg_write_index(path, data):
+            try:
+                path.write_text(data, encoding="utf-8")
+            except IOError as e:
+                logger.warning(f"[BRAIN] Could not save conversations index: {e}")
+        _BG_EXECUTOR.submit(_bg_write_index, self._conversations_index_file, _index_snapshot)
 
     def create_conversation(self, title: Optional[str] = None) -> str:
         """Create a new conversation.
@@ -1278,6 +1394,19 @@ class OllamaBrain:
             result.append(entry_copy)
         return result
 
+    def _validate_conversation_path(self, conversation_id: str) -> Path | None:
+        """Validate that a conversation_id resolves to a safe path inside _conversations_dir.
+
+        Returns the resolved path if safe, or None if the ID is invalid or escapes.
+        """
+        try:
+            conv_dir = (self._conversations_dir / conversation_id).resolve()
+            conv_dir.relative_to(self._conversations_dir.resolve())
+        except (ValueError, OSError):
+            logger.warning(f"[BRAIN] Blocked path traversal attempt: {conversation_id!r}")
+            return None
+        return conv_dir
+
     def switch_conversation(self, conversation_id: str) -> bool:
         """Switch to a different conversation.
 
@@ -1290,8 +1419,8 @@ class OllamaBrain:
         if conversation_id == self._current_conversation_id:
             return True
 
-        conv_dir = self._conversations_dir / conversation_id
-        if not conv_dir.exists():
+        conv_dir = self._validate_conversation_path(conversation_id)
+        if conv_dir is None or not conv_dir.exists():
             logger.warning(f"[BRAIN] Conversation not found: {conversation_id}")
             return False
 
@@ -1317,8 +1446,13 @@ class OllamaBrain:
         Returns:
             True if deleted successfully
         """
-        conv_dir = self._conversations_dir / conversation_id
-        if not conv_dir.exists():
+        conv_dir = self._validate_conversation_path(conversation_id)
+        if conv_dir is None or not conv_dir.exists():
+            return False
+
+        # Safety: only delete directories that contain a history.json (our canary)
+        if not (conv_dir / "history.json").exists():
+            logger.warning(f"[BRAIN] Refusing to delete non-conversation dir: {conv_dir}")
             return False
 
         # Remove directory
@@ -1368,6 +1502,8 @@ class OllamaBrain:
         Returns:
             True if renamed successfully
         """
+        if self._validate_conversation_path(conversation_id) is None:
+            return False
         self._invalidate_conversation_cache()
         index = self._load_conversations_index()
         for entry in index:
@@ -1394,7 +1530,9 @@ class OllamaBrain:
         if conversation_id == self._current_conversation_id:
             return list(self.conversation_history)
 
-        conv_dir = self._conversations_dir / conversation_id
+        conv_dir = self._validate_conversation_path(conversation_id)
+        if conv_dir is None:
+            return []
         history_file = conv_dir / "history.json"
         if history_file.exists():
             try:
@@ -1405,7 +1543,7 @@ class OllamaBrain:
         return []
 
     def save_conversation_to_memory(self, conversation_id: Optional[str] = None) -> dict:
-        """Save a conversation's content to AURA's long-term memory (A-MEM).
+        """Save a conversation's content to AURA's long-term memory (UnifiedMemory).
 
         Args:
             conversation_id: ID of conversation to save, or None for current
@@ -1450,30 +1588,7 @@ class OllamaBrain:
 
         memory_content = f"Conversation: {title}\n\n{conversation_text}"
 
-        # Try to save to A-MEM
-        primary_error: Optional[str] = None
-        try:
-            from aura.tools.amem import get_amem
-            amem = get_amem()
-            note = amem.add(
-                content=memory_content,
-                tags=["conversation", "chat_history", title.lower().replace(" ", "_")[:30]],
-                category="conversation",
-                source="conversation_save",
-                importance=0.6,
-            )
-            logger.info(f"[BRAIN] Saved conversation {conv_id} to A-MEM (note: {note.id})")
-            return {
-                "success": True,
-                "note_id": note.id,
-                "message_count": len(messages),
-                "title": title,
-            }
-        except Exception as e:
-            primary_error = str(e)
-            logger.error(f"[BRAIN] Failed to save conversation to memory: {e}")
-
-        # Fallback: UnifiedMemory (independent SQLite backend)
+        # Save to UnifiedMemory (primary — A-MEM removed 2026-03-22)
         try:
             from aura.memory.unified_memory import get_unified_memory
             umem = get_unified_memory()
@@ -1483,17 +1598,16 @@ class OllamaBrain:
                 importance=0.6,
                 tags=["conversation", "chat_history"],
             )
-            logger.info(f"[BRAIN] Saved conversation {conv_id} via UnifiedMemory fallback")
+            logger.info(f"[BRAIN] Saved conversation {conv_id} to UnifiedMemory")
             return {
                 "success": True,
                 "note_id": result.get("store", ""),
-                "fallback": "unified_memory",
                 "message_count": len(messages),
                 "title": title,
             }
-        except Exception as e2:
-            logger.error(f"[BRAIN] UnifiedMemory fallback also failed: {e2}")
-            return {"success": False, "error": f"Memory save failed: {primary_error}; {e2}"}
+        except Exception as e:
+            logger.error(f"[BRAIN] Failed to save conversation: {e}")
+            return {"success": False, "error": f"Memory save failed: {e}"}
 
     def clear_history(self):
         """Clear conversation history to free memory."""
@@ -1532,6 +1646,7 @@ class OllamaBrain:
 
         No history, no system prompt injection — just prompt -> response.
         Wrapped in call_with_timeout to prevent thread pool starvation.
+        Skips if user inference is active to avoid contention.
 
         Args:
             prompt: The prompt to send
@@ -1540,6 +1655,10 @@ class OllamaBrain:
         Returns:
             Generated response string
         """
+        # Yield to user inference
+        if self._user_inference_active.is_set():
+            logger.debug("[BRAIN] _quick_generate skipped — user inference active")
+            return ""
         fast_model = Config.MODEL_FAST
         try:
             client, actual_model = self._get_client_for_model(fast_model)
@@ -1628,24 +1747,52 @@ class OllamaBrain:
         logger.info(f"[BRAIN] Compacted {len(old_messages)} messages into summary, kept {len(recent_messages)} recent")
         return summary
 
-    def _check_auto_reset(self):
-        """Check if auto-reset is needed and perform it.
+    def _retry_on_rate_limit(self, func, max_retries=3, base_delay=2.0):
+        """Retry a function call with exponential backoff on rate limit (429) errors."""
+        for attempt in range(max_retries + 1):
+            try:
+                return func()
+            except Exception as e:
+                if attempt < max_retries and _is_rate_limit_error(e):
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(f"[BRAIN] Rate limited (attempt {attempt+1}/{max_retries}), retrying in {delay:.1f}s")
+                    time.sleep(delay)
+                else:
+                    raise
 
-        Instead of just resetting the counter, compacts history to preserve
-        context. Falls back to simple reset if compaction fails.
+    def _get_context_limit(self) -> int:
+        """Return the context window size for the current model."""
+        model = self._last_model_used or self.model or Config.MODEL_NAME
+        return get_context_window(model)
+
+    def _check_auto_reset(self):
+        """Check if token-based auto-compaction is needed and perform it.
+
+        Triggers background compaction when conversation history exceeds
+        70% of the model's context window. This replaced the old count-based
+        heuristic (query_count >= 15) which was a poor proxy for actual
+        context usage.
         """
         with self._history_lock:
             self._query_count += 1
             self._total_query_count += 1  # Total count never resets
-            needs_compact = self._query_count >= self.AUTO_RESET_INTERVAL
-            if needs_compact:
-                self._query_count = 0
-        if not needs_compact:
+            history_snapshot = list(self.conversation_history)
+
+        # Token-based compaction trigger: compact at 70% of context window
+        history_tokens = estimate_messages_tokens(history_snapshot)
+        context_limit = self._get_context_limit()
+        threshold = int(context_limit * 0.7)
+
+        if history_tokens <= threshold:
             return
-        logger.info(f"[BRAIN] Auto-compact triggered (total: {self._total_query_count})")
-        # Submit compaction to background (it handles its own save on completion)
+
+        logger.info(
+            "[BRAIN] Auto-compact triggered: %d tokens > %d (70%% of %d) (total queries: %d)",
+            history_tokens, threshold, context_limit, self._total_query_count,
+        )
+        # Submit compaction to background executor (non-blocking)
         try:
-            self.compact_history()
+            _BG_EXECUTOR.submit(self.compact_history)
         except Exception as e:
             logger.warning(f"[BRAIN] Auto-compact submission failed: {e}")
 
@@ -1786,6 +1933,48 @@ class OllamaBrain:
             "repeat_penalty": adjusted_repeat_penalty,
         }
 
+    def _get_adaptive_timeout(self) -> int:
+        """Compute adaptive timeout from recent LLM latency history.
+
+        Uses p95 of recent latencies * 1.5, clamped to [45, 120].
+        Falls back to 60s if fewer than 10 samples.
+        """
+        with self._latency_lock:
+            if len(self._recent_latencies) < 10:
+                return LLM_TIMEOUT  # default 60s
+            sorted_latencies = sorted(self._recent_latencies)
+            p95_idx = int(len(sorted_latencies) * 0.95)
+            p95 = sorted_latencies[min(p95_idx, len(sorted_latencies) - 1)]
+        return max(45, min(120, int(p95 * 1.5)))
+
+    def _record_latency(self, elapsed: float) -> None:
+        """Record a successful LLM call latency for adaptive timeout."""
+        with self._latency_lock:
+            self._recent_latencies.append(elapsed)
+
+    def _check_think_circuit_breaker(self) -> Optional[str]:
+        """Check if think() circuit breaker is open.
+
+        Returns a degraded response string if the circuit is open and cooldown
+        hasn't elapsed, or None if the circuit is closed (proceed normally).
+        """
+        with self._cb_lock:
+            if self._consecutive_think_failures >= self._think_cb_threshold:
+                elapsed = time.time() - self._think_circuit_open_at
+                if elapsed < self._think_cb_cooldown:
+                    remaining = int(self._think_cb_cooldown - elapsed)
+                    logger.warning(
+                        f"[BRAIN] Think circuit breaker OPEN — {self._consecutive_think_failures} "
+                        f"consecutive failures, {remaining}s cooldown remaining"
+                    )
+                    return (
+                        "I'm experiencing connectivity issues with the language model. "
+                        f"Retrying in ~{remaining}s. Please try again shortly."
+                    )
+                # Cooldown elapsed — allow one attempt (half-open state)
+                logger.info("[BRAIN] Think circuit breaker half-open — allowing retry")
+        return None
+
     @staticmethod
     def _build_budget_instruction(budget: int) -> str:
         return f"\n\n[Response budget: ~{budget} tokens. Be appropriately concise.]"
@@ -1894,6 +2083,50 @@ class OllamaBrain:
         except Exception as e:
             logger.debug(f"[BRAIN] Code context retrieval failed: {e}")
 
+        # === PROGRESSIVE SKILL CATALOG ===
+        # Show available skills so the LLM knows it can load full procedures on demand.
+        # skill_list_summaries() comes from SkillManagerMixin — may not be present yet.
+        if len(full) < MAX_SYSTEM_PROMPT_CHARS - 1500:
+            try:
+                if hasattr(self, 'skill_list_summaries') and callable(self.skill_list_summaries):
+                    skill_summaries = self.skill_list_summaries()
+                    if skill_summaries:
+                        skill_lines = "\n".join(
+                            f"- {s['name']}: {s.get('description', 'no description')}"
+                            for s in skill_summaries
+                        )
+                        # Cap skill section to 500 chars to stay within budget
+                        if len(skill_lines) > 500:
+                            skill_lines = skill_lines[:500].rsplit("\n", 1)[0]
+                        full = f"{full}\n\n[Available Skills - use load_skill tool to load full procedures]\n{skill_lines}"
+            except Exception as e:
+                logger.debug(f"[BRAIN] Skill catalog injection failed: {e}")
+
+        # === DEFERRED TOOL LISTING ===
+        # Show tools that exist but aren't loaded yet — LLM can activate via tool_search.
+        if len(full) < MAX_SYSTEM_PROMPT_CHARS - 1000:
+            try:
+                from aura.tools.loader import get_deferred_tool_list
+                deferred_tools = get_deferred_tool_list()
+                if deferred_tools:
+                    tool_lines = "\n".join(
+                        f"- {t['name']}: {t.get('description', 'no description')}"
+                        for t in deferred_tools
+                    )
+                    # Cap deferred tools section to 800 chars
+                    if len(tool_lines) > 800:
+                        tool_lines = tool_lines[:800].rsplit("\n", 1)[0]
+                    full = f"{full}\n\n[Additional Tools - use tool_search to find and activate]\n{tool_lines}"
+            except ImportError:
+                logger.debug("[BRAIN] aura.tools.loader.get_deferred_tool_list not available yet")
+            except Exception as e:
+                logger.debug(f"[BRAIN] Deferred tool listing failed: {e}")
+
+        # One-liner instruction for skill/tool discovery (always added if space permits)
+        hint = "Use load_skill or tool_search when a task matches a listed skill or requires a specialized tool."
+        if len(full) + len(hint) + 4 < MAX_SYSTEM_PROMPT_CHARS:
+            full = f"{full}\n\n{hint}"
+
         # Apply emotional style prompt — behavioral directives from ALMA
         # The style prompt already encodes verbosity/formality/enthusiasm as behavior
         if tone_modifier:
@@ -1911,14 +2144,14 @@ class OllamaBrain:
         # Skip if already near budget cap
         if len(prompt) > 25 and len(full) < MAX_SYSTEM_PROMPT_CHARS - 500:
             try:
-                if hasattr(self, '_episodic_memory') and self._episodic_memory:
-                    memories = self._episodic_memory.quick_recall(prompt, limit=3)
-                    if memories:
-                        memory_ctx = "\n\n## Relevant Past Context\n"
-                        for m in memories:
-                            ts = m.get("timestamp", "")[:10] if m.get("timestamp") else ""
-                            memory_ctx += f"- [{ts}] {m.get('title', '')}: {m.get('summary', '')}\n"
-                        full = f"{full}{memory_ctx}"
+                from aura.memory.unified_memory import get_unified_memory
+                um_results = get_unified_memory().query(prompt, k=3)
+                if um_results:
+                    memory_ctx = "\n\n## Relevant Past Context\n"
+                    for m in um_results:
+                        ts = m.metadata.get("created_at", "")[:10] if m.metadata.get("created_at") else ""
+                        memory_ctx += f"- [{ts}] {m.content[:120]}\n"
+                    full = f"{full}{memory_ctx}"
             except Exception as e:
                 logger.debug(f"[Brain] non-critical: {e}")
         budget = self._classify_budget(prompt)
@@ -1936,6 +2169,149 @@ class OllamaBrain:
             full += "\n\n[System context truncated for length]"
 
         return full
+
+    # -----------------------------------------------------------------
+    # Shared setup / teardown for think() and think_stream()
+    # -----------------------------------------------------------------
+
+    def _prepare_chat_think(
+        self,
+        prompt: str,
+        system_prompt: Optional[str],
+        use_history: bool,
+        task_type: Optional[TaskType],
+        tone_modifier: Optional[str],
+        model_override: Optional[str],
+    ) -> dict:
+        """Shared pre-LLM setup for think() and think_stream().
+
+        Performs: auto-reset, ALMA processing, model selection, system prompt
+        building, auto-compaction, user_inference_active flag set.
+
+        Returns a context dict with all values needed by the caller:
+            model, full_system_prompt, task_type
+        """
+        self._check_auto_reset()
+
+        # ALMA: Process user message for emotional triggers
+        if self._alma_enabled and use_history:
+            try:
+                process_user_message(prompt)
+            except Exception as e:
+                logger.debug(f"[BRAIN] ALMA message processing failed: {e}")
+
+        # Model selection
+        if model_override:
+            logger.info(f"[BRAIN] Using explicit model override: {model_override}")
+            model = model_override
+        else:
+            model = self._select_model(prompt, task_type)
+            model = self._routing_stats_override(model, task_type)
+        self._last_model_used = model
+
+        full_system_prompt = self._build_full_system_prompt(prompt, system_prompt, tone_modifier)
+
+        # Note: auto-compaction is handled by _check_auto_reset() above (via background executor).
+        # A duplicate synchronous compaction was removed here to prevent double triggers.
+
+        self._user_inference_active.set()
+
+        return {
+            "model": model,
+            "full_system_prompt": full_system_prompt,
+            "task_type": task_type,
+        }
+
+    def _build_chat_messages(
+        self,
+        prompt: str,
+        full_system_prompt: str,
+        use_history: bool,
+    ) -> list:
+        """Build the message list for think()/think_stream() inside _think_lock.
+
+        Returns:
+            List of message dicts ready for the LLM call.
+        """
+        messages = []
+        if full_system_prompt:
+            messages.append({"role": "system", "content": full_system_prompt})
+        if use_history:
+            with self._history_lock:
+                messages.extend(self.conversation_history[-self._max_history:])
+        messages.append({"role": "user", "content": prompt})
+        return messages
+
+    def _resolve_chat_client(self, model: str) -> tuple:
+        """Resolve client and actual model, record thinking panel event.
+
+        Returns:
+            (client, actual_model) tuple
+        """
+        client, actual_model = self._get_client_for_model(model)
+        if actual_model != model:
+            logger.info(f"[BRAIN] Model fallback: {model} -> {actual_model}")
+        self._last_model_used = actual_model
+
+        # Record real thinking — LLM inference starting
+        try:
+            from api.routes.thinking import get_manager as get_thinking_manager
+            tm = get_thinking_manager()
+            tm.record_real_thought("formulating", f"reasoning with {actual_model}...", intensity=0.7, source="brain")
+        except Exception as e:
+            logger.debug(f"[Brain] non-critical: {e}")
+
+        return client, actual_model
+
+    def _update_history_and_cleanup(
+        self,
+        prompt: str,
+        assistant_message: str,
+        actual_model: str,
+        use_history: bool,
+    ) -> list:
+        """Shared post-LLM teardown for think() and think_stream().
+
+        Updates conversation history, saves to disk, triggers self-improvement
+        and world model extraction in background.
+
+        Returns:
+            recent messages list (for world model extraction).
+        """
+        with self._history_lock:
+            if use_history:
+                self.conversation_history.append({"role": "user", "content": prompt})
+                self.conversation_history.append({"role": "assistant", "content": assistant_message})
+                if len(self.conversation_history) > self._max_history:
+                    self.conversation_history = self.conversation_history[-self._max_history:]
+                recent = list(self.conversation_history[-6:])
+                _history_snapshot = list(self.conversation_history)
+                _qc = self._query_count
+                _tqc = self._total_query_count
+                _hpath = self._history_file
+            else:
+                recent = [
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "content": assistant_message},
+                ]
+                _history_snapshot = None
+
+        # Disk I/O outside the lock to avoid serializing concurrent requests
+        if _history_snapshot is not None:
+            self._save_history_snapshot(_history_snapshot, _qc, _tqc, history_path=_hpath)
+
+        # Self-improvement: record interaction outcome (background)
+        try:
+            from aura.consciousness.self_improvement import get_self_improvement_engine
+            _BG_EXECUTOR.submit(
+                get_self_improvement_engine().record_chat_outcome,
+                prompt, assistant_message, actual_model
+            )
+        except Exception as e:
+            logger.debug(f"[Brain] non-critical: {e}")
+
+        self._trigger_world_model_extraction(list(recent), _BG_EXECUTOR)
+        return recent
 
     def think(
         self,
@@ -1956,183 +2332,143 @@ class OllamaBrain:
             tone_modifier: Optional emotional tone modifier from EvoEmo/ALMA
             model_override: Explicit model to use (bypasses all routing and stats)
         """
-        # Check if auto-reset is needed to prevent slowdown
-        self._check_auto_reset()
+        # Circuit breaker: if too many consecutive failures, return degraded response
+        cb_response = self._check_think_circuit_breaker()
+        if cb_response is not None:
+            return cb_response
 
-        # ALMA: Process user message for emotional triggers
-        if self._alma_enabled and use_history:
-            try:
-                process_user_message(prompt)
-            except Exception as e:
-                logger.debug(f"[BRAIN] ALMA message processing failed: {e}")
+        ctx = self._prepare_chat_think(
+            prompt, system_prompt, use_history, task_type, tone_modifier, model_override,
+        )
+        model = ctx["model"]
+        full_system_prompt = ctx["full_system_prompt"]
 
-        # Use explicit model_override if provided — user's choice is final,
-        # no routing stats, no auto-override, no fallback chain selection
-        if model_override:
-            logger.info(f"[BRAIN] Using explicit model override: {model_override}")
-            model = model_override
-        else:
-            # Select model based on task type, then apply outcome-aware routing overlay
-            model = self._select_model(prompt, task_type)
-            model = self._routing_stats_override(model, task_type)
-        self._last_model_used = model
+        try:
+            with self._think_lock:
+                messages = self._build_chat_messages(prompt, full_system_prompt, use_history)
 
-        full_system_prompt = self._build_full_system_prompt(prompt, system_prompt, tone_modifier)
-
-        # Auto-compact: cloud models have 128K-256K context, compact at ~60% (~150 msgs)
-        if use_history:
-            with self._history_lock:
-                _needs_compact = len(self.conversation_history) > 150
-            if _needs_compact:
+                # Taint tracking: scan user messages for secrets (OpenFang-inspired)
                 try:
-                    summary = self.compact_history()
-                    if summary:
-                        logger.info(f"[BRAIN] Auto-compacted history → {len(self.conversation_history)} msgs remain")
+                    from aura.security.taint_tracker import get_tracker
+                    tracker = get_tracker()
+                    taint_matches, _ = tracker.check_and_track(prompt, session_id="brain")
+                    if taint_matches:
+                        logger.warning(
+                            f"[BRAIN] Detected {len(taint_matches)} secret(s) in user message — "
+                            f"taint level tracked for session"
+                        )
+                except Exception as e:
+                    logger.warning(f"[BRAIN] Taint tracker failed — secrets may pass through undetected: {e}")
+
+                # Adaptive timeout based on recent latency history
+                neuro = _get_neuromodulator_levels()
+                adjusted_timeout = self._get_adaptive_timeout()
+                _llm_start_ts = time.time()
+                logger.debug(f"[BRAIN] Calling {model} with adaptive timeout={adjusted_timeout}s")
+
+                client, actual_model = self._resolve_chat_client(model)
+                llm_options = self._build_neuro_llm_options(prompt, neuro)
+
+                # Record neuromodulator influence on thinking panel
+                try:
+                    from api.routes.thinking import record_thought
+                    neuro_effects = []
+                    if abs(neuro["dopamine"] - 0.5) > 0.1:
+                        neuro_effects.append(f"DA={'high' if neuro['dopamine']>0.5 else 'low'}")
+                    if abs(neuro["serotonin"] - 0.5) > 0.1:
+                        neuro_effects.append(f"5HT={'high' if neuro['serotonin']>0.5 else 'low'}")
+                    if abs(neuro["norepinephrine"] - 0.5) > 0.1:
+                        neuro_effects.append(f"NE={'high' if neuro['norepinephrine']>0.5 else 'low'}")
+                    if neuro_effects:
+                        record_thought(
+                            "observing",
+                            f"neuromodulators influencing response: {', '.join(neuro_effects)}",
+                            0.4, "emotion"
+                        )
                 except Exception as e:
                     logger.debug(f"[Brain] non-critical: {e}")
-        messages = []
-        if full_system_prompt:
-            messages.append({"role": "system", "content": full_system_prompt})
-        if use_history:
-            with self._history_lock:
-                messages.extend(self.conversation_history[-self._max_history:])
-        messages.append({"role": "user", "content": prompt})
 
-        # Neuromodulator: Serotonin modulates patience (timeout)
-        # High serotonin = more patience = longer timeout; low = impatient = shorter
-        neuro = _get_neuromodulator_levels()
-        adjusted_timeout = max(45, int(_neuro_scale(LLM_TIMEOUT, neuro["serotonin"], sensitivity=0.3)))
-        _llm_start_ts = time.time()  # Track LLM latency for routing stats
-        logger.debug(f"[BRAIN] Calling {model} with timeout={adjusted_timeout}s (serotonin={neuro['serotonin']:.2f})")
-
-        # Get appropriate client (local or cloud) - may return fallback model
-        client, actual_model = self._get_client_for_model(model)
-        if actual_model != model:
-            logger.info(f"[BRAIN] Model fallback: {model} -> {actual_model}")
-
-        # Update last model used to reflect ACTUAL model, not requested
-        self._last_model_used = actual_model
-
-        # === PHASE 1: Record real thinking — LLM inference starting ===
-        try:
-            from api.routes.thinking import get_manager as get_thinking_manager
-            tm = get_thinking_manager()
-            tm.record_real_thought("formulating", f"reasoning with {actual_model}...", intensity=0.7, source="brain")
-        except Exception as e:
-            logger.debug(f"[Brain] non-critical: {e}")
-        llm_options = self._build_neuro_llm_options(prompt, neuro)
-
-        # Record neuromodulator influence on thinking panel
-        try:
-            from api.routes.thinking import record_thought
-            neuro_effects = []
-            if abs(neuro["dopamine"] - 0.5) > 0.1:
-                neuro_effects.append(f"DA={'high' if neuro['dopamine']>0.5 else 'low'}")
-            if abs(neuro["serotonin"] - 0.5) > 0.1:
-                neuro_effects.append(f"5HT={'high' if neuro['serotonin']>0.5 else 'low'}")
-            if abs(neuro["norepinephrine"] - 0.5) > 0.1:
-                neuro_effects.append(f"NE={'high' if neuro['norepinephrine']>0.5 else 'low'}")
-            if neuro_effects:
-                record_thought(
-                    "observing",
-                    f"neuromodulators influencing response: {', '.join(neuro_effects)}",
-                    0.4, "emotion"
+                # Call with timeout protection (adaptive latency-based) + 429 retry
+                response = call_with_timeout(
+                    lambda: self._retry_on_rate_limit(
+                        lambda: client.chat(model=actual_model, messages=messages, options=llm_options)
+                    ),
+                    timeout=adjusted_timeout + 20,
+                    default=None
                 )
-        except Exception as e:
-            logger.debug(f"[Brain] non-critical: {e}")
-        # Call with timeout protection (serotonin-modulated)
-        response = call_with_timeout(
-            lambda: client.chat(model=actual_model, messages=messages, options=llm_options),
-            timeout=adjusted_timeout,
-            default=None
-        )
 
-        if response is None:
-            # ===== Phase 4 Fix 4B: Try fallback models in chain =====
-            chain = self._get_fallback_chain(actual_model)
-            for fallback_model in chain:
-                if fallback_model == actual_model:
-                    continue
-                try:
-                    fb_client, fb_actual = self._get_client_for_model(fallback_model)
-                    logger.info(f"[BRAIN] Fallback attempt: {actual_model} → {fb_actual}")
-                    response = call_with_timeout(
-                        lambda m=fb_actual, c=fb_client: c.chat(model=m, messages=messages, options=llm_options),
-                        timeout=adjusted_timeout,
-                        default=None,
+                if response is None:
+                    chain = self._get_fallback_chain(actual_model)
+                    for fallback_model in chain:
+                        if fallback_model == actual_model:
+                            continue
+                        try:
+                            fb_client, fb_actual = self._get_client_for_model(fallback_model)
+                            logger.info(f"[BRAIN] Fallback attempt: {actual_model} -> {fb_actual}")
+                            response = call_with_timeout(
+                                lambda m=fb_actual, c=fb_client: c.chat(model=m, messages=messages, options=llm_options),
+                                timeout=adjusted_timeout,
+                                default=None,
+                            )
+                            if response is not None:
+                                actual_model = fb_actual
+                                self._last_model_used = actual_model
+                                logger.info(f"[BRAIN] Fallback succeeded with: {actual_model}")
+                                break
+                        except Exception as e:
+                            logger.warning(f"[BRAIN] Fallback model failed: {e}")
+                            continue
+
+                if response is None:
+                    logger.warning(f"[BRAIN] All models in chain failed, returning error message")
+                    with self._cb_lock:
+                        self._consecutive_think_failures += 1
+                        if self._consecutive_think_failures >= self._think_cb_threshold:
+                            self._think_circuit_open_at = time.time()
+                            logger.warning(
+                                f"[BRAIN] Think circuit breaker OPENED after "
+                                f"{self._consecutive_think_failures} consecutive failures — "
+                                f"cooldown {self._think_cb_cooldown}s"
+                            )
+                    _BG_EXECUTOR.submit(
+                        self._record_routing_outcome, actual_model, task_type, False,
+                        (time.time() - _llm_start_ts) * 1000
                     )
-                    if response is not None:
-                        actual_model = fb_actual
-                        self._last_model_used = actual_model
-                        logger.info(f"[BRAIN] Fallback succeeded with: {actual_model}")
-                        break
-                except Exception as e:
-                    logger.warning(f"[BRAIN] Fallback model failed: {e}")
-                    continue
+                    return _user_facing_llm_error()
 
-        if response is None:
-            logger.warning(f"[BRAIN] All models in chain failed, returning error message")
-            # Record failure to routing stats
-            _BG_EXECUTOR.submit(
-                self._record_routing_outcome, actual_model, task_type, False,
-                (time.time() - _llm_start_ts) * 1000
-            )
-            return "I'm having trouble processing that right now. Please try again."
+                assistant_message = _resp_content(response)
 
-        assistant_message = _resp_content(response)
+                # Record latency for adaptive timeout and reset circuit breaker
+                _llm_elapsed = time.time() - _llm_start_ts
+                self._record_latency(_llm_elapsed)
+                with self._cb_lock:
+                    self._consecutive_think_failures = 0
 
-        # Record routing success to stats store (background, non-blocking)
-        _BG_EXECUTOR.submit(
-            self._record_routing_outcome, actual_model, task_type, True,
-            (time.time() - _llm_start_ts) * 1000
-        )
+                _BG_EXECUTOR.submit(
+                    self._record_routing_outcome, actual_model, task_type, True,
+                    _llm_elapsed * 1000
+                )
 
-        # ===== Phase 4 Fix 4D: Track tokens and cost =====
-        _in_tok = _resp_get(response, "prompt_eval_count", 0) or 0
-        _out_tok = _resp_get(response, "eval_count", 0) or 0
-        if _in_tok or _out_tok:
-            self._record_tokens(actual_model, _in_tok, _out_tok)
+                # Track tokens and cost
+                _in_tok = _resp_get(response, "prompt_eval_count", 0) or 0
+                _out_tok = _resp_get(response, "eval_count", 0) or 0
+                if _in_tok or _out_tok:
+                    self._record_tokens(actual_model, _in_tok, _out_tok)
 
-        # ===== Phase 4 Fix 4C: Compaction notice =====
-        if self._compaction_pending:
-            self._compaction_pending = False
-            assistant_message = (
-                "_[Context compacted — older messages summarized to preserve memory]_\n\n"
-                + assistant_message
-            )
+                # Compaction notice
+                if self._compaction_pending:
+                    self._compaction_pending = False
+                    assistant_message = (
+                        "_[Context compacted — older messages summarized to preserve memory]_\n\n"
+                        + assistant_message
+                    )
 
-        if use_history:
-            with self._history_lock:
-                self.conversation_history.append({"role": "user", "content": prompt})
-                self.conversation_history.append({"role": "assistant", "content": assistant_message})
-                # Enforce history limit (mirrors think_stream behaviour)
-                if len(self.conversation_history) > self._max_history:
-                    self.conversation_history = self.conversation_history[-self._max_history:]
-                recent = list(self.conversation_history[-6:])
-                _history_snapshot = list(self.conversation_history)
-                _qc = self._query_count
-                _tqc = self._total_query_count
-                _hpath = self._history_file
-            # Disk I/O outside the lock to avoid serializing concurrent requests
-            self._save_history_snapshot(_history_snapshot, _qc, _tqc, history_path=_hpath)
-        else:
-            recent = [
-                {"role": "user", "content": prompt},
-                {"role": "assistant", "content": assistant_message},
-            ]
+                self._update_history_and_cleanup(prompt, assistant_message, actual_model, use_history)
+            # _think_lock released here
 
-        # === SELF-IMPROVEMENT: Record interaction outcome ===
-        try:
-            from aura.consciousness.self_improvement import get_self_improvement_engine
-            _BG_EXECUTOR.submit(
-                get_self_improvement_engine().record_chat_outcome,
-                prompt, assistant_message, actual_model
-            )
-        except Exception as e:
-            logger.debug(f"[Brain] non-critical: {e}")
-        self._trigger_world_model_extraction(list(recent), _BG_EXECUTOR)
-
-        return assistant_message
+            return assistant_message
+        finally:
+            self._user_inference_active.clear()
 
     def think_stream(
         self,
@@ -2158,162 +2494,110 @@ class OllamaBrain:
         Yields:
             str: Response chunks as they are generated
         """
-        # Check if auto-reset is needed to prevent slowdown
-        self._check_auto_reset()
+        ctx = self._prepare_chat_think(
+            prompt, system_prompt, use_history, task_type, tone_modifier, model_override,
+        )
+        model = ctx["model"]
+        full_system_prompt = ctx["full_system_prompt"]
 
-        # ALMA: Process user message for emotional triggers
-        if self._alma_enabled and use_history:
-            try:
-                process_user_message(prompt)
-            except Exception as e:
-                logger.debug(f"[BRAIN] ALMA message processing failed: {e}")
-
-        # Use explicit model_override if provided (thread-safe, no shared state)
-        if model_override:
-            logger.info(f"[BRAIN] Using explicit model override: {model_override}")
-            model = model_override
-        else:
-            # Select model based on task type, then apply outcome-aware routing overlay
-            model = self._select_model(prompt, task_type)
-            model = self._routing_stats_override(model, task_type)
-        self._last_model_used = model
-
-        full_system_prompt = self._build_full_system_prompt(prompt, system_prompt, tone_modifier)
-
-        # Auto-compact: cloud models have 128K-256K context, compact at ~60% (~150 msgs)
-        if use_history:
-            with self._history_lock:
-                _needs_compact = len(self.conversation_history) > 150
-            if _needs_compact:
-                try:
-                    summary = self.compact_history()
-                    if summary:
-                        logger.info(f"[BRAIN] Auto-compacted history → {len(self.conversation_history)} msgs remain")
-                except Exception as e:
-                    logger.debug(f"[Brain] non-critical: {e}")
-        messages = []
-        if full_system_prompt:
-            messages.append({"role": "system", "content": full_system_prompt})
-        if use_history:
-            with self._history_lock:
-                messages.extend(self.conversation_history[-self._max_history:])
-        messages.append({"role": "user", "content": prompt})
-
-        logger.debug(f"[BRAIN] Streaming call to {model}")
-
-        # Get appropriate client (local or cloud) - may return fallback model
-        client, actual_model = self._get_client_for_model(model)
-        if actual_model != model:
-            logger.info(f"[BRAIN] Model fallback: {model} -> {actual_model}")
-
-        # Update last model used to reflect ACTUAL model, not requested
-        self._last_model_used = actual_model
-
-        # === PHASE 1: Record real thinking — streaming inference starting ===
         try:
-            from api.routes.thinking import get_manager as get_thinking_manager
-            tm = get_thinking_manager()
-            tm.record_real_thought("formulating", f"streaming response with {actual_model}...", intensity=0.7, source="brain")
-        except Exception as e:
-            logger.debug(f"[Brain] non-critical: {e}")
-        neuro = _get_neuromodulator_levels()
-        llm_options = self._build_neuro_llm_options(prompt, neuro)
+            # Acquire _think_lock briefly to snapshot history and prepare messages.
+            # Cannot hold through the streaming generator, but this prevents a
+            # concurrent think() from reading stale history while we're mid-stream.
+            with self._think_lock:
+                messages = self._build_chat_messages(prompt, full_system_prompt, use_history)
+                logger.debug(f"[BRAIN] Streaming call to {model}")
+                client, actual_model = self._resolve_chat_client(model)
+                neuro = _get_neuromodulator_levels()
+                llm_options = self._build_neuro_llm_options(prompt, neuro)
+            # _think_lock released — streaming proceeds without blocking other callers
 
-        full_response = ""
-        _all_models_failed = False
+            full_response = ""
+            _all_models_failed = False
 
-        # ===== Phase 4 Fix 4C: Compaction notice on streaming path =====
-        if self._compaction_pending:
-            self._compaction_pending = False
-            notice = "_[Context compacted — older messages summarized to preserve memory]_\n\n"
-            yield notice
-            full_response += notice
+            # Compaction notice on streaming path
+            if self._compaction_pending:
+                self._compaction_pending = False
+                notice = "_[Context compacted — older messages summarized to preserve memory]_\n\n"
+                yield notice
+                full_response += notice
 
-        # ===== Phase 4 Fix 4B+4D: Streaming with fallback chain + token tracking =====
-        _stream_in_tok = 0
-        _stream_out_tok = 0
-        _models_to_try = [actual_model] + [
-            m for m in self._get_fallback_chain(actual_model) if m != actual_model
-        ]
-
-        _STREAM_STALE_TIMEOUT = 90  # seconds without a chunk → abort
-
-        for _try_model in _models_to_try:
-            try:
-                _try_client, _try_actual = self._get_client_for_model(_try_model)
-                if _try_model != _models_to_try[0]:
-                    logger.info(f"[BRAIN] Stream fallback: {actual_model} → {_try_actual}")
-                stream = _try_client.chat(model=_try_actual, messages=messages, stream=True, options=llm_options)
-                _last_chunk_time = time.time()
-                _stream_timed_out = False
-                for chunk in stream:
-                    now = time.time()
-                    if now - _last_chunk_time > _STREAM_STALE_TIMEOUT:
-                        logger.warning(f"[BRAIN] Stream stale for {_STREAM_STALE_TIMEOUT}s, aborting")
-                        _stream_timed_out = True
-                        break
-                    _last_chunk_time = now
-                    content = _resp_content(chunk) if chunk else ""
-                    if content:
-                        full_response += content
-                        yield content
-                    # Extract token counts from final done chunk
-                    if _resp_get(chunk, "done", False):
-                        _stream_in_tok = _resp_get(chunk, "prompt_eval_count", 0) or 0
-                        _stream_out_tok = _resp_get(chunk, "eval_count", 0) or 0
-                if _stream_timed_out:
-                    raise TimeoutError(f"Stream stale for {_STREAM_STALE_TIMEOUT}s")
-                actual_model = _try_actual
-                self._last_model_used = actual_model
-                break
-            except Exception as e:
-                if _try_model == _models_to_try[-1]:
-                    import traceback
-                    _tb = traceback.format_exc()
-                    logger.error(f"[BRAIN] All stream models failed: {e}\n{_tb}")
-                    fallback = "I'm having trouble processing that right now. Please try again."
-                    yield fallback
-                    full_response += fallback
-                    _all_models_failed = True
-                else:
-                    logger.warning(f"[BRAIN] Stream model {_try_model} failed, trying next: {e}")
-                continue
-
-        if _stream_in_tok or _stream_out_tok:
-            self._record_tokens(actual_model, _stream_in_tok, _stream_out_tok)
-
-        # Update history after streaming completes (skip if all models failed —
-        # don't pollute conversation history with the error fallback string)
-        if use_history and not _all_models_failed:
-            with self._history_lock:
-                self.conversation_history.append({"role": "user", "content": prompt})
-                self.conversation_history.append({"role": "assistant", "content": full_response})
-                # Enforce history limit
-                if len(self.conversation_history) > self._max_history:
-                    self.conversation_history = self.conversation_history[-self._max_history:]
-                recent = list(self.conversation_history[-6:])
-                _history_snapshot = list(self.conversation_history)
-                _qc = self._query_count
-                _tqc = self._total_query_count
-                _hpath = self._history_file
-            # Disk I/O outside the lock to avoid serializing concurrent requests
-            self._save_history_snapshot(_history_snapshot, _qc, _tqc, history_path=_hpath)
-        else:
-            recent = [
-                {"role": "user", "content": prompt},
-                {"role": "assistant", "content": full_response},
+            # Streaming with fallback chain + token tracking
+            _stream_in_tok = 0
+            _stream_out_tok = 0
+            _models_to_try = [actual_model] + [
+                m for m in self._get_fallback_chain(actual_model) if m != actual_model
             ]
 
-        # === SELF-IMPROVEMENT: Record interaction outcome ===
-        try:
-            from aura.consciousness.self_improvement import get_self_improvement_engine
-            _BG_EXECUTOR.submit(
-                get_self_improvement_engine().record_chat_outcome,
-                prompt, full_response, actual_model
-            )
-        except Exception as e:
-            logger.debug(f"[Brain] non-critical: {e}")
-        self._trigger_world_model_extraction(list(recent), _BG_EXECUTOR)
+            _STREAM_STALE_TIMEOUT = 90  # seconds without a chunk -> abort
+
+            for _try_model in _models_to_try:
+                try:
+                    _try_client, _try_actual = self._get_client_for_model(_try_model)
+                    if _try_model != _models_to_try[0]:
+                        logger.info(f"[BRAIN] Stream fallback: {actual_model} -> {_try_actual}")
+                    _start_stream = _llm_retry(
+                        lambda c=_try_client, m=_try_actual: c.chat(model=m, messages=messages, stream=True, options=llm_options)
+                    )
+                    stream = _start_stream()
+                    _last_chunk_time = time.time()
+                    _stream_timed_out = False
+                    for chunk in stream:
+                        now = time.time()
+                        if now - _last_chunk_time > _STREAM_STALE_TIMEOUT:
+                            logger.warning(f"[BRAIN] Stream stale for {_STREAM_STALE_TIMEOUT}s, aborting")
+                            _stream_timed_out = True
+                            break
+                        _last_chunk_time = now
+                        content = _resp_content(chunk) if chunk else ""
+                        if content:
+                            full_response += content
+                            yield content
+                        # Extract token counts from final done chunk
+                        if _resp_get(chunk, "done", False):
+                            _stream_in_tok = _resp_get(chunk, "prompt_eval_count", 0) or 0
+                            _stream_out_tok = _resp_get(chunk, "eval_count", 0) or 0
+                    if _stream_timed_out:
+                        raise TimeoutError(f"Stream stale for {_STREAM_STALE_TIMEOUT}s")
+                    actual_model = _try_actual
+                    self._last_model_used = actual_model
+                    break
+                except Exception as e:
+                    if _try_model == _models_to_try[-1]:
+                        import traceback
+                        _tb = traceback.format_exc()
+                        logger.error(f"[BRAIN] All stream models failed: {e}\n{_tb}")
+                        fallback = _user_facing_llm_error(e)
+                        yield fallback
+                        full_response += fallback
+                        _all_models_failed = True
+                    else:
+                        logger.warning(f"[BRAIN] Stream model {_try_model} failed, trying next: {e}")
+                    continue
+
+            if _stream_in_tok or _stream_out_tok:
+                self._record_tokens(actual_model, _stream_in_tok, _stream_out_tok)
+
+            # Update history (skip if all models failed to avoid polluting history)
+            if not _all_models_failed:
+                self._update_history_and_cleanup(prompt, full_response, actual_model, use_history)
+            else:
+                # Still trigger self-improvement and world model extraction
+                try:
+                    from aura.consciousness.self_improvement import get_self_improvement_engine
+                    _BG_EXECUTOR.submit(
+                        get_self_improvement_engine().record_chat_outcome,
+                        prompt, full_response, actual_model
+                    )
+                except Exception as e:
+                    logger.debug(f"[Brain] non-critical: {e}")
+                recent = [
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "content": full_response},
+                ]
+                self._trigger_world_model_extraction(list(recent), _BG_EXECUTOR)
+        finally:
+            self._user_inference_active.clear()
 
     def _trigger_world_model_extraction(self, recent: list, executor=None) -> None:
         """Submit background world model extraction (deduplicates logic from think/think_stream)."""
@@ -2325,13 +2609,13 @@ class OllamaBrain:
             conv_id = self.get_current_conversation_id() or "unknown"
             if executor is not None:
                 try:
-                    executor.submit(_run_world_model_extraction, conv_id, recent)
+                    executor.submit(_run_world_model_extraction, conv_id, recent, self._user_inference_active)
                     return
                 except RuntimeError:
                     pass  # Executor shut down — fall through to daemon thread
             threading.Thread(
                 target=_run_world_model_extraction,
-                args=(conv_id, recent),
+                args=(conv_id, recent, self._user_inference_active),
                 daemon=True,
                 name=f"wm-extract-{conv_id[:8]}",
             ).start()

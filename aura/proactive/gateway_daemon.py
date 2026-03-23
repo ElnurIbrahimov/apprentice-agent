@@ -135,6 +135,7 @@ class GatewayDaemon:
 
         # Background task
         self._task: Optional[asyncio.Task] = None
+        self._sub_task: Optional[asyncio.Task] = None
         self._decision_interval = 30.0  # Reduced from 5s to prevent thread starvation
 
         # Track last non-WAIT decision for outcome feedback
