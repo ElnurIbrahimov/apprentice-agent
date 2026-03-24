@@ -29,6 +29,14 @@ AUTO = PermissionTier.AUTO
 PROMPT = PermissionTier.PROMPT
 BLOCKED = PermissionTier.BLOCKED
 
+# Shell commands that are auto-approved (first word of command)
+SAFE_SHELL_COMMANDS = {
+    "mkdir", "ls", "dir", "cat", "head", "tail", "echo", "pwd", "cd",
+    "npm", "npx", "yarn", "pnpm", "pip", "pip3", "python", "python3",
+    "node", "git", "curl", "wget", "touch", "cp", "mv", "rm",
+    "chmod", "find", "grep", "which", "env", "export",
+}
+
 # Default permission map for each tool (or tool.subaction)
 DEFAULT_PERMISSIONS = {
     # Read-only: always allowed
@@ -38,20 +46,20 @@ DEFAULT_PERMISSIONS = {
     "list_dir": AUTO,
     "search_web": AUTO,
     "project_structure": AUTO,
-    # Git read ops: always allowed
+    # Git ops: all auto-approved
     "git.status": AUTO,
     "git.log": AUTO,
     "git.diff": AUTO,
     "git.branch": AUTO,
-    # Mutating: ask user
-    "edit_file": PROMPT,
-    "write_file": PROMPT,
+    "git.add": AUTO,
+    "git.commit": AUTO,
+    "git.push": AUTO,
+    "git.pull": AUTO,
+    # File edits: auto-approved (like Claude Code)
+    "edit_file": AUTO,
+    "write_file": AUTO,
+    # Shell: prompt, but safe commands auto-approved
     "shell": PROMPT,
-    # Git write ops: ask user
-    "git.add": PROMPT,
-    "git.commit": PROMPT,
-    "git.push": PROMPT,
-    "git.pull": PROMPT,
     # Sub-agent spawning
     "spawn_agent": PROMPT,
 }
@@ -132,6 +140,13 @@ class PermissionManager:
         if tier == BLOCKED:
             logger.warning(f"[Permissions] BLOCKED: {key}")
             return False
+
+        # Shell commands: auto-approve if the first word is in SAFE_SHELL_COMMANDS
+        if tool_name == "shell":
+            cmd = args.get("command", "").strip()
+            first_word = cmd.split()[0].split("/")[-1].split("\\")[-1] if cmd else ""
+            if first_word in SAFE_SHELL_COMMANDS:
+                return True
 
         # PROMPT tier — ask user
         if self._confirm_callback:

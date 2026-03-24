@@ -167,6 +167,8 @@ PLAN_GENERATION_PROMPT = """Analyze this task and create a step-by-step executio
 
 Task: {task}
 
+IMPORTANT: Generate an ACTION plan, not a question list. Every step must be a concrete action (create, write, edit, run, install). Do NOT include steps that ask the user questions or present options. Make reasonable assumptions and proceed.
+
 Respond with a structured plan in this format:
 # [Task Title]
 
@@ -176,7 +178,7 @@ Approach: [1-2 sentence approach description]
 2. [Second step description] (`file.py` if applicable)
 3. [Continue as needed...]
 
-Keep steps concrete and actionable. Include file paths where relevant. 5-10 steps max."""
+Keep steps concrete and actionable. Include file paths where relevant. 5-10 steps max. Every step should be something YOU execute, not something you ask the user about."""
 
 
 def show_plan_approval(console: Console, plan: ExecutionPlan) -> str:

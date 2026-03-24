@@ -1,4 +1,4 @@
-"""Tests for streaming tool output rendering."""
+"""Tests for minimal tool output rendering."""
 import pytest
 from io import StringIO
 from rich.console import Console
@@ -7,7 +7,7 @@ from aura.cli.tool_output import ToolOutputRenderer, format_elapsed
 
 @pytest.fixture
 def renderer():
-    console = Console(file=StringIO(), force_terminal=True, width=100)
+    console = Console(file=StringIO(), force_terminal=True, width=100, highlight=False)
     return ToolOutputRenderer(console=console, visible_lines=5)
 
 
@@ -16,16 +16,16 @@ def test_shell_output_short(renderer):
     output = renderer._console.file.getvalue()
     assert "line1" in output
     assert "line3" in output
-    assert "more lines" not in output
+    assert "hidden" not in output
 
 
 def test_shell_output_collapsed(renderer):
     lines = "\n".join(f"line{i}" for i in range(20))
     renderer.render_shell_output(lines, command="find .", exit_code=0)
     output = renderer._console.file.getvalue()
-    assert "line0" in output
-    assert "15" in output
-    assert "more lines" in output
+    # Should show last 5 lines (tail), not first
+    assert "line19" in output
+    assert "hidden" in output
 
 
 def test_shell_output_empty(renderer):
@@ -42,7 +42,6 @@ def test_shell_output_failure(renderer):
 
 def test_file_content_short(renderer):
     renderer.render_file_content("print('hello')", filename="test.py")
-    # Should render as syntax-highlighted panel
     output = renderer._console.file.getvalue()
     assert "test.py" in output
 
@@ -51,7 +50,10 @@ def test_file_content_collapsed(renderer):
     content = "\n".join(f"line {i}" for i in range(30))
     renderer.render_file_content(content, filename="big.py")
     output = renderer._console.file.getvalue()
-    assert "more lines" in output
+    assert "hidden" in output
+    # Should show first lines and last lines
+    assert "line 0" in output
+    assert "line 29" in output
 
 
 def test_render_tool_result_dispatch(renderer):

@@ -1,4 +1,4 @@
-"""Rich-based display for AURA CLI — panels, syntax highlighting, streaming."""
+"""Rich-based display for AURA CLI — clean, minimal, Claude Code aesthetic."""
 from __future__ import annotations
 
 import logging
@@ -10,7 +10,6 @@ logger = logging.getLogger(__name__)
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.padding import Padding
-from rich.panel import Panel
 from rich.spinner import Spinner
 from rich.live import Live
 from rich.text import Text
@@ -27,18 +26,26 @@ def _get_tool_renderer() -> ToolOutputRenderer:
     return ToolOutputRenderer(console=console)
 
 
+def _get_code_theme() -> str:
+    """Get the current code theme from the theme system."""
+    try:
+        from aura.cli.themes import get_theme
+        return get_theme().code_theme
+    except (ImportError, AttributeError):
+        return "monokai"
+
+
 def show_banner() -> None:
-    """Display ASCII art banner with gradient colors."""
-    from .banner import get_banner, get_welcome_line
+    """Display clean 1-line banner."""
+    from .banner import get_welcome_line
     from aura import __version__
-    width = console.size.width
-    console.print(get_banner(width))
+    console.print()
     console.print(get_welcome_line(__version__))
     console.print()
 
 
 def show_welcome_info(agent: Any) -> None:
-    """Show a brief info line after the banner: model, session, tool count."""
+    """Show a brief info line after the banner: model, tools."""
     model = "auto"
     try:
         model = agent.brain._model_override or "auto"
@@ -51,67 +58,36 @@ def show_welcome_info(agent: Any) -> None:
     except (TypeError, AttributeError):
         logger.debug("welcome_tool_count_failed", exc_info=True)
 
-    session = "new"
-    try:
-        if hasattr(agent, 'memory') and hasattr(agent.memory, 'session_id'):
-            sid = agent.memory.session_id
-            if sid:
-                session = str(sid)[:8]
-    except (AttributeError, TypeError):
-        logger.debug("welcome_session_read_failed", exc_info=True)
-
-    info = Text()
-    info.append("  Model: ", style="dim")
-    info.append(model, style="dim bold")
-    info.append("  |  ", style="dim")
-    info.append("Session: ", style="dim")
-    info.append(session, style="dim bold")
-    info.append("  |  ", style="dim")
-    info.append("Tools: ", style="dim")
-    info.append(f"{tool_count} loaded", style="dim bold")
-    console.print(info)
+    if tool_count:
+        console.print(f"  [dim]{model} \u2022 {tool_count} tools[/dim]")
+    else:
+        console.print(f"  [dim]{model}[/dim]")
     console.print()
 
 
 def show_status_bar(
     model: str = "auto",
-    project_type: str = "",
-    session_title: str = "",
-    message_count: int = 0,
-    thinking: bool = False,
-    elapsed: float = 0.0,
     cost_usd: float = 0.0,
-    tier: str = "",
     token_used: int = 0,
     token_limit: int = 128000,
     permission_mode: str = "careful",
-    bg_indicator: str = "",
-    research_indicator: str = "",
-    mood_indicator: str = "",
-    watch_indicator: str = "",
-    steering_queue: Any = None,
+    # Accept and ignore legacy kwargs so callers don't break
+    **_ignored,
 ) -> None:
-    """Print the status bar line."""
+    """Print the minimal status bar line."""
     from .status_bar import build_status_bar
-    width = console.size.width
     bar = build_status_bar(
-        model=model, project_type=project_type,
-        session_title=session_title, message_count=message_count,
-        width=width, thinking=thinking, elapsed=elapsed,
-        cost_usd=cost_usd, tier=tier,
-        token_used=token_used, token_limit=token_limit,
+        model=model,
+        cost_usd=cost_usd,
+        token_used=token_used,
+        token_limit=token_limit,
         permission_mode=permission_mode,
-        bg_indicator=bg_indicator,
-        research_indicator=research_indicator,
-        mood_indicator=mood_indicator,
-        watch_indicator=watch_indicator,
-        steering_queue=steering_queue,
     )
     console.print(bar, style="on grey11", end="\n")
 
 
 def show_thinking(label: str = "Working...") -> Live:
-    """Context manager — shows spinner while agent runs. Disappears when done."""
+    """Context manager -- shows spinner while agent runs. Disappears when done."""
     return Live(
         Spinner("dots", text=f"  [dim]{label}[/dim]"),
         console=console,
@@ -122,24 +98,24 @@ def show_thinking(label: str = "Working...") -> Live:
 
 # Phase-aware verb mapping for contextual spinner labels
 _TOOL_PHASE_VERBS: dict[str, str] = {
-    "web_search": "Searching the web...",
-    "search_web": "Searching the web...",
-    "browse": "Browsing...",
-    "browse_url": "Browsing...",
-    "read_file": "Reading files...",
-    "edit_file": "Editing code...",
-    "write_file": "Writing code...",
-    "execute": "Running code...",
-    "run_command": "Running command...",
-    "shell": "Running shell...",
-    "analyze": "Analyzing...",
-    "summarize": "Summarizing...",
-    "translate": "Translating...",
-    "calculate": "Calculating...",
-    "research": "Researching...",
-    "deep_research": "Deep researching...",
-    "memory_recall": "Remembering...",
-    "memory_store": "Storing memory...",
+    "web_search": "Searching the web",
+    "search_web": "Searching the web",
+    "browse": "Browsing",
+    "browse_url": "Browsing",
+    "read_file": "Reading files",
+    "edit_file": "Editing code",
+    "write_file": "Writing code",
+    "execute": "Running code",
+    "run_command": "Running command",
+    "shell": "Running shell",
+    "analyze": "Analyzing",
+    "summarize": "Summarizing",
+    "translate": "Translating",
+    "calculate": "Calculating",
+    "research": "Researching",
+    "deep_research": "Deep researching",
+    "memory_recall": "Remembering",
+    "memory_store": "Storing memory",
 }
 
 
@@ -151,14 +127,14 @@ def get_thinking_label(tool_name: str | None = None) -> str:
 
 
 def show_tool_call(tool_name: str, description: str = "", result: Any = None, elapsed: float = 0.0) -> None:
-    """Print a tool call in a compact styled format with elapsed time.
+    """Print a tool call as a single-line compact badge.
 
-    If result is provided and contains diff info for edit/write, show a compact diff summary.
-    If result is provided with substantial output, render via ToolOutputRenderer.
+    Style: "  > tool_name description (elapsed)"
+    No panels, no multi-line, no emoji.
     """
-    # Format the elapsed time suffix
     time_str = f" {format_elapsed(elapsed)}" if elapsed > 0 else ""
 
+    # For edit/write with diff info, show compact diff summary
     if tool_name in ("edit_file", "write_file") and result and isinstance(result, dict) and result.get("diff"):
         try:
             from aura.cli.diff_viewer import render_diff_compact
@@ -173,22 +149,23 @@ def show_tool_call(tool_name: str, description: str = "", result: Any = None, el
             console.print(f"  {summary}")
             return
         except (ImportError, ValueError, KeyError, TypeError):
-            pass  # Fall through to default display
+            pass
 
     # Get theme-aware tool color
     try:
         from aura.cli.themes import get_theme
         tool_color = get_theme().tool_color
     except (ImportError, AttributeError):
-        tool_color = "yellow"
+        tool_color = "cyan"
 
+    # Single-line badge
     line = Text()
-    line.append("  ▸ ", style=f"dim {tool_color}")
+    line.append("  > ", style=f"dim {tool_color}")
     line.append(tool_name, style=f"bold {tool_color}")
     if description:
-        line.append(f" {description}", style=f"dim {tool_color}")
+        line.append(f" {description}", style="dim")
     if time_str:
-        line.append(time_str, style="dim")
+        line.append(f" {time_str}", style="dim")
     console.print(line)
 
     # Render substantial tool output via ToolOutputRenderer
@@ -208,62 +185,38 @@ def show_tool_call(tool_name: str, description: str = "", result: Any = None, el
 
 
 def show_response(text: str, model: str = "", stream: bool = True) -> None:
-    """Render agent response as markdown with a left-border panel.
+    """Render agent response as clean markdown. No panels. No borders.
 
-    Args:
-        text: Response text (markdown)
-        model: Model name to display
-        stream: If True, use block-level streaming (only re-renders active block)
+    The model's text IS the experience -- just clean markdown with breathing room.
     """
-    # Get theme colors
-    try:
-        from aura.cli.themes import get_theme
-        theme = get_theme()
-        border_style = f"dim {theme.response_border}"
-        header_style = theme.response_header
-        code_theme = theme.code_theme
-    except (ImportError, AttributeError):
-        border_style = "dim cyan"
-        header_style = "bold cyan"
-        code_theme = "monokai"
+    code_theme = _get_code_theme()
 
-    console.print()
+    console.print()  # breathing room
 
-    # Header: label + model name
-    label = Text()
-    label.append(" ◆ ", style=header_style)
-    label.append("AURA", style=header_style)
-    if model:
-        label.append(f"  ({model})", style="dim")
+    max_width = min(console.width - 4, 100)
 
     if stream and len(text) > 20:
         # Block-level streaming: freeze finalized blocks, only re-render the active one
         import time
 
-        # Print header once
-        console.print(Padding(Text.from_markup(f"  [dim {border_style.replace('dim ', '')}]{'─' * 60}[/]"), (0, 2)))
-        console.print(Padding(label, (0, 2)))
-        console.print(Padding(Text.from_markup(f"  [dim {border_style.replace('dim ', '')}]{'─' * 60}[/]"), (0, 2)))
-
         chunks = _split_for_streaming(text)
         accumulated = ""
-        finalized_count = 0  # how many blocks we've already printed
+        finalized_count = 0
 
         with Live(console=console, refresh_per_second=15, transient=True) as live:
             for chunk in chunks:
                 accumulated += chunk
                 blocks = _split_into_blocks(accumulated)
 
-                # Print any newly finalized blocks (all except the last)
+                # Print any newly finalized blocks permanently
                 while finalized_count < len(blocks) - 1:
                     block_text = blocks[finalized_count]
                     try:
                         block_md = Markdown(block_text, code_theme=code_theme)
-                    except (ValueError, TypeError):  # Status bar: cosmetic, Rich parse fallback
+                    except (ValueError, TypeError):
                         block_md = Text(block_text)
-                    # Exit live temporarily to print finalized block permanently
                     live.update(Text(""))
-                    console.print(Padding(block_md, (0, 4)))
+                    console.print(Padding(block_md, (0, 2)), width=max_width)
                     finalized_count += 1
 
                 # Live-update only the active (last) block
@@ -271,9 +224,9 @@ def show_response(text: str, model: str = "", stream: bool = True) -> None:
                     active_block = blocks[-1]
                     try:
                         active_md = Markdown(active_block, code_theme=code_theme)
-                    except (ValueError, TypeError):  # Status bar: cosmetic, Rich parse fallback
+                    except (ValueError, TypeError):
                         active_md = Text(active_block)
-                    live.update(Padding(active_md, (0, 4)))
+                    live.update(Padding(active_md, (0, 2)))
 
                 time.sleep(0.008)
 
@@ -283,36 +236,28 @@ def show_response(text: str, model: str = "", stream: bool = True) -> None:
             for i in range(finalized_count, len(blocks)):
                 try:
                     block_md = Markdown(blocks[i], code_theme=code_theme)
-                except (ValueError, TypeError):  # Status bar: cosmetic, Rich parse fallback
+                except (ValueError, TypeError):
                     block_md = Text(blocks[i])
-                console.print(Padding(block_md, (0, 4)))
-
-        console.print(Padding(Text.from_markup(f"  [dim {border_style.replace('dim ', '')}]{'─' * 60}[/]"), (0, 2)))
-        console.print()
+                console.print(Padding(block_md, (0, 2)), width=max_width)
     else:
-        # Non-streaming: render the full panel as before
+        # Non-streaming: render full markdown directly
         try:
             md = Markdown(text, code_theme=code_theme)
-        except (ValueError, TypeError):  # Rich Markdown parse fallback
+        except (ValueError, TypeError):
             md = Text(text)
+        console.print(Padding(md, (0, 2)), width=max_width)
 
-        panel = Panel(
-            md,
-            title=label,
-            title_align="left",
-            border_style=border_style,
-            padding=(0, 2),
-            expand=True,
-        )
-        console.print(Padding(panel, (0, 2)))
-        console.print()
+    # Model attribution in dim text
+    if model:
+        console.print(f"  [dim]{model}[/dim]")
+
+    console.print()  # breathing room
 
 
 def _split_for_streaming(text: str) -> list[str]:
     """Split text into word-based chunks for streaming display."""
     words = text.split(' ')
     chunks = []
-    # Use larger chunks for longer texts to keep animation snappy
     chunk_size = 1 if len(text) < 200 else (3 if len(text) < 1000 else 5)
     for i in range(0, len(words), chunk_size):
         chunk_words = words[i:i+chunk_size]
@@ -327,34 +272,26 @@ def _split_into_blocks(text: str) -> list[str]:
     """Split markdown text into top-level blocks by double-newlines.
 
     Respects code fences (``` blocks stay together as a single block).
-    Returns a list of block strings.
     """
     lines = text.split('\n')
     blocks: list[str] = []
     current_lines: list[str] = []
     in_code_fence = False
-    prev_was_empty = False
 
     for line in lines:
         stripped = line.strip()
 
-        # Track code fence boundaries
         if stripped.startswith('```'):
             in_code_fence = not in_code_fence
             current_lines.append(line)
-            prev_was_empty = False
             continue
 
-        # Inside a code fence — everything stays in the current block
         if in_code_fence:
             current_lines.append(line)
-            prev_was_empty = False
             continue
 
-        # Outside code fence: detect blank line (block boundary)
         if stripped == '':
             if current_lines and any(l.strip() for l in current_lines):
-                # Blank line after content — finalize current block
                 while current_lines and current_lines[-1].strip() == '':
                     current_lines.pop()
                 if current_lines:
@@ -362,18 +299,14 @@ def _split_into_blocks(text: str) -> list[str]:
                 current_lines = []
             else:
                 current_lines.append(line)
-            prev_was_empty = True
         else:
             current_lines.append(line)
-            prev_was_empty = False
 
-    # Whatever remains is the current (possibly incomplete) block
     if current_lines:
         remaining = '\n'.join(current_lines).strip()
         if remaining:
             blocks.append(remaining)
 
-    # If nothing was parsed, return the whole text as one block
     if not blocks and text.strip():
         blocks.append(text.strip())
 
@@ -388,222 +321,149 @@ def show_context_summary(
     tool_count: int = 0,
     memory_snippets: Optional[list[str]] = None,
 ) -> None:
-    """Show a one-line context summary before the response, with optional memory snippets.
-
-    Example:
-      context: 3 memories | mood: curious | model: devstral-2
-      remembered: "prefers Python" | "working on BroadMind" | "uses RTX 4060"
-    """
+    """Show an ultra-minimal context line. Only if there's something noteworthy."""
     if memory_snippets is None:
         memory_snippets = []
 
     parts = []
     if memory_count > 0:
-        parts.append(f"[dim]{memory_count} memories[/dim]")
-    if kg_topic:
-        topic = kg_topic[:30]
-        parts.append(f'[dim]KG: [/dim][dim italic]"{topic}"[/dim italic]')
+        parts.append(f"{memory_count} memories")
     if mood:
-        parts.append(f"[dim]mood: [/dim][dim]{mood}[/dim]")
+        parts.append(mood)
     if model:
         short = model.replace(":cloud", "").replace(":latest", "")
         if len(short) > 25:
             short = short[:22] + "..."
-        parts.append(f"[dim]model: [/dim][dim cyan]{short}[/dim cyan]")
-    if tool_count > 0:
-        parts.append(f"[dim]{tool_count} tools[/dim]")
+        parts.append(short)
 
     if not parts:
         return
 
-    line = "  [dim]context:[/dim] " + " [dim]|[/dim] ".join(parts)
-    console.print(Text.from_markup(line))
-
-    # Show memory snippets on a second line (max 3, truncated to 40 chars each)
-    if memory_snippets:
-        snippets = memory_snippets[:3]
-        formatted = []
-        for s in snippets:
-            truncated = s.strip()
-            if len(truncated) > 40:
-                truncated = truncated[:37] + "..."
-            formatted.append(f'[dim italic]"{truncated}"[/dim italic]')
-        snippet_line = "  [dim]remembered:[/dim] " + " [dim]|[/dim] ".join(formatted)
-        console.print(Text.from_markup(snippet_line))
+    console.print(f"  [dim]{'  //  '.join(parts)}[/dim]")
 
 
 def show_error(message: str) -> None:
-    """Display error in a styled format."""
-    try:
-        from aura.cli.themes import get_theme
-        error_color = get_theme().error_color
-    except (ImportError, AttributeError):
-        error_color = "red"
-    err = Text()
-    err.append("  ✗ ", style=f"bold {error_color}")
-    err.append(message, style=error_color)
-    console.print(err)
+    """Display error -- clean single line, no panel."""
+    console.print(f"  [red]x[/red] {message}")
 
 
 def show_info(message: str) -> None:
-    """Display info message."""
-    info = Text()
-    info.append("  ● ", style="dim cyan")
-    info.append(message, style="dim")
-    console.print(info)
+    """Display info message -- minimal dim text."""
+    console.print(f"  [dim]{message}[/dim]")
 
 
 def show_help() -> None:
-    """Display quick help with available commands and shortcuts."""
-    from rich.table import Table
-
-    table = Table(
-        show_header=True, header_style="bold cyan",
-        border_style="dim", padding=(0, 2),
-        title="[bold]Commands & Shortcuts[/bold]",
-    )
-    table.add_column("Key / Command", style="cyan", width=24)
-    table.add_column("Action", style="white")
-
-    # --- Keyboard shortcuts ---
-    table.add_row("Alt+M", "Model picker (interactive)")
-    table.add_row("Ctrl+L", "Clear screen")
-    table.add_row("Ctrl+N", "New session")
-    table.add_row("Ctrl+K", "Command palette (fuzzy search)")
-    table.add_row("Ctrl+G", "Open editor for long prompt")
-    table.add_row("Shift+Tab", "Cycle permission mode (Plan / Careful / Full Auto)")
-    table.add_row("Ctrl+Z", "Rewind to checkpoint")
-    table.add_row("Alt+Enter", "Insert newline (multiline input)")
-    table.add_row("Ctrl+C / Ctrl+D", "Exit")
-    table.add_row("?", "Show this help")
-
-    table.add_row("", "")
-
-    # --- Model & session ---
-    table.add_row("/model [name]", "Pick model interactively or set by name")
-    table.add_row("/sessions", "Manage sessions (list, switch, delete)")
-    table.add_row("/compact", "Compress conversation history")
-    table.add_row("/clear", "Clear conversation history")
-
-    table.add_row("", "")
-
-    # --- Code & files ---
-    table.add_row("/grep <pattern>", "Search code content")
-    table.add_row("/search, /find <query>", "Search files and definitions")
-    table.add_row("/edit <file>", "Read file with line numbers")
-    table.add_row("/project [info|index|search]", "Project context, indexing, semantic search")
-
-    table.add_row("", "")
-
-    # --- Execution ---
-    table.add_row("/shell, /bash, /run <cmd>", "Execute shell command")
-    table.add_row("/plan <task>", "Create and execute a plan")
-    table.add_row("/agent <name> <task>", "Run specialist agent")
-    table.add_row("/goal <objective>", "Run a goal")
-
-    table.add_row("", "")
-
-    # --- Parallel & background ---
-    table.add_row("/fleet <task>", "Run parallel sub-agents on decomposed task")
-    table.add_row("/chain step1 -> step2", "Run prompt pipeline (output feeds forward)")
-    table.add_row("& <prompt>", "Run prompt as background task")
-    table.add_row("/tasks", "Show background tasks")
-
-    table.add_row("", "")
-
-    # --- Research ---
-    table.add_row("/research <topic>", "Start research mode with citation tracking")
-    table.add_row("/sources", "Show collected research sources")
-    table.add_row("/export research", "Export research session to Markdown")
-
-    table.add_row("", "")
-
-    # --- Emotional & hooks ---
-    table.add_row("/mood", "Show current emotional state")
-    table.add_row("/hook [list|add|remove]", "Manage automation hooks")
-
-    table.add_row("", "")
-
-    # --- Git power tools ---
-    table.add_row("/pr", "Create pull request with AI-generated description")
-    table.add_row("/branch <name>", "Create and switch to a new git branch")
-    table.add_row("/stash [desc]", "Smart stash with description")
-    table.add_row("/blame file:N", "Explain why a line exists using git history")
-
-    table.add_row("", "")
-
-    # --- Testing & watch ---
-    table.add_row("/test [cmd]", "Run tests with formatted output")
-    table.add_row("/watch", "Monitor files for AURA:/AI: comments")
-
-    table.add_row("", "")
-
-    # --- Utilities ---
-    table.add_row("/browse <url>", "Browse web pages")
-    table.add_row("/speak <text>", "Text-to-speech")
-    table.add_row("/recall <query>", "Search memories")
-    table.add_row("/context", "Show context window usage")
-    table.add_row("/rewind", "Rewind file changes to a checkpoint")
-    table.add_row("/theme [name]", "Switch color theme (dark, light, monokai, dracula, solarized, nord)")
-
-    table.add_row("", "")
-
-    # --- Git & Diff ---
-    table.add_row("/diff [args]", "Show git diff with syntax highlighting")
-    table.add_row("/git <command>", "Run read-only git commands (status, log, blame, ...)")
-
-    table.add_row("", "")
-
-    # --- MCP & Audit ---
-    table.add_row("/mcp [connect|list|disconnect]", "Manage MCP server connections")
-    table.add_row("/audit [verify|tail|count]", "Inspect Merkle audit chain")
-
-    table.add_row("", "")
-
-    # --- Autonomous ---
-    table.add_row("/hand [list|spawn|kill]", "Manage autonomous Hands")
-    table.add_row("/evolve [--skill-ids ...]", "Evolve skills with GEPA")
-
-    table.add_row("", "")
-
-    # --- Multi-agent & branching ---
-    table.add_row("/debate <topic>", "Multi-agent debate on a topic")
-    table.add_row("/fork [name]", "Fork conversation into a new branch")
-    table.add_row("/branches", "List conversation branches")
-    table.add_row("/checkout <branch>", "Switch to a conversation branch")
-    table.add_row("/merge <branch>", "Merge a branch into current conversation")
-    table.add_row("/undo", "Undo last file edit")
-
-    table.add_row("", "")
-
-    # --- Voice ---
-    table.add_row("/voice", "Start voice conversation mode")
-
-    table.add_row("", "")
-
-    # --- Recovery ---
-    table.add_row("/retry", "Re-run the last prompt (useful after 429 errors)")
-    table.add_row("/cost", "Show session token usage and cost")
-    table.add_row("/trust", "Toggle trust mode (auto-approve all tools)")
-
-    table.add_row("", "")
-
-    # --- Exit ---
-    table.add_row("/quit, /exit", "Exit AURA")
-
+    """Display help with clean aligned text, no heavy borders."""
     console.print()
-    console.print(table)
+    console.print("  [bold]Commands & Shortcuts[/bold]")
     console.print()
+
+    sections = [
+        ("Keyboard", [
+            ("Alt+M", "Model picker"),
+            ("Ctrl+L", "Clear screen"),
+            ("Ctrl+N", "New session"),
+            ("Ctrl+K", "Command palette"),
+            ("Ctrl+G", "Open editor for long prompt"),
+            ("Shift+Tab", "Cycle permission mode"),
+            ("Ctrl+Z", "Rewind to checkpoint"),
+            ("Alt+Enter", "Insert newline"),
+            ("Ctrl+C / Ctrl+D", "Exit"),
+            ("?", "Show this help"),
+        ]),
+        ("Model & Session", [
+            ("/model [name]", "Pick or set model"),
+            ("/sessions", "Manage sessions"),
+            ("/compact", "Compress conversation"),
+            ("/clear", "Clear conversation"),
+        ]),
+        ("Code & Files", [
+            ("/grep <pattern>", "Search code content"),
+            ("/search <query>", "Search files and definitions"),
+            ("/edit <file>", "Read file with line numbers"),
+            ("/project [cmd]", "Project context, indexing, search"),
+        ]),
+        ("Execution", [
+            ("/shell <cmd>", "Execute shell command"),
+            ("/plan <task>", "Create and execute a plan"),
+            ("/agent <name> <task>", "Run specialist agent"),
+            ("/goal <objective>", "Run a goal"),
+        ]),
+        ("Parallel & Background", [
+            ("/fleet <task>", "Run parallel sub-agents"),
+            ("/chain step1 -> step2", "Run prompt pipeline"),
+            ("& <prompt>", "Run as background task"),
+            ("/tasks", "Show background tasks"),
+        ]),
+        ("Research", [
+            ("/research <topic>", "Start research mode"),
+            ("/sources", "Show collected sources"),
+            ("/export research", "Export to Markdown"),
+        ]),
+        ("Git", [
+            ("/pr", "Create pull request"),
+            ("/branch <name>", "Create and switch branch"),
+            ("/stash [desc]", "Smart stash"),
+            ("/blame file:N", "Explain line history"),
+            ("/diff [args]", "Show git diff"),
+            ("/git <command>", "Run read-only git commands"),
+        ]),
+        ("Testing & Watch", [
+            ("/test [cmd]", "Run tests"),
+            ("/watch", "Monitor files for AI comments"),
+        ]),
+        ("Utilities", [
+            ("/browse <url>", "Browse web pages"),
+            ("/speak <text>", "Text-to-speech"),
+            ("/recall <query>", "Search memories"),
+            ("/context", "Show context usage"),
+            ("/rewind", "Rewind to checkpoint"),
+            ("/theme [name]", "Switch color theme"),
+            ("/mood", "Show emotional state"),
+            ("/hook [cmd]", "Manage automation hooks"),
+        ]),
+        ("Multi-agent", [
+            ("/debate <topic>", "Multi-agent debate"),
+            ("/fork [name]", "Fork conversation"),
+            ("/branches", "List branches"),
+            ("/checkout <branch>", "Switch branch"),
+            ("/merge <branch>", "Merge branch"),
+            ("/undo", "Undo last file edit"),
+        ]),
+        ("MCP & Audit", [
+            ("/mcp [cmd]", "Manage MCP servers"),
+            ("/audit [cmd]", "Inspect audit chain"),
+        ]),
+        ("Autonomous", [
+            ("/hand [cmd]", "Manage autonomous Hands"),
+            ("/evolve [...]", "Evolve skills with GEPA"),
+        ]),
+        ("Other", [
+            ("/voice", "Start voice mode"),
+            ("/retry", "Re-run last prompt"),
+            ("/cost", "Show token usage and cost"),
+            ("/trust", "Toggle trust mode"),
+            ("/quit", "Exit AURA"),
+        ]),
+    ]
+
+    for section_name, commands in sections:
+        console.print(f"  [dim]{section_name}[/dim]")
+        for key, action in commands:
+            # Right-pad the key column for alignment
+            padded_key = key.ljust(28)
+            console.print(f"    [cyan]{padded_key}[/cyan] [dim]{action}[/dim]")
+        console.print()
 
 
 class StreamingResponse:
     """Manages live token streaming to terminal via Rich.
 
-    Key design: when pause() is called (for tool-call display), the accumulated
-    text so far is printed *permanently* to the terminal, then Live is stopped.
-    When resume() is called, a fresh Live starts with empty content — only NEW
-    chunks stream into it.  This avoids the old bug where resume() re-rendered
-    ALL accumulated text, causing garbled/repeated output.
+    Clean output -- no panels, no borders. Just markdown flowing in.
+
+    When pause() is called (for tool-call display), the accumulated
+    text so far is printed permanently, then Live is stopped.
+    When resume() is called, a fresh Live starts with empty content.
     """
 
     def __init__(self, model: str = "") -> None:
@@ -611,19 +471,11 @@ class StreamingResponse:
         self._live: Optional[Live] = None
         self._model: str = model
         self._displayed: bool = False
-        # Tracks the length of _accumulated that has already been permanently
-        # printed to the terminal (via pause or finish).
         self._permanent_len: int = 0
-
-    def _get_code_theme(self) -> str:
-        try:
-            from aura.cli.themes import get_theme
-            return get_theme().code_theme
-        except (ImportError, AttributeError):
-            return "monokai"
 
     def start(self) -> None:
         """Begin live rendering context."""
+        console.print()  # breathing room before response
         self._live = Live("", console=console, refresh_per_second=15, transient=True)
         self._live.start()
 
@@ -633,10 +485,10 @@ class StreamingResponse:
         if self._live:
             new_content = self._accumulated[self._permanent_len:]
             try:
-                md = Markdown(new_content, code_theme=self._get_code_theme())
-                self._live.update(md)
+                md = Markdown(new_content, code_theme=_get_code_theme())
+                self._live.update(Padding(md, (0, 2)))
             except (ValueError, TypeError):
-                self._live.update(Text(new_content))
+                self._live.update(Padding(Text(new_content), (0, 2)))
 
     def pause(self) -> None:
         """Pause live rendering for tool call display.
@@ -646,77 +498,32 @@ class StreamingResponse:
         if self._live:
             new_content = self._accumulated[self._permanent_len:]
             if new_content.strip():
-                # Make the current Live content permanent before stopping
                 try:
-                    md = Markdown(new_content, code_theme=self._get_code_theme())
-                    self._live.update(md)
+                    md = Markdown(new_content, code_theme=_get_code_theme())
+                    self._live.update(Padding(md, (0, 2)))
                 except (ValueError, TypeError):
-                    self._live.update(Text(new_content))
+                    self._live.update(Padding(Text(new_content), (0, 2)))
                 self._live.transient = False
             self._live.stop()
             self._live = None
-            # Mark everything accumulated so far as permanently displayed
             self._permanent_len = len(self._accumulated)
 
     def resume(self) -> None:
-        """Resume live rendering after tool call.
-
-        Starts a fresh Live — old text is already permanent on screen.
-        Only new chunks will be rendered.
-        """
+        """Resume live rendering after tool call."""
         self._live = Live("", console=console, refresh_per_second=15, transient=True)
         self._live.start()
 
-    def _build_final_panel(self, content: str) -> Panel:
-        """Build the final styled panel matching show_response() static output.
-
-        Args:
-            content: The markdown text to render inside the panel.
-        """
-        try:
-            from aura.cli.themes import get_theme
-            theme = get_theme()
-            border_style = f"dim {theme.response_border}"
-            header_style = theme.response_header
-            code_theme = theme.code_theme
-        except (ImportError, AttributeError):
-            border_style = "dim cyan"
-            header_style = "bold cyan"
-            code_theme = "monokai"
-
-        label = Text()
-        label.append(" ◆ ", style=header_style)
-        label.append("AURA", style=header_style)
-        if self._model:
-            label.append(f"  ({self._model})", style="dim")
-
-        try:
-            md = Markdown(content, code_theme=code_theme)
-        except (ValueError, TypeError):
-            md = Text(content)
-
-        return Panel(
-            md,
-            title=label,
-            title_align="left",
-            border_style=border_style,
-            padding=(0, 2),
-            expand=True,
-        )
-
     def finish(self) -> None:
-        """Finalize display — freeze the final styled panel in place.
-
-        Only renders content that came AFTER the last permanent print into a
-        panel.  Text that was already permanently printed (before tool calls)
-        stays as-is on screen.
-        """
+        """Finalize display -- print remaining content cleanly, no panel wrapping."""
         if self._live:
             new_content = self._accumulated[self._permanent_len:]
             if new_content.strip():
-                final_panel = self._build_final_panel(new_content)
-                padded = Padding(final_panel, (1, 2, 1, 2))
-                self._live.update(padded)
+                try:
+                    md = Markdown(new_content, code_theme=_get_code_theme())
+                    final = Padding(md, (0, 2))
+                except (ValueError, TypeError):
+                    final = Padding(Text(new_content), (0, 2))
+                self._live.update(final)
                 self._live.transient = False
                 self._live.stop()
                 self._live = None
@@ -725,12 +532,15 @@ class StreamingResponse:
             else:
                 self._live.stop()
                 self._live = None
-                # Mark displayed if we had ANY content (even if it was all printed
-                # permanently during earlier pause cycles).
                 self._displayed = bool(self._accumulated.strip())
         else:
-            # Live was already stopped (e.g. after a pause with no resume)
             self._displayed = bool(self._accumulated.strip())
+
+        # Model attribution below the response
+        if self._model and self._displayed:
+            console.print(f"  [dim]{self._model}[/dim]")
+
+        console.print()  # breathing room after response
 
     @property
     def displayed(self) -> bool:
@@ -743,39 +553,24 @@ class StreamingResponse:
 
 
 def show_checkpoint_picker(checkpoints: list[dict[str, Any]]) -> Optional[str]:
-    """Display checkpoints in a numbered list and let the user pick one.
+    """Display checkpoints in a clean numbered list.
 
-    Args:
-        checkpoints: List of checkpoint dicts from CheckpointManager.list_checkpoints()
-
-    Returns:
-        Selected checkpoint ID, or None if cancelled.
+    Returns selected checkpoint ID, or None if cancelled.
     """
-    from rich.table import Table
     import time as _time
 
     if not checkpoints:
         show_info("No checkpoints available.")
         return None
 
-    # Show last 10 checkpoints
     display = checkpoints[:10]
 
-    table = Table(
-        show_header=True,
-        header_style="bold cyan",
-        border_style="dim",
-        padding=(0, 1),
-        title="[bold]Checkpoints[/bold]",
-    )
-    table.add_column("#", style="bold white", width=4, justify="right")
-    table.add_column("Time", style="dim", width=16)
-    table.add_column("Label", style="white", min_width=20)
-    table.add_column("Files", style="dim cyan", width=30)
+    console.print()
+    console.print("  [bold]Checkpoints[/bold]")
+    console.print()
 
     now = _time.time()
     for i, cp in enumerate(display, 1):
-        # Relative time
         delta = now - cp.get("timestamp", now)
         if delta < 60:
             rel = f"{int(delta)}s ago"
@@ -788,19 +583,15 @@ def show_checkpoint_picker(checkpoints: list[dict[str, Any]]) -> Optional[str]:
 
         label = cp.get("label", "") or "-"
         files = cp.get("files", [])
-        file_names = ", ".join(
-            f.get("backup_name", "?") for f in files[:3]
-        )
+        file_names = ", ".join(f.get("backup_name", "?") for f in files[:3])
         if len(files) > 3:
             file_names += f" +{len(files) - 3}"
 
-        table.add_row(str(i), rel, label, file_names)
+        num = str(i).rjust(2)
+        console.print(f"  [bold]{num}[/bold]  [dim]{rel.ljust(10)}[/dim]  {label.ljust(24)}  [dim]{file_names}[/dim]")
 
     console.print()
-    console.print(table)
-    console.print()
 
-    # Prompt for selection
     try:
         raw = console.input("[dim]  Pick checkpoint # (or Enter to cancel): [/dim]")
         raw = raw.strip()
@@ -817,19 +608,8 @@ def show_checkpoint_picker(checkpoints: list[dict[str, Any]]) -> Optional[str]:
 
 
 def show_rewind_result(success: bool, checkpoint_id: str) -> None:
-    """Display the result of a rewind operation.
-
-    Args:
-        success: Whether the rewind succeeded.
-        checkpoint_id: The checkpoint ID that was targeted.
-    """
+    """Display the result of a rewind operation."""
     if success:
-        msg = Text()
-        msg.append("  ✓ ", style="bold green")
-        msg.append(f"Rewound to checkpoint {checkpoint_id}", style="green")
-        console.print(msg)
+        console.print(f"  [green]Rewound to checkpoint {checkpoint_id}[/green]")
     else:
-        msg = Text()
-        msg.append("  ✗ ", style="bold red")
-        msg.append("Failed to rewind", style="red")
-        console.print(msg)
+        console.print(f"  [red]x[/red] Failed to rewind")

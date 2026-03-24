@@ -12,10 +12,11 @@ class PermissionMode(str, Enum):
     FULL_AUTO = "full_auto"
 
 
-# auto_edit is defined but deferred from the cycle — its enforcement logic
-# (auto-approve edits, prompt for commands) is not yet wired up.
+# auto_edit: auto-approve file edits/writes, prompt for shell commands.
+# Now wired up — confirm callback checks should_auto_approve_edit().
 _MODE_ORDER = [
     PermissionMode.CAREFUL,
+    PermissionMode.AUTO_EDIT,
     PermissionMode.PLAN_APPROVE,
     PermissionMode.FULL_AUTO,
 ]

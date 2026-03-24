@@ -1,182 +1,85 @@
-"""Persistent status bar for AURA CLI — shows model, project, session info."""
+"""Minimal status bar for AURA CLI — model, cost, context gauge, permission mode."""
 
-import os
-import subprocess
-from pathlib import Path
 from rich.text import Text
-
-from aura.cli.context_bar import build_context_gauge
-from aura.cli.permissions_ui import get_mode_short
-
-
-_git_branch_cache: dict = {"branch": "", "time": 0.0}
-
-
-def _get_git_branch() -> str:
-    """Get current git branch name, or empty string if not in a git repo.
-
-    Results are cached for 10 seconds to avoid spawning a subprocess on every render.
-    """
-    import time as _time
-    now = _time.time()
-    if now - _git_branch_cache["time"] < 10:
-        return _git_branch_cache["branch"]
-    try:
-        result = subprocess.run(
-            ["git", "branch", "--show-current"],
-            capture_output=True, text=True, timeout=2,
-            cwd=os.getcwd(),
-        )
-        if result.returncode == 0:
-            branch = result.stdout.strip()
-        else:
-            branch = ""
-    except Exception:
-        branch = ""
-    _git_branch_cache["branch"] = branch
-    _git_branch_cache["time"] = now
-    return branch
 
 
 def build_status_bar(
+    *,
     model: str = "auto",
-    project_type: str = "",
-    session_title: str = "",
-    message_count: int = 0,
-    width: int = 80,
-    thinking: bool = False,
-    elapsed: float = 0.0,
-    tool_count: int = 0,
-    cost_usd: float = 0.0,
-    tier: str = "",
     token_used: int = 0,
     token_limit: int = 128000,
     permission_mode: str = "careful",
-    steering_queue=None,
-    bg_indicator: str = "",
-    research_indicator: str = "",
-    mood_indicator: str = "",
-    watch_indicator: str = "",
+    cost_usd: float = 0.0,
+    # Accept and ignore legacy kwargs so callers don't break
+    **_ignored,
 ) -> Text:
-    """Build a single-line status bar that spans the full terminal width."""
+    """Build a clean 4-5 item status bar.
 
-    # -- Left section: directory + project type + git branch --
-    left = Text()
-    cwd = os.getcwd()
-    home = str(Path.home())
-    if cwd.startswith(home):
-        cwd = "~" + cwd[len(home):]
-    cwd = cwd.replace("\\", "/")
-    if len(cwd) > 35:
-        cwd = "..." + cwd[-32:]
+    Format:  model  |  $0.023  |  1.2K/128K ████░░░░ 1%  |  CARE
+    """
+    parts: list[Text] = []
 
-    left.append(f" {cwd}", style="dim white")
+    # -- Model name (cyan if auto, green if manual override) --
+    model_short = model.replace(":cloud", "").replace(":latest", "")
+    if len(model_short) > 25:
+        model_short = model_short[:22] + "..."
+    color = "cyan" if model == "auto" else "green"
+    t = Text(model_short, style=f"bold {color}")
+    parts.append(t)
 
-    if project_type and project_type != "unknown":
-        left.append(f" ({project_type})", style="dim cyan")
-
-    branch = _get_git_branch()
-    if branch:
-        left.append(" ", style="dim")
-        left.append(branch, style="bold magenta")
-
-    # -- Center section: model (or thinking indicator) + tool count --
-    center = Text()
-    if thinking:
-        center.append(f"Thinking... ({elapsed:.1f}s)", style="bold yellow")
-    else:
-        model_short = model.replace(":cloud", "").replace(":latest", "")
-        if len(model_short) > 25:
-            model_short = model_short[:22] + "..."
-
-        if model == "auto":
-            center.append(model_short, style="bold cyan")
-        else:
-            # Actively overridden model — highlight in green
-            center.append(model_short, style="bold green")
-
-    if tool_count > 0:
-        center.append(f" | {tool_count} tools", style="dim")
-
-    if tier:
-        center.append(f" | {tier}", style="dim yellow")
-
+    # -- Cost (only shown when > 0) --
     if cost_usd > 0:
-        center.append(f" | ${cost_usd:.3f}", style="dim green")
+        parts.append(Text(f"${cost_usd:.3f}", style="dim"))
 
-    # Context gauge
-    if token_limit > 0:
-        gauge_markup = build_context_gauge(token_used, token_limit)
-        center.append(" | ", style="dim")
-        center.append_text(Text.from_markup(gauge_markup))
-
-    # Permission mode indicator
-    mode_markup = get_mode_short(permission_mode)
-    center.append(" | ", style="dim")
-    center.append_text(Text.from_markup(mode_markup))
-
-    # -- Right section: session info --
-    right_info = Text()
-    if session_title:
-        title = session_title[:20]
-        right_info.append(f'"{title}"', style="dim white")
-        if message_count:
-            right_info.append(f" ({message_count} msgs)", style="dim")
-    elif message_count:
-        right_info.append(f"{message_count} msgs", style="dim")
-
-    # -- Phase 3 indicators: background, research, mood --
-    if bg_indicator:
-        right_info.append(" ")
-        right_info.append_text(Text.from_markup(bg_indicator))
-    if research_indicator:
-        right_info.append(" ")
-        right_info.append_text(Text.from_markup(research_indicator))
-    if mood_indicator:
-        right_info.append(f" {mood_indicator}")
-    if watch_indicator:
-        right_info.append(" ")
-        right_info.append_text(Text.from_markup(watch_indicator))
-
-    # -- Steering indicators --
-    if steering_queue is not None:
-        from aura.cli.steering import create_steering_indicator, create_follow_up_indicator
-        steer_ind = create_steering_indicator(steering_queue)
-        follow_ind = create_follow_up_indicator(steering_queue)
-        if steer_ind:
-            right_info.append(" ")
-            right_info.append_text(Text.from_markup(steer_ind))
-        if follow_ind:
-            right_info.append(" ")
-            right_info.append_text(Text.from_markup(follow_ind))
-
-    # -- Hint (always rightmost) --
-    hint = Text()
-    hint.append("Alt+M", style="dim bold")
-    hint.append(" model ", style="dim")
-
-    # -- Assemble with separators, pad to full width --
-    sep = Text(" | ", style="dim")
-
-    bar = Text()
-    bar.append_text(left)
-    bar.append_text(sep)
-    bar.append_text(center)
-
-    if right_info.cell_len > 0:
-        bar.append_text(sep)
-        bar.append_text(right_info)
-
-    # Calculate remaining space for right-alignment of hint
-    used = bar.cell_len + hint.cell_len
-    gap = width - used
-    if gap < 0:
-        # Terminal too narrow — drop hint to save space
-        # No hint appended
-        pass
+    # -- Context gauge --
+    pct = int(100 * token_used / max(token_limit, 1))
+    if token_used >= 1000:
+        used_k = f"{token_used / 1000:.1f}K"
     else:
-        if gap > 0:
-            bar.append(" " * gap)
-        bar.append_text(hint)
+        used_k = str(token_used)
+    limit_k = f"{token_limit / 1000:.0f}K"
 
-    return bar
+    if pct < 50:
+        gauge_color = "green"
+    elif pct < 80:
+        gauge_color = "yellow"
+    else:
+        gauge_color = "red"
+
+    filled = int(8 * pct / 100)
+    bar_chars = "\u2588" * filled + "\u2591" * (8 - filled)
+
+    gauge = Text()
+    gauge.append(f"{used_k}/{limit_k} ", style="dim")
+    gauge.append(bar_chars, style=gauge_color)
+    gauge.append(f" {pct}%", style="dim")
+    parts.append(gauge)
+
+    # -- Permission mode --
+    _mode_colors = {
+        "careful": "yellow",
+        "auto_edit": "green",
+        "full_auto": "red",
+        "plan": "blue",
+        "plan_approve": "magenta",
+    }
+    _mode_short = {
+        "careful": "CARE",
+        "auto_edit": "AUTO",
+        "full_auto": "FULL",
+        "plan": "PLAN",
+        "plan_approve": "P-APR",
+    }
+    mc = _mode_colors.get(permission_mode, "white")
+    ms = _mode_short.get(permission_mode, permission_mode.upper())
+    parts.append(Text(ms, style=f"bold {mc}"))
+
+    # -- Assemble --
+    sep = Text("  \u2502  ", style="dim")
+    result = Text("  ")
+    for i, part in enumerate(parts):
+        if i > 0:
+            result.append_text(sep)
+        result.append_text(part)
+
+    return result

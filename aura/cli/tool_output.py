@@ -1,86 +1,79 @@
-"""Streaming and collapsible tool output rendering."""
+"""Minimal tool output rendering — no panels, compact output."""
 from __future__ import annotations
-import time
-from typing import Optional, List, Callable
-from rich.console import Console
-from rich.panel import Panel
-from rich.text import Text
-from rich.syntax import Syntax
+
+import json
+from typing import Optional, List
 
 
-# Maximum lines shown by default before collapsing
-DEFAULT_VISIBLE_LINES = 8
-# Maximum output stored (prevent memory issues with huge outputs)
+# File reads: show first/last N lines
+_FILE_HEAD = 5
+_FILE_TAIL = 5
+# Shell output: show last N lines
+_SHELL_TAIL = 10
+# Max stored lines to prevent memory issues
 MAX_OUTPUT_LINES = 500
 
 
 class ToolOutputRenderer:
-    """Renders tool execution output with collapsing and streaming support."""
+    """Renders tool output — compact, no panels, dimmed."""
 
-    def __init__(self, console: Optional[Console] = None, visible_lines: int = DEFAULT_VISIBLE_LINES):
-        self._console = console or Console()
+    def __init__(self, console=None, visible_lines: int = _SHELL_TAIL):
+        if console is None:
+            from rich.console import Console
+            console = Console()
+        self._console = console
         self._visible_lines = visible_lines
 
-    def render_shell_output(self, output: str, command: str = "", elapsed: float = 0.0, exit_code: int = 0) -> None:
-        """Render shell command output with collapsing for long output."""
+    def render_shell_output(self, output: str, command: str = "",
+                            elapsed: float = 0.0, exit_code: int = 0) -> None:
+        """Show last N lines of shell output, dimmed."""
         lines = output.splitlines() if output else []
 
         if not lines:
-            self._console.print(f"  [dim](no output)[/dim]")
+            self._console.print("  [dim](no output)[/dim]")
             return
 
-        # Header with command and timing
-        status_icon = "[green]\u2713[/green]" if exit_code == 0 else "[red]\u2717[/red]"
-        elapsed_str = f" ({elapsed:.1f}s)" if elapsed > 0.5 else ""
-        header = f"{status_icon} [dim]{command}{elapsed_str}[/dim]" if command else ""
-        if header:
-            self._console.print(f"  {header}")
+        # Status line
+        icon = "[green]\u2713[/green]" if exit_code == 0 else "[red]\u2717[/red]"
+        elapsed_str = f" {format_elapsed(elapsed)}" if elapsed > 0.5 else ""
+        if command:
+            self._console.print(f"  {icon} [dim]{command}{elapsed_str}[/dim]")
 
-        # Show lines with collapsing
-        if len(lines) <= self._visible_lines:
+        tail = self._visible_lines
+        if len(lines) <= tail:
             for line in lines:
-                self._console.print(f"  [dim]\u2502[/dim] {line}")
+                self._console.print(f"  [dim]{line}[/dim]")
         else:
-            for line in lines[:self._visible_lines]:
-                self._console.print(f"  [dim]\u2502[/dim] {line}")
-            hidden = len(lines) - self._visible_lines
-            self._console.print(f"  [dim]\u2502 ... +{hidden} more lines (use -v to show all)[/dim]")
+            hidden = len(lines) - tail
+            self._console.print(f"  [dim]... {hidden} lines hidden ...[/dim]")
+            for line in lines[-tail:]:
+                self._console.print(f"  [dim]{line}[/dim]")
 
-    def render_file_content(self, content: str, filename: str = "", language: str = "") -> None:
-        """Render file content with syntax highlighting, collapsed if long."""
+    def render_file_content(self, content: str, filename: str = "",
+                            language: str = "") -> None:
+        """Show first 5 + last 5 lines of a file read, no panel."""
         lines = content.splitlines()
+        total = len(lines)
 
-        if not language and filename:
-            # Detect language from extension
-            ext_map = {
-                ".py": "python", ".js": "javascript", ".ts": "typescript",
-                ".jsx": "jsx", ".tsx": "tsx", ".json": "json", ".yaml": "yaml",
-                ".yml": "yaml", ".md": "markdown", ".html": "html", ".css": "css",
-                ".sh": "bash", ".rs": "rust", ".go": "go", ".java": "java",
-                ".cpp": "cpp", ".c": "c", ".rb": "ruby", ".sql": "sql",
-            }
-            ext = "." + filename.rsplit(".", 1)[-1] if "." in filename else ""
-            language = ext_map.get(ext, "text")
+        if filename:
+            self._console.print(f"  [dim]{filename} ({total} lines)[/dim]")
 
-        if len(lines) <= self._visible_lines + 5:
-            # Small enough to show fully
-            syntax = Syntax(content, language or "text", theme="monokai", line_numbers=True)
-            self._console.print(Panel(syntax, title=f"[dim]{filename}[/dim]", border_style="dim", padding=(0, 1)))
+        if total <= _FILE_HEAD + _FILE_TAIL + 2:
+            # Small file — show all, dimmed
+            for line in lines:
+                self._console.print(f"  [dim]{line}[/dim]")
         else:
-            # Collapse — show first N lines
-            preview = "\n".join(lines[:self._visible_lines])
-            syntax = Syntax(preview, language or "text", theme="monokai", line_numbers=True)
-            hidden = len(lines) - self._visible_lines
-            self._console.print(Panel(
-                syntax,
-                title=f"[dim]{filename} ({len(lines)} lines)[/dim]",
-                subtitle=f"[dim]+{hidden} more lines[/dim]",
-                border_style="dim",
-                padding=(0, 1),
-            ))
+            # First 5
+            for line in lines[:_FILE_HEAD]:
+                self._console.print(f"  [dim]{line}[/dim]")
+            hidden = total - _FILE_HEAD - _FILE_TAIL
+            self._console.print(f"  [dim]... {hidden} lines hidden ...[/dim]")
+            # Last 5
+            for line in lines[-_FILE_TAIL:]:
+                self._console.print(f"  [dim]{line}[/dim]")
 
     def render_search_results(self, results: List[dict], query: str = "") -> None:
-        """Render search/grep results with highlighting."""
+        """Show search results, compact."""
         if not results:
             self._console.print(f"  [dim](no results for '{query}')[/dim]")
             return
@@ -96,31 +89,33 @@ class ToolOutputRenderer:
             self._console.print(f"  {loc}  {text.strip()}")
 
         if len(results) > shown:
-            self._console.print(f"  [dim]... +{len(results) - shown} more results[/dim]")
+            self._console.print(f"  [dim]... +{len(results) - shown} more[/dim]")
 
-    def render_web_result(self, content: str, url: str = "", status_code: int = 200) -> None:
-        """Render web request result."""
-        status_color = "green" if 200 <= status_code < 300 else "yellow" if 300 <= status_code < 400 else "red"
-        header = f"[{status_color}]{status_code}[/{status_color}]"
+    def render_web_result(self, content: str, url: str = "",
+                          status_code: int = 200) -> None:
+        """Show web result, compact."""
+        sc = "green" if 200 <= status_code < 300 else "yellow" if 300 <= status_code < 400 else "red"
+        header = f"[{sc}]{status_code}[/{sc}]"
         if url:
             header += f" [dim]{url}[/dim]"
         self._console.print(f"  {header}")
 
         lines = content.splitlines() if content else []
-        if len(lines) <= self._visible_lines:
+        tail = self._visible_lines
+        if len(lines) <= tail:
             for line in lines:
-                self._console.print(f"  [dim]\u2502[/dim] {line}")
+                self._console.print(f"  [dim]{line}[/dim]")
         else:
-            for line in lines[:self._visible_lines]:
-                self._console.print(f"  [dim]\u2502[/dim] {line}")
-            hidden = len(lines) - self._visible_lines
-            self._console.print(f"  [dim]\u2502 ... +{hidden} more lines[/dim]")
+            hidden = len(lines) - tail
+            self._console.print(f"  [dim]... {hidden} lines hidden ...[/dim]")
+            for line in lines[-tail:]:
+                self._console.print(f"  [dim]{line}[/dim]")
 
-    def render_tool_result(self, tool_name: str, result: dict, elapsed: float = 0.0) -> None:
-        """Smart dispatcher — routes to the right renderer based on tool type."""
+    def render_tool_result(self, tool_name: str, result: dict,
+                           elapsed: float = 0.0) -> None:
+        """Route to the right renderer based on tool type."""
         output = result.get("output", result.get("content", result.get("result", "")))
         if isinstance(output, dict):
-            import json
             output = json.dumps(output, indent=2)
         elif not isinstance(output, str):
             output = str(output) if output else ""
@@ -150,7 +145,6 @@ class ToolOutputRenderer:
                 status_code=result.get("status_code", 200),
             )
         else:
-            # Generic fallback
             if output:
                 self.render_shell_output(output=output, elapsed=elapsed)
 
@@ -158,7 +152,7 @@ class ToolOutputRenderer:
 def format_elapsed(seconds: float) -> str:
     """Format elapsed time for display."""
     if seconds < 1:
-        return f"{seconds*1000:.0f}ms"
+        return f"{seconds * 1000:.0f}ms"
     elif seconds < 60:
         return f"{seconds:.1f}s"
     else:

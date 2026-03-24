@@ -120,6 +120,19 @@ def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: O
     show_banner()
     show_welcome_info(agent)
 
+    # Show permission mode banner (like Claude Code's "Allowed tools: ...")
+    def _show_perm_banner(mode: str) -> None:
+        from .permissions_ui import get_mode_description
+        allowed = "Read, Glob, Grep, ListDir, Git"
+        if mode in ("auto_edit", "full_auto"):
+            allowed += ", Edit, Write"
+        if mode == "full_auto":
+            allowed += ", Shell(all)"
+        else:
+            allowed += ", Shell(safe)"
+        console.print(f"  [dim]Allowed tools:[/dim] [bold]{allowed}[/bold]  [dim]|[/dim]  [dim]Mode:[/dim] [bold]{get_mode_description(mode).split(' — ')[0]}[/bold]")
+        console.print()
+
     _project_type = ""
     try:
         from aura.tools.project_context import detect_and_load_context
@@ -140,12 +153,26 @@ def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: O
     permissions = PermissionManager()
 
     def _cli_confirm(tool_name: str, description: str) -> bool:
+        from rich.prompt import Prompt
+        from .permissions_ui import should_auto_approve_edit, should_auto_approve_command
+
+        # Auto-edit mode: auto-approve file edits/writes, still prompt for shell
+        if should_auto_approve_edit(current_perm_mode) and tool_name in ("edit_file", "write_file"):
+            return True
+        if should_auto_approve_command(current_perm_mode):
+            return True
+
         console.print(f"\n  [yellow]Permission required:[/yellow] {tool_name}")
         if description:
             for line in description.split("\n")[:10]:
                 console.print(f"    {line}", highlight=False)
         try:
-            response = input("    Allow? (y/n/always): ").strip().lower()
+            response = Prompt.ask(
+                "    [yellow]Allow?[/yellow]",
+                choices=["y", "n", "always"],
+                default="y",
+                console=console,
+            )
         except (EOFError, KeyboardInterrupt):
             return False
         if response == "always":
@@ -192,9 +219,11 @@ def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: O
         agentic._checkpoint_mgr = checkpoint_mgr
         agentic.executor._checkpoint_mgr = checkpoint_mgr
 
-    current_perm_mode = "careful"
+    current_perm_mode = "auto_edit"
     if trust:
         current_perm_mode = "full_auto"
+
+    _show_perm_banner(current_perm_mode)
 
     try:
         from .background import BackgroundManager, notify_completion, create_background_indicator
@@ -460,6 +489,7 @@ def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: O
         elif user_input == SIGNAL_CYCLE_PERMS:
             current_perm_mode = cycle_permission_mode(current_perm_mode)
             console.print(f"[dim]{get_mode_description(current_perm_mode)}[/dim]")
+            _show_perm_banner(current_perm_mode)
             if current_perm_mode == "full_auto":
                 permissions.set_trust_mode(True)
             else:
