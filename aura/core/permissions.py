@@ -112,7 +112,8 @@ class PermissionManager:
                 logger.warning(f"[Permissions] Unknown tier '{value}' for '{key}'")
 
     def _resolve_key(self, tool_name: str, args: dict) -> str:
-        """Resolve the permission key, handling git sub-actions."""
+        """Resolve the permission key, handling git sub-actions and case normalization."""
+        tool_name = tool_name.lower()
         if tool_name == "git":
             action = args.get("action", "status")
             return f"git.{action}"

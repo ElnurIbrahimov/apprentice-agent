@@ -153,7 +153,6 @@ def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: O
     permissions = PermissionManager()
 
     def _cli_confirm(tool_name: str, description: str) -> bool:
-        from rich.prompt import Prompt
         from .permissions_ui import should_auto_approve_edit, should_auto_approve_command
 
         # Auto-edit mode: auto-approve file edits/writes, still prompt for shell
@@ -162,23 +161,19 @@ def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: O
         if should_auto_approve_command(current_perm_mode):
             return True
 
-        console.print(f"\n  [yellow]Permission required:[/yellow] {tool_name}")
+        console.print(f"\n  [yellow]Allow {tool_name}?[/yellow]", end="")
         if description:
-            for line in description.split("\n")[:10]:
-                console.print(f"    {line}", highlight=False)
+            console.print(f" [dim]{description[:80]}[/dim]", end="")
         try:
-            response = Prompt.ask(
-                "    [yellow]Allow?[/yellow]",
-                choices=["y", "n", "always"],
-                default="y",
-                console=console,
-            )
+            # Use plain input() — prompt_toolkit releases stdin during agentic.run()
+            # Rich's Prompt.ask() conflicts with prompt_toolkit's stdin ownership
+            response = input("  [y/n/always] ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             return False
         if response == "always":
             permissions.set_trust_mode(True)
             return True
-        return response in ("y", "yes")
+        return response in ("y", "yes", "")
 
     permissions.set_confirm_callback(_cli_confirm)
     if trust:

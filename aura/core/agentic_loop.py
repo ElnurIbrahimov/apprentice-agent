@@ -428,19 +428,14 @@ class ToolExecutor:
         if not preview.get("success"):
             return preview
 
-        # Step 2: show diff and get approval (skip prompt in trust mode)
-        from .diff_display import show_diff_and_confirm
-        if not self.permissions.trust_mode:
-            approved = show_diff_and_confirm(path, args["old_string"], args["new_string"], trust_mode=False)
-            if not approved:
-                return {"success": False, "error": "Edit rejected by user"}
-        else:
-            # Trust mode: show diff briefly, auto-approve
-            from .diff_display import show_diff
-            try:
-                show_diff(path, args["old_string"], args["new_string"])
-            except Exception as e:
-                logger.debug(f"[AgenticLoop] non-critical: {e}")
+        # Step 2: show diff — auto-approve if edit_file is AUTO in permissions (like Claude Code)
+        # The PermissionManager already approved this tool at the outer gate (line 988).
+        # No second prompt needed — just show the diff for visibility.
+        from .diff_display import show_diff
+        try:
+            show_diff(path, args["old_string"], args["new_string"])
+        except Exception as e:
+            logger.debug(f"[AgenticLoop] non-critical: {e}")
         # Step 3: apply for real
         result = self.code_edit.edit(
             path=path,
@@ -931,10 +926,14 @@ class AgenticLoop:
             content = re.sub(r'\n{3,}', '\n\n', content)
 
             if not tool_calls:
-                # No tool calls — LLM is done
-                final_response = content or "(No response)"
+                if not content:
+                    # Empty response — retry with a nudge instead of showing "(No response)"
+                    logger.warning(f"[AgenticLoop] Empty response from model on iteration {self.iteration}, nudging")
+                    messages.append({"role": "assistant", "content": ""})
+                    messages.append({"role": "user", "content": "Continue. Execute the task using tools."})
+                    continue
+                final_response = content
                 if on_response and not accumulated:
-                    # Only call on_response if we didn't already stream it
                     on_response(final_response, self.iteration)
                 break
 
@@ -985,7 +984,9 @@ class AgenticLoop:
             approved = []
             for tool_name, args in parsed_calls:
                 self.tool_calls_total += 1
-                if not self.permissions.check(tool_name, args):
+                # Resolve aliases BEFORE permission check (LLM may send "find", "Glob", "cat", etc.)
+                resolved_name = self.executor._TOOL_ALIASES.get(tool_name, tool_name).lower()
+                if not self.permissions.check(resolved_name, args):
                     approved.append((tool_name, args, json.dumps({"error": "Permission denied by user"})))
                     # Only show tool status here when there's no external on_tool_call callback
                     # (the callback in chat_loop already handles display, so this avoids double display)
