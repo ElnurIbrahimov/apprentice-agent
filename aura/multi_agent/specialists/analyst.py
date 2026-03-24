@@ -98,15 +98,11 @@ When searching documents, use: [TOOL: local_rag] search query"""
                     analysis_data["rag_results"] = rag_result
 
             # Step 2: Synthesize analysis
-            fluxmind_reasoning = None
             analysis_prompt = system_prompt
 
             if context_parts:
                 analysis_prompt += "\n\n**Available Context:**\n"
                 analysis_prompt += "\n---\n".join(context_parts)
-
-            if fluxmind_reasoning:
-                analysis_prompt += f"\n\n**Calibrated Reasoning (FluxMind):**\n{fluxmind_reasoning}"
 
             analysis_prompt += """
 

@@ -73,13 +73,8 @@ Explore scenarios and ideas creatively."""
             query = message.content.lower()
 
             # Detect creative task type
-            is_whatif = "what if" in query or "scenario" in query
             is_brainstorm = any(kw in query for kw in ["brainstorm", "ideas", "suggest"])
             is_story = any(kw in query for kw in ["story", "write", "tale", "narrative"])
-            is_debate = any(kw in query for kw in ["perspective", "debate", "argue", "both sides"])
-
-            worldsim_result = None
-            theater_result = None
 
             # Generate creative content
             creative_prompt = system_prompt
@@ -101,22 +96,6 @@ Create an engaging narrative with:
 - Compelling conflict
 - Sensory details
 - Satisfying resolution"""
-
-            elif is_whatif and worldsim_result:
-                creative_prompt += f"""
-
-WorldSim Analysis:
-{worldsim_result}
-
-Build on this simulation to explore the scenario further."""
-
-            elif is_debate and theater_result:
-                creative_prompt += f"""
-
-Multi-Perspective Debate:
-{theater_result}
-
-Synthesize these perspectives into a balanced conclusion."""
 
             response = llm_func(creative_prompt, message.content)
 

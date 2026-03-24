@@ -115,7 +115,7 @@ class AnthropicProvider(BaseProvider):
         return body
 
     def chat(self, model: str, messages: list[dict], stream: bool = False,
-             options: dict = None) -> dict | Iterator[dict]:
+             options: dict = None, tools: list | None = None) -> dict | Iterator[dict]:
         if not self.is_configured():
             raise ConnectionError(
                 f"Anthropic API key not set. Set {_CFG['env_var']} in your .env file."
@@ -124,6 +124,18 @@ class AnthropicProvider(BaseProvider):
         url = f"{_CFG['base_url']}/messages"
         headers = self._build_headers(stream)
         body = self._build_body(model, messages, stream, options)
+
+        # Convert OpenAI-format tools to Anthropic format
+        if tools:
+            anthropic_tools = []
+            for t in tools:
+                func = t.get("function", t)
+                anthropic_tools.append({
+                    "name": func.get("name", ""),
+                    "description": func.get("description", ""),
+                    "input_schema": func.get("parameters", {}),
+                })
+            body["tools"] = anthropic_tools
 
         if stream:
             return self._stream_chat(url, headers, body)
@@ -140,27 +152,43 @@ class AnthropicProvider(BaseProvider):
         if resp.status_code != 200:
             error_text = resp.text[:500] if resp.text else ""
             logger.error(f"[ANTHROPIC] API error {resp.status_code}: {error_text}")
-            raise ConnectionError(f"Anthropic API error: {resp.status_code}")
+            raise ConnectionError(f"Anthropic API error: {resp.status_code} - {resp.text[:200]}")
 
         data = resp.json()
 
-        # Extract text from content blocks
+        # Extract text and tool_use from content blocks
         text = ""
+        tool_calls = []
         for block in data.get("content", []):
             if block.get("type") == "text":
                 text += block.get("text", "")
+            elif block.get("type") == "tool_use":
+                # Convert to OpenAI-compatible tool_calls format
+                tool_calls.append({
+                    "id": block.get("id", ""),
+                    "type": "function",
+                    "function": {
+                        "name": block.get("name", ""),
+                        "arguments": json.dumps(block.get("input", {})),
+                    },
+                })
 
         usage = data.get("usage", {})
-        return {
+        result = {
             "message": {"role": "assistant", "content": text},
             "done": True,
             "prompt_eval_count": usage.get("input_tokens", 0),
             "eval_count": usage.get("output_tokens", 0),
         }
 
+        if tool_calls:
+            result["message"]["tool_calls"] = tool_calls
+
+        return result
+
     def _stream_chat(self, url: str, headers: dict, body: dict) -> Iterator[dict]:
         try:
-            resp = self._session.post(url, headers=headers, json=body, stream=True, timeout=120)
+            resp = self._session.post(url, headers=headers, json=body, stream=True, timeout=(10, 90))
         except requests.exceptions.RequestException as e:
             logger.error(f"[ANTHROPIC] Stream request failed: {e}")
             raise ConnectionError(f"Anthropic request failed: {e}")
@@ -168,10 +196,12 @@ class AnthropicProvider(BaseProvider):
         if resp.status_code != 200:
             error_text = resp.text[:500] if resp.text else ""
             logger.error(f"[ANTHROPIC] API error {resp.status_code}: {error_text}")
-            raise ConnectionError(f"Anthropic API error: {resp.status_code}")
+            raise ConnectionError(f"Anthropic API error: {resp.status_code} - {resp.text[:200]}")
 
         input_tokens = 0
         output_tokens = 0
+        tool_calls = []  # Accumulated tool_use blocks
+        current_tool = None  # Tool block being streamed
         resp.encoding = "utf-8"
 
         for raw_line in resp.iter_lines():
@@ -188,13 +218,32 @@ class AnthropicProvider(BaseProvider):
                 event = json.loads(data_str)
                 event_type = event.get("type", "")
 
-                if event_type == "content_block_delta":
+                if event_type == "content_block_start":
+                    block = event.get("content_block", {})
+                    if block.get("type") == "tool_use":
+                        current_tool = {
+                            "id": block.get("id", ""),
+                            "type": "function",
+                            "function": {
+                                "name": block.get("name", ""),
+                                "arguments": "",
+                            },
+                        }
+
+                elif event_type == "content_block_delta":
                     delta = event.get("delta", {})
                     if delta.get("type") == "text_delta":
                         yield {
                             "message": {"role": "assistant", "content": delta.get("text", "")},
                             "done": False,
                         }
+                    elif delta.get("type") == "input_json_delta" and current_tool:
+                        current_tool["function"]["arguments"] += delta.get("partial_json", "")
+
+                elif event_type == "content_block_stop":
+                    if current_tool:
+                        tool_calls.append(current_tool)
+                        current_tool = None
 
                 elif event_type == "message_start":
                     msg = event.get("message", {})
@@ -208,8 +257,11 @@ class AnthropicProvider(BaseProvider):
             except json.JSONDecodeError:
                 continue
 
+        final_msg = {"role": "assistant", "content": ""}
+        if tool_calls:
+            final_msg["tool_calls"] = tool_calls
         yield {
-            "message": {"role": "assistant", "content": ""},
+            "message": final_msg,
             "done": True,
             "prompt_eval_count": input_tokens,
             "eval_count": output_tokens,

@@ -281,7 +281,7 @@ def main() -> None:
                 print(f"  Resumed (legacy): {latest.get('title', 'Untitled')}")
             else:
                 print("No previous sessions found.")
-        elif args.resume == "pick" or args.resume:
+        else:
             all_sessions = []
             for s in agentic_sessions:
                 s["_source"] = "agentic"

@@ -29,7 +29,17 @@ from .token_manager import ContextWindowManager
 
 logger = logging.getLogger(__name__)
 
-from aura.cli.display import console  # Use the SAME console as display.py
+# Lazy import — set on first use to decouple core from CLI
+console = None
+def _ensure_console():
+    global console
+    if console is None:
+        try:
+            from aura.cli.display import console as _c
+            console = _c
+        except ImportError:
+            from rich.console import Console
+            console = Console()
 
 MAX_ITERATIONS = 50
 MAX_TOOL_OUTPUT_CHARS = 15000
@@ -716,6 +726,9 @@ class AgenticLoop:
         Returns:
             {success, response, iterations, tool_calls, model}
         """
+        # Ensure console is initialized for display output
+        _ensure_console()
+
         # Reset per-turn counters
         self.iteration = 0
         self.tool_calls_total = 0
@@ -1080,7 +1093,14 @@ class AgenticLoop:
 
         # Keep history bounded (last 100 messages, only 40 sent to LLM anyway)
         if len(self._conversation_history) > 100:
+            dropped = len(self._conversation_history) - 100
             self._conversation_history = self._conversation_history[-100:]
+            # Notify user about context compaction
+            try:
+                _ensure_console()
+                console.print(f"  [dim italic]Context compacted: {dropped} oldest messages trimmed[/]")
+            except Exception:
+                pass
 
         # Update session stats and save
         if self.session:

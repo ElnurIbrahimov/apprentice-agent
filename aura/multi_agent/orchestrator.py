@@ -178,19 +178,29 @@ class MultiAgentOrchestrator:
         }
 
         if futures:
-
-            for future in concurrent.futures.as_completed(futures, timeout=60):
-                try:
-                    result = future.result()
-                    results.append(result)
-                except Exception as e:
-                    agent_name = futures[future]
-                    logger.error(f"[Orchestrator] Parallel execution error for {agent_name}: {e}")
-                    results.append(AgentResult(
-                        success=False,
-                        response=f"Error: {e}",
-                        agent=agent_name
-                    ))
+            try:
+                for future in concurrent.futures.as_completed(futures, timeout=60):
+                    try:
+                        result = future.result()
+                        results.append(result)
+                    except Exception as e:
+                        agent_name = futures[future]
+                        logger.error(f"[Orchestrator] Parallel execution error for {agent_name}: {e}")
+                        results.append(AgentResult(
+                            success=False,
+                            response=f"Error: {e}",
+                            agent=agent_name
+                        ))
+            except concurrent.futures.TimeoutError:
+                logger.error("[Orchestrator] Parallel execution timed out after 60s")
+                for future, name in futures.items():
+                    if not future.done():
+                        future.cancel()
+                        results.append(AgentResult(
+                            success=False,
+                            response="Timed out after 60s",
+                            agent=name
+                        ))
 
         return results
 

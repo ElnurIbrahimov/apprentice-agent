@@ -2600,6 +2600,19 @@ IMPORTANT: If the user asks about something you are not sure about, something re
         except Exception as e:  # Catch-all: shutdown must continue even if one step fails
             results["errors"].append(f"ALMA state save: {e}")
 
+        # 13. Stop GatewayDaemon (proactive intelligence)
+        try:
+            if self.gateway_daemon is not None:
+                import asyncio
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(self.gateway_daemon.stop())
+                except RuntimeError:
+                    asyncio.run(self.gateway_daemon.stop())
+                results["freed_resources"].append("gateway_daemon")
+        except Exception as e:  # Catch-all: shutdown must continue even if one step fails
+            results["errors"].append(f"GatewayDaemon stop: {e}")
+
         results["success"] = len(results["errors"]) == 0
         return results
 

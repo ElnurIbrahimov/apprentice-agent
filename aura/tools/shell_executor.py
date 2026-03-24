@@ -61,6 +61,7 @@ BLOCKED_COMMANDS = {
     "chmod -R 777 /", "> /dev/sda", "shutdown", "reboot",
     "format c:", "del /f /s /q c:\\",
     "powershell", "pwsh", "cmd", "cmd.exe",
+    "taskkill", "pkill", "killall", "kill",
 }
 
 # Security: blocked patterns (regex)

@@ -7,6 +7,11 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
+_ERROR_SENTINELS = ["I'm having trouble processing", "[LLM Error]"]
+
+_last_ctrl_c_time = 0.0
+_last_ipc_heartbeat = 0.0
+
 
 def _rewind_picker(cp_mgr: Any, console: Any) -> bool:
     import time as _time
@@ -112,6 +117,8 @@ def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: O
     from aura.core.session import AgenticSession
     from aura.core.permissions import PermissionManager
     from aura.core.context import gather_context, get_aura_md_config
+
+    global _last_ctrl_c_time, _last_ipc_heartbeat
 
     from .themes import load_theme_preference, set_theme
     saved_theme = load_theme_preference()
@@ -542,6 +549,9 @@ def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: O
                     return {"success": True, "response": response or "", "iterations": 1}
                 except Exception as e:  # Catch-all: runs in thread pool, must not propagate
                     return {"success": False, "error": str(e)}
+            if not bg_manager:
+                console.print("[red]Background tasks are not available.[/red]")
+                continue
             task = bg_manager.submit(bg_prompt, _bg_task_fn)
             if task:
                 console.print(f"[cyan]Background task started: {task.id}[/cyan]")
@@ -549,20 +559,23 @@ def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: O
                 console.print("[red]Too many background tasks running.[/red]")
             continue
 
-        # IPC heartbeat — best-effort, failures are expected and harmless
-        try:
-            import socket, json as _json
-            _ipc_token = ""
-            _token_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "ipc_token")
-            if os.path.isfile(_token_path):
-                with open(_token_path) as _tf:
-                    _ipc_token = _tf.read().strip()
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(0.1)
-                s.connect(("127.0.0.1", 19733))
-                s.send((_json.dumps({"type": "activity", "token": _ipc_token}) + "\n").encode())
-        except (OSError, ValueError):
-            pass
+        # IPC heartbeat — best-effort, throttled to once per 30s
+        import time as _t_ipc
+        if _t_ipc.time() - _last_ipc_heartbeat > 30.0:
+            _last_ipc_heartbeat = _t_ipc.time()
+            try:
+                import socket, json as _json
+                _ipc_token = ""
+                _token_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "ipc_token")
+                if os.path.isfile(_token_path):
+                    with open(_token_path) as _tf:
+                        _ipc_token = _tf.read().strip()
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.settimeout(0.1)
+                    s.connect(("127.0.0.1", 19733))
+                    s.send((_json.dumps({"type": "activity", "token": _ipc_token}) + "\n").encode())
+            except (OSError, ValueError):
+                pass
 
         if user_input.strip() == "?":
             show_help()
@@ -673,11 +686,31 @@ def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: O
                         )
                         streamer.finish()
                     except KeyboardInterrupt:
-                        streamer.pause()
-                        agentic.cancel()
-                        show_info("Cancelled.")
-                        agentic._cancel_event.clear()
-                        result = None
+                        import time as _time
+                        now = _time.time()
+                        if now - _last_ctrl_c_time < 5.0:
+                            # Second Ctrl+C — actually abort
+                            streamer.pause()
+                            agentic.cancel()
+                            console.print("\n  [red]Aborted.[/red]")
+                            _last_ctrl_c_time = 0.0
+                            agentic._cancel_event.clear()
+                            result = None
+                        else:
+                            # First Ctrl+C — warn
+                            _last_ctrl_c_time = now
+                            console.print("\n  [dim yellow]Press Ctrl+C again within 5s to abort[/dim yellow]")
+                            try:
+                                _deadline = _time.time() + 5.0
+                                while _time.time() < _deadline:
+                                    _time.sleep(0.1)
+                            except KeyboardInterrupt:
+                                streamer.pause()
+                                agentic.cancel()
+                                console.print("\n  [red]Aborted.[/red]")
+                                _last_ctrl_c_time = 0.0
+                                agentic._cancel_event.clear()
+                            result = None
                     except Exception as exc:
                         streamer.pause()
                         show_error(str(exc))
@@ -703,7 +736,6 @@ def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: O
             response_text = result.get("response", "")
             model_used = result.get("model", _current_model)
 
-            _ERROR_SENTINELS = ["I'm having trouble processing", "[LLM Error]"]
             is_error = result.get("success") is False or any(response_text.startswith(s) for s in _ERROR_SENTINELS)
             if is_error:
                 show_error(response_text)
@@ -772,21 +804,36 @@ def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: O
                 steering_queue=steering,
             )
         except KeyboardInterrupt:
-            # First Ctrl+C: graceful cancel -- signal the loop and wait
-            streamer.pause()
-            steering.clear()
-            agentic.cancel()
-            show_info("Cancelling... (press Ctrl+C again to force stop)")
-            try:
-                import time as _cancel_time
-                _cancel_deadline = _cancel_time.time() + 2.0
-                while _cancel_time.time() < _cancel_deadline:
-                    _cancel_time.sleep(0.1)
-            except KeyboardInterrupt:
-                # Second Ctrl+C: force break immediately
-                show_info("Force stopped.")
-            agentic._cancel_event.clear()
-            continue
+            import time as _time
+            now = _time.time()
+            if now - _last_ctrl_c_time < 5.0:
+                # Second Ctrl+C — actually abort
+                streamer.pause()
+                steering.clear()
+                agentic.cancel()
+                console.print("\n  [red]Aborted.[/red]")
+                _last_ctrl_c_time = 0.0
+                agentic._cancel_event.clear()
+                continue
+            else:
+                # First Ctrl+C — warn
+                _last_ctrl_c_time = now
+                console.print("\n  [dim yellow]Press Ctrl+C again within 5s to abort[/dim yellow]")
+                try:
+                    _deadline = _time.time() + 5.0
+                    while _time.time() < _deadline:
+                        _time.sleep(0.1)
+                except KeyboardInterrupt:
+                    streamer.pause()
+                    steering.clear()
+                    agentic.cancel()
+                    console.print("\n  [red]Aborted.[/red]")
+                    _last_ctrl_c_time = 0.0
+                    agentic._cancel_event.clear()
+                    continue
+                # 5s passed without second Ctrl+C — resume
+                _last_ctrl_c_time = 0.0
+                continue
         except Exception as exc:  # Catch-all: protect main loop from crash
             streamer.pause()
             show_error(str(exc))
@@ -801,7 +848,6 @@ def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: O
         response_text = result.get("response", "")
         model_used = result.get("model", _current_model)
 
-        _ERROR_SENTINELS = ["I'm having trouble processing", "[LLM Error]"]
         is_error = result.get("success") is False or any(response_text.startswith(s) for s in _ERROR_SENTINELS)
         if is_error:
             show_error(response_text)

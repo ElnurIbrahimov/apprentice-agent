@@ -997,7 +997,7 @@ class OllamaBrain:
             return
 
         try:
-            stream = self._retry_on_rate_limit(
+            _start_stream = _llm_retry(
                 lambda: client.chat(
                     model=actual_model,
                     messages=messages,
@@ -1006,13 +1006,22 @@ class OllamaBrain:
                     stream=True,
                 )
             )
+            stream = _start_stream()
 
             accumulated_content = ""
             tool_calls = None
             input_tokens = 0
             output_tokens = 0
+            _STREAM_STALE_TIMEOUT = 90
+            _last_chunk_time = time.time()
 
             for chunk in stream:
+                now = time.time()
+                if now - _last_chunk_time > _STREAM_STALE_TIMEOUT:
+                    logger.warning(f"[BRAIN] Tool stream stale for {_STREAM_STALE_TIMEOUT}s, aborting")
+                    yield ("error", {"error": f"Stream stale for {_STREAM_STALE_TIMEOUT}s", "model": actual_model})
+                    return
+                _last_chunk_time = now
                 # Ollama streaming returns ChatResponse objects or dicts
                 if isinstance(chunk, dict):
                     msg = chunk.get("message", {})
@@ -2390,127 +2399,129 @@ class OllamaBrain:
         full_system_prompt = ctx["full_system_prompt"]
 
         try:
+            # Phase 1: Snapshot under lock (brief — only reads shared history)
             with self._think_lock:
                 messages = self._build_chat_messages(prompt, full_system_prompt, use_history)
-
-                # Taint tracking: scan user messages for secrets (OpenFang-inspired)
-                try:
-                    from aura.security.taint_tracker import get_tracker
-                    tracker = get_tracker()
-                    taint_matches, _ = tracker.check_and_track(prompt, session_id="brain")
-                    if taint_matches:
-                        logger.warning(
-                            f"[BRAIN] Detected {len(taint_matches)} secret(s) in user message — "
-                            f"taint level tracked for session"
-                        )
-                except Exception as e:
-                    logger.warning(f"[BRAIN] Taint tracker failed — secrets may pass through undetected: {e}")
-
-                # Adaptive timeout based on recent latency history
-                neuro = _get_neuromodulator_levels()
-                adjusted_timeout = self._get_adaptive_timeout()
-                _llm_start_ts = time.time()
-                logger.debug(f"[BRAIN] Calling {model} with adaptive timeout={adjusted_timeout}s")
-
                 client, actual_model = self._resolve_chat_client(model)
+                neuro = _get_neuromodulator_levels()
                 llm_options = self._build_neuro_llm_options(prompt, neuro)
+            # _think_lock released — LLM call proceeds without blocking other callers
 
-                # Record neuromodulator influence on thinking panel
-                try:
-                    from api.routes.thinking import record_thought
-                    neuro_effects = []
-                    if abs(neuro["dopamine"] - 0.5) > 0.1:
-                        neuro_effects.append(f"DA={'high' if neuro['dopamine']>0.5 else 'low'}")
-                    if abs(neuro["serotonin"] - 0.5) > 0.1:
-                        neuro_effects.append(f"5HT={'high' if neuro['serotonin']>0.5 else 'low'}")
-                    if abs(neuro["norepinephrine"] - 0.5) > 0.1:
-                        neuro_effects.append(f"NE={'high' if neuro['norepinephrine']>0.5 else 'low'}")
-                    if neuro_effects:
-                        record_thought(
-                            "observing",
-                            f"neuromodulators influencing response: {', '.join(neuro_effects)}",
-                            0.4, "emotion"
+            # Taint tracking: scan user messages for secrets (OpenFang-inspired)
+            try:
+                from aura.security.taint_tracker import get_tracker
+                tracker = get_tracker()
+                taint_matches, _ = tracker.check_and_track(prompt, session_id="brain")
+                if taint_matches:
+                    logger.warning(
+                        f"[BRAIN] Detected {len(taint_matches)} secret(s) in user message — "
+                        f"taint level tracked for session"
+                    )
+            except Exception as e:
+                logger.warning(f"[BRAIN] Taint tracker failed — secrets may pass through undetected: {e}")
+
+            # Record neuromodulator influence on thinking panel
+            try:
+                from api.routes.thinking import record_thought
+                neuro_effects = []
+                if abs(neuro["dopamine"] - 0.5) > 0.1:
+                    neuro_effects.append(f"DA={'high' if neuro['dopamine']>0.5 else 'low'}")
+                if abs(neuro["serotonin"] - 0.5) > 0.1:
+                    neuro_effects.append(f"5HT={'high' if neuro['serotonin']>0.5 else 'low'}")
+                if abs(neuro["norepinephrine"] - 0.5) > 0.1:
+                    neuro_effects.append(f"NE={'high' if neuro['norepinephrine']>0.5 else 'low'}")
+                if neuro_effects:
+                    record_thought(
+                        "observing",
+                        f"neuromodulators influencing response: {', '.join(neuro_effects)}",
+                        0.4, "emotion"
+                    )
+            except Exception as e:
+                logger.debug(f"[Brain] non-critical: {e}")
+
+            # Phase 2: LLM call (NO lock held — allows parallel think/fleet/debate)
+            adjusted_timeout = self._get_adaptive_timeout()
+            _llm_start_ts = time.time()
+            logger.debug(f"[BRAIN] Calling {model} with adaptive timeout={adjusted_timeout}s")
+
+            # Call with timeout protection (adaptive latency-based) + 429 retry
+            response = call_with_timeout(
+                lambda: self._retry_on_rate_limit(
+                    lambda: client.chat(model=actual_model, messages=messages, options=llm_options)
+                ),
+                timeout=adjusted_timeout + 20,
+                default=None
+            )
+
+            if response is None:
+                chain = self._get_fallback_chain(actual_model)
+                for fallback_model in chain:
+                    if fallback_model == actual_model:
+                        continue
+                    try:
+                        fb_client, fb_actual = self._get_client_for_model(fallback_model)
+                        logger.info(f"[BRAIN] Fallback attempt: {actual_model} -> {fb_actual}")
+                        response = call_with_timeout(
+                            lambda m=fb_actual, c=fb_client: c.chat(model=m, messages=messages, options=llm_options),
+                            timeout=adjusted_timeout,
+                            default=None,
                         )
-                except Exception as e:
-                    logger.debug(f"[Brain] non-critical: {e}")
+                        if response is not None:
+                            actual_model = fb_actual
+                            self._last_model_used = actual_model
+                            logger.info(f"[BRAIN] Fallback succeeded with: {actual_model}")
+                            break
+                    except Exception as e:
+                        logger.warning(f"[BRAIN] Fallback model failed: {e}")
+                        continue
 
-                # Call with timeout protection (adaptive latency-based) + 429 retry
-                response = call_with_timeout(
-                    lambda: self._retry_on_rate_limit(
-                        lambda: client.chat(model=actual_model, messages=messages, options=llm_options)
-                    ),
-                    timeout=adjusted_timeout + 20,
-                    default=None
-                )
-
-                if response is None:
-                    chain = self._get_fallback_chain(actual_model)
-                    for fallback_model in chain:
-                        if fallback_model == actual_model:
-                            continue
-                        try:
-                            fb_client, fb_actual = self._get_client_for_model(fallback_model)
-                            logger.info(f"[BRAIN] Fallback attempt: {actual_model} -> {fb_actual}")
-                            response = call_with_timeout(
-                                lambda m=fb_actual, c=fb_client: c.chat(model=m, messages=messages, options=llm_options),
-                                timeout=adjusted_timeout,
-                                default=None,
-                            )
-                            if response is not None:
-                                actual_model = fb_actual
-                                self._last_model_used = actual_model
-                                logger.info(f"[BRAIN] Fallback succeeded with: {actual_model}")
-                                break
-                        except Exception as e:
-                            logger.warning(f"[BRAIN] Fallback model failed: {e}")
-                            continue
-
-                if response is None:
-                    logger.warning(f"[BRAIN] All models in chain failed, returning error message")
-                    with self._cb_lock:
-                        self._consecutive_think_failures += 1
-                        if self._consecutive_think_failures >= self._think_cb_threshold:
-                            self._think_circuit_open_at = time.time()
-                            logger.warning(
-                                f"[BRAIN] Think circuit breaker OPENED after "
-                                f"{self._consecutive_think_failures} consecutive failures — "
-                                f"cooldown {self._think_cb_cooldown}s"
-                            )
-                    _BG_EXECUTOR.submit(
-                        self._record_routing_outcome, actual_model, task_type, False,
-                        (time.time() - _llm_start_ts) * 1000
-                    )
-                    return _user_facing_llm_error()
-
-                assistant_message = _resp_content(response)
-
-                # Record latency for adaptive timeout and reset circuit breaker
-                _llm_elapsed = time.time() - _llm_start_ts
-                self._record_latency(_llm_elapsed)
+            if response is None:
+                logger.warning(f"[BRAIN] All models in chain failed, returning error message")
                 with self._cb_lock:
-                    self._consecutive_think_failures = 0
-
+                    self._consecutive_think_failures += 1
+                    if self._consecutive_think_failures >= self._think_cb_threshold:
+                        self._think_circuit_open_at = time.time()
+                        logger.warning(
+                            f"[BRAIN] Think circuit breaker OPENED after "
+                            f"{self._consecutive_think_failures} consecutive failures — "
+                            f"cooldown {self._think_cb_cooldown}s"
+                        )
                 _BG_EXECUTOR.submit(
-                    self._record_routing_outcome, actual_model, task_type, True,
-                    _llm_elapsed * 1000
+                    self._record_routing_outcome, actual_model, task_type, False,
+                    (time.time() - _llm_start_ts) * 1000
+                )
+                return _user_facing_llm_error()
+
+            assistant_message = _resp_content(response)
+
+            # Record latency for adaptive timeout and reset circuit breaker
+            _llm_elapsed = time.time() - _llm_start_ts
+            self._record_latency(_llm_elapsed)
+            with self._cb_lock:
+                self._consecutive_think_failures = 0
+
+            _BG_EXECUTOR.submit(
+                self._record_routing_outcome, actual_model, task_type, True,
+                _llm_elapsed * 1000
+            )
+
+            # Track tokens and cost
+            _in_tok = _resp_get(response, "prompt_eval_count", 0) or 0
+            _out_tok = _resp_get(response, "eval_count", 0) or 0
+            if _in_tok or _out_tok:
+                self._record_tokens(actual_model, _in_tok, _out_tok)
+
+            # Compaction notice
+            if self._compaction_pending:
+                self._compaction_pending = False
+                assistant_message = (
+                    "_[Context compacted — older messages summarized to preserve memory]_\n\n"
+                    + assistant_message
                 )
 
-                # Track tokens and cost
-                _in_tok = _resp_get(response, "prompt_eval_count", 0) or 0
-                _out_tok = _resp_get(response, "eval_count", 0) or 0
-                if _in_tok or _out_tok:
-                    self._record_tokens(actual_model, _in_tok, _out_tok)
-
-                # Compaction notice
-                if self._compaction_pending:
-                    self._compaction_pending = False
-                    assistant_message = (
-                        "_[Context compacted — older messages summarized to preserve memory]_\n\n"
-                        + assistant_message
-                    )
-
+            # Phase 3: Update history under lock (brief — only writes shared history)
+            with self._think_lock:
                 self._update_history_and_cleanup(prompt, assistant_message, actual_model, use_history)
-            # _think_lock released here
 
             return assistant_message
         finally:

@@ -64,6 +64,9 @@ class BackgroundManager:
         execute_fn: Callable[[str], Dict],
     ) -> Optional[BackgroundTask]:
         """Submit a task to run in the background. Returns the task or None if at capacity."""
+        # Auto-prune old completed tasks before adding new ones
+        self.prune_completed()
+
         with self._lock:
             running = sum(1 for t in self._tasks.values() if t.state == TaskState.RUNNING)
             if running >= self._max_tasks:
@@ -144,6 +147,26 @@ class BackgroundManager:
             for tid in to_remove:
                 del self._tasks[tid]
             return len(to_remove)
+
+    def shutdown(self, timeout: float = 5.0) -> None:
+        """Cancel all running tasks and clean up."""
+        with self._lock:
+            for task_id, task in list(self._tasks.items()):
+                if task.state == TaskState.RUNNING:
+                    task._cancelled = True
+                    task.state = TaskState.FAILED
+                    task.error = "Shutdown"
+                    task.end_time = time.time()
+
+        # Give threads a moment to finish
+        deadline = time.monotonic() + timeout
+        for task_id, task in list(self._tasks.items()):
+            remaining = deadline - time.monotonic()
+            if remaining > 0 and task.thread and task.thread.is_alive():
+                task.thread.join(timeout=remaining)
+
+        with self._lock:
+            self._tasks.clear()
 
     @property
     def running_count(self) -> int:

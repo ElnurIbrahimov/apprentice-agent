@@ -227,15 +227,18 @@ def run_debate(brain, question: str, user_models: Optional[str] = None) -> Debat
         try:
             # Use a per-model timeout to prevent one slow model from stalling the debate
             from concurrent.futures import ThreadPoolExecutor as _TP, TimeoutError as _TE
-            with _TP(max_workers=1) as _p:
-                fut = _p.submit(
-                    brain.think,
-                    prompt,
-                    system_prompt=cfg["system"],
-                    use_history=False,
-                    model_override=pos.model,
-                )
+            _p = _TP(max_workers=1)
+            fut = _p.submit(
+                brain.think,
+                prompt,
+                system_prompt=cfg["system"],
+                use_history=False,
+                model_override=pos.model,
+            )
+            try:
                 response = fut.result(timeout=DEBATER_TIMEOUT)
+            finally:
+                _p.shutdown(wait=False)
             # think() can return str or dict
             if isinstance(response, dict):
                 response = response.get("response", response.get("content", str(response)))

@@ -16,7 +16,7 @@ class BaseProvider(ABC):
 
     @abstractmethod
     def chat(self, model: str, messages: list[dict], stream: bool = False,
-             options: dict = None) -> dict | Iterator[dict]:
+             options: dict = None, tools: list | None = None) -> dict | Iterator[dict]:
         """Send a chat request, returning ollama-compatible response."""
         ...
 

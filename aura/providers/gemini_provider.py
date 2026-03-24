@@ -100,7 +100,7 @@ class GeminiProvider(BaseProvider):
         return body
 
     def chat(self, model: str, messages: list[dict], stream: bool = False,
-             options: dict = None) -> dict | Iterator[dict]:
+             options: dict = None, tools: list | None = None) -> dict | Iterator[dict]:
         if not self.is_configured():
             raise ConnectionError(
                 f"Gemini API key not set. Set {_CFG['env_var']} in your .env file."
@@ -111,63 +111,108 @@ class GeminiProvider(BaseProvider):
 
         if stream:
             url = f"{_CFG['base_url']}/models/{bare_model}:streamGenerateContent?alt=sse&key={api_key}"
-            return self._stream_chat(url, messages, options)
+            return self._stream_chat(url, messages, options, tools)
         else:
             url = f"{_CFG['base_url']}/models/{bare_model}:generateContent?key={api_key}"
-            return self._sync_chat(url, messages, options)
+            return self._sync_chat(url, messages, options, tools)
 
-    def _sync_chat(self, url: str, messages: list[dict], options: dict = None) -> dict:
+    def _sync_chat(self, url: str, messages: list[dict], options: dict = None,
+                   tools: list | None = None) -> dict:
         body = self._build_body(messages, options)
         headers = {"Content-Type": "application/json"}
 
+        # Convert OpenAI-format tools to Gemini format
+        if tools:
+            declarations = []
+            for t in tools:
+                func = t.get("function", t)
+                declarations.append({
+                    "name": func.get("name", ""),
+                    "description": func.get("description", ""),
+                    "parameters": func.get("parameters", {}),
+                })
+            body["tools"] = [{"function_declarations": declarations}]
+
+        safe_url = url.split("?")[0] + "?key=REDACTED"
         try:
             resp = self._session.post(url, headers=headers, json=body, timeout=120)
         except requests.exceptions.RequestException as e:
-            logger.error(f"[GEMINI] Request failed: {e}")
-            raise ConnectionError(f"Gemini request failed: {e}")
+            logger.error(f"[GEMINI] Request failed: {safe_url}: {type(e).__name__}")
+            raise ConnectionError(f"Gemini request failed: {type(e).__name__}")
 
         if resp.status_code != 200:
             error_text = resp.text[:500] if resp.text else ""
-            logger.error(f"[GEMINI] API error {resp.status_code}: {error_text}")
+            logger.error(f"[GEMINI] API error {resp.status_code} ({safe_url}): {error_text}")
             raise ConnectionError(f"Gemini API error: {resp.status_code}")
 
         data = resp.json()
 
-        # Extract text from candidates
+        # Extract text and functionCall from candidates
         text = ""
+        tool_calls = []
         candidates = data.get("candidates", [])
         if candidates:
             parts = candidates[0].get("content", {}).get("parts", [])
             for part in parts:
                 if "text" in part:
                     text += part["text"]
+                if "functionCall" in part:
+                    fc = part["functionCall"]
+                    tool_calls.append({
+                        "id": f"call_{fc.get('name', '')}",
+                        "type": "function",
+                        "function": {
+                            "name": fc.get("name", ""),
+                            "arguments": json.dumps(fc.get("args", {})),
+                        },
+                    })
 
         # Gemini usage metadata
         usage = data.get("usageMetadata", {})
-        return {
+        result = {
             "message": {"role": "assistant", "content": text},
             "done": True,
             "prompt_eval_count": usage.get("promptTokenCount", 0),
             "eval_count": usage.get("candidatesTokenCount", 0),
         }
 
-    def _stream_chat(self, url: str, messages: list[dict], options: dict = None) -> Iterator[dict]:
+        if tool_calls:
+            result["message"]["tool_calls"] = tool_calls
+
+        return result
+
+    def _stream_chat(self, url: str, messages: list[dict], options: dict = None,
+                     tools: list | None = None) -> Iterator[dict]:
         body = self._build_body(messages, options)
         headers = {"Content-Type": "application/json"}
 
+        # Convert OpenAI-format tools to Gemini format
+        if tools:
+            declarations = []
+            for t in tools:
+                func = t.get("function", t)
+                declarations.append({
+                    "name": func.get("name", ""),
+                    "description": func.get("description", ""),
+                    "parameters": func.get("parameters", {}),
+                })
+            body["tools"] = [{"function_declarations": declarations}]
+
+        safe_url = url.split("?")[0] + "?key=REDACTED"
         try:
-            resp = self._session.post(url, headers=headers, json=body, stream=True, timeout=120)
+            resp = self._session.post(url, headers=headers, json=body, stream=True, timeout=(10, 90))
         except requests.exceptions.RequestException as e:
-            logger.error(f"[GEMINI] Stream request failed: {e}")
-            raise ConnectionError(f"Gemini request failed: {e}")
+            logger.error(f"[GEMINI] Stream request failed: {safe_url}: {type(e).__name__}")
+            raise ConnectionError(f"Gemini request failed: {type(e).__name__}")
 
         if resp.status_code != 200:
             error_text = resp.text[:500] if resp.text else ""
-            logger.error(f"[GEMINI] API error {resp.status_code}: {error_text}")
+            logger.error(f"[GEMINI] API error {resp.status_code} ({safe_url}): {error_text}")
             raise ConnectionError(f"Gemini API error: {resp.status_code}")
 
         input_tokens = 0
         output_tokens = 0
+        tool_calls = []
         resp.encoding = "utf-8"
 
         for raw_line in resp.iter_lines():
@@ -192,6 +237,16 @@ class GeminiProvider(BaseProvider):
                                 "message": {"role": "assistant", "content": text},
                                 "done": False,
                             }
+                        if "functionCall" in part:
+                            fc = part["functionCall"]
+                            tool_calls.append({
+                                "id": f"call_{fc.get('name', '')}",
+                                "type": "function",
+                                "function": {
+                                    "name": fc.get("name", ""),
+                                    "arguments": json.dumps(fc.get("args", {})),
+                                },
+                            })
 
                 usage = event.get("usageMetadata")
                 if usage:
@@ -201,8 +256,11 @@ class GeminiProvider(BaseProvider):
             except json.JSONDecodeError:
                 continue
 
+        final_msg = {"role": "assistant", "content": ""}
+        if tool_calls:
+            final_msg["tool_calls"] = tool_calls
         yield {
-            "message": {"role": "assistant", "content": ""},
+            "message": final_msg,
             "done": True,
             "prompt_eval_count": input_tokens,
             "eval_count": output_tokens,

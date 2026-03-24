@@ -32,9 +32,9 @@ BLOCKED = PermissionTier.BLOCKED
 # Shell commands that are auto-approved (first word of command)
 SAFE_SHELL_COMMANDS = {
     "mkdir", "ls", "dir", "cat", "head", "tail", "echo", "pwd", "cd",
-    "npm", "npx", "yarn", "pnpm", "pip", "pip3", "python", "python3",
-    "node", "git", "curl", "wget", "touch", "cp", "mv", "rm",
-    "chmod", "find", "grep", "which", "env", "export",
+    "npm", "npx", "yarn", "pnpm", "pip", "pip3",
+    "git", "touch", "cp", "mv",
+    "find", "grep", "which", "env", "export",
 }
 
 # Default permission map for each tool (or tool.subaction)
@@ -160,6 +160,21 @@ class PermissionManager:
 
         # No callback = deny by default
         return False
+
+    @property
+    def current_mode(self) -> str:
+        """Return current permission mode name for display/checks."""
+        if self._trust_mode:
+            return "full_auto"
+        return self._mode if hasattr(self, '_mode') else "careful"
+
+    def set_mode(self, mode: str) -> None:
+        """Set the permission mode."""
+        self._mode = mode
+        if mode == "full_auto":
+            self._trust_mode = True
+        elif mode in ("plan", "plan_approve"):
+            self._trust_mode = False
 
     def _format_action_description(self, tool_name: str, args: dict) -> str:
         """Format a human-readable description for the approval prompt."""

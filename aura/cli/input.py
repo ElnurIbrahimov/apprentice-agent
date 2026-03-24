@@ -13,6 +13,23 @@ HISTORY_FILE = Path.home() / ".aura_history"
 
 _session_ok = True
 
+# ---------------------------------------------------------------------------
+# Persistent bottom toolbar (updated by display.show_status_bar)
+# ---------------------------------------------------------------------------
+_bottom_toolbar_content = None
+
+
+def set_bottom_toolbar(content):
+    """Update the persistent status bar content."""
+    global _bottom_toolbar_content
+    _bottom_toolbar_content = content
+
+
+def _get_bottom_toolbar():
+    """Called by prompt_toolkit to render the bottom toolbar."""
+    return _bottom_toolbar_content
+
+
 # Signal constants for keybindings — returned as pseudo-input from prompt_toolkit
 SIGNAL_MODEL_PICK = "__MODEL_PICK__"
 SIGNAL_CLEAR_SCREEN = "__CLEAR_SCREEN__"
@@ -36,7 +53,7 @@ SLASH_COMMANDS = [
     ("/grep", "Search code content"),
     ("/search", "Search files by pattern"),
     ("/find", "Find definitions/references"),
-    ("/edit", "Read file with line numbers"),
+    ("/edit", "View file contents with line numbers"),
     ("/project", "Project info/context/index"),
     ("/agent", "Run specialist agent"),
     ("/sessions", "Manage sessions"),
@@ -103,7 +120,6 @@ SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
     ],
     "/sessions": [
         ("list", "List saved sessions"),
-        ("switch", "Switch to a session"),
         ("new", "Start a new session"),
         ("delete", "Delete a session"),
     ],
@@ -146,11 +162,7 @@ SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
         ("stash", "Show stash list"),
         ("show", "Show commit details"),
     ],
-    "/mcp": [
-        ("connect", "Connect to an MCP server"),
-        ("list", "List connected MCP servers"),
-        ("disconnect", "Disconnect from an MCP server"),
-    ],
+    "/mcp": [],
     "/audit": [
         ("verify", "Verify chain integrity"),
         ("tail", "Show last N entries"),
@@ -158,8 +170,10 @@ SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
     ],
     "/hand": [
         ("list", "List active Hands"),
-        ("spawn", "Spawn a new Hand"),
-        ("kill", "Kill a Hand"),
+        ("activate", "Activate a hand for scheduling"),
+        ("deactivate", "Deactivate a hand"),
+        ("run", "Run a hand immediately"),
+        ("status", "Show detailed hand status"),
     ],
     "/evolve": [
         ("--skill-ids", "Comma-separated skill IDs to evolve"),
@@ -231,6 +245,8 @@ def create_session():
 
         _style = Style.from_dict({
             "prompt": "bold cyan",
+            "project": "#ffffff bold",
+            "branch": "#888888",
             "placeholder": "#666666 italic",
             # Completion dropdown — dark background, light text
             "completion-menu": "bg:#1a1a2e #e0e0e0",
@@ -242,6 +258,8 @@ def create_session():
             "scrollbar.background": "bg:#1a1a2e",
             "scrollbar.button": "bg:#333355",
             "scrollbar.arrow": "bg:#333355 #aaaaaa",
+            # Persistent bottom toolbar
+            "bottom-toolbar": "bg:#1a1a1a #cccccc",
         })
 
         kb = KeyBindings()
@@ -291,7 +309,8 @@ def create_session():
             multiline=True,
             style=_style,
             key_bindings=kb,
-            placeholder=HTML('<style fg="#666666"><i>Type a message, / for commands... (Alt+Enter for newline)</i></style>'),
+            placeholder=HTML('<style fg="#555555"><i>  Type a message, / for commands, ? for help</i></style>'),
+            bottom_toolbar=_get_bottom_toolbar,
         )
         _session_ok = True
         return session
@@ -300,11 +319,37 @@ def create_session():
         return None
 
 
+def _get_prompt_prefix() -> list:
+    """Build prompt prefix with project name and git branch."""
+    try:
+        import subprocess
+        import os
+        # Get git branch
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, timeout=2, cwd="."
+        )
+        branch = result.stdout.strip() if result.returncode == 0 else ""
+
+        # Get project name (directory name)
+        project = os.path.basename(os.getcwd())
+
+        if branch:
+            return [
+                ("class:project", f"\n  {project}"),
+                ("class:branch", f" ({branch})"),
+                ("class:prompt", " > "),
+            ]
+    except Exception:
+        pass
+    return [("class:prompt", "\n  > ")]
+
+
 def get_input(session) -> "str | None":
     """Get user input. Returns None on exit, or a SIGNAL_* constant for keybindings."""
     try:
         if session is not None and _session_ok:
-            result = session.prompt([("class:prompt", "\n  > ")]).strip()
+            result = session.prompt(_get_prompt_prefix()).strip()
             return result
         else:
             return input("\n  > ").strip()

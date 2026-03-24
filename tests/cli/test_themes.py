@@ -10,12 +10,9 @@ def test_default_theme_is_dark():
 
 def test_all_builtin_themes_exist():
     names = list_themes()
-    assert "dark" in names
-    assert "light" in names
-    assert "monokai" in names
-    assert "dracula" in names
-    assert "solarized" in names
-    assert "nord" in names
+    for expected in ("dark", "light", "monokai", "dracula", "solarized", "nord",
+                     "catppuccin", "gruvbox", "tokyo-night"):
+        assert expected in names
 
 def test_set_theme_builtin():
     assert set_theme("dracula")
@@ -29,15 +26,34 @@ def test_set_theme_invalid():
 def test_theme_has_all_fields():
     for name, theme in THEMES.items():
         assert theme.name == name
-        assert theme.banner_gradient
-        assert theme.response_border
+        assert theme.gradient
         assert theme.code_theme
         assert theme.prompt_color
+        assert theme.accent
+        assert theme.success
+        assert theme.error
+        assert theme.warning
 
 def test_theme_dataclass():
-    theme = AuraTheme(name="custom", banner_gradient=["red", "blue"])
+    theme = AuraTheme(name="custom", gradient=["red", "blue"])
     assert theme.name == "custom"
     assert theme.code_theme == "monokai"  # default
+
+def test_backward_compat_aliases():
+    theme = AuraTheme(name="compat-test", gradient=["cyan", "blue"])
+    assert theme.banner_gradient == ["cyan", "blue"]
+    assert theme.response_border == theme.border_active
+    assert theme.diff_added == theme.diff_added_fg
+    assert theme.diff_removed == theme.diff_removed_fg
+    assert theme.error_color == theme.error
+    assert theme.warning_color == theme.warning
+    assert theme.success_color == theme.success
+
+def test_theme_types():
+    assert THEMES["dark"].type == "dark"
+    assert THEMES["light"].type == "light"
+    for name, theme in THEMES.items():
+        assert theme.type in ("dark", "light")
 
 def test_save_and_load_preference(tmp_path, monkeypatch):
     config_path = tmp_path / ".aura" / "config.json"
@@ -46,4 +62,4 @@ def test_save_and_load_preference(tmp_path, monkeypatch):
     import aura.cli.themes as mod
     old_path = mod._THEMES_DIR
     # Just test the functions work without error
-    assert load_theme_preference() in ("dark", "light", "monokai", "dracula", "solarized", "nord") or True
+    assert load_theme_preference() in list(THEMES.keys()) or True

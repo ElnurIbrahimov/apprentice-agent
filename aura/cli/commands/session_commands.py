@@ -76,6 +76,12 @@ def handle_sessions(agent, arg, context) -> Optional[str]:
 
 
 def handle_clear(agent, arg, context) -> Optional[str]:
+    if arg.strip() != "--force":
+        from ..display import console
+        response = console.input("  Clear conversation history? [y/N] ").strip().lower()
+        if response not in ("y", "yes"):
+            console.print("  [dim]Cancelled.[/dim]")
+            return
     agent.brain.clear_history()
     if hasattr(agent, '_agentic_loop'):
         agent._agentic_loop.clear_history()

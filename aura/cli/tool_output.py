@@ -6,10 +6,10 @@ from typing import Optional, List
 
 
 # File reads: show first/last N lines
-_FILE_HEAD = 5
-_FILE_TAIL = 5
+_FILE_HEAD = 15
+_FILE_TAIL = 15
 # Shell output: show last N lines
-_SHELL_TAIL = 10
+_SHELL_TAIL = 30
 # Max stored lines to prevent memory issues
 MAX_OUTPUT_LINES = 500
 

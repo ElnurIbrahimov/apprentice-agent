@@ -113,7 +113,7 @@ def handle_fleet(agent, arg, context) -> Optional[str]:
         return
     from ..fleet import (
         FleetRun, FleetExecutor, parse_decomposition,
-        render_fleet_dashboard, DECOMPOSITION_PROMPT,
+        render_fleet_dashboard, run_fleet_live, DECOMPOSITION_PROMPT,
     )
     from ..display import console as _fleet_console
     prompt = DECOMPOSITION_PROMPT.format(task=task)
@@ -142,8 +142,7 @@ def handle_fleet(agent, arg, context) -> Optional[str]:
         except Exception as e:  # Catch-all: runs in thread pool, must not propagate
             return {"success": False, "error": str(e)}
     executor = FleetExecutor(max_workers=3)
-    executor.run(fleet, _fleet_task_fn, on_update=lambda f: render_fleet_dashboard(_fleet_console, f))
-    render_fleet_dashboard(_fleet_console, fleet)
+    run_fleet_live(_fleet_console, fleet, executor, _fleet_task_fn)
 
 
 def handle_agent(agent, arg, context) -> Optional[str]:

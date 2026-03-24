@@ -10,11 +10,11 @@ logger = logging.getLogger(__name__)
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.padding import Padding
-from rich.spinner import Spinner
 from rich.live import Live
 from rich.text import Text
 
 from aura.cli.tool_output import ToolOutputRenderer, format_elapsed
+from aura.cli.tool_icons import get_tool_icon
 
 _no_color = os.environ.get("NO_COLOR") is not None
 console: Console = Console(highlight=True, soft_wrap=True, no_color=_no_color)
@@ -71,29 +71,46 @@ def show_status_bar(
     token_used: int = 0,
     token_limit: int = 128000,
     permission_mode: str = "careful",
-    # Accept and ignore legacy kwargs so callers don't break
-    **_ignored,
+    bg_indicator: str = "",
+    research_indicator: str = "",
+    mood_indicator: str = "",
+    watch_indicator: str = "",
+    steering_queue: object = None,
+    session_title: str = "",
+    message_count: int = 0,
+    project_type: str = "",
 ) -> None:
-    """Print the minimal status bar line."""
+    """Update the persistent bottom toolbar (no more scrolling print)."""
     from .status_bar import build_status_bar
-    bar = build_status_bar(
+    from .input import set_bottom_toolbar
+
+    # Build prompt_toolkit formatted-text for the persistent toolbar
+    toolbar_parts = build_status_bar(
         model=model,
         cost_usd=cost_usd,
         token_used=token_used,
         token_limit=token_limit,
         permission_mode=permission_mode,
+        bg_indicator=bg_indicator,
+        research_indicator=research_indicator,
+        mood_indicator=mood_indicator,
+        watch_indicator=watch_indicator,
+        steering_queue=steering_queue,
+        session_title=session_title,
+        message_count=message_count,
+        project_type=project_type,
+        as_ansi=True,
     )
-    console.print(bar, style="on grey11", end="\n")
+    set_bottom_toolbar(toolbar_parts)
 
 
-def show_thinking(label: str = "Working...") -> Live:
-    """Context manager -- shows spinner while agent runs. Disappears when done."""
-    return Live(
-        Spinner("dots", text=f"  [dim]{label}[/dim]"),
-        console=console,
-        refresh_per_second=10,
-        transient=True,
-    )
+def show_thinking(label: str = None, step: int = None) -> Live:
+    """Context manager -- shows animated spinner while agent runs. Disappears when done."""
+    from .spinner import AuraSpinner
+    spinner = AuraSpinner(label=label, step=step)
+    live = Live(spinner, console=console, refresh_per_second=12, transient=True)
+    live._aura_spinner = spinner  # expose for external verb/step updates
+    return live
 
 
 # Phase-aware verb mapping for contextual spinner labels
@@ -158,9 +175,10 @@ def show_tool_call(tool_name: str, description: str = "", result: Any = None, el
     except (ImportError, AttributeError):
         tool_color = "cyan"
 
-    # Single-line badge
+    # Single-line badge with tool icon
+    icon = get_tool_icon(tool_name)
     line = Text()
-    line.append("  > ", style=f"dim {tool_color}")
+    line.append(f"  {icon} ", style=f"{tool_color}")
     line.append(tool_name, style=f"bold {tool_color}")
     if description:
         line.append(f" {description}", style="dim")
@@ -252,6 +270,24 @@ def show_response(text: str, model: str = "", stream: bool = True) -> None:
         console.print(f"  [dim]{model}[/dim]")
 
     console.print()  # breathing room
+
+
+def show_response_attribution(model: str, elapsed: float, tokens: int = 0) -> None:
+    """Show model + time after each response, like Claude Code."""
+    from .spinner import _format_elapsed
+    t = Text("  ")
+    # Model name — trim common suffixes
+    model_short = model.replace(":cloud", "").replace(":latest", "")
+    if len(model_short) > 30:
+        model_short = model_short[:27] + "..."
+    t.append(model_short, style="dim")
+    t.append(f" \u00b7 {_format_elapsed(elapsed)}", style="dim")
+    if tokens > 0:
+        if tokens >= 1000:
+            t.append(f" \u00b7 {tokens/1000:.1f}K tokens", style="dim")
+        else:
+            t.append(f" \u00b7 {tokens} tokens", style="dim")
+    console.print(t)
 
 
 def _split_for_streaming(text: str) -> list[str]:
@@ -474,13 +510,19 @@ class StreamingResponse:
         self._permanent_len: int = 0
 
     def start(self) -> None:
-        """Begin live rendering context."""
+        """Begin live rendering context with a thinking spinner."""
         console.print()  # breathing room before response
-        self._live = Live("", console=console, refresh_per_second=15, transient=True)
+        self._spinner_active = True
+        self._live = Live(
+            Text("  thinking...", style="dim italic"),
+            console=console, refresh_per_second=8, transient=True,
+        )
         self._live.start()
 
     def chunk(self, text: str) -> None:
         """Append a text chunk and re-render only NEW content since last pause."""
+        if self._spinner_active:
+            self._spinner_active = False  # first real chunk replaces spinner
         self._accumulated += text
         if self._live:
             new_content = self._accumulated[self._permanent_len:]

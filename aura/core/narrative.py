@@ -298,7 +298,7 @@ class NarrativeMixin:
                 try:
                     from aura.core.permissions import PermissionTier
                     pm = getattr(self, "permissions", None)
-                    if pm is None or pm.current_mode != PermissionTier.FULL_AUTO:
+                    if pm is None or not pm.trust_mode:
                         logger.info(f"[EvoEmo] Destructive command blocked (non-auto mode): {message_lower[:40]}")
                         return "Destructive mood commands require full-auto mode or explicit confirmation via the API."
                 except (ImportError, AttributeError) as e:

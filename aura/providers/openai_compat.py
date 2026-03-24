@@ -84,7 +84,7 @@ class OpenAICompatProvider(BaseProvider):
         return body
 
     def chat(self, model: str, messages: list[dict], stream: bool = False,
-             options: dict = None) -> dict | Iterator[dict]:
+             options: dict = None, tools: list | None = None) -> dict | Iterator[dict]:
         if not self.is_configured():
             raise ConnectionError(
                 f"{self._display_name} API key not set. "
@@ -94,6 +94,9 @@ class OpenAICompatProvider(BaseProvider):
         url = f"{self._base_url}/chat/completions"
         headers = self._build_headers()
         body = self._build_body(model, messages, stream, options)
+
+        if tools:
+            body["tools"] = tools
 
         if stream:
             return self._stream_chat(url, headers, body)
@@ -111,14 +114,14 @@ class OpenAICompatProvider(BaseProvider):
         if resp.status_code != 200:
             error_text = resp.text[:500] if resp.text else ""
             logger.error(f"[{self._provider_name.upper()}] API error {resp.status_code}: {error_text}")
-            raise ConnectionError(f"{self._display_name} API error: {resp.status_code}")
+            raise ConnectionError(f"{self._display_name} API error: {resp.status_code} - {resp.text[:200]}")
 
         data = resp.json()
         choice = data.get("choices", [{}])[0]
         message = choice.get("message", {})
         usage = data.get("usage", {})
 
-        return {
+        result = {
             "message": {
                 "role": "assistant",
                 "content": message.get("content", ""),
@@ -128,10 +131,16 @@ class OpenAICompatProvider(BaseProvider):
             "eval_count": usage.get("completion_tokens", 0),
         }
 
+        # Include tool_calls if present
+        if message.get("tool_calls"):
+            result["message"]["tool_calls"] = message["tool_calls"]
+
+        return result
+
     def _stream_chat(self, url: str, headers: dict, body: dict) -> Iterator[dict]:
         """Streaming chat — parse SSE events."""
         try:
-            resp = self._session.post(url, headers=headers, json=body, stream=True, timeout=120)
+            resp = self._session.post(url, headers=headers, json=body, stream=True, timeout=(10, 90))
         except requests.exceptions.RequestException as e:
             logger.error(f"[{self._provider_name.upper()}] Stream request failed: {e}")
             raise ConnectionError(f"{self._display_name} request failed: {e}")
@@ -139,10 +148,11 @@ class OpenAICompatProvider(BaseProvider):
         if resp.status_code != 200:
             error_text = resp.text[:500] if resp.text else ""
             logger.error(f"[{self._provider_name.upper()}] API error {resp.status_code}: {error_text}")
-            raise ConnectionError(f"{self._display_name} API error: {resp.status_code}")
+            raise ConnectionError(f"{self._display_name} API error: {resp.status_code} - {resp.text[:200]}")
 
         input_tokens = 0
         output_tokens = 0
+        accumulated_tool_calls = {}  # index -> {id, type, function: {name, arguments}}
         resp.encoding = "utf-8"
 
         for raw_line in resp.iter_lines():
@@ -164,6 +174,26 @@ class OpenAICompatProvider(BaseProvider):
                 delta = choice.get("delta", {})
                 content = delta.get("content", "")
 
+                # Accumulate tool_calls from streaming deltas
+                delta_tool_calls = delta.get("tool_calls")
+                if delta_tool_calls:
+                    for tc in delta_tool_calls:
+                        idx = tc.get("index", 0)
+                        if idx not in accumulated_tool_calls:
+                            accumulated_tool_calls[idx] = {
+                                "id": tc.get("id", ""),
+                                "type": tc.get("type", "function"),
+                                "function": {"name": "", "arguments": ""},
+                            }
+                        entry = accumulated_tool_calls[idx]
+                        if tc.get("id"):
+                            entry["id"] = tc["id"]
+                        func = tc.get("function", {})
+                        if func.get("name"):
+                            entry["function"]["name"] += func["name"]
+                        if func.get("arguments"):
+                            entry["function"]["arguments"] += func["arguments"]
+
                 # Some providers include usage in the final chunk
                 usage = event.get("usage")
                 if usage:
@@ -179,8 +209,14 @@ class OpenAICompatProvider(BaseProvider):
                 continue
 
         # Final done chunk
+        final_msg = {"role": "assistant", "content": ""}
+        if accumulated_tool_calls:
+            final_msg["tool_calls"] = [
+                accumulated_tool_calls[i]
+                for i in sorted(accumulated_tool_calls.keys())
+            ]
         yield {
-            "message": {"role": "assistant", "content": ""},
+            "message": final_msg,
             "done": True,
             "prompt_eval_count": input_tokens,
             "eval_count": output_tokens,
