@@ -3,7 +3,7 @@
   "name": "AURA",
   "version": "4.3.0",
   "description": "Your private AI assistant — always present, never clouds.",
-  "permissions": ["sidePanel", "contextMenus", "storage", "activeTab", "tabs", "scripting", "unlimitedStorage"],
+  "permissions": ["sidePanel", "contextMenus", "storage", "activeTab", "tabs", "scripting", "unlimitedStorage", "topSites"],
   "optional_permissions": ["tabCapture"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "background.js" },

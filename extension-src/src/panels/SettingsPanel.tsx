@@ -4,19 +4,60 @@ import { User, FileText, Sparkles, RotateCcw, Save, Check, Server, Key, ChevronD
 import { getBackendUrl, setBackendUrl, setApiKey, API_KEY } from '../api';
 import { connectWS, fetchStatus, resetWsRetry } from '../ws';
 
-// Direct API provider definitions
-const API_PROVIDERS = [
-  { name: 'anthropic', display: 'Anthropic', placeholder: 'sk-ant-...' },
-  { name: 'openai', display: 'OpenAI', placeholder: 'sk-...' },
-  { name: 'gemini', display: 'Google Gemini', placeholder: 'AIza...' },
-  { name: 'grok', display: 'xAI (Grok)', placeholder: 'xai-...' },
-  { name: 'perplexity', display: 'Perplexity', placeholder: 'pplx-...' },
-  { name: 'deepseek', display: 'DeepSeek', placeholder: 'sk-...' },
-  { name: 'minimax', display: 'MiniMax', placeholder: 'eyJ...' },
-  { name: 'qwen', display: 'Qwen (Alibaba)', placeholder: 'sk-...' },
-  { name: 'kimi', display: 'Kimi (Moonshot)', placeholder: 'sk-...' },
-  { name: 'glm', display: 'GLM (Zhipu)', placeholder: '' },
-] as const;
+// Direct API provider definitions — categorized
+const API_PROVIDER_CATEGORIES = [
+  { id: 'text', label: '💬 Text & Chat', providers: [
+    { name: 'anthropic', display: 'Anthropic', placeholder: 'sk-ant-...' },
+    { name: 'openai', display: 'OpenAI', placeholder: 'sk-...' },
+    { name: 'gemini', display: 'Google Gemini', placeholder: 'AIza...' },
+    { name: 'grok', display: 'xAI (Grok)', placeholder: 'xai-...' },
+    { name: 'mistral', display: 'Mistral AI', placeholder: 'Bearer...' },
+    { name: 'cohere', display: 'Cohere', placeholder: 'Bearer...' },
+    { name: 'perplexity', display: 'Perplexity', placeholder: 'pplx-...' },
+    { name: 'deepseek', display: 'DeepSeek', placeholder: 'sk-...' },
+    { name: 'minimax', display: 'MiniMax', placeholder: 'eyJ...' },
+    { name: 'qwen', display: 'Qwen (Alibaba)', placeholder: 'sk-...' },
+    { name: 'kimi', display: 'Kimi (Moonshot)', placeholder: 'sk-...' },
+    { name: 'glm', display: 'GLM (Zhipu)', placeholder: '' },
+    { name: 'groq', display: 'Groq', placeholder: 'gsk_...' },
+    { name: 'together', display: 'Together AI', placeholder: 'Bearer...' },
+    { name: 'fireworks', display: 'Fireworks AI', placeholder: 'Bearer...' },
+    { name: 'openrouter', display: 'OpenRouter', placeholder: 'sk-or-...' },
+  ]},
+  { id: 'image', label: '🎨 Image Generation', providers: [
+    { name: 'stability', display: 'Stability AI', placeholder: 'sk-...' },
+    { name: 'falai', display: 'Fal.ai', placeholder: 'Bearer...' },
+    { name: 'leonardo', display: 'Leonardo AI', placeholder: 'Bearer...' },
+    { name: 'replicate', display: 'Replicate', placeholder: 'r8_...' },
+    { name: 'ideogram', display: 'Ideogram', placeholder: 'Bearer...' },
+    { name: 'recraft', display: 'Recraft AI', placeholder: 'Bearer...' },
+  ]},
+  { id: 'video', label: '🎬 Video Generation', providers: [
+    { name: 'runway', display: 'Runway', placeholder: 'Bearer...' },
+    { name: 'luma', display: 'Luma AI', placeholder: 'Bearer...' },
+    { name: 'kling', display: 'Kling', placeholder: 'Bearer...' },
+    { name: 'heygen', display: 'HeyGen', placeholder: 'Bearer...' },
+    { name: 'did', display: 'D-ID', placeholder: 'Bearer...' },
+  ]},
+  { id: 'audio', label: '🎙️ Audio & Voice', providers: [
+    { name: 'elevenlabs', display: 'ElevenLabs', placeholder: 'xi-...' },
+    { name: 'playht', display: 'PlayHT', placeholder: 'Bearer...' },
+    { name: 'deepgram', display: 'Deepgram', placeholder: 'Bearer...' },
+    { name: 'assemblyai', display: 'AssemblyAI', placeholder: 'Bearer...' },
+    { name: 'cartesia', display: 'Cartesia', placeholder: 'Bearer...' },
+  ]},
+  { id: 'search', label: '🔍 Search & RAG', providers: [
+    { name: 'tavily', display: 'Tavily', placeholder: 'tvly-...' },
+    { name: 'brave_search', display: 'Brave Search', placeholder: 'Bearer...' },
+    { name: 'exa', display: 'Exa', placeholder: 'Bearer...' },
+    { name: 'serper', display: 'Serper', placeholder: 'Bearer...' },
+    { name: 'firecrawl', display: 'Firecrawl', placeholder: 'fc-...' },
+    { name: 'jina', display: 'Jina AI', placeholder: 'Bearer...' },
+  ]},
+];
+
+// Flat list for backward compat
+const API_PROVIDERS = API_PROVIDER_CATEGORIES.flatMap(c => c.providers);
 
 const STYLE_PRESETS: { label: string; icon: string; instructions: string }[] = [
   {
@@ -143,7 +184,7 @@ export default function SettingsPanel() {
   const handleTestConnection = async () => {
     setConnTesting(true);
     setConnStatus('idle');
-    const testUrl = localBackendUrl.trim().replace(/\/+$/, '') || 'http://89.167.107.134';
+    const testUrl = localBackendUrl.trim().replace(/\/+$/, '') || 'https://aura-elnur.duckdns.org';
     try {
       const headers: Record<string, string> = {};
       if (localApiKey.trim()) headers['X-API-Key'] = localApiKey.trim();
@@ -352,7 +393,7 @@ export default function SettingsPanel() {
             type="url"
             value={localBackendUrl}
             onChange={(e) => setLocalBackendUrl(e.target.value)}
-            placeholder="http://89.167.107.134 (default)"
+            placeholder="https://aura-elnur.duckdns.org (default)"
             maxLength={200}
             style={inputStyle}
             onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--pl)')}
@@ -540,8 +581,17 @@ export default function SettingsPanel() {
           <p style={{ margin: '0 0 10px', fontSize: 11, color: 'var(--fg2)' }}>
             Add API keys for direct model access. Models appear in the picker once a key is set.
           </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {API_PROVIDERS.map((prov) => {
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {API_PROVIDER_CATEGORIES.map((cat) => (
+              <div key={cat.id}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg2)', padding: '6px 4px 4px', letterSpacing: '0.02em' }}>
+                  {cat.label}
+                  <span style={{ fontSize: 9, color: 'var(--fg3)', marginLeft: 6 }}>
+                    {cat.providers.filter(p => providerStatus[p.name]).length}/{cat.providers.length}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {cat.providers.map((prov) => {
               const isExpanded = providerExpanded === prov.name;
               const isConfigured = providerStatus[prov.name] || false;
               const isSaving = providerSaving === prov.name;
@@ -660,6 +710,9 @@ export default function SettingsPanel() {
                 </div>
               );
             })}
+                </div>
+              </div>
+            ))}
           </div>
         </section>
 

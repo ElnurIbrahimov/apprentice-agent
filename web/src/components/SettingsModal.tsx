@@ -23,6 +23,128 @@ interface TraitDescription {
   description: string;
 }
 
+const API_PROVIDERS = [
+  { name: 'anthropic', display: 'Anthropic', placeholder: 'sk-ant-...' },
+  { name: 'openai', display: 'OpenAI', placeholder: 'sk-...' },
+  { name: 'gemini', display: 'Google Gemini', placeholder: 'AIza...' },
+  { name: 'grok', display: 'xAI (Grok)', placeholder: 'xai-...' },
+  { name: 'perplexity', display: 'Perplexity', placeholder: 'pplx-...' },
+  { name: 'deepseek', display: 'DeepSeek', placeholder: 'sk-...' },
+];
+
+function ApiProviderManager() {
+  const [providers, setProviders] = useState<Record<string, boolean>>({});
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [keyInput, setKeyInput] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/providers').then(r => r.json()).then(data => {
+      const status: Record<string, boolean> = {};
+      if (Array.isArray(data)) {
+        data.forEach((p: any) => { status[p.name] = p.configured; });
+      } else if (data.providers) {
+        data.providers.forEach((p: any) => { status[p.name] = p.configured; });
+      }
+      setProviders(status);
+    }).catch(() => {});
+  }, []);
+
+  const saveKey = async (providerName: string) => {
+    if (!keyInput.trim()) return;
+    setSaving(true);
+    try {
+      const resp = await fetch(`/api/providers/${providerName}/key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: keyInput.trim() }),
+      });
+      if (resp.ok) {
+        setProviders(prev => ({ ...prev, [providerName]: true }));
+        toast.success('API key saved', `${providerName} is now active`);
+        setEditingKey(null);
+        setKeyInput('');
+      } else {
+        toast.error('Failed', 'Could not save API key');
+      }
+    } catch {
+      toast.error('Error', 'Network error saving key');
+    }
+    setSaving(false);
+  };
+
+  const removeKey = async (providerName: string) => {
+    try {
+      await fetch(`/api/providers/${providerName}/key`, { method: 'DELETE' });
+      setProviders(prev => ({ ...prev, [providerName]: false }));
+      toast.success('Removed', `${providerName} key removed`);
+    } catch {}
+  };
+
+  return (
+    <div className="space-y-2">
+      {API_PROVIDERS.map(p => (
+        <div key={p.name} className="flex items-center gap-2 p-2 rounded-lg bg-chat-assistant/20 border border-chat-border/30">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-chat-text font-medium">{p.display}</span>
+              {providers[p.name] ? (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-400">Active</span>
+              ) : (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-chat-border/30 text-chat-text-secondary">Not set</span>
+              )}
+            </div>
+            {editingKey === p.name && (
+              <div className="flex gap-1 mt-1.5">
+                <input
+                  type="password"
+                  value={keyInput}
+                  onChange={e => setKeyInput(e.target.value)}
+                  placeholder={p.placeholder}
+                  className="flex-1 px-2 py-1 text-xs bg-chat-bg border border-chat-border/50 rounded text-chat-text placeholder:text-chat-text-secondary/40 outline-none focus:border-purple-500/50"
+                  autoFocus
+                  onKeyDown={e => e.key === 'Enter' && saveKey(p.name)}
+                />
+                <button
+                  onClick={() => saveKey(p.name)}
+                  disabled={saving}
+                  className="px-2 py-1 text-[10px] bg-purple-600/30 text-purple-300 rounded hover:bg-purple-600/40"
+                >
+                  Save
+                </button>
+                <button
+                  onClick={() => { setEditingKey(null); setKeyInput(''); }}
+                  className="px-2 py-1 text-[10px] bg-chat-border/30 text-chat-text-secondary rounded hover:bg-chat-border/50"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
+          {editingKey !== p.name && (
+            <div className="flex gap-1 flex-shrink-0">
+              <button
+                onClick={() => { setEditingKey(p.name); setKeyInput(''); }}
+                className="px-2 py-1 text-[10px] bg-chat-border/30 text-chat-text-secondary rounded hover:bg-chat-border/50"
+              >
+                {providers[p.name] ? 'Change' : 'Set Key'}
+              </button>
+              {providers[p.name] && (
+                <button
+                  onClick={() => removeKey(p.name)}
+                  className="px-2 py-1 text-[10px] bg-red-500/20 text-red-400 rounded hover:bg-red-500/30"
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const { settings, updateSettings, resetSettings } = useSettingsStore();
 
@@ -299,6 +421,15 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 ALMA emotional system not available
               </div>
             )}
+          </div>
+
+          {/* API Providers */}
+          <div>
+            <h3 className="text-sm font-medium text-chat-text mb-3">API Providers</h3>
+            <p className="text-xs text-chat-text-secondary/70 mb-3">
+              Add API keys for direct model access. Models appear in the picker once a key is set.
+            </p>
+            <ApiProviderManager />
           </div>
 
           {/* About */}

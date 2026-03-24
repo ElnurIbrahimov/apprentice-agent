@@ -19,7 +19,10 @@ export default function ComparePanel() {
     if (activePanel !== 'compare' || loaded) return;
     const load = async () => {
       try {
-        const d = await fetch('http://localhost:11434/api/tags').then(r => r.json());
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 2000);
+        const d = await fetch('http://localhost:11434/api/tags', { signal: controller.signal }).then(r => r.json());
+        clearTimeout(timeout);
         const all: string[] = (d.models || []).map((m: any) => m.name);
         setMdlLists(all.filter(n => n.includes(':cloud')), all.filter(n => !n.includes(':cloud')));
       } catch {

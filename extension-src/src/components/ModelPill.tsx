@@ -15,6 +15,7 @@ const TIERS: TierDef[] = [
   { id: 'standard', label: 'Standard', color: '#a78bfa', badge: 'std' },
   { id: 'power', label: 'Power', color: '#f59e0b', badge: 'power' },
   { id: 'chatgpt', label: 'ChatGPT', color: '#74aa9c', badge: 'chatgpt' },
+  { id: 'api', label: 'API Providers', color: '#ec4899', badge: 'api' },
 ];
 
 const FAST_PATTERNS = [
@@ -33,22 +34,24 @@ function classifyModel(name: string, source: 'cloud' | 'local' | 'chatgpt'): str
   return 'standard';
 }
 
-function getBadgeLabel(source: 'cloud' | 'local' | 'chatgpt'): string {
+function getBadgeLabel(source: string): string {
   if (source === 'chatgpt') return 'chatgpt';
   if (source === 'cloud') return 'cloud';
-  return 'local';
+  if (source === 'local') return 'local';
+  return source; // provider name for API models (e.g. 'anthropic')
 }
 
-function getBadgeColor(source: 'cloud' | 'local' | 'chatgpt'): string {
+function getBadgeColor(source: string): string {
   if (source === 'chatgpt') return '#74aa9c';
   if (source === 'cloud') return '#60a5fa';
-  return '#a78bfa';
+  if (source === 'local') return '#a78bfa';
+  return '#ec4899'; // pink for API provider models
 }
 
 interface ModelEntry {
   name: string;
   displayName: string;
-  source: 'cloud' | 'local' | 'chatgpt';
+  source: string;
   tier: string;
 }
 
@@ -58,7 +61,7 @@ interface Props {
 }
 
 export default function ModelPill({ featureKey }: Props) {
-  const { featureModels, setModel, mdlCloudList, mdlLocalList, mdlChatgptList, loadModels } = useStore();
+  const { featureModels, setModel, mdlCloudList, mdlLocalList, mdlChatgptList, mdlDirectList, loadModels } = useStore();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
@@ -68,7 +71,7 @@ export default function ModelPill({ featureKey }: Props) {
 
   const current = featureModels[featureKey] || null;
   const displayName = current
-    ? current.replace(/:cloud$/, '').replace(/^chatgpt:/, '')
+    ? current.replace(/:cloud$/, '').replace(/^chatgpt:/, '').replace(/^[^:]+:/, '')
     : 'Auto';
 
   /* Build tiered model list */
@@ -77,6 +80,10 @@ export default function ModelPill({ featureKey }: Props) {
     for (const m of mdlChatgptList) {
       entries.push({ name: m, displayName: m.replace(/^chatgpt:/, ''), source: 'chatgpt', tier: 'chatgpt' });
     }
+    for (const m of (mdlDirectList || [])) {
+      const provider = m.split(':')[0] || 'api';
+      entries.push({ name: m, displayName: m.replace(/^[^:]+:/, ''), source: provider, tier: 'api' });
+    }
     for (const m of mdlCloudList) {
       entries.push({ name: m, displayName: m.replace(/:cloud$/, ''), source: 'cloud', tier: classifyModel(m, 'cloud') });
     }
@@ -84,7 +91,7 @@ export default function ModelPill({ featureKey }: Props) {
       entries.push({ name: m, displayName: m, source: 'local', tier: classifyModel(m, 'local') });
     }
     return entries;
-  }, [mdlCloudList, mdlLocalList, mdlChatgptList]);
+  }, [mdlCloudList, mdlLocalList, mdlChatgptList, mdlDirectList]);
 
   const showSearch = allModels.length > 10;
 

@@ -46,7 +46,7 @@ except ImportError:
     logger.warning("[BRAIN] ALMA emotional system not available")
 
 # Default timeouts (in seconds)
-LLM_TIMEOUT = 60  # 60 seconds for LLM calls
+LLM_TIMEOUT = 120  # 120 seconds for LLM calls (cloud models need more time)
 WARMUP_TIMEOUT = 10  # 10 seconds for warmup
 
 # Neuromodulator bounds for safety (multipliers on default values)
@@ -309,6 +309,20 @@ class OllamaBrain:
         # Local Ollama client (for local models)
         self.client = ollama.Client(host=Config.OLLAMA_HOST)
 
+        # Check if local Ollama has useful models (not just embedding/OCR models)
+        self._local_ollama_ok = False
+        try:
+            result = self.client.list()
+            chat_models = [m.model for m in result.models
+                          if not any(x in m.model.lower() for x in ("embed", "nomic", "ocr"))]
+            if chat_models:
+                self._local_ollama_ok = True
+                logger.info(f"[BRAIN] Local Ollama has {len(chat_models)} chat models")
+            else:
+                logger.info("[BRAIN] Local Ollama has no chat models — using cloud for all requests")
+        except Exception:
+            logger.info("[BRAIN] Local Ollama not reachable — using cloud for all requests")
+
         # Cloud Ollama client (for cloud models like kimi-k2.5:cloud)
         self._cloud_client = None
         api_key = os.getenv("OLLAMA_API_KEY")
@@ -338,6 +352,7 @@ class OllamaBrain:
         self._query_count: int = 0  # Track queries for auto-reset (resets every 15)
         self._total_query_count: int = 0  # Total queries (never resets)
         self._model_override: Optional[str] = None  # Manual model override (bypasses auto-selection)
+        self._action_mode: Optional[str] = None  # Current action mode (set by agent_service per request)
 
         # Phase 4 — compaction notification flag
         self._compaction_pending: bool = False
@@ -483,6 +498,14 @@ class OllamaBrain:
                 return self._cloud_client, model
             logger.debug(f"[BRAIN] Using local Ollama bridge for cloud model: {model}")
             return self.client, model
+
+        # For local models / "auto": check if local Ollama is actually reachable.
+        # If not, route to cloud with a cloud-capable model instead of failing.
+        if self._cloud_client and not self._local_ollama_ok:
+            logger.info(f"[BRAIN] Local Ollama not available, routing '{model}' to cloud")
+            cloud_model = model if model.endswith(":cloud") else Config.MODEL_FAST
+            return self._cloud_client, cloud_model
+
         return self.client, model
 
     def _get_fallback_chain(self, model: str) -> list:
@@ -2019,6 +2042,15 @@ class OllamaBrain:
         )
         full = f"{full}\n\n{web_search_instruction}"
 
+        # === DESIGN SYSTEM INJECTION (frontend/rapid/artifact modes) ===
+        try:
+            from aura.prompts.design_system import DESIGN_SYSTEM_PROMPT, DESIGN_SYSTEM_MODES
+            if self._action_mode and self._action_mode in DESIGN_SYSTEM_MODES:
+                full = f"{full}\n\n{DESIGN_SYSTEM_PROMPT}"
+                logger.debug(f"[BRAIN] Design system prompt injected for mode: {self._action_mode}")
+        except ImportError:
+            logger.debug("[BRAIN] aura.prompts.design_system not available")
+
         # === SUBSYSTEM CONTEXT INJECTION (cached, TTL=12s) ===
         # Side-effect calls (observe/record) still run every time; only context
         # retrieval is cached to avoid 8+ module round-trips on rapid messages.
@@ -2679,6 +2711,18 @@ class OllamaBrain:
             logger.info(f"[BRAIN] Model override set: {model}")
         else:
             logger.info("[BRAIN] Model override cleared, returning to auto-selection")
+
+    def set_action_mode(self, mode: Optional[str]) -> None:
+        """Set the current action mode for context-aware prompt injection.
+
+        Used by agent_service to pass the detected action mode so that
+        _build_full_system_prompt can inject mode-specific prompts
+        (e.g., design system for frontend/artifact modes).
+
+        Args:
+            mode: Action mode string or None to clear
+        """
+        self._action_mode = mode
 
     def _get_domain_confidence(self, prompt: str) -> tuple:
         """Get domain and confidence score from metacognition for a prompt.

@@ -461,8 +461,10 @@ export function MessageInput({
 
               {showModelMenu && availableModels.length > 0 && (() => {
                 const chatgpt = availableModels.filter(m => m.startsWith('chatgpt:'));
-                const cloud = availableModels.filter(m => !m.startsWith('chatgpt:') && (m.includes(':cloud') || m.includes('-cloud')));
-                const local = availableModels.filter(m => !m.startsWith('chatgpt:') && !m.includes(':cloud') && !m.includes('-cloud'));
+                const apiProviders = ['anthropic:', 'openai:', 'gemini:', 'grok:', 'perplexity:', 'deepseek:', 'minimax:', 'qwen:', 'kimi:', 'glm:'];
+                const apiModels = availableModels.filter(m => !m.startsWith('chatgpt:') && apiProviders.some(p => m.startsWith(p)));
+                const cloud = availableModels.filter(m => !m.startsWith('chatgpt:') && !apiProviders.some(p => m.startsWith(p)) && (m.includes(':cloud') || m.includes('-cloud')));
+                const local = availableModels.filter(m => !m.startsWith('chatgpt:') && !apiProviders.some(p => m.startsWith(p)) && !m.includes(':cloud') && !m.includes('-cloud'));
                 const renderItem = (model: string, label: string) => (
                   <button
                     key={model}
@@ -508,6 +510,8 @@ export function MessageInput({
                     <div style={{ overflowY: 'auto', flex: 1 }}>
                       {chatgpt.length > 0 && sectionHeader('ChatGPT', 'rgba(74,222,128,0.7)')}
                       {chatgpt.map(m => renderItem(m, '🟢 ' + m.replace('chatgpt:', '')))}
+                      {apiModels.length > 0 && sectionHeader('API Providers', 'rgba(236,72,153,0.7)')}
+                      {apiModels.map(m => renderItem(m, '🔑 ' + m))}
                       {cloud.length > 0 && sectionHeader('Cloud', 'rgba(96,165,250,0.7)')}
                       {cloud.map(m => renderItem(m, '☁️ ' + m.replace(/:cloud$/, '')))}
                       {local.length > 0 && sectionHeader('Local', 'rgba(251,146,60,0.7)')}

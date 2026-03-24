@@ -45,21 +45,21 @@ async def list_provider_models(name: str):
     }
 
 
+def _resolve_env_var(name: str) -> str:
+    """Resolve provider name to env var. Uses PROVIDER_CONFIGS if available,
+    otherwise derives from convention: name -> NAME_API_KEY."""
+    from aura.providers.registry import PROVIDER_CONFIGS
+    cfg = PROVIDER_CONFIGS.get(name)
+    if cfg:
+        return cfg["env_var"]
+    # Convention for non-text providers (image, video, audio, search)
+    return f"{name.upper()}_API_KEY"
+
+
 @router.post("/{name}/key")
 async def set_provider_key(name: str, body: ApiKeyBody):
     """Set API key for a provider (saves to .env file and env vars)."""
-    from aura.providers import get_provider
-    from aura.providers.registry import PROVIDER_CONFIGS
-
-    provider = get_provider(name)
-    if not provider:
-        raise HTTPException(404, f"Unknown provider: {name}")
-
-    cfg = PROVIDER_CONFIGS.get(name)
-    if not cfg:
-        raise HTTPException(404, f"No config for provider: {name}")
-
-    env_var = cfg["env_var"]
+    env_var = _resolve_env_var(name)
 
     # Set in current process environment
     os.environ[env_var] = body.key
@@ -74,18 +74,7 @@ async def set_provider_key(name: str, body: ApiKeyBody):
 @router.delete("/{name}/key")
 async def remove_provider_key(name: str):
     """Remove API key for a provider."""
-    from aura.providers import get_provider
-    from aura.providers.registry import PROVIDER_CONFIGS
-
-    provider = get_provider(name)
-    if not provider:
-        raise HTTPException(404, f"Unknown provider: {name}")
-
-    cfg = PROVIDER_CONFIGS.get(name)
-    if not cfg:
-        raise HTTPException(404, f"No config for provider: {name}")
-
-    env_var = cfg["env_var"]
+    env_var = _resolve_env_var(name)
 
     # Remove from current process environment
     os.environ.pop(env_var, None)

@@ -566,6 +566,21 @@ def show_help() -> None:
 
     table.add_row("", "")
 
+    # --- Multi-agent & branching ---
+    table.add_row("/debate <topic>", "Multi-agent debate on a topic")
+    table.add_row("/fork [name]", "Fork conversation into a new branch")
+    table.add_row("/branches", "List conversation branches")
+    table.add_row("/checkout <branch>", "Switch to a conversation branch")
+    table.add_row("/merge <branch>", "Merge a branch into current conversation")
+    table.add_row("/undo", "Undo last file edit")
+
+    table.add_row("", "")
+
+    # --- Voice ---
+    table.add_row("/voice", "Start voice conversation mode")
+
+    table.add_row("", "")
+
     # --- Recovery ---
     table.add_row("/retry", "Re-run the last prompt (useful after 429 errors)")
     table.add_row("/cost", "Show session token usage and cost")
@@ -582,13 +597,30 @@ def show_help() -> None:
 
 
 class StreamingResponse:
-    """Manages live token streaming to terminal via Rich."""
+    """Manages live token streaming to terminal via Rich.
+
+    Key design: when pause() is called (for tool-call display), the accumulated
+    text so far is printed *permanently* to the terminal, then Live is stopped.
+    When resume() is called, a fresh Live starts with empty content — only NEW
+    chunks stream into it.  This avoids the old bug where resume() re-rendered
+    ALL accumulated text, causing garbled/repeated output.
+    """
 
     def __init__(self, model: str = "") -> None:
         self._accumulated: str = ""
         self._live: Optional[Live] = None
         self._model: str = model
         self._displayed: bool = False
+        # Tracks the length of _accumulated that has already been permanently
+        # printed to the terminal (via pause or finish).
+        self._permanent_len: int = 0
+
+    def _get_code_theme(self) -> str:
+        try:
+            from aura.cli.themes import get_theme
+            return get_theme().code_theme
+        except (ImportError, AttributeError):
+            return "monokai"
 
     def start(self) -> None:
         """Begin live rendering context."""
@@ -596,28 +628,51 @@ class StreamingResponse:
         self._live.start()
 
     def chunk(self, text: str) -> None:
-        """Append a text chunk and re-render."""
+        """Append a text chunk and re-render only NEW content since last pause."""
         self._accumulated += text
         if self._live:
+            new_content = self._accumulated[self._permanent_len:]
             try:
-                md = Markdown(self._accumulated)
+                md = Markdown(new_content, code_theme=self._get_code_theme())
                 self._live.update(md)
-            except (ValueError, TypeError):  # Status bar: cosmetic, Rich parse fallback
-                self._live.update(Text(self._accumulated))
+            except (ValueError, TypeError):
+                self._live.update(Text(new_content))
 
     def pause(self) -> None:
-        """Pause live rendering for tool call display."""
+        """Pause live rendering for tool call display.
+
+        Prints accumulated-since-last-resume text permanently, then stops Live.
+        """
         if self._live:
+            new_content = self._accumulated[self._permanent_len:]
+            if new_content.strip():
+                # Make the current Live content permanent before stopping
+                try:
+                    md = Markdown(new_content, code_theme=self._get_code_theme())
+                    self._live.update(md)
+                except (ValueError, TypeError):
+                    self._live.update(Text(new_content))
+                self._live.transient = False
             self._live.stop()
             self._live = None
+            # Mark everything accumulated so far as permanently displayed
+            self._permanent_len = len(self._accumulated)
 
     def resume(self) -> None:
-        """Resume live rendering after tool call."""
-        self._live = Live(Markdown(self._accumulated), console=console, refresh_per_second=15, transient=True)
+        """Resume live rendering after tool call.
+
+        Starts a fresh Live — old text is already permanent on screen.
+        Only new chunks will be rendered.
+        """
+        self._live = Live("", console=console, refresh_per_second=15, transient=True)
         self._live.start()
 
-    def _build_final_panel(self) -> Panel:
-        """Build the final styled panel matching show_response() static output."""
+    def _build_final_panel(self, content: str) -> Panel:
+        """Build the final styled panel matching show_response() static output.
+
+        Args:
+            content: The markdown text to render inside the panel.
+        """
         try:
             from aura.cli.themes import get_theme
             theme = get_theme()
@@ -636,9 +691,9 @@ class StreamingResponse:
             label.append(f"  ({self._model})", style="dim")
 
         try:
-            md = Markdown(self._accumulated, code_theme=code_theme)
-        except (ValueError, TypeError):  # Rich Markdown parse fallback
-            md = Text(self._accumulated)
+            md = Markdown(content, code_theme=code_theme)
+        except (ValueError, TypeError):
+            md = Text(content)
 
         return Panel(
             md,
@@ -652,24 +707,30 @@ class StreamingResponse:
     def finish(self) -> None:
         """Finalize display — freeze the final styled panel in place.
 
-        Renders the final Markdown panel into the Live context, then stops
-        Live with transient=False so the content stays on screen without
-        re-rendering (no flicker).
+        Only renders content that came AFTER the last permanent print into a
+        panel.  Text that was already permanently printed (before tool calls)
+        stays as-is on screen.
         """
-        if self._live and self._accumulated.strip():
-            # Build the same styled panel that show_response() would produce
-            final_panel = self._build_final_panel()
-            # Wrap in Padding to match show_response() non-streaming layout
-            padded = Padding(final_panel, (1, 2, 1, 2))
-            # Update Live with the final panel, then freeze it in place
-            self._live.update(padded)
-            self._live.transient = False
-            self._live.stop()
-            self._live = None
-            self._displayed = True
-        elif self._live:
-            self._live.stop()
-            self._live = None
+        if self._live:
+            new_content = self._accumulated[self._permanent_len:]
+            if new_content.strip():
+                final_panel = self._build_final_panel(new_content)
+                padded = Padding(final_panel, (1, 2, 1, 2))
+                self._live.update(padded)
+                self._live.transient = False
+                self._live.stop()
+                self._live = None
+                self._permanent_len = len(self._accumulated)
+                self._displayed = True
+            else:
+                self._live.stop()
+                self._live = None
+                # Mark displayed if we had ANY content (even if it was all printed
+                # permanently during earlier pause cycles).
+                self._displayed = bool(self._accumulated.strip())
+        else:
+            # Live was already stopped (e.g. after a pause with no resume)
+            self._displayed = bool(self._accumulated.strip())
 
     @property
     def displayed(self) -> bool:

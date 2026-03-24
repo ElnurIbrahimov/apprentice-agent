@@ -296,7 +296,7 @@ export interface FleetTask {
 }
 
 // Tab types
-export type TabId = 'chat' | 'monitoring' | 'tools' | 'advanced' | 'activity';
+export type TabId = 'chat' | 'monitoring' | 'tools' | 'advanced' | 'activity' | 'settings';
 
 // A-MEM (Agentic Memory)
 export interface AMEMNote {

@@ -3,6 +3,7 @@
 Uses block characters (█ ▀ ▄) for a bold banner with Rich gradient colors.
 Inspired by Gemini CLI's block-character approach.
 """
+from __future__ import annotations
 
 from rich.text import Text
 
@@ -77,8 +78,14 @@ def get_banner(width: int = 80) -> Text:
     return text
 
 
-def get_welcome_line(version: str = "4.3.0") -> Text:
+def get_welcome_line(version: str | None = None) -> Text:
     """Return the one-line welcome below the banner."""
+    if version is None:
+        try:
+            from aura import __version__
+            version = __version__
+        except (ImportError, AttributeError):
+            version = "4.3.0"
     t = Text()
     t.append(f"  v{version}", style="dim")
     t.append("  |  ", style="dim")

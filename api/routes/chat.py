@@ -29,6 +29,11 @@ def _get_agent_service():
     from api.services.agent_service import agent_service
     return agent_service
 
+def _get_conversation_manager():
+    """Get ConversationManager with lazy loading."""
+    from aura.core.conversation_manager import get_conversation_manager
+    return get_conversation_manager()
+
 # Upload directory for file cleanup
 UPLOAD_DIR = Path(__file__).parent.parent / "data" / "uploads"
 UPLOAD_DIR_RESOLVED = Path(UPLOAD_DIR).resolve()
@@ -67,6 +72,42 @@ async def _broadcast_json(payload: dict) -> None:
         except Exception:
             logger.debug("broadcast_ws_send_failed", exc_info=True)
             unregister_websocket(ws)
+
+
+# ---------------------------------------------------------------------------
+# ConversationManager async listener (registered once)
+# ---------------------------------------------------------------------------
+_conv_listener_registered = False
+_conv_listener_lock = threading.Lock()
+
+
+def _ensure_conv_listener():
+    """Register the ConversationManager -> WebSocket broadcast listener once."""
+    global _conv_listener_registered
+    if _conv_listener_registered:
+        return
+    with _conv_listener_lock:
+        if _conv_listener_registered:
+            return
+        try:
+            manager = _get_conversation_manager()
+
+            async def _on_conv_event(event):
+                payload = {
+                    "type": "conv_sync",
+                    "event": event.event_type,
+                    "conversation_id": event.conversation_id,
+                    "surface": event.surface,
+                    "data": event.data,
+                    "timestamp": event.timestamp,
+                }
+                await _broadcast_json(payload)
+
+            manager.register_async_listener(_on_conv_event)
+            _conv_listener_registered = True
+            logger.info("[Chat] ConversationManager async listener registered")
+        except Exception as e:
+            logger.debug(f"[Chat] ConvManager listener registration deferred: {e}")
 
 
 async def broadcast_proactive_message(msg) -> None:
@@ -473,9 +514,9 @@ async def search_messages(q: str, limit: int = 20):
         return {"results": [], "query": q, "error": safe_error_detail(e)}
 
 
-@router.get("/conversations", response_model=list[ConversationSummary])
+@router.get("/conversations")
 async def list_conversations():
-    """List all conversations."""
+    """List all conversations with surface activity info."""
     try:
         loop = asyncio.get_running_loop()
         conversations = await loop.run_in_executor(None, _get_agent_service().list_conversations)
@@ -572,6 +613,52 @@ async def save_conversation_to_memory(conversation_id: str):
         raise HTTPException(status_code=500, detail=safe_error_detail(e))
 
 
+# =========================================================================
+# Cross-Surface Sync Endpoints (Phase 2)
+# =========================================================================
+
+@router.get("/sync/status")
+async def get_sync_status():
+    """Get ConversationManager sync status."""
+    try:
+        manager = _get_conversation_manager()
+        return manager.get_status()
+    except Exception as e:
+        logger.debug(f"[SyncStatus] ConversationManager not ready: {e}")
+        return {
+            "initialized": False,
+            "total_bindings": 0,
+            "bindings": {},
+            "listener_count": 0,
+            "current_conversation": None,
+        }
+
+
+@router.get("/conversations/{conversation_id}/messages")
+async def get_conversation_messages(conversation_id: str):
+    """Get messages for a conversation with surface attribution."""
+    try:
+        manager = _get_conversation_manager()
+        loop = asyncio.get_running_loop()
+        messages = await loop.run_in_executor(
+            None, lambda: manager.get_conversation_messages(conversation_id)
+        )
+        return {"messages": messages, "conversation_id": conversation_id}
+    except RuntimeError:
+        # ConversationManager not initialized — fall back to brain
+        svc = _get_agent_service()
+        if not svc.is_ready:
+            raise HTTPException(status_code=503, detail="Agent not initialized")
+        loop = asyncio.get_running_loop()
+        messages = await loop.run_in_executor(
+            None, lambda: svc.agent.brain.get_conversation_messages(conversation_id)
+        )
+        return {"messages": messages, "conversation_id": conversation_id}
+    except Exception as e:
+        logger.error(f"[ConvMessages] Error: {e}")
+        raise HTTPException(status_code=500, detail=safe_error_detail(e))
+
+
 @router.websocket("/stream")
 async def websocket_chat(websocket: WebSocket):
     """WebSocket endpoint for streaming chat.
@@ -600,6 +687,7 @@ async def websocket_chat(websocket: WebSocket):
 
     await websocket.accept()
     register_websocket(websocket)
+    _ensure_conv_listener()
     logger.info("[WebSocket] Client connected")
 
     # Flag to signal stop to the streaming thread
@@ -689,6 +777,7 @@ async def websocket_chat(websocket: WebSocket):
             action_mode = msg.get("action_mode")  # Optional action mode for auto-model selection
             conversation_id = msg.get("conversation_id")  # Optional conversation context
             attachments = msg.get("attachments", [])  # Optional attachments
+            surface = msg.get("surface", "web")  # Cross-surface sync: which surface sent this
             _last_attachments = attachments  # Track for outer finally cleanup
             logger.debug(f"[WebSocket] Received message: '{message[:50]}...' model={model_override} action_mode={action_mode} conv={conversation_id} attachments={len(attachments)}")
 
@@ -876,6 +965,17 @@ async def websocket_chat(websocket: WebSocket):
                                 audio_url = "/api/voice/synthesize"
                         except Exception:
                             logger.debug("ws_voice_presence_check_failed", exc_info=True)
+
+                        # Track messages in ConversationManager for cross-surface sync
+                        try:
+                            conv_mgr = _get_conversation_manager()
+                            cid = conv_mgr.get_current_conversation_id()
+                            if cid and full_response:
+                                _clean_ws_msg = message.split("[FILE_ATTACHMENT_CONTEXT]")[0].strip() if "[FILE_ATTACHMENT_CONTEXT]" in message else message
+                                conv_mgr.on_message_added(cid, "user", _clean_ws_msg[:500], surface=surface, surface_user=f"{surface}_default")
+                                conv_mgr.on_message_added(cid, "assistant", full_response, surface=surface, surface_user=f"{surface}_default")
+                        except Exception:
+                            logger.debug("ws_conv_manager_tracking_failed", exc_info=True)
 
                         await websocket.send_json({
                             "type": "done",

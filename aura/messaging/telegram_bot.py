@@ -16,11 +16,12 @@ import tempfile
 import time as _time
 from collections import defaultdict, OrderedDict
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Tuple
 from pathlib import Path
 import json
 import base64
+import uuid
 
 # Per-user rate limiting
 _msg_timestamps: Dict[str, list] = defaultdict(list)
@@ -36,17 +37,303 @@ def _check_rate_limit(user_id: str, max_per_min: int = 20) -> bool:
     stamps.append(now)
     return True
 
+
+# ============================================================================
+#  Scheduled task / reminder callbacks (module-level for APScheduler pickling)
+# ============================================================================
+
+# Global ref to the running bot instance so scheduler callbacks can send messages.
+# Set in TelegramBot.start(), cleared in TelegramBot.stop().
+_active_bot_instance: Optional["TelegramBot"] = None
+_active_event_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def _send_telegram_reminder(chat_id: str, message: str):
+    """APScheduler callback: send a one-shot reminder message to Telegram.
+
+    Runs in APScheduler's thread pool — uses run_coroutine_threadsafe to bridge
+    into the bot's async event loop.
+    """
+    bot_inst = _active_bot_instance
+    loop = _active_event_loop
+    if not bot_inst or not bot_inst.bot or not loop or loop.is_closed():
+        logging.getLogger(__name__).warning(
+            f"[Scheduler] Cannot deliver reminder — bot not running. chat={chat_id}"
+        )
+        return
+
+    text = f"\u23f0 Reminder: {message}"
+
+    async def _send():
+        try:
+            await bot_inst.bot.send_message(chat_id=chat_id, text=text)
+        except Exception as e:
+            logging.getLogger(__name__).error(f"[Scheduler] Reminder send failed: {e}")
+
+    asyncio.run_coroutine_threadsafe(_send(), loop)
+
+
+def _run_telegram_scheduled_task(chat_id: str, task_prompt: str, is_agent_task: bool = False):
+    """APScheduler callback: run a scheduled task and send results to Telegram.
+
+    If is_agent_task is True, runs the prompt through the AURA agent first.
+    Otherwise just sends the task_prompt as a notification.
+    """
+    bot_inst = _active_bot_instance
+    loop = _active_event_loop
+    if not bot_inst or not bot_inst.bot or not loop or loop.is_closed():
+        logging.getLogger(__name__).warning(
+            f"[Scheduler] Cannot deliver scheduled task — bot not running. chat={chat_id}"
+        )
+        return
+
+    async def _execute_and_send():
+        try:
+            if is_agent_task:
+                # Run through the agent, then send results
+                try:
+                    response_text, _ = await asyncio.to_thread(
+                        bot_inst._run_agent_sync, task_prompt
+                    )
+                except Exception as e:
+                    response_text = f"Scheduled task failed: {e}"
+
+                header = f"\U0001f4c5 Scheduled Task: {task_prompt}\n\n"
+                full_text = header + (response_text or "No output.")
+
+                # Split if needed
+                for chunk in _split_message(full_text, 4096):
+                    await bot_inst.bot.send_message(chat_id=chat_id, text=chunk)
+            else:
+                await bot_inst.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"\U0001f4c5 Scheduled: {task_prompt}"
+                )
+        except Exception as e:
+            logging.getLogger(__name__).error(
+                f"[Scheduler] Scheduled task send failed: {e}"
+            )
+
+    asyncio.run_coroutine_threadsafe(_execute_and_send(), loop)
+
+
+def _parse_time_expression(text: str) -> Optional[datetime]:
+    """Parse natural language time expressions into an absolute datetime.
+
+    Handles:
+        - "in Xh", "in Xm", "in X hours", "in X minutes", "in X days"
+        - "at HH:MM", "at H:MMam/pm", "at Ham/pm"
+        - "tomorrow", "tomorrow HH:MM", "tomorrow at HH:MM"
+        - "next monday", "next tuesday at HH:MM"
+
+    Returns None if parsing fails.
+    """
+    original = text.strip()
+    t = original.lower().strip()
+    now = datetime.now()
+
+    # --- Relative: "in X hours/minutes/seconds/days" or shorthand "in 2h" ---
+    m = re.match(r'in\s+(\d+)\s*h(?:ours?)?$', t)
+    if m:
+        return now + timedelta(hours=int(m.group(1)))
+
+    m = re.match(r'in\s+(\d+)\s*m(?:in(?:utes?)?)?$', t)
+    if m:
+        return now + timedelta(minutes=int(m.group(1)))
+
+    m = re.match(r'in\s+(\d+)\s*s(?:ec(?:onds?)?)?$', t)
+    if m:
+        return now + timedelta(seconds=int(m.group(1)))
+
+    m = re.match(r'in\s+(\d+)\s*d(?:ays?)?$', t)
+    if m:
+        return now + timedelta(days=int(m.group(1)))
+
+    # Compound relative: "in 1h 30m", "in 2 hours 15 minutes"
+    m = re.match(r'in\s+(\d+)\s*h(?:ours?)?\s+(\d+)\s*m(?:in(?:utes?)?)?$', t)
+    if m:
+        return now + timedelta(hours=int(m.group(1)), minutes=int(m.group(2)))
+
+    # --- "at HH:MM" or "at H:MMam/pm" or "at Ham/pm" ---
+    m = re.match(r'at\s+(\d{1,2}):(\d{2})\s*(am|pm)?$', t)
+    if m:
+        hour, minute = int(m.group(1)), int(m.group(2))
+        ampm = m.group(3)
+        if ampm == 'pm' and hour != 12:
+            hour += 12
+        elif ampm == 'am' and hour == 12:
+            hour = 0
+        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if target <= now:
+            target += timedelta(days=1)
+        return target
+
+    m = re.match(r'at\s+(\d{1,2})\s*(am|pm)$', t)
+    if m:
+        hour = int(m.group(1))
+        ampm = m.group(2)
+        if ampm == 'pm' and hour != 12:
+            hour += 12
+        elif ampm == 'am' and hour == 12:
+            hour = 0
+        target = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+        if target <= now:
+            target += timedelta(days=1)
+        return target
+
+    # --- "tomorrow" optionally with time ---
+    m = re.match(r'tomorrow(?:\s+(?:at\s+)?(\d{1,2}):(\d{2})\s*(am|pm)?)?$', t)
+    if m:
+        tomorrow = now + timedelta(days=1)
+        if m.group(1):
+            hour, minute = int(m.group(1)), int(m.group(2))
+            ampm = m.group(3)
+            if ampm == 'pm' and hour != 12:
+                hour += 12
+            elif ampm == 'am' and hour == 12:
+                hour = 0
+            return tomorrow.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        else:
+            return tomorrow.replace(hour=9, minute=0, second=0, microsecond=0)
+
+    m = re.match(r'tomorrow(?:\s+(?:at\s+)?(\d{1,2})\s*(am|pm))?$', t)
+    if m and m.group(1):
+        tomorrow = now + timedelta(days=1)
+        hour = int(m.group(1))
+        ampm = m.group(2)
+        if ampm == 'pm' and hour != 12:
+            hour += 12
+        elif ampm == 'am' and hour == 12:
+            hour = 0
+        return tomorrow.replace(hour=hour, minute=0, second=0, microsecond=0)
+
+    # --- "next <weekday>" optionally with time ---
+    days_of_week = {
+        'monday': 0, 'tuesday': 1, 'wednesday': 2, 'thursday': 3,
+        'friday': 4, 'saturday': 5, 'sunday': 6,
+        'mon': 0, 'tue': 1, 'wed': 2, 'thu': 3,
+        'fri': 4, 'sat': 5, 'sun': 6,
+    }
+    m = re.match(
+        r'next\s+(\w+?)(?:\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?)?$', t
+    )
+    if m:
+        day_name = m.group(1)
+        if day_name in days_of_week:
+            target_weekday = days_of_week[day_name]
+            days_ahead = (target_weekday - now.weekday()) % 7
+            if days_ahead == 0:
+                days_ahead = 7
+            target = now + timedelta(days=days_ahead)
+
+            hour, minute = 9, 0  # default 9am
+            if m.group(2):
+                hour = int(m.group(2))
+                minute = int(m.group(3)) if m.group(3) else 0
+                ampm = m.group(4)
+                if ampm == 'pm' and hour != 12:
+                    hour += 12
+                elif ampm == 'am' and hour == 12:
+                    hour = 0
+
+            return target.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+    return None
+
+
+def _parse_schedule_expression(text: str) -> Optional[Dict]:
+    """Parse a schedule expression into APScheduler trigger parameters.
+
+    Handles:
+        - "every Xh", "every X hours", "every X minutes", "every Xm"
+        - "daily at HH:MM", "daily at Ham/pm"
+        - "every monday at HH:MM", "every <weekday> at H:MMam/pm"
+        - "every 30 minutes", "every 2 hours"
+
+    Returns a dict with:
+        - "type": "interval" | "cron"
+        - For interval: "hours", "minutes", "seconds"
+        - For cron: "cron_expression" (5-part)
+    Returns None if parsing fails.
+    """
+    t = text.lower().strip()
+
+    # --- "every Xh" / "every X hours" / "every Xm" / "every X minutes" ---
+    m = re.match(r'every\s+(\d+)\s*h(?:ours?)?$', t)
+    if m:
+        return {"type": "interval", "hours": int(m.group(1)), "minutes": 0, "seconds": 0}
+
+    m = re.match(r'every\s+(\d+)\s*m(?:in(?:utes?)?)?$', t)
+    if m:
+        return {"type": "interval", "hours": 0, "minutes": int(m.group(1)), "seconds": 0}
+
+    m = re.match(r'every\s+(\d+)\s*s(?:ec(?:onds?)?)?$', t)
+    if m:
+        return {"type": "interval", "hours": 0, "minutes": 0, "seconds": int(m.group(1))}
+
+    # --- "daily at HH:MM" or "daily at Ham/pm" ---
+    m = re.match(r'daily\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$', t)
+    if m:
+        hour = int(m.group(1))
+        minute = int(m.group(2)) if m.group(2) else 0
+        ampm = m.group(3)
+        if ampm == 'pm' and hour != 12:
+            hour += 12
+        elif ampm == 'am' and hour == 12:
+            hour = 0
+        return {"type": "cron", "cron_expression": f"{minute} {hour} * * *"}
+
+    # --- "every <weekday> at HH:MM" ---
+    days_of_week = {
+        'monday': '1', 'tuesday': '2', 'wednesday': '3', 'thursday': '4',
+        'friday': '5', 'saturday': '6', 'sunday': '0',
+        'mon': '1', 'tue': '2', 'wed': '3', 'thu': '4',
+        'fri': '5', 'sat': '6', 'sun': '0',
+    }
+    m = re.match(
+        r'every\s+(\w+)\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$', t
+    )
+    if m:
+        day_name = m.group(1)
+        if day_name in days_of_week:
+            dow = days_of_week[day_name]
+            hour = int(m.group(2))
+            minute = int(m.group(3)) if m.group(3) else 0
+            ampm = m.group(4)
+            if ampm == 'pm' and hour != 12:
+                hour += 12
+            elif ampm == 'am' and hour == 12:
+                hour = 0
+            return {"type": "cron", "cron_expression": f"{minute} {hour} * * {dow}"}
+
+    return None
+
+
 try:
-    from telegram import Update, Bot, InlineQueryResultArticle, InputTextMessageContent
+    from telegram import (
+        Update, Bot, InlineQueryResultArticle, InputTextMessageContent,
+        InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice,
+        ReplyKeyboardMarkup, ReplyKeyboardRemove, BotCommand,
+    )
     from telegram.ext import (
         Application,
         CommandHandler,
         MessageHandler,
         InlineQueryHandler,
+        CallbackQueryHandler,
+        PreCheckoutQueryHandler,
+        ChatMemberHandler,
         ContextTypes,
         filters
     )
     from telegram.constants import ParseMode, ChatAction
+
+    # ReactionTypeEmoji requires python-telegram-bot >= 20.8
+    try:
+        from telegram import ReactionTypeEmoji
+        REACTIONS_AVAILABLE = True
+    except ImportError:
+        REACTIONS_AVAILABLE = False
     TELEGRAM_AVAILABLE = True
 except ImportError:
     TELEGRAM_AVAILABLE = False
@@ -59,11 +346,82 @@ from .base_platform import (
     OutgoingMessage,
     MessageType
 )
+from aura.core.conversation_manager import get_conversation_manager
+
+# Skill library and evolution imports (lazy — only fail when actually used)
+try:
+    from aura_skill_library import (
+        SkillStore, SkillLearner, Skill, SkillCategory, SkillExample, SkillMetadata
+    )
+    SKILL_LIBRARY_AVAILABLE = True
+except ImportError:
+    SKILL_LIBRARY_AVAILABLE = False
+
+try:
+    from aura.evolution import GEPAEngine, GEPAConfig, AuraSkillAdapter, Candidate, GEPAResult
+    from aura.evolution.types import EvalExample
+    GEPA_AVAILABLE = True
+except ImportError:
+    GEPA_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
 # Max chars for code output before truncation in Telegram messages
 _MAX_OUTPUT_CHARS = 3500
+
+# Premium tier definitions for Telegram payments
+PREMIUM_TIERS = {
+    "supporter": {
+        "title": "AURA Supporter",
+        "description": "Support AURA development",
+        "price": 500,  # $5.00 in cents
+        "currency": "USD",
+        "benefits": ["Priority responses", "Badge in status"],
+    },
+    "pro": {
+        "title": "AURA Pro",
+        "description": "Unlock advanced features",
+        "price": 1500,  # $15.00
+        "currency": "USD",
+        "benefits": ["Unlimited research", "Fleet mode", "Priority model routing", "Custom personality"],
+    },
+    "patron": {
+        "title": "AURA Patron",
+        "description": "Maximum support + all features",
+        "price": 5000,  # $50.00
+        "currency": "USD",
+        "benefits": ["Everything in Pro", "Direct feature requests", "Early access", "Custom training"],
+    },
+}
+
+# ============================================================================
+#  Emotion-to-sticker/GIF mapping for contextual reactions (Phase 5)
+# ============================================================================
+EMOTION_REACTIONS = {
+    "joy": {"sticker_query": "happy", "gif_queries": ["celebration", "happy dance", "yay"]},
+    "excited": {"sticker_query": "excited", "gif_queries": ["excited", "woohoo", "amazing"]},
+    "curious": {"sticker_query": "thinking", "gif_queries": ["thinking", "hmm", "curious"]},
+    "surprised": {"sticker_query": "surprised", "gif_queries": ["shocked", "wow", "surprised"]},
+    "sad": {"sticker_query": "sad", "gif_queries": ["sad", "cry", "disappointed"]},
+    "frustrated": {"sticker_query": "angry", "gif_queries": ["frustrated", "facepalm"]},
+    "grateful": {"sticker_query": "thank you", "gif_queries": ["thank you", "grateful", "heart"]},
+    "empathetic": {"sticker_query": "hug", "gif_queries": ["hug", "comfort", "care"]},
+    "confident": {"sticker_query": "cool", "gif_queries": ["confident", "boss", "cool"]},
+    "neutral": {"sticker_query": "ok", "gif_queries": ["ok", "thumbs up", "nod"]},
+}
+
+EMOTION_EMOJI = {
+    "joy": "\U0001f60a",
+    "excited": "\U0001f525",
+    "curious": "\U0001f914",
+    "surprised": "\U0001f62e",
+    "sad": "\U0001f622",
+    "frustrated": "\U0001f624",
+    "grateful": "\u2764\ufe0f",
+    "empathetic": "\U0001f917",
+    "confident": "\U0001f4aa",
+    "neutral": "\U0001f44d",
+}
 
 
 def _extract_code_from_message(text: str) -> str:
@@ -321,6 +679,16 @@ class TelegramProgressReporter:
                 delay = self.MIN_EDIT_INTERVAL - elapsed
                 self._flush_task = asyncio.create_task(self._flush_after(delay))
 
+    async def update_structured(self, step: int, total: int, label: str,
+                                elapsed: float = 0.0):
+        """Send a structured progress update with progress bar and step counter."""
+        filled = int(10 * step / max(total, 1))
+        bar = "\u2588" * filled + "\u2591" * (10 - filled)
+        pct = int(100 * step / max(total, 1))
+        time_str = f" | {elapsed:.0f}s" if elapsed > 0 else ""
+        text = f"\u2699\ufe0f Step {step}/{total} — {label}\n[{bar}] {pct}%{time_str}"
+        await self.update(text)
+
     async def _flush_after(self, delay: float):
         """Wait then send the most recent pending update."""
         await asyncio.sleep(delay)
@@ -566,6 +934,29 @@ class TelegramBot(BasePlatform):
         self._INLINE_DEBOUNCE_SEC = 1.0
         self._INLINE_TIMEOUT_SEC = 15.0
 
+        # Skill system state
+        self._skill_pending: Dict[int, dict] = {}    # user_id -> pending skill action
+        self._last_exchange: Dict[int, dict] = {}     # user_id -> {"input": str, "output": str}
+        self._skill_store = None   # Lazy-loaded SkillStore
+        self._skill_learner = None # Lazy-loaded SkillLearner
+        self._skill_create_state: Dict[int, dict] = {}  # user_id -> multi-step create flow
+
+        # Group message cache for summarization (chat_id -> last 50 messages)
+        self._group_message_cache: Dict[str, List[dict]] = {}
+
+        # Premium/payment state
+        self._premium_users: Dict[str, dict] = {}
+        self._load_premium_state()
+
+        # Location sharing state (ephemeral, per-user)
+        self._user_locations: Dict[str, dict] = {}
+
+        # --- Improvement state ---
+        self._keyboard_enabled: Dict[str, bool] = {}   # user_id -> keyboard on/off
+        self._user_language: Dict[str, str] = {}        # user_id -> lang code (e.g. "ru")
+        self._digest_enabled: Dict[str, bool] = {}      # chat_id -> digest on/off
+        self._digest_job_ids: Dict[str, str] = {}        # chat_id -> APScheduler job ID
+
         self._load_state()
 
     @property
@@ -604,6 +995,26 @@ class TelegramBot(BasePlatform):
         except Exception as e:
             logger.error(f"Could not save Telegram state: {e}")
 
+    def _load_premium_state(self):
+        """Load premium user data from disk."""
+        path = Path("data/premium_users.json")
+        if path.exists():
+            try:
+                self._premium_users = json.loads(path.read_text())
+            except Exception:
+                pass
+
+    def _save_premium_state(self):
+        """Persist premium user data to disk."""
+        Path("data").mkdir(exist_ok=True)
+        Path("data/premium_users.json").write_text(
+            json.dumps(self._premium_users, indent=2)
+        )
+
+    def is_premium(self, user_id: str) -> bool:
+        """Check if a user has premium status."""
+        return user_id in self._premium_users
+
     async def start(self):
         """Start the Telegram bot"""
 
@@ -627,6 +1038,36 @@ class TelegramBot(BasePlatform):
         self.app.add_handler(CommandHandler("code", self._handle_code))
         self.app.add_handler(CommandHandler("model", self._handle_model))
         self.app.add_handler(CommandHandler("compare", self._handle_compare))
+        self.app.add_handler(CommandHandler("session", self._handle_session))
+        self.app.add_handler(CommandHandler("webhook", self._handle_webhook))
+        self.app.add_handler(CommandHandler("remind", self._handle_remind))
+        self.app.add_handler(CommandHandler("schedule", self._handle_schedule))
+        self.app.add_handler(CommandHandler("tasks", self._handle_tasks))
+        self.app.add_handler(CommandHandler("cancel", self._handle_cancel))
+        self.app.add_handler(CommandHandler("agent", self._handle_agent))
+        self.app.add_handler(CommandHandler("fleet", self._handle_fleet))
+        self.app.add_handler(CommandHandler("learn", self._handle_learn))
+        self.app.add_handler(CommandHandler("skill", self._handle_skill))
+        self.app.add_handler(CommandHandler("premium", self._handle_premium))
+        self.app.add_handler(CommandHandler("donate", self._handle_donate))
+
+        # --- Improvement commands ---
+        self.app.add_handler(CommandHandler("keyboard", self._handle_keyboard))
+        self.app.add_handler(CommandHandler("stars", self._handle_stars))
+        self.app.add_handler(CommandHandler("file", self._handle_file_gen))
+        self.app.add_handler(CommandHandler("export", self._handle_export))
+        self.app.add_handler(CommandHandler("digest", self._handle_digest))
+        self.app.add_handler(CommandHandler("lang", self._handle_lang))
+        self.app.add_handler(CommandHandler("stickers", self._handle_stickers_cmd))
+        self.app.add_handler(CommandHandler("pin", self._handle_pin))
+
+        # Payment handlers
+        self.app.add_handler(CallbackQueryHandler(self._handle_callback, pattern="^buy_"))
+        self.app.add_handler(CallbackQueryHandler(self._handle_stars_callback, pattern="^stars_"))
+        self.app.add_handler(CallbackQueryHandler(self._handle_action_callback, pattern="^act_"))
+        self.app.add_handler(CallbackQueryHandler(self._handle_pin_callback, pattern="^pin_"))
+        self.app.add_handler(PreCheckoutQueryHandler(self._handle_pre_checkout))
+        self.app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, self._handle_successful_payment))
 
         # Inline query handler (enable via @BotFather -> /setinline)
         self.app.add_handler(InlineQueryHandler(self._handle_inline))
@@ -649,6 +1090,28 @@ class TelegramBot(BasePlatform):
             self._handle_photo_upload
         ))
 
+        # Location handler (Phase 5 — contextual location info)
+        self.app.add_handler(MessageHandler(
+            filters.LOCATION,
+            self._handle_location
+        ))
+
+        # Nearby search command (uses last shared location)
+        self.app.add_handler(CommandHandler("nearby", self._handle_nearby))
+
+        # Sticker handler (Phase 5 — contextual reactions)
+        self.app.add_handler(MessageHandler(
+            filters.Sticker.ALL,
+            self._handle_sticker
+        ))
+
+        # Group-specific command handlers
+        self.app.add_handler(CommandHandler("summarize_group", self._handle_summarize_group))
+        self.app.add_handler(CommandHandler("summarize_thread", self._handle_summarize_thread))
+
+        # ChatMember handler — bot added/removed from groups
+        self.app.add_handler(ChatMemberHandler(self._handle_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
+
         # Message handler (must be last)
         self.app.add_handler(MessageHandler(
             filters.TEXT & ~filters.COMMAND,
@@ -666,14 +1129,59 @@ class TelegramBot(BasePlatform):
         await self.app.start()
         await self.app.updater.start_polling(
             drop_pending_updates=True,
-            allowed_updates=["message", "inline_query", "chosen_inline_result"]
+            allowed_updates=[
+                "message", "inline_query", "chosen_inline_result",
+                "my_chat_member", "chat_member", "callback_query",
+                "pre_checkout_query", "message_reaction",
+            ]
         )
 
         logger.info("Telegram bot started successfully!")
 
+        # Expose bot instance + event loop for scheduler callbacks
+        global _active_bot_instance, _active_event_loop
+        _active_bot_instance = self
+        _active_event_loop = asyncio.get_running_loop()
+
         # Get bot info
         me = await self.bot.get_me()
         logger.info(f"Bot: @{me.username} ({me.first_name})")
+
+        # Set bot commands menu (autocomplete in Telegram)
+        try:
+            await self.bot.set_my_commands([
+                BotCommand("start", "Start the bot"),
+                BotCommand("help", "Show help"),
+                BotCommand("status", "Current status"),
+                BotCommand("mood", "Check my mood"),
+                BotCommand("memory", "What I remember"),
+                BotCommand("research", "Deep research"),
+                BotCommand("search", "Web search"),
+                BotCommand("summarize", "Summarize text/URL"),
+                BotCommand("image", "Generate an image"),
+                BotCommand("code", "Run Python code"),
+                BotCommand("model", "View/switch AI models"),
+                BotCommand("compare", "Compare models"),
+                BotCommand("session", "Manage sessions"),
+                BotCommand("remind", "Set a reminder"),
+                BotCommand("schedule", "Recurring tasks"),
+                BotCommand("tasks", "List scheduled tasks"),
+                BotCommand("agent", "Run specialist agent"),
+                BotCommand("fleet", "Multi-agent parallel"),
+                BotCommand("keyboard", "Toggle reply keyboard"),
+                BotCommand("stars", "Support with Telegram Stars"),
+                BotCommand("file", "Generate document"),
+                BotCommand("export", "Export conversation"),
+                BotCommand("digest", "Daily digest settings"),
+                BotCommand("lang", "Set language"),
+                BotCommand("pin", "Pin a message"),
+                BotCommand("nearby", "Nearby places"),
+                BotCommand("premium", "Premium tiers"),
+                BotCommand("donate", "Support AURA"),
+            ])
+            logger.info("[Telegram] Bot commands menu set successfully")
+        except Exception as e:
+            logger.warning(f"[Telegram] Could not set bot commands: {e}")
 
         # Connect proactive system to Telegram
         await self._connect_proactive_system()
@@ -683,6 +1191,11 @@ class TelegramBot(BasePlatform):
 
         logger.info("Stopping Telegram bot...")
         self.is_running = False
+
+        # Clear scheduler callback references
+        global _active_bot_instance, _active_event_loop
+        _active_bot_instance = None
+        _active_event_loop = None
 
         # Cancel proactive polling task
         if hasattr(self, '_proactive_task') and self._proactive_task:
@@ -792,13 +1305,24 @@ Quick commands:
 /code <python> - Run Python code
 /model - View/switch AI models
 /compare <prompt> - Compare models side-by-side
+/session - Manage conversation sessions
+/remind <time> <msg> - Set a reminder
+/schedule <interval> <task> - Recurring tasks
+/tasks - List scheduled tasks
+/cancel <id> - Cancel a task
+/agent <specialist> <task> - Run a specialist agent
+/fleet <goal> - Multi-agent parallel run
+/webhook - Webhook integrations
 /help - More info
 
 Inline mode: Type @Aura828Bot in any chat to ask me anything!
 
 Or just talk to me like a friend. What's on your mind?"""
 
-        await update.message.reply_text(welcome)
+        # Attach persistent reply keyboard by default
+        self._keyboard_enabled[str(user.id)] = True
+        reply_markup = self._get_reply_keyboard()
+        await update.message.reply_text(welcome, reply_markup=reply_markup)
 
     async def _handle_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /help command"""
@@ -818,12 +1342,49 @@ Or just talk to me like a friend. What's on your mind?"""
 /model - View current models and available options
 /model <name> - Switch the default model
 /compare <prompt> - Run same prompt through 3 models side-by-side
+/session - Show current session info
+/session new [title] - Start a new conversation
+/session list - List recent conversations
+/session <id> - Switch to a conversation by ID
+/session sync - Cross-surface sync status
+/learn - Learn a skill from our last exchange
+/skill list [category] - List all learned skills
+/skill search <query> - Search skills by description
+/skill info <name> - Detailed skill info
+/skill improve <name> - Evolve a skill with GEPA
+/skill create <name> - Manually define a new skill
+
+Reminders & Scheduled Tasks:
+/remind in 2h Check the deployment
+/remind at 17:00 Call the team
+/remind tomorrow 9am Review PRs
+/schedule every 2h Check CPU usage
+/schedule daily at 9am Summarize notifications
+/schedule every monday at 10am Weekly summary
+/tasks - List active reminders & tasks
+/cancel <id> - Cancel a reminder or task
+
+Multi-Agent System:
+/agent list - Show available specialists
+/agent route <query> - Preview which agent handles a query
+/agent <specialist> <task> - Run a specific specialist
+/fleet <goal> - Decompose goal and run agents in parallel
+/fleet status - Check running fleet status
 
 Inline mode (use @Aura828Bot in any chat):
 - Type any question to get a quick answer
 - "translate <text>" - Translation
 - "explain <topic>" - Explanation
 - "summarize <text>" - Summary
+
+Location:
+- Share your location to get weather, timezone, sunrise/sunset info
+/nearby <query> - Find places near your last shared location
+
+Group Commands (in group chats):
+/summarize_group - Summarize recent group conversation
+/summarize_thread - Reply to a message to summarize the thread
+- Mention @Aura828Bot or reply to my messages to chat in groups
 
 Tips:
 - Just chat normally - I'll respond naturally
@@ -1706,6 +2267,386 @@ Status: Online and ready!"""
         except Exception:
             pass
 
+    # ============ SESSION COMMAND ============
+
+    async def _handle_session(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /session command — manage cross-surface conversation sessions.
+
+        Subcommands:
+          /session            — show current session info
+          /session new [title] — create a new conversation and switch to it
+          /session list       — list recent conversations (max 10)
+          /session sync       — show cross-surface sync status
+          /session <id>       — switch to a conversation by ID (partial match)
+        """
+        if not self._is_user_allowed(update.effective_user.id):
+            return
+
+        user_id = str(update.effective_user.id)
+        args = context.args or []
+
+        try:
+            manager = get_conversation_manager()
+        except Exception as e:
+            logger.error(f"[Telegram] ConversationManager unavailable: {e}")
+            await update.message.reply_text("Session management is not available right now.")
+            return
+
+        # Dispatch subcommands
+        if not args:
+            await self._session_info(update, manager, user_id)
+        elif args[0].lower() == "new":
+            title = " ".join(args[1:]).strip() if len(args) > 1 else None
+            await self._session_new(update, manager, user_id, title)
+        elif args[0].lower() == "list":
+            await self._session_list(update, manager, user_id)
+        elif args[0].lower() == "sync":
+            await self._session_sync(update, manager, user_id)
+        else:
+            # Treat as conversation ID to switch to
+            target_id = args[0].strip()
+            await self._session_switch(update, manager, user_id, target_id)
+
+    async def _session_info(self, update: Update, manager, user_id: str):
+        """Show current session info."""
+        try:
+            conv_id = manager.get_or_create_session("telegram", user_id)
+            convs = manager.list_conversations()
+            conv = next((c for c in convs if c["id"] == conv_id), None)
+
+            if not conv:
+                await update.message.reply_text("No active session found\\. Use /session new to start one\\.",
+                                                 parse_mode="MarkdownV2")
+                return
+
+            title = conv.get("title", "Untitled")
+            msg_count = conv.get("message_count", 0)
+            updated_at = conv.get("updated_at", 0)
+
+            # Format timestamp
+            if updated_at:
+                ts = datetime.fromtimestamp(updated_at).strftime("%Y\\-%m\\-%d %H:%M")
+            else:
+                ts = "Unknown"
+
+            # Connected surfaces
+            bound = conv.get("bound_surfaces", [])
+            if bound:
+                surface_badges = []
+                for sk in bound:
+                    surface_name = sk.split(":")[0] if ":" in sk else sk
+                    surface_badges.append(f"\\[{_escape_mdv2(surface_name)}\\]")
+                surfaces_str = " ".join(surface_badges)
+            else:
+                surfaces_str = "\\(none\\)"
+
+            # Surface activity
+            activity = conv.get("surface_activity", {})
+            if activity:
+                activity_lines = []
+                for s, count in sorted(activity.items(), key=lambda x: -x[1]):
+                    activity_lines.append(f"  {_escape_mdv2(s)}: {count} msgs")
+                activity_str = "\n".join(activity_lines)
+            else:
+                activity_str = "  No surface activity recorded"
+
+            text = (
+                f"*Current Session*\n\n"
+                f"*Title:* {_escape_mdv2(title)}\n"
+                f"*ID:* `{conv_id}`\n"
+                f"*Messages:* {msg_count}\n"
+                f"*Updated:* {ts}\n"
+                f"*Surfaces:* {surfaces_str}\n\n"
+                f"*Activity:*\n{activity_str}"
+            )
+
+            await update.message.reply_text(text, parse_mode="MarkdownV2")
+
+        except Exception as e:
+            logger.error(f"[Telegram] /session info error: {e}", exc_info=True)
+            await update.message.reply_text("Could not retrieve session info.")
+
+    async def _session_new(self, update: Update, manager, user_id: str, title: str = None):
+        """Create a new conversation and switch to it."""
+        try:
+            conv_id = manager.new_session("telegram", user_id, title)
+            display_title = _escape_mdv2(title or "Telegram Chat")
+
+            text = (
+                f"*New session created*\n\n"
+                f"*Title:* {display_title}\n"
+                f"*ID:* `{conv_id}`\n\n"
+                f"You're now chatting in this session\\."
+            )
+            await update.message.reply_text(text, parse_mode="MarkdownV2")
+
+        except Exception as e:
+            logger.error(f"[Telegram] /session new error: {e}", exc_info=True)
+            await update.message.reply_text("Could not create a new session.")
+
+    async def _session_list(self, update: Update, manager, user_id: str):
+        """List recent conversations (max 10)."""
+        try:
+            convs = manager.list_sessions("telegram", user_id)
+            if not convs:
+                await update.message.reply_text("No conversations found\\. Use /session new to start one\\.",
+                                                 parse_mode="MarkdownV2")
+                return
+
+            # Limit to 10 most recent
+            convs = convs[:10]
+
+            lines = ["*Recent Conversations*\n"]
+            for conv in convs:
+                conv_id = conv["id"]
+                title = conv.get("title", "Untitled")
+                msg_count = conv.get("message_count", 0)
+                updated_at = conv.get("updated_at", 0)
+                is_bound = conv.get("is_bound", False)
+
+                # Timestamp
+                if updated_at:
+                    ts = datetime.fromtimestamp(updated_at).strftime("%m/%d %H:%M")
+                else:
+                    ts = "\\-\\-"
+
+                # Surface badges
+                bound_surfaces = conv.get("bound_surfaces", [])
+                badges = ""
+                if bound_surfaces:
+                    badge_parts = []
+                    for sk in bound_surfaces:
+                        surface_name = sk.split(":")[0] if ":" in sk else sk
+                        badge_parts.append(f"\\[{_escape_mdv2(surface_name)}\\]")
+                    badges = " " + " ".join(badge_parts)
+
+                # Active marker
+                marker = "→ " if is_bound else "  "
+                active_label = " \\*active\\*" if is_bound else ""
+
+                short_id = conv_id[-8:] if len(conv_id) > 8 else conv_id
+
+                line = (
+                    f"{_escape_mdv2(marker)}"
+                    f"*{_escape_mdv2(title)}*{active_label}\n"
+                    f"    `{short_id}` \\| "
+                    f"{_escape_mdv2(ts)} \\| "
+                    f"{msg_count} msgs{badges}"
+                )
+                lines.append(line)
+
+            lines.append(f"\nSwitch: `/session <id>`")
+
+            text = "\n".join(lines)
+            await update.message.reply_text(text, parse_mode="MarkdownV2")
+
+        except Exception as e:
+            logger.error(f"[Telegram] /session list error: {e}", exc_info=True)
+            await update.message.reply_text("Could not list sessions.")
+
+    async def _session_switch(self, update: Update, manager, user_id: str, target_id: str):
+        """Switch to a conversation by ID (supports partial match)."""
+        try:
+            convs = manager.list_conversations()
+
+            # Exact match first
+            match = next((c for c in convs if c["id"] == target_id), None)
+
+            # Partial match (suffix or contains)
+            if not match:
+                candidates = [c for c in convs if c["id"].endswith(target_id)]
+                if not candidates:
+                    candidates = [c for c in convs if target_id in c["id"]]
+                if len(candidates) == 1:
+                    match = candidates[0]
+                elif len(candidates) > 1:
+                    lines = ["Multiple matches:\n"]
+                    for c in candidates[:5]:
+                        lines.append(f"  `{c['id']}` — {_escape_mdv2(c.get('title', 'Untitled'))}")
+                    lines.append(f"\nBe more specific\\.")
+                    await update.message.reply_text("\n".join(lines), parse_mode="MarkdownV2")
+                    return
+
+            if not match:
+                await update.message.reply_text(
+                    f"No conversation found matching `{_escape_mdv2(target_id)}`\\.\n"
+                    f"Use /session list to see available conversations\\.",
+                    parse_mode="MarkdownV2"
+                )
+                return
+
+            conv_id = match["id"]
+            success = manager.switch_session("telegram", user_id, conv_id)
+
+            if success:
+                title = match.get("title", "Untitled")
+                msg_count = match.get("message_count", 0)
+                text = (
+                    f"*Switched session*\n\n"
+                    f"*Title:* {_escape_mdv2(title)}\n"
+                    f"*ID:* `{conv_id}`\n"
+                    f"*Messages:* {msg_count}\n\n"
+                    f"Continuing in this conversation\\."
+                )
+                await update.message.reply_text(text, parse_mode="MarkdownV2")
+            else:
+                await update.message.reply_text("Failed to switch session\\. The conversation may have been deleted\\.",
+                                                 parse_mode="MarkdownV2")
+
+        except Exception as e:
+            logger.error(f"[Telegram] /session switch error: {e}", exc_info=True)
+            await update.message.reply_text("Could not switch session.")
+
+    async def _session_sync(self, update: Update, manager, user_id: str):
+        """Show cross-surface sync status."""
+        try:
+            status = manager.get_status()
+            conv_id = manager.get_or_create_session("telegram", user_id)
+
+            # All bindings
+            bindings = status.get("bindings", {})
+            total = status.get("total_bindings", 0)
+            listener_count = status.get("listener_count", 0)
+
+            # Surfaces connected to the current conversation
+            current_surfaces = manager.get_surfaces_for_conversation(conv_id)
+
+            # Group bindings by surface type
+            surface_summary = {}
+            for key in bindings:
+                surface_type = key.split(":")[0] if ":" in key else key
+                surface_summary[surface_type] = surface_summary.get(surface_type, 0) + 1
+
+            summary_lines = []
+            for s, count in sorted(surface_summary.items()):
+                summary_lines.append(f"  {_escape_mdv2(s)}: {count} binding\\(s\\)")
+
+            # Current session surfaces
+            if current_surfaces:
+                current_lines = []
+                for sk in current_surfaces:
+                    parts = sk.split(":", 1)
+                    surface_name = parts[0]
+                    surface_uid = parts[1] if len(parts) > 1 else "\\-"
+                    current_lines.append(f"  {_escape_mdv2(surface_name)} \\(`{_escape_mdv2(surface_uid)}`\\)")
+                current_str = "\n".join(current_lines)
+            else:
+                current_str = "  None"
+
+            text = (
+                f"*Cross\\-Surface Sync Status*\n\n"
+                f"*Current session:* `{conv_id}`\n"
+                f"*Total bindings:* {total}\n"
+                f"*Active listeners:* {listener_count}\n\n"
+                f"*Connected surfaces \\(this session\\):*\n{current_str}\n\n"
+                f"*All surface bindings:*\n" +
+                ("\n".join(summary_lines) if summary_lines else "  None")
+            )
+
+            await update.message.reply_text(text, parse_mode="MarkdownV2")
+
+        except Exception as e:
+            logger.error(f"[Telegram] /session sync error: {e}", exc_info=True)
+            await update.message.reply_text("Could not retrieve sync status.")
+
+    # ============ GROUP HANDLERS ============
+
+    async def _handle_chat_member(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle bot being added/removed from groups."""
+        try:
+            new_status = update.my_chat_member.new_chat_member.status
+            if new_status in ("member", "administrator"):
+                chat = update.my_chat_member.chat
+                await context.bot.send_message(
+                    chat.id,
+                    "Hi! I'm AURA. Mention me with @Aura828Bot or reply to my messages to chat.\n\n"
+                    "Commands: /summarize_group, /summarize_thread, /help"
+                )
+                logger.info(f"[TelegramBot] Added to group: {chat.title} ({chat.id})")
+            elif new_status in ("left", "kicked"):
+                chat = update.my_chat_member.chat
+                # Clean up group cache
+                cache_key = str(chat.id)
+                self._group_message_cache.pop(cache_key, None)
+                logger.info(f"[TelegramBot] Removed from group: {chat.title} ({chat.id})")
+        except Exception as e:
+            logger.error(f"[TelegramBot] Error handling chat_member update: {e}", exc_info=True)
+
+    async def _handle_summarize_group(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Summarize recent group conversation from cached messages."""
+        chat_id = str(update.effective_chat.id)
+        chat_type = update.effective_chat.type
+
+        if chat_type not in ("group", "supergroup"):
+            await update.message.reply_text("This command only works in groups.")
+            return
+
+        cache = self._group_message_cache.get(chat_id, [])
+        if len(cache) < 3:
+            await update.message.reply_text("Not enough messages to summarize yet. I need at least 3 cached messages.")
+            return
+
+        # Build context from last 30 cached messages
+        context_text = "\n".join([f"{m['user']}: {m['text']}" for m in cache[-30:]])
+        prompt = f"Summarize this group conversation concisely. Focus on key topics and decisions:\n\n{context_text}"
+
+        placeholder = await update.message.reply_text("Summarizing group conversation...")
+        try:
+            response_text, _ = await asyncio.to_thread(self._run_agent_sync, prompt)
+            await self._edit_or_send_response(placeholder, chat_id, response_text, update)
+        except Exception as e:
+            logger.error(f"[TelegramBot] /summarize_group failed: {e}", exc_info=True)
+            try:
+                await placeholder.edit_text("Could not generate summary. Try again later.")
+            except Exception:
+                pass
+
+    async def _handle_summarize_thread(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Summarize a thread when used as a reply in a group."""
+        chat_id = str(update.effective_chat.id)
+        chat_type = update.effective_chat.type
+
+        if chat_type not in ("group", "supergroup"):
+            await update.message.reply_text("This command only works in groups.")
+            return
+
+        if not update.message.reply_to_message:
+            await update.message.reply_text("Reply to a message with /summarize_thread to summarize the conversation around it.")
+            return
+
+        # Get the replied-to message as the anchor
+        anchor_msg = update.message.reply_to_message
+        anchor_text = anchor_msg.text or anchor_msg.caption or "[non-text message]"
+        anchor_user = anchor_msg.from_user.first_name if anchor_msg.from_user else "Unknown"
+
+        # Pull related messages from cache around the same timeframe
+        cache = self._group_message_cache.get(chat_id, [])
+        if len(cache) < 2:
+            await update.message.reply_text(
+                f"Not enough cached context. Here's the message you pointed to:\n\n"
+                f"{anchor_user}: {anchor_text}"
+            )
+            return
+
+        # Build context from cached messages
+        context_text = "\n".join([f"{m['user']}: {m['text']}" for m in cache[-30:]])
+        prompt = (
+            f"Summarize this group conversation thread. The user is asking about the discussion "
+            f"around this message from {anchor_user}: \"{anchor_text}\"\n\n"
+            f"Recent conversation context:\n{context_text}"
+        )
+
+        placeholder = await update.message.reply_text("Summarizing thread...")
+        try:
+            response_text, _ = await asyncio.to_thread(self._run_agent_sync, prompt)
+            await self._edit_or_send_response(placeholder, chat_id, response_text, update)
+        except Exception as e:
+            logger.error(f"[TelegramBot] /summarize_thread failed: {e}", exc_info=True)
+            try:
+                await placeholder.edit_text("Could not generate thread summary. Try again later.")
+            except Exception:
+                pass
+
     # ============ MESSAGE HANDLER ============
 
     async def _handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1714,9 +2655,44 @@ Status: Online and ready!"""
         user = update.effective_user
         chat_id = str(update.effective_chat.id)
 
-        # Check if user is allowed
-        if not self._is_user_allowed(user.id):
-            return
+        # Detect group vs private chat
+        chat_type = update.effective_chat.type  # "private", "group", "supergroup"
+        is_group = chat_type in ("group", "supergroup")
+
+        text = update.message.text or ""
+
+        # --- Group message caching (always, even if we don't respond) ---
+        if is_group:
+            cache = self._group_message_cache.setdefault(chat_id, [])
+            cache.append({
+                "user": user.first_name or "Unknown",
+                "text": text,
+                "time": _time.time(),
+            })
+            if len(cache) > 50:
+                cache.pop(0)
+
+        # --- Group gate: only respond if mentioned or replied-to ---
+        if is_group:
+            me = await context.bot.get_me()
+            bot_username = me.username or "Aura828Bot"
+            mentioned = f"@{bot_username}".lower() in text.lower()
+            replied_to_bot = (
+                update.message.reply_to_message is not None
+                and update.message.reply_to_message.from_user is not None
+                and update.message.reply_to_message.from_user.id == me.id
+            )
+            if not mentioned and not replied_to_bot:
+                return  # Ignore messages not directed at us
+
+            # Strip the @mention from text before processing
+            text = re.sub(rf"@{re.escape(bot_username)}", "", text, flags=re.IGNORECASE).strip()
+            if not text:
+                text = "Hello"
+        else:
+            # Private chat: require allowed user
+            if not self._is_user_allowed(user.id):
+                return
 
         # Per-user rate limit (max_messages_per_minute from config, default 20)
         max_per_min = self.config.get("max_messages_per_minute", 20)
@@ -1725,8 +2701,6 @@ Status: Online and ready!"""
                 "You're sending messages too fast. Please wait a moment."
             )
             return
-
-        text = update.message.text
 
         # Check if this is a reply to a /code message — treat as continuation code
         reply = update.message.reply_to_message
@@ -1792,6 +2766,10 @@ Status: Online and ready!"""
             )
             return
 
+        # Check for pending skill actions (confirm/create flow)
+        if await self._check_skill_pending(update, user.id, text):
+            return
+
         # Update active chat info
         if chat_id in self.active_chats:
             self.active_chats[chat_id]["last_message"] = datetime.now().isoformat()
@@ -1808,8 +2786,31 @@ Status: Online and ready!"""
         if hasattr(self, '_build_doc_augmented_text'):
             text = self._build_doc_augmented_text(user.id, text)
 
+        # Multi-language: prepend language instruction for non-English users
+        user_lang = self._user_language.get(str(user.id))
+        if not user_lang and hasattr(user, 'language_code') and user.language_code:
+            lc = user.language_code.split("-")[0]
+            if lc and lc != "en":
+                user_lang = lc
+                self._user_language[str(user.id)] = lc
+        if user_lang and user_lang != "en":
+            text = f"[Respond in {user_lang}] {text}"
+
+        # Forum support: capture message_thread_id for topic-aware replies
+        thread_id = getattr(update.message, 'message_thread_id', None)
+
+        # Bind to conversation via ConversationManager (cross-surface sync)
+        conv_id = None
+        try:
+            cm = get_conversation_manager()
+            if cm._brain is not None:
+                conv_id = cm.get_or_create_session("telegram", str(user.id))
+                cm.switch_conversation(conv_id, surface="telegram")
+        except Exception as e:
+            logger.debug(f"[Telegram] ConversationManager session bind skipped: {e}")
+
         # Route through the full agent loop with typing indicator + file artifacts
-        await self._run_agent_and_reply(update, text)
+        await self._run_agent_and_reply(update, text, conv_id=conv_id, user_id=str(user.id))
 
         self._save_state()
 
@@ -2436,9 +3437,29 @@ Status: Online and ready!"""
                     )
                 ))
 
-        # Fallback if nothing generated
-        if not results:
+        # Rich inline: add category-specific quick actions
+        _INLINE_CATEGORIES = [
+            ("code_", "\U0001f4bb Code", f"Write code for: {query}",
+             f"Write clean, concise code for the following request:\n\n{query}"),
+            ("img_", "\U0001f3a8 Image Prompt", f"Image prompt for: {query}",
+             f"Create a detailed image generation prompt for: {query}"),
+            ("research_", "\U0001f50d Research", f"Research: {query}",
+             f"Give a thorough research summary on: {query}"),
+        ]
+        for cat_id, cat_title, cat_desc, cat_prompt in _INLINE_CATEGORIES:
+            rid = hashlib.md5(f"{cat_id}{query}".encode()).hexdigest()[:16]
             results.append(InlineQueryResultArticle(
+                id=rid,
+                title=f"{cat_title}: {query[:35]}",
+                description=cat_desc[:100],
+                input_message_content=InputTextMessageContent(
+                    message_text=f"/{cat_title.split(' ')[1].lower()} {query}"
+                )
+            ))
+
+        # Fallback if nothing generated (keep category shortcuts)
+        if len(results) <= len(_INLINE_CATEGORIES):
+            results.insert(0, InlineQueryResultArticle(
                 id="error",
                 title="Could not generate a response",
                 description="Try a different query or ask in the direct chat.",
@@ -2478,11 +3499,78 @@ Status: Online and ready!"""
 
         return None
 
+    # ============ STICKER / GIF REACTIONS (Phase 5) ============
+
+    async def _handle_sticker(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """React when user sends a sticker."""
+        if not self._is_user_allowed(update.effective_user.id):
+            return
+        sticker = update.message.sticker
+        emoji = sticker.emoji or "🤔"
+        responses = [
+            f"Nice {emoji}!",
+            f"I see you're feeling {emoji}",
+            f"{emoji} right back at you!",
+            f"Ooh, {emoji}!",
+        ]
+        await update.message.reply_text(random.choice(responses))
+
+    async def _maybe_send_reaction(self, chat_id: str, emotion: str, intensity: float):
+        """Maybe send a sticker or GIF based on current emotion.
+
+        Only triggers ~20% of the time to avoid spam, and only when
+        the emotion intensity is strong enough (>= 0.5).
+        """
+        if intensity < 0.5 or random.random() > 0.2:
+            return
+
+        reaction_info = EMOTION_REACTIONS.get(emotion, EMOTION_REACTIONS["neutral"])
+
+        if random.random() > 0.5:
+            await self._send_random_gif(chat_id, reaction_info["gif_queries"])
+        else:
+            await self._send_emoji_reaction(chat_id, emotion)
+
+    async def _send_random_gif(self, chat_id: str, queries: list):
+        """Send a random GIF using Tenor's API."""
+        query = random.choice(queries)
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                url = (
+                    f"https://tenor.googleapis.com/v2/search"
+                    f"?q={query}&limit=5&media_filter=gif"
+                    f"&key=AIzaSyAyimkuYQYF_FXVALexPuGQctUWRURdCYQ"
+                )
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        results = data.get("results", [])
+                        if results:
+                            gif = random.choice(results)
+                            gif_url = gif["media_formats"]["gif"]["url"]
+                            await self.bot.send_animation(
+                                chat_id=int(chat_id),
+                                animation=gif_url,
+                            )
+        except Exception as e:
+            logger.debug(f"GIF reaction failed (non-critical): {e}")
+
+    async def _send_emoji_reaction(self, chat_id: str, emotion: str):
+        """Send an emoji as a lightweight reaction message."""
+        emoji = EMOTION_EMOJI.get(emotion, "👍")
+        try:
+            await self.bot.send_message(chat_id=int(chat_id), text=emoji)
+        except Exception:
+            pass
+
+
     # ============ REACT AGENT LOOP ============
 
     _AGENT_TIMEOUT = 120  # seconds
 
-    async def _run_agent_and_reply(self, update: Update, goal: str):
+    async def _run_agent_and_reply(self, update: Update, goal: str, *,
+                                    conv_id: str = None, user_id: str = None):
         """Run the full ReAct agent loop and send the result back to the user.
 
         Flow:
@@ -2492,9 +3580,18 @@ Status: Online and ready!"""
         4. Edit the placeholder with the final response
         5. Send any file artifacts (screenshots, plots) as photos/documents
         6. Fall back to agent.chat() / brain.think() on failure
+        7. Track user + assistant messages in ConversationManager (surface attribution)
         """
         chat_id = str(update.effective_chat.id)
         start_time = _time.time()
+
+        # Track the user message in ConversationManager
+        if conv_id and user_id:
+            try:
+                cm = get_conversation_manager()
+                cm.on_message_added(conv_id, "user", goal, "telegram", user_id)
+            except Exception as e:
+                logger.debug(f"[Telegram] ConversationManager user message tracking skipped: {e}")
 
         # Send placeholder — we'll edit it with the real response
         placeholder = await update.message.reply_text("Thinking...")
@@ -2529,12 +3626,62 @@ Status: Online and ready!"""
             f"({len(response_text)} chars, {len(artifacts)} artifacts)"
         )
 
-        # Edit the placeholder with the real response
-        await self._edit_or_send_response(placeholder, chat_id, response_text, update)
+        # Track the assistant response in ConversationManager
+        if conv_id and user_id and response_text:
+            try:
+                cm = get_conversation_manager()
+                cm.on_message_added(conv_id, "assistant", response_text, "telegram", user_id)
+            except Exception as e:
+                logger.debug(f"[Telegram] ConversationManager assistant message tracking skipped: {e}")
+
+        # Store last exchange for /learn command
+        if user_id:
+            try:
+                uid = int(user_id)
+                self._last_exchange[uid] = {
+                    "input": goal[:2000],
+                    "output": response_text[:2000],
+                    "timestamp": _time.time(),
+                }
+            except (ValueError, TypeError):
+                pass
+
+        # Build reply action buttons
+        action_buttons = self._get_action_buttons(update.message.message_id)
+
+        # Edit the placeholder with the real response + action buttons
+        await self._edit_or_send_response(placeholder, chat_id, response_text, update,
+                                          reply_markup=action_buttons)
 
         # Send any file artifacts (screenshots, plots, generated files)
         for artifact_path in artifacts:
             await self._send_file_artifact(chat_id, artifact_path, update)
+
+        # Phase 5+: Native reaction via Telegram API (if available)
+        try:
+            emotion_data = None
+            evoemo = self.aura.tools.get("evoemo") if hasattr(self.aura, 'tools') else None
+            if evoemo and hasattr(evoemo, 'get_state'):
+                emotion_data = evoemo.get_state()
+            if not emotion_data:
+                agent = getattr(self.aura, 'agent', self.aura)
+                brain = getattr(agent, 'brain', None)
+                if brain and hasattr(brain, '_alma_engine'):
+                    emotion_data = brain._alma_engine.get_emotional_state()
+            if not emotion_data and hasattr(self.aura, 'emotion') and self.aura.emotion:
+                emotion_data = self.aura.emotion.get_emotional_state()
+
+            if emotion_data:
+                emotion = emotion_data.get("dominant_emotion", "neutral")
+                intensity = emotion_data.get("intensity", 0.3)
+                # Try native reaction first, fall back to sticker/GIF
+                reacted = await self._try_native_reaction(
+                    chat_id, update.message.message_id, emotion, intensity
+                )
+                if not reacted:
+                    await self._maybe_send_reaction(chat_id, emotion, intensity)
+        except Exception:
+            pass  # Reactions are optional — never break the main flow
 
     def _run_agent_sync(self, goal: str):
         """Synchronous agent execution — called via asyncio.to_thread.
@@ -2652,7 +3799,8 @@ Status: Online and ready!"""
         except asyncio.CancelledError:
             pass
 
-    async def _edit_or_send_response(self, placeholder, chat_id: str, text: str, update: Update):
+    async def _edit_or_send_response(self, placeholder, chat_id: str, text: str,
+                                     update: Update, reply_markup=None):
         """Edit the placeholder message with the response, splitting if > 4096 chars."""
         if not text:
             text = "I processed your request but have nothing to report."
@@ -2662,11 +3810,12 @@ Status: Online and ready!"""
 
         if len(text) <= MAX_LEN:
             try:
-                await placeholder.edit_text(text)
+                await placeholder.edit_text(text, reply_markup=reply_markup)
             except Exception as e:
                 logger.warning(f"Could not edit placeholder: {e}")
                 try:
-                    await self.bot.send_message(chat_id=chat_id, text=text)
+                    await self.bot.send_message(chat_id=chat_id, text=text,
+                                                reply_markup=reply_markup)
                 except Exception:
                     pass
         else:
@@ -2676,7 +3825,10 @@ Status: Online and ready!"""
                     if i == 0:
                         await placeholder.edit_text(chunk)
                     else:
-                        await self.bot.send_message(chat_id=chat_id, text=chunk)
+                        # Attach reply_markup to the last chunk only
+                        markup = reply_markup if i == len(chunks) - 1 else None
+                        await self.bot.send_message(chat_id=chat_id, text=chunk,
+                                                    reply_markup=markup)
                 except Exception as e:
                     logger.warning(f"Error sending chunk {i}: {e}")
 
@@ -2820,6 +3972,1785 @@ Status: Online and ready!"""
 
         message = f"Hey - how did {topic} go?"
         await self.send_proactive(chat_id, message)
+
+
+    # ============ SKILL SYSTEM HANDLERS ============
+
+    def _get_skill_store(self) -> "SkillStore":
+        """Lazy-load the SkillStore singleton."""
+        if self._skill_store is None:
+            if not SKILL_LIBRARY_AVAILABLE:
+                raise RuntimeError("Skill library not installed")
+            self._skill_store = SkillStore(storage_path="./aura_skills")
+        return self._skill_store
+
+    def _get_skill_learner(self) -> "SkillLearner":
+        """Lazy-load the SkillLearner singleton."""
+        if self._skill_learner is None:
+            if not SKILL_LIBRARY_AVAILABLE:
+                raise RuntimeError("Skill library not installed")
+            store = self._get_skill_store()
+            # Try to get an LLM function from the aura engine
+            llm_func = None
+            try:
+                brain = getattr(self.aura, 'brain', None)
+                if brain is None:
+                    brain = getattr(getattr(self.aura, 'agent', None), 'brain', None)
+                if brain and hasattr(brain, 'think'):
+                    llm_func = lambda prompt: brain.think(prompt)
+            except Exception:
+                pass
+            self._skill_learner = SkillLearner(
+                store=store,
+                llm_func=llm_func,
+                min_examples_to_learn=1,
+            )
+        return self._skill_learner
+
+    async def _handle_learn(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /learn -- extract a reusable skill from the last conversation exchange."""
+        if not self._is_user_allowed(update.effective_user.id):
+            return
+
+        user_id = update.effective_user.id
+
+        if not SKILL_LIBRARY_AVAILABLE:
+            await update.message.reply_text("Skill library is not available on this server.")
+            return
+
+        exchange = self._last_exchange.get(user_id)
+        if not exchange:
+            await update.message.reply_text(
+                "No recent conversation to learn from.\n"
+                "Chat with me first, then use /learn to extract a skill."
+            )
+            return
+
+        if _time.time() - exchange.get("timestamp", 0) > 1800:
+            await update.message.reply_text(
+                "The last exchange is too old (> 30 min).\n"
+                "Have a fresh conversation first, then /learn."
+            )
+            return
+
+        await update.message.reply_text("Analyzing our last exchange to create a skill...")
+        await self.send_typing_indicator(str(update.effective_chat.id))
+
+        try:
+            learner = self._get_skill_learner()
+
+            if learner.llm_func is None:
+                await update.message.reply_text(
+                    "Cannot learn skills right now -- no LLM backend available."
+                )
+                return
+
+            prompt = (
+                "Analyze this conversation exchange and extract a reusable skill.\n\n"
+                f"User said: {exchange['input'][:1000]}\n\n"
+                f"AURA responded: {exchange['output'][:1000]}\n\n"
+                "Create a skill definition with:\n"
+                "1. A clear, concise name (2-4 words)\n"
+                "2. A description of what this skill does\n"
+                "3. 3-5 trigger phrases that would activate this skill\n"
+                "4. A step-by-step procedure that generalizes from this exchange\n"
+                "5. The best category: coding, writing, research, automation, analysis, communication, learning\n\n"
+                'Respond in this exact JSON format:\n'
+                '{"name": "Skill Name", "description": "What this skill does...", '
+                '"trigger_patterns": ["phrase 1", "phrase 2", "phrase 3"], '
+                '"procedure": "Step 1: ...\\nStep 2: ...\\nStep 3: ...", '
+                '"category": "coding", "tags": ["tag1", "tag2"]}\n\n'
+                "Respond ONLY with the JSON, no other text."
+            )
+
+            response = await asyncio.to_thread(learner.llm_func, prompt)
+
+            json_match = re.search(r'\{[\s\S]*\}', response)
+            if not json_match:
+                await update.message.reply_text(
+                    "Could not extract a skill from that exchange. Try a more structured interaction."
+                )
+                return
+
+            skill_data = json.loads(json_match.group())
+
+            required = ["name", "description", "trigger_patterns", "procedure"]
+            for fld in required:
+                if fld not in skill_data:
+                    await update.message.reply_text(f"Skill extraction incomplete -- missing {fld}. Try again.")
+                    return
+
+            triggers_str = ", ".join(f'"{t}"' for t in skill_data["trigger_patterns"][:5])
+            procedure_preview = skill_data["procedure"][:300]
+            if len(skill_data["procedure"]) > 300:
+                procedure_preview += "..."
+
+            msg = (
+                f'Skill: "{skill_data["name"]}"\n'
+                f'Category: {skill_data.get("category", "custom")}\n'
+                f'Triggers: {triggers_str}\n'
+                f'Procedure: {procedure_preview}\n\n'
+                f'Save this skill? (reply "yes" to confirm)'
+            )
+            await update.message.reply_text(msg)
+
+            self._skill_pending[user_id] = {
+                "action": "learn_confirm",
+                "skill_data": skill_data,
+                "exchange": exchange,
+                "timestamp": _time.time(),
+            }
+
+        except json.JSONDecodeError:
+            await update.message.reply_text("Failed to parse skill data. The LLM returned invalid JSON.")
+        except Exception as e:
+            logger.error(f"[Telegram] /learn error: {e}", exc_info=True)
+            await update.message.reply_text(f"Failed to learn skill: {e}")
+
+    async def _handle_skill(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /skill command -- dispatch to subcommands."""
+        if not self._is_user_allowed(update.effective_user.id):
+            return
+
+        if not SKILL_LIBRARY_AVAILABLE:
+            await update.message.reply_text("Skill library is not available on this server.")
+            return
+
+        args = context.args or []
+
+        if not args:
+            await update.message.reply_text(
+                "Usage:\n"
+                "/skill list [category] -- List all skills\n"
+                "/skill search <query> -- Search skills\n"
+                "/skill info <name> -- Detailed skill info\n"
+                "/skill improve <name> -- Evolve with GEPA\n"
+                "/skill create <name> -- Define a new skill"
+            )
+            return
+
+        subcmd = args[0].lower()
+        rest = args[1:]
+
+        if subcmd == "list":
+            await self._skill_list(update, " ".join(rest) if rest else None)
+        elif subcmd == "search":
+            if not rest:
+                await update.message.reply_text("Usage: /skill search <query>")
+                return
+            await self._skill_search(update, " ".join(rest))
+        elif subcmd == "info":
+            if not rest:
+                await update.message.reply_text("Usage: /skill info <id_or_name>")
+                return
+            await self._skill_info(update, " ".join(rest))
+        elif subcmd == "improve":
+            if not rest:
+                await update.message.reply_text("Usage: /skill improve <id_or_name>")
+                return
+            await self._skill_improve(update, " ".join(rest))
+        elif subcmd == "create":
+            if not rest:
+                await update.message.reply_text("Usage: /skill create <name>")
+                return
+            await self._skill_create_start(update, " ".join(rest))
+        else:
+            await update.message.reply_text(
+                f"Unknown subcommand: {subcmd}\n"
+                "Use /skill for available commands."
+            )
+
+    async def _skill_list(self, update: Update, category_str: str = None):
+        """List all learned skills, optionally filtered by category."""
+        try:
+            store = self._get_skill_store()
+
+            cat_filter = None
+            if category_str:
+                try:
+                    cat_filter = SkillCategory(category_str.lower())
+                except ValueError:
+                    await update.message.reply_text(
+                        f"Unknown category: {category_str}\n"
+                        f"Valid: {', '.join(c.value for c in SkillCategory)}"
+                    )
+                    return
+
+            skills = store.list_all(category=cat_filter, sort_by="updated")
+
+            if not skills:
+                msg = "No skills found."
+                if category_str:
+                    msg += f" (category: {category_str})"
+                await update.message.reply_text(msg)
+                return
+
+            page = skills[:10]
+            lines = ["Learned Skills\n"]
+            for i, s in enumerate(page, 1):
+                name = s.get("name", "Unnamed")
+                success_rate = s.get("success_rate", 0)
+                total_uses = s.get("total_uses", 0)
+                updated = s.get("updated_at", "")
+                if updated and len(updated) > 10:
+                    updated = updated[:10]
+
+                rate_pct = f"{success_rate * 100:.0f}%" if success_rate else "N/A"
+                lines.append(
+                    f"{i}. {name}\n"
+                    f"   Rate: {rate_pct} | Uses: {total_uses} | Updated: {updated}"
+                )
+
+            if len(skills) > 10:
+                lines.append(f"\n... and {len(skills) - 10} more skills")
+
+            lines.append("\nUse /skill info <name> for details")
+            await update.message.reply_text("\n".join(lines))
+
+        except Exception as e:
+            logger.error(f"[Telegram] /skill list error: {e}", exc_info=True)
+            await update.message.reply_text(f"Failed to list skills: {e}")
+
+    async def _skill_search(self, update: Update, query: str):
+        """Search skills by description/name."""
+        try:
+            store = self._get_skill_store()
+            results = store.search(query, limit=5)
+
+            if not results:
+                await update.message.reply_text(f"No skills found matching: {query}")
+                return
+
+            lines = [f'Search results for "{query}"\n']
+            for skill_id, score in results:
+                info = store.index.get(skill_id, {})
+                name = info.get("name", skill_id)
+                desc = info.get("description", "")[:80]
+                lines.append(f"  {name} (score: {score:.2f})\n   {desc}")
+
+            lines.append("\nUse /skill info <name> for details")
+            await update.message.reply_text("\n".join(lines))
+
+        except Exception as e:
+            logger.error(f"[Telegram] /skill search error: {e}", exc_info=True)
+            await update.message.reply_text(f"Search failed: {e}")
+
+    async def _skill_info(self, update: Update, id_or_name: str):
+        """Show detailed info about a skill."""
+        try:
+            store = self._get_skill_store()
+            skill, skill_id = self._find_skill_by_id_or_name(store, id_or_name)
+
+            if not skill:
+                await update.message.reply_text(f"Skill not found: {id_or_name}")
+                return
+
+            triggers = ", ".join(f'"{t}"' for t in skill.trigger_patterns[:5])
+            rate_pct = f"{skill.metadata.success_rate * 100:.0f}%" if skill.metadata.total_uses > 0 else "N/A"
+            last_used = skill.metadata.last_used.strftime("%Y-%m-%d %H:%M") if skill.metadata.last_used else "Never"
+
+            lines = [
+                f"Skill: {skill.name}",
+                f"ID: {skill.id}",
+                f"Version: {skill.metadata.version}",
+                f"Category: {skill.category.value}",
+                f"Description: {skill.description}",
+                "",
+                f"Triggers: {triggers}",
+                "",
+                "Procedure:",
+                skill.procedure[:500],
+                "",
+                f"Success Rate: {rate_pct}",
+                f"Total Uses: {skill.metadata.total_uses}",
+                f"Last Used: {last_used}",
+                f"Tags: {', '.join(skill.metadata.tags) if skill.metadata.tags else 'None'}",
+            ]
+
+            if skill.metadata.parent_skill_id:
+                lines.append(f"Evolved from: {skill.metadata.parent_skill_id}")
+
+            await update.message.reply_text("\n".join(lines))
+
+        except Exception as e:
+            logger.error(f"[Telegram] /skill info error: {e}", exc_info=True)
+            await update.message.reply_text(f"Failed to get skill info: {e}")
+
+    async def _skill_improve(self, update: Update, id_or_name: str):
+        """Trigger GEPA evolution on a skill."""
+        user_id = update.effective_user.id
+
+        if not GEPA_AVAILABLE:
+            await update.message.reply_text("GEPA evolution engine is not available on this server.")
+            return
+
+        try:
+            store = self._get_skill_store()
+            skill, skill_id = self._find_skill_by_id_or_name(store, id_or_name)
+
+            if not skill:
+                await update.message.reply_text(f"Skill not found: {id_or_name}")
+                return
+
+            await update.message.reply_text(
+                f'Evolving "{skill.name}"...\nThis may take a minute.'
+            )
+            await self.send_typing_indicator(str(update.effective_chat.id))
+
+            brain = getattr(self.aura, 'brain', None)
+            if brain is None:
+                brain = getattr(getattr(self.aura, 'agent', None), 'brain', None)
+
+            if not brain or not hasattr(brain, 'think'):
+                await update.message.reply_text("Cannot evolve -- no LLM backend available.")
+                return
+
+            def llm_func(system: str, user: str) -> str:
+                return brain.think(f"{system}\n\n{user}")
+
+            config = GEPAConfig(
+                max_iterations=3,
+                max_metric_calls=30,
+                timeout_seconds=120,
+                no_improvement_patience=2,
+                run_dir=f"./aura_data/evolution_runs/telegram_{skill_id}",
+            )
+
+            adapter = AuraSkillAdapter(config=config, llm_func=llm_func)
+
+            seed = Candidate(
+                id=0,
+                components={skill_id: skill.procedure},
+                parent_id=-1,
+            )
+
+            eval_examples = await asyncio.to_thread(
+                adapter.generate_eval_dataset, seed, num_examples=6
+            )
+
+            if len(eval_examples) < 2:
+                await update.message.reply_text(
+                    "Could not generate enough evaluation examples. "
+                    "The skill may be too simple to evolve."
+                )
+                return
+
+            engine = GEPAEngine(config=config, adapter=adapter, llm_func=llm_func)
+
+            result = await asyncio.to_thread(
+                engine.optimize, seed, eval_examples
+            )
+
+            best = result.best_candidate
+            improved_procedure = best.components.get(skill_id, skill.procedure)
+
+            if result.improvement <= 0.01:
+                await update.message.reply_text(
+                    f'Evolution complete for "{skill.name}"\n\n'
+                    f"Iterations: {result.iterations_run}\n"
+                    f"Score: {best.avg_score:.2f}\n"
+                    f"No significant improvement found. The skill is already good!"
+                )
+                return
+
+            procedure_preview = improved_procedure[:400]
+            if len(improved_procedure) > 400:
+                procedure_preview += "..."
+
+            msg = (
+                f'Evolution complete for "{skill.name}"\n\n'
+                f"Iterations: {result.iterations_run}\n"
+                f"Improvement: +{result.improvement:.3f}\n"
+                f"Best score: {best.avg_score:.2f}\n\n"
+                f"Improved procedure:\n{procedure_preview}\n\n"
+                f'Apply improvement? (reply "yes" to confirm)'
+            )
+            await update.message.reply_text(msg)
+
+            self._skill_pending[user_id] = {
+                "action": "improve_confirm",
+                "skill_id": skill_id,
+                "improved_procedure": improved_procedure,
+                "improvement": result.improvement,
+                "timestamp": _time.time(),
+            }
+
+        except Exception as e:
+            logger.error(f"[Telegram] /skill improve error: {e}", exc_info=True)
+            await update.message.reply_text(f"Evolution failed: {e}")
+
+    async def _skill_create_start(self, update: Update, name: str):
+        """Start the interactive skill creation flow."""
+        user_id = update.effective_user.id
+
+        self._skill_create_state[user_id] = {
+            "step": "description",
+            "name": name,
+            "timestamp": _time.time(),
+        }
+
+        await update.message.reply_text(
+            f'Creating skill: "{name}"\n\n'
+            "Step 1/3: What does this skill do?\n"
+            "(Send the description)"
+        )
+
+    async def _check_skill_pending(self, update: Update, user_id: int, text: str) -> bool:
+        """Check and handle pending skill actions. Returns True if handled."""
+        text_lower = text.strip().lower() if text else ""
+
+        # Handle skill create multi-step flow
+        if user_id in self._skill_create_state:
+            state = self._skill_create_state[user_id]
+
+            # Timeout after 10 minutes
+            if _time.time() - state.get("timestamp", 0) > 600:
+                del self._skill_create_state[user_id]
+                return False
+
+            step = state.get("step")
+
+            if step == "description":
+                state["description"] = text.strip()
+                state["step"] = "triggers"
+                state["timestamp"] = _time.time()
+                await update.message.reply_text(
+                    "Step 2/3: What phrases should trigger this skill?\n"
+                    "(Send comma-separated trigger phrases)"
+                )
+                return True
+
+            elif step == "triggers":
+                triggers = [t.strip() for t in text.split(",") if t.strip()]
+                if not triggers:
+                    await update.message.reply_text(
+                        "Please provide at least one trigger phrase, separated by commas."
+                    )
+                    return True
+                state["triggers"] = triggers
+                state["step"] = "procedure"
+                state["timestamp"] = _time.time()
+                await update.message.reply_text(
+                    "Step 3/3: What is the step-by-step procedure?\n"
+                    "(Send the procedure -- use numbered steps)"
+                )
+                return True
+
+            elif step == "procedure":
+                state["procedure"] = text.strip()
+
+                try:
+                    store = self._get_skill_store()
+                    skill = Skill.create(
+                        name=state["name"],
+                        description=state["description"],
+                        category=SkillCategory.CUSTOM,
+                        trigger_patterns=state["triggers"],
+                        procedure=state["procedure"],
+                        tags=[],
+                    )
+                    skill_id = store.save(skill)
+                    del self._skill_create_state[user_id]
+
+                    await update.message.reply_text(
+                        f"Skill created!\n\n"
+                        f"Name: {state['name']}\n"
+                        f"ID: {skill_id}\n"
+                        f"Triggers: {', '.join(state['triggers'])}\n\n"
+                        f"Use /skill info {state['name']} to see full details."
+                    )
+                except Exception as e:
+                    logger.error(f"[Telegram] skill create error: {e}", exc_info=True)
+                    await update.message.reply_text(f"Failed to create skill: {e}")
+                    if user_id in self._skill_create_state:
+                        del self._skill_create_state[user_id]
+
+                return True
+
+        # Handle pending confirmations (learn_confirm, improve_confirm)
+        if user_id in self._skill_pending:
+            pending = self._skill_pending[user_id]
+
+            # Timeout after 5 minutes
+            if _time.time() - pending.get("timestamp", 0) > 300:
+                del self._skill_pending[user_id]
+                return False
+
+            if text_lower != "yes":
+                del self._skill_pending[user_id]
+                await update.message.reply_text("Cancelled.")
+                return True
+
+            action = pending.get("action")
+
+            if action == "learn_confirm":
+                try:
+                    skill_data = pending["skill_data"]
+                    store = self._get_skill_store()
+
+                    category_str = skill_data.get("category", "custom").lower()
+                    try:
+                        category = SkillCategory(category_str)
+                    except ValueError:
+                        category = SkillCategory.CUSTOM
+
+                    skill = Skill.create(
+                        name=skill_data["name"],
+                        description=skill_data["description"],
+                        category=category,
+                        trigger_patterns=skill_data["trigger_patterns"],
+                        procedure=skill_data["procedure"],
+                        tags=skill_data.get("tags", []),
+                    )
+                    skill.id = f"learned_{skill.id}"
+
+                    exchange = pending.get("exchange", {})
+                    if exchange:
+                        example = SkillExample(
+                            input_context=exchange.get("input", ""),
+                            input_data=None,
+                            output=exchange.get("output", ""),
+                            success=True,
+                        )
+                        skill.add_example(example)
+
+                    skill_id = store.save(skill)
+                    del self._skill_pending[user_id]
+
+                    await update.message.reply_text(
+                        f"Skill saved!\n\n"
+                        f"Name: {skill_data['name']}\n"
+                        f"ID: {skill_id}\n\n"
+                        "I'll use this skill in future similar conversations."
+                    )
+                except Exception as e:
+                    logger.error(f"[Telegram] learn confirm error: {e}", exc_info=True)
+                    await update.message.reply_text(f"Failed to save skill: {e}")
+                    if user_id in self._skill_pending:
+                        del self._skill_pending[user_id]
+                return True
+
+            elif action == "improve_confirm":
+                try:
+                    skill_id_pending = pending["skill_id"]
+                    improved_procedure = pending["improved_procedure"]
+                    store = self._get_skill_store()
+                    skill = store.load(skill_id_pending)
+
+                    if not skill:
+                        await update.message.reply_text("Skill no longer exists.")
+                        del self._skill_pending[user_id]
+                        return True
+
+                    skill.procedure = improved_procedure
+                    try:
+                        current_version = float(skill.metadata.version)
+                        skill.metadata.version = f"{current_version + 0.1:.1f}"
+                    except ValueError:
+                        skill.metadata.version = "1.1"
+
+                    from datetime import timezone
+                    skill.metadata.last_modified = datetime.now(timezone.utc)
+                    skill.updated_at = datetime.now(timezone.utc)
+                    store.save(skill)
+
+                    del self._skill_pending[user_id]
+                    await update.message.reply_text(
+                        f'Improvement applied to "{skill.name}"!\n'
+                        f"Version: {skill.metadata.version}\n"
+                        f"Improvement: +{pending.get('improvement', 0):.3f}"
+                    )
+                except Exception as e:
+                    logger.error(f"[Telegram] improve confirm error: {e}", exc_info=True)
+                    await update.message.reply_text(f"Failed to apply improvement: {e}")
+                    if user_id in self._skill_pending:
+                        del self._skill_pending[user_id]
+                return True
+
+        return False
+
+    def _find_skill_by_id_or_name(self, store, id_or_name: str):
+        """Find a skill by ID or name (case-insensitive partial match).
+
+        Returns (Skill, skill_id) or (None, None).
+        """
+        # Try direct ID match
+        skill = store.load(id_or_name)
+        if skill:
+            return skill, id_or_name
+
+        # Try name match (case-insensitive)
+        name_lower = id_or_name.lower()
+        for sid, info in store.index.items():
+            if info.get("name", "").lower() == name_lower:
+                skill = store.load(sid)
+                if skill:
+                    return skill, sid
+
+        # Try partial name match
+        for sid, info in store.index.items():
+            if name_lower in info.get("name", "").lower():
+                skill = store.load(sid)
+                if skill:
+                    return skill, sid
+
+        # Try slug match (name with hyphens)
+        slug = name_lower.replace(" ", "-")
+        for sid, info in store.index.items():
+            stored_slug = info.get("name", "").lower().replace(" ", "-")
+            if slug == stored_slug or slug in stored_slug:
+                skill = store.load(sid)
+                if skill:
+                    return skill, sid
+
+        return None, None
+
+
+    # ─── Phase 4: Webhook commands ───────────────────────────────────
+
+    async def _handle_webhook(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /webhook command — show webhook info and endpoints."""
+        if not self._is_user_allowed(update.effective_user.id):
+            return
+        args = context.args or []
+        backend = os.getenv("AURA_BACKEND_URL", "http://89.167.107.134")
+
+        if not args:
+            text = (
+                "Webhook Endpoints\n\n"
+                f"GitHub: {backend}/api/webhooks/github\n"
+                f"Alerts: {backend}/api/webhooks/alert\n"
+                f"Notify: {backend}/api/webhooks/notify\n\n"
+                "Use /webhook test to send a test event.\n"
+                "Use /webhook github <repo> for setup instructions."
+            )
+            await update.message.reply_text(text)
+        elif args[0] == "test":
+            await update.message.reply_text("Test webhook received! Pipeline is working.")
+        elif args[0] == "github" and len(args) > 1:
+            repo = args[1]
+            text = (
+                f"GitHub Webhook Setup for {repo}\n\n"
+                f"URL: {backend}/api/webhooks/github\n"
+                f"Content type: application/json\n"
+                f"Events: check_run, workflow_run, pull_request, push\n\n"
+                f"Configure at: https://github.com/{repo}/settings/hooks/new"
+            )
+            await update.message.reply_text(text)
+        else:
+            await update.message.reply_text("Usage: /webhook, /webhook test, /webhook github <repo>")
+
+    # ─── Phase 4: Scheduled tasks commands ─────────────────────────────
+
+    async def _handle_remind(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /remind <time> <message> — one-shot reminder."""
+        if not self._is_user_allowed(update.effective_user.id):
+            return
+        args = context.args
+        if not args or len(args) < 2:
+            await update.message.reply_text("Usage: /remind <time> <message>\n\nExamples:\n/remind in 2h Check deployment\n/remind at 17:00 Call team\n/remind tomorrow 9am Review PRs")
+            return
+
+        text = " ".join(args)
+        # Simple time parsing
+        import re
+        from datetime import timedelta
+
+        now = __import__("datetime").datetime.now()
+        run_at = None
+        message = text
+
+        # "in Xh", "in Xm", "in X hours", "in X minutes"
+        m = re.match(r"in\s+(\d+)\s*h(?:ours?)?\s*(.*)", text, re.I)
+        if m:
+            run_at = now + timedelta(hours=int(m.group(1)))
+            message = m.group(2).strip()
+        if not run_at:
+            m = re.match(r"in\s+(\d+)\s*m(?:in(?:utes?)?)?\s*(.*)", text, re.I)
+            if m:
+                run_at = now + timedelta(minutes=int(m.group(1)))
+                message = m.group(2).strip()
+        if not run_at:
+            m = re.match(r"at\s+(\d{1,2}):?(\d{2})?\s*(am|pm)?\s*(.*)", text, re.I)
+            if m:
+                hour = int(m.group(1))
+                minute = int(m.group(2) or 0)
+                ampm = (m.group(3) or "").lower()
+                if ampm == "pm" and hour < 12: hour += 12
+                if ampm == "am" and hour == 12: hour = 0
+                run_at = now.replace(hour=hour, minute=minute, second=0)
+                if run_at <= now:
+                    run_at += timedelta(days=1)
+                message = m.group(4).strip()
+        if not run_at:
+            # Try "tomorrow" prefix
+            m = re.match(r"tomorrow\s*(.*)", text, re.I)
+            if m:
+                run_at = now + timedelta(days=1)
+                message = m.group(1).strip()
+
+        if not run_at:
+            await update.message.reply_text("Could not parse time. Try: /remind in 2h Check something")
+            return
+        if not message:
+            message = "Reminder!"
+
+        chat_id = str(update.effective_chat.id)
+        job_id = f"tg_remind_{int(time.time())}_{update.effective_user.id}"
+
+        try:
+            from aura.tools.task_scheduler import TaskSchedulerTool
+            scheduler = TaskSchedulerTool()
+            if not scheduler._scheduler.running:
+                scheduler._scheduler.start()
+
+            scheduler._scheduler.add_job(
+                self._fire_reminder, "date", run_date=run_at,
+                id=job_id, args=[chat_id, message],
+                replace_existing=True,
+            )
+            time_str = run_at.strftime("%H:%M on %b %d")
+            await update.message.reply_text(f"Reminder set for {time_str}:\n{message}")
+        except Exception as e:
+            logger.error(f"Remind error: {e}")
+            await update.message.reply_text(f"Failed to set reminder: {e}")
+
+    def _fire_reminder(self, chat_id: str, message: str):
+        """Callback for APScheduler — sends reminder to Telegram."""
+        import asyncio
+        async def _send():
+            try:
+                await self.bot.send_message(chat_id=int(chat_id), text=f"Reminder:\n{message}")
+            except Exception as e:
+                logger.error(f"Failed to send reminder: {e}")
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.ensure_future(_send())
+            else:
+                loop.run_until_complete(_send())
+        except RuntimeError:
+            asyncio.run(_send())
+
+    async def _handle_schedule(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /schedule <interval> <task> — recurring scheduled task."""
+        if not self._is_user_allowed(update.effective_user.id):
+            return
+        args = context.args
+        if not args or len(args) < 2:
+            await update.message.reply_text("Usage: /schedule <interval> <task>\n\nExamples:\n/schedule every 2h Check CPU\n/schedule daily at 9am Summarize notifications")
+            return
+        await update.message.reply_text("Scheduled tasks coming soon! Use /remind for one-shot reminders.")
+
+    async def _handle_tasks(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /tasks — list active scheduled tasks and reminders."""
+        if not self._is_user_allowed(update.effective_user.id):
+            return
+        try:
+            from aura.tools.task_scheduler import TaskSchedulerTool
+            scheduler = TaskSchedulerTool()
+            jobs = scheduler._scheduler.get_jobs() if scheduler._scheduler.running else []
+            if not jobs:
+                await update.message.reply_text("No active tasks or reminders.")
+                return
+            lines = ["Active Tasks:\n"]
+            for job in jobs:
+                next_run = job.next_run_time.strftime("%H:%M %b %d") if job.next_run_time else "paused"
+                lines.append(f"  {job.id}\n  Next: {next_run}\n")
+            await update.message.reply_text("\n".join(lines))
+        except Exception as e:
+            await update.message.reply_text(f"Error listing tasks: {e}")
+
+    async def _handle_cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /cancel <id> — cancel a scheduled task."""
+        if not self._is_user_allowed(update.effective_user.id):
+            return
+        args = context.args
+        if not args:
+            await update.message.reply_text("Usage: /cancel <task_id>")
+            return
+        job_id = args[0]
+        try:
+            from aura.tools.task_scheduler import TaskSchedulerTool
+            scheduler = TaskSchedulerTool()
+            scheduler._scheduler.remove_job(job_id)
+            await update.message.reply_text(f"Cancelled: {job_id}")
+        except Exception as e:
+            await update.message.reply_text(f"Failed to cancel: {e}")
+
+    # ─── Phase 4: Multi-agent commands ─────────────────────────────────
+
+    async def _handle_agent(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /agent <specialist> <task> — run a specialist sub-agent."""
+        if not self._is_user_allowed(update.effective_user.id):
+            return
+        args = context.args
+        if not args:
+            await update.message.reply_text(
+                "Usage:\n"
+                "/agent list — show specialists\n"
+                "/agent route <query> — preview routing\n"
+                "/agent <specialist> <task> — run a specialist\n\n"
+                "Specialists: research, coder, analyst, creative, searcher"
+            )
+            return
+
+        subcmd = args[0].lower()
+
+        if subcmd == "list":
+            try:
+                from aura.multi_agent.orchestrator import MultiAgentOrchestrator
+                orch = getattr(self.aura, "orchestrator", None)
+                if not orch:
+                    await update.message.reply_text("Multi-agent orchestrator not available.")
+                    return
+                status = orch.get_status()
+                lines = ["Available Specialists:\n"]
+                for spec in status.get("specialists", []):
+                    lines.append(f"  {spec['name']} — {spec.get('description', '')[:80]}")
+                await update.message.reply_text("\n".join(lines))
+            except Exception as e:
+                await update.message.reply_text(f"Error: {e}")
+
+        elif subcmd == "route" and len(args) > 1:
+            query = " ".join(args[1:])
+            try:
+                orch = getattr(self.aura, "orchestrator", None)
+                if not orch:
+                    await update.message.reply_text("Orchestrator not available.")
+                    return
+                preview = orch.route_preview(query)
+                await update.message.reply_text(f"Routing preview:\n{preview}")
+            except Exception as e:
+                await update.message.reply_text(f"Error: {e}")
+
+        else:
+            specialist = subcmd
+            task = " ".join(args[1:]) if len(args) > 1 else "Help me"
+            placeholder = await update.message.reply_text(f"Running {specialist} agent...")
+            try:
+                response = await asyncio.to_thread(self._run_agent_sync, task)
+                await self._edit_or_send_response(placeholder, response or "No response from agent.", update.effective_chat.id)
+            except Exception as e:
+                await self._edit_or_send_response(placeholder, f"Agent error: {e}", update.effective_chat.id)
+
+    # ================================================================
+    #  Location sharing handlers (Phase 5)
+    # ================================================================
+
+    async def _handle_location(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle shared location — provide contextual local info."""
+        if not self._is_user_allowed(update.effective_user.id):
+            return
+
+        location = update.message.location
+        lat = location.latitude
+        lon = location.longitude
+
+        placeholder = await update.message.reply_text("\U0001f4cd Getting info for your location...")
+
+        try:
+            info, results = await self._get_location_info(lat, lon)
+
+            # Store last known location for /nearby
+            self._user_locations[str(update.effective_user.id)] = {
+                "lat": lat, "lon": lon,
+                "city": results.get("city", ""),
+                "country": results.get("country", ""),
+                "timestamp": _time.time(),
+            }
+
+            await self._edit_or_send_response(placeholder, str(update.effective_chat.id), info, update)
+        except Exception as e:
+            logger.error(f"[Location] Error getting location info: {e}")
+            await self._edit_or_send_response(
+                placeholder, str(update.effective_chat.id),
+                f"Couldn't get location info: {e}", update
+            )
+
+    async def _get_location_info(self, lat: float, lon: float) -> tuple:
+        """Fetch contextual info for a location.
+
+        Returns (formatted_text, raw_results_dict).
+        """
+        import aiohttp
+
+        results: dict = {}
+
+        async with aiohttp.ClientSession() as session:
+            # 1. Reverse geocoding via Nominatim
+            try:
+                url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json&zoom=14"
+                headers = {"User-Agent": "AURA-Bot/4.5"}
+                async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        address = data.get("address", {})
+                        results["city"] = (
+                            address.get("city")
+                            or address.get("town")
+                            or address.get("village")
+                            or "Unknown"
+                        )
+                        results["country"] = address.get("country", "")
+                        results["display"] = data.get("display_name", "")[:100]
+            except Exception:
+                pass
+
+            # 2. Weather from wttr.in
+            try:
+                url = f"https://wttr.in/{lat},{lon}?format=j1"
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        current = data.get("current_condition", [{}])[0]
+                        results["temp"] = current.get("temp_C", "?")
+                        results["feels_like"] = current.get("FeelsLikeC", "?")
+                        results["condition"] = current.get("weatherDesc", [{}])[0].get("value", "")
+                        results["humidity"] = current.get("humidity", "?")
+                        results["wind"] = current.get("windspeedKmph", "?")
+
+                        # Astronomy
+                        astro = data.get("weather", [{}])[0].get("astronomy", [{}])[0]
+                        results["sunrise"] = astro.get("sunrise", "")
+                        results["sunset"] = astro.get("sunset", "")
+            except Exception:
+                pass
+
+            # 3. Timezone from timeapi.io
+            try:
+                url = f"https://timeapi.io/api/Time/current/coordinate?latitude={lat}&longitude={lon}"
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        results["timezone"] = data.get("timeZone", "")
+                        results["local_time"] = data.get("time", "")
+                        results["day_of_week"] = data.get("dayOfWeek", "")
+            except Exception:
+                pass
+
+        # Build response text
+        city = results.get("city", "Unknown")
+        country = results.get("country", "")
+
+        lines = [f"\U0001f4cd {city}, {country}"]
+
+        if "temp" in results:
+            lines.append(f"\n\U0001f321 Weather: {results['temp']}\u00b0C (feels like {results['feels_like']}\u00b0C)")
+            lines.append(f"   {results['condition']}")
+            lines.append(f"   Humidity: {results['humidity']}% | Wind: {results['wind']} km/h")
+
+        if "sunrise" in results:
+            lines.append(f"\n\U0001f305 Sunrise: {results['sunrise']} | Sunset: {results['sunset']}")
+
+        if "timezone" in results:
+            lines.append(f"\n\U0001f550 Local time: {results.get('local_time', '')} ({results['timezone']})")
+
+        lines.append(f"\n\U0001f4cc Coordinates: {lat:.4f}, {lon:.4f}")
+
+        lines.append(f"\nTip: Send me a message about what you want to do here, and I can help with local recommendations!")
+
+        return "\n".join(lines), results
+
+    async def _handle_nearby(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /nearby <query> — search for nearby places using last shared location."""
+        if not self._is_user_allowed(update.effective_user.id):
+            return
+
+        user_id = str(update.effective_user.id)
+        last_location = self._user_locations.get(user_id)
+
+        if not last_location:
+            await update.message.reply_text("Please share your location first, then use /nearby <query>")
+            return
+
+        query = " ".join(context.args) if context.args else "restaurants"
+        lat, lon = last_location["lat"], last_location["lon"]
+        city = last_location.get("city", "the area")
+
+        prompt = (
+            f"Find {query} near coordinates {lat},{lon} (in {city}). "
+            f"Give me top 3-5 recommendations with brief descriptions."
+        )
+
+        placeholder = await update.message.reply_text(f"\U0001f50d Searching for {query} nearby...")
+
+        try:
+            response_text, _ = await asyncio.to_thread(self._run_agent_sync, prompt)
+            await self._edit_or_send_response(
+                placeholder, str(update.effective_chat.id),
+                response_text or "Couldn't find results.", update
+            )
+        except Exception as e:
+            logger.error(f"[Nearby] Error: {e}")
+            await self._edit_or_send_response(
+                placeholder, str(update.effective_chat.id),
+                f"Couldn't search nearby: {e}", update
+            )
+
+    async def _handle_fleet(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /fleet <goal> — parallel multi-agent decomposition."""
+        if not self._is_user_allowed(update.effective_user.id):
+            return
+        args = context.args
+        if not args:
+            await update.message.reply_text("Usage: /fleet <goal>\n\nExample:\n/fleet Analyze the codebase for bugs, optimizations, and security issues")
+            return
+
+        goal = " ".join(args)
+        placeholder = await update.message.reply_text(f"Fleet dispatched: {goal[:100]}...\n\nRunning all specialists in parallel...")
+
+        try:
+            orch = getattr(self.aura, "orchestrator", None)
+            if not orch:
+                await self._edit_or_send_response(placeholder, "Multi-agent orchestrator not available.", update.effective_chat.id)
+                return
+
+            result = await asyncio.to_thread(orch.chat, goal)
+            response = result if isinstance(result, str) else str(result.get("response", result))
+            await self._edit_or_send_response(placeholder, f"Fleet Results:\n\n{response}", update.effective_chat.id)
+        except Exception as e:
+            await self._edit_or_send_response(placeholder, f"Fleet error: {e}", update.effective_chat.id)
+
+    # =========================================================================
+    #  Payment / Premium handlers
+    # =========================================================================
+
+    async def _handle_premium(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /premium — show available premium tiers."""
+        if not self._is_user_allowed(update.effective_user.id):
+            return
+
+        keyboard = []
+        for tier_id, tier in PREMIUM_TIERS.items():
+            price_str = f"${tier['price'] / 100:.2f}"
+            keyboard.append([InlineKeyboardButton(
+                f"{tier['title']} — {price_str}",
+                callback_data=f"buy_{tier_id}"
+            )])
+
+        text = "AURA Premium\n\n"
+        for tier_id, tier in PREMIUM_TIERS.items():
+            benefits = "\n".join(f"  • {b}" for b in tier["benefits"])
+            text += f"{tier['title']} (${tier['price']/100:.2f}/mo)\n{benefits}\n\n"
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(text, reply_markup=reply_markup)
+
+    async def _handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle callback queries for premium purchase buttons."""
+        query = update.callback_query
+        await query.answer()
+
+        tier_id = query.data.replace("buy_", "")
+        tier = PREMIUM_TIERS.get(tier_id)
+        if not tier:
+            return
+
+        provider_token = os.getenv("TELEGRAM_PAYMENT_TOKEN", "")
+        if not provider_token:
+            await query.message.reply_text("Payments not configured yet. Contact the admin.")
+            return
+
+        await context.bot.send_invoice(
+            chat_id=query.from_user.id,
+            title=tier["title"],
+            description=tier["description"],
+            payload=f"premium_{tier_id}_{query.from_user.id}",
+            provider_token=provider_token,
+            currency=tier["currency"],
+            prices=[LabeledPrice(tier["title"], tier["price"])],
+            start_parameter=f"premium_{tier_id}",
+        )
+
+    async def _handle_pre_checkout(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Must answer pre-checkout query within 10 seconds."""
+        query = update.pre_checkout_query
+        await query.answer(ok=True)
+
+    async def _handle_successful_payment(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Record successful payment and grant premium status."""
+        payment = update.message.successful_payment
+        user_id = str(update.effective_user.id)
+        tier_id = payment.invoice_payload.split("_")[1] if "_" in payment.invoice_payload else "supporter"
+
+        self._premium_users[user_id] = {
+            "tier": tier_id,
+            "paid_at": _time.time(),
+            "amount": payment.total_amount,
+            "currency": payment.currency,
+        }
+        self._save_premium_state()
+
+        tier = PREMIUM_TIERS.get(tier_id, {})
+        await update.message.reply_text(
+            f"Thank you for your support!\n\n"
+            f"You now have {tier.get('title', 'Premium')} access.\n"
+            f"Benefits:\n" + "\n".join(f"  • {b}" for b in tier.get("benefits", []))
+        )
+
+    async def _handle_donate(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /donate — one-time support payment."""
+        if not self._is_user_allowed(update.effective_user.id):
+            return
+
+        args = context.args
+        amount = 500  # Default $5
+        if args:
+            try:
+                amount = int(float(args[0]) * 100)
+            except ValueError:
+                pass
+
+        provider_token = os.getenv("TELEGRAM_PAYMENT_TOKEN", "")
+        if not provider_token:
+            await update.message.reply_text("Payments not configured. Set TELEGRAM_PAYMENT_TOKEN.")
+            return
+
+        await context.bot.send_invoice(
+            chat_id=update.effective_chat.id,
+            title="Support AURA",
+            description="One-time donation to support AURA development",
+            payload=f"donate_{update.effective_user.id}_{amount}",
+            provider_token=provider_token,
+            currency="USD",
+            prices=[LabeledPrice("Donation", amount)],
+        )
+
+    # =========================================================================
+    #  16 Improvements: Keyboard, Stars, Forum, Reactions, File Gen, Digest,
+    #  Language, Export, Stickers, Inline categories, Pinning, Action buttons
+    # =========================================================================
+
+    # --- 1. Persistent Reply Keyboard ---
+
+    def _get_reply_keyboard(self) -> ReplyKeyboardMarkup:
+        """Build the persistent quick-access reply keyboard."""
+        keyboard = [
+            ["/research", "/search", "/code", "/image"],
+            ["/model", "/status", "/help", "/session"],
+        ]
+        return ReplyKeyboardMarkup(keyboard, resize_keyboard=True,
+                                   is_persistent=True)
+
+    async def _handle_keyboard(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /keyboard — toggle the persistent reply keyboard on/off."""
+        if not self._is_user_allowed(update.effective_user.id):
+            return
+        user_id = str(update.effective_user.id)
+        currently_on = self._keyboard_enabled.get(user_id, True)
+        if currently_on:
+            self._keyboard_enabled[user_id] = False
+            await update.message.reply_text(
+                "Keyboard hidden. Use /keyboard to bring it back.",
+                reply_markup=ReplyKeyboardRemove()
+            )
+        else:
+            self._keyboard_enabled[user_id] = True
+            await update.message.reply_text(
+                "Keyboard restored!",
+                reply_markup=self._get_reply_keyboard()
+            )
+
+    # --- 3. Telegram Stars ---
+
+    _STARS_TIERS = [
+        {"stars": 50, "label": "\u2b50 50 Stars", "description": "Small support"},
+        {"stars": 150, "label": "\u2b50 150 Stars", "description": "Medium support"},
+        {"stars": 500, "label": "\u2b50 500 Stars", "description": "Big support — unlocks priority"},
+    ]
+
+    async def _handle_stars(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /stars — support AURA with Telegram Stars (XTR currency)."""
+        if not self._is_user_allowed(update.effective_user.id):
+            return
+        keyboard = []
+        for tier in self._STARS_TIERS:
+            keyboard.append([InlineKeyboardButton(
+                f"{tier['label']} — {tier['description']}",
+                callback_data=f"stars_{tier['stars']}"
+            )])
+        text = (
+            "\u2b50 Support AURA with Telegram Stars\n\n"
+            "Telegram Stars are an in-app currency. "
+            "Choose a tier below to send stars as a thank-you!"
+        )
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+    async def _handle_stars_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle stars_<amount> callback — send a Stars invoice."""
+        query = update.callback_query
+        await query.answer()
+        try:
+            amount = int(query.data.replace("stars_", ""))
+        except ValueError:
+            return
+        await context.bot.send_invoice(
+            chat_id=query.from_user.id,
+            title=f"Support AURA — {amount} Stars",
+            description=f"Send {amount} Telegram Stars to support AURA development",
+            payload=f"stars_{amount}_{query.from_user.id}",
+            provider_token="",  # Empty for Telegram Stars
+            currency="XTR",
+            prices=[LabeledPrice(f"{amount} Stars", amount)],
+        )
+
+    # --- 5. Forum Topics ---
+
+    async def _create_forum_topic_if_needed(self, chat_id: str, topic_name: str,
+                                            context: ContextTypes.DEFAULT_TYPE) -> Optional[int]:
+        """Create a forum topic for a research task in a supergroup with topics enabled."""
+        try:
+            result = await context.bot.create_forum_topic(
+                chat_id=int(chat_id),
+                name=topic_name[:128],
+            )
+            return result.message_thread_id
+        except Exception as e:
+            logger.debug(f"[Forum] Could not create topic: {e}")
+            return None
+
+    # --- 6. Native Reactions ---
+
+    _EMOTION_TO_REACTION = {
+        "joy": "\U0001f44d",         # thumbs up
+        "excited": "\U0001f525",     # fire
+        "curious": "\U0001f914",     # thinking
+        "surprised": "\U0001f62e",   # open mouth
+        "sad": "\U0001f622",         # crying
+        "frustrated": "\U0001f44e",  # thumbs down
+        "grateful": "\u2764\ufe0f",  # red heart
+        "empathetic": "\U0001f917",  # hugging
+        "confident": "\U0001f60e",   # sunglasses
+        "neutral": "\U0001f44d",     # thumbs up
+    }
+
+    async def _try_native_reaction(self, chat_id: str, message_id: int,
+                                   emotion: str, intensity: float) -> bool:
+        """Try to set a native Telegram reaction on the user's message.
+
+        Returns True if successful, False otherwise.
+        """
+        if not REACTIONS_AVAILABLE or intensity < 0.4:
+            return False
+        emoji = self._EMOTION_TO_REACTION.get(emotion, "\U0001f44d")
+        try:
+            await self.bot.set_message_reaction(
+                chat_id=int(chat_id),
+                message_id=message_id,
+                reaction=[ReactionTypeEmoji(emoji=emoji)],
+            )
+            return True
+        except Exception as e:
+            logger.debug(f"[Reaction] Native reaction failed: {e}")
+            return False
+
+    # --- 7. File Generation ---
+
+    async def _handle_file_gen(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /file <format> [content] — generate a document and send it.
+
+        Formats: pdf, docx, txt, md
+        If content is "last", uses the last agent response.
+        """
+        if not self._is_user_allowed(update.effective_user.id):
+            return
+        args = context.args or []
+        if not args:
+            await update.message.reply_text(
+                "Usage: /file <pdf|docx|txt|md> [content or 'last']\n\n"
+                "Examples:\n"
+                "/file pdf last — export last response as PDF\n"
+                "/file docx Meeting notes: discussed Q1 goals"
+            )
+            return
+
+        fmt = args[0].lower().strip(".")
+        if fmt not in ("pdf", "docx", "txt", "md"):
+            await update.message.reply_text("Supported formats: pdf, docx, txt, md")
+            return
+
+        content_text = " ".join(args[1:]) if len(args) > 1 else ""
+
+        # "last" keyword: use last agent response
+        if content_text.strip().lower() == "last" or not content_text:
+            uid = update.effective_user.id
+            exchange = self._last_exchange.get(uid, {})
+            content_text = exchange.get("output", "")
+            if not content_text:
+                await update.message.reply_text("No recent response to export. Send a message first.")
+                return
+
+        placeholder = await update.message.reply_text(f"\U0001f4c4 Generating {fmt.upper()}...")
+
+        try:
+            if fmt in ("pdf", "docx"):
+                from aura.tools.document_generator import DocumentGeneratorTool
+                gen = DocumentGeneratorTool()
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"aura_{ts}.{fmt}"
+                filepath = os.path.join(tempfile.gettempdir(), filename)
+                if fmt == "pdf":
+                    gen.create_pdf(content_text, filepath)
+                else:
+                    gen.create_docx(content_text, filepath)
+            else:
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"aura_{ts}.{fmt}"
+                filepath = os.path.join(tempfile.gettempdir(), filename)
+                with open(filepath, "w", encoding="utf-8") as f:
+                    f.write(content_text)
+
+            with open(filepath, "rb") as f:
+                await self.bot.send_document(
+                    chat_id=str(update.effective_chat.id),
+                    document=f,
+                    filename=filename,
+                    caption=f"Generated {fmt.upper()} document",
+                )
+            await placeholder.delete()
+            # Clean up temp file
+            try:
+                os.unlink(filepath)
+            except OSError:
+                pass
+        except Exception as e:
+            logger.error(f"[FileGen] Error: {e}", exc_info=True)
+            await placeholder.edit_text(f"Failed to generate file: {e}")
+
+    # --- 8. Daily Digest ---
+
+    async def _handle_digest(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /digest on|off|now — daily activity digest."""
+        if not self._is_user_allowed(update.effective_user.id):
+            return
+        chat_id = str(update.effective_chat.id)
+        args = context.args or []
+        cmd = args[0].lower() if args else "now"
+
+        if cmd == "on":
+            self._digest_enabled[chat_id] = True
+            # Schedule via APScheduler if available
+            try:
+                from apscheduler.schedulers.asyncio import AsyncIOScheduler
+                scheduler = getattr(self, '_digest_scheduler', None)
+                if not scheduler:
+                    scheduler = AsyncIOScheduler()
+                    self._digest_scheduler = scheduler
+                    scheduler.start()
+                job = scheduler.add_job(
+                    self._send_daily_digest_async, 'cron',
+                    hour=9, minute=0,
+                    args=[chat_id],
+                    id=f"digest_{chat_id}",
+                    replace_existing=True,
+                )
+                self._digest_job_ids[chat_id] = job.id
+                await update.message.reply_text(
+                    "\U0001f4ec Daily digest enabled! You'll get a summary at 9:00 AM.\n"
+                    "Use /digest off to disable, /digest now for an instant digest."
+                )
+            except ImportError:
+                await update.message.reply_text(
+                    "APScheduler not installed — digest scheduling unavailable.\n"
+                    "Use /digest now for a one-time digest."
+                )
+                return
+
+        elif cmd == "off":
+            self._digest_enabled[chat_id] = False
+            try:
+                scheduler = getattr(self, '_digest_scheduler', None)
+                job_id = self._digest_job_ids.get(chat_id)
+                if scheduler and job_id:
+                    scheduler.remove_job(job_id)
+                    del self._digest_job_ids[chat_id]
+            except Exception:
+                pass
+            await update.message.reply_text("\U0001f6d1 Daily digest disabled.")
+
+        else:
+            # "now" — send an instant digest
+            await self._send_daily_digest_async(chat_id)
+
+    async def _send_daily_digest_async(self, chat_id: str):
+        """Build and send a daily activity digest to the chat."""
+        lines = ["\U0001f4ca Daily AURA Digest\n"]
+
+        # Gather stats
+        try:
+            from aura.proactive.persistence import ProactivePersistence
+            pp = ProactivePersistence()
+            conn = pp._conn
+            if conn:
+                cursor = conn.execute(
+                    "SELECT COUNT(*) FROM activity_log WHERE timestamp > datetime('now', '-1 day')"
+                )
+                count = cursor.fetchone()[0]
+                lines.append(f"\u2022 Activities logged (24h): {count}")
+        except Exception:
+            lines.append("\u2022 Activity log: unavailable")
+
+        # Conversation count
+        try:
+            cm = get_conversation_manager()
+            convos = cm.list_conversations() if hasattr(cm, 'list_conversations') else []
+            lines.append(f"\u2022 Active conversations: {len(convos)}")
+        except Exception:
+            pass
+
+        # Active chats
+        lines.append(f"\u2022 Active Telegram chats: {len(self.active_chats)}")
+
+        # Scheduled tasks
+        try:
+            from apscheduler.schedulers.background import BackgroundScheduler
+            aura_sched = getattr(self.aura, 'scheduler', None)
+            if aura_sched:
+                jobs = aura_sched.get_jobs() if hasattr(aura_sched, 'get_jobs') else []
+                lines.append(f"\u2022 Scheduled tasks: {len(jobs)}")
+        except Exception:
+            pass
+
+        lines.append(f"\n\U0001f552 Generated at {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+
+        try:
+            await self.bot.send_message(chat_id=int(chat_id), text="\n".join(lines))
+        except Exception as e:
+            logger.error(f"[Digest] Failed to send digest: {e}")
+
+    # --- 9. Multi-language ---
+
+    async def _handle_lang(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /lang [code] — set or show language preference.
+
+        Examples: /lang ru, /lang en, /lang (shows current)
+        """
+        if not self._is_user_allowed(update.effective_user.id):
+            return
+        user_id = str(update.effective_user.id)
+        args = context.args or []
+
+        if not args:
+            current = self._user_language.get(user_id, "en")
+            tg_lang = getattr(update.effective_user, 'language_code', 'unknown')
+            await update.message.reply_text(
+                f"\U0001f310 Language settings:\n"
+                f"Current: {current}\n"
+                f"Telegram language: {tg_lang}\n\n"
+                f"Set with: /lang <code>\n"
+                f"Examples: /lang ru, /lang az, /lang en"
+            )
+            return
+
+        lang_code = args[0].lower().strip()[:5]
+        self._user_language[user_id] = lang_code
+        if lang_code == "en":
+            await update.message.reply_text(
+                "\U0001f310 Language set to English (default). "
+                "I'll respond in English."
+            )
+        else:
+            await update.message.reply_text(
+                f"\U0001f310 Language set to: {lang_code}\n"
+                f"I'll try to respond in {lang_code} from now on."
+            )
+
+    # --- 10. Reply Action Buttons ---
+
+    def _get_action_buttons(self, original_msg_id: int = 0) -> InlineKeyboardMarkup:
+        """Build action buttons attached to agent responses."""
+        return InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("\U0001f50d Go deeper", callback_data=f"act_deeper_{original_msg_id}"),
+                InlineKeyboardButton("\U0001f4be Save to memory", callback_data=f"act_save_{original_msg_id}"),
+            ],
+            [
+                InlineKeyboardButton("\U0001f4e4 Share", callback_data=f"act_share_{original_msg_id}"),
+                InlineKeyboardButton("\U0001f4c4 Export", callback_data=f"act_export_{original_msg_id}"),
+            ],
+        ])
+
+    async def _handle_action_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle act_<action>_<msg_id> callbacks from action buttons."""
+        query = update.callback_query
+        await query.answer()
+        data = query.data  # e.g. "act_deeper_12345"
+        parts = data.split("_", 2)
+        if len(parts) < 3:
+            return
+        action = parts[1]
+        user_id = str(query.from_user.id)
+
+        # Get last response text for context
+        uid = query.from_user.id
+        exchange = self._last_exchange.get(uid, {})
+        last_output = exchange.get("output", "")
+        last_input = exchange.get("input", "")
+
+        if action == "deeper":
+            if not last_output:
+                await query.message.reply_text("No recent response to expand on.")
+                return
+            goal = f"Expand on and go deeper into this topic. Previous response was about: {last_input[:200]}"
+            # Run agent and send response directly (can't reuse _run_agent_and_reply without a proper Update)
+            placeholder = await query.message.reply_text("Thinking...")
+            try:
+                response_text, artifacts = await asyncio.wait_for(
+                    asyncio.to_thread(self._run_agent_sync, goal),
+                    timeout=self._AGENT_TIMEOUT,
+                )
+            except Exception:
+                response_text = "Could not expand. Try asking directly."
+                artifacts = []
+            chat_id = str(query.message.chat_id)
+            await self._edit_or_send_response(placeholder, chat_id, response_text, update)
+
+        elif action == "save":
+            if not last_output:
+                await query.message.reply_text("Nothing to save.")
+                return
+            try:
+                if hasattr(self.aura, 'memory') and self.aura.memory:
+                    mem_text = f"[Saved from Telegram] {last_input[:100]}: {last_output[:500]}"
+                    if hasattr(self.aura.memory, 'add'):
+                        self.aura.memory.add(mem_text)
+                    elif hasattr(self.aura.memory, 'store'):
+                        self.aura.memory.store(mem_text)
+                    await query.message.reply_text("\U0001f4be Saved to memory!")
+                else:
+                    await query.message.reply_text("Memory system not available.")
+            except Exception as e:
+                await query.message.reply_text(f"Could not save: {e}")
+
+        elif action == "share":
+            if last_output:
+                share_text = last_output[:4000]
+                await query.message.reply_text(
+                    f"\U0001f4e4 Shareable response:\n\n{share_text}"
+                )
+            else:
+                await query.message.reply_text("No recent response to share.")
+
+        elif action == "export":
+            if not last_output:
+                await query.message.reply_text("Nothing to export.")
+                return
+            # Quick export as txt
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"aura_response_{ts}.txt"
+            filepath = os.path.join(tempfile.gettempdir(), filename)
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(f"Query: {last_input}\n\nResponse:\n{last_output}")
+            try:
+                with open(filepath, "rb") as f:
+                    await self.bot.send_document(
+                        chat_id=str(query.message.chat_id),
+                        document=f,
+                        filename=filename,
+                    )
+            except Exception as e:
+                await query.message.reply_text(f"Export failed: {e}")
+            try:
+                os.unlink(filepath)
+            except OSError:
+                pass
+
+    # --- 11. Custom Sticker Pack ---
+
+    async def _handle_stickers_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /stickers — admin command to scaffold an emotion-mapped sticker set."""
+        if not self._is_user_allowed(update.effective_user.id):
+            return
+        if not self._is_admin(update.effective_user.id):
+            await update.message.reply_text("Admin only command.")
+            return
+
+        emotions = list(EMOTION_REACTIONS.keys())
+        lines = [
+            "\U0001f3a8 AURA Sticker Pack Setup\n",
+            "To create a custom sticker pack for AURA, you need:",
+            "1. Design one sticker per emotion (512x512 PNG, <512KB)",
+            "2. Send them to @Stickers bot to create a pack",
+            "3. Set AURA_STICKER_PACK env var to the pack name\n",
+            "Required emotions:",
+        ]
+        for emo in emotions:
+            emoji = EMOTION_EMOJI.get(emo, "\U0001f610")
+            lines.append(f"  {emoji} {emo}")
+
+        lines.append(f"\nTotal stickers needed: {len(emotions)}")
+        lines.append("\nOnce created, AURA will auto-select stickers based on emotional state.")
+
+        await update.message.reply_text("\n".join(lines))
+
+    # --- 12. Rich Inline Mode (category results added in _handle_inline above) ---
+    # Category results (Code, Image, Research) are injected in _handle_inline
+
+    # --- 13. Message Pinning ---
+
+    async def _handle_pin(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /pin — pin the replied-to message, or the last bot message."""
+        if not self._is_user_allowed(update.effective_user.id):
+            return
+        chat_id = str(update.effective_chat.id)
+        reply = update.message.reply_to_message
+
+        if reply:
+            try:
+                await context.bot.pin_chat_message(
+                    chat_id=int(chat_id),
+                    message_id=reply.message_id,
+                    disable_notification=True,
+                )
+                await update.message.reply_text("\U0001f4cc Message pinned!")
+            except Exception as e:
+                await update.message.reply_text(f"Could not pin: {e}")
+        else:
+            await update.message.reply_text(
+                "Reply to a message with /pin to pin it.\n"
+                "Tip: I'll also offer to pin important research results in groups."
+            )
+
+    async def _handle_pin_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle pin_<message_id> callbacks — pin a specific message."""
+        query = update.callback_query
+        await query.answer()
+        try:
+            msg_id = int(query.data.replace("pin_", ""))
+            await context.bot.pin_chat_message(
+                chat_id=query.message.chat_id,
+                message_id=msg_id,
+                disable_notification=True,
+            )
+            await query.message.reply_text("\U0001f4cc Pinned!")
+        except Exception as e:
+            await query.message.reply_text(f"Could not pin: {e}")
+
+    def _get_pin_button(self, message_id: int) -> InlineKeyboardMarkup:
+        """Build a 'Pin this' inline button for important research results."""
+        return InlineKeyboardMarkup([[
+            InlineKeyboardButton("\U0001f4cc Pin this", callback_data=f"pin_{message_id}")
+        ]])
+
+    # --- 14. Conversation Export ---
+
+    async def _handle_export(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /export [json|md|pdf|txt] — export conversation history."""
+        if not self._is_user_allowed(update.effective_user.id):
+            return
+        args = context.args or []
+        fmt = args[0].lower() if args else "md"
+        if fmt not in ("json", "md", "pdf", "txt"):
+            await update.message.reply_text("Supported: /export json|md|pdf|txt")
+            return
+
+        user_id = str(update.effective_user.id)
+        placeholder = await update.message.reply_text(f"\U0001f4e6 Exporting as {fmt.upper()}...")
+
+        try:
+            # Gather conversation from ConversationManager
+            messages = []
+            try:
+                cm = get_conversation_manager()
+                conv_id = cm.get_bound_conversation(f"telegram:{user_id}")
+                if conv_id and hasattr(cm, 'get_messages'):
+                    messages = cm.get_messages(conv_id) or []
+                elif conv_id and hasattr(cm, '_messages'):
+                    messages = cm._messages.get(conv_id, [])
+            except Exception:
+                pass
+
+            # Fallback: use last exchange if no conversation manager data
+            if not messages:
+                exchange = self._last_exchange.get(update.effective_user.id, {})
+                if exchange:
+                    messages = [
+                        {"role": "user", "content": exchange.get("input", "")},
+                        {"role": "assistant", "content": exchange.get("output", "")},
+                    ]
+
+            if not messages:
+                await placeholder.edit_text("No conversation data to export.")
+                return
+
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"aura_conversation_{ts}.{fmt}"
+            filepath = os.path.join(tempfile.gettempdir(), filename)
+
+            if fmt == "json":
+                with open(filepath, "w", encoding="utf-8") as f:
+                    json.dump(messages if isinstance(messages, list) else
+                              [{"role": m.role, "content": m.preview} if hasattr(m, 'role')
+                               else m for m in messages],
+                              f, indent=2, default=str)
+
+            elif fmt == "md":
+                with open(filepath, "w", encoding="utf-8") as f:
+                    f.write(f"# AURA Conversation Export\n")
+                    f.write(f"*Exported: {datetime.now().isoformat()}*\n\n---\n\n")
+                    for m in messages:
+                        if isinstance(m, dict):
+                            role = m.get("role", "unknown").upper()
+                            content = m.get("content", m.get("preview", ""))
+                        elif hasattr(m, 'role'):
+                            role = m.role.upper()
+                            content = getattr(m, 'preview', '') or getattr(m, 'content', '')
+                        else:
+                            role = "MSG"
+                            content = str(m)
+                        f.write(f"**{role}**: {content}\n\n")
+
+            elif fmt == "txt":
+                with open(filepath, "w", encoding="utf-8") as f:
+                    for m in messages:
+                        if isinstance(m, dict):
+                            role = m.get("role", "unknown")
+                            content = m.get("content", m.get("preview", ""))
+                        elif hasattr(m, 'role'):
+                            role = m.role
+                            content = getattr(m, 'preview', '') or getattr(m, 'content', '')
+                        else:
+                            role = "msg"
+                            content = str(m)
+                        f.write(f"[{role}] {content}\n\n")
+
+            elif fmt == "pdf":
+                try:
+                    from aura.tools.document_generator import DocumentGeneratorTool
+                    gen = DocumentGeneratorTool()
+                    text_content = "AURA Conversation Export\n\n"
+                    for m in messages:
+                        if isinstance(m, dict):
+                            role = m.get("role", "unknown").upper()
+                            content = m.get("content", m.get("preview", ""))
+                        elif hasattr(m, 'role'):
+                            role = m.role.upper()
+                            content = getattr(m, 'preview', '') or getattr(m, 'content', '')
+                        else:
+                            role = "MSG"
+                            content = str(m)
+                        text_content += f"{role}: {content}\n\n"
+                    gen.create_pdf(text_content, filepath)
+                except ImportError:
+                    await placeholder.edit_text("PDF export requires fpdf2. Use /export md instead.")
+                    return
+
+            with open(filepath, "rb") as f:
+                await self.bot.send_document(
+                    chat_id=str(update.effective_chat.id),
+                    document=f,
+                    filename=filename,
+                    caption=f"Conversation export ({fmt.upper()})",
+                )
+            await placeholder.delete()
+            try:
+                os.unlink(filepath)
+            except OSError:
+                pass
+        except Exception as e:
+            logger.error(f"[Export] Error: {e}", exc_info=True)
+            await placeholder.edit_text(f"Export failed: {e}")
 
     def get_active_chat_ids(self) -> List[str]:
         """Get list of active chat IDs for proactive messaging"""

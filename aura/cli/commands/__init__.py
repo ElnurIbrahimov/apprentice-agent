@@ -32,6 +32,11 @@ from .system_commands import (
     handle_hook, handle_mcp, handle_audit, handle_evolve,
 )
 
+def _handle_voice(agent, args, context=None, **kwargs):
+    from aura.cli.voice_mode import run_voice_mode
+    run_voice_mode(agent)
+
+
 COMMAND_REGISTRY: dict[str, Callable[..., Any]] = {
     "/quit": handle_quit,
     "/exit": handle_quit,
@@ -87,6 +92,7 @@ COMMAND_REGISTRY: dict[str, Callable[..., Any]] = {
     "/branches": handle_branches,
     "/checkout": handle_checkout,
     "/merge": handle_merge,
+    "/voice": _handle_voice,
 }
 
 

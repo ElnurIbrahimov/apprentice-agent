@@ -42,7 +42,57 @@ def _rewind_picker(cp_mgr: Any, console: Any) -> bool:
     return False
 
 
-def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: Optional[str] = None, verbose: bool = False, tier: Optional[str] = None) -> None:
+def _display_channel_message(console: Any, msg: Any) -> None:
+    """Display an incoming channel message with a styled box."""
+    from rich.text import Text
+    source_name = msg.source.value.capitalize()
+    width = min(console.size.width - 4, 60)
+    header = f" {source_name} "
+    line_rest = "\u2500" * max(width - len(header) - 2, 4)
+    top = f"\u250c\u2500{header}{line_rest}"
+
+    body = Text()
+    body.append(f"\u2502 ", style="dim cyan")
+    body.append(f"{msg.user_name}: ", style="bold")
+    body.append(msg.text[:500])
+
+    bottom = "\u2514" + "\u2500" * (width)
+
+    console.print()
+    console.print(f"  [cyan]{top}[/cyan]")
+    console.print(f"  ", end="")
+    console.print(body)
+    console.print(f"  [cyan]{bottom}[/cyan]")
+
+
+def _display_channel_response(console: Any, msg: Any, response_text: str) -> None:
+    """Display an outgoing response to a channel with a styled box."""
+    from rich.text import Text
+    source_name = msg.source.value.capitalize()
+    width = min(console.size.width - 4, 60)
+    header = f" \u2192 {source_name} "
+    line_rest = "\u2500" * max(width - len(header) - 2, 4)
+    top = f"\u250c\u2500{header}{line_rest}"
+
+    # Truncate long responses for display
+    display_text = response_text[:300]
+    if len(response_text) > 300:
+        display_text += "..."
+
+    body = Text()
+    body.append(f"\u2502 ", style="dim green")
+    body.append("AURA: ", style="bold green")
+    body.append(display_text)
+
+    bottom = "\u2514" + "\u2500" * (width)
+
+    console.print(f"  [green]{top}[/green]")
+    console.print(f"  ", end="")
+    console.print(body)
+    console.print(f"  [green]{bottom}[/green]")
+
+
+def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: Optional[str] = None, verbose: bool = False, tier: Optional[str] = None, bridge: Any = None) -> None:
     from .context import CLIContext, set_ctx
     from .display import (
         console, show_banner, show_response,
@@ -224,6 +274,17 @@ def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: O
     agent._research_ctx = research_ctx
     agent._hook_manager = hook_mgr
 
+    # ── Cross-surface sync via ConversationManager ─────────────────
+    _cm_conv_id = None
+    try:
+        from aura.core.conversation_manager import get_conversation_manager
+        _cm = get_conversation_manager()
+        if _cm._brain is not None:
+            _cm_conv_id = _cm.get_or_create_session("cli", "local")
+            _cm.switch_conversation(_cm_conv_id, surface="cli")
+    except Exception:
+        pass
+
     resume_id = cli_ctx.resume_session_id
     if resume_id:
         if agentic.load_session(resume_id):
@@ -288,12 +349,44 @@ def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: O
 
     session = create_session()
 
+    # -- Channel bridge setup --
+    if bridge:
+        show_info(f"Channel bridge active: {', '.join(s['channel'] for s in bridge.status())}")
+        # Register a live-notification callback that prints above the prompt
+        def _channel_notify(msg: Any) -> None:
+            # This fires from the adapter thread; Rich console.print is thread-safe
+            _display_channel_message(console, msg)
+        bridge.set_on_message_callback(_channel_notify)
+
+    def _drain_channel_messages() -> None:
+        """Process all pending channel messages through the agent."""
+        if not bridge:
+            return
+        while bridge.has_pending():
+            ch_msg = bridge.get_pending_message(timeout=0)
+            if ch_msg is None:
+                break
+            # Process through the agent
+            try:
+                result = agentic.run(ch_msg.text)
+                response_text = result.get("response", "") if result else ""
+            except Exception as _e:
+                logger.debug("channel_agent_run_failed", exc_info=True)
+                response_text = f"Error processing message: {_e}"
+
+            if response_text:
+                _display_channel_response(console, ch_msg, response_text)
+                bridge.send_response(ch_msg, response_text)
+
     _pending_follow_up = None
     _follow_up_depth = 0
     _MAX_FOLLOW_UP_DEPTH = 3
     _last_user_input = ""
 
     while True:
+        # Drain any pending channel messages before waiting for CLI input
+        _drain_channel_messages()
+
         if _pending_follow_up:
             user_input = _pending_follow_up
             _pending_follow_up = None
@@ -302,7 +395,12 @@ def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: O
             _follow_up_depth = 0
             user_input = get_input(session)
 
+        # After CLI input, drain channel messages that arrived while typing
+        _drain_channel_messages()
+
         if user_input is None:
+            if bridge:
+                bridge.stop()
             if hook_mgr:
                 hook_mgr.fire(HookEvent.SESSION_END, {"reason": "user_exit"})
             console.print("\n[dim]Goodbye.[/dim]\n")
@@ -454,6 +552,27 @@ def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: O
                 show_error("Nothing to retry — no previous prompt.")
                 continue
 
+        if user_input.strip() == "/channels":
+            if not bridge:
+                show_info("No channel bridge active. Start with --channels flag.")
+            else:
+                from rich.table import Table
+                ch_table = Table(
+                    show_header=True, header_style="bold cyan",
+                    border_style="dim", padding=(0, 2),
+                    title="[bold]Active Channels[/bold]",
+                )
+                ch_table.add_column("Channel", style="cyan", width=16)
+                ch_table.add_column("Status", style="white", width=12)
+                ch_table.add_column("Pending", style="dim", width=10)
+                for st in bridge.status():
+                    status_str = "[green]running[/green]" if st["running"] else "[red]stopped[/red]"
+                    ch_table.add_row(st["channel"], status_str, str(st["pending"]))
+                console.print()
+                console.print(ch_table)
+                console.print()
+            continue
+
         if user_input.startswith("/"):
             try:
                 from .commands import handle_command
@@ -567,7 +686,18 @@ def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: O
                 if not streamer.displayed and response_text:
                     show_response(response_text, model=model_used, stream=False)
 
+            # Track in ConversationManager (plan-approve path)
+            if _cm_conv_id:
+                try:
+                    _cm = get_conversation_manager()
+                    _cm.on_message_added(_cm_conv_id, "user", user_input, "cli", "local")
+                    _cm.on_message_added(_cm_conv_id, "assistant", response_text, "cli", "local")
+                except Exception:
+                    pass
+
             _msg_count += 1
+            if _msg_count == 1 and user_input:
+                _session_title = user_input[:50].strip()
             _current_model = agent.brain._model_override or "auto"
             _token_used = estimate_messages_tokens(agentic._conversation_history)
             _token_limit = get_context_limit(_current_model)
@@ -694,6 +824,15 @@ def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: O
             except (OSError, TypeError, ValueError):
                 logger.debug("activity_log_write_failed", exc_info=True)
 
+        # Track in ConversationManager (normal path)
+        if _cm_conv_id:
+            try:
+                _cm = get_conversation_manager()
+                _cm.on_message_added(_cm_conv_id, "user", user_input, "cli", "local")
+                _cm.on_message_added(_cm_conv_id, "assistant", response_text, "cli", "local")
+            except Exception:
+                pass
+
         follow_up = steering.pop_follow_up()
         if follow_up and _follow_up_depth < _MAX_FOLLOW_UP_DEPTH:
             _pending_follow_up = follow_up
@@ -702,6 +841,8 @@ def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: O
             show_info("Max auto-follow-up depth reached, dropping follow-up.")
 
         _msg_count += 1
+        if _msg_count == 1 and user_input:
+            _session_title = user_input[:50].strip()
         _current_model = agent.brain._model_override or "auto"
         _token_used = estimate_messages_tokens(agentic._conversation_history)
         _token_limit = get_context_limit(_current_model)
@@ -730,3 +871,6 @@ def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: O
                 agent._speak(response_text)
             except (OSError, RuntimeError, AttributeError):
                 logger.warning("tts_speak_failed", exc_info=True)
+
+        # Drain channel messages that arrived during agent execution
+        _drain_channel_messages()

@@ -99,10 +99,66 @@ PROVIDER_CONFIGS = {
             "glm-4-long",
         ],
     },
+    "mistral": {
+        "base_url": "https://api.mistral.ai/v1",
+        "env_var": "MISTRAL_API_KEY",
+        "display_name": "Mistral AI",
+        "default_models": [
+            "mistral-large-latest",
+            "mistral-medium-latest",
+            "codestral-latest",
+        ],
+    },
+    "cohere": {
+        "base_url": "https://api.cohere.ai/v2",
+        "env_var": "COHERE_API_KEY",
+        "display_name": "Cohere",
+        "default_models": [
+            "command-r-plus",
+            "command-r",
+        ],
+    },
+    "groq": {
+        "base_url": "https://api.groq.com/openai/v1",
+        "env_var": "GROQ_API_KEY",
+        "display_name": "Groq",
+        "default_models": [
+            "llama-3.3-70b-versatile",
+            "mixtral-8x7b-32768",
+        ],
+    },
+    "together": {
+        "base_url": "https://api.together.xyz/v1",
+        "env_var": "TOGETHER_API_KEY",
+        "display_name": "Together AI",
+        "default_models": [
+            "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+            "mistralai/Mixtral-8x22B-Instruct-v0.1",
+        ],
+    },
+    "fireworks": {
+        "base_url": "https://api.fireworks.ai/inference/v1",
+        "env_var": "FIREWORKS_API_KEY",
+        "display_name": "Fireworks AI",
+        "default_models": [
+            "accounts/fireworks/models/llama-v3p3-70b-instruct",
+        ],
+    },
+    "openrouter": {
+        "base_url": "https://openrouter.ai/api/v1",
+        "env_var": "OPENROUTER_API_KEY",
+        "display_name": "OpenRouter",
+        "default_models": [
+            "anthropic/claude-sonnet-4",
+            "openai/gpt-4.1",
+            "google/gemini-2.5-flash",
+        ],
+    },
 }
 
 # Providers that use OpenAI-compatible API format
 OPENAI_COMPATIBLE_PROVIDERS = [
     "openai", "grok", "perplexity", "deepseek",
     "minimax", "qwen", "kimi", "glm",
+    "mistral", "cohere", "groq", "together", "fireworks", "openrouter",
 ]

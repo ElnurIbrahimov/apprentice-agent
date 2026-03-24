@@ -25,7 +25,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from api.routes import chat, status, upload, features, multi_agent, reasoning_tree, proactive, memory, context, conversation_starters, thinking, idle_behaviors, self_improvement, thinking_mode, tools_new, activity, multi_model, knowledge, search, pdf, transcribe, ocr, image_gen, agent_action, models as models_route, summarize, youtube, math as math_route, research, evolution, artifacts, feed, providers as providers_route, code as code_route
+from api.routes import chat, status, upload, features, multi_agent, reasoning_tree, proactive, memory, context, conversation_starters, thinking, idle_behaviors, self_improvement, thinking_mode, tools_new, activity, multi_model, knowledge, search, pdf, transcribe, ocr, image_gen, agent_action, models as models_route, summarize, youtube, math as math_route, research, evolution, artifacts, feed, providers as providers_route, code as code_route, webhooks as webhooks_route
 try:
     from api.routes import reliability as reliability_route
     _reliability_available = True
@@ -398,6 +398,7 @@ app.include_router(artifacts.router)
 app.include_router(feed.router)
 app.include_router(providers_route.router)
 app.include_router(code_route.router)
+app.include_router(webhooks_route.router)
 if _reliability_available and reliability_route:
     app.include_router(reliability_route.router)
 if _auth_available and auth_route:
@@ -412,6 +413,19 @@ static_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web", "d
 _is_dev = os.environ.get("AURA_ENV") != "production"
 if os.path.exists(static_path) and not _is_dev:
     app.mount("/assets", StaticFiles(directory=os.path.join(static_path, "assets")), name="assets")
+
+    @app.get("/miniapp")
+    async def serve_miniapp():
+        """Serve the Telegram Mini App HTML."""
+        miniapp_path = os.path.join(static_path, "miniapp.html")
+        if os.path.exists(miniapp_path):
+            return FileResponse(miniapp_path)
+        # Fallback: serve from web/ source dir in case build didn't run
+        src_miniapp = os.path.join(os.path.dirname(static_path), "miniapp.html")
+        if os.path.exists(src_miniapp):
+            return FileResponse(src_miniapp)
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Mini app not found")
 
     @app.get("/")
     async def serve_index():

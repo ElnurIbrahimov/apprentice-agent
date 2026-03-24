@@ -11,6 +11,7 @@ from typing import Optional, Dict, Any, Generator
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from aura import ApprenticeAgent
+from aura.core.conversation_manager import get_conversation_manager
 from api.models.schemas import MoodState
 
 # Import ALMA directly for mood detection
@@ -75,8 +76,58 @@ def _record_thought(thought_type: str, content: str, intensity: float = 0.6, sou
 # Format: trigger_word -> (action_mode, model_config)
 
 ACTION_TRIGGERS = {
+    # ===== FRONTEND / UI / DESIGN MODE =====
+    # Only specific UI terms — NO generic verbs like "build a", "create a"
+    "landing page": "frontend",
+    "dashboard design": "frontend",
+    "web page": "frontend",
+    "web app": "frontend",
+    "webapp": "frontend",
+    "website": "frontend",
+    "frontend": "frontend",
+    "user interface": "frontend",
+    "design a page": "frontend",
+    "design a site": "frontend",
+    "design a ui": "frontend",
+    "build a page": "frontend",
+    "build a site": "frontend",
+    "build a website": "frontend",
+    "build a webapp": "frontend",
+    "build a web app": "frontend",
+    "build a dashboard": "frontend",
+    "react component": "frontend",
+    "tailwind": "frontend",
+    "pricing page": "frontend",
+    "signup page": "frontend",
+    "login page": "frontend",
+    "settings page": "frontend",
+
+    # ===== RAPID / PROTOTYPE MODE =====
+    "quick prototype": "rapid",
+    "rapid prototype": "rapid",
+    "scaffold": "rapid",
+    "quick mock": "rapid",
+    "sketch out": "rapid",
+
+    # ===== ARTIFACT / COMPONENT MODE =====
+    "artifact": "artifact",
+    "ui component": "artifact",
+    "react widget": "artifact",
+    "build a component": "artifact",
+    "create a component": "artifact",
+
+    # ===== DEBUG / REVIEW MODE =====
+    "not working": "debug",
+    "fix this": "debug",
+    "fix the": "debug",
+    "debug": "debug",
+    "find the bug": "debug",
+    "why is this": "debug",
+    "broken": "debug",
+    "code review": "debug",
+
     # ===== SEARCH MODE =====
-    # Quick web search - uses fast cloud model
+    # Quick web search - uses fastest cloud model
     "search": "search",
     "google": "search",
     "lookup": "search",
@@ -96,8 +147,6 @@ ACTION_TRIGGERS = {
     "comprehensive": "research",
     "in-depth": "research",
     "detailed analysis": "research",
-    "thorough research": "research",
-    "deep research": "research",
     "full analysis": "research",
 
     # ===== AGENT MODE =====
@@ -113,21 +162,23 @@ ACTION_TRIGGERS = {
     "workflow": "agent",
     "[agent mode]": "agent",
 
-    # ===== CODE MODE =====
-    # Code generation/analysis - uses code-specialized model
+    # ===== CODE / BACKEND MODE =====
+    # Code generation/analysis - uses top SWE-bench model
     "code": "code",
     "program": "code",
     "script": "code",
     "implement": "code",
-    "debug": "code",
-    "fix code": "code",
     "write code": "code",
     "coding": "code",
     "refactor": "code",
     "optimize code": "code",
+    "backend": "code",
+    "api": "code",
+    "database": "code",
+    "server": "code",
 
     # ===== VISION MODE =====
-    # Image analysis - uses vision model
+    # Image analysis - uses best multimodal model
     "describe image": "vision",
     "analyze image": "vision",
     "what's in this": "vision",
@@ -159,67 +210,186 @@ ACTION_TRIGGERS = {
     "collaborative": "swarm",
     "all agents": "swarm",
     "agent team": "swarm",
+    "fleet": "swarm",
 }
 
-# Best models for each action mode
+# Best models for each action mode — optimized for design quality (2026-03 research)
 ACTION_MODE_MODELS = {
+    "frontend": {
+        "preferred": "kimi-k2.5:cloud",
+        "fallbacks": ["chatgpt:gpt-5.3-codex"],
+        "description": "Frontend/UI/design — best vision-to-code, polished UI"
+    },
+    "rapid": {
+        "preferred": "chatgpt:gpt-5.3-codex-spark",
+        "fallbacks": ["nemotron-3-super:cloud"],
+        "description": "Rapid prototyping — 1000 tok/s instant iteration"
+    },
+    "code": {
+        "preferred": "minimax-m2.5:cloud",
+        "fallbacks": ["qwen3-coder:480b-cloud"],
+        "description": "Backend/code — 80.2% SWE-bench top open model"
+    },
     "search": {
         "preferred": "nemotron-3-super:cloud",
-        "fallbacks": ["kimi-k2.5:cloud", "glm-5:cloud"],
-        "description": "Quick web search"
+        "fallbacks": ["glm-5:cloud"],
+        "description": "Quick web search — fastest model"
     },
     "research": {
         "preferred": "qwen3.5:397b-cloud",
-        "fallbacks": ["deepseek-v3.2:cloud", "kimi-k2.5:cloud"],
-        "description": "Comprehensive research"
-    },
-    "agent": {
-        "preferred": "kimi-k2.5:cloud",
-        "fallbacks": ["minimax-m2.7:cloud", "deepseek-v3.2:cloud"],
-        "description": "Autonomous task execution"
-    },
-    "code": {
-        "preferred": "qwen3-coder:480b-cloud",
-        "fallbacks": ["minimax-m2.7:cloud", "qwen3-coder-next:cloud"],
-        "description": "Code generation and analysis"
-    },
-    "vision": {
-        "preferred": "kimi-k2.5:cloud",
-        "fallbacks": ["qwen3.5:397b-cloud", "glm-5:cloud"],
-        "description": "Image analysis"
+        "fallbacks": ["kimi-k2.5:cloud"],
+        "description": "Comprehensive research — best reasoning + 256K context"
     },
     "deep_research": {
         "preferred": "qwen3.5:397b-cloud",
-        "fallbacks": ["kimi-k2.5:cloud", "deepseek-v3.2:cloud"],
-        "description": "Multi-source deep research with page reading"
+        "fallbacks": ["kimi-k2.5:cloud"],
+        "description": "Multi-source deep research — best reasoning + 256K context"
+    },
+    "debug": {
+        "preferred": "chatgpt:gpt-5.4-thinking",
+        "fallbacks": ["minimax-m2.7:cloud"],
+        "description": "Debug/review — extended thinking for hard bugs"
+    },
+    "vision": {
+        "preferred": "kimi-k2.5:cloud",
+        "fallbacks": ["chatgpt:gpt-5.4"],
+        "description": "Image analysis — best multimodal"
     },
     "swarm": {
-        "preferred": "qwen3.5:397b-cloud",
-        "fallbacks": ["kimi-k2.5:cloud", "minimax-m2.7:cloud"],
-        "description": "Multi-agent parallel collaboration"
-    }
+        "preferred": "minimax-m2.7:cloud",
+        "fallbacks": ["qwen3.5:397b-cloud"],
+        "description": "Multi-agent swarm — 1M context, self-evolving"
+    },
+    "artifact": {
+        "preferred": "kimi-k2.5:cloud",
+        "fallbacks": ["minimax-m2.5:cloud"],
+        "description": "UI components/artifacts — best for generating UI pieces"
+    },
+    "agent": {
+        "preferred": "kimi-k2.5:cloud",
+        "fallbacks": ["minimax-m2.7:cloud"],
+        "description": "Autonomous task execution"
+    },
 }
 
 
-def detect_action_mode(message: str) -> Optional[str]:
-    """Detect action mode from trigger words in message.
+# ---------------------------------------------------------------------------
+#  LLM-based intent classifier (cached client singleton)
+# ---------------------------------------------------------------------------
+_classifier_client = None
+_classifier_client_lock = threading.Lock()
 
-    Scans the message for trigger words and returns the corresponding action mode.
-    Trigger words can appear anywhere in the message (not just at the start).
+
+def _get_classifier_client():
+    """Get or create a cached Ollama cloud client for intent classification."""
+    global _classifier_client
+    if _classifier_client is None:
+        with _classifier_client_lock:
+            if _classifier_client is None:
+                try:
+                    import ollama
+                    api_key = os.getenv("OLLAMA_API_KEY", "")
+                    if api_key and not api_key.startswith("YOUR_"):
+                        _classifier_client = ollama.Client(
+                            host="https://api.ollama.com",
+                            headers={"Authorization": f"Bearer {api_key}"}
+                        )
+                        logger.info("[ActionMode] LLM classifier client initialized")
+                    else:
+                        logger.debug("[ActionMode] No OLLAMA_API_KEY — LLM classifier unavailable")
+                except Exception as e:
+                    logger.warning(f"[ActionMode] Failed to create classifier client: {e}")
+    return _classifier_client
+
+
+_CLASSIFICATION_PROMPT = """Classify this user request into ONE category. Reply with ONLY the category name, nothing else.
+
+Categories:
+- frontend: Building websites, web pages, landing pages, dashboards, UI components, React/HTML/CSS
+- code: Backend code, APIs, databases, scripts, algorithms, non-UI programming
+- debug: Fixing bugs, errors, debugging, code review
+- search: Looking up information online, web search
+- deep_research: Extensive multi-source research, thorough investigation
+- research: Deep analysis, comprehensive research, investigation
+- vision: Analyzing images, screenshots, visual content
+- rapid: Quick prototyping, scaffolding, fast iteration
+- swarm: Multi-agent collaborative tasks, team research
+- agent: Autonomous multi-step task execution, automation
+- artifact: Generating standalone UI components or widgets
+- general: Conversation, questions, explanations, greetings, anything else
+
+User request: "{message}"
+
+Category:"""
+
+_VALID_MODES = {"frontend", "code", "debug", "search", "research", "deep_research",
+                "vision", "rapid", "swarm", "agent", "artifact"}
+
+
+def detect_action_mode(message: str) -> Optional[str]:
+    """Classify user intent using a fast LLM call (~100 tokens, <1s).
+
+    Uses nemotron-3-super (fastest cloud model, ~415 tok/s) for classification.
+    Falls back to keyword matching if LLM classification fails.
 
     Returns:
-        'search', 'research', 'agent', 'code', 'vision', or None
+        'frontend', 'rapid', 'artifact', 'debug', 'search', 'research',
+        'agent', 'code', 'vision', 'deep_research', 'swarm', or None
     """
+    # Quick skip for very short messages (greetings, etc.)
+    if len(message.split()) < 4:
+        return None
+
+    # Try LLM classification first
+    client = _get_classifier_client()
+    if client is None:
+        return _keyword_fallback(message)
+
+    try:
+        import concurrent.futures
+
+        prompt = _CLASSIFICATION_PROMPT.format(message=message[:200])
+
+        def _classify():
+            return client.chat(
+                model="nemotron-3-super:cloud",
+                messages=[{"role": "user", "content": prompt}],
+                options={"temperature": 0, "num_predict": 10},
+            )
+
+        # 5-second timeout — if the model is slow, fall back to keywords
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(_classify)
+            resp = future.result(timeout=5)
+
+        raw = resp.get("message", {}).get("content", "").strip().lower()
+        # Take first word only (model might add explanation)
+        category = raw.split()[0].rstrip(".,;:") if raw else ""
+
+        if category in _VALID_MODES:
+            logger.info(f"[ActionMode] LLM classified as: {category}")
+            return category
+
+        # "general" or unrecognised → no special routing
+        logger.info(f"[ActionMode] LLM returned '{category}' -> no special mode")
+        return None
+
+    except Exception as e:
+        logger.warning(f"[ActionMode] LLM classification failed: {e}, using keyword fallback")
+        return _keyword_fallback(message)
+
+
+def _keyword_fallback(message: str) -> Optional[str]:
+    """Fallback keyword-based detection when LLM classifier is unavailable."""
     msg_lower = message.lower().strip()
 
     # Check for trigger words (longer phrases first to avoid partial matches)
-    # Sort by length descending so "search online" matches before "search"
     sorted_triggers = sorted(ACTION_TRIGGERS.keys(), key=len, reverse=True)
 
     for trigger in sorted_triggers:
         if trigger in msg_lower:
             mode = ACTION_TRIGGERS[trigger]
-            logger.info(f"[ActionMode] Trigger '{trigger}' detected -> mode: {mode}")
+            logger.info(f"[ActionMode] Keyword fallback '{trigger}' -> mode: {mode}")
             return mode
 
     return None
@@ -374,6 +544,14 @@ class AgentService:
                 except Exception as e:
                     logger.warning(f"[AgentService] Inner Thoughts Engine failed to start: {e}")
 
+                # Initialize ConversationManager for cross-surface sync (Phase 2)
+                try:
+                    manager = get_conversation_manager()
+                    manager.initialize(self._agent.brain)
+                    logger.info("[AgentService] ConversationManager initialized")
+                except Exception as e:
+                    logger.warning(f"[AgentService] ConversationManager init failed: {e}")
+
     @property
     def agent(self) -> ApprenticeAgent:
         """Get the agent instance, initializing if needed."""
@@ -459,11 +637,54 @@ class AgentService:
                 self.agent.brain.set_model_override(effective_model)
                 logger.info(f"[AgentService] Using model: {effective_model}")
 
+            # Set action mode for context-aware prompt injection (design system, etc.)
+            self.agent.brain.set_action_mode(detected_action)
+
             # Get references we need (agent is thread-safe for reads)
             agent = self.agent
         # ===== END SETUP — Lock released, LLM calls proceed without blocking =====
 
         try:
+            # ===== FRONTEND VISUAL FEEDBACK HANDLER =====
+            if detected_action == "frontend":
+                logger.info(f"[AgentService] Frontend visual feedback for: {message[:50]}...")
+                _record_thought("creating", "visual feedback loop — generate, render, screenshot, iterate", 0.8, "service")
+
+                try:
+                    from aura.tools.visual_feedback import VisualFeedbackLoop
+                    vfl = VisualFeedbackLoop(brain=agent.brain)
+                    result = vfl.generate_with_feedback(message, max_iterations=2)
+
+                    # Build response with code + iteration info
+                    parts = []
+                    if result.get("improvements"):
+                        parts.append(f"**Visual Feedback Loop** completed {result['iterations']} iteration(s) using `{result.get('model_used', 'auto')}`:")
+                        for imp in result["improvements"]:
+                            parts.append(f"- {imp}")
+                        parts.append("")
+
+                    code = result.get("code", "")
+                    parts.append(f"```html\n{code}\n```")
+
+                    if result.get("screenshot_path"):
+                        parts.append(f"\n*Screenshot: `{result['screenshot_path']}`*")
+
+                    response = "\n".join(parts)
+
+                    return {
+                        "response": response,
+                        "fast_path": False,
+                        "mood": self._get_mood(),
+                        "model_used": result.get("model_used", effective_model or "visual_feedback"),
+                        "screenshot_base64": result.get("screenshot_base64"),
+                        "screenshot_path": result.get("screenshot_path"),
+                    }
+
+                except Exception as e:
+                    logger.error(f"[AgentService] Visual feedback error: {e}", exc_info=True)
+                    _record_thought("observing", f"visual feedback failed, falling back: {e}", 0.5, "service")
+                    # Fall through to normal chat if visual feedback fails
+
             # ===== SWARM MODE HANDLER (via MultiAgentOrchestrator) =====
             if detected_action == "swarm":
                 logger.info(f"[AgentService] Multi-agent mode for: {message[:50]}...")
@@ -611,6 +832,16 @@ Provide key findings and cite sources."""
             except Exception as _ts_err:
                 logger.debug(f"[TruthSpine] Classification error: {_ts_err}")
 
+            # Track messages in ConversationManager for cross-surface sync
+            try:
+                conv_manager = get_conversation_manager()
+                conv_id = conv_manager.get_current_conversation_id()
+                if conv_id:
+                    conv_manager.on_message_added(conv_id, "user", message, surface="web", surface_user="web_default")
+                    conv_manager.on_message_added(conv_id, "assistant", response, surface="web", surface_user="web_default")
+            except Exception:
+                logger.debug("chat_conv_manager_tracking_failed", exc_info=True)
+
             return {
                 "response": response,
                 "fast_path": self._was_fast_path(message),
@@ -618,9 +849,10 @@ Provide key findings and cite sources."""
                 "model_used": agent.brain.get_last_model_used()
             }
         finally:
-            # Clear model override after request
+            # Clear model override and action mode after request
             if effective_model:
                 agent.brain.set_model_override(None)
+            agent.brain.set_action_mode(None)
 
     def chat_stream(self, message: str, model_override: Optional[str] = None, action_mode: Optional[str] = None):
         """Stream a chat response from the agent.
@@ -653,6 +885,9 @@ Provide key findings and cite sources."""
             self.agent.brain.set_model_override(effective_model)
             if effective_model:
                 logger.info(f"[AgentService] Streaming with model: {effective_model}")
+
+            # Set action mode for context-aware prompt injection (design system, etc.)
+            self.agent.brain.set_action_mode(detected_action)
 
             # Get references we need (agent is thread-safe for reads)
             agent = self.agent
@@ -695,6 +930,23 @@ Provide key findings and cite sources."""
                     yield {"type": "chunk", "content": crypto_response}
                     yield {"type": "done", "mood": self._get_mood(), "model_used": "direct_crypto"}
                     return
+
+            # ===== FRONTEND VISUAL FEEDBACK HANDLER (streaming) =====
+            if detected_action == "frontend":
+                logger.info(f"[AgentService] Frontend visual feedback (stream) for: {message[:50]}...")
+                try:
+                    from aura.tools.visual_feedback import VisualFeedbackLoop
+                    vfl = VisualFeedbackLoop(brain=brain)
+
+                    for evt in vfl.generate_stream(message, max_iterations=2):
+                        yield evt
+
+                    yield {"type": "done", "mood": self._get_mood(), "model_used": effective_model or "visual_feedback"}
+                    return
+                except Exception as e:
+                    logger.error(f"[AgentService] Visual feedback stream error: {e}", exc_info=True)
+                    yield {"type": "chunk", "content": f"*Visual feedback loop failed ({e}), falling back to standard generation...*\n\n"}
+                    # Fall through to standard streaming
 
             # ===== DEEP RESEARCH HANDLER =====
             if detected_action == "deep_research":
@@ -912,18 +1164,42 @@ Provide a well-structured, informative summary with key findings and cite source
                     except Exception:
                         logger.debug("unified_memory_thread_start_failed", exc_info=True)
 
+                # Track messages in ConversationManager for cross-surface sync
+                try:
+                    conv_manager = get_conversation_manager()
+                    conv_id = conv_manager.get_current_conversation_id()
+                    if conv_id:
+                        _clean_user_msg = message.split("\n[Screen context:")[0].strip()
+                        conv_manager.on_message_added(conv_id, "user", _clean_user_msg, surface="web", surface_user="web_default")
+                        conv_manager.on_message_added(conv_id, "assistant", full_response, surface="web", surface_user="web_default")
+                except Exception:
+                    logger.debug("stream_conv_manager_tracking_failed", exc_info=True)
+
                 yield {"type": "done", "mood": self._get_mood(), "model_used": brain.get_last_model_used()}
             else:
                 # Fallback to non-streaming
                 response = agent.chat(message, speak=False)
+
+                # Track messages in ConversationManager for cross-surface sync
+                try:
+                    conv_manager = get_conversation_manager()
+                    conv_id = conv_manager.get_current_conversation_id()
+                    if conv_id:
+                        conv_manager.on_message_added(conv_id, "user", message, surface="web", surface_user="web_default")
+                        conv_manager.on_message_added(conv_id, "assistant", response, surface="web", surface_user="web_default")
+                except Exception:
+                    logger.debug("stream_fallback_conv_manager_tracking_failed", exc_info=True)
+
                 yield {"type": "chunk", "content": response}
                 yield {"type": "done", "mood": self._get_mood(), "model_used": brain.get_last_model_used()}
 
         finally:
             # ===== TEARDOWN =====
-            # Clear model override after request (matches chat() behavior)
+            # Clear model override and action mode after request (matches chat() behavior)
             if effective_model and brain:
                 brain.set_model_override(None)
+            if brain:
+                brain.set_action_mode(None)
 
     def run(self, goal: str, context: Optional[Dict] = None,
             use_fastpath: Optional[bool] = None, max_iterations: int = 10) -> Dict[str, Any]:
@@ -1014,24 +1290,40 @@ Provide a well-structured, informative summary with key findings and cite source
     # =========================================================================
 
     def create_conversation(self, title: Optional[str] = None) -> Dict[str, Any]:
-        """Create a new conversation."""
+        """Create a new conversation via ConversationManager."""
         if self._agent is None:
             return {"error": "Agent not initialized"}
-        conv_id = self._agent.brain.create_conversation(title)
+        try:
+            manager = get_conversation_manager()
+            conv_id = manager.create_conversation(title, surface="web")
+        except Exception:
+            # Fallback to direct brain call if ConversationManager not ready
+            conv_id = self._agent.brain.create_conversation(title)
         return {"id": conv_id, "title": title or "New Chat", "messages": []}
 
     def list_conversations(self) -> list:
-        """List all conversations."""
+        """List all conversations via ConversationManager (includes surface activity)."""
         if self._agent is None:
             return []
-        return self._agent.brain.list_conversations()
+        try:
+            manager = get_conversation_manager()
+            return manager.list_conversations()
+        except Exception:
+            # Fallback to direct brain call if ConversationManager not ready
+            return self._agent.brain.list_conversations()
 
     def switch_conversation(self, conversation_id: str) -> Dict[str, Any]:
-        """Switch to a different conversation."""
+        """Switch to a different conversation via ConversationManager."""
         if self._agent is None:
             return {"error": "Agent not initialized"}
 
-        success = self._agent.brain.switch_conversation(conversation_id)
+        try:
+            manager = get_conversation_manager()
+            success = manager.switch_conversation(conversation_id, surface="web")
+        except Exception:
+            # Fallback to direct brain call if ConversationManager not ready
+            success = self._agent.brain.switch_conversation(conversation_id)
+
         if not success:
             return {"error": f"Conversation not found: {conversation_id}"}
 
@@ -1050,20 +1342,30 @@ Provide a well-structured, informative summary with key findings and cite source
         return {"id": conversation_id, "title": title, "messages": messages}
 
     def delete_conversation(self, conversation_id: str) -> Dict[str, Any]:
-        """Delete a conversation."""
+        """Delete a conversation via ConversationManager."""
         if self._agent is None:
             return {"success": False, "error": "Agent not initialized"}
-        success = self._agent.brain.delete_conversation(conversation_id)
+        try:
+            manager = get_conversation_manager()
+            success = manager.delete_conversation(conversation_id)
+        except Exception:
+            # Fallback to direct brain call if ConversationManager not ready
+            success = self._agent.brain.delete_conversation(conversation_id)
         return {
             "success": success,
             "new_active_id": self._agent.brain.get_current_conversation_id(),
         }
 
     def rename_conversation(self, conversation_id: str, title: str) -> bool:
-        """Rename a conversation."""
+        """Rename a conversation via ConversationManager."""
         if self._agent is None:
             return False
-        return self._agent.brain.rename_conversation(conversation_id, title)
+        try:
+            manager = get_conversation_manager()
+            return manager.rename_conversation(conversation_id, title)
+        except Exception:
+            # Fallback to direct brain call if ConversationManager not ready
+            return self._agent.brain.rename_conversation(conversation_id, title)
 
     def save_conversation_to_memory(self, conversation_id: Optional[str] = None) -> Dict[str, Any]:
         """Save a conversation to AURA's long-term memory."""

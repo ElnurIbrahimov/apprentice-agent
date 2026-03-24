@@ -9,7 +9,7 @@ import ext from './ext';
 // ---------------------------------------------------------------------------
 
 // Default to the Aura server. Override in Settings panel if running locally.
-const DEFAULT_HTTP = 'http://89.167.107.134';
+const DEFAULT_HTTP = 'https://aura-elnur.duckdns.org';
 const DEFAULT_API_KEY = 'i-L5ShpMkY2B7loNb8VS4EAAT-Ronh-K8cIgRILGjnQ';
 
 export let HTTP = DEFAULT_HTTP;

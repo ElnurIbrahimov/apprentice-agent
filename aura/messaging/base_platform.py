@@ -11,6 +11,7 @@ from enum import Enum
 import logging
 
 from .sanitizer import sanitize_outgoing
+from aura.core.conversation_manager import get_conversation_manager
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,21 @@ class BasePlatform(ABC):
         if not message.text:
             return None
 
+        # --- Cross-surface session setup (graceful degradation) ---
+        conv_id = None
+        manager = None
+        try:
+            manager = get_conversation_manager()
+            conv_id = manager.get_or_create_session(
+                self.platform_name,
+                message.user_id,
+                default_title=f"{self.platform_name.title()} - {message.display_name or message.username or message.user_id}"
+            )
+            # Switch brain to this conversation
+            manager.switch_conversation(conv_id, surface=self.platform_name)
+        except Exception as e:
+            logger.warning(f"[{self.platform_name}] ConvManager session error: {e}")
+
         # Process through AURA
         try:
             # Update user context in AURA
@@ -102,6 +118,17 @@ class BasePlatform(ABC):
 
             # Get response from AURA
             response = await self._process_with_aura(message.text, message.user_id)
+
+            # --- Record messages for cross-surface sync (graceful degradation) ---
+            try:
+                if manager and conv_id is None:
+                    conv_id = manager.get_bound_conversation(f"{self.platform_name}:{message.user_id}")
+                if manager and conv_id:
+                    manager.on_message_added(conv_id, "user", message.text or "", self.platform_name, message.user_id)
+                    if response:
+                        manager.on_message_added(conv_id, "assistant", response, self.platform_name, message.user_id)
+            except Exception as e:
+                logger.warning(f"[{self.platform_name}] ConvManager tracking error: {e}")
 
             return response
 

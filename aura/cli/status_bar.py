@@ -9,8 +9,18 @@ from aura.cli.context_bar import build_context_gauge
 from aura.cli.permissions_ui import get_mode_short
 
 
+_git_branch_cache: dict = {"branch": "", "time": 0.0}
+
+
 def _get_git_branch() -> str:
-    """Get current git branch name, or empty string if not in a git repo."""
+    """Get current git branch name, or empty string if not in a git repo.
+
+    Results are cached for 10 seconds to avoid spawning a subprocess on every render.
+    """
+    import time as _time
+    now = _time.time()
+    if now - _git_branch_cache["time"] < 10:
+        return _git_branch_cache["branch"]
     try:
         result = subprocess.run(
             ["git", "branch", "--show-current"],
@@ -18,10 +28,14 @@ def _get_git_branch() -> str:
             cwd=os.getcwd(),
         )
         if result.returncode == 0:
-            return result.stdout.strip()
+            branch = result.stdout.strip()
+        else:
+            branch = ""
     except Exception:
-        pass
-    return ""
+        branch = ""
+    _git_branch_cache["branch"] = branch
+    _git_branch_cache["time"] = now
+    return branch
 
 
 def build_status_bar(

@@ -102,24 +102,29 @@ async def chatgpt_set_token(body: ChatGPTTokenRequest):
 async def chatgpt_login_url():
     """Get the ChatGPT OAuth login URL (for browser-based login).
 
-    The actual login happens in the browser. Call GET /chatgpt/status
-    to check if auth completed.
+    Uses the server-side callback at /api/auth/chatgpt/callback so the OAuth
+    flow works even when the server is remote (no localhost needed).
     """
     try:
         from aura.auth.chatgpt_oauth import (
-            AUTHORIZE_URL, CLIENT_ID, REDIRECT_URI, SCOPE,
-            _generate_pkce, CALLBACK_PORT
+            AUTHORIZE_URL, CLIENT_ID, SCOPE,
+            _generate_pkce,
         )
         import secrets
         from urllib.parse import urlencode
+        import os
 
         verifier, challenge = _generate_pkce()
         state = secrets.token_hex(16)
 
+        # Use localhost callback (required by OpenAI's registered redirect URI)
+        from aura.auth.chatgpt_oauth import REDIRECT_URI, CALLBACK_PORT
+        redirect_uri = REDIRECT_URI
+
         params = {
             "response_type": "code",
             "client_id": CLIENT_ID,
-            "redirect_uri": REDIRECT_URI,
+            "redirect_uri": redirect_uri,
             "scope": SCOPE,
             "code_challenge": challenge,
             "code_challenge_method": "S256",
@@ -130,26 +135,126 @@ async def chatgpt_login_url():
         }
         url = f"{AUTHORIZE_URL}?{urlencode(params)}"
 
-        # Store verifier server-side keyed by state for the callback to use.
-        # SECURITY: Never return the PKCE verifier over the network — it must
-        # stay server-side. The callback handler retrieves it by state.
-        try:
-            from aura.auth.chatgpt_oauth import store_pkce_verifier
-            store_pkce_verifier(state, verifier)
-        except ImportError:
-            # Fallback: store in a module-level dict (single-process only)
-            _pkce_store_put(state, verifier)
+        # Store verifier + redirect_uri server-side keyed by state
+        _pkce_store_put(state, verifier)
+        # Also store redirect_uri for the token exchange
+        _pkce_redirect_store[state] = redirect_uri
 
         return {
             "url": url,
             "state": state,
-            "port": CALLBACK_PORT,
-            "instructions": "Open the URL in a browser. After login, the callback "
-                            f"server on port {CALLBACK_PORT} will capture the token.",
+            "instructions": "Open the URL in your browser. After login you'll be "
+                            "redirected back and authenticated automatically.",
         }
     except Exception as e:
         logging.getLogger(__name__).error("chatgpt login-url failed: %s", e, exc_info=True)
         return {"error": "Failed to generate login URL — check server logs"}
+
+
+# Store redirect_uri per state for callback exchange
+_pkce_redirect_store: dict[str, str] = {}
+
+
+@router.get("/chatgpt/callback")
+async def chatgpt_oauth_callback(code: str = "", state: str = "", error: str = ""):
+    """Server-side OAuth callback — exchanges code for tokens automatically."""
+    from fastapi.responses import HTMLResponse
+
+    if error:
+        return HTMLResponse(
+            f"<html><body style='font-family:system-ui;text-align:center;padding:60px'>"
+            f"<h1>Authentication Failed</h1><p>{error}</p>"
+            f"<p>Close this window and try again.</p></body></html>",
+            status_code=400,
+        )
+
+    if not code or not state:
+        return HTMLResponse(
+            "<html><body style='font-family:system-ui;text-align:center;padding:60px'>"
+            "<h1>Missing Parameters</h1><p>No authorization code received.</p>"
+            "</body></html>",
+            status_code=400,
+        )
+
+    # Retrieve stored PKCE verifier
+    verifier = _pkce_store_get(state)
+    if not verifier:
+        return HTMLResponse(
+            "<html><body style='font-family:system-ui;text-align:center;padding:60px'>"
+            "<h1>Session Expired</h1><p>OAuth state not found. Please try logging in again.</p>"
+            "</body></html>",
+            status_code=400,
+        )
+
+    redirect_uri = _pkce_redirect_store.pop(state, "")
+
+    # Exchange authorization code for tokens
+    try:
+        import requests as http_requests
+        from aura.auth.chatgpt_oauth import (
+            TOKEN_URL, CLIENT_ID, _save_tokens, _extract_account_id,
+        )
+
+        resp = http_requests.post(
+            TOKEN_URL,
+            data={
+                "grant_type": "authorization_code",
+                "client_id": CLIENT_ID,
+                "code": code,
+                "code_verifier": verifier,
+                "redirect_uri": redirect_uri,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=30,
+        )
+
+        if resp.status_code != 200:
+            logging.getLogger(__name__).error(
+                "ChatGPT token exchange failed: %s %s", resp.status_code, resp.text
+            )
+            return HTMLResponse(
+                f"<html><body style='font-family:system-ui;text-align:center;padding:60px'>"
+                f"<h1>Token Exchange Failed</h1><p>Status {resp.status_code}</p>"
+                f"</body></html>",
+                status_code=502,
+            )
+
+        data = resp.json()
+        access = data.get("access_token", "")
+        refresh = data.get("refresh_token", "")
+        expires_in = data.get("expires_in", 3600)
+
+        if not access:
+            return HTMLResponse(
+                "<html><body style='font-family:system-ui;text-align:center;padding:60px'>"
+                "<h1>No Access Token</h1><p>Response missing access token.</p>"
+                "</body></html>",
+                status_code=502,
+            )
+
+        import time
+        expires = int(time.time() * 1000) + expires_in * 1000
+        _save_tokens(access, refresh, expires)
+
+        account_id = _extract_account_id(access) or ""
+        display_id = (account_id[:8] + "...") if account_id else "unknown"
+
+        return HTMLResponse(
+            f"<html><body style='font-family:system-ui;text-align:center;padding:60px'>"
+            f"<h1>Authenticated!</h1>"
+            f"<p>Account: {display_id}</p>"
+            f"<p>ChatGPT models are now available in AURA.</p>"
+            f"<p>You can close this window.</p>"
+            f"</body></html>"
+        )
+
+    except Exception as e:
+        logging.getLogger(__name__).error("ChatGPT callback exchange failed: %s", e, exc_info=True)
+        return HTMLResponse(
+            f"<html><body style='font-family:system-ui;text-align:center;padding:60px'>"
+            f"<h1>Error</h1><p>{e}</p></body></html>",
+            status_code=500,
+        )
 
 
 @router.post("/chatgpt/logout", dependencies=[Depends(require_api_key)])

@@ -13,7 +13,7 @@ const ext: typeof chrome =
   typeof browser !== 'undefined' ? (browser as typeof chrome) : chrome;
 
 // Dynamic backend URL — reads from storage, falls back to localhost
-let BACKEND = 'http://localhost:8000';
+let BACKEND = 'https://aura-elnur.duckdns.org';
 let BACKEND_API_KEY = '';
 
 // Load saved backend URL and API key from extension storage

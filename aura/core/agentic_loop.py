@@ -20,7 +20,6 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from rich.console import Console
 from rich.text import Text
 
 from .tool_schemas import AGENTIC_TOOLS
@@ -30,7 +29,7 @@ from .token_manager import ContextWindowManager
 
 logger = logging.getLogger(__name__)
 
-console = Console()
+from aura.cli.display import console  # Use the SAME console as display.py
 
 MAX_ITERATIONS = 50
 MAX_TOOL_OUTPUT_CHARS = 15000
@@ -592,6 +591,9 @@ class AgenticLoop:
         self._has_test_failure = False
         self._last_tools_were_reads = True
 
+        # Action mode detected by intent classifier (set per run())
+        self._current_action_mode = None
+
         # Cancellation event for mid-loop abort (Ctrl+C)
         self._cancel_event = threading.Event()
 
@@ -652,10 +654,20 @@ class AgenticLoop:
         except OSError:
             pass
 
-        return AGENTIC_SYSTEM_PROMPT.format(
+        system_prompt = AGENTIC_SYSTEM_PROMPT.format(
             context=self.context or "(No project context loaded)",
             memories=memories or "(No relevant memories found)",
         )
+
+        # Inject design system for frontend tasks
+        try:
+            from aura.prompts.design_system import DESIGN_SYSTEM_PROMPT, DESIGN_SYSTEM_MODES
+            if self._current_action_mode in DESIGN_SYSTEM_MODES:
+                system_prompt += "\n\n" + DESIGN_SYSTEM_PROMPT
+        except ImportError:
+            pass
+
+        return system_prompt
 
     def plan_first(self, prompt: str) -> dict:
         """Generate a plan without executing anything. Returns plan dict.
@@ -718,6 +730,24 @@ class AgenticLoop:
         guard = get_guard(_session_id)
         guard.reset()
 
+        # ── Intent classification & model routing (same as web UI) ──
+        self._current_action_mode = None
+        _original_model_override = self.model_override  # preserve user-set override
+        try:
+            from api.services.agent_service import detect_action_mode, get_model_for_action
+            action_mode = detect_action_mode(prompt)
+            if action_mode:
+                self._current_action_mode = action_mode
+                logger.info(f"[AgenticLoop] Detected action mode: {action_mode}")
+                # Apply model routing only if user hasn't set a manual override
+                if not self.model_override:
+                    routed_model = get_model_for_action(action_mode)
+                    if routed_model:
+                        self.model_override = routed_model
+                        logger.info(f"[AgenticLoop] Model routed to: {routed_model}")
+        except Exception as e:
+            logger.debug(f"[AgenticLoop] Intent classification failed (non-fatal): {e}")
+
         system_prompt = self._build_system_prompt(prompt)
 
         messages = [
@@ -737,6 +767,40 @@ class AgenticLoop:
 
         final_response = ""
         model_used = ""
+
+        # ── Visual feedback loop for frontend mode ──
+        if self._current_action_mode == "frontend" and not getattr(self.brain, '_model_override', None):
+            try:
+                from aura.tools.visual_feedback import get_visual_feedback
+                vfl = get_visual_feedback(brain=self.brain)
+                if vfl:
+                    logger.info("[AgenticLoop] Frontend mode: trying visual feedback loop")
+                    result = vfl.generate_with_feedback(prompt)
+                    if result and result.get("code"):
+                        final_response = result["code"]
+                        model_used = result.get("model_used", "")
+                        # Store and return early — skip agentic loop
+                        self._conversation_history.append({"role": "user", "content": prompt})
+                        self._conversation_history.append({"role": "assistant", "content": final_response})
+                        if self.session:
+                            self.session.append({"role": "user", "content": prompt})
+                            self.session.append({"role": "assistant", "content": final_response})
+                            self.session.update_stats(iterations=1, tool_calls=0)
+                            self.session.save()
+                        try:
+                            _store_interaction(prompt, final_response)
+                        except Exception:
+                            pass
+                        self._current_action_mode = None
+                        return {
+                            "success": True,
+                            "response": final_response,
+                            "iterations": 1,
+                            "tool_calls": 0,
+                            "model": model_used,
+                        }
+            except Exception as e:
+                logger.warning(f"[AgenticLoop] Visual feedback failed, falling back to normal: {e}")
 
         while self.iteration < self.max_iterations:
             # ── Cancellation check: top of iteration ──
@@ -914,9 +978,13 @@ class AgenticLoop:
                 self.tool_calls_total += 1
                 if not self.permissions.check(tool_name, args):
                     approved.append((tool_name, args, json.dumps({"error": "Permission denied by user"})))
-                    self._show_tool_status(tool_name, args, denied=True)
+                    # Only show tool status here when there's no external on_tool_call callback
+                    # (the callback in chat_loop already handles display, so this avoids double display)
+                    if not on_tool_call:
+                        self._show_tool_status(tool_name, args, denied=True)
                 else:
-                    self._show_tool_status(tool_name, args)
+                    if not on_tool_call:
+                        self._show_tool_status(tool_name, args)
                     approved.append((tool_name, args, None))  # None = needs execution
 
             # ── Cancellation check: before tool execution ──
@@ -1000,6 +1068,10 @@ class AgenticLoop:
             if self.session:
                 self.session.append({"role": "assistant", "content": final_response})
 
+        # Keep history bounded (last 100 messages, only 40 sent to LLM anyway)
+        if len(self._conversation_history) > 100:
+            self._conversation_history = self._conversation_history[-100:]
+
         # Update session stats and save
         if self.session:
             self.session.update_stats(
@@ -1015,6 +1087,10 @@ class AgenticLoop:
             logger.debug(f"[AgenticLoop] non-critical: {e}")
         # Determine success via explicit flag rather than string prefix matching.
         # The loop sets _loop_error when it hits a real failure (LLM error, budget, guard trip).
+        # Clean up action mode state and restore original model override
+        self._current_action_mode = None
+        self.model_override = _original_model_override
+
         hit_error = getattr(self, '_loop_error', False)
         return {
             "success": not hit_error,

@@ -58,12 +58,21 @@ ROUTING_TABLE = {
         "balanced": "gpt-oss:120b-cloud",       # 5.1B active, fast, MMLU 90%
         "local": "nemotron-3-super:cloud",      # fast cloud fallback
     },
+    "frontend": {
+        "local": "kimi-k2.5:cloud",
+        "balanced": "kimi-k2.5:cloud",
+        "max": "kimi-k2.5:cloud",
+    },
 }
 
 VALID_TIERS = ("local", "balanced", "max")
 
 # Keyword patterns for task classification
 TASK_KEYWORDS = {
+    "frontend": {"landing page", "dashboard", "website", "webapp", "web app",
+                 "pricing page", "signup page", "login page", "settings page",
+                 "frontend", "user interface", "ui design", "react component",
+                 "tailwind"},
     "code_gen": {"implement", "create", "build", "add feature", "new file", "write a", "scaffold"},
     "small_edit": {"fix", "change", "rename", "update", "modify", "replace", "typo", "tweak"},
     "reasoning": {"explain", "why", "how does", "analyze", "review", "what is", "understand", "compare"},
@@ -74,10 +83,22 @@ TASK_KEYWORDS = {
 
 
 def classify_task(prompt: str) -> str:
-    """Classify a prompt into a task category using keyword matching."""
+    """Classify a prompt into a task category using keyword matching.
+
+    Frontend keywords are checked first so that prompts like
+    "build a landing page" route to "frontend" instead of "code_gen".
+    """
     prompt_lower = prompt.lower()
+
+    # Priority check: frontend keywords win over generic code_gen matches
+    frontend_kws = TASK_KEYWORDS.get("frontend", set())
+    if any(kw in prompt_lower for kw in frontend_kws):
+        return "frontend"
+
     scores = {}
     for category, keywords in TASK_KEYWORDS.items():
+        if category == "frontend":
+            continue  # already handled above
         score = sum(1 for kw in keywords if kw in prompt_lower)
         if score > 0:
             scores[category] = score

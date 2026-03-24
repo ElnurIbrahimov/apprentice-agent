@@ -367,6 +367,59 @@ class DocumentGeneratorTool:
             return {"success": False, "error": str(e)}
 
     # ------------------------------------------------------------------ #
+    # Simple docx from text
+    # ------------------------------------------------------------------ #
+
+    def create_docx(self, text: str, output_path: str) -> Dict:
+        """Create a simple Word document from text with basic markdown formatting.
+
+        Args:
+            text: Body text (supports # headings and - bullet points)
+            output_path: Where to save the .docx file
+        """
+        if not DOCX_AVAILABLE:
+            return {"success": False, "error": "python-docx not installed. Run: pip install python-docx"}
+
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            doc = Document()
+            doc.add_heading("AURA Document", level=0)
+
+            for line in text.splitlines():
+                stripped = line.strip()
+                if not stripped:
+                    continue
+
+                # Headings
+                h_match = re.match(r"^(#{1,6})\s+(.+)", stripped)
+                if h_match:
+                    level = min(len(h_match.group(1)), 4)
+                    doc.add_heading(h_match.group(2).strip(), level=level)
+                    continue
+
+                # Bullet points
+                li_match = re.match(r"^[-*+]\s+(.+)", stripped)
+                if li_match:
+                    doc.add_paragraph(li_match.group(1), style="List Bullet")
+                    continue
+
+                # Regular paragraph
+                doc.add_paragraph(stripped)
+
+            doc.save(str(out))
+            return {
+                "success": True,
+                "format": "docx",
+                "path": str(out),
+                "size_kb": round(out.stat().st_size / 1024, 1),
+            }
+        except Exception as e:
+            logger.error(f"[DocGen] create_docx failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    # ------------------------------------------------------------------ #
     # Convenience wrappers
     # ------------------------------------------------------------------ #
 

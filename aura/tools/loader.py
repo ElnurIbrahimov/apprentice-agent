@@ -168,6 +168,18 @@ _TOOL_KEYWORDS = frozenset([
     # --- Tool: load_skill (progressive skill loading) ---
     'load skill', 'get skill', 'skill procedure', 'skill details',
     'show skill', 'use skill',
+
+    # --- Tool: visual_feedback ---
+    'render', 'screenshot', 'preview', 'visual', 'feedback', 'iterate',
+
+    # --- Tool: component_registry ---
+    'component', 'template', 'hero', 'pricing', 'table', 'form', 'sidebar', 'ui',
+
+    # --- Tool: deploy ---
+    'deploy', 'vercel', 'netlify', 'github pages', 'publish site',
+
+    # --- Tool: scaffold ---
+    'scaffold', 'boilerplate', 'project template', 'generate project',
 ])
 
 # Pre-compiled combined regex for _TOOL_KEYWORDS (avoids re-compiling ~150 patterns per message)
@@ -341,6 +353,14 @@ def load_heavy_tools(tools: dict, brain=None) -> None:
                                 _make_loader("aura.tools.screen_reader", "ScreenReaderTool")),
         ("email",               "Read and send emails via IMAP/SMTP or Gmail API.",
                                 _make_loader("aura.tools.email_tool", "EmailTool")),
+        ("visual_feedback",     "Render UI code in headless browser, screenshot, iterate for quality.",
+                                _make_loader("aura.tools.visual_feedback", "VisualFeedbackLoop")),
+        ("component_registry",  "Fetch production-ready UI component templates (hero, pricing, table, etc.).",
+                                _make_loader("aura.tools.component_registry", "ComponentRegistryTool")),
+        ("deploy",              "Deploy projects to Vercel, Netlify, or GitHub Pages.",
+                                _make_loader("aura.tools.deploy_tool", "DeployTool")),
+        ("scaffold",            "Generate project templates and boilerplate.",
+                                _make_loader("aura.tools.scaffold", "ScaffoldTool")),
     ]
 
     for name, description, loader in _deferred_defs:

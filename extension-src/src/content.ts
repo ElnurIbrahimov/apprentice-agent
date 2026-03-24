@@ -4607,7 +4607,7 @@ function safeSend(msg: OutboundMessage, cb?: (response: any) => void): void {
 
   // ── Google SERP AI Answer Card ───────────────────────────────────────────
 
-  let SERP_BACKEND = 'http://89.167.107.134';
+  let SERP_BACKEND = 'https://aura-elnur.duckdns.org';
   let SERP_API_KEY = '';
 
   /** Read backend URL and API key from chrome.storage.local (same source as sidebar). */

@@ -204,14 +204,14 @@ OpenClaw lets the agent write/update its own skills. Aura has GEPA for evolution
 
 ## Priority Order
 
-| Phase | Effort | Impact | When |
+| Phase | Effort | Impact | Status |
 |---|---|---|---|
-| Phase 2: Cross-surface sync | High | Very High | Next major sprint |
-| Phase 3: CLI bridge | Medium | High | After sync |
-| Phase 4: Webhooks + scheduled tasks | Medium | High | Can be parallel |
+| Phase 2: Cross-surface sync | High | Very High | **DONE** (March 24, 2026) |
+| Phase 3: CLI bridge | Medium | High | **DONE** (March 24, 2026) |
+| Phase 4: Webhooks + scheduled tasks | Medium | High | **DONE** (March 24, 2026) |
+| Phase 4: Self-modifying skills from chat | Low | Medium | **DONE** (March 24, 2026) |
 | Phase 1: Discord + Slack channels | Medium | Medium | When needed |
-| Phase 4: Self-modifying skills from chat | Low | Medium | Quick win |
-| Phase 5: Platform-specific features | Varies | Nice-to-have | Later |
+| Phase 5: Platform-specific features | Varies | Nice-to-have | **DONE** (March 24, 2026) |
 
 ---
 
@@ -220,7 +220,7 @@ OpenClaw lets the agent write/update its own skills. Aura has GEPA for evolution
 | Feature | Aura | OpenClaw | Claude Code Channels |
 |---|---|---|---|
 | Channels | 2 (Telegram, WhatsApp) | 20+ | 2 (Telegram, Discord) |
-| Local tool access from chat | Server-side only | Yes (local gateway) | Yes (MCP plugin) |
+| Local tool access from chat | **Yes (--channels bridge)** | Yes (local gateway) | Yes (MCP plugin) |
 | Memory | Deep (UnifiedMemory + KG + FadeMem) | Basic persistence | Session-only |
 | Emotions/personality | Full ALMA + OCEAN | None | None |
 | Reasoning depth | MCTS + Strategy Bandit + multi-agent | Basic LLM | Claude's built-in |
@@ -228,7 +228,7 @@ OpenClaw lets the agent write/update its own skills. Aura has GEPA for evolution
 | Research | Deep research with citations + progress | Basic web search | Claude's built-in |
 | Vision from chat | Photo → vision model | No | No (text only) |
 | Code from chat | /code with sandbox + plots | Shell execution | Full Claude Code |
-| Cross-surface sync | Not yet (Phase 2) | Single gateway hub | Cowork + Dispatch |
+| Cross-surface sync | **ConversationManager + WebSocket broadcast** | Single gateway hub | Cowork + Dispatch |
 | Marketplace | GitHub plugin registry | ClawHub (50+ skills) | Claude plugins |
 | Price | Free (self-hosted) | Free (self-hosted) | Pro/Max subscription |
 
@@ -238,4 +238,24 @@ OpenClaw lets the agent write/update its own skills. Aura has GEPA for evolution
 ---
 
 *Last updated: March 24, 2026*
-*Session: DeerFlow/Perplexity comparison → extension audit → Telegram upgrade → roadmap*
+*Session: Phase 2 (cross-surface sync) + Phase 3 (CLI bridge) implemented*
+
+---
+
+## What Was Built (March 24, 2026)
+
+### Phase 2: Cross-Surface Conversation Sync
+- **ConversationManager** (`aura/core/conversation_manager.py`) — singleton, surface bindings, message attribution, event broadcast
+- **Surface tagging** — every message records which surface sent it (web, telegram, cli, extension)
+- **Telegram /session commands** — `/session new|list|<id>|sync` for conversation management
+- **WebSocket broadcast** — `conv_sync` events pushed to all connected clients in real-time
+- **API endpoints** — `GET /sync/status`, `GET /conversations/:id/messages` with surface attribution
+- **Cross-surface forwarding** — messages from one surface can forward to others bound to the same conversation
+
+### Phase 3: CLI Bridge
+- **ChannelBridge** (`aura/channels/channel_bridge.py`) — thread-safe message queue, background event loop, adapter management
+- **TelegramChannel** (`aura/channels/telegram_channel.py`) — lightweight relay that queues messages for CLI agent
+- **ExtensionChannel** (`aura/channels/extension_channel.py`) — WebSocket server on localhost:9828
+- **Channel display** (`aura/channels/display.py`) — Rich terminal rendering with channel panels and notifications
+- **CLI integration** — `aura --channels telegram extension`, `/channels` command, messages drain between interactions
+- **Key feature**: Telegram/extension gets access to LOCAL tools (filesystem, git, code execution on your machine)

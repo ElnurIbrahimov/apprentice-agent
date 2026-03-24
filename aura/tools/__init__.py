@@ -591,6 +591,25 @@ except Exception as _e:
     get_feed_tool = None
     _safe_import_error("ExtensionFeedTool/get_feed_tool", _e)
 
+# ---------------------------------------------------------------------------
+#  Visual Feedback Loop (headless render + screenshot iteration)
+# ---------------------------------------------------------------------------
+try:
+    from .visual_feedback import VisualFeedbackLoop, get_visual_feedback
+except Exception as _e:
+    VisualFeedbackLoop = None
+    get_visual_feedback = None
+    _safe_import_error("VisualFeedbackLoop/get_visual_feedback", _e)
+
+# ---------------------------------------------------------------------------
+#  Component Registry (on-demand UI component templates)
+# ---------------------------------------------------------------------------
+try:
+    from .component_registry import ComponentRegistryTool
+except Exception as _e:
+    ComponentRegistryTool = None
+    _safe_import_error("ComponentRegistryTool", _e)
+
 
 # ---------------------------------------------------------------------------
 #  __all__ — only export symbols that actually imported successfully
@@ -727,6 +746,11 @@ _ALL_SYMBOLS = [
     "deferred_registry",
     # Load Skill
     "LoadSkillTool",
+    # Visual Feedback Loop
+    "VisualFeedbackLoop",
+    "get_visual_feedback",
+    # Component Registry
+    "ComponentRegistryTool",
 ]
 
 # Filter out symbols that failed to import (are None) — but keep

@@ -3950,7 +3950,7 @@ ${description}
         return void 0;
       }
     );
-    let SERP_BACKEND = "http://89.167.107.134";
+    let SERP_BACKEND = "https://aura-elnur.duckdns.org";
     let SERP_API_KEY = "";
     function loadSerpConfig() {
       return new Promise((resolve) => {

@@ -2,7 +2,6 @@ import { useEffect, useState, useCallback } from 'react';
 import { useChatStore } from '../store/chatStore';
 import { usePolling } from '../hooks/usePolling';
 import { EmotionPanel } from './EmotionPanel';
-import { SettingsModal } from './SettingsModal';
 import { AuraBreathingAvatar, AuraStatusLine } from './AuraBreathingAvatar';
 import { SystemStatsPanel } from './SystemStatsPanel';
 import { ConversationList } from './ConversationList';
@@ -24,7 +23,6 @@ interface SidebarProps {
 }
 
 export function Sidebar({ onClose }: SidebarProps) {
-  const [showSettings, setShowSettings] = useState(false);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [modelFilter, setModelFilter] = useState('');
 
@@ -40,12 +38,6 @@ export function Sidebar({ onClose }: SidebarProps) {
   } = useChatStore();
 
   // Keyboard shortcut: Ctrl+/ toggle settings
-  useEffect(() => {
-    const handler = () => setShowSettings(prev => !prev);
-    document.addEventListener('aura:toggle-settings', handler);
-    return () => document.removeEventListener('aura:toggle-settings', handler);
-  }, []);
-
   // Poll status only (10s - lightweight, just /api/status)
   const fetchStatus = useCallback(async () => {
     try {
@@ -68,7 +60,7 @@ export function Sidebar({ onClose }: SidebarProps) {
         const response = await fetch('/api/models');
         if (response.ok) {
           const data = await response.json();
-          const allModels = [...(data.chatgpt_models || []), ...(data.cloud_models || []), ...(data.local_models || [])];
+          const allModels = [...(data.chatgpt_models || []), ...(data.direct_api_models || []), ...(data.cloud_models || []), ...(data.local_models || [])];
           if (!cancelled) setAvailableModels(allModels);
         } else if (attempt < 1) {
           setTimeout(() => { if (!cancelled) fetchModels(attempt + 1); }, 3000);
@@ -198,8 +190,10 @@ export function Sidebar({ onClose }: SidebarProps) {
                         ? availableModels.filter(m => m.toLowerCase().includes(modelFilter))
                         : availableModels;
                       const chatgptModels = filtered.filter(m => m.startsWith('chatgpt:'));
-                      const cloudModels = filtered.filter(m => !m.startsWith('chatgpt:') && (m.includes(':cloud') || m.includes('-cloud')));
-                      const localModels = filtered.filter(m => !m.startsWith('chatgpt:') && !m.includes(':cloud') && !m.includes('-cloud'));
+                      const apiProviders = ['anthropic:', 'openai:', 'gemini:', 'grok:', 'perplexity:', 'deepseek:', 'minimax:', 'qwen:', 'kimi:', 'glm:'];
+                      const apiModels = filtered.filter(m => !m.startsWith('chatgpt:') && apiProviders.some(p => m.startsWith(p)));
+                      const cloudModels = filtered.filter(m => !m.startsWith('chatgpt:') && !apiProviders.some(p => m.startsWith(p)) && (m.includes(':cloud') || m.includes('-cloud')));
+                      const localModels = filtered.filter(m => !m.startsWith('chatgpt:') && !apiProviders.some(p => m.startsWith(p)) && !m.includes(':cloud') && !m.includes('-cloud'));
                       return (
                         <>
                           {'auto'.includes(modelFilter) && (
@@ -232,6 +226,26 @@ export function Sidebar({ onClose }: SidebarProps) {
                                   }`}
                                 >
                                   🟢 {model.replace('chatgpt:', '')}
+                                </button>
+                              ))}
+                            </>
+                          )}
+
+                          {/* API Provider models */}
+                          {apiModels.length > 0 && (
+                            <>
+                              <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-pink-400/70 font-semibold bg-pink-500/5 border-t border-chat-border/30">
+                                API Providers
+                              </div>
+                              {apiModels.map((model) => (
+                                <button
+                                  key={model}
+                                  onClick={() => { setSelectedModel(model); setShowModelDropdown(false); setModelFilter(''); }}
+                                  className={`w-full text-left px-3 py-1.5 text-xs hover:bg-chat-assistant/50 transition-colors truncate ${
+                                    selectedModel === model ? 'bg-purple-600/20 text-purple-400' : 'text-chat-text'
+                                  }`}
+                                >
+                                  🔑 {model}
                                 </button>
                               ))}
                             </>
@@ -312,7 +326,10 @@ export function Sidebar({ onClose }: SidebarProps) {
         {/* Footer actions */}
         <div className="p-4 border-t border-chat-border/50">
           <button
-            onClick={() => setShowSettings(true)}
+            onClick={() => {
+              // Navigate to Settings tab instead of opening modal
+              document.dispatchEvent(new CustomEvent('aura:switch-tab', { detail: 'settings' }));
+            }}
             className="w-full flex items-center gap-3 px-4 py-3 text-sm text-chat-text-secondary hover:text-chat-text hover:bg-chat-assistant/50 rounded-xl transition-all duration-200 group"
           >
             <Cog6ToothIcon className="w-5 h-5 transition-transform duration-200 group-hover:rotate-90" />
@@ -320,12 +337,6 @@ export function Sidebar({ onClose }: SidebarProps) {
           </button>
         </div>
       </div>
-
-      {/* Settings Modal */}
-      <SettingsModal
-        isOpen={showSettings}
-        onClose={() => setShowSettings(false)}
-      />
     </>
   );
 }

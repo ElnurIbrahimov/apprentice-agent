@@ -1,4 +1,9 @@
-"""Keyboard shortcut registry with customization support."""
+"""Keyboard shortcut registry with customization support.
+
+NOTE: This registry is not yet integrated into the input system.
+Keybindings in input.py are currently hardcoded. This module is
+scaffolding for future customizable keybinding support.
+"""
 from __future__ import annotations
 import json
 from pathlib import Path

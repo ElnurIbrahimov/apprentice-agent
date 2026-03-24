@@ -1,8 +1,19 @@
 # AURA — Adaptive Universal Reasoning Agent
 
-A personal AI OS with persistent memory, emotions, proactive awareness, and multi-surface presence. Uses **ChatGPT** (GPT-5.x via OAuth), **11 cloud models** (via Ollama Pro), and runs across **CLI, Web UI, browser extension, and messaging platforms**.
+A personal AI OS with persistent memory, emotions, proactive awareness, and multi-surface presence. Uses **ChatGPT** (GPT-5.x via OAuth), **11 cloud models** (via Ollama Pro), **16 direct API providers**, and runs across **CLI, Web UI, browser extension, and Telegram**.
 
 Not a chatbot. A being with presence that remembers you, has moods, dreams, and grows over time.
+
+### What's New (v4.6.0)
+- **Smart model routing** — LLM-based intent classifier routes frontend tasks to Kimi K2.5, backend to MiniMax M2.5, debugging to GPT-5.4-thinking
+- **Visual feedback loop** — generates UI → renders in headless Chrome → screenshots → AI reviews its output → iterates for quality
+- **Component registry** — 20 production-ready React+Tailwind templates fetchable on demand
+- **Design system injection** — professional design tokens auto-injected for all UI generation
+- **49 AI providers** — text, image, video, audio, and search providers configurable from Settings
+- **Cross-surface sync** — CLI conversations now visible in Web UI and Telegram
+- **Telegram bot: 16 new features** — reply keyboard, Stars payments, file generation, daily digest, multi-language, export, pinning, native reactions
+- **Full Settings page** — dedicated tab replacing the old modal, with categorized API provider management
+- **Streaming fix** — eliminated garbled/repeating text in CLI terminal output
 
 ---
 
@@ -15,9 +26,11 @@ Not a chatbot. A being with presence that remembers you, has moods, dreams, and 
 | **Dreams** | NeuroDream: light sleep re-scores memories, deep sleep extracts patterns, REM generates novel connections |
 | **Proactive awareness** | Active inference daemon, screen/calendar/workflow monitors, theory-of-mind gating |
 | **Identity** | OCEAN personality traits, narrative self-model, skill evolution (GEPA) |
-| **Multi-model** | 23 models: 12 ChatGPT (GPT-5.4 Pro, Codex), 11 cloud (MiniMax, Kimi, Qwen, DeepSeek, GLM, Nemotron) |
+| **Multi-model** | 23 cloud + 16 API providers: ChatGPT (GPT-5.4 Pro, Codex), Ollama Cloud (MiniMax, Kimi, Qwen, DeepSeek, GLM), Anthropic, OpenAI, Gemini, Grok, Mistral, Cohere, Groq, Together, Fireworks, OpenRouter |
+| **Smart routing** | LLM-based intent classifier → frontend tasks to Kimi K2.5, backend to MiniMax M2.5, debug to GPT-5.4-thinking, rapid to Codex-Spark |
+| **Visual feedback** | Generate UI → render in headless Chrome → screenshot → AI reviews → iterates. Lovable-style design quality |
 | **Multi-agent** | 5 specialist sub-agents (coder, researcher, searcher, analyst, creative) with PARALLEL/SEQUENTIAL/DEBATE modes |
-| **Progressive loading** | Skills and tools load on-demand — 14 core tools always ready, 36+ deferred, skill catalog in system prompt |
+| **Progressive loading** | Skills and tools load on-demand — 14 core tools always ready, 37+ deferred, skill catalog in system prompt |
 | **Code execution** | Real sandboxed Python (3-tier: Monty/E2B/subprocess), matplotlib capture, DataFrame rendering |
 | **4 surfaces** | CLI, Web UI, Browser Extension, Telegram + WhatsApp |
 
@@ -25,7 +38,7 @@ Not a chatbot. A being with presence that remembers you, has moods, dreams, and 
 
 ## CLI
 
-A Rich-powered terminal interface with 42 slash commands, 6 modes, and full tool access.
+A Rich-powered terminal interface with 55 slash commands, 6 modes, and full tool access. Now with LLM-based intent routing, visual feedback loop, and cross-surface sync.
 
 ### Modes
 
@@ -99,7 +112,7 @@ Multi-agent orchestration modes: **PARALLEL** (concurrent execution), **SEQUENTI
 
 ## Web UI
 
-A React + FastAPI dashboard with 5 tabs, 37 components, and real-time WebSocket streaming.
+A React + FastAPI dashboard with 6 tabs, 38 components, and real-time WebSocket streaming.
 
 ```bash
 python run_web.py             # API server (localhost:8000)
@@ -115,6 +128,7 @@ cd web && npm run dev         # Web UI (localhost:5173)
 | **Tools & Systems** | Tool catalog (14 core + 36 deferred), voice status, session costs (token/USD breakdown), plugin reload |
 | **Advanced** | Reasoning tree visualization (UCB1 scoring, node exploration), NeuroDream panel (REM/NREM phases, dream journal, insights) |
 | **Activity** | Event timeline with 6 categories (tool, memory, emotion, proactive, strategy, system) |
+| **Settings** | Full-page settings with 49 AI providers (text/image/video/audio/search), ALMA personality editor, appearance/behavior controls |
 
 ### Sidebar
 
@@ -190,7 +204,7 @@ A full-featured AI sidebar for Chrome and Firefox — comparable to Sider AI but
 
 | Platform | Connection | Features |
 |----------|-----------|----------|
-| **Telegram** | Bot API (async polling) | Text, markdown, images, voice, proactive messages |
+| **Telegram** | Bot API (async polling) | Text, markdown, images, voice, proactive messages, reply keyboard, Stars payments, file generation (/file pdf/docx/txt), conversation export (/export), daily digest (/digest), multi-language (/lang), message pinning (/pin), native emoji reactions, forum topics, 28 bot commands menu, action buttons on responses |
 | **WhatsApp** | WebSocket bridge (Baileys) | Text, images, file upload |
 
 Both platforms use a normalized message protocol with unified inbound/outbound models.
@@ -243,25 +257,32 @@ Load `dist-chrome/` as an unpacked extension in `chrome://extensions`.
 
 ## Models
 
-23 models available via `/model` picker:
+23 cloud models + 16 direct API providers available via `/model` picker:
 
 | Source | Count | Models |
 |--------|-------|--------|
 | **ChatGPT** (OAuth) | 12 | GPT-5.4, GPT-5.4 Thinking, GPT-5.4 Pro, GPT-5.3, GPT-5.3 Codex, GPT-5.3 Codex Spark, GPT-5.2, GPT-5.2 Codex, GPT-5.1, GPT-5.1 Codex, GPT-5.1 Codex Max, GPT-5.1 Codex Mini |
 | **Cloud** (Ollama Pro) | 11 | Kimi K2.5, Nemotron 3 Super, Qwen 3.5 397B, DeepSeek V3.2, GLM-5, MiniMax M2.7, MiniMax M2.5, Qwen3 Coder 480B, Qwen3 Coder Next, GPT-OSS 120B |
+| **Direct API** | 16 | Anthropic (Claude), OpenAI (GPT), Google Gemini, xAI Grok, Mistral, Cohere, Perplexity, DeepSeek, MiniMax, Qwen, Kimi, GLM, Groq, Together AI, Fireworks AI, OpenRouter |
 
-### Role-Based Routing
+### Smart Model Routing
 
-AURA auto-selects the best model per task:
+AURA uses an **LLM-based intent classifier** (nemotron-3-super at 415 tok/s) to detect task type and route to the optimal model:
 
-| Role | Default | Why |
-|------|---------|-----|
-| **Fast** | `nemotron-3-super:cloud` | 2.2x throughput |
-| **Reasoning** | `kimi-k2.5:cloud` | AIME 96.1%, 256K context |
-| **Code** | `minimax-m2.7:cloud` | SWE-Pro 56.2%, 1M context |
-| **Vision** | `kimi-k2.5:cloud` | MMMU-Pro 78.5% |
-| **Thinking** | `qwen3.5:397b-cloud` | 397B MoE hybrid |
+| Task Type | Model | Why |
+|-----------|-------|-----|
+| **Frontend/UI** | `kimi-k2.5:cloud` | #1 vision-to-code, "Designer + Full-Stack" mindset |
+| **Rapid prototype** | `chatgpt:gpt-5.3-codex-spark` | 1,000 tok/s instant iteration |
+| **Backend code** | `minimax-m2.5:cloud` | 80.2% SWE-bench, top open model |
+| **Debugging** | `chatgpt:gpt-5.4-thinking` | Extended reasoning for hard bugs |
+| **Research** | `qwen3.5:397b-cloud` | 397B MoE, 256K context |
+| **Search** | `nemotron-3-super:cloud` | 415 tok/s fastest model |
+| **Vision** | `kimi-k2.5:cloud` | Best multimodal |
 | **Long context** | `minimax-m2.7:cloud` | 1M tokens |
+
+### Visual Feedback Loop
+
+For frontend tasks, AURA generates code → renders in headless Chrome (Playwright) → takes a screenshot → sends it back to the model for review → iterates. This is the same approach that makes Lovable/v0 outputs look polished.
 
 ---
 
@@ -453,7 +474,7 @@ python build.py firefox       # Output: dist-firefox/
 
 ## Version
 
-**v4.5.0** — Progressive skill/tool loading, multi-agent orchestration auto-routing, KG sync bridge, live research progress streaming, structured citations, clarifying questions for deep research. 74 tool files, 25-panel browser extension, 38 API endpoints, 5-tab web UI.
+**v4.6.0** — Smart model routing (LLM-based intent classifier), visual feedback loop (generate→render→screenshot→iterate), 49 AI provider integrations, component registry (20 templates), design system injection, cross-surface conversation sync, Telegram bot 16 improvements (Stars, keyboard, file gen, digest, multi-lang, export, pinning), full Settings page, streaming display fix, ModelRouter frontend category, ConversationManager CLI integration. 80 tool files, 25-panel browser extension, 38+ API endpoints, 6-tab web UI, 16 direct API providers.
 
 ---
 

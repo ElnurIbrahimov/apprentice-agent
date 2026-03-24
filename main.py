@@ -67,10 +67,12 @@ def main() -> None:
         nargs="*",
         help="One-shot agentic prompt (e.g., aura 'fix the login bug')"
     )
+    # --chat is accepted for explicitness but chat is already the default mode
+    # when no goal/prompt is provided. Kept for CLI discoverability.
     parser.add_argument(
         "--chat",
         action="store_true",
-        help="Start in interactive chat mode"
+        help="Start in interactive chat mode (default when no prompt given)"
     )
     parser.add_argument(
         "--max-iterations",
@@ -169,6 +171,12 @@ def main() -> None:
         "-v", "--verbose",
         action="store_true",
         help="Verbose mode: expand all tool output sections"
+    )
+    parser.add_argument(
+        "--channels", "-ch",
+        nargs="+",
+        default=[],
+        help="Enable channel bridges (telegram, extension)"
     )
 
     args = parser.parse_args()
@@ -327,6 +335,25 @@ def main() -> None:
             pipe.result({"response": response, "model": model_used})
         sys.exit(EXIT_SUCCESS if result.get("success", True) else EXIT_ERROR)
 
+    # Initialize channel bridge if --channels specified
+    bridge = None
+    if args.channels:
+        from aura.channels.channel_bridge import ChannelBridge
+        bridge = ChannelBridge()
+
+        for ch_name in args.channels:
+            if ch_name == 'telegram':
+                from aura.channels.telegram_channel import TelegramChannel
+                bridge.add_channel(TelegramChannel())
+            elif ch_name == 'extension':
+                from aura.channels.extension_channel import ExtensionChannel
+                bridge.add_channel(ExtensionChannel())
+            else:
+                print(f"Unknown channel: {ch_name}")
+                sys.exit(1)
+
+        bridge.start()
+
     if args.voice:
         from aura.cli.voice_mode import run_voice_mode
         run_voice_mode(agent, enable_barge_in=not args.no_barge_in)
@@ -336,7 +363,7 @@ def main() -> None:
         run_agentic_oneshot(agent, prompt, args)
     else:
         from aura.cli.chat_loop import run_chat_mode
-        run_chat_mode(agent, speak=args.speak, trust=args.trust, model=args.model, verbose=args.verbose, tier=args.tier)
+        run_chat_mode(agent, speak=args.speak, trust=args.trust, model=args.model, verbose=args.verbose, tier=args.tier, bridge=bridge)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,10 @@
 """prompt_toolkit-based input for AURA CLI — styled prompt, keybindings, completions.
 
 Falls back to plain input() when prompt_toolkit can't attach to the console.
+
+NOTE: Keybindings below are hardcoded. See keybindings.py for a
+KeybindingsRegistry that will eventually replace these with
+user-customizable shortcuts loaded from ~/.aura/keybindings.json.
 """
 
 from pathlib import Path
@@ -73,6 +77,7 @@ SLASH_COMMANDS = [
     ("/checkout", "Switch to a conversation branch"),
     ("/merge", "Merge branch back to parent"),
     ("/chain", "Run prompt pipelines (step1 -> step2 -> ...)"),
+    ("/channels", "Show active channel bridges and status"),
 ]
 
 # Subcommand completions for commands that accept them
@@ -247,33 +252,27 @@ def create_session():
 
         @kb.add('c-l')
         def _clear(event):
-            event.app.current_buffer.text = SIGNAL_CLEAR_SCREEN
-            event.app.current_buffer.validate_and_handle()
+            event.app.exit(result=SIGNAL_CLEAR_SCREEN)
 
         @kb.add('c-n')
         def _new_session(event):
-            event.app.current_buffer.text = SIGNAL_NEW_SESSION
-            event.app.current_buffer.validate_and_handle()
+            event.app.exit(result=SIGNAL_NEW_SESSION)
 
         @kb.add('c-k')
         def _palette(event):
-            event.app.current_buffer.text = SIGNAL_COMMAND_PALETTE
-            event.app.current_buffer.validate_and_handle()
+            event.app.exit(result=SIGNAL_COMMAND_PALETTE)
 
         @kb.add('c-g')
         def _editor(event):
-            event.app.current_buffer.text = SIGNAL_OPEN_EDITOR
-            event.app.current_buffer.validate_and_handle()
+            event.app.exit(result=SIGNAL_OPEN_EDITOR)
 
         @kb.add('s-tab')
         def _cycle_perms(event):
-            event.app.current_buffer.text = SIGNAL_CYCLE_PERMS
-            event.app.current_buffer.validate_and_handle()
+            event.app.exit(result=SIGNAL_CYCLE_PERMS)
 
         @kb.add('c-z')
         def _rewind(event):
-            event.app.current_buffer.text = SIGNAL_REWIND
-            event.app.current_buffer.validate_and_handle()
+            event.app.exit(result=SIGNAL_REWIND)
 
         @kb.add('escape', 'enter')  # Alt+Enter inserts a newline
         def _newline(event):

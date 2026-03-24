@@ -19,7 +19,9 @@ import {
   WrenchScrewdriverIcon,
   CogIcon,
   ClockIcon,
+  Cog8ToothIcon,
 } from '@heroicons/react/24/outline';
+import { SettingsPage } from './components/SettingsPage';
 import type { TabId } from './types';
 
 const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
@@ -28,6 +30,7 @@ const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: 
   { id: 'tools', label: 'Tools', icon: WrenchScrewdriverIcon },
   { id: 'advanced', label: 'Advanced', icon: CogIcon },
   { id: 'activity', label: 'Activity', icon: ClockIcon },
+  { id: 'settings', label: 'Settings', icon: Cog8ToothIcon },
 ];
 
 function App() {
@@ -56,7 +59,7 @@ function App() {
       }
       if (e.ctrlKey && e.key === '/') {
         e.preventDefault();
-        document.dispatchEvent(new CustomEvent('aura:toggle-settings'));
+        setActiveTab('settings');
       }
       if (e.ctrlKey && e.key === 'k') {
         e.preventDefault();
@@ -65,6 +68,16 @@ function App() {
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Listen for tab switch events (from Sidebar gear button, etc.)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const tab = (e as CustomEvent).detail;
+      if (tab) setActiveTab(tab);
+    };
+    document.addEventListener('aura:switch-tab', handler);
+    return () => document.removeEventListener('aura:switch-tab', handler);
   }, []);
 
   // Detect mobile viewport
@@ -119,6 +132,13 @@ function App() {
         return (
           <div className="h-full overflow-hidden">
             <ActivityTimeline />
+          </div>
+        );
+
+      case 'settings':
+        return (
+          <div className="h-full overflow-hidden">
+            <SettingsPage />
           </div>
         );
 

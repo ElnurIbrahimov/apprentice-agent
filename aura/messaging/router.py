@@ -12,6 +12,7 @@ from typing import Dict, Optional, List
 
 from .config import load_config, MESSAGING_CONFIG
 from .base_platform import BasePlatform, OutgoingMessage
+from aura.core.conversation_manager import get_conversation_manager
 
 logger = logging.getLogger(__name__)
 
@@ -100,11 +101,72 @@ class MessageRouter:
             except Exception as e:
                 logger.error(f"Failed to start {name}: {e}")
 
+        # Register cross-surface conversation event listener
+        self._register_cross_surface_listener()
+
         # Start proactive message loop
         if MESSAGING_CONFIG.get("proactive_enabled", True):
             self._proactive_task = asyncio.create_task(self._proactive_loop())
 
         logger.info("Message Router started!")
+
+    def _register_cross_surface_listener(self):
+        """Register a listener to forward conversation events across surfaces."""
+        try:
+            manager = get_conversation_manager()
+            if not manager._initialized or manager._brain is None:
+                logger.debug("ConversationManager not fully initialized, skipping cross-surface listener")
+                return
+
+            router_ref = self  # capture for closure
+
+            async def _on_conversation_event(event):
+                """Forward cross-surface events to messaging platforms."""
+                if event.event_type != "message_added":
+                    return
+                if event.data.get("role") != "assistant":
+                    return
+
+                # Find all surfaces bound to this conversation
+                bound_surfaces = []
+                try:
+                    for surface_key, conv_id in manager._surface_bindings.items():
+                        if conv_id == event.conversation_id:
+                            bound_surfaces.append(surface_key)
+                except Exception:
+                    return
+
+                # Only forward if more than one surface is bound
+                if len(bound_surfaces) <= 1:
+                    return
+
+                for surface_key in bound_surfaces:
+                    try:
+                        platform_name, user_id = surface_key.split(":", 1)
+                    except ValueError:
+                        continue
+
+                    # Don't echo back to the originating surface
+                    if platform_name == event.surface:
+                        continue
+
+                    platform = router_ref.platforms.get(platform_name)
+                    if platform and platform.is_running:
+                        try:
+                            preview = event.data.get("preview", "")
+                            source = event.surface
+                            await platform.send_message(OutgoingMessage(
+                                chat_id=user_id,
+                                text=f"[From {source}] {preview[:500]}",
+                            ))
+                        except Exception as e:
+                            logger.warning(f"Cross-surface forward failed: {e}")
+
+            manager.register_async_listener(_on_conversation_event)
+            logger.info("Cross-surface conversation listener registered")
+
+        except Exception as e:
+            logger.debug(f"Could not register cross-surface listener: {e}")
 
     async def stop(self):
         """Stop all platforms"""
