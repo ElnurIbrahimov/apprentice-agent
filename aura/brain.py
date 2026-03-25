@@ -191,12 +191,17 @@ _BG_EXECUTOR = _bg_pool_fn()
 
 
 # --- Retry decorator for transient network/connection errors ---
-_RETRYABLE_ERRORS = (ConnectionError, TimeoutError, OSError)
+try:
+    import httpx as _httpx
+    _RETRYABLE_ERRORS = (ConnectionError, TimeoutError, OSError, _httpx.TimeoutException)
+except ImportError:
+    _RETRYABLE_ERRORS = (ConnectionError, TimeoutError, OSError)
 
+# 2 attempts max (not 3) — fail fast, let model fallback chain handle it
 _llm_retry = retry(
     retry=retry_if_exception_type(_RETRYABLE_ERRORS),
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=1, max=4),
+    stop=stop_after_attempt(2),
+    wait=wait_exponential(multiplier=1, min=1, max=3),
     before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
@@ -307,7 +312,10 @@ class OllamaBrain:
 
     def __init__(self, warmup: bool = True):
         # Local Ollama client (for local models)
-        self.client = ollama.Client(host=Config.OLLAMA_HOST)
+        # Explicit timeout prevents infinite hangs on unresponsive models
+        import httpx
+        _ollama_timeout = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.0)
+        self.client = ollama.Client(host=Config.OLLAMA_HOST, timeout=_ollama_timeout)
 
         # Check if local Ollama has useful models (not just embedding/OCR models)
         self._local_ollama_ok = False
@@ -327,9 +335,12 @@ class OllamaBrain:
         self._cloud_client = None
         api_key = os.getenv("OLLAMA_API_KEY")
         if api_key:
+            # Cloud models: 90s read timeout (cloud can be slower than local)
+            _cloud_timeout = httpx.Timeout(connect=10.0, read=90.0, write=10.0, pool=10.0)
             self._cloud_client = ollama.Client(
                 host=self.OLLAMA_CLOUD_HOST,
-                headers={"Authorization": f"Bearer {api_key}"}
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=_cloud_timeout,
             )
             logger.debug(f"[BRAIN] Ollama cloud client initialized")
         else:
@@ -1012,7 +1023,7 @@ class OllamaBrain:
             tool_calls = None
             input_tokens = 0
             output_tokens = 0
-            _STREAM_STALE_TIMEOUT = 90
+            _STREAM_STALE_TIMEOUT = 45  # 45s between chunks (was 90s — too slow)
             _last_chunk_time = time.time()
 
             for chunk in stream:
@@ -2586,7 +2597,7 @@ class OllamaBrain:
                 m for m in self._get_fallback_chain(actual_model) if m != actual_model
             ]
 
-            _STREAM_STALE_TIMEOUT = 90  # seconds without a chunk -> abort
+            _STREAM_STALE_TIMEOUT = 45  # seconds without a chunk -> abort (was 90)
 
             for _try_model in _models_to_try:
                 try:
