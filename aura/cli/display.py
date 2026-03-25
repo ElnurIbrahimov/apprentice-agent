@@ -214,10 +214,13 @@ def show_tool_call(
     result: Any = None,
     elapsed: float = 0.0,
     status: str = "success",
+    step: int = 0,
+    max_steps: int = 0,
 ) -> None:
-    """Print a tool call with status dot, icon, name, and elapsed time.
+    """Print a tool call with step counter, status dot, icon, name, and description.
 
-    Style inspired by Claude Code (● dot + bold name) and OpenCode (icons + compact).
+    Visual style: ┃ Step N · ● → tool_name description
+    Shows the workflow progress so user can see what's happening.
     """
     colors = _get_theme_colors()
     time_str = f" {format_elapsed(elapsed)}" if elapsed > 0 else ""
@@ -234,9 +237,9 @@ def show_tool_call(
                 filename=filename,
                 elapsed=elapsed,
             )
-            # Status dot + summary
             dot_char, dot_style = _get_status_dot(status, colors)
-            console.print(f"  [{dot_style}]{dot_char}[/{dot_style}] {summary}")
+            step_prefix = _step_prefix(step, max_steps, colors)
+            console.print(f"  {step_prefix}[{dot_style}]{dot_char}[/{dot_style}] {summary}")
             return
         except (ImportError, ValueError, KeyError, TypeError):
             pass
@@ -247,7 +250,14 @@ def show_tool_call(
     # Tool icon
     icon = get_tool_icon(tool_name)
 
+    # Build the line with step counter
     line = Text("  ")
+
+    # Step prefix: "Step 3 · " in dim
+    if step > 0:
+        line.append(f"Step {step}", style=f"bold {colors['accent']}")
+        line.append(" \u00b7 ", style="dim")
+
     line.append(dot_char, style=dot_style)
     line.append(f" {icon} ", style=f"{colors['tool']}")
     line.append(tool_name, style=f"bold {colors['tool']}")
@@ -257,26 +267,132 @@ def show_tool_call(
         line.append(f" {time_str}", style="dim")
     console.print(line)
 
-    # Render substantial tool output via ToolOutputRenderer
-    if result and isinstance(result, (dict, str)):
-        try:
-            import json
-            if isinstance(result, str):
-                parsed = json.loads(result)
+
+def show_tool_result_inline(tool_name: str, result: Any) -> None:
+    """Show a compact inline tool result — just enough to see what happened.
+
+    This is the KEY to workflow visibility. User sees:
+      Step 2 · ● → read_file src/main.py
+        245 lines | python
+      Step 2 · ● ← edit_file src/app.py
+        +12/-3 lines changed
+      Step 3 · ● $ shell npm test
+        ✓ (4 lines)
+    """
+    if not result:
+        return
+
+    colors = _get_theme_colors()
+
+    try:
+        import json
+        if isinstance(result, str):
+            parsed = json.loads(result)
+        else:
+            parsed = result
+        if not isinstance(parsed, dict):
+            return
+
+        # Error display
+        if parsed.get("error"):
+            err_msg = str(parsed["error"])
+            if len(err_msg) > 120:
+                err_msg = err_msg[:120] + "\u2026"
+            console.print(f"    [{colors['error']}]\u2717 {err_msg}[/{colors['error']}]")
+            return
+
+        # ── Search/match tools (results in "results"/"matches", not "output") ──
+        if tool_name in ("grep", "glob", "code_search", "search", "find"):
+            results_list = parsed.get("results", parsed.get("matches", []))
+            if isinstance(results_list, list):
+                count = len(results_list)
+                console.print(f"    [dim]{count} {'match' if count == 1 else 'matches'}[/dim]")
+                return
+
+        # ── Web tools (may not have "output") ──
+        if tool_name in ("web_search", "browse", "web_fetch", "browse_url"):
+            status_code = parsed.get("status_code", 200)
+            url = parsed.get("url", "")
+            if url:
+                short_url = url[:60] + "\u2026" if len(url) > 60 else url
+                console.print(f"    [dim]{status_code} {short_url}[/dim]")
+                return
+
+        # ── Get output text (various field names) ──
+        output = parsed.get("output", parsed.get("content", parsed.get("result", "")))
+        if not output or not isinstance(output, str):
+            return
+
+        lines = output.splitlines()
+        line_count = len(lines)
+
+        # ── File reads ──
+        if tool_name in ("read_file", "cat"):
+            lang = parsed.get("language", "")
+            extras = []
+            if line_count > 0:
+                extras.append(f"{line_count} lines")
+            if lang:
+                extras.append(lang)
+            if extras:
+                console.print(f"    [dim]{' \u2502 '.join(extras)}[/dim]")
+
+        # ── Shell commands ──
+        elif tool_name in ("shell", "shell_executor", "bash", "run", "run_command", "execute"):
+            exit_code = parsed.get("exit_code", parsed.get("returncode", 0)) or 0
+            if exit_code == 0:
+                icon = f"[{colors['success']}]\u2713[/{colors['success']}]"
             else:
-                parsed = result
-            if isinstance(parsed, dict):
-                if parsed.get("error"):
-                    err_msg = parsed["error"]
-                    if isinstance(err_msg, str) and len(err_msg) > 200:
-                        err_msg = err_msg[:200] + "\u2026"
-                    console.print(f"    [{colors['error']}]{err_msg}[/{colors['error']}]")
-                else:
-                    output = parsed.get("output", parsed.get("content", parsed.get("result", "")))
-                    if isinstance(output, str) and len(output) > 50:
-                        _get_tool_renderer().render_tool_result(tool_name, parsed)
-        except (json.JSONDecodeError, TypeError, ValueError):
-            pass
+                icon = f"[{colors['error']}]\u2717 exit {exit_code}[/{colors['error']}]"
+            # Show last 3 meaningful lines
+            meaningful = [l.strip() for l in lines if l.strip()][-3:]
+            if meaningful:
+                console.print(f"    {icon} [dim]({line_count} lines)[/dim]")
+                for ml in meaningful:
+                    if len(ml) > 100:
+                        ml = ml[:100] + "\u2026"
+                    console.print(f"    [dim]{ml}[/dim]")
+            else:
+                console.print(f"    {icon} [dim](no output)[/dim]")
+
+        # ── File edits ──
+        elif tool_name in ("edit_file", "write_file"):
+            added = sum(1 for l in lines if l.startswith("+") and not l.startswith("+++"))
+            removed = sum(1 for l in lines if l.startswith("-") and not l.startswith("---"))
+            if added or removed:
+                console.print(f"    [{colors['success']}]+{added}[/{colors['success']}]/[{colors['error']}]-{removed}[/{colors['error']}] [dim]lines changed[/dim]")
+            elif line_count > 0:
+                console.print(f"    [dim]{line_count} lines written[/dim]")
+
+        # ── Directory listing ──
+        elif tool_name in ("list_dir", "ls"):
+            items = [l.strip() for l in lines if l.strip()]
+            count = len(items)
+            preview = ", ".join(items[:6])
+            if count > 6:
+                preview += f" +{count - 6} more"
+            if preview:
+                console.print(f"    [dim]{count} items: {preview}[/dim]")
+
+        # ── Generic fallback ──
+        else:
+            if line_count > 3:
+                console.print(f"    [dim]{line_count} lines[/dim]")
+            elif line_count > 0:
+                for l in lines[:3]:
+                    if len(l) > 100:
+                        l = l[:100] + "\u2026"
+                    console.print(f"    [dim]{l}[/dim]")
+
+    except (json.JSONDecodeError, TypeError, ValueError, AttributeError):
+        pass
+
+
+def _step_prefix(step: int, max_steps: int, colors: dict) -> str:
+    """Build a step counter prefix string."""
+    if step <= 0:
+        return ""
+    return f"[bold {colors['accent']}]Step {step}[/bold {colors['accent']}] [dim]\u00b7[/dim] "
 
 
 def _get_status_dot(status: str, colors: dict) -> tuple[str, str]:
@@ -679,8 +795,11 @@ class StreamingResponse:
             self._permanent_len = len(self._accumulated)
 
     def resume(self) -> None:
-        """Resume live rendering after tool call."""
-        self._live = Live("", console=console, refresh_per_second=15, transient=True)
+        """Resume live rendering after tool call with a fresh spinner."""
+        from .spinner import AuraSpinner
+        spinner = AuraSpinner()
+        self._live = Live(spinner, console=console, refresh_per_second=12, transient=True)
+        self._live._aura_spinner = spinner
         self._live.start()
 
     def finish(self) -> None:

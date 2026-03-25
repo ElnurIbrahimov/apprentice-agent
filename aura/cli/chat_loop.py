@@ -127,17 +127,10 @@ def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: O
     show_banner()
     show_welcome_info(agent)
 
-    # Show permission mode banner (like Claude Code's "Allowed tools: ...")
+    # Show permission mode as a clean single line (not a raw tool list)
     def _show_perm_banner(mode: str) -> None:
-        from .permissions_ui import get_mode_description
-        allowed = "Read, Glob, Grep, ListDir, Git"
-        if mode in ("auto_edit", "full_auto"):
-            allowed += ", Edit, Write"
-        if mode == "full_auto":
-            allowed += ", Shell(all)"
-        else:
-            allowed += ", Shell(safe)"
-        console.print(f"  [dim]Allowed tools:[/dim] [bold]{allowed}[/bold]  [dim]|[/dim]  [dim]Mode:[/dim] [bold]{get_mode_description(mode).split(' — ')[0]}[/bold]")
+        from .permissions_ui import get_mode_indicator
+        console.print(f"  {get_mode_indicator(mode)}")
         console.print()
 
     _project_type = ""
@@ -690,10 +683,14 @@ def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: O
 
                         def _plan_on_tool_call(name: str, args: dict[str, Any], _result: Any) -> None:
                             streamer.pause()
+                            step = getattr(agentic, 'iteration', 0)
+                            max_iter = getattr(agentic, 'max_iterations', 0)
                             desc = args.get("path") or args.get("pattern") or args.get("query") or ""
                             if not desc and "command" in args:
                                 desc = args["command"][:60]
-                            show_tool_call(name, str(desc))
+                            show_tool_call(name, str(desc), step=step, max_steps=max_iter)
+                            from .display import show_tool_result_inline
+                            show_tool_result_inline(name, _result)
                             streamer.resume()
 
                         result = agentic.run(
@@ -785,24 +782,42 @@ def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: O
             continue
 
         # ── Normal execution path ──
-        from .display import StreamingResponse
+        import time as _exec_time
+        from .display import StreamingResponse, show_tool_result_inline
         streamer = StreamingResponse(model=_current_model)
         streamer.start()
+        _tool_call_count = 0
+        _exec_start = _exec_time.monotonic()
         try:
             def _on_chunk(text: str) -> None:
                 streamer.chunk(text)
 
             def _on_tool_call(name: str, args: dict[str, Any], _result: Any) -> None:
+                nonlocal _tool_call_count
+                _tool_call_count += 1
                 streamer.pause()
+
+                # Update spinner step count
+                step = getattr(agentic, 'iteration', 0)
+                max_iter = getattr(agentic, 'max_iterations', 0)
+
                 if hook_mgr:
                     hook_mgr.fire(HookEvent.PRE_TOOL_CALL, {
                         "tool_name": name,
                         "tool_args": str(args)[:500],
                     })
+
+                # Build description from args
                 desc = args.get("path") or args.get("pattern") or args.get("query") or ""
                 if not desc and "command" in args:
                     desc = args["command"][:60]
-                show_tool_call(name, str(desc))
+
+                # Show tool call with step counter
+                show_tool_call(name, str(desc), step=step, max_steps=max_iter)
+
+                # Show inline tool result (compact)
+                show_tool_result_inline(name, _result)
+
                 if hook_mgr:
                     hook_mgr.fire(HookEvent.POST_TOOL_CALL, {
                         "tool_name": name,
@@ -858,6 +873,24 @@ def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: O
             continue
 
         streamer.finish()
+
+        # Show execution summary (elapsed time, tool calls, model)
+        _elapsed = _exec_time.monotonic() - _exec_start
+        if _tool_call_count > 0 or _elapsed > 2.0:
+            from .display import show_response_attribution
+            _iter_count = getattr(agentic, 'iteration', 0)
+            _summary_parts = []
+            if _iter_count > 1:
+                _summary_parts.append(f"{_iter_count} steps")
+            if _tool_call_count > 0:
+                _summary_parts.append(f"{_tool_call_count} tool calls")
+            show_response_attribution(
+                model=_current_model,
+                elapsed=_elapsed,
+                tokens=result.get("tokens", 0) if result else 0,
+            )
+            if _summary_parts:
+                console.print(f"  [dim]{' \u00b7 '.join(_summary_parts)}[/dim]")
 
         if result is None:
             show_error("No response received.")

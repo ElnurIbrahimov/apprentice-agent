@@ -243,23 +243,36 @@ def create_session():
                                     display_meta=desc,
                                 )
 
+        # Get theme accent for prompt styling
+        try:
+            from aura.cli.themes import get_theme
+            _theme = get_theme()
+            _accent = _theme.accent
+            _accent_dim = _theme.accent_dim
+        except (ImportError, AttributeError):
+            _accent = "#D777AF"
+            _accent_dim = "#B0578F"
+
         _style = Style.from_dict({
-            "prompt": "bold cyan",
+            "prompt": f"bold {_accent}",
+            "prompt.sep": "#444444",
             "project": "#ffffff bold",
             "branch": "#888888",
-            "placeholder": "#666666 italic",
-            # Completion dropdown — dark background, light text
+            "mode": f"bold {_accent}",
+            "placeholder": "#555555 italic",
+            # Completion dropdown
             "completion-menu": "bg:#1a1a2e #e0e0e0",
             "completion-menu.completion": "bg:#1a1a2e #e0e0e0",
-            "completion-menu.completion.current": "bg:#0f3460 #00d2ff bold",
+            "completion-menu.completion.current": f"bg:#0f3460 {_accent} bold",
             "completion-menu.meta.completion": "bg:#1a1a2e #777777",
             "completion-menu.meta.completion.current": "bg:#0f3460 #bbbbbb",
             # Scrollbar styling
             "scrollbar.background": "bg:#1a1a2e",
             "scrollbar.button": "bg:#333355",
             "scrollbar.arrow": "bg:#333355 #aaaaaa",
-            # Persistent bottom toolbar
-            "bottom-toolbar": "bg:#1a1a1a #cccccc",
+            # Bottom toolbar — darker background, clear text
+            "bottom-toolbar": "bg:#111115 #aaaaaa",
+            "bottom-toolbar.text": "#cccccc",
         })
 
         kb = KeyBindings()
@@ -309,7 +322,7 @@ def create_session():
             multiline=True,
             style=_style,
             key_bindings=kb,
-            placeholder=HTML('<style fg="#555555"><i>  Type a message, / for commands, ? for help</i></style>'),
+            placeholder=HTML('<style fg="#555555"><i>Message, / commands, ? help, Alt+M model</i></style>'),
             bottom_toolbar=_get_bottom_toolbar,
         )
         _session_ok = True
@@ -320,29 +333,34 @@ def create_session():
 
 
 def _get_prompt_prefix() -> list:
-    """Build prompt prefix with project name and git branch."""
+    """Build a visually distinct prompt with separator, project, branch, and styled caret.
+
+    Renders as:
+      ─────────────────────────────
+      project (branch) ❯
+    """
+    import os
+
+    project = os.path.basename(os.getcwd())
+    branch = ""
     try:
         import subprocess
-        import os
-        # Get git branch
         result = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             capture_output=True, text=True, timeout=2, cwd="."
         )
         branch = result.stdout.strip() if result.returncode == 0 else ""
-
-        # Get project name (directory name)
-        project = os.path.basename(os.getcwd())
-
-        if branch:
-            return [
-                ("class:project", f"\n  {project}"),
-                ("class:branch", f" ({branch})"),
-                ("class:prompt", " > "),
-            ]
     except Exception:
         pass
-    return [("class:prompt", "\n  > ")]
+
+    # Separator line + project/branch + styled prompt caret
+    parts = []
+    parts.append(("class:prompt.sep", "\n  " + "\u2500" * 40 + "\n"))
+    parts.append(("class:project", f"  {project}"))
+    if branch:
+        parts.append(("class:branch", f" ({branch})"))
+    parts.append(("class:prompt", " \u276f "))
+    return parts
 
 
 def get_input(session) -> "str | None":
