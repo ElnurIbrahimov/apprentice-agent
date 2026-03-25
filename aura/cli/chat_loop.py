@@ -168,19 +168,37 @@ def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: O
         if should_auto_approve_command(current_perm_mode):
             return True
 
-        console.print(f"\n  [yellow]Allow {tool_name}?[/yellow]", end="")
-        if description:
-            console.print(f" [dim]{description[:80]}[/dim]", end="")
+        # Styled permission prompt
         try:
-            # Use plain input() — prompt_toolkit releases stdin during agentic.run()
-            # Rich's Prompt.ask() conflicts with prompt_toolkit's stdin ownership
-            response = input("  [y/n/always] ").strip().lower()
+            from aura.cli.themes import get_theme
+            theme = get_theme()
+            warn = theme.warning
+            accent = theme.permission_accent
+            muted = theme.text_muted
+        except (ImportError, AttributeError):
+            warn = "#FFC107"
+            accent = "#B1B9F9"
+            muted = "#555555"
+
+        console.print()
+        console.print(f"  [{warn}]\u25b3[/{warn}] [{accent}]Allow {tool_name}?[/{accent}]", end="")
+        if description:
+            console.print(f" [dim]{description[:80]}[/dim]")
+        else:
+            console.print()
+        console.print(f"    [{accent}]> 1. Yes[/{accent}]")
+        console.print(f"      2. Yes, always (trust mode)", style="dim")
+        console.print(f"      3. No", style="dim")
+        try:
+            response = input(f"  Choose (1-3, Enter=yes): ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             return False
-        if response == "always":
+        if response in ("2", "always"):
             permissions.set_trust_mode(True)
             return True
-        return response in ("y", "yes", "")
+        if response in ("3", "n", "no"):
+            return False
+        return response in ("", "1", "y", "yes")
 
     permissions.set_confirm_callback(_cli_confirm)
     if trust:

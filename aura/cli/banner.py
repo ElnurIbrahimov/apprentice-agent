@@ -1,63 +1,100 @@
-"""Banner for AURA CLI — gradient-colored header using theme colors."""
+"""Banner for AURA CLI — gradient block-art logo with theme colors."""
 from __future__ import annotations
 
 from rich.text import Text
 
 
-def _apply_gradient(text: str, colors: list[str]) -> Text:
-    """Apply a color gradient across *text* using *colors*.
+# Compact 2-line block art — looks striking, renders on all terminals
+_LOGO_LINES = [
+    "▄▀█ █ █ █▀█ █▀█",
+    "█▀█ █▄█ █▀▄ █▀█",
+]
 
-    Each character is assigned a color by splitting the text into
-    equal-sized segments -- one segment per color in the list.
-    """
+_STAR = "✦"
+
+
+def _apply_gradient(text: str, colors: list[str]) -> Text:
+    """Apply a color gradient across text, skipping spaces."""
     if not colors:
         return Text(text, style="bold cyan")
     result = Text()
     n = len(text)
     if n == 0:
         return result
+    # Count non-space chars for gradient mapping
+    solid_chars = [i for i, ch in enumerate(text) if ch != " "]
+    num_solid = len(solid_chars)
     num_colors = len(colors)
+    # Map each solid char to a gradient color
+    color_map = {}
+    for j, pos in enumerate(solid_chars):
+        idx = min(j * num_colors // max(num_solid, 1), num_colors - 1)
+        color_map[pos] = colors[idx]
     for i, ch in enumerate(text):
-        # Map character position to a color index
-        idx = min(i * num_colors // n, num_colors - 1)
-        result.append(ch, style=f"bold {colors[idx]}")
+        if ch == " ":
+            result.append(ch)
+        else:
+            result.append(ch, style=f"bold {color_map.get(i, colors[0])}")
     return result
 
 
 def get_banner(width: int = 80) -> Text:
-    """Return an empty Text -- the banner is part of the welcome line."""
-    return Text()
+    """Return gradient block-art AURA logo."""
+    try:
+        from aura.cli.themes import get_theme
+        colors = get_theme().gradient
+    except (ImportError, AttributeError):
+        colors = ["#D777AF", "#B1B9F9", "#87D7D7"]
+
+    result = Text()
+    for line in _LOGO_LINES:
+        result.append("   ")
+        result.append_text(_apply_gradient(line, colors))
+        result.append("\n")
+    return result
 
 
 def get_welcome_line(version: str | None = None) -> Text:
-    """Return a 1-line banner: gradient AURA + version + shortcut hints."""
+    """Return full startup display: logo + info + shortcuts."""
     if version is None:
         try:
             from aura import __version__
             version = __version__
         except (ImportError, AttributeError):
-            version = "4.6.0"
+            version = "dev"
 
-    # Get gradient colors from the active theme
     try:
         from aura.cli.themes import get_theme
-        colors = get_theme().gradient
+        theme = get_theme()
+        colors = theme.gradient
+        accent = theme.accent
     except (ImportError, AttributeError):
-        colors = ["cyan", "blue", "magenta"]
+        colors = ["#D777AF", "#B1B9F9", "#87D7D7"]
+        accent = "#D777AF"
 
-    t = Text("  ")
-    t.append_text(_apply_gradient("AURA", colors))
-    t.append(f" v{version}", style="dim")
-    t.append("  \u2014  ", style="dim")
-    t.append("/", style="bold cyan")
-    t.append(" commands", style="dim")
-    t.append("  \u2022  ", style="dim")
-    t.append("Alt+M", style="bold cyan")
-    t.append(" model", style="dim")
-    t.append("  \u2022  ", style="dim")
-    t.append("?", style="bold cyan")
-    t.append(" help", style="dim")
-    t.append("  \u2022  ", style="dim")
-    t.append("Shift+Tab", style="bold cyan")
-    t.append(" perms", style="dim")
-    return t
+    result = Text()
+
+    # Block-art logo with gradient
+    for line in _LOGO_LINES:
+        result.append("   ")
+        result.append_text(_apply_gradient(line, colors))
+        result.append("\n")
+
+    # Info line: star + version + shortcut hints
+    result.append("   ")
+    result.append(_STAR, style=f"bold {accent}")
+    result.append(f" v{version}", style="dim")
+    result.append("  \u2014  ", style="dim")
+    result.append("/", style=f"bold {accent}")
+    result.append(" commands", style="dim")
+    result.append("  \u00b7  ", style="dim")
+    result.append("Alt+M", style=f"bold {accent}")
+    result.append(" model", style="dim")
+    result.append("  \u00b7  ", style="dim")
+    result.append("?", style=f"bold {accent}")
+    result.append(" help", style="dim")
+    result.append("  \u00b7  ", style="dim")
+    result.append("Shift+Tab", style=f"bold {accent}")
+    result.append(" perms", style="dim")
+
+    return result

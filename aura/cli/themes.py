@@ -120,7 +120,9 @@ class AuraTheme:
 THEMES: Dict[str, AuraTheme] = {
     "dark": AuraTheme(
         name="dark", type="dark",
-        accent="#D777AF", gradient=["cyan", "blue", "magenta"],
+        accent="#D777AF", accent_dim="#E8A0C8",
+        gradient=["#D777AF", "#B1B9F9", "#87D7D7"],
+        text_accent="#B1B9F9",
         code_theme="monokai",
     ),
     "light": AuraTheme(

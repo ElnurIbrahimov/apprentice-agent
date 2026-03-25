@@ -6,10 +6,10 @@ from typing import Optional, List
 
 
 # File reads: show first/last N lines
-_FILE_HEAD = 15
-_FILE_TAIL = 15
+_FILE_HEAD = 20
+_FILE_TAIL = 20
 # Shell output: show last N lines
-_SHELL_TAIL = 30
+_SHELL_TAIL = 40
 # Max stored lines to prevent memory issues
 MAX_OUTPUT_LINES = 500
 
@@ -26,51 +26,51 @@ class ToolOutputRenderer:
 
     def render_shell_output(self, output: str, command: str = "",
                             elapsed: float = 0.0, exit_code: int = 0) -> None:
-        """Show last N lines of shell output, dimmed."""
+        """Show last N lines of shell output, dimmed with themed status icon."""
         lines = output.splitlines() if output else []
 
         if not lines:
-            self._console.print("  [dim](no output)[/dim]")
+            self._console.print("    [dim](no output)[/dim]")
             return
 
-        # Status line
-        icon = "[green]\u2713[/green]" if exit_code == 0 else "[red]\u2717[/red]"
+        # Status icon with color
+        if exit_code == 0:
+            icon = "[#4EBA65]\u2713[/#4EBA65]"
+        else:
+            icon = "[#FF6B80]\u2717 exit {0}[/#FF6B80]".format(exit_code)
         elapsed_str = f" {format_elapsed(elapsed)}" if elapsed > 0.5 else ""
         if command:
-            self._console.print(f"  {icon} [dim]{command}{elapsed_str}[/dim]")
+            self._console.print(f"    {icon} [dim]{command}{elapsed_str}[/dim]")
 
         tail = self._visible_lines
         if len(lines) <= tail:
             for line in lines:
-                self._console.print(f"  [dim]{line}[/dim]")
+                self._console.print(f"    [dim]{line}[/dim]")
         else:
             hidden = len(lines) - tail
-            self._console.print(f"  [dim]... {hidden} lines hidden ...[/dim]")
+            self._console.print(f"    [dim]\u2026 {hidden} lines hidden[/dim]")
             for line in lines[-tail:]:
-                self._console.print(f"  [dim]{line}[/dim]")
+                self._console.print(f"    [dim]{line}[/dim]")
 
     def render_file_content(self, content: str, filename: str = "",
                             language: str = "") -> None:
-        """Show first 5 + last 5 lines of a file read, no panel."""
+        """Show first/last N lines of a file read with line count."""
         lines = content.splitlines()
         total = len(lines)
 
         if filename:
-            self._console.print(f"  [dim]{filename} ({total} lines)[/dim]")
+            self._console.print(f"    [dim]{filename} ({total} lines)[/dim]")
 
         if total <= _FILE_HEAD + _FILE_TAIL + 2:
-            # Small file — show all, dimmed
             for line in lines:
-                self._console.print(f"  [dim]{line}[/dim]")
+                self._console.print(f"    [dim]{line}[/dim]")
         else:
-            # First 5
             for line in lines[:_FILE_HEAD]:
-                self._console.print(f"  [dim]{line}[/dim]")
+                self._console.print(f"    [dim]{line}[/dim]")
             hidden = total - _FILE_HEAD - _FILE_TAIL
-            self._console.print(f"  [dim]... {hidden} lines hidden ...[/dim]")
-            # Last 5
+            self._console.print(f"    [dim]\u2026 {hidden} lines hidden[/dim]")
             for line in lines[-_FILE_TAIL:]:
-                self._console.print(f"  [dim]{line}[/dim]")
+                self._console.print(f"    [dim]{line}[/dim]")
 
     def render_search_results(self, results: List[dict], query: str = "") -> None:
         """Show search results, compact."""
