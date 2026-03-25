@@ -333,15 +333,22 @@ def create_session():
 
 
 def _get_prompt_prefix() -> list:
-    """Build a visually distinct prompt with separator, project, branch, and styled caret.
+    """Build a visually distinct prompt with project context and styled caret.
 
     Renders as:
-      ─────────────────────────────
-      project (branch) ❯
+      ╭─
+      │ project (branch) ❯
     """
     import os
 
-    project = os.path.basename(os.getcwd())
+    # Show meaningful directory name — collapse home dir
+    cwd = os.getcwd()
+    home = os.path.expanduser("~")
+    if cwd == home or cwd == home.replace("/", "\\"):
+        project = "~"
+    else:
+        project = os.path.basename(cwd)
+
     branch = ""
     try:
         import subprocess
@@ -353,10 +360,11 @@ def _get_prompt_prefix() -> list:
     except Exception:
         pass
 
-    # Separator line + project/branch + styled prompt caret
+    # Prompt with left border for visual structure
     parts = []
-    parts.append(("class:prompt.sep", "\n  " + "\u2500" * 40 + "\n"))
-    parts.append(("class:project", f"  {project}"))
+    parts.append(("class:prompt.sep", "\n  \u256d\u2500\n"))
+    parts.append(("class:prompt.sep", "  \u2502 "))
+    parts.append(("class:project", project))
     if branch:
         parts.append(("class:branch", f" ({branch})"))
     parts.append(("class:prompt", " \u276f "))

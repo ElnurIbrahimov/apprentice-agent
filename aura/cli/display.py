@@ -82,16 +82,37 @@ def _get_theme_colors() -> dict:
 # ─────────────────────────────────────────────────────────
 
 def show_banner() -> None:
-    """Display startup banner with gradient logo."""
-    from .banner import get_welcome_line
+    """Display startup screen — cohesive bordered panel with logo, info, shortcuts."""
+    from .banner import _apply_gradient, _LOGO_LINES
     from aura import __version__
+
+    colors = _get_theme_colors()
+    try:
+        from aura.cli.themes import get_theme
+        gradient = get_theme().gradient
+    except (ImportError, AttributeError):
+        gradient = ["#D777AF", "#B1B9F9", "#87D7D7"]
+
+    # Build the panel content
+    content = Text()
+    for line in _LOGO_LINES:
+        content.append(" ")
+        content.append_text(_apply_gradient(line, gradient))
+        content.append("\n")
+    content.append(f" \u2728 v{__version__}", style="dim")
+
+    panel = Panel(
+        content,
+        border_style=colors["accent"],
+        padding=(0, 1),
+        width=min(console.width - 2, 50),
+    )
     console.print()
-    console.print(get_welcome_line(__version__))
-    console.print()
+    console.print(panel)
 
 
 def show_welcome_info(agent: Any) -> None:
-    """Show a brief info line after the banner: model, tools."""
+    """Show model, tools, and keyboard shortcuts below the banner."""
     colors = _get_theme_colors()
     model = "auto"
     try:
@@ -105,13 +126,28 @@ def show_welcome_info(agent: Any) -> None:
     except (TypeError, AttributeError):
         logger.debug("welcome_tool_count_failed", exc_info=True)
 
-    t = Text("   ")
+    # Model + tools line
+    t = Text("  ")
+    t.append(model, style=f"bold {colors['accent']}")
     if tool_count:
-        t.append(model, style=f"{colors['accent']}")
         t.append(f" \u00b7 {tool_count} tools", style="dim")
-    else:
-        t.append(model, style=f"{colors['accent']}")
     console.print(t)
+
+    # Compact shortcut hints
+    h = Text("  ")
+    shortcuts = [
+        ("/", "commands"),
+        ("Alt+M", "model"),
+        ("?", "help"),
+        ("Shift+Tab", "perms"),
+        ("Ctrl+K", "palette"),
+    ]
+    for i, (key, desc) in enumerate(shortcuts):
+        if i > 0:
+            h.append("  ", style="dim")
+        h.append(key, style=f"bold {colors['accent']}")
+        h.append(f" {desc}", style="dim")
+    console.print(h)
     console.print()
 
 
@@ -250,13 +286,15 @@ def show_tool_call(
     # Tool icon
     icon = get_tool_icon(tool_name)
 
-    # Build the line with step counter
-    line = Text("  ")
+    # Build the line with left border + step counter
+    line = Text()
 
-    # Step prefix: "Step 3 · " in dim
+    # Left border for visual grouping (like OpenCode's ┃)
+    line.append("  \u2503 ", style=f"{colors['accent']}")
+
+    # Step prefix
     if step > 0:
-        line.append(f"Step {step}", style=f"bold {colors['accent']}")
-        line.append(" \u00b7 ", style="dim")
+        line.append(f"[{step}] ", style=f"bold {colors['accent']}")
 
     line.append(dot_char, style=dot_style)
     line.append(f" {icon} ", style=f"{colors['tool']}")
@@ -283,6 +321,8 @@ def show_tool_result_inline(tool_name: str, result: Any) -> None:
         return
 
     colors = _get_theme_colors()
+    # Left border prefix for visual grouping
+    B = f"  [{colors['accent']}]\u2503[/{colors['accent']}]   "
 
     try:
         import json
@@ -298,27 +338,27 @@ def show_tool_result_inline(tool_name: str, result: Any) -> None:
             err_msg = str(parsed["error"])
             if len(err_msg) > 120:
                 err_msg = err_msg[:120] + "\u2026"
-            console.print(f"    [{colors['error']}]\u2717 {err_msg}[/{colors['error']}]")
+            console.print(f"{B}[{colors['error']}]\u2717 {err_msg}[/{colors['error']}]")
             return
 
-        # ── Search/match tools (results in "results"/"matches", not "output") ──
+        # ── Search/match tools ──
         if tool_name in ("grep", "glob", "code_search", "search", "find"):
             results_list = parsed.get("results", parsed.get("matches", []))
             if isinstance(results_list, list):
                 count = len(results_list)
-                console.print(f"    [dim]{count} {'match' if count == 1 else 'matches'}[/dim]")
+                console.print(f"{B}[dim]{count} {'match' if count == 1 else 'matches'}[/dim]")
                 return
 
-        # ── Web tools (may not have "output") ──
+        # ── Web tools ──
         if tool_name in ("web_search", "browse", "web_fetch", "browse_url"):
             status_code = parsed.get("status_code", 200)
             url = parsed.get("url", "")
             if url:
                 short_url = url[:60] + "\u2026" if len(url) > 60 else url
-                console.print(f"    [dim]{status_code} {short_url}[/dim]")
+                console.print(f"{B}[dim]{status_code} {short_url}[/dim]")
                 return
 
-        # ── Get output text (various field names) ──
+        # ── Get output text ──
         output = parsed.get("output", parsed.get("content", parsed.get("result", "")))
         if not output or not isinstance(output, str):
             return
@@ -335,34 +375,33 @@ def show_tool_result_inline(tool_name: str, result: Any) -> None:
             if lang:
                 extras.append(lang)
             if extras:
-                console.print(f"    [dim]{' \u2502 '.join(extras)}[/dim]")
+                console.print(f"{B}[dim]{' \u2502 '.join(extras)}[/dim]")
 
         # ── Shell commands ──
         elif tool_name in ("shell", "shell_executor", "bash", "run", "run_command", "execute"):
             exit_code = parsed.get("exit_code", parsed.get("returncode", 0)) or 0
             if exit_code == 0:
-                icon = f"[{colors['success']}]\u2713[/{colors['success']}]"
+                ic = f"[{colors['success']}]\u2713[/{colors['success']}]"
             else:
-                icon = f"[{colors['error']}]\u2717 exit {exit_code}[/{colors['error']}]"
-            # Show last 3 meaningful lines
+                ic = f"[{colors['error']}]\u2717 exit {exit_code}[/{colors['error']}]"
             meaningful = [l.strip() for l in lines if l.strip()][-3:]
             if meaningful:
-                console.print(f"    {icon} [dim]({line_count} lines)[/dim]")
+                console.print(f"{B}{ic} [dim]({line_count} lines)[/dim]")
                 for ml in meaningful:
                     if len(ml) > 100:
                         ml = ml[:100] + "\u2026"
-                    console.print(f"    [dim]{ml}[/dim]")
+                    console.print(f"{B}[dim]{ml}[/dim]")
             else:
-                console.print(f"    {icon} [dim](no output)[/dim]")
+                console.print(f"{B}{ic} [dim](no output)[/dim]")
 
         # ── File edits ──
         elif tool_name in ("edit_file", "write_file"):
             added = sum(1 for l in lines if l.startswith("+") and not l.startswith("+++"))
             removed = sum(1 for l in lines if l.startswith("-") and not l.startswith("---"))
             if added or removed:
-                console.print(f"    [{colors['success']}]+{added}[/{colors['success']}]/[{colors['error']}]-{removed}[/{colors['error']}] [dim]lines changed[/dim]")
+                console.print(f"{B}[{colors['success']}]+{added}[/{colors['success']}]/[{colors['error']}]-{removed}[/{colors['error']}] [dim]lines changed[/dim]")
             elif line_count > 0:
-                console.print(f"    [dim]{line_count} lines written[/dim]")
+                console.print(f"{B}[dim]{line_count} lines written[/dim]")
 
         # ── Directory listing ──
         elif tool_name in ("list_dir", "ls"):
@@ -372,17 +411,17 @@ def show_tool_result_inline(tool_name: str, result: Any) -> None:
             if count > 6:
                 preview += f" +{count - 6} more"
             if preview:
-                console.print(f"    [dim]{count} items: {preview}[/dim]")
+                console.print(f"{B}[dim]{count} items: {preview}[/dim]")
 
         # ── Generic fallback ──
         else:
             if line_count > 3:
-                console.print(f"    [dim]{line_count} lines[/dim]")
+                console.print(f"{B}[dim]{line_count} lines[/dim]")
             elif line_count > 0:
                 for l in lines[:3]:
                     if len(l) > 100:
                         l = l[:100] + "\u2026"
-                    console.print(f"    [dim]{l}[/dim]")
+                    console.print(f"{B}[dim]{l}[/dim]")
 
     except (json.JSONDecodeError, TypeError, ValueError, AttributeError):
         pass
