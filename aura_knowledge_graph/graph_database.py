@@ -501,7 +501,7 @@ class AURAKnowledgeGraph:
             with self._lock:
                 result = self.conn.execute(
                     f"MATCH (start:Entity {{id: $id}})-[r:RELATES_TO*1..{int(hops)}]-(related:Entity) "
-                    f"WHERE ALL(rel IN r WHERE rel.is_active = true) "
+                    f"WHERE ALL(rel IN rels(r) WHERE rel.is_active = true) "
                     f"AND related.id <> $id "
                     f"RETURN DISTINCT related.id, related.name, related.entity_type, "
                     f"       related.description, related.importance "
