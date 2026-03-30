@@ -133,18 +133,19 @@ export default function Rail() {
   const handleTabClick = useCallback(
     (key: string) => {
       if (expandedTab === key) {
-        // Already expanded — collapse (optional: keep open, but accordion UX expects toggle)
-        // We keep it open since one tab must always be expanded for discoverability
+        // Already expanded — navigate to the first panel in this category
+        const cat = CATEGORIES.find(c => c.key === key);
+        if (cat?.panels[0]) setPanel(cat.panels[0].id);
         return;
       }
       setExpandedTab(key);
     },
-    [expandedTab],
+    [expandedTab, setPanel],
   );
 
   return (
     <>
-      <nav className="rail-nav">
+      <nav className="rail-nav" aria-label="Panel navigation">
         <div className="rail-section">
           {CATEGORIES.map((cat) => {
             const isExpanded = expandedTab === cat.key;
@@ -158,6 +159,8 @@ export default function Rail() {
                   onMouseEnter={(e) => showTooltip(cat.label, e)}
                   onMouseLeave={hideTooltip}
                   title={cat.label}
+                  aria-label={cat.label}
+                  aria-expanded={isExpanded}
                   className={`rail-btn rail-icon-btn ${catOwnsActive ? 'rail-active' : ''}`}
                   style={{ width: 36, height: 36 }}
                 >
@@ -187,6 +190,8 @@ export default function Rail() {
                           onMouseEnter={(e) => showTooltip(panel.label, e)}
                           onMouseLeave={hideTooltip}
                           title={panel.label}
+                          aria-label={panel.label}
+                          aria-current={isActive ? 'page' : undefined}
                           className={`rail-btn rail-icon-btn ${isActive ? 'rail-active' : ''}`}
                           style={{ width: 32, height: 32, marginLeft: 4 }}
                         >

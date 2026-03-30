@@ -209,6 +209,8 @@ export default function Header() {
               <button
                 onClick={() => setExportOpen(!exportOpen)}
                 title="Export"
+                aria-label="Export conversation"
+                aria-expanded={exportOpen}
                 style={{
                   background: 'none', border: 'none', color: 'var(--mu)',
                   cursor: 'pointer', padding: 2, display: 'flex',
@@ -269,6 +271,8 @@ export default function Header() {
             <button
               onClick={handleHistoryToggle}
               title="History"
+              aria-label="Chat history"
+              aria-expanded={historyOpen}
               style={{
                 background: 'none', border: 'none',
                 color: historyOpen ? 'var(--pl)' : 'var(--mu)',
@@ -284,6 +288,7 @@ export default function Header() {
           <button
             onClick={handleNewConversation}
             title="New chat"
+            aria-label="New conversation"
             style={{
               background: 'none', border: 'none',
               color: 'var(--mu)', cursor: 'pointer', padding: 2, display: 'flex',

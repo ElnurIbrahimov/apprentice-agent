@@ -1,26 +1,12 @@
 import { HTTP, getAuthHeaders } from '../api';
 
 /**
- * Stream chat response from the backend SSE endpoint.
- * Yields text chunks as they arrive.
+ * Parse SSE stream and yield text chunks.
+ * Shared logic for both chat and raw generation endpoints.
  */
-export async function* streamChat(
-  message: string,
-  model?: string,
-  signal?: AbortSignal
+async function* parseSSEStream(
+  resp: Response,
 ): AsyncGenerator<string, void, unknown> {
-  const resp = await fetch(`${HTTP}/api/chat/sse`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-    body: JSON.stringify({ message, model: model || undefined }),
-    signal,
-  });
-
-  if (!resp.ok) {
-    const d = await resp.json().catch(() => ({}));
-    throw new Error((d as any).detail || `HTTP ${resp.status}`);
-  }
-
   const reader = resp.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -56,6 +42,65 @@ export async function* streamChat(
       }
     }
   }
+}
+
+/**
+ * Stream chat response from the backend SSE endpoint.
+ * Goes through the full agent pipeline (personality, tools, emotion).
+ * Yields text chunks as they arrive.
+ */
+export async function* streamChat(
+  message: string,
+  model?: string,
+  signal?: AbortSignal
+): AsyncGenerator<string, void, unknown> {
+  const resp = await fetch(`${HTTP}/api/chat/sse`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify({ message, model: model || undefined }),
+    signal,
+  });
+
+  if (!resp.ok) {
+    const d = await resp.json().catch(() => ({}));
+    throw new Error((d as any).detail || `HTTP ${resp.status}`);
+  }
+
+  yield* parseSSEStream(resp);
+}
+
+/**
+ * Stream raw LLM generation — bypasses the agent pipeline entirely.
+ * Used by WebCreator and Artifacts for direct HTML/code generation
+ * with custom system prompts, no personality or tool interference.
+ */
+export async function* streamRawGenerate(
+  message: string,
+  opts: {
+    systemPrompt?: string;
+    model?: string;
+    history?: Array<{ role: string; content: string }>;
+    signal?: AbortSignal;
+  } = {}
+): AsyncGenerator<string, void, unknown> {
+  const resp = await fetch(`${HTTP}/api/generate/raw`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify({
+      message,
+      system_prompt: opts.systemPrompt || undefined,
+      model: opts.model || undefined,
+      history: opts.history || undefined,
+    }),
+    signal: opts.signal,
+  });
+
+  if (!resp.ok) {
+    const d = await resp.json().catch(() => ({}));
+    throw new Error((d as any).detail || `HTTP ${resp.status}`);
+  }
+
+  yield* parseSSEStream(resp);
 }
 
 /**

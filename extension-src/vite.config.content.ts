@@ -5,6 +5,7 @@ export default defineConfig({
   build: {
     outDir: resolve(__dirname, '../extension'),
     emptyOutDir: false,
+    sourcemap: 'hidden',
     lib: {
       entry: resolve(__dirname, 'src/content.ts'),
       name: 'AuraContent',

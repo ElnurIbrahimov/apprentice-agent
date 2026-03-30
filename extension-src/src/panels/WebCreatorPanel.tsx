@@ -9,10 +9,37 @@ import DOMPurify from 'dompurify';
 import { useStore } from '../store';
 import ModelPill from '../components/ModelPill';
 import { HTTP, getAuthHeaders } from '../api';
-import { streamChat } from '../utils/streamChat';
+import { streamRawGenerate } from '../utils/streamChat';
 import { StreamingPreviewController } from '../utils/StreamingPreviewController';
 import { useVersionHistory } from '../utils/useVersionHistory';
 import { highlightCode } from '../utils/highlighter';
+import OfflineBanner from '../components/OfflineBanner';
+
+/* ─── Chrome storage helpers ─── */
+declare const browser: any; // Firefox compat
+const ext = typeof chrome !== 'undefined' ? chrome : typeof browser !== 'undefined' ? browser : null;
+const WC_STORAGE_KEY = 'aura_webcreator_state';
+
+function wcStorageGet(): Promise<{ html?: string; messages?: ChatMessage[]; history?: Array<{ role: string; content: string }> } | null> {
+  return new Promise((resolve) => {
+    if (!ext?.storage?.local) { resolve(null); return; }
+    ext.storage.local.get([WC_STORAGE_KEY], (d: any) => {
+      try { resolve(d?.[WC_STORAGE_KEY] ? JSON.parse(d[WC_STORAGE_KEY]) : null); }
+      catch { resolve(null); }
+    });
+  });
+}
+
+function wcStorageSave(html: string, messages: ChatMessage[], history: Array<{ role: string; content: string }>) {
+  if (!ext?.storage?.local) return;
+  // Only save if there's actual content
+  if (!html && messages.length === 0) {
+    ext.storage.local.remove([WC_STORAGE_KEY]);
+    return;
+  }
+  const data = JSON.stringify({ html, messages: messages.slice(-30), history: history.slice(-20) });
+  ext.storage.local.set({ [WC_STORAGE_KEY]: data });
+}
 
 /* ─── Types ─── */
 type ViewMode = 'preview' | 'code';
@@ -217,7 +244,7 @@ function ActionBtn({ id, icon, label, onClick, hoveredBtn, setHoveredBtn }: {
    ═══════════════════════════════════════════════════════════════════════════ */
 export default function WebCreatorPanel() {
   const { getModel } = useStore();
-  const { versions, currentIdx, pushVersion, goToVersion, undo, redo, canUndo, canRedo, clear: clearVersions } = useVersionHistory();
+  const { versions, currentIdx, pushVersion, goToVersion, undo, redo, canUndo, canRedo, clear: clearVersions } = useVersionHistory(20, 'aura_webcreator_versions');
 
   /* ─── State ─── */
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -252,6 +279,34 @@ export default function WebCreatorPanel() {
   const abortRef = useRef<AbortController | null>(null);
   const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const detachedWindowRef = useRef<Window | null>(null);
+
+  /* ─── Restore persisted state on mount ─── */
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    wcStorageGet().then(saved => {
+      if (!saved) return;
+      if (saved.html) {
+        setCurrentHtml(saved.html);
+        if (iframeRef.current) {
+          iframeRef.current.srcdoc = injectIframeScripts(saved.html);
+        }
+      }
+      if (saved.messages?.length) setMessages(saved.messages);
+      if (saved.history?.length) setConversationHistory(saved.history);
+    });
+  }, []);
+
+  /* ─── Auto-save state on changes ─── */
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      wcStorageSave(currentHtml, messages, conversationHistory);
+    }, 1000); // Debounce 1s
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
+  }, [currentHtml, messages, conversationHistory]);
 
   /* ─── Cleanup ─── */
   useEffect(() => {
@@ -373,24 +428,25 @@ export default function WebCreatorPanel() {
     const ctrl = new AbortController();
     abortRef.current = ctrl;
 
-    // Build conversation for context
+    // Build conversation history for context continuity
     const newHistory = [
       ...conversationHistory,
       { role: 'user', content: text },
     ];
 
-    // Build the message with system prompt + full conversation
-    let elementContext = '';
-    if (selectedElement) {
-      elementContext = `\n\nThe user has selected a specific element to modify:\nElement: <${selectedElement.tagName.toLowerCase()}>\nCSS path: ${selectedElement.path}\nElement HTML: ${selectedElement.outerHTML}\n\nOnly modify this specific element. Keep all other elements unchanged.`;
+    // Build the user message (just the request + context, NOT the system prompt)
+    let userMessage = text;
+    if (currentHtml) {
+      let elementContext = '';
+      if (selectedElement) {
+        elementContext = `\n\nThe user has selected a specific element to modify:\nElement: <${selectedElement.tagName.toLowerCase()}>\nCSS path: ${selectedElement.path}\nElement HTML: ${selectedElement.outerHTML}\n\nOnly modify this specific element. Keep all other elements unchanged.`;
+      }
+      userMessage = `Current HTML page code:\n\`\`\`html\n${currentHtml}\n\`\`\`${elementContext}\n\nUser request: ${text}`;
     }
-    const contextMessage = currentHtml
-      ? `${SYSTEM_PROMPT}\n\nCurrent HTML page code:\n\`\`\`html\n${currentHtml}\n\`\`\`${elementContext}\n\nUser request: ${text}`
-      : `${SYSTEM_PROMPT}\n\nUser request: ${text}`;
 
     const model = getModel('webcreator') || undefined;
 
-    // Set up streaming preview controller (declared outside try so finally can reset it)
+    // Set up streaming preview controller
     const previewCtrl = new StreamingPreviewController((html) => {
       if (iframeRef.current) {
         iframeRef.current.srcdoc = injectIframeScripts(html);
@@ -399,16 +455,33 @@ export default function WebCreatorPanel() {
 
     try {
       let streamedText = '';
-      for await (const chunk of streamChat(contextMessage, model, ctrl.signal)) {
+      let htmlStartIdx = -1; // Track where HTML begins in the stream
+
+      for await (const chunk of streamRawGenerate(userMessage, {
+        systemPrompt: SYSTEM_PROMPT,
+        model,
+        history: conversationHistory.length > 0 ? conversationHistory : undefined,
+        signal: ctrl.signal,
+      })) {
         streamedText += chunk;
-        // Try to extract HTML progressively for preview
-        const htmlMatch = streamedText.match(/<!DOCTYPE html>[\s\S]*/i) || streamedText.match(/<html[\s\S]*/i);
-        if (htmlMatch) {
+
+        // Progressive preview: detect HTML start and feed ALL content from that point
+        if (htmlStartIdx === -1) {
+          const docTypeIdx = streamedText.search(/<!DOCTYPE html>/i);
+          const htmlIdx = streamedText.search(/<html[\s >]/i);
+          const startIdx = docTypeIdx !== -1 ? docTypeIdx : htmlIdx;
+          if (startIdx !== -1) {
+            htmlStartIdx = startIdx;
+            // Feed everything from HTML start to preview controller (catches initial chunks)
+            previewCtrl.append(streamedText.slice(htmlStartIdx));
+          }
+        } else {
+          // HTML already started — just append the new chunk
           previewCtrl.append(chunk);
         }
       }
 
-      // Final extraction using the existing extractHtml
+      // Final extraction
       const finalHtml = extractHtml(streamedText);
       if (finalHtml) {
         setCurrentHtml(finalHtml);
@@ -417,19 +490,19 @@ export default function WebCreatorPanel() {
         setViewMode('preview');
       }
 
-      // Add AI message (show a brief summary, not the full HTML)
+      // Add AI message
       const aiMsg: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'ai',
-        text: finalHtml ? 'Page updated. Preview is live below.' : streamedText,
+        text: finalHtml ? 'Page updated. Preview is live below.' : streamedText.slice(0, 200),
         timestamp: Date.now(),
       };
       setMessages(prev => [...prev, aiMsg]);
 
-      // Update conversation history
+      // Update conversation history (store summary, not full HTML)
       setConversationHistory([
         ...newHistory,
-        { role: 'assistant', content: streamedText },
+        { role: 'assistant', content: finalHtml ? 'Generated/updated the HTML page as requested.' : streamedText },
       ]);
 
       setStatus('');
@@ -445,7 +518,7 @@ export default function WebCreatorPanel() {
         setMessages(prev => [...prev, errMsg]);
       }
     } finally {
-      previewCtrl.reset();
+      previewCtrl.dispose();
       setLoading(false);
       abortRef.current = null;
     }
@@ -620,6 +693,7 @@ export default function WebCreatorPanel() {
 
   return (
     <div style={panelStyle}>
+      <OfflineBanner />
       {/* ═══ Top bar ═══ */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', flexShrink: 0,

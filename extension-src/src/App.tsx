@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { Suspense, useEffect, useRef, useState } from 'react';
 import { useStore } from './store';
 import Header from './components/Header';
 import Rail from './components/Rail';
+import ErrorBoundary from './components/ErrorBoundary';
 import ChatPanel from './panels/ChatPanel';
 import SearchPanel from './panels/SearchPanel';
 import TranslatePanel from './panels/TranslatePanel';
@@ -16,21 +17,31 @@ import VoicePanel from './panels/VoicePanel';
 import RecordPanel from './panels/RecordPanel';
 import OcrPanel from './panels/OcrPanel';
 import YoutubePanel from './panels/YoutubePanel';
-import ResearchPanel from './panels/ResearchPanel';
 import MathPanel from './panels/MathPanel';
-import CodePanel from './panels/CodePanel';
-import ArtifactsPanel from './panels/ArtifactsPanel';
-import WebCreatorPanel from './panels/WebCreatorPanel';
 import ImagePanel from './panels/ImagePanel';
-import ComparePanel from './panels/ComparePanel';
 import CapturePanel from './panels/CapturePanel';
-import AgentPanel from './panels/AgentPanel';
 import SlidesPanel from './panels/SlidesPanel';
 import ModelsPanel from './panels/ModelsPanel';
 import SettingsPanel from './panels/SettingsPanel';
 import CommandPalette from './components/CommandPalette';
 import ext from './ext';
 import type { PanelId } from './types';
+
+// Lazy-loaded heavy panels (~350KB combined — load on demand)
+const ResearchPanel = React.lazy(() => import('./panels/ResearchPanel'));
+const CodePanel = React.lazy(() => import('./panels/CodePanel'));
+const ArtifactsPanel = React.lazy(() => import('./panels/ArtifactsPanel'));
+const WebCreatorPanel = React.lazy(() => import('./panels/WebCreatorPanel'));
+const ComparePanel = React.lazy(() => import('./panels/ComparePanel'));
+const AgentPanel = React.lazy(() => import('./panels/AgentPanel'));
+
+function LazyFallback() {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--mu)', fontSize: '12px' }}>
+      Loading...
+    </div>
+  );
+}
 
 const PANEL_ENTRIES: { id: PanelId; Component: React.FC }[] = [
   { id: 'chat', Component: ChatPanel },
@@ -192,7 +203,9 @@ export default function App() {
                 : activePanel === 'chat' ? 'panel-visible' : 'panel-hidden'
             }`}
           >
-            <ChatPanel />
+            <ErrorBoundary panelName="chat">
+              <ChatPanel />
+            </ErrorBoundary>
           </div>
           {/* Other panels: only mount active + previous (for exit animation) */}
           {PANEL_ENTRIES.filter(({ id }) => id !== 'chat').map(({ id, Component }) => {
@@ -213,7 +226,11 @@ export default function App() {
                 id={`panel-${id}`}
                 className={`panel-wrapper ${cls}`}
               >
-                <Component />
+                <ErrorBoundary panelName={id}>
+                  <Suspense fallback={<LazyFallback />}>
+                    <Component />
+                  </Suspense>
+                </ErrorBoundary>
               </div>
             );
           })}

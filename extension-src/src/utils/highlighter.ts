@@ -95,8 +95,6 @@ export function highlightCode(code: string, language?: string): string {
 
   for (const [regex, cls] of rules) {
     const color = COLORS[cls] || '#e6edf3';
-    // Reset regex lastIndex for global patterns
-    regex.lastIndex = 0;
     html = html.replace(regex, (match) => {
       // Don't highlight inside an existing placeholder
       if (match.includes('\x00')) return match;

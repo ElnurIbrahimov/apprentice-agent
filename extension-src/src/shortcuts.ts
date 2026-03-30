@@ -4,8 +4,8 @@
  */
 import type { PanelId } from './types';
 
-// Panel order for Ctrl+1..5
-const PANEL_SLOTS: PanelId[] = ['chat', 'search', 'translate', 'write', 'ask'];
+// Panel order for Ctrl+1..9
+const PANEL_SLOTS: PanelId[] = ['chat', 'search', 'write', 'artifacts', 'webcreator', 'code', 'research', 'summary', 'settings'];
 
 type Store = {
   getState: () => {
@@ -36,14 +36,22 @@ export function initShortcuts(store: Store) {
     const state = store.getState();
     const actions = getActions(store);
 
-    // --- Escape: close dropdown/modal or blur input ---
+    // --- Escape: close dropdown/modal, exit fullscreen, or blur input ---
     if (e.key === 'Escape') {
       if (state.moreOpen) {
         actions.setMoreOpen(false);
         e.preventDefault();
         return;
       }
-      // Close any open dropdown by dispatching a click outside
+      // Exit fullscreen panels
+      const fs = document.querySelector('[style*="position: fixed"][style*="inset: 0"]');
+      if (fs) {
+        const exitBtn = fs.querySelector('button[title*="xit"], button[title*="inimize"]') as HTMLElement | null;
+        exitBtn?.click();
+        e.preventDefault();
+        return;
+      }
+      // Blur focused input/textarea
       const active = document.activeElement as HTMLElement | null;
       if (active && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT')) {
         active.blur();
@@ -99,8 +107,8 @@ export function initShortcuts(store: Store) {
       return;
     }
 
-    // --- Ctrl+1..5: Switch panels ---
-    if (mod && !e.shiftKey && e.key >= '1' && e.key <= '5') {
+    // --- Ctrl+1..9: Switch panels ---
+    if (mod && !e.shiftKey && e.key >= '1' && e.key <= '9') {
       e.preventDefault();
       const idx = parseInt(e.key, 10) - 1;
       const panel = PANEL_SLOTS[idx];
@@ -109,5 +117,6 @@ export function initShortcuts(store: Store) {
       }
       return;
     }
+
   });
 }

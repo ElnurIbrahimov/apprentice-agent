@@ -8,7 +8,7 @@ import DOMPurify from 'dompurify';
 import { useStore } from '../store';
 import ModelPill from '../components/ModelPill';
 import { HTTP, getAuthHeaders } from '../api';
-import { streamChat } from '../utils/streamChat';
+import { streamRawGenerate } from '../utils/streamChat';
 import { StreamingPreviewController } from '../utils/StreamingPreviewController';
 import { useVersionHistory } from '../utils/useVersionHistory';
 import { highlightCode, detectLanguage } from '../utils/highlighter';
@@ -446,7 +446,7 @@ export default function ArtifactsPanel() {
   const [hoveredBtn, setHoveredBtn] = useState<string | null>(null);
   const [consoleLogs, setConsoleLogs] = useState<Array<{level: string, args: string[], timestamp: number}>>([]);
   const [consoleOpen, setConsoleOpen] = useState(false);
-  const { versions, currentIdx, pushVersion, goToVersion, undo, redo, canUndo, canRedo } = useVersionHistory();
+  const { versions, currentIdx, pushVersion, goToVersion, undo, redo, canUndo, canRedo } = useVersionHistory(20, 'aura_artifacts_versions');
 
   // --- Live mode state ---
   const [liveActiveFile, setLiveActiveFile] = useState<string | null>(null);
@@ -535,7 +535,6 @@ export default function ArtifactsPanel() {
     abortRef.current = ctrl;
 
     const systemPrompt = SYSTEM_PROMPTS[type] || SYSTEM_PROMPTS.html;
-    const promptMessage = `${systemPrompt}\n\nTask: ${text}`;
     const model = getModel('artifacts') || undefined;
 
     const previewCtrl = new StreamingPreviewController((html) => {
@@ -546,13 +545,24 @@ export default function ArtifactsPanel() {
 
     try {
       let streamedCode = '';
-      for await (const chunk of streamChat(promptMessage, model, ctrl.signal)) {
+      let lastCodeUpdate = 0;
+      for await (const chunk of streamRawGenerate(text, {
+        systemPrompt,
+        model,
+        signal: ctrl.signal,
+      })) {
         streamedCode += chunk;
-        // Update code display progressively
-        setCode(streamedCode);
+        // Throttle code display to every 200ms to avoid render thrashing
+        const now = Date.now();
+        if (now - lastCodeUpdate > 200) {
+          setCode(streamedCode);
+          lastCodeUpdate = now;
+        }
         // Update preview via debounced controller
         previewCtrl.append(chunk);
       }
+      // Ensure final code is shown
+      setCode(streamedCode);
 
       // Cancel any pending timer without rendering to avoid fenced content flash
       previewCtrl.reset();

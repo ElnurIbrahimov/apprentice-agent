@@ -1,6 +1,7 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Search, Trash2, X, MessageSquare, Clock } from 'lucide-react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { Search, Trash2, X, MessageSquare, Clock, Download } from 'lucide-react';
 import { useStore } from '../store';
+import { exportJSON, formatChatExport } from '../utils/exportUtils';
 import type { ConversationMeta } from '../types';
 
 function relativeTime(ts: number): string {
@@ -68,13 +69,13 @@ export default function ConversationHistory({ open, onClose }: Props) {
   }, [conversations, search]);
 
   const handleLoad = async (id: string) => {
-    await loadConversation(id);
+    try { await loadConversation(id); } catch { /* store handles errors */ }
     onClose();
   };
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    await deleteConversation(id);
+    try { await deleteConversation(id); } catch { /* store handles errors */ }
   };
 
   const handleClearAll = async () => {
@@ -82,9 +83,19 @@ export default function ConversationHistory({ open, onClose }: Props) {
       setConfirmClearAll(true);
       return;
     }
-    await clearAllHistory();
+    try { await clearAllHistory(); } catch { /* store handles errors */ }
     setConfirmClearAll(false);
   };
+
+  const handleExport = useCallback(() => {
+    const messages = useStore.getState().messages;
+    if (!messages?.length) return;
+    const data = {
+      exported: new Date().toISOString(),
+      messages: formatChatExport(messages.map(m => ({ role: m.role, text: m.text || '', timestamp: m.timestamp }))),
+    };
+    exportJSON(data, `aura-chat-${Date.now()}.json`);
+  }, []);
 
   if (!open) return null;
 
@@ -163,11 +174,19 @@ export default function ConversationHistory({ open, onClose }: Props) {
       {conversations.length > 0 && (
         <div className="conv-history-footer">
           <button
+            onClick={handleExport}
+            className="conv-history-clear-btn"
+            title="Export current chat as JSON"
+          >
+            <Download size={11} />
+            <span>Export chat</span>
+          </button>
+          <button
             onClick={handleClearAll}
             className={`conv-history-clear-btn ${confirmClearAll ? 'conv-history-clear-confirm' : ''}`}
           >
             <Trash2 size={11} />
-            <span>{confirmClearAll ? 'Confirm clear all?' : 'Clear all history'}</span>
+            <span>{confirmClearAll ? 'Confirm clear all?' : 'Clear all'}</span>
           </button>
         </div>
       )}

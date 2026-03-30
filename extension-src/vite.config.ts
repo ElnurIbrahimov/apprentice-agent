@@ -7,6 +7,7 @@ export default defineConfig({
   build: {
     outDir: resolve(__dirname, '../extension'),
     emptyOutDir: false,
+    sourcemap: 'hidden',
     rollupOptions: {
       input: { sidebar: resolve(__dirname, 'sidebar.html') },
       output: {

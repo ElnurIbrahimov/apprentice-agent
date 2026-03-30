@@ -1,9 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Terminal, ChevronRight, Copy, Play, Upload, Check, Pencil, Bug, RotateCcw, Zap, Square } from 'lucide-react';
+import { Terminal, ChevronRight, Copy, Play, Upload, Check, Pencil, Bug, RotateCcw, Zap, Square, Globe, Server } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { useStore } from '../store';
 import { HTTP, getAuthHeaders } from '../api';
 import ModelPill from '../components/ModelPill';
+import { getPyodideExecutor, PyodideExecutor } from '../utils/PyodideExecutor';
+import type { OutputBlock as PyOutputBlock, VariableInfo as PyVariableInfo } from '../utils/PyodideExecutor';
+import OfflineBanner from '../components/OfflineBanner';
 
 /* ── Types ── */
 interface OutputBlock {
@@ -215,6 +218,9 @@ export default function CodePanel() {
   const [sessionId, setSessionId] = useState(() => `code-${Date.now()}`);
   const [hasSessionState, setHasSessionState] = useState(false);
   const [runOnlyMode, setRunOnlyMode] = useState(false);
+  const [pyodideState, setPyodideState] = useState<string>('idle');
+  const [forceBackend, setForceBackend] = useState(false);
+  const executorRef = useRef(getPyodideExecutor(setPyodideState));
   const [inputValue, setInputValue] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -251,30 +257,52 @@ export default function CodePanel() {
     } catch { /* clipboard not available (unfocused, permissions) — skip visual feedback */ }
   }, []);
 
-  /* ── Generate code via chat endpoint ── */
+  /* ── Generate code via raw LLM endpoint (bypasses agent pipeline) ── */
   const generateCode = useCallback(async (prompt: string): Promise<{ code: string; explanation: string }> => {
     const model = getModel('code');
     if (generateAbortRef.current) generateAbortRef.current.abort();
     const ctrl = new AbortController();
     generateAbortRef.current = ctrl;
     try {
-      const resp = await fetch(`${HTTP}/api/chat`, {
+      const resp = await fetch(`${HTTP}/api/generate/raw`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
-          message: `${SYSTEM_PROMPT}\n\n${prompt}`,
+          message: prompt,
+          system_prompt: SYSTEM_PROMPT,
           model: model || undefined,
         }),
         signal: ctrl.signal,
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const data = await resp.json();
-      const text = data.response || data.text || data.content || '';
+      // Collect SSE stream into full text
+      const reader = resp.body!.getReader();
+      const decoder = new TextDecoder();
+      let buf = '', text = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const data = line.slice(6);
+          if (data === '[DONE]') break;
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.type === 'chunk' && parsed.content) text += parsed.content;
+            else if (parsed.type === 'error') throw new Error(parsed.error || 'Generation error');
+          } catch (e: any) { if (!(e instanceof SyntaxError)) throw e; }
+        }
+      }
+      // Parse JSON response from LLM
       try {
         const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
         const parsed = JSON.parse(cleaned);
         return { code: parsed.code || '', explanation: parsed.explanation || '' };
       } catch {
+        // Fallback: extract code from fences or raw text
         if (text.includes('import ') || text.includes('def ') || text.includes('print(')) {
           const fenceMatch = text.match(/```(?:python)?\s*([\s\S]*?)```/);
           return { code: fenceMatch ? fenceMatch[1].trim() : text, explanation: '' };
@@ -282,47 +310,58 @@ export default function CodePanel() {
         return { code: text, explanation: '' };
       }
     } catch (err: any) {
-      if (err.name === 'AbortError') throw err; // let caller handle cancellation
+      if (err.name === 'AbortError') throw err;
       throw new Error('Failed to generate code: ' + (err.message || err));
     }
   }, [getModel]);
 
-  /* ── Execute code via real backend executor ── */
+  /* ── Execute code via Pyodide (browser) or backend (server) ── */
   const executeCode = useCallback(async (code: string): Promise<{ outputs: OutputBlock[]; variables: VariableInfo[] }> => {
     if (executeAbortRef.current) executeAbortRef.current.abort();
     const ctrl = new AbortController();
     executeAbortRef.current = ctrl;
-    try {
-      const resp = await fetch(`${HTTP}/api/code/execute`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        body: JSON.stringify({ code, session_id: sessionId, timeout: 60 }),
-        signal: ctrl.signal,
-      });
-      if (!resp.ok) {
-        const d = await resp.json().catch(() => ({}));
-        return {
-          outputs: [{ type: 'error', ename: 'HTTPError', evalue: (d as any).detail || `HTTP ${resp.status}`, traceback: '' }],
-          variables: [],
-        };
-      }
-      const data = await resp.json();
-      if (data.variables?.length) setHasSessionState(true);
-      const outputs: OutputBlock[] = data.outputs || [];
-      if (!outputs.length && data.success) {
-        outputs.push({ type: 'stdout', text: '(no output)' });
-      }
-      return { outputs, variables: data.variables || [] };
-    } catch (err: any) {
-      if (err.name === 'AbortError') {
-        return { outputs: [{ type: 'stdout', text: 'Execution cancelled.' }], variables: [] };
-      }
-      return {
-        outputs: [{ type: 'error', ename: 'Error', evalue: err.message || 'Unknown error', traceback: '' }],
-        variables: [],
+
+    return new Promise((resolve) => {
+      let resolved = false;
+      const outputs: OutputBlock[] = [];
+      let variables: VariableInfo[] = [];
+
+      const finish = (success: boolean) => {
+        if (resolved) return;
+        resolved = true;
+        if (!outputs.length && success) outputs.push({ type: 'stdout', text: '(no output)' });
+        resolve({ outputs, variables });
       };
-    }
-  }, [sessionId]);
+
+      // Handle abort
+      ctrl.signal.addEventListener('abort', () => {
+        if (!resolved) { resolved = true; resolve({ outputs: [{ type: 'stdout', text: 'Execution cancelled.' }], variables: [] }); }
+      });
+
+      // Safety timeout: 5 minutes — prevents infinite hang if executor crashes
+      const safetyTimer = setTimeout(() => {
+        if (!resolved) {
+          outputs.push({ type: 'error', ename: 'Timeout', evalue: 'Execution timed out after 5 minutes', traceback: '' });
+          finish(false);
+        }
+      }, 300000);
+
+      executorRef.current.execute(
+        code,
+        {
+          onOutput: (block) => { if (!resolved) outputs.push(block as OutputBlock); },
+          onVariables: (vars) => {
+            if (resolved) return;
+            variables = vars as VariableInfo[];
+            if (vars.length) setHasSessionState(true);
+          },
+          onDone: (success, _executionTime) => { clearTimeout(safetyTimer); finish(success); },
+          onStatus: (msg) => { if (!resolved) outputs.push({ type: 'stdout', text: msg + '\n' }); },
+        },
+        { sessionId, forceBackend }
+      );
+    });
+  }, [sessionId, forceBackend]);
 
   /* ── Main submit (generate + execute) ── */
   const submit = useCallback(async (prompt: string) => {
@@ -470,6 +509,7 @@ export default function CodePanel() {
 
   /* ── Reset session ── */
   const resetSession = useCallback(async () => {
+    // Reset backend session
     try {
       await fetch(`${HTTP}/api/code/session/reset`, {
         method: 'POST',
@@ -477,6 +517,8 @@ export default function CodePanel() {
         body: JSON.stringify({ session_id: sessionId }),
       });
     } catch { /* ignore */ }
+    // Reset Pyodide runtime
+    executorRef.current.reset();
     setExchanges([]);
     setSessionId(`code-${Date.now()}`);
     setHasSessionState(false);
@@ -489,6 +531,7 @@ export default function CodePanel() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
+      <OfflineBanner hint="Browser Python available" />
       {/* Header */}
       <div className="flex items-center gap-2 px-3 pt-3 pb-1">
         <Terminal size={16} style={{ color: 'var(--pl)' }} />
@@ -501,6 +544,28 @@ export default function CodePanel() {
           }}>
             Session
           </span>
+        )}
+        {/* Pyodide / Backend toggle */}
+        <button
+          onClick={() => setForceBackend(!forceBackend)}
+          title={forceBackend ? 'Using server — click for browser Python' : 'Using browser Python — click for server'}
+          aria-label={forceBackend ? 'Switch to browser execution' : 'Switch to server execution'}
+          style={{
+            background: forceBackend ? 'rgba(245,158,11,0.1)' : 'rgba(16,185,129,0.1)',
+            border: `1px solid ${forceBackend ? 'rgba(245,158,11,0.3)' : 'rgba(16,185,129,0.3)'}`,
+            borderRadius: 'var(--r-pill)', color: forceBackend ? '#f59e0b' : '#10b981',
+            padding: '1px 7px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3,
+            fontSize: '9.5px', fontFamily: 'inherit', fontWeight: 500,
+          }}
+        >
+          {forceBackend ? <Server size={10} /> : <Globe size={10} />}
+          {forceBackend ? 'Server' : 'Browser'}
+        </button>
+        {pyodideState === 'loading' && (
+          <span style={{ fontSize: '9px', color: 'var(--pl)', fontStyle: 'italic' }}>Loading Python...</span>
+        )}
+        {pyodideState === 'error' && (
+          <span style={{ fontSize: '9px', color: 'var(--rd)' }}>Python unavailable</span>
         )}
         <span style={{ flex: 1 }} />
         <ModelPill featureKey="code" />

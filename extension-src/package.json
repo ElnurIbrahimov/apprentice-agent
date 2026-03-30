@@ -5,31 +5,40 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build && vite build --config vite.config.background.ts && vite build --config vite.config.content.ts && vite build --config vite.config.youtube.ts && vite build --config vite.config.netflix.ts && vite build --config vite.config.newtab.ts && cp newtab.html ../extension/newtab.html",
+    "build": "tsc --noEmit && vite build && vite build --config vite.config.background.ts && vite build --config vite.config.content.ts && vite build --config vite.config.youtube.ts && vite build --config vite.config.netflix.ts && vite build --config vite.config.newtab.ts && vite build --config vite.config.worker.ts && cp newtab.html ../extension/newtab.html",
+    "build:worker": "vite build --config vite.config.worker.ts",
     "build:netflix": "vite build --config vite.config.netflix.ts",
     "build:newtab": "vite build --config vite.config.newtab.ts && cp newtab.html ../extension/newtab.html",
     "build:bg": "vite build --config vite.config.background.ts",
     "build:content": "vite build --config vite.config.content.ts",
     "build:youtube": "vite build --config vite.config.youtube.ts",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "jest --verbose",
+    "test:watch": "jest --watch"
   },
   "dependencies": {
-    "dompurify": "^3.3.3",
-    "lucide-react": "^0.462.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "zustand": "^5.0.1"
+    "dompurify": "~3.3.3",
+    "lucide-react": "~0.462.0",
+    "react": "~18.3.1",
+    "react-dom": "~18.3.1",
+    "zustand": "~5.0.1"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/chrome": "^0.1.37",
     "@types/dompurify": "^3.0.5",
+    "@types/jest": "^30.0.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.3",
     "autoprefixer": "^10.4.20",
     "chrome-types": "^0.1.422",
+    "jest": "^30.3.0",
+    "jest-environment-jsdom": "^30.3.0",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.15",
+    "ts-jest": "^29.4.6",
     "typescript": "^5.6.3",
     "vite": "^5.4.10"
   }

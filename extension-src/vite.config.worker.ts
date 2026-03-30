@@ -3,20 +3,19 @@ import { resolve } from 'path'
 
 export default defineConfig({
   build: {
-    outDir: '../extension',
+    outDir: resolve(__dirname, '../extension'),
     emptyOutDir: false,
-    sourcemap: 'hidden',
     lib: {
-      entry: resolve(__dirname, 'background.ts'),
-      name: 'background',
-      fileName: () => 'background.js',
+      entry: resolve(__dirname, 'src/workers/pyodide-worker.ts'),
+      name: 'PyodideWorker',
       formats: ['iife'],
+      fileName: () => 'pyodide-worker.js',
     },
     rollupOptions: {
       output: {
-        // Service worker — single IIFE file, no code splitting
         inlineDynamicImports: true,
       },
     },
+    minify: 'esbuild',
   },
 })
