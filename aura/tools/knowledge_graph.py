@@ -30,8 +30,19 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Dict, List, Any, Tuple
 from dataclasses import dataclass, asdict, field
-import networkx as nx
-import numpy as np
+# networkx and numpy are lazy-loaded to avoid pulling them at package import time
+nx = None
+np = None
+
+def _ensure_kg_deps():
+    """Lazy-load networkx and numpy on first use."""
+    global nx, np
+    if nx is None:
+        import networkx as _nx
+        nx = _nx
+    if np is None:
+        import numpy as _np
+        np = _np
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +215,7 @@ class KnowledgeGraphTool:
     MAX_EDGES = 100000  # Maximum number of edges allowed
 
     def __init__(self, db_path: str = "data/knowledge_graph/"):
+        _ensure_kg_deps()
         self.db_path = Path(db_path)
         self.db_path.mkdir(parents=True, exist_ok=True)
 

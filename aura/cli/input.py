@@ -1,10 +1,8 @@
 """prompt_toolkit-based input for AURA CLI — styled prompt, keybindings, completions.
 
 Falls back to plain input() when prompt_toolkit can't attach to the console.
-
-NOTE: Keybindings below are hardcoded. See keybindings.py for a
-KeybindingsRegistry that will eventually replace these with
-user-customizable shortcuts loaded from ~/.aura/keybindings.json.
+Keybindings are loaded from KeybindingsRegistry, which supports user
+customization via ~/.aura/keybindings.json.
 """
 
 from pathlib import Path
@@ -94,6 +92,7 @@ SLASH_COMMANDS = [
     ("/checkout", "Switch to a conversation branch"),
     ("/merge", "Merge branch back to parent"),
     ("/chain", "Run prompt pipelines (step1 -> step2 -> ...)"),
+    ("/changes", "Show files modified in this session"),
     ("/channels", "Show active channel bridges and status"),
 ]
 
@@ -277,33 +276,37 @@ def create_session():
 
         kb = KeyBindings()
 
-        @kb.add("escape", "m")  # Alt+M or Esc then M
-        def _model_pick(event):
-            event.app.exit(result=SIGNAL_MODEL_PICK)
+        # Load keybindings from registry (supports user overrides via ~/.aura/keybindings.json)
+        from aura.cli.keybindings import (
+            KeybindingsRegistry, parse_key_to_pt,
+            ACTION_CLEAR_SCREEN, ACTION_NEW_SESSION, ACTION_COMMAND_PALETTE,
+            ACTION_OPEN_EDITOR, ACTION_REWIND, ACTION_CYCLE_PERMISSIONS,
+            ACTION_MODEL_PICKER,
+        )
+        _registry = KeybindingsRegistry()
 
-        @kb.add('c-l')
-        def _clear(event):
-            event.app.exit(result=SIGNAL_CLEAR_SCREEN)
+        # Map actions to signal constants
+        _ACTION_TO_SIGNAL = {
+            ACTION_MODEL_PICKER: SIGNAL_MODEL_PICK,
+            ACTION_CLEAR_SCREEN: SIGNAL_CLEAR_SCREEN,
+            ACTION_NEW_SESSION: SIGNAL_NEW_SESSION,
+            ACTION_COMMAND_PALETTE: SIGNAL_COMMAND_PALETTE,
+            ACTION_OPEN_EDITOR: SIGNAL_OPEN_EDITOR,
+            ACTION_CYCLE_PERMISSIONS: SIGNAL_CYCLE_PERMS,
+            ACTION_REWIND: SIGNAL_REWIND,
+        }
 
-        @kb.add('c-n')
-        def _new_session(event):
-            event.app.exit(result=SIGNAL_NEW_SESSION)
+        for action, signal in _ACTION_TO_SIGNAL.items():
+            key_str = _registry.get_key_for_action(action)
+            if key_str:
+                pt_keys = parse_key_to_pt(key_str)
 
-        @kb.add('c-k')
-        def _palette(event):
-            event.app.exit(result=SIGNAL_COMMAND_PALETTE)
+                def _make_handler(sig):
+                    def _handler(event):
+                        event.app.exit(result=sig)
+                    return _handler
 
-        @kb.add('c-g')
-        def _editor(event):
-            event.app.exit(result=SIGNAL_OPEN_EDITOR)
-
-        @kb.add('s-tab')
-        def _cycle_perms(event):
-            event.app.exit(result=SIGNAL_CYCLE_PERMS)
-
-        @kb.add('c-z')
-        def _rewind(event):
-            event.app.exit(result=SIGNAL_REWIND)
+                kb.add(*pt_keys)(_make_handler(signal))
 
         @kb.add('escape', 'enter')  # Alt+Enter inserts a newline
         def _newline(event):

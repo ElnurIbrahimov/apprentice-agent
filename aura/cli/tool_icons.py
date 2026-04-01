@@ -1,33 +1,33 @@
 """Tool icons and status indicators for AURA CLI."""
 
-# Per-tool Unicode icons (inspired by OpenCode)
+# Per-tool text labels (Claude Code style — readable at a glance)
 TOOL_ICONS = {
-    "read_file": "\u2192",
-    "write_file": "\u2190",
-    "edit_file": "\u2190",
-    "glob": "\u2731",
-    "grep": "\u2731",
-    "list_dir": "\u2192",
-    "shell": "$",
-    "run_command": "$",
-    "web_search": "\u25c8",
-    "search_web": "\u25c8",
-    "web_fetch": "%",
-    "browse": "%",
-    "browse_url": "%",
-    "code_search": "\u25c7",
-    "project_structure": "\u25c7",
-    "git": "\u238b",
-    "image_gen": "\u25ce",
-    "inner_monologue": "\u00b7",
-    "spawn_agent": "\u2502",
-    "tool_search": "\u25c7",
-    "load_skill": "\u26a1",
-    "clipboard": "\U0001f4cb",
-    "notifications": "\u25c6",
-    "calendar": "\u25c6",
-    "task_manager": "\u25c6",
-    "code_executor": "\u2699",
+    "read_file": "Read",
+    "write_file": "Write",
+    "edit_file": "Edit",
+    "glob": "Find",
+    "grep": "Search",
+    "list_dir": "List",
+    "shell": "Run",
+    "run_command": "Run",
+    "web_search": "Web",
+    "search_web": "Web",
+    "web_fetch": "Fetch",
+    "browse": "Browse",
+    "browse_url": "Browse",
+    "code_search": "Search",
+    "project_structure": "Tree",
+    "git": "Git",
+    "image_gen": "Image",
+    "inner_monologue": "Think",
+    "spawn_agent": "Agent",
+    "tool_search": "Search",
+    "load_skill": "Skill",
+    "clipboard": "Clip",
+    "notifications": "Notify",
+    "calendar": "Calendar",
+    "task_manager": "Tasks",
+    "code_executor": "Exec",
 }
 
 # Status indicators
@@ -44,5 +44,5 @@ BRAILLE_SPINNER = "\u280b\u2819\u2839\u2838\u283c\u2834\u2826\u2827\u2807\u280f"
 
 
 def get_tool_icon(tool_name: str) -> str:
-    """Get the icon for a tool."""
-    return TOOL_ICONS.get(tool_name, "\u2699")
+    """Get the text label for a tool (e.g. 'Read', 'Edit', 'Run')."""
+    return TOOL_ICONS.get(tool_name, "Tool")

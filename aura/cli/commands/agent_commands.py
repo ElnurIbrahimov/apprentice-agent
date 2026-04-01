@@ -1,6 +1,8 @@
 import logging
 from typing import Optional
 
+from ..context import get_ctx
+
 logger = logging.getLogger(__name__)
 
 
@@ -20,7 +22,7 @@ def handle_goal(agent, arg, context) -> Optional[str]:
         from ..display import show_info as _goal_info, show_response as _goal_resp, show_tool_call as _goal_tool, show_error as _goal_err
         _goal_info("Running goal...")
         try:
-            _goal_agentic = getattr(agent, '_agentic_loop', None)
+            _goal_agentic = get_ctx().agentic_loop if get_ctx() else None
             if _goal_agentic:
                 def _goal_on_tool_call(name, args, _result):
                     desc = args.get("path") or args.get("pattern") or args.get("query") or ""
@@ -35,7 +37,8 @@ def handle_goal(agent, arg, context) -> Optional[str]:
         except Exception as e:  # Catch-all: protect CLI from goal execution crash
             _goal_err(str(e))
     else:
-        print("Usage: /goal <your goal>")
+        from ..display import console
+        console.print("Usage: /goal <your goal>")
 
 
 def handle_plan(agent, arg, context) -> Optional[str]:
@@ -49,7 +52,7 @@ def handle_plan(agent, arg, context) -> Optional[str]:
             if isinstance(response, dict):
                 response = response.get("response", response.get("content", str(response)))
         except (ConnectionError, TimeoutError, OSError, RuntimeError) as e:
-            print(f"  Error generating plan: {e}")
+            _plan_console.print(f"  Error generating plan: {e}")
             return
 
         plan = parse_plan_from_llm(response)
@@ -62,7 +65,7 @@ def handle_plan(agent, arg, context) -> Optional[str]:
             return
 
         if choice in ("y", "yes"):
-            agentic_loop = getattr(agent, '_agentic_loop', None)
+            agentic_loop = get_ctx().agentic_loop if get_ctx() else None
             for step in plan.steps:
                 step.status = StepStatus.RUNNING
                 render_plan(_plan_console, plan)
@@ -99,10 +102,11 @@ def handle_plan(agent, arg, context) -> Optional[str]:
             render_plan(_plan_console, plan)
             _plan_console.print("[green]Plan execution complete.[/green]")
         else:
-            print("  Plan cancelled.")
+            _plan_console.print("  Plan cancelled.")
         return
     else:
-        print("Usage: /plan <task description>")
+        from ..display import console as _plan_console
+        _plan_console.print("Usage: /plan <task description>")
 
 
 def handle_fleet(agent, arg, context) -> Optional[str]:
@@ -154,6 +158,7 @@ def handle_hand(agent, arg, context) -> Optional[str]:
 
 
 def _handle_agent_command(agent, arg: str):
+    from ..display import console as _agent_console
     try:
         from aura.core.permissions import PermissionTier
         pm = getattr(agent, "permissions", None)
@@ -161,7 +166,7 @@ def _handle_agent_command(agent, arg: str):
             if arg:
                 confirm = input(f"  Spawn agent for: {arg[:60]}\n  Confirm? (y/n): ").strip().lower()
                 if confirm not in ("y", "yes"):
-                    print("  Cancelled.")
+                    _agent_console.print("  Cancelled.")
                     return
     except (ImportError, AttributeError, EOFError, KeyboardInterrupt):
         logger.debug("agent_permission_check_skipped", exc_info=True)
@@ -178,19 +183,19 @@ def _handle_agent_command(agent, arg: str):
                 llm_func=llm_func
             )
         except (ImportError, AttributeError, TypeError) as e:
-            print(f"Multi-agent system not available: {e}")
+            _agent_console.print(f"Multi-agent system not available: {e}")
             return
 
     specialists = list(agent.orchestrator.specialists.keys())
 
     if not arg:
-        print("\n  Available specialists:")
+        _agent_console.print("\n  Available specialists:")
         for name in specialists:
             spec = agent.orchestrator.specialists[name]
             desc = getattr(spec, 'description', name.capitalize())
-            print(f"    {name:12s} - {desc}")
-        print(f"\n  Usage: /agent <specialist> <task>")
-        print(f"         /agent parallel <task>")
+            _agent_console.print(f"    {name:12s} - {desc}")
+        _agent_console.print(f"\n  Usage: /agent <specialist> <task>")
+        _agent_console.print(f"         /agent parallel <task>")
         return
 
     parts = arg.split(maxsplit=1)
@@ -198,31 +203,31 @@ def _handle_agent_command(agent, arg: str):
     task = parts[1] if len(parts) > 1 else ""
 
     if not task:
-        print(f"Usage: /agent {specialist} <task>")
+        _agent_console.print(f"Usage: /agent {specialist} <task>")
         return
 
     if specialist == "parallel":
-        print(f"  Running all specialists in parallel on: {task[:60]}...")
+        _agent_console.print(f"  Running all specialists in parallel on: {task[:60]}...")
         from aura.multi_agent.protocol import AgentMessage, CollaborationMode
         message = AgentMessage(content=task, sender="user")
         results = agent.orchestrator._execute_parallel(specialists, message)
         for result in results:
             status = "OK" if result.success else "FAIL"
-            print(f"\n  [{result.agent.upper()}] ({status}):")
-            print(f"  {result.response[:500]}")
+            _agent_console.print(f"\n  [{result.agent.upper()}] ({status}):")
+            _agent_console.print(f"  {result.response[:500]}")
     elif specialist in specialists:
-        print(f"  [{specialist.upper()}] Working on: {task[:60]}...")
+        _agent_console.print(f"  [{specialist.upper()}] Working on: {task[:60]}...")
         from aura.multi_agent.protocol import AgentMessage
         message = AgentMessage(content=task, sender="user")
         result = agent.orchestrator._execute_single(specialist, message)
         if result.success:
-            print(f"\n  [{specialist.upper()}]:")
-            print(f"  {result.response}")
+            _agent_console.print(f"\n  [{specialist.upper()}]:")
+            _agent_console.print(f"  {result.response}")
         else:
-            print(f"  Error: {result.response}")
+            _agent_console.print(f"  Error: {result.response}")
     else:
-        print(f"  Unknown specialist: {specialist}")
-        print(f"  Available: {', '.join(specialists)}, parallel")
+        _agent_console.print(f"  Unknown specialist: {specialist}")
+        _agent_console.print(f"  Available: {', '.join(specialists)}, parallel")
 
 
 def handle_debate(agent, arg, context) -> Optional[str]:
@@ -345,6 +350,7 @@ def handle_chain(agent, arg, context) -> Optional[str]:
 
 
 def _handle_hand_command(agent, arg: str):
+    from ..display import console as _hand_console
     from aura.hands.manager import get_hand_manager
     from aura.hands.researcher import ResearcherHand
     from aura.hands.guardian import GuardianHand
@@ -364,33 +370,33 @@ def _handle_hand_command(agent, arg: str):
     if subcmd == "list" or subcmd == "ls":
         hands = manager.list_hands()
         if not hands:
-            print("No hands registered.")
+            _hand_console.print("No hands registered.")
             return
-        print(f"\n  {'Name':<15} {'State':<12} {'Runs':<6} {'Cost':<10} {'Failures':<10}")
-        print(f"  {'─'*15} {'─'*12} {'─'*6} {'─'*10} {'─'*10}")
+        _hand_console.print(f"\n  {'Name':<15} {'State':<12} {'Runs':<6} {'Cost':<10} {'Failures':<10}")
+        _hand_console.print(f"  {'─'*15} {'─'*12} {'─'*6} {'─'*10} {'─'*10}")
         for h in hands:
-            print(f"  {h['name']:<15} {h['state']:<12} {h['total_runs']:<6} ${h['total_cost']:<9.4f} {h['consecutive_failures']:<10}")
-        print()
+            _hand_console.print(f"  {h['name']:<15} {h['state']:<12} {h['total_runs']:<6} ${h['total_cost']:<9.4f} {h['consecutive_failures']:<10}")
+        _hand_console.print()
 
     elif subcmd == "activate" and subarg:
         if manager.activate(subarg):
-            print(f"  Hand '{subarg}' activated.")
+            _hand_console.print(f"  Hand '{subarg}' activated.")
         else:
-            print(f"  Unknown hand: {subarg}")
+            _hand_console.print(f"  Unknown hand: {subarg}")
 
     elif subcmd == "deactivate" and subarg:
         if manager.deactivate(subarg):
-            print(f"  Hand '{subarg}' deactivated.")
+            _hand_console.print(f"  Hand '{subarg}' deactivated.")
         else:
-            print(f"  Unknown hand: {subarg}")
+            _hand_console.print(f"  Unknown hand: {subarg}")
 
     elif subcmd == "run" and subarg:
         import asyncio
         hand = manager.get_hand(subarg)
         if not hand:
-            print(f"  Unknown hand: {subarg}")
+            _hand_console.print(f"  Unknown hand: {subarg}")
             return
-        print(f"  Running hand '{subarg}'...")
+        _hand_console.print(f"  Running hand '{subarg}'...")
         try:
             result = asyncio.run(manager.run_hand(
                 subarg,
@@ -398,32 +404,32 @@ def _handle_hand_command(agent, arg: str):
                 tools=getattr(agent, 'tools', {}),
             ))
             status = "SUCCESS" if result.success else "FAILED"
-            print(f"  [{status}] {result.summary}")
+            _hand_console.print(f"  [{status}] {result.summary}")
             if result.error:
-                print(f"  Error: {result.error}")
-            print(f"  ({result.iterations} iterations, {result.duration_seconds:.1f}s, ${result.cost_usd:.4f})")
+                _hand_console.print(f"  Error: {result.error}")
+            _hand_console.print(f"  ({result.iterations} iterations, {result.duration_seconds:.1f}s, ${result.cost_usd:.4f})")
         except Exception as e:  # Catch-all: hand execution may fail in many ways
-            print(f"  Hand execution failed: {e}")
+            _hand_console.print(f"  Hand execution failed: {e}")
 
     elif subcmd == "status" and subarg:
         hand = manager.get_hand(subarg)
         if not hand:
-            print(f"  Unknown hand: {subarg}")
+            _hand_console.print(f"  Unknown hand: {subarg}")
             return
         stats = hand.get_stats()
-        print(f"\n  Hand: {stats['name']}")
-        print(f"  State: {stats['state']}")
-        print(f"  Total runs: {stats['total_runs']}")
-        print(f"  Total cost: ${stats['total_cost']:.4f}")
-        print(f"  Failures (consecutive): {stats['consecutive_failures']}")
+        _hand_console.print(f"\n  Hand: {stats['name']}")
+        _hand_console.print(f"  State: {stats['state']}")
+        _hand_console.print(f"  Total runs: {stats['total_runs']}")
+        _hand_console.print(f"  Total cost: ${stats['total_cost']:.4f}")
+        _hand_console.print(f"  Failures (consecutive): {stats['consecutive_failures']}")
         if stats['last_error']:
-            print(f"  Last error: {stats['last_error']}")
-        print()
+            _hand_console.print(f"  Last error: {stats['last_error']}")
+        _hand_console.print()
 
     else:
-        print("Usage: /hand <list|activate|deactivate|run|status> [name]")
-        print("  /hand list              — Show all hands and their status")
-        print("  /hand activate <name>   — Activate a hand for scheduling")
-        print("  /hand deactivate <name> — Deactivate a hand")
-        print("  /hand run <name>        — Run a hand immediately")
-        print("  /hand status <name>     — Show detailed hand status")
+        _hand_console.print("Usage: /hand <list|activate|deactivate|run|status> [name]")
+        _hand_console.print("  /hand list              — Show all hands and their status")
+        _hand_console.print("  /hand activate <name>   — Activate a hand for scheduling")
+        _hand_console.print("  /hand deactivate <name> — Deactivate a hand")
+        _hand_console.print("  /hand run <name>        — Run a hand immediately")
+        _hand_console.print("  /hand status <name>     — Show detailed hand status")

@@ -2,6 +2,8 @@ import os
 import logging
 from typing import Optional
 
+from ..context import get_ctx
+
 logger = logging.getLogger(__name__)
 
 
@@ -16,63 +18,72 @@ def handle_sessions(agent, arg, context) -> Optional[str]:
 
     if subcmd == "list":
         if not agentic_sessions and not brain_conversations:
-            print("  No sessions found.")
+            from ..display import console
+            console.print("  No sessions found.")
             return
         from ..session_picker import _format_session_line
+        from ..display import console
+        ctx = get_ctx()
         current_sid = ""
-        if hasattr(agent, '_agentic_session') and agent._agentic_session:
-            current_sid = getattr(agent._agentic_session, 'session_id', "") or ""
+        if ctx and ctx.session:
+            current_sid = getattr(ctx.session, 'session_id', "") or ""
         all_sessions = agentic_sessions + brain_conversations
-        print(f"  {'Session':<35} {'Msgs':>5}  {'Model':<15} {'Last Active':>8}")
-        print(f"  {'-' * 72}")
+        console.print(f"  {'Session':<35} {'Msgs':>5}  {'Model':<15} {'Last Active':>8}")
+        console.print(f"  {'-' * 72}")
         for s in all_sessions:
             is_current = s.get("id", "") == current_sid
             line = _format_session_line(s, is_current=is_current)
             marker = " *" if is_current else "  "
-            print(f" {marker}{line}")
-        print(f"\n  {len(all_sessions)} session(s) total.")
+            console.print(f" {marker}{line}")
+        console.print(f"\n  {len(all_sessions)} session(s) total.")
         return
     elif subcmd == "delete" and len(parts_arg) > 1:
         target = parts_arg[1]
+        from ..display import console
         if session_mgr.delete(target):
-            print(f"  Deleted session: {target}")
+            console.print(f"  Deleted session: {target}")
         else:
-            print(f"  Session not found: {target}")
+            console.print(f"  Session not found: {target}")
     elif subcmd == "new":
-        if hasattr(agent, '_agentic_session'):
-            agent._agentic_session.save()
+        ctx = get_ctx()
+        if ctx and ctx.session:
+            ctx.session.save()
         new_ses = AgenticSession()
         new_ses.new(project_root=os.getcwd())
-        if hasattr(agent, '_agentic_loop'):
-            agent._agentic_loop.session = new_ses
-            agent._agentic_loop.clear_history()
-        agent._agentic_session = new_ses
-        print("  Started new session.")
+        if ctx and ctx.agentic_loop:
+            ctx.agentic_loop.session = new_ses
+            ctx.agentic_loop.clear_history()
+        if ctx:
+            ctx.session = new_ses
+        from ..display import console
+        console.print("  Started new session.")
     else:
         if not agentic_sessions and not brain_conversations:
-            print("  No sessions found.")
+            from ..display import console
+            console.print("  No sessions found.")
             return
         from ..session_picker import pick_session
         from ..display import console as _sessions_console
+        ctx = get_ctx()
         current_sid = ""
-        if hasattr(agent, '_agentic_session') and agent._agentic_session:
-            current_sid = getattr(agent._agentic_session, 'session_id', "") or ""
+        if ctx and ctx.session:
+            current_sid = getattr(ctx.session, 'session_id', "") or ""
         all_sessions = agentic_sessions + brain_conversations
         result = pick_session(_sessions_console, all_sessions, current_sid)
         if result and "__action__" not in result:
             sid = result.get("id", "")
-            if sid and hasattr(agent, '_agentic_loop'):
-                if agent._agentic_loop.load_session(sid):
-                    print(f"  Switched to session: {result.get('title', 'Untitled')}")
+            if sid and ctx and ctx.agentic_loop:
+                if ctx.agentic_loop.load_session(sid):
+                    _sessions_console.print(f"  Switched to session: {result.get('title', 'Untitled')}")
                 else:
-                    print(f"  Failed to load session: {sid}")
+                    _sessions_console.print(f"  Failed to load session: {sid}")
         elif result and result.get("__action__") == "delete":
             target_session = result.get("session", {})
             target_id = target_session.get("id", "")
             if target_id and session_mgr.delete(target_id):
-                print(f"  Deleted session: {target_session.get('title', target_id)}")
+                _sessions_console.print(f"  Deleted session: {target_session.get('title', target_id)}")
             else:
-                print(f"  Failed to delete session.")
+                _sessions_console.print(f"  Failed to delete session.")
 
 
 def handle_clear(agent, arg, context) -> Optional[str]:
@@ -83,19 +94,22 @@ def handle_clear(agent, arg, context) -> Optional[str]:
             console.print("  [dim]Cancelled.[/dim]")
             return
     agent.brain.clear_history()
-    if hasattr(agent, '_agentic_loop'):
-        agent._agentic_loop.clear_history()
-    print("Conversation history cleared.")
+    ctx = get_ctx()
+    if ctx and ctx.agentic_loop:
+        ctx.agentic_loop.clear_history()
+    from ..display import console
+    console.print("Conversation history cleared.")
 
 
 def handle_compact(agent, arg, context) -> Optional[str]:
+    from ..display import console
     focus = arg if arg else None
-    print("Compacting conversation history...")
+    console.print("Compacting conversation history...")
     summary = agent.brain.compact_history(focus=focus)
     if summary:
-        print(f"Compacted. Summary: {summary[:200]}...")
+        console.print(f"Compacted. Summary: {summary[:200]}...")
     else:
-        print("Nothing to compact (history too short).")
+        console.print("Nothing to compact (history too short).")
 
 
 def handle_retry(agent, arg, context) -> Optional[str]:
@@ -133,11 +147,12 @@ def handle_retry(agent, arg, context) -> Optional[str]:
 
 
 def handle_context(agent, arg, context) -> Optional[str]:
-    if hasattr(agent, '_agentic_loop'):
+    ctx = get_ctx()
+    if ctx and ctx.agentic_loop:
         from ..display import console as _context_console
         from ..context_bar import estimate_messages_tokens, get_context_limit, build_context_breakdown, estimate_tokens
         from rich.panel import Panel
-        agentic_loop = agent._agentic_loop
+        agentic_loop = ctx.agentic_loop
         tokens_used = estimate_messages_tokens(agentic_loop._conversation_history)
         token_limit = get_context_limit(agent.brain._model_override or "default")
         system_tokens = 0
@@ -151,27 +166,31 @@ def handle_context(agent, arg, context) -> Optional[str]:
             border_style="cyan",
         ))
     else:
-        print("  Context tracking not available.")
+        from ..display import console
+        console.print("  Context tracking not available.")
 
 
 def handle_cost(agent, arg, context) -> Optional[str]:
+    from ..display import console
     stats = agent.brain.get_session_stats()
-    print(f"\n  Session Cost:")
-    print(f"    Input tokens:  {stats['input_tokens']:,}")
-    print(f"    Output tokens: {stats['output_tokens']:,}")
-    print(f"    Total tokens:  {stats['total_tokens']:,}")
-    print(f"    Estimated cost: ${stats['cost_usd']:.4f}")
-    print(f"    Queries: {stats['queries']}")
-    print()
+    console.print(f"\n  Session Cost:")
+    console.print(f"    Input tokens:  {stats['input_tokens']:,}")
+    console.print(f"    Output tokens: {stats['output_tokens']:,}")
+    console.print(f"    Total tokens:  {stats['total_tokens']:,}")
+    console.print(f"    Estimated cost: ${stats['cost_usd']:.4f}")
+    console.print(f"    Queries: {stats['queries']}")
+    console.print()
 
 
 def handle_rewind(agent, arg, context) -> Optional[str]:
-    if hasattr(agent, '_agentic_loop') and hasattr(agent._agentic_loop, '_checkpoint_mgr'):
+    ctx = get_ctx()
+    if ctx and ctx.agentic_loop and hasattr(ctx.agentic_loop, '_checkpoint_mgr'):
         from ..display import console as _rw_console
         from ..chat_loop import _rewind_picker
-        _rewind_picker(agent._agentic_loop._checkpoint_mgr, _rw_console)
+        _rewind_picker(ctx.agentic_loop._checkpoint_mgr, _rw_console)
     else:
-        print("  No checkpoint manager available.")
+        from ..display import console
+        console.print("  No checkpoint manager available.")
 
 
 # ── Conversation Forking Commands ────────────────────────────────────
@@ -198,18 +217,18 @@ def _get_tree(agent):
 
 def handle_fork(agent, arg, context) -> Optional[str]:
     """Fork current conversation into a new branch."""
-    if not hasattr(agent, '_agentic_loop') or not agent._agentic_loop:
-        print("  Fork/checkout/merge requires an active chat session.")
-        return
-
     from ..display import console as _fork_console
+    ctx = get_ctx()
+    if not ctx or not ctx.agentic_loop:
+        _fork_console.print("  Fork/checkout/merge requires an active chat session.")
+        return
 
     tree = _get_tree(agent)
     if tree is None:
-        print("  Fork not available outside chat mode.")
+        _fork_console.print("  Fork not available outside chat mode.")
         return
 
-    loop = agent._agentic_loop
+    loop = ctx.agentic_loop
     # Sync current history into the tree before forking
     tree.sync_history(loop._conversation_history)
 
@@ -234,16 +253,17 @@ def handle_branches(agent, arg, context) -> Optional[str]:
 
     tree = _get_tree(agent)
     if tree is None:
-        print("  Branches not available outside chat mode.")
+        _br_console.print("  Branches not available outside chat mode.")
         return
 
     # Sync current history
-    loop = agent._agentic_loop
+    ctx = get_ctx()
+    loop = ctx.agentic_loop
     tree.sync_history(loop._conversation_history)
 
     branches = tree.list_branches()
     if not branches:
-        print("  No branches.")
+        _br_console.print("  No branches.")
         return
 
     _br_console.print()
@@ -283,22 +303,22 @@ def handle_branches(agent, arg, context) -> Optional[str]:
 
 def handle_checkout(agent, arg, context) -> Optional[str]:
     """Switch to a different conversation branch."""
-    if not hasattr(agent, '_agentic_loop') or not agent._agentic_loop:
-        print("  Fork/checkout/merge requires an active chat session.")
-        return
-
     from ..display import console as _co_console
+    ctx = get_ctx()
+    if not ctx or not ctx.agentic_loop:
+        _co_console.print("  Fork/checkout/merge requires an active chat session.")
+        return
 
     tree = _get_tree(agent)
     if tree is None:
-        print("  Checkout not available outside chat mode.")
+        _co_console.print("  Checkout not available outside chat mode.")
         return
 
     if not arg or not arg.strip():
-        print("  Usage: /checkout <branch-id|number>  (e.g. /checkout 1, /checkout main)")
+        _co_console.print("  Usage: /checkout <branch-id|number>  (e.g. /checkout 1, /checkout main)")
         return
 
-    loop = agent._agentic_loop
+    loop = ctx.agentic_loop
     # Save current branch's history before switching
     tree.sync_history(loop._conversation_history)
 
@@ -306,7 +326,7 @@ def handle_checkout(agent, arg, context) -> Optional[str]:
     try:
         branch = tree.switch(branch_id)
     except KeyError as e:
-        print(f"  {e}")
+        _co_console.print(f"  {e}")
         return
 
     # Point the agentic loop at the target branch's history
@@ -320,27 +340,62 @@ def handle_checkout(agent, arg, context) -> Optional[str]:
     )
 
 
-def handle_merge(agent, arg, context) -> Optional[str]:
-    """Merge current branch back to parent."""
-    if not hasattr(agent, '_agentic_loop') or not agent._agentic_loop:
-        print("  Fork/checkout/merge requires an active chat session.")
+def handle_changes(agent, arg, context) -> Optional[str]:
+    """Show files modified in the current session with diffs."""
+    from ..context import get_ctx
+    from ..display import console
+    ctx = get_ctx()
+    if not ctx or not ctx.agentic_loop:
+        console.print("[dim]No active session.[/dim]")
         return
 
+    hot_files = getattr(ctx.agentic_loop, '_hot_files', [])
+    if not hot_files:
+        console.print("[dim]No files modified in this session.[/dim]")
+        return
+
+    console.print(f"\n[bold]Files modified this session ({len(hot_files)}):[/bold]\n")
+    for f in hot_files:
+        import subprocess, os
+        basename = os.path.basename(f)
+        try:
+            result = subprocess.run(
+                ["git", "diff", "HEAD~1", "--", f],
+                capture_output=True, text=True, timeout=5,
+                cwd=os.path.dirname(f) or ".",
+            )
+            if result.stdout:
+                adds = result.stdout.count('\n+') - result.stdout.count('\n+++')
+                dels = result.stdout.count('\n-') - result.stdout.count('\n---')
+                console.print(f"  [cyan]{basename}[/cyan] [green]+{adds}[/green] [red]-{dels}[/red]")
+            else:
+                console.print(f"  [cyan]{basename}[/cyan] [dim](no diff)[/dim]")
+        except Exception:
+            console.print(f"  [cyan]{basename}[/cyan]")
+    console.print()
+
+
+def handle_merge(agent, arg, context) -> Optional[str]:
+    """Merge current branch back to parent."""
     from ..display import console as _mg_console
+    ctx = get_ctx()
+    if not ctx or not ctx.agentic_loop:
+        _mg_console.print("  Fork/checkout/merge requires an active chat session.")
+        return
 
     tree = _get_tree(agent)
     if tree is None:
-        print("  Merge not available outside chat mode.")
+        _mg_console.print("  Merge not available outside chat mode.")
         return
 
-    loop = agent._agentic_loop
+    loop = ctx.agentic_loop
     # Sync current history before merge
     tree.sync_history(loop._conversation_history)
 
     result = tree.merge_to_parent()
 
     if result.get("error"):
-        print(f"  {result['error']}")
+        _mg_console.print(f"  {result['error']}")
         return
 
     # Point the agentic loop at the parent's history (now current)

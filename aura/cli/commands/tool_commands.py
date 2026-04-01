@@ -47,7 +47,8 @@ def handle_test(agent, arg, context) -> Optional[str]:
         except (EOFError, KeyboardInterrupt):
             return
         if choice in ("y", "yes"):
-            agentic_loop = getattr(agent, '_agentic_loop', None)
+            ctx = get_ctx()
+            agentic_loop = ctx.agentic_loop if ctx else None
             if agentic_loop:
                 fix_prompt = f"These tests failed:\n{result.output[-2000:]}\n\nFix the failing tests."
                 def _test_on_tool_call(name, args_t, _result):
@@ -66,10 +67,13 @@ def handle_project(agent, arg, context) -> Optional[str]:
 def handle_watch(agent, arg, context) -> Optional[str]:
     from ..watch_mode import FileWatcher, create_watch_indicator, remove_ai_comment
     from ..display import console as _watch_console
-    watcher = getattr(agent, '_file_watcher', None)
+    from ..context import get_ctx
+    ctx = get_ctx()
+    watcher = ctx.file_watcher if ctx else None
     if not watcher:
         watcher = FileWatcher()
-        agent._file_watcher = watcher
+        if ctx:
+            ctx.file_watcher = watcher
 
     if arg.strip() == "stop":
         watcher.stop()
@@ -101,44 +105,50 @@ def handle_watch(agent, arg, context) -> Optional[str]:
 
 
 def handle_undo(agent, arg, context) -> Optional[str]:
-    if hasattr(agent, '_agentic_loop'):
-        tool_exec = agent._agentic_loop.executor
+    from ..context import get_ctx
+    from ..display import console
+    ctx = get_ctx()
+    if ctx and ctx.agentic_loop:
+        tool_exec = ctx.agentic_loop.executor
         if arg:
             result = tool_exec.code_edit.rollback(arg)
             if result.get("success"):
-                print(f"  Rolled back: {result.get('restored', arg)}")
+                console.print(f"  Rolled back: {result.get('restored', arg)}")
             else:
-                print(f"  Error: {result.get('error', 'Unknown error')}")
+                console.print(f"  Error: {result.get('error', 'Unknown error')}")
         else:
             backups = tool_exec.code_edit._last_backups
             if backups:
                 last_path = list(backups.keys())[-1]
                 result = tool_exec.code_edit.rollback(last_path)
                 if result.get("success"):
-                    print(f"  Rolled back: {last_path}")
+                    console.print(f"  Rolled back: {last_path}")
                 else:
-                    print(f"  Error: {result.get('error', 'Unknown error')}")
+                    console.print(f"  Error: {result.get('error', 'Unknown error')}")
             else:
-                print("  No edits to undo (no .bak files)")
+                console.print("  No edits to undo (no .bak files)")
     else:
-        print("  No active agentic loop.")
+        console.print("  No active agentic loop.")
 
 
 def _handle_shell_command(agent, arg: str):
+    from ..display import console as _shell_console
     if not arg:
-        print("Usage: /shell <command>")
-        print("  /shell git status")
-        print("  /run npm test")
-        print("  /bash ls -la")
+        _shell_console.print("Usage: /shell <command>")
+        _shell_console.print("  /shell git status")
+        _shell_console.print("  /run npm test")
+        _shell_console.print("  /bash ls -la")
         return
 
     try:
         from aura.core.permissions import PermissionTier
-        pm = getattr(agent, "permissions", None)
+        from ..context import get_ctx
+        ctx = get_ctx()
+        pm = ctx.permissions if ctx else None
         if pm and pm.current_mode != PermissionTier.FULL_AUTO:
             confirm = input(f"  Execute shell command: {arg}\n  Confirm? (y/n): ").strip().lower()
             if confirm not in ("y", "yes"):
-                print("  Cancelled.")
+                _shell_console.print("  Cancelled.")
                 return
     except (ImportError, AttributeError, EOFError, KeyboardInterrupt):
         logger.debug("shell_permission_check_skipped", exc_info=True)
@@ -150,23 +160,24 @@ def _handle_shell_command(agent, arg: str):
         agent.tools["shell_executor"] = tool
 
     def on_line(line):
-        print(f"  {line}")
+        _shell_console.print(f"  {line}")
 
     result = tool.run_streaming(command=arg, on_output=on_line)
 
     if not result.get("success"):
         error = result.get("error", "")
         if error:
-            print(f"\n  Error: {error}")
-    print(f"\n  [exit {result.get('exit_code', '?')}] ({result.get('elapsed', '?')}s)")
+            _shell_console.print(f"\n  Error: {error}")
+    _shell_console.print(f"\n  \\[exit {result.get('exit_code', '?')}] ({result.get('elapsed', '?')}s)")
 
 
 def _handle_grep_command(agent, arg: str):
+    from ..display import console as _grep_console
     if not arg:
-        print("Usage: /grep <pattern> [path]")
-        print("  /grep 'def my_func'")
-        print("  /grep 'import os' ./src")
-        print("  /grep 'TODO' --type py")
+        _grep_console.print("Usage: /grep <pattern> \\[path]")
+        _grep_console.print("  /grep 'def my_func'")
+        _grep_console.print("  /grep 'import os' ./src")
+        _grep_console.print("  /grep 'TODO' --type py")
         return
 
     tool = agent.tools.get("code_search")
@@ -203,28 +214,29 @@ def _handle_grep_command(agent, arg: str):
     )
 
     if not result.get("success"):
-        print(f"  Error: {result.get('error')}")
+        _grep_console.print(f"  Error: {result.get('error')}")
         return
 
     matches = result.get("matches", [])
     total = result.get("total_matches", 0)
-    print(f"\n  {total} matches in {result.get('files_searched', 0)} files:\n")
+    _grep_console.print(f"\n  {total} matches in {result.get('files_searched', 0)} files:\n")
     for m in matches[:50]:
-        print(f"  {m['file']}:{m['line']}\t{m['text']}")
+        _grep_console.print(f"  {m['file']}:{m['line']}\t{m['text']}")
         for ctx in m.get("before", []):
-            print(f"    {ctx}")
+            _grep_console.print(f"    {ctx}")
         for ctx in m.get("after", []):
-            print(f"    {ctx}")
+            _grep_console.print(f"    {ctx}")
     if total > 50:
-        print(f"\n  ... and {total - 50} more matches")
+        _grep_console.print(f"\n  ... and {total - 50} more matches")
 
 
 def _handle_search_command(agent, arg: str):
+    from ..display import console as _search_console
     if not arg:
-        print("Usage: /search <glob-pattern>  or  /find def <name>")
-        print("  /search '*.py'")
-        print("  /find def MyClass")
-        print("  /search structure")
+        _search_console.print("Usage: /search <glob-pattern>  or  /find def <name>")
+        _search_console.print("  /search '*.py'")
+        _search_console.print("  /find def MyClass")
+        _search_console.print("  /search structure")
         return
 
     tool = agent.tools.get("code_search")
@@ -239,62 +251,63 @@ def _handle_search_command(agent, arg: str):
     if subcmd == "def" or subcmd == "definition":
         name = parts[1] if len(parts) > 1 else ""
         if not name:
-            print("Usage: /find def <name>")
+            _search_console.print("Usage: /find def <name>")
             return
         result = tool.find_definition(name=name)
         if result.get("success"):
             defs = result.get("definitions", [])
-            print(f"\n  Found {len(defs)} definition(s) of '{name}':\n")
+            _search_console.print(f"\n  Found {len(defs)} definition(s) of '{name}':\n")
             for d in defs:
-                print(f"  {d['file']}:{d['line']} ({d['kind']})")
-                print(f"    {d['text']}")
+                _search_console.print(f"  {d['file']}:{d['line']} ({d['kind']})")
+                _search_console.print(f"    {d['text']}")
         else:
-            print(f"  Error: {result.get('error')}")
+            _search_console.print(f"  Error: {result.get('error')}")
 
     elif subcmd == "ref" or subcmd == "references":
         name = parts[1] if len(parts) > 1 else ""
         if not name:
-            print("Usage: /find ref <name>")
+            _search_console.print("Usage: /find ref <name>")
             return
         result = tool.find_references(name=name)
         if result.get("success"):
             refs = result.get("references", [])
-            print(f"\n  Found {len(refs)} reference(s) to '{name}':\n")
+            _search_console.print(f"\n  Found {len(refs)} reference(s) to '{name}':\n")
             for r in refs[:30]:
-                print(f"  {r['file']}:{r['line']}\t{r['text']}")
+                _search_console.print(f"  {r['file']}:{r['line']}\t{r['text']}")
         else:
-            print(f"  Error: {result.get('error')}")
+            _search_console.print(f"  Error: {result.get('error')}")
 
     elif subcmd == "structure" or subcmd == "tree":
         path = parts[1] if len(parts) > 1 else "."
         result = tool.project_structure(path=path)
         if result.get("success"):
-            print(f"\n{result['tree']}")
+            _search_console.print(f"\n{result['tree']}")
             s = result.get("stats", {})
-            print(f"\n  {s.get('files', 0)} files, {s.get('dirs', 0)} dirs")
+            _search_console.print(f"\n  {s.get('files', 0)} files, {s.get('dirs', 0)} dirs")
         else:
-            print(f"  Error: {result.get('error')}")
+            _search_console.print(f"  Error: {result.get('error')}")
 
     else:
         result = tool.glob(pattern=arg)
         if result.get("success"):
             files = result.get("files", [])
-            print(f"\n  Found {result.get('total', 0)} files:\n")
+            _search_console.print(f"\n  Found {result.get('total', 0)} files:\n")
             for f in files[:50]:
                 size = f.get("size", 0)
                 size_str = f"{size // 1024}KB" if size > 1024 else f"{size}B"
-                print(f"  {f['path']}  ({size_str})")
+                _search_console.print(f"  {f['path']}  ({size_str})")
             if result.get("truncated"):
-                print(f"\n  ... truncated ({result['total']} total)")
+                _search_console.print(f"\n  ... truncated ({result['total']} total)")
         else:
-            print(f"  Error: {result.get('error')}")
+            _search_console.print(f"  Error: {result.get('error')}")
 
 
 def _handle_edit_command(agent, arg: str):
+    from ..display import console as _edit_console
     if not arg:
-        print("Usage: /edit <file-path> [line-offset]")
-        print("  /edit src/main.py")
-        print("  /edit src/main.py 100")
+        _edit_console.print("Usage: /edit <file-path> \\[line-offset]")
+        _edit_console.print("  /edit src/main.py")
+        _edit_console.print("  /edit src/main.py 100")
         return
 
     tool = agent.tools.get("code_edit")
@@ -310,13 +323,14 @@ def _handle_edit_command(agent, arg: str):
 
     result = tool.read_file(path=path, offset=offset, limit=limit)
     if result.get("success"):
-        print(f"\n  {result['showing']}  ({result['path']})\n")
-        print(result["content"])
+        _edit_console.print(f"\n  {result['showing']}  ({result['path']})\n")
+        _edit_console.print(result["content"])
     else:
-        print(f"  Error: {result.get('error')}")
+        _edit_console.print(f"  Error: {result.get('error')}")
 
 
 def _handle_project_command(agent, arg: str):
+    from ..display import console as _proj_console
     tool = agent.tools.get("code_search")
     if not tool:
         from aura.tools.code_search import CodeSearchTool
@@ -329,29 +343,29 @@ def _handle_project_command(agent, arg: str):
     if subcmd == "init":
         from aura.tools.project_context import init_project
         path = parts[1] if len(parts) > 1 else "."
-        print(init_project(path))
+        _proj_console.print(init_project(path))
 
     elif subcmd == "detect" or subcmd == "info":
         path = parts[1] if len(parts) > 1 else "."
         result = tool.detect_project_type(path=path)
         if result.get("success"):
-            print(f"\n  Project Type:     {result.get('project_type', 'unknown')}")
-            print(f"  Language:         {result.get('language', 'N/A')}")
-            print(f"  Stack:            {', '.join(result.get('stack', [])) or 'N/A'}")
-            print(f"  Frameworks:       {', '.join(result.get('frameworks', [])) or 'N/A'}")
-            print(f"  Package Manager:  {result.get('package_manager', 'N/A')}")
-            print(f"  Key Files:        {', '.join(result.get('key_files', [])) or 'N/A'}")
+            _proj_console.print(f"\n  Project Type:     {result.get('project_type', 'unknown')}")
+            _proj_console.print(f"  Language:         {result.get('language', 'N/A')}")
+            _proj_console.print(f"  Stack:            {', '.join(result.get('stack', [])) or 'N/A'}")
+            _proj_console.print(f"  Frameworks:       {', '.join(result.get('frameworks', [])) or 'N/A'}")
+            _proj_console.print(f"  Package Manager:  {result.get('package_manager', 'N/A')}")
+            _proj_console.print(f"  Key Files:        {', '.join(result.get('key_files', [])) or 'N/A'}")
         else:
-            print(f"  Error: {result.get('error')}")
+            _proj_console.print(f"  Error: {result.get('error')}")
 
     elif subcmd == "context":
         from aura.tools.project_context import load_project_context
         path = parts[1] if len(parts) > 1 else None
         ctx = load_project_context(path)
         if ctx:
-            print(f"\n{ctx}")
+            _proj_console.print(f"\n{ctx}")
         else:
-            print("  No AURA.md found. Create one with: /project init")
+            _proj_console.print("  No AURA.md found. Create one with: /project init")
 
     elif subcmd == "index":
         path = parts[1] if len(parts) > 1 else "."
@@ -359,35 +373,35 @@ def _handle_project_command(agent, arg: str):
         idx = CodebaseIndex(path)
         def on_progress(current, total, fpath):
             if current % 20 == 0 or current == total:
-                print(f"  [{current}/{total}] {fpath}")
-        print("  Indexing codebase...")
+                _proj_console.print(f"  \\[{current}/{total}] {fpath}")
+        _proj_console.print("  Indexing codebase...")
         result = idx.index(progress_callback=on_progress)
-        print(f"\n  Done: {result['indexed']} files indexed, {result['total_chunks']} chunks, "
+        _proj_console.print(f"\n  Done: {result['indexed']} files indexed, {result['total_chunks']} chunks, "
               f"{result['skipped']} unchanged, {result['elapsed']}s")
         idx.close()
 
     elif subcmd == "search":
         query = parts[1] if len(parts) > 1 else ""
         if not query:
-            print("Usage: /project search <query>")
+            _proj_console.print("Usage: /project search <query>")
             return
         path = "."
         from aura.tools.codebase_index import CodebaseIndex
         idx = CodebaseIndex(path)
         if idx.stats()["total_chunks"] == 0:
-            print("  No index found, indexing first...")
+            _proj_console.print("  No index found, indexing first...")
             idx.index()
         results = idx.search(query, top_k=10)
         if results:
-            print(f"\n  Results for '{query}':\n")
+            _proj_console.print(f"\n  Results for '{query}':\n")
             for r in results:
                 score_pct = f"{r['score']:.0%}"
-                print(f"  [{score_pct}] {r['file_path']}:{r['line_start']} ({r['kind']}) {r['name']}")
+                _proj_console.print(f"  \\[{score_pct}] {r['file_path']}:{r['line_start']} ({r['kind']}) {r['name']}")
                 snippet = (r.get('content') or '')[:100].replace('\n', ' ')
-                print(f"        {snippet}")
+                _proj_console.print(f"        {snippet}")
         else:
-            print("  No results found.")
+            _proj_console.print("  No results found.")
         idx.close()
 
     else:
-        print("Usage: /project [info|detect|init|context|index|search] [path|query]")
+        _proj_console.print("Usage: /project \\[info|detect|init|context|index|search] \\[path|query]")

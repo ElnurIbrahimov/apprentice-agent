@@ -13,7 +13,11 @@ Each tool maps to an existing Aura tool class:
   shell          -> ShellExecutorTool.run
   git            -> GitTool (status/diff/add/commit/log/push)
   search_web     -> BraveSearchTool.run / TavilyTool.search
+  fetch_url      -> requests.get + HTML strip (read full web pages)
   project_structure -> CodeSearchTool.project_structure
+  create_directory -> os.makedirs
+  move_file      -> shutil.move
+  run_tests      -> auto-detect pytest/jest/vitest/cargo/go
 """
 
 AGENTIC_TOOLS = [
@@ -31,7 +35,7 @@ AGENTIC_TOOLS = [
                     },
                     "offset": {
                         "type": "integer",
-                        "description": "Start line (0-based). Omit to start from beginning.",
+                        "description": "Start line (1-based). Omit to start from beginning.",
                     },
                     "limit": {
                         "type": "integer",
@@ -113,7 +117,7 @@ AGENTIC_TOOLS = [
         "type": "function",
         "function": {
             "name": "edit_file",
-            "description": "Edit a file by replacing an exact string with a new string. The old_string must match exactly (including whitespace/indentation). Read the file first to get the exact content.",
+            "description": "Edit a file by replacing an exact string with a new string. The old_string must match exactly (including whitespace/indentation). Read the file first to get the exact content. Example: {\"path\": \"src/app.py\", \"old_string\": \"def hello():\", \"new_string\": \"def hello(name):\"}",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -278,6 +282,89 @@ AGENTIC_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch_url",
+            "description": "Fetch a web page URL and return its text content (HTML stripped to readable text). Use after search_web to read full page content. Example: {\"url\": \"https://docs.python.org/3/library/json.html\"}",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL to fetch"},
+                },
+                "required": ["url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_directory",
+            "description": "Create a directory (and parent directories if needed). Example: {\"path\": \"src/components\"}",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Directory path to create"},
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "move_file",
+            "description": "Move or rename a file. Example: {\"source\": \"old_name.py\", \"destination\": \"new_name.py\"}",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source": {"type": "string", "description": "Current file path"},
+                    "destination": {"type": "string", "description": "New file path"},
+                },
+                "required": ["source", "destination"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_tests",
+            "description": "Run project tests. Auto-detects test framework (pytest, jest, vitest, cargo test, go test). Example: {\"target\": \"tests/test_auth.py\"}",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "Specific test file or directory (optional — omit to run all)"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "multi_edit",
+            "description": "Apply multiple edits to a single file in one atomic operation. All edits succeed or none do. Example: {\"path\": \"src/app.py\", \"edits\": [{\"old_string\": \"import os\", \"new_string\": \"import os\\nimport sys\"}, {\"old_string\": \"def main():\", \"new_string\": \"def main(args):\"}]}",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File path to edit"},
+                    "edits": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "old_string": {"type": "string"},
+                                "new_string": {"type": "string"},
+                            },
+                            "required": ["old_string", "new_string"],
+                        },
+                        "description": "List of {old_string, new_string} pairs to apply in order",
+                    },
+                },
+                "required": ["path", "edits"],
+            },
+        },
+    },
 ]
 
 # Quick lookup: tool name -> schema
@@ -286,10 +373,11 @@ TOOL_SCHEMA_MAP = {t["function"]["name"]: t for t in AGENTIC_TOOLS}
 # Tool names that are read-only (safe to auto-approve)
 READ_ONLY_TOOLS = frozenset({
     "read_file", "grep", "glob", "list_dir",
-    "search_web", "project_structure",
+    "search_web", "project_structure", "fetch_url",
 })
 
 # Tool names that mutate state (need approval in non-trust mode)
 MUTATING_TOOLS = frozenset({
     "edit_file", "write_file", "shell",
+    "create_directory", "move_file", "multi_edit",
 })

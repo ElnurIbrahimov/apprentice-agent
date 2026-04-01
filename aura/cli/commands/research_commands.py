@@ -2,16 +2,20 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+from ..context import get_ctx
+
 logger = logging.getLogger(__name__)
 
 
 def handle_research(agent, arg, context) -> Optional[str]:
     from ..display import console as _research_console
-    research_ctx = getattr(agent, '_research_ctx', None)
+    ctx = get_ctx()
+    research_ctx = ctx.research_ctx if ctx else None
     if research_ctx is None:
         from ..research_mode import ResearchContext
         research_ctx = ResearchContext()
-        agent._research_ctx = research_ctx
+        if ctx:
+            ctx.research_ctx = research_ctx
     topic = arg.strip()
     if not topic:
         if research_ctx.is_active:
@@ -26,7 +30,8 @@ def handle_research(agent, arg, context) -> Optional[str]:
 
 def handle_sources(agent, arg, context) -> Optional[str]:
     from ..display import console as _sources_console
-    research_ctx = getattr(agent, '_research_ctx', None)
+    ctx = get_ctx()
+    research_ctx = ctx.research_ctx if ctx else None
     if research_ctx and research_ctx.is_active:
         from ..research_mode import render_sources
         render_sources(_sources_console, research_ctx)
@@ -37,7 +42,8 @@ def handle_sources(agent, arg, context) -> Optional[str]:
 def handle_export(agent, arg, context) -> Optional[str]:
     from ..display import console as _export_console
     import re as _re_export
-    research_ctx = getattr(agent, '_research_ctx', None)
+    ctx = get_ctx()
+    research_ctx = ctx.research_ctx if ctx else None
     if research_ctx and research_ctx.is_active:
         md = research_ctx.export_markdown()
         safe_topic = _re_export.sub(r'[^\w\-]', '_', research_ctx.topic)[:30]
@@ -50,19 +56,21 @@ def handle_export(agent, arg, context) -> Optional[str]:
 
 def handle_browse(agent, arg, context) -> Optional[str]:
     if not arg:
-        print("Usage: /browse <url> | /browse search <query> | /browse text | /browse screenshot | /browse click <selector> | /browse links")
+        from ..display import console
+        console.print("Usage: /browse <url> | /browse search <query> | /browse text | /browse screenshot | /browse click <selector> | /browse links")
     else:
         _handle_browse_command(agent, arg)
 
 
 def handle_recall(agent, arg, context) -> Optional[str]:
+    from ..display import console
     if arg:
         memories = agent.recall_memories(arg)
-        print(f"\nRecalled {len(memories)} memories:")
+        console.print(f"\nRecalled {len(memories)} memories:")
         for m in memories:
-            print(f"  - {m.get('content', str(m))[:100]}...")
+            console.print(f"  - {m.get('content', str(m))[:100]}...")
     else:
-        print("Usage: /recall <query>")
+        console.print("Usage: /recall <query>")
 
 
 def _handle_browse_command(agent, arg: str):
@@ -83,7 +91,8 @@ def _handle_browse_command(agent, arg: str):
         if not subarg:
             print("Usage: /browse search <query>")
             return
-        query_url = f"https://www.google.com/search?q={subarg.replace(' ', '+')}"
+        from urllib.parse import urlencode
+        query_url = f"https://www.google.com/search?{urlencode({'q': subarg})}"
         result = browser.open(query_url)
         if result.get("success"):
             print(f"  Searched: {subarg}")

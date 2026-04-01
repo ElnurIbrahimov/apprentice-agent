@@ -9,7 +9,7 @@ from .git_commands import (
     handle_stash, handle_pr,
 )
 from .session_commands import (
-    handle_sessions, handle_clear, handle_compact, handle_retry,
+    handle_sessions, handle_clear, handle_compact,
     handle_context, handle_cost, handle_rewind,
 )
 from .agent_commands import (
@@ -40,7 +40,7 @@ __all__ = [
     "handle_shell", "handle_agent", "handle_evolve", "handle_fleet",
     "handle_tasks", "handle_research", "handle_sources", "handle_export",
     "handle_mood", "handle_hook", "handle_sessions", "handle_theme",
-    "handle_trust", "handle_context", "handle_rewind", "handle_retry",
+    "handle_trust", "handle_context", "handle_rewind",
     "handle_cost", "handle_undo", "handle_diff", "handle_git",
     "handle_pr", "handle_branch", "handle_stash", "handle_blame",
     "handle_test", "handle_watch", "handle_mcp", "print_result",

@@ -27,6 +27,58 @@ from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+
+def _git_auto_commit(file_path: str, message: str) -> Optional[str]:
+    """Auto-commit a file after a successful edit. Returns commit hash or None.
+
+    Silently returns None if:
+    - AURA_NO_AUTO_COMMIT=1 is set
+    - Not inside a git repo
+    - Git is not installed
+    - The commit fails for any reason
+    """
+    if os.environ.get("AURA_NO_AUTO_COMMIT") == "1":
+        return None
+
+    try:
+        cwd = os.path.dirname(os.path.abspath(file_path))
+
+        # Check if we're in a git repo
+        check = subprocess.run(
+            ["git", "rev-parse", "--git-dir"],
+            cwd=cwd, capture_output=True, text=True, timeout=5,
+        )
+        if check.returncode != 0:
+            return None
+
+        # Stage the file
+        subprocess.run(
+            ["git", "add", "--", file_path],
+            cwd=cwd, capture_output=True, text=True, timeout=10,
+        )
+
+        # Commit with --no-verify (skip hooks for speed — this is an auto-commit)
+        result = subprocess.run(
+            ["git", "commit", "-m", message, "--no-verify"],
+            cwd=cwd, capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0:
+            return None
+
+        # Get the commit hash
+        hash_result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=cwd, capture_output=True, text=True, timeout=5,
+        )
+        if hash_result.returncode == 0:
+            return hash_result.stdout.strip()
+
+    except Exception:
+        pass  # Edit succeeded — never fail because of git
+
+    return None
+
+
 # Directories where edits are blocked for safety
 BLOCKED_DIRS = frozenset({
     "node_modules", ".git", "__pycache__", ".venv", "venv",
@@ -71,6 +123,59 @@ class CodeEditTool:
         self.backup_enabled = backup_enabled
         self.auto_verify_enabled = auto_verify
         self._last_backups: Dict[str, str] = {}  # path -> backup_path
+
+    # =====================================================================
+    #  Auto-lint after edits
+    # =====================================================================
+
+    def _auto_lint(self, file_path: str) -> Optional[str]:
+        """Run the appropriate linter on a file after a successful edit.
+
+        Returns lint output string if there are warnings/errors, or None if
+        clean or linter unavailable. Never raises — lint is advisory only.
+        """
+        ext = os.path.splitext(file_path)[1].lower()
+
+        try:
+            if ext == ".py":
+                result = subprocess.run(
+                    ["ruff", "check", "--select", "E,W,F", file_path],
+                    capture_output=True, text=True, timeout=10,
+                )
+                output = (result.stdout.strip() + "\n" + result.stderr.strip()).strip()
+                return output if result.returncode != 0 and output else None
+
+            elif ext in (".js", ".ts", ".jsx", ".tsx"):
+                rules = '{"no-undef":"warn","no-unused-vars":"warn","no-extra-semi":"warn"}'
+                result = subprocess.run(
+                    ["npx", "eslint", "--no-eslintrc", "--rule", rules, file_path],
+                    capture_output=True, text=True, timeout=10,
+                )
+                output = (result.stdout.strip() + "\n" + result.stderr.strip()).strip()
+                return output if result.returncode != 0 and output else None
+
+            elif ext == ".rs":
+                # Only useful inside a cargo project
+                cwd = os.path.dirname(os.path.abspath(file_path))
+                result = subprocess.run(
+                    ["cargo", "clippy", "--message-format=short"],
+                    capture_output=True, text=True, timeout=10,
+                    cwd=cwd,
+                )
+                output = (result.stdout.strip() + "\n" + result.stderr.strip()).strip()
+                return output if result.returncode != 0 and output else None
+
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            pass  # Linter not available or timed out — skip silently
+
+        return None
+
+    def _attach_lint_warnings(self, result: dict, file_path: str) -> dict:
+        """Run auto-lint and attach warnings to a successful result dict."""
+        lint_output = self._auto_lint(file_path)
+        if lint_output:
+            result["lint_warnings"] = lint_output
+        return result
 
     # =====================================================================
     #  Read
@@ -314,6 +419,8 @@ class CodeEditTool:
             original = file_path.read_text(encoding="utf-8")
 
             # === Compute updated content ===
+            self._last_edit_was_fuzzy = False
+            self._last_fuzzy_ratio = 0.0
             updated = self._compute_replacement(original, old_string, new_string, replace_all)
             if updated is None:
                 # _compute_replacement returns None with error details
@@ -356,14 +463,35 @@ class CodeEditTool:
                     tofile=f"b/{file_path.name}",
                 ))
 
-                return {
+                result = {
                     "success": True,
                     "diff": diff,
                     "path": resolved_path,
                     "backup_path": backup_path,
                 }
+                if self._last_edit_was_fuzzy:
+                    result["warning"] = (
+                        f"FUZZY MATCH used ({self._last_fuzzy_ratio:.0%} similarity). "
+                        f"Exact old_string not found — applied closest match. "
+                        f"Please verify the edit is correct."
+                    )
+                return result
 
-            return self._apply_with_rollback(resolved_path, _do_edit)
+            result = self._apply_with_rollback(resolved_path, _do_edit)
+
+            # === Git auto-commit (only on success) ===
+            if result.get("success"):
+                old_preview = old_string[:40].replace("\n", "\\n")
+                new_preview = new_string[:40].replace("\n", "\\n")
+                msg = f"aura: edit {file_path.name} — {old_preview}→{new_preview}"
+                commit_hash = _git_auto_commit(resolved_path, msg)
+                if commit_hash:
+                    result["commit_hash"] = commit_hash
+
+                # === Auto-lint (advisory) ===
+                self._attach_lint_warnings(result, resolved_path)
+
+            return result
 
         except PermissionError:
             return {"success": False, "error": "Permission denied"}
@@ -400,12 +528,18 @@ class CodeEditTool:
 
         if best_ratio >= 0.85:
             lines[best_start:best_start + len(search_lines)] = new_string.split("\n")
+            logger.warning(
+                f"[CodeEdit] Fuzzy match used ({best_ratio:.0%} similarity). "
+                f"Exact match not found — applied closest match."
+            )
+            self._last_edit_was_fuzzy = True
+            self._last_fuzzy_ratio = best_ratio
             return "\n".join(lines)
 
         return None  # No match found
 
     def _fuzzy_match_error(self, original: str, old_string: str) -> dict:
-        """Generate a helpful error when no match is found."""
+        """Generate a helpful error when no match is found, with line numbers."""
         lines = original.split("\n")
         search_lines = old_string.split("\n")
         best_ratio = 0.0
@@ -420,8 +554,16 @@ class CodeEditTool:
 
         hint = ""
         if best_ratio > 0.5 and best_start >= 0:
-            nearby = "\n".join(lines[best_start:best_start + len(search_lines)])
-            hint = f"\n\nClosest match ({best_ratio:.0%}):\n{nearby[:300]}"
+            # Include line numbers so the LLM can recalibrate
+            end_line = best_start + len(search_lines)
+            numbered_lines = []
+            for idx in range(best_start, min(end_line, len(lines))):
+                numbered_lines.append(f"{idx + 1:>5}\t{lines[idx]}")
+            nearby_numbered = "\n".join(numbered_lines)
+            hint = (
+                f"\n\nClosest match ({best_ratio:.0%}) at lines {best_start + 1}-{end_line}:\n"
+                f"{nearby_numbered[:500]}"
+            )
 
         return {
             "success": False,
@@ -539,7 +681,19 @@ class CodeEditTool:
                     "error": "No blocks could be applied",
                 }
 
-        return self._apply_with_rollback(resolved_str, _do_apply)
+        result = self._apply_with_rollback(resolved_str, _do_apply)
+
+        # === Git auto-commit (only on success) ===
+        if result.get("success"):
+            msg = f"aura: search/replace {resolved.name} ({result.get('applied', 0)} blocks)"
+            commit_hash = _git_auto_commit(resolved_str, msg)
+            if commit_hash:
+                result["commit_hash"] = commit_hash
+
+            # === Auto-lint (advisory) ===
+            self._attach_lint_warnings(result, resolved_str)
+
+        return result
 
     def apply_search_replace_text(self, file_path: str, text: str) -> dict:
         """Parse SEARCH/REPLACE blocks from text and apply them to a file.
@@ -617,11 +771,22 @@ class CodeEditTool:
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(content, encoding="utf-8")
 
-            return {
+            result = {
                 "success": True,
                 "path": str(file_path),
                 "bytes_written": len(content.encode("utf-8")),
             }
+
+            # === Git auto-commit ===
+            msg = f"aura: create {file_path.name}"
+            commit_hash = _git_auto_commit(str(file_path), msg)
+            if commit_hash:
+                result["commit_hash"] = commit_hash
+
+            # === Auto-lint (advisory) ===
+            self._attach_lint_warnings(result, str(file_path))
+
+            return result
 
         except PermissionError:
             return {"success": False, "error": "Permission denied"}
@@ -709,7 +874,19 @@ class CodeEditTool:
                     "backup_path": backup_path,
                 }
 
-            return self._apply_with_rollback(resolved_str, _do_multi_edit)
+            result = self._apply_with_rollback(resolved_str, _do_multi_edit)
+
+            # === Git auto-commit (only on success) ===
+            if result.get("success"):
+                msg = f"aura: multi-edit {file_path.name} ({applied} edits)"
+                commit_hash = _git_auto_commit(resolved_str, msg)
+                if commit_hash:
+                    result["commit_hash"] = commit_hash
+
+                # === Auto-lint (advisory) ===
+                self._attach_lint_warnings(result, resolved_str)
+
+            return result
 
         except Exception as e:
             return {"success": False, "error": str(e)}

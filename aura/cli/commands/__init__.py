@@ -8,9 +8,10 @@ from .git_commands import (
     handle_stash, handle_pr,
 )
 from .session_commands import (
-    handle_sessions, handle_clear, handle_compact, handle_retry,
+    handle_sessions, handle_clear, handle_compact,
     handle_context, handle_cost, handle_rewind,
     handle_fork, handle_branches, handle_checkout, handle_merge,
+    handle_changes,
 )
 from .agent_commands import (
     handle_goal, handle_plan, handle_fleet, handle_agent, handle_hand,
@@ -74,7 +75,6 @@ COMMAND_REGISTRY: dict[str, Callable[..., Any]] = {
     "/trust": handle_trust,
     "/context": handle_context,
     "/rewind": handle_rewind,
-    "/retry": handle_retry,
     "/cost": handle_cost,
     "/undo": handle_undo,
     "/diff": handle_diff,
@@ -93,6 +93,7 @@ COMMAND_REGISTRY: dict[str, Callable[..., Any]] = {
     "/checkout": handle_checkout,
     "/merge": handle_merge,
     "/voice": _handle_voice,
+    "/changes": handle_changes,
 }
 
 

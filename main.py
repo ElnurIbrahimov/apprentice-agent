@@ -24,11 +24,19 @@ def _suppress_warnings() -> None:
         pass
 
     import warnings
+    import logging
     warnings.filterwarnings("ignore", category=DeprecationWarning, module="urllib3")
     warnings.filterwarnings("ignore", category=DeprecationWarning, module="comtypes")
     warnings.filterwarnings("ignore", category=DeprecationWarning, module="pycaw")
     warnings.filterwarnings("ignore", message="urllib3.*charset_normalizer")
     warnings.filterwarnings("ignore", message="Revert to STA COM")
+
+    # Suppress torchao/triton warnings
+    warnings.filterwarnings("ignore", module="torchao")
+    os.environ["TORCHAO_DISABLE_TRITON"] = "1"
+
+    # Suppress HuggingFace HTTP retry warnings
+    logging.getLogger("huggingface_hub.utils._http").setLevel(logging.ERROR)
 
 
 def main() -> None:
@@ -140,7 +148,7 @@ def main() -> None:
     parser.add_argument(
         "--tier",
         type=str,
-        choices=["local", "balanced", "max"],
+        choices=["fast", "balanced", "max"],
         default=None,
         help="Model routing tier (default: balanced)"
     )

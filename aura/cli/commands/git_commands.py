@@ -14,7 +14,7 @@ def handle_diff(agent, arg, context) -> Optional[str]:
         if arg:
             safe_tokens = []
             for token in arg.split():
-                if token.startswith("-c") or token.startswith("--ext-diff"):
+                if token == "-c" or token.startswith("-c=") or token == "--ext-diff" or token.startswith("--ext-diff=") or token.startswith("--extcmd"):
                     _diff_err(f"Blocked unsafe flag: {token}")
                     safe_tokens = None
                     break

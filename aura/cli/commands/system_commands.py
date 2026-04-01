@@ -1,16 +1,20 @@
 import logging
 from typing import Optional
 
+from ..context import get_ctx
+
 logger = logging.getLogger(__name__)
 
 
 def handle_hook(agent, arg, context) -> Optional[str]:
     from ..display import console as _hook_console
-    _hook_mgr = getattr(agent, '_hook_manager', None)
+    ctx = get_ctx()
+    _hook_mgr = ctx.hook_manager if ctx else None
     if _hook_mgr is None:
         from ..hooks import HookManager
         _hook_mgr = HookManager()
-        agent._hook_manager = _hook_mgr
+        if ctx:
+            ctx.hook_manager = _hook_mgr
     from ..hooks import render_hooks_table, HookEvent
     sub = arg.strip().split(None, 1)
     if not sub or sub[0] == "list":
@@ -33,8 +37,9 @@ def handle_hook(agent, arg, context) -> Optional[str]:
 
 
 def handle_mcp(agent, arg, context) -> Optional[str]:
-    if hasattr(agent, '_agentic_loop') and hasattr(agent._agentic_loop, '_mcp_client'):
-        mgr = agent._agentic_loop._mcp_client
+    ctx = get_ctx()
+    if ctx and ctx.agentic_loop and hasattr(ctx.agentic_loop, '_mcp_client'):
+        mgr = ctx.agentic_loop._mcp_client
         if not mgr.connections:
             print("  No MCP servers connected. Configure in AURA.md under mcp_servers:")
         else:
@@ -150,7 +155,7 @@ def _handle_evolve_command(agent, arg: str):
             config_overrides={"max_iterations": max_iterations},
             dry_run=dry_run,
         )
-    except Exception as e:  # Catch-all: evolution runner may fail in many ways
+    except Exception as e:
         print(f"  [GEPA] Failed: {e}\n")
         return
 

@@ -20,7 +20,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-import numpy as np
+try:
+    import numpy as np
+except ImportError:
+    np = None  # type: ignore[assignment]
 
 from .store import MemoryStore, MemoryRecord, get_memory_store
 from .fade_mem import compute_strength, reinforce
@@ -51,9 +54,27 @@ def _get_cross_encoder():
         _cross_encoder_attempted = True
         try:
             from sentence_transformers import CrossEncoder
-            logger.info("[Retrieval] Loading cross-encoder: cross-encoder/ms-marco-MiniLM-L-6-v2")
-            _cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", max_length=512)
-            return _cross_encoder
+
+            # Load with a 3-second timeout — if model isn't cached locally, skip it
+            # instead of blocking startup with HuggingFace download retries.
+            result = [None]
+            def _load():
+                try:
+                    result[0] = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", max_length=512)
+                except Exception:
+                    pass
+
+            t = threading.Thread(target=_load, daemon=True)
+            t.start()
+            t.join(timeout=3.0)
+
+            if result[0] is not None:
+                _cross_encoder = result[0]
+                logger.info("[Retrieval] Cross-encoder loaded successfully")
+                return _cross_encoder
+            else:
+                logger.info("[Retrieval] Cross-encoder skipped (not cached locally or timeout)")
+                return None
         except Exception as e:
             logger.warning("[Retrieval] Cross-encoder unavailable (CPU reranking disabled): %s", e)
             return None

@@ -1,9 +1,13 @@
 def test_shell_executor_blocks_chaining():
     from aura.tools.shell_executor import ShellExecutorTool
     executor = ShellExecutorTool()
+    # 'del' is not in the allowed commands list, so this should fail
     result = executor.execute("echo hello && del important.txt")
     assert result["success"] == False
-    assert "disallowed" in result["error"].lower()
+    assert "error" in result
+    # Could be "not in allowed list" or "Security:" prefix
+    err = result["error"].lower()
+    assert "not in allowed list" in err or "security" in err or "disallowed" in err
 
 
 def test_database_tool_blocks_drop():

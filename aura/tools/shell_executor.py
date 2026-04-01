@@ -32,17 +32,74 @@ def _get_sanitized_env() -> dict:
     }
 
 
-SHELL_METACHAR_RE = re.compile(r'[&|;`$(){}[\]<>!\\^%\r\n]')
+# ---------------------------------------------------------------------------
+# Injection detection — blocks actual shell exploits while allowing legitimate
+# shell features: pipes (|), output redirection (>, >>), conditional chaining
+# (&&, ||).
+# ---------------------------------------------------------------------------
+
+# Patterns that indicate real injection attempts (backtick subshell, $()
+# expansion, eval/exec, process substitution, clobber, etc.)
+_INJECTION_PATTERNS = [
+    re.compile(r'`'),                       # backtick subshell
+    re.compile(r'\$\('),                    # $() command substitution
+    re.compile(r'\$\(\('),                  # $(()) arithmetic expansion
+    re.compile(r'\$\{'),                    # ${} parameter expansion
+    re.compile(r'>\|'),                     # >| clobber operator
+    re.compile(r'&>'),                      # &> background redirect
+    re.compile(r'<\('),                     # <() process substitution
+    re.compile(r'>\('),                     # >() process substitution
+    re.compile(r';\s*'),                    # raw semicolons (use && instead)
+    re.compile(r'[\r\n]'),                  # newline injection
+    re.compile(r'\beval\b'),               # eval command
+    re.compile(r'\bexec\b'),               # exec command
+    re.compile(r'\bsource\b'),             # source command
+    re.compile(r'^\s*\.(?:\s|/)'),          # dot-sourcing (. script.sh)
+]
 
 
 def _contains_shell_injection(cmd: str) -> bool:
-    """Detect shell metacharacters and dangerous flags."""
-    if SHELL_METACHAR_RE.search(cmd):
-        return True
+    """Detect actual injection patterns while allowing pipes, redirects, &&/||."""
+    for pattern in _INJECTION_PATTERNS:
+        if pattern.search(cmd):
+            return True
+    # Block interpreter code-execution flags at top level
     tokens = cmd.split()
     if len(tokens) >= 2 and tokens[1] in ('-c', '/c', '-e', '-enc'):
         return True
     return False
+
+
+def _is_pipeline_or_chain(cmd: str) -> bool:
+    """Check if the command uses pipes, redirects, or conditional chaining."""
+    # Match |, >, >>, &&, || but NOT the injection patterns already caught
+    return bool(re.search(r'\|(?!\|)|\|{2}|&&|>{1,2}', cmd))
+
+
+def _extract_base_command(segment: str, is_windows: bool = False) -> str | None:
+    """Extract the base command name from a pipeline/chain segment."""
+    segment = segment.strip()
+    # Strip output redirection from the end (e.g., "> file.txt", ">> log")
+    segment = re.sub(r'>{1,2}\s*\S+\s*$', '', segment).strip()
+    if not segment:
+        return None
+    parts = segment.split()
+    for part in parts:
+        if '=' in part:
+            continue  # skip env vars like FOO=bar
+        base = part.lower()
+        # Strip path
+        if '/' in base:
+            base = base.rsplit('/', 1)[-1]
+        if '\\' in base:
+            base = base.rsplit('\\', 1)[-1]
+        # Strip extension on Windows
+        if is_windows:
+            for ext in ('.exe', '.cmd', '.bat', '.ps1'):
+                if base.endswith(ext):
+                    base = base[:-len(ext)]
+        return base
+    return None
 
 # Maximum output length before truncation
 MAX_OUTPUT_CHARS = 10_000
@@ -56,12 +113,14 @@ MAX_SESSIONS = 5
 SESSION_IDLE_TIMEOUT = 30
 
 # Security: blocked commands (exact)
+# NOTE: 'kill' is intentionally allowed — targeted PID kills are safe and needed.
+# 'killall', 'pkill', and 'taskkill' remain blocked (blanket process killing).
 BLOCKED_COMMANDS = {
     "rm -rf /", "rm -rf ~", "mkfs", ":(){ :|:& };:",
     "chmod -R 777 /", "> /dev/sda", "shutdown", "reboot",
     "format c:", "del /f /s /q c:\\",
     "powershell", "pwsh", "cmd", "cmd.exe",
-    "taskkill", "pkill", "killall", "kill",
+    "taskkill", "pkill", "killall",
 }
 
 # Security: blocked patterns (regex)
@@ -92,6 +151,7 @@ ALLOWED_COMMANDS_PREFIX = [
     "cargo", "rustc", "go", "java", "javac", "dotnet", "cmake",
     "make", "gcc", "g++", "clang",
     "ipconfig", "ifconfig", "netstat", "ss",
+    "kill", "xargs",
     # Dev tools — read-only / linting / testing
     "tsc", "eslint", "prettier", "vitest", "jest", "pytest",
     "rg", "fd", "ruff", "mypy", "black", "isort",
@@ -151,49 +211,58 @@ class ShellExecutorTool:
 
         Returns:
             (is_valid, reason) where reason is "OK", "SANDBOX_REQUIRED", or a block reason.
+
+        For pipeline/chained commands (containing |, &&, ||), each segment
+        is individually validated against the allowed list.
         """
         cmd_stripped = command.strip()
-        cmd_lower = cmd_stripped.lower()
 
-        # Check blocked commands against the command portion (before first pipe/semicolon)
-        cmd_portion = re.split(r'[|;]', cmd_lower, maxsplit=1)[0].strip()
-        for blocked in BLOCKED_COMMANDS:
-            if blocked.lower() in cmd_portion:
-                return False, f"Blocked command: {blocked}"
+        # --- Global checks (apply to entire command) ---
 
-        # Check blocked patterns
+        # Check blocked patterns (rm -rf /, fork bomb, dd, pipe-to-shell, etc.)
         for pattern in BLOCKED_PATTERNS:
             if re.search(pattern, cmd_stripped, re.IGNORECASE):
-                return False, f"Command matches blocked pattern"
+                return False, "Command matches blocked pattern"
 
-        # Check if command starts with an allowed prefix
-        # Get the base command (first word, ignoring env vars and sudo)
-        parts = cmd_stripped.split()
-        base_cmd = None
-        for part in parts:
-            if "=" in part:
-                continue  # Skip env variable assignments
-            if part in ("sudo", "doas"):
-                return False, f"Privilege escalation command '{part}' is disallowed"
-            base_cmd = part.lower()
-            break
+        # --- Split into segments for per-segment validation ---
+        # Split on pipe (|), && and || while preserving the operators
+        # for later shell execution.  We just need the segments for validation.
+        segments = re.split(r'\s*(?:\|{2}|&&|\|)\s*', cmd_stripped)
+        # Also strip trailing redirections from each segment for validation
+        # (e.g. "echo hello > file.txt" -> validate "echo")
 
-        if base_cmd:
-            # Strip path from command
-            if "/" in base_cmd:
-                base_cmd = base_cmd.rsplit("/", 1)[-1]
-            if "\\" in base_cmd:
-                base_cmd = base_cmd.rsplit("\\", 1)[-1]
+        has_sandbox_segment = False
 
-            # Remove .exe or .cmd extension on Windows
-            if self._is_windows:
-                for ext in (".exe", ".cmd", ".bat", ".ps1"):
-                    if base_cmd.endswith(ext):
-                        base_cmd = base_cmd[:-len(ext)]
+        for segment in segments:
+            segment = segment.strip()
+            if not segment:
+                continue
+
+            seg_lower = segment.lower()
+
+            # Check blocked commands against this segment
+            for blocked in BLOCKED_COMMANDS:
+                if blocked.lower() in seg_lower:
+                    return False, f"Blocked command: {blocked}"
+
+            # Extract base command for this segment
+            base_cmd = _extract_base_command(segment, self._is_windows)
+            if not base_cmd:
+                continue
+
+            # Check privilege escalation
+            parts = segment.split()
+            for part in parts:
+                if '=' in part:
+                    continue
+                if part.lower() in ('sudo', 'doas'):
+                    return False, f"Privilege escalation command '{part}' is disallowed"
+                break
 
             # Check if command needs sandbox routing
             if base_cmd in SANDBOX_REQUIRED_COMMANDS:
-                return True, "SANDBOX_REQUIRED"
+                has_sandbox_segment = True
+                continue  # Don't check allowed list for sandbox commands
 
             # Block interpreter code-execution flags (e.g. python -c, node -e)
             _INTERP_FLAGS = {
@@ -213,7 +282,14 @@ class ShellExecutorTool:
             is_allowed = any(base_cmd == prefix.lower()
                              for prefix in ALLOWED_COMMANDS_PREFIX)
             if not is_allowed:
-                return False, f"Command '{base_cmd}' not in allowed list. Allowed: {', '.join(ALLOWED_COMMANDS_PREFIX[:15])}..."
+                return False, (
+                    f"Command '{base_cmd}' not in allowed list. "
+                    f"Allowed: {', '.join(ALLOWED_COMMANDS_PREFIX[:15])}..."
+                )
+
+        # If any segment requires sandbox, route the whole command there
+        if has_sandbox_segment:
+            return True, "SANDBOX_REQUIRED"
 
         return True, "OK"
 
@@ -324,9 +400,17 @@ class ShellExecutorTool:
                         "session_id": session.id,
                     }
 
-        # Build command args — no shell wrapper needed because
-        # _contains_shell_injection() already rejected any metacharacters.
-        shell_cmd = shlex.split(command)
+        # Build command for execution.
+        # For pipeline/chained commands, we must use shell=True because
+        # subprocess cannot handle |, &&, ||, > without a shell.
+        # Security: _contains_shell_injection() has already rejected dangerous
+        # patterns (backtick, $(), eval, exec, semicolons, etc.) and
+        # _validate_command() verified every segment against the allowed list.
+        use_shell = _is_pipeline_or_chain(command)
+        if use_shell:
+            shell_cmd = command
+        else:
+            shell_cmd = shlex.split(command)
 
         start_time = time.time()
 
@@ -337,6 +421,7 @@ class ShellExecutorTool:
                 stderr=subprocess.PIPE,
                 cwd=working_dir,
                 text=True,
+                shell=use_shell,
                 env=_get_sanitized_env(),
             )
             stdout, stderr = proc.communicate(timeout=timeout)
@@ -490,9 +575,12 @@ class ShellExecutorTool:
             if not Path(working_dir).exists():
                 working_dir = str(Path.cwd())
 
-        # Build command args — no shell wrapper needed because
-        # _contains_shell_injection() already rejected any metacharacters.
-        shell_cmd = shlex.split(command)
+        # Build command — same shell logic as run()
+        use_shell = _is_pipeline_or_chain(command)
+        if use_shell:
+            shell_cmd = command
+        else:
+            shell_cmd = shlex.split(command)
 
         start_time = time.time()
         stdout_lines = []
@@ -506,6 +594,7 @@ class ShellExecutorTool:
                 cwd=working_dir,
                 text=True,
                 bufsize=1,  # Line-buffered
+                shell=use_shell,
                 env=_get_sanitized_env(),
             )
 

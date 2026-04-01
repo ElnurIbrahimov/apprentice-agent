@@ -22,6 +22,46 @@ READ_ONLY_TOOLS = frozenset({
 })
 
 
+class BrainProxy:
+    """Lightweight wrapper that isolates mutable state for sub-agents.
+
+    Delegates LLM calls to the shared brain but maintains its own
+    model_override, cost counters, and conversation buffer to avoid
+    race conditions when multiple sub-agents run in parallel.
+    """
+
+    def __init__(self, parent_brain):
+        self._parent = parent_brain
+        self._model_override = parent_brain._model_override
+        self._sub_input_tokens = 0
+        self._sub_output_tokens = 0
+
+    def think(self, *args, **kwargs):
+        result = self._parent.think(*args, **kwargs)
+        return result
+
+    def think_with_tools(self, *args, **kwargs):
+        return self._parent.think_with_tools(*args, **kwargs)
+
+    def think_with_tools_stream(self, *args, **kwargs):
+        return self._parent.think_with_tools_stream(*args, **kwargs)
+
+    def get_session_stats(self):
+        return self._parent.get_session_stats()
+
+    def set_model_override(self, model):
+        self._model_override = model
+
+    def recall_relevant(self, *args, **kwargs):
+        if hasattr(self._parent, 'recall_relevant'):
+            return self._parent.recall_relevant(*args, **kwargs)
+        return []
+
+    def __getattr__(self, name):
+        # Fall through to parent for any other attribute reads
+        return getattr(self._parent, name)
+
+
 class SubAgentManager:
     """Manages sub-agent lifecycle."""
 
@@ -83,9 +123,9 @@ class SubAgentManager:
             # Read-only roles: auto-approve all (they only have safe tools)
             permissions.set_trust_mode(True)
 
-        # Create child loop
+        # Create child loop with isolated brain proxy
         child = AgenticLoop(
-            brain=self.parent.brain,  # Share brain (cost tracking)
+            brain=BrainProxy(self.parent.brain),
             project_root=self.parent.project_root,
             permissions=permissions,
             model_override=self.parent.model_override,

@@ -22,6 +22,10 @@ _config_lock = threading.RLock()
 _validation_session = None
 _validation_session_lock = threading.Lock()
 
+# Background model validation future
+_validation_future = None
+_validation_future_lock = threading.Lock()
+
 def _get_validation_session():
     global _validation_session
     with _validation_session_lock:
@@ -196,15 +200,8 @@ class Config:
     MODEL_NAME: str = MODEL_REASON  # Default model (backward compat)
 
     @classmethod
-    def validate_models_on_startup(cls) -> Dict[str, str]:
-        """
-        Validate all configured models and find best available.
-
-        Call this once at startup to ensure models are available.
-        Returns dict of role -> selected model.
-
-        SECURITY: Thread-safe with locking.
-        """
+    def _do_validate_models(cls) -> Dict[str, str]:
+        """Internal: actually perform model validation (may be called in background)."""
         # Guard: reject known-weak API keys when auth is enabled
         _weak_keys = {"", "change-this-to-a-strong-random-key", "test", "admin", "password"}
         if cls.API_AUTH_ENABLED and cls.API_KEY in _weak_keys:
@@ -252,9 +249,70 @@ class Config:
         return results
 
     @classmethod
+    def validate_models_on_startup(cls, background: bool = False) -> Dict[str, str]:
+        """
+        Validate all configured models and find best available.
+
+        Args:
+            background: If True, run validation in a background thread and
+                       return immediately with empty dict. Results are applied
+                       asynchronously. Use ``ensure_models_validated()`` to
+                       block until done when a model is actually needed.
+
+        Returns dict of role -> selected model (empty if background=True).
+
+        SECURITY: Thread-safe with locking.
+        """
+        global _validation_future
+        if background:
+            from concurrent.futures import ThreadPoolExecutor
+            with _validation_future_lock:
+                if _validation_future is None:
+                    # Single-thread pool that lives for the duration of validation
+                    _pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="model-validation")
+                    _validation_future = _pool.submit(cls._do_validate_models)
+                    # Allow the pool thread to be cleaned up after completion
+                    _pool.shutdown(wait=False)
+            return {}
+        return cls._do_validate_models()
+
+    @classmethod
+    def ensure_models_validated(cls, timeout: float = 10.0) -> Dict[str, str]:
+        """Wait for background model validation to complete (if running).
+
+        If validation was never started or already completed synchronously,
+        this returns immediately. Safe to call multiple times -- after the
+        first completion the future is cleared so subsequent calls are free.
+        """
+        global _validation_future
+        with _validation_future_lock:
+            fut = _validation_future
+        if fut is None:
+            return {}
+        if fut.done():
+            # Already finished -- clear the future so we skip the lock next time
+            with _validation_future_lock:
+                _validation_future = None
+            try:
+                return fut.result()
+            except Exception:
+                return {}
+        try:
+            result = fut.result(timeout=timeout)
+            with _validation_future_lock:
+                _validation_future = None
+            logger.info(f"[MODELS] Background validation complete: {result}")
+            return result
+        except Exception as e:
+            logger.warning(f"[MODELS] Background validation failed/timed out: {e}")
+            return {}
+
+    @classmethod
     def get_model(cls, role: str) -> str:
         """
         Thread-safe getter for model by role.
+
+        Lazily waits for background validation to complete on first call.
 
         Args:
             role: One of 'fast', 'reason', 'code', 'vision', 'think', 'longctx'
@@ -262,6 +320,8 @@ class Config:
         Returns:
             Model name string
         """
+        # Ensure background validation is done before returning a model
+        cls.ensure_models_validated(timeout=10.0)
         with _config_lock:
             role_map = {
                 'fast': cls.MODEL_FAST,

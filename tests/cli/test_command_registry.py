@@ -10,7 +10,7 @@ from aura.cli.commands.handlers import (
     handle_project, handle_shell, handle_agent, handle_evolve, handle_fleet,
     handle_tasks, handle_research, handle_sources, handle_export, handle_mood,
     handle_hook, handle_sessions, handle_theme, handle_trust, handle_context,
-    handle_rewind, handle_retry, handle_cost, handle_undo, handle_diff,
+    handle_rewind, handle_cost, handle_undo, handle_diff,
     handle_git, handle_pr, handle_branch, handle_stash, handle_blame,
     handle_test, handle_watch, handle_mcp,
 )
@@ -24,7 +24,7 @@ EXPECTED_COMMANDS = [
     "/search", "/find", "/edit", "/project", "/shell", "/bash", "/run",
     "/agent", "/evolve", "/fleet", "/tasks", "/research", "/sources",
     "/export", "/mood", "/hook", "/sessions", "/theme", "/trust", "/context",
-    "/rewind", "/retry", "/cost", "/undo", "/diff", "/git", "/pr", "/branch",
+    "/rewind", "/cost", "/undo", "/diff", "/git", "/pr", "/branch",
     "/stash", "/blame", "/test", "/watch", "/mcp",
 ]
 
@@ -35,7 +35,7 @@ def test_registry_has_all_expected_commands():
 
 
 def test_registry_count():
-    assert len(COMMAND_REGISTRY) == 54
+    assert len(COMMAND_REGISTRY) == 55
 
 
 def test_every_registry_value_is_callable():
@@ -178,7 +178,6 @@ HANDLER_MAP = {
     "/trust": handle_trust,
     "/context": handle_context,
     "/rewind": handle_rewind,
-    "/retry": handle_retry,
     "/cost": handle_cost,
     "/undo": handle_undo,
     "/diff": handle_diff,

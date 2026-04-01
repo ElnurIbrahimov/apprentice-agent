@@ -154,35 +154,48 @@ class ContextWindowManager:
         old_msgs = non_system[:-keep_count]
         recent_msgs = non_system[-keep_count:]
 
-        # Build summary of old messages
-        summary_parts = []
-        for msg in old_msgs:
-            role = msg.get("role", "?")
-            content = msg.get("content", "") or ""
-            if role == "user":
-                summary_parts.append(f"User: {content[:150]}")
-            elif role == "assistant":
-                tc = msg.get("tool_calls")
-                if tc:
-                    tool_names = []
-                    for t in tc:
-                        if isinstance(t, dict):
-                            tool_names.append(t.get("function", {}).get("name", "?"))
-                        else:
-                            func = getattr(t, "function", None)
-                            tool_names.append(getattr(func, "name", "?") if func else "?")
-                    summary_parts.append(f"Assistant used tools: {', '.join(tool_names)}")
-                elif content:
-                    summary_parts.append(f"Assistant: {content[:150]}")
-            elif role == "tool":
-                # Skip tool results in summary — they're bulky
-                pass
+        # Use the shared action-summary extractor from agentic_loop
+        try:
+            from .agentic_loop import _extract_action_summary
+            summary_lines = []
+            for msg in old_msgs:
+                line = _extract_action_summary(msg)
+                if line:
+                    summary_lines.append(line)
+            summary_text = "\n".join(summary_lines) if summary_lines else "(earlier conversation)"
+        except ImportError:
+            # Fallback: basic role + truncated content
+            summary_parts = []
+            for msg in old_msgs:
+                role = msg.get("role", "?")
+                content = msg.get("content", "") or ""
+                if role == "user":
+                    first_line = content.split("\n", 1)[0]
+                    summary_parts.append(f"- User: {first_line[:120]}")
+                elif role == "assistant":
+                    tc = msg.get("tool_calls")
+                    if tc:
+                        names = []
+                        for t in tc:
+                            if isinstance(t, dict):
+                                names.append(t.get("function", {}).get("name", "?"))
+                            else:
+                                func = getattr(t, "function", None)
+                                names.append(getattr(func, "name", "?") if func else "?")
+                        summary_parts.append(f"- Agent used tools: {', '.join(names)}")
+                    elif content:
+                        first_line = content.split("\n", 1)[0]
+                        summary_parts.append(f"- Agent responded: {first_line[:100]}")
+            summary_text = "\n".join(summary_parts) if summary_parts else "(earlier conversation)"
 
-        summary_text = "\n".join(summary_parts) if summary_parts else "(earlier conversation)"
-
+        n_compressed = len(old_msgs)
         compaction_msg = {
             "role": "system",
-            "content": f"[Context compacted — {len(old_msgs)} earlier messages summarized]\n{summary_text}",
+            "content": (
+                f"[Previous conversation summary]\n"
+                f"{summary_text}\n"
+                f"[End summary — {n_compressed} messages compressed]"
+            ),
         }
 
         return system_msgs + [compaction_msg] + recent_msgs

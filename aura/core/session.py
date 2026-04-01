@@ -80,6 +80,9 @@ class AgenticSession:
 
     def load(self, session_id: str) -> list[dict]:
         """Load session from disk. Returns messages list."""
+        if ".." in session_id or "/" in session_id or "\\" in session_id:
+            logger.warning(f"[Session] Rejected path traversal in session_id: {session_id}")
+            return []
         session_file = self.sessions_dir / session_id / "session.json"
         if not session_file.exists():
             logger.warning(f"[Session] Not found: {session_id}")
@@ -131,8 +134,17 @@ class AgenticSession:
 
     def delete(self, session_id: str) -> bool:
         """Delete a session directory."""
+        if ".." in session_id or "/" in session_id or "\\" in session_id:
+            logger.warning(f"[Session] Rejected path traversal in session_id: {session_id}")
+            return False
         session_dir = self.sessions_dir / session_id
         if not session_dir.exists():
+            return False
+        # Containment check
+        try:
+            session_dir.resolve().relative_to(self.sessions_dir.resolve())
+        except ValueError:
+            logger.warning(f"[Session] Path escaped sessions dir: {session_dir}")
             return False
         try:
             import shutil

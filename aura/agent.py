@@ -246,12 +246,12 @@ class ApprenticeAgent(KGBrainMixin, SkillManagerMixin, NarrativeMixin, DirectHan
             fast_init: If True, skip slow initialization (warmup, heavy tools).
                       Use for GUI where you want fast startup.
         """
-        # Validate and select best available models before creating brain
+        # Start model validation in background — don't block startup
         try:
-            validated = Config.validate_models_on_startup()
-            logger.info(f"[MODELS] Validated: {validated}")
+            Config.validate_models_on_startup(background=True)
+            logger.info("[MODELS] Background validation started")
         except (AttributeError, ConnectionError, TimeoutError, OSError) as e:
-            logger.warning(f"[MODELS] Validation failed: {e}")
+            logger.warning(f"[MODELS] Validation failed to start: {e}")
 
         # Skip Ollama warmup for fast init
         self.brain = OllamaBrain(warmup=not fast_init)

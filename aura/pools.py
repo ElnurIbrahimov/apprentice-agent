@@ -75,7 +75,10 @@ def _shutdown_all():
     kwargs = {"wait": False}
     if sys.version_info >= (3, 9):
         kwargs["cancel_futures"] = True
-    for name, pool in [("llm", _llm_pool), ("bg", _bg_pool), ("tool", _tool_pool)]:
+    # Snapshot pool refs under lock to avoid race with lazy initialization
+    with _lock:
+        pools = [("llm", _llm_pool), ("bg", _bg_pool), ("tool", _tool_pool)]
+    for name, pool in pools:
         if pool is not None:
             try:
                 pool.shutdown(**kwargs)

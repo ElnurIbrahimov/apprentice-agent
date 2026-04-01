@@ -340,9 +340,16 @@ class HooksManager:
                     "$n.Visible = $true;"
                     "$n.ShowBalloonTip(5000, 'AURA Hook', $env:HOOK_MSG, 'Info')"
                 )
+                _SENSITIVE_ENV_KEYS = frozenset({
+                    "OLLAMA_API_KEY", "E2B_API_KEY", "TAVILY_API_KEY",
+                    "BRAVE_API_KEY", "FIRECRAWL_API_KEY", "TELEGRAM_BOT_TOKEN",
+                    "CHATGPT_REFRESH_TOKEN",
+                })
+                safe_env = {k: v for k, v in os.environ.items() if k not in _SENSITIVE_ENV_KEYS}
+                safe_env["HOOK_MSG"] = str(message)
                 subprocess.run(
                     ["powershell", "-Command", ps_script],
-                    env={**os.environ, "HOOK_MSG": str(message)},
+                    env=safe_env,
                     timeout=5
                 )
             else:

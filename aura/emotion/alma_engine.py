@@ -1135,14 +1135,10 @@ class ALMAEngine:
             else:
                 lat = lon = None
 
-            # Only fall back to IP geolocation if no location configured
+            # IP geolocation disabled — requires explicit location config
+            # to avoid involuntary IP leak to third-party services
             if lat is None or lon is None:
-                try:
-                    geo = requests.get("https://ipapi.co/json/", timeout=5).json()
-                    lat = geo.get("latitude")
-                    lon = geo.get("longitude")
-                except Exception:
-                    return None
+                return None
 
             if not lat or not lon:
                 return None

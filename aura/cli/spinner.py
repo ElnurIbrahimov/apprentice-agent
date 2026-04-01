@@ -15,14 +15,11 @@ FRAME_INTERVAL = 0.08  # 80ms per frame
 _SHIMMER_PERIOD = 2.0   # seconds for one full sweep
 _SHIMMER_BAND = 5.0     # half-width of highlight band in characters
 
-# Aura-themed spinner verbs — mix of mystical + technical
+# Default spinner verbs — practical, informative (phase-aware verbs in display.py
+# override these once a specific tool is called)
 SPINNER_VERBS = [
-    "Thinking", "Perceiving", "Resonating", "Channeling", "Sensing",
-    "Contemplating", "Manifesting", "Harmonizing", "Illuminating", "Attuning",
-    "Synthesizing", "Crystallizing", "Weaving", "Flowing", "Pulsing",
-    "Dreaming", "Evolving", "Awakening", "Transmuting", "Radiating",
-    "Calibrating", "Decoding", "Unraveling", "Orchestrating", "Conjuring",
-    "Computing", "Processing", "Analyzing", "Reflecting", "Exploring",
+    "Thinking", "Processing", "Analyzing", "Working",
+    "Reasoning", "Planning", "Generating",
 ]
 
 

@@ -1,8 +1,7 @@
 """Keyboard shortcut registry with customization support.
 
-NOTE: This registry is not yet integrated into the input system.
-Keybindings in input.py are currently hardcoded. This module is
-scaffolding for future customizable keybinding support.
+Used by input.py to register keybindings. User overrides are loaded
+from ~/.aura/keybindings.json.
 """
 from __future__ import annotations
 import json
@@ -64,3 +63,27 @@ class KeybindingsRegistry:
     def all_bindings(self) -> Dict[str, str]:
         """Return all current bindings."""
         return dict(self._bindings)
+
+
+def parse_key_to_pt(key_str: str) -> tuple:
+    """Convert a human-readable key string to prompt_toolkit key args.
+
+    Examples:
+        "ctrl+l"     -> ("c-l",)
+        "ctrl+n"     -> ("c-n",)
+        "alt+m"      -> ("escape", "m")
+        "shift+tab"  -> ("s-tab",)
+        "ctrl+z"     -> ("c-z",)
+    """
+    parts = key_str.lower().strip().split("+")
+    if len(parts) == 1:
+        return (parts[0],)
+    modifier = parts[0]
+    key = parts[1]
+    if modifier == "ctrl":
+        return (f"c-{key}",)
+    elif modifier == "alt":
+        return ("escape", key)
+    elif modifier == "shift":
+        return (f"s-{key}",)
+    return (key_str,)

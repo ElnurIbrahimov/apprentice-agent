@@ -16,30 +16,37 @@ def gather_context(project_root: str) -> str:
     """Build context string for the agentic system prompt.
 
     Gathers:
-    1. AURA.md content (freeform markdown section)
-    2. Git status (branch, dirty file count)
-    3. Project structure (depth 2, compact tree)
+    1. AGENTS.md content (cross-tool standard, loaded first)
+    2. AURA.md content (project-specific overrides)
+    3. Git status (branch, dirty file count)
+    4. Project structure (depth 2, compact tree)
+    5. Repo map with key symbols
 
     Returns a formatted string ready for injection into the system prompt.
     """
     parts = []
 
-    # 1. AURA.md content
+    # 1. AGENTS.md content (cross-tool standard, loaded first so AURA.md overrides)
+    agents_md_content = _load_agents_md(project_root)
+    if agents_md_content:
+        parts.append(f"## Agent Instructions (AGENTS.md)\n{agents_md_content}")
+
+    # 2. AURA.md content (project-specific, takes precedence)
     aura_md_content, aura_md_config = _load_aura_md(project_root)
     if aura_md_content:
         parts.append(f"## Project Instructions (AURA.md)\n{aura_md_content}")
 
-    # 2. Git state
+    # 3. Git state
     git_info = _get_git_info(project_root)
     if git_info:
         parts.append(f"## Git Status\n{git_info}")
 
-    # 3. Project structure (compact)
+    # 4. Project structure (compact)
     tree = _get_project_tree(project_root)
     if tree:
         parts.append(f"## Project Structure\n{tree}")
 
-    # 4. Repo map with key symbols
+    # 5. Repo map with key symbols
     try:
         from .repo_map import build_repo_map
         repo_map = build_repo_map(project_root)
@@ -58,6 +65,42 @@ def get_aura_md_config(project_root: str) -> dict:
     """Parse and return just the AURA.md frontmatter config, if any."""
     _, config = _load_aura_md(project_root)
     return config
+
+
+def _load_agents_md(project_root: str) -> Optional[str]:
+    """Load AGENTS.md or .agents.md from the project root.
+
+    This is the cross-tool configuration standard used by Claude Code, Codex,
+    Cursor, Goose, Copilot, etc. (https://agents.md/)
+
+    Checks AGENTS.md first, then .agents.md (hidden variant).
+    Capped at 32KB. Returns None if not found.
+    """
+    _MAX_AGENTS_MD_SIZE = 32 * 1024
+
+    for filename in ("AGENTS.md", ".agents.md"):
+        filepath = os.path.join(project_root, filename)
+        if not os.path.isfile(filepath):
+            continue
+
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                content = f.read()
+        except (OSError, PermissionError):
+            logger.debug(f"[Context] Could not read {filename}")
+            continue
+
+        if len(content) > _MAX_AGENTS_MD_SIZE:
+            logger.warning(
+                f"[Context] {filename} exceeds {_MAX_AGENTS_MD_SIZE} bytes "
+                f"({len(content)}), truncating"
+            )
+            content = content[:_MAX_AGENTS_MD_SIZE]
+
+        logger.debug(f"[Context] Loaded {filename} ({len(content)} bytes)")
+        return content.strip() or None
+
+    return None
 
 
 def _load_aura_md(project_root: str) -> tuple[Optional[str], dict]:
@@ -156,6 +199,34 @@ def _get_git_info(project_root: str) -> Optional[str]:
                     parts.append(f"  ... and {len(changed) - 10} more")
         else:
             parts.append("Clean working tree")
+
+        # Add recent diff (first 2000 chars) for dirty files
+        if dirty:
+            try:
+                import subprocess
+                diff_result = subprocess.run(
+                    ["git", "diff", "--stat", "--no-color"],
+                    capture_output=True, text=True, timeout=5,
+                    cwd=project_root,
+                )
+                if diff_result.stdout:
+                    parts.append(f"\nRecent changes:\n{diff_result.stdout[:2000]}")
+            except Exception:
+                pass
+
+        # Add last 3 commit messages for dev direction context
+        try:
+            import subprocess
+            log_result = subprocess.run(
+                ["git", "log", "--oneline", "-3", "--no-color"],
+                capture_output=True, text=True, timeout=5,
+                cwd=project_root,
+            )
+            if log_result.stdout:
+                parts.append(f"\nRecent commits:\n{log_result.stdout.strip()}")
+        except Exception:
+            pass
+
         return "\n".join(parts)
     except Exception as e:
         logger.debug(f"[Context] Git info unavailable: {e}")

@@ -6,21 +6,31 @@ Replaces the pattern of bolting attributes onto the agent object
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from aura.agent import ApprenticeAgent
+    from aura.core.agentic_loop import AgenticLoop
+    from aura.core.permissions import PermissionManager
+    from aura.core.session import AgenticSession
+    from aura.cli.background import BackgroundManager
+    from aura.cli.research_mode import ResearchContext
+    from aura.cli.hooks import HookManager
+    from aura.cli.watch_mode import FileWatcher
 
 
 @dataclass
 class CLIContext:
     """Holds all CLI session state that was previously bolted onto agent."""
 
-    agent: Any
-    agentic_loop: Any = None
-    permissions: Any = None
-    session: Any = None
-    bg_manager: Any = None
-    research_ctx: Any = None
-    hook_manager: Any = None
-    file_watcher: Any = None
+    agent: ApprenticeAgent
+    agentic_loop: Optional[AgenticLoop] = None
+    permissions: Optional[PermissionManager] = None
+    session: Optional[AgenticSession] = None
+    bg_manager: Optional[BackgroundManager] = None
+    research_ctx: Optional[ResearchContext] = None
+    hook_manager: Optional[HookManager] = None
+    file_watcher: Optional[FileWatcher] = None
     speak: bool = False
     verbose: bool = False
     resume_session_id: Optional[str] = None

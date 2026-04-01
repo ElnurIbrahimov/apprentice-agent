@@ -1582,12 +1582,18 @@ class SecureToolExecutor:
         try:
             code_file.write_text(code)
 
+            # Sanitize environment — do not leak API keys to executed code
+            import sys as _sys
+            _SAFE_ENV_KEYS = {"PATH", "HOME", "USERPROFILE", "TEMP", "TMP",
+                              "SYSTEMROOT", "WINDIR", "COMSPEC", "PYTHONPATH"}
+            safe_env = {k: v for k, v in os.environ.items() if k in _SAFE_ENV_KEYS}
             result = subprocess.run(
-                ["python", str(code_file)],
+                [_sys.executable, str(code_file)],
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                cwd=str(self.sandbox_dir)
+                cwd=str(self.sandbox_dir),
+                env=safe_env,
             )
 
             return {

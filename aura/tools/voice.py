@@ -12,8 +12,20 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional, Callable, Tuple
 
-import numpy as np
-import sounddevice as sd
+# numpy and sounddevice are lazy-loaded to avoid pulling them at package import time.
+# They are imported on first use inside the classes that need them.
+np = None
+sd = None
+
+def _ensure_audio_deps():
+    """Lazy-load numpy and sounddevice on first use."""
+    global np, sd
+    if np is None:
+        import numpy as _np
+        np = _np
+    if sd is None:
+        import sounddevice as _sd
+        sd = _sd
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +86,7 @@ class BargeInDetector:
 
     def start(self) -> None:
         """Start monitoring the microphone for barge-in."""
+        _ensure_audio_deps()
         self._detected.clear()
         self._stop.clear()
         self._consecutive_speech = 0
@@ -168,8 +181,9 @@ class InterruptiblePlayer:
         self._start_time: float = 0
         self._total_duration: float = 0
 
-    def play(self, audio: np.ndarray, sample_rate: int) -> None:
+    def play(self, audio, sample_rate: int) -> None:
         """Start non-blocking playback."""
+        _ensure_audio_deps()
         self._audio = audio
         self._sample_rate = sample_rate
         self._total_duration = len(audio) / sample_rate
@@ -266,6 +280,7 @@ class VoiceTool:
         on_listening: Optional[Callable] = None
     ) -> dict:
         try:
+            _ensure_audio_deps()
             model = self._load_whisper()
             if on_listening:
                 on_listening()
@@ -286,7 +301,7 @@ class VoiceTool:
             traceback.print_exc()
             return {"success": False, "error": str(e), "text": ""}
 
-    def transcribe(self, audio_data: np.ndarray) -> str:
+    def transcribe(self, audio_data) -> str:
         """Transcribe a numpy audio array via Whisper. Returns text."""
         try:
             model = self._load_whisper()
@@ -392,6 +407,7 @@ class VoiceTool:
 
     def list_audio_devices(self) -> dict:
         try:
+            _ensure_audio_deps()
             devices = sd.query_devices()
             input_devices = []
             for i, device in enumerate(devices):

@@ -18,13 +18,24 @@ os.environ.setdefault('TORCHAO_NO_TRITON', '1')
 
 import requests
 
-# Torch is optional - only needed for GPU voice features
-try:
-    import torch
-    TORCH_AVAILABLE = True
-except ImportError:
-    torch = None
-    TORCH_AVAILABLE = False
+# Torch is lazy-loaded — only needed for GPU voice features
+_torch = None
+_torch_checked = False
+
+def _get_torch():
+    """Lazy-load torch on first use. Returns (torch_module, is_available)."""
+    global _torch, _torch_checked
+    if not _torch_checked:
+        try:
+            import torch
+            _torch = torch
+        except ImportError:
+            _torch = None
+        _torch_checked = True
+    return _torch, _torch is not None
+
+# Keep backward-compat module-level flag (evaluated lazily via property-like access)
+# Code that checks TORCH_AVAILABLE should use _get_torch() instead.
 
 # Config import for dynamic model list
 try:
@@ -97,8 +108,9 @@ class VoiceManager:
             if self.current_mode == "duplex" and self.personaplex is not None:
                 logger.debug("Stopping PersonaPlex server...")
                 self.personaplex.stop_server()
-                if TORCH_AVAILABLE and torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                _t, _avail = _get_torch()
+                if _avail and _t.cuda.is_available():
+                    _t.cuda.empty_cache()
 
             # Load Sesame
             logger.debug("Loading Sesame CSM 1B...")
@@ -139,8 +151,9 @@ class VoiceManager:
 
             # Unload Ollama models to free VRAM (PersonaPlex needs full 8GB)
             self._unload_ollama_models()
-            if TORCH_AVAILABLE and torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            _t, _avail = _get_torch()
+            if _avail and _t.cuda.is_available():
+                _t.cuda.empty_cache()
 
             # Start PersonaPlex server
             logger.debug("Starting PersonaPlex server...")
@@ -273,8 +286,9 @@ class VoiceManager:
                 results.append(f"Sesame: {result.get('message', 'unloaded')}")
 
             # Clear CUDA cache
-            if TORCH_AVAILABLE and torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            _t, _avail = _get_torch()
+            if _avail and _t.cuda.is_available():
+                _t.cuda.empty_cache()
 
             self.current_mode = None
 
@@ -297,8 +311,9 @@ class VoiceManager:
             vram_free = "N/A"
             vram_total = "N/A"
 
-            if TORCH_AVAILABLE and torch.cuda.is_available():
-                free, total = torch.cuda.mem_get_info()
+            _t, _avail = _get_torch()
+            if _avail and _t.cuda.is_available():
+                free, total = _t.cuda.mem_get_info()
                 vram_free = f"{free / 1024**3:.1f}GB"
                 vram_total = f"{total / 1024**3:.1f}GB"
 

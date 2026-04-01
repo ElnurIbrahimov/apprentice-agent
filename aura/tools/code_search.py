@@ -6,9 +6,12 @@ is spent searching for code, not writing it. Fast, accurate search = faster ever
 Inspired by Claude Code's Grep/Glob tools, ripgrep, and tree-sitter.
 """
 
+import json as _json
 import logging
 import os
 import re
+import shutil
+import subprocess
 from fnmatch import fnmatch
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -144,6 +147,306 @@ class CodeSearchTool:
     name = "code_search"
     description = "Search code: grep for content patterns, glob for file patterns, find definitions"
 
+    # Cache ripgrep availability (None = not checked yet)
+    _rg_path: Optional[str] = None
+    _rg_checked: bool = False
+
+    @classmethod
+    def _rg_available(cls) -> Optional[str]:
+        """Check if ripgrep (rg) is on PATH. Returns path to rg or None."""
+        if cls._rg_checked:
+            return cls._rg_path
+        cls._rg_checked = True
+        cls._rg_path = shutil.which("rg")
+        if cls._rg_path:
+            logger.info(f"[CodeSearch] ripgrep found at {cls._rg_path}")
+        else:
+            logger.debug("[CodeSearch] ripgrep not found, using Python fallback")
+        return cls._rg_path
+
+    def _grep_ripgrep(
+        self,
+        pattern: str,
+        path: str,
+        file_type: Optional[str],
+        glob_filter: Optional[str],
+        case_insensitive: bool,
+        context_lines: int,
+        before_context: int,
+        after_context: int,
+        output_mode: str,
+        max_results: int,
+    ) -> Optional[dict]:
+        """Run grep via ripgrep subprocess. Returns result dict or None on failure."""
+        rg = self._rg_available()
+        if not rg:
+            return None
+
+        search_path = Path(path).resolve()
+        if not search_path.exists():
+            return None  # Let the Python fallback handle the error message
+
+        cmd = [rg, "--json", f"--max-count={max_results}"]
+
+        # Case sensitivity
+        if case_insensitive:
+            cmd.append("-i")
+
+        # Context lines
+        ctx_before = before_context or context_lines
+        ctx_after = after_context or context_lines
+        if ctx_before > 0:
+            cmd.extend(["-B", str(ctx_before)])
+        if ctx_after > 0:
+            cmd.extend(["-A", str(ctx_after)])
+
+        # File type filter — use rg's built-in types when possible
+        rg_native_types = {
+            "py", "python", "js", "javascript", "ts", "typescript",
+            "rust", "go", "java", "c", "cpp", "css", "html", "json",
+            "yaml", "toml", "md", "markdown", "sql", "sh", "shell",
+            "ruby", "php", "swift", "kotlin", "dart",
+        }
+        if file_type:
+            ft_lower = file_type.lower()
+            # Map our names to rg's type names
+            rg_type_map = {
+                "python": "py", "javascript": "js", "typescript": "ts",
+                "shell": "sh", "markdown": "md",
+            }
+            rg_type = rg_type_map.get(ft_lower, ft_lower)
+
+            # Check if rg knows this type natively
+            if rg_type in rg_native_types:
+                cmd.extend(["--type", rg_type])
+            else:
+                # Fall back to glob patterns from our TYPE_MAP
+                exts = TYPE_MAP.get(ft_lower)
+                if exts:
+                    for ext in exts:
+                        cmd.extend(["--glob", f"*{ext}"])
+
+        # Glob filter
+        if glob_filter:
+            cmd.extend(["--glob", glob_filter])
+
+        # Pattern and path
+        cmd.append(pattern)
+        cmd.append(str(search_path))
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                encoding="utf-8",
+                errors="replace",
+            )
+        except subprocess.TimeoutExpired:
+            logger.warning("[CodeSearch] ripgrep timed out, falling back to Python")
+            return None
+        except (OSError, FileNotFoundError):
+            logger.warning("[CodeSearch] ripgrep execution failed, falling back to Python")
+            return None
+
+        # rg returns exit code 1 for "no matches" (not an error)
+        if result.returncode not in (0, 1):
+            logger.warning(f"[CodeSearch] ripgrep error (code {result.returncode}): {result.stderr[:200]}")
+            return None
+
+        # Parse ripgrep JSON output
+        return self._parse_rg_json(
+            result.stdout, search_path, output_mode, max_results
+        )
+
+    def _parse_rg_json(
+        self,
+        stdout: str,
+        search_path: Path,
+        output_mode: str,
+        max_results: int,
+    ) -> dict:
+        """Parse ripgrep --json output into our standard result format."""
+        matches = []
+        file_match_counts: Dict[str, int] = {}
+        files_seen: set = set()
+        total_matches = 0
+
+        # Collect context lines keyed by (file, match_line_number)
+        # rg JSON emits "context" messages for -B/-C/-A lines
+        context_buffer: Dict[str, List] = {}  # key: f"{file}:{line}" -> list of context msgs
+        pending_before: List = []  # context lines before the next match
+
+        for raw_line in stdout.splitlines():
+            if not raw_line.strip():
+                continue
+            try:
+                msg = _json.loads(raw_line)
+            except _json.JSONDecodeError:
+                continue
+
+            msg_type = msg.get("type")
+
+            if msg_type == "begin":
+                # New file started
+                file_data = msg.get("data", {}).get("path", {})
+                fname = file_data.get("text", "")
+                if fname:
+                    files_seen.add(fname)
+                pending_before = []
+
+            elif msg_type == "context":
+                # Context line (before or after a match)
+                pending_before.append(msg)
+
+            elif msg_type == "match":
+                data = msg.get("data", {})
+                file_data = data.get("path", {})
+                fname = file_data.get("text", "")
+                line_number = data.get("line_number", 0)
+                lines_data = data.get("lines", {})
+                text = lines_data.get("text", "").rstrip("\n").rstrip("\r")
+
+                total_matches += 1
+
+                # Compute relative path
+                try:
+                    rel_path = str(Path(fname).relative_to(search_path))
+                except ValueError:
+                    rel_path = fname
+
+                if output_mode in ("files", "count"):
+                    file_match_counts[rel_path] = file_match_counts.get(rel_path, 0) + 1
+                else:
+                    if total_matches <= max_results:
+                        match_entry: Dict[str, Any] = {
+                            "file": rel_path,
+                            "line": line_number,
+                            "text": text,
+                        }
+
+                        # Attach before-context from pending_before
+                        if pending_before:
+                            before = []
+                            for ctx_msg in pending_before:
+                                ctx_data = ctx_msg.get("data", {})
+                                ctx_line = ctx_data.get("line_number", 0)
+                                ctx_text = ctx_data.get("lines", {}).get("text", "").rstrip("\n").rstrip("\r")
+                                before.append(f"{ctx_line}: {ctx_text}")
+                            if before:
+                                match_entry["before"] = before
+
+                        matches.append(match_entry)
+                        # Store reference for after-context attachment
+                        context_buffer[f"{rel_path}:{line_number}"] = match_entry
+
+                pending_before = []
+
+            elif msg_type == "end":
+                pending_before = []
+
+        # Attach after-context: rg emits context lines after a match before the next match/end.
+        # We already handled before-context above. For after-context, we need a second pass
+        # through the JSON. Instead, let's do it inline by re-parsing with state tracking.
+        # Actually, the simpler approach: re-parse and track after-context properly.
+        self._attach_after_context(stdout, search_path, matches, max_results)
+
+        # Build result
+        if output_mode == "files":
+            return {
+                "success": True,
+                "files": list(file_match_counts.keys()),
+                "file_counts": file_match_counts,
+                "total_matches": total_matches,
+                "files_searched": len(files_seen),
+            }
+        elif output_mode == "count":
+            return {
+                "success": True,
+                "counts": file_match_counts,
+                "total_matches": total_matches,
+                "files_searched": len(files_seen),
+            }
+        else:
+            truncated = total_matches > max_results
+            return {
+                "success": True,
+                "matches": matches[:max_results],
+                "total_matches": total_matches,
+                "files_searched": len(files_seen),
+                "truncated": truncated,
+            }
+
+    @staticmethod
+    def _attach_after_context(
+        stdout: str,
+        search_path: Path,
+        matches: list,
+        max_results: int,
+    ) -> None:
+        """Second pass: attach after-context lines to match entries."""
+        if not matches:
+            return
+
+        # Build a lookup from (rel_path, line_number) -> match_entry index
+        match_lookup: Dict[tuple, int] = {}
+        for idx, m in enumerate(matches):
+            match_lookup[(m["file"], m["line"])] = idx
+
+        current_match_idx: Optional[int] = None
+        after_lines: List[str] = []
+
+        for raw_line in stdout.splitlines():
+            if not raw_line.strip():
+                continue
+            try:
+                msg = _json.loads(raw_line)
+            except _json.JSONDecodeError:
+                continue
+
+            msg_type = msg.get("type")
+
+            if msg_type == "match":
+                # Flush any pending after-context to previous match
+                if current_match_idx is not None and after_lines:
+                    if current_match_idx < len(matches):
+                        matches[current_match_idx]["after"] = after_lines
+                after_lines = []
+
+                # Find this match in our list
+                data = msg.get("data", {})
+                fname = data.get("path", {}).get("text", "")
+                line_number = data.get("line_number", 0)
+                try:
+                    rel_path = str(Path(fname).relative_to(search_path))
+                except ValueError:
+                    rel_path = fname
+                current_match_idx = match_lookup.get((rel_path, line_number))
+
+            elif msg_type == "context" and current_match_idx is not None:
+                ctx_data = msg.get("data", {})
+                ctx_line = ctx_data.get("line_number", 0)
+                ctx_text = ctx_data.get("lines", {}).get("text", "").rstrip("\n").rstrip("\r")
+                # Only add as "after" if this context line comes after the match
+                if current_match_idx < len(matches):
+                    match_line = matches[current_match_idx]["line"]
+                    if ctx_line > match_line:
+                        after_lines.append(f"{ctx_line}: {ctx_text}")
+
+            elif msg_type in ("end", "begin"):
+                # Flush after-context
+                if current_match_idx is not None and after_lines:
+                    if current_match_idx < len(matches):
+                        matches[current_match_idx]["after"] = after_lines
+                after_lines = []
+                current_match_idx = None
+
+        # Final flush
+        if current_match_idx is not None and after_lines:
+            if current_match_idx < len(matches):
+                matches[current_match_idx]["after"] = after_lines
+
     def grep(self, pattern: str, path: str = ".",
              file_type: Optional[str] = None,
              glob_filter: Optional[str] = None,
@@ -170,6 +473,23 @@ class CodeSearchTool:
         Returns:
             {success, matches, total_matches, files_searched}
         """
+        # Try ripgrep first — orders of magnitude faster than Python os.walk
+        rg_result = self._grep_ripgrep(
+            pattern=pattern,
+            path=path,
+            file_type=file_type,
+            glob_filter=glob_filter,
+            case_insensitive=case_insensitive,
+            context_lines=context_lines,
+            before_context=before_context,
+            after_context=after_context,
+            output_mode=output_mode,
+            max_results=max_results,
+        )
+        if rg_result is not None:
+            return rg_result
+
+        # Fallback: pure Python implementation
         try:
             flags = re.IGNORECASE if case_insensitive else 0
             try:

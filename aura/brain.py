@@ -207,29 +207,64 @@ _llm_retry = retry(
 )
 
 
-def _ollama_health_check() -> str | None:
-    """Quick check if Ollama is reachable. Returns error message or None if OK."""
+def _ollama_health_check() -> tuple[bool, list[str]]:
+    """Quick check if Ollama is reachable. Returns (is_ok, available_model_names)."""
     try:
         resp = requests.get(f"{Config.OLLAMA_HOST}/api/tags", timeout=3)
         if resp.status_code == 200:
-            return None
-        return f"Ollama returned HTTP {resp.status_code}. Check that `ollama serve` is running."
-    except requests.ConnectionError:
-        return "Ollama is not responding. Run `ollama serve` or check your connection."
-    except requests.Timeout:
-        return "Ollama health check timed out. The server may be overloaded."
-    except Exception as e:
-        return f"Ollama health check failed: {e}"
+            models = [m.get("name", "") for m in resp.json().get("models", [])]
+            return True, models
+        return False, []
+    except Exception:
+        return False, []
 
 
-def _user_facing_llm_error(original_error: Exception | None = None) -> str:
+def _user_facing_llm_error(original_error: Exception | None = None, model: str | None = None) -> str:
     """Return a user-friendly error message after LLM call failure, with Ollama health context."""
-    health = _ollama_health_check()
-    if health:
-        return f"[LLM Error] {health}"
+    model_tag = f" ({model})" if model else ""
+    ollama_ok, available_models = _ollama_health_check()
+
+    if not ollama_ok:
+        return (
+            f"[LLM Error] Could not connect to Ollama{model_tag}.\n"
+            f"  - Is Ollama running? Try: ollama serve\n"
+            f"  - Is the model available? Try: ollama list\n"
+            f"  - For cloud models, check OLLAMA_API_KEY in .env"
+        )
+
+    # Ollama is reachable — check if the requested model exists
+    if model and available_models:
+        # Normalize: strip :latest tag for comparison
+        normalized = [m.split(":")[0] for m in available_models]
+        model_base = model.split(":")[0]
+        if model_base not in normalized and model not in available_models:
+            return (
+                f"[LLM Error] Model '{model}' not found on this Ollama instance.\n"
+                f"  - Available models: {', '.join(available_models[:8])}\n"
+                f"  - Pull it with: ollama pull {model}\n"
+                f"  - For cloud models, check OLLAMA_API_KEY in .env"
+            )
+
     if original_error:
-        return f"[LLM Error] Request failed: {type(original_error).__name__}. Ollama is reachable — the model may have crashed. Try again."
-    return "[LLM Error] No response from the language model. Try again or check `ollama serve`."
+        err_type = type(original_error).__name__
+        if isinstance(original_error, (ConnectionError, OSError)):
+            return (
+                f"[LLM Error] Connection failed for {model or 'model'}: {err_type}\n"
+                f"  - Ollama is reachable but the request failed.\n"
+                f"  - The model may have crashed. Try: ollama run {model or '<model>'}"
+            )
+        if isinstance(original_error, TimeoutError) or "timeout" in str(original_error).lower():
+            return (
+                f"[LLM Error] Request timed out for {model or 'model'}.\n"
+                f"  - The model may be too large for your hardware.\n"
+                f"  - Try a smaller model or increase timeout."
+            )
+        return f"[LLM Error] {err_type} for {model or 'model'}: {original_error}"
+
+    return (
+        f"[LLM Error] No response from {model or 'the language model'}.\n"
+        f"  - Try again or run: aura doctor"
+    )
 
 
 def call_with_timeout(func: Callable, timeout: int = LLM_TIMEOUT, default: Any = None) -> Any:
@@ -679,7 +714,7 @@ class OllamaBrain:
         )
 
         if response is None:
-            return {"error": _user_facing_llm_error()}
+            return {"error": _user_facing_llm_error(model=actual_model)}
 
         input_tokens, output_tokens = self._extract_tool_response_tokens(response, actual_model)
 
@@ -964,7 +999,7 @@ class OllamaBrain:
         )
 
         if response is None:
-            return {"error": "Model failed to respond (timeout)"}
+            return {"error": _user_facing_llm_error(model=actual_model)}
 
         # Extract content from response
         content = _resp_content(response)
@@ -1080,7 +1115,7 @@ class OllamaBrain:
             })
 
         except Exception as e:
-            error_msg = _user_facing_llm_error(e)
+            error_msg = _user_facing_llm_error(e, model=actual_model)
             yield ("error", {"error": error_msg})
 
     def _warmup_models(self) -> None:
@@ -2125,7 +2160,7 @@ class OllamaBrain:
             logger.debug(f"[Brain] non-critical: {e}")
         # === SEMANTIC CODEBASE CONTEXT ===
         # Skip expensive operations if prompt is already near 12K cap
-        MAX_SYSTEM_PROMPT_CHARS = 12000
+        MAX_SYSTEM_PROMPT_CHARS = 25000
         try:
             from aura.tools.codebase_index import CodebaseIndex
             _cwd = os.getcwd()
@@ -2501,7 +2536,7 @@ class OllamaBrain:
                     self._record_routing_outcome, actual_model, task_type, False,
                     (time.time() - _llm_start_ts) * 1000
                 )
-                return _user_facing_llm_error()
+                return _user_facing_llm_error(model=actual_model)
 
             assistant_message = _resp_content(response)
 
@@ -2635,7 +2670,7 @@ class OllamaBrain:
                         import traceback
                         _tb = traceback.format_exc()
                         logger.error(f"[BRAIN] All stream models failed: {e}\n{_tb}")
-                        fallback = _user_facing_llm_error(e)
+                        fallback = _user_facing_llm_error(e, model=_try_actual)
                         yield fallback
                         full_response += fallback
                         _all_models_failed = True

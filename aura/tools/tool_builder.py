@@ -21,6 +21,13 @@ import time
 import ast as _ast
 from datetime import datetime
 from pathlib import Path
+
+# Sanitized environment for subprocess execution — prevents API key leaks
+_SAFE_ENV_KEYS = frozenset({"PATH", "HOME", "USERPROFILE", "TEMP", "TMP",
+                            "SYSTEMROOT", "WINDIR", "COMSPEC", "PYTHONPATH"})
+
+def _safe_env() -> dict:
+    return {k: v for k, v in os.environ.items() if k in _SAFE_ENV_KEYS}
 from typing import Any, Callable, Optional
 
 _BLOCKED_BUILTINS = {"eval", "exec", "compile", "__import__", "open", "breakpoint"}
@@ -566,7 +573,7 @@ Include 'if __name__ == "__main__": pytest.main([__file__, "-x", "-q"])' at the 
             result = subprocess.run(
                 [sys.executable, "-m", "pytest", test_path, "-x", "--tb=short", "-q"],
                 capture_output=True, text=True, timeout=30,
-                cwd=os.path.dirname(tool_path)
+                cwd=os.path.dirname(tool_path), env=_safe_env(),
             )
             output = (result.stdout + result.stderr)[-500:]
             return {
@@ -849,7 +856,7 @@ Include 'if __name__ == "__main__": pytest.main([__file__, "-x", "-q"])' at the 
                 result = subprocess.run(
                     [sys.executable, str(test_file)],
                     capture_output=True, text=True, timeout=30,
-                    cwd=str(BASE_DIR)
+                    cwd=str(BASE_DIR), env=_safe_env(),
                 )
                 test_output = result.stdout + result.stderr
                 test_passed = result.returncode == 0
@@ -1012,7 +1019,7 @@ that would make it pass. Return ONLY the corrected tool code between ```python a
                 capture_output=True,
                 text=True,
                 timeout=30,
-                cwd=str(BASE_DIR)
+                cwd=str(BASE_DIR), env=_safe_env(),
             )
 
             output = result.stdout + result.stderr

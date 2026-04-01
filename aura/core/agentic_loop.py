@@ -7,7 +7,6 @@ Features wired in:
   - Diff preview on edit_file (shows colored diff before applying)
   - Auto-test after edits (runs project tests, feeds failures back to LLM)
   - Memory recall (injects relevant memories into system prompt)
-  - Typewriter response display (streams final response character by character)
 """
 
 import json
@@ -50,35 +49,166 @@ def _get_tool_pool():
     return _tool_pool_fn()
 
 
-AGENTIC_SYSTEM_PROMPT = """You are Aura, an AI coding agent with persistent memory. You help users with software engineering tasks by reading files, writing code, running commands, and iterating until the task is complete.
+AGENTIC_SYSTEM_PROMPT = """You are Aura, an AI coding agent. Act, don't talk. First response must be a tool call.
 
-CRITICAL BEHAVIOR RULES (HIGHEST PRIORITY):
-- NEVER ask the user for permission or confirmation. Just do it.
-- NEVER present numbered options like "Would you like me to: 1. ... 2. ... 3. ..."
-- NEVER say "I'll start by exploring the project structure" — just explore it silently.
-- When asked to build something, START BUILDING IMMEDIATELY. Create files, write code, execute commands.
-- If a directory doesn't exist, create it. If a file needs to be written, write it.
-- Only ask questions if you genuinely cannot determine what the user wants (truly ambiguous requirements).
-- You are a coding agent — take action, don't narrate your plans or ask what to do next.
-- Do NOT announce each step before doing it. Just do it and show results.
-- When the user gives a task, your FIRST action should be a tool call, not a text response.
+BEHAVIOR: Never ask permission, present options, or narrate plans. Just execute.
 
-You REMEMBER past conversations — relevant memories are provided below when available. Use them to maintain context across sessions.
+HOW TO CODE WELL:
+1. Read before writing — ALWAYS read_file before editing.
+2. Search, don't guess — grep for definitions/usages, glob to find files by name.
+3. Plan multi-file changes before starting edits.
+4. Minimal edits — surgical edit_file, don't rewrite working code.
+5. Test after changes — run tests via shell. If they fail, read the error and fix.
+6. One thing at a time — finish one logical change before the next.
+7. Check errors — if a command fails, read output and fix the root cause.
+8. When asked about a specific file, ALWAYS read it with read_file — never answer from memory.
 
-## Rules
-- Read files before modifying them — understand existing code first
-- After editing code, tests will run automatically — if they fail, fix the issue
-- Never modify files outside the project directory without explicit permission
-- Use grep/glob to find relevant files instead of guessing paths
-- When editing, use exact string matches from the file content
+TOOLS:
+- read_file: ALWAYS read before editing. Read related files for context.
+- grep: Find where things are defined or used.
+- glob: Find files by name pattern.
+- edit_file: Surgical string-match edits. Prefer over write_file for existing files.
+- write_file: New files only.
+- shell: Run commands, build, test. Always check output.
+- search_web/fetch_url: Look up docs when needed.
 
-## Available tools
-You have tools for: reading files, searching code (grep/glob), editing files, writing new files, running shell commands, git operations, web search, and viewing project structure.
+RULES:
+- Never modify files outside the project without permission.
+- Use exact string matches from file content when editing.
+- Past session memories are below when available.
 
 {context}
 
 {memories}
 """
+
+
+def _extract_action_summary(msg: dict) -> str | None:
+    """Extract a concise action description from a conversation message.
+
+    Returns a short summary line like:
+      - User asked to fix the auth bug in login.py
+      - Agent read login.py, found the issue on line 42
+      - Agent edited login.py to fix the token refresh logic
+    Returns None for messages that don't contain useful info (empty, tool noise).
+    """
+    role = msg.get("role", "")
+    content = msg.get("content", "") or ""
+    content = content.strip()
+
+    if role == "user":
+        if not content or len(content) < 5:
+            return None
+        # Strip [Auto-test result] prefix for cleaner summaries
+        if content.startswith("[Auto-test result]"):
+            result_text = content[len("[Auto-test result]"):].strip()
+            if "PASS" in result_text.upper() or "OK" in result_text.upper():
+                return "- Tests were run and passed"
+            return f"- Tests were run and failed: {result_text[:80]}"
+        # Summarize user request
+        first_line = content.split("\n", 1)[0]
+        return f"- User: {first_line[:120]}"
+
+    if role == "assistant":
+        # Check for tool_calls first — they describe what the agent DID
+        tc = msg.get("tool_calls")
+        if tc:
+            tool_summaries = []
+            for t in tc:
+                if isinstance(t, dict):
+                    func = t.get("function", {})
+                    name = func.get("name", "?")
+                    args = func.get("arguments", {})
+                else:
+                    func = getattr(t, "function", None)
+                    name = getattr(func, "name", "?") if func else "?"
+                    args = getattr(func, "arguments", {}) if func else {}
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except (json.JSONDecodeError, TypeError):
+                        args = {}
+                if not isinstance(args, dict):
+                    args = {}
+                # Build human-readable tool description
+                if name in ("read_file", "read"):
+                    tool_summaries.append(f"read {args.get('path', args.get('file_path', '?'))}")
+                elif name == "edit_file":
+                    tool_summaries.append(f"edited {args.get('path', '?')}")
+                elif name == "write_file":
+                    tool_summaries.append(f"wrote {args.get('path', '?')}")
+                elif name == "run_command":
+                    cmd = args.get("command", "?")
+                    tool_summaries.append(f"ran `{cmd[:60]}`")
+                elif name == "grep":
+                    tool_summaries.append(f"searched for '{args.get('pattern', '?')}'")
+                elif name == "glob":
+                    tool_summaries.append(f"found files matching '{args.get('pattern', '?')}'")
+                elif name == "git":
+                    sub = args.get("subcommand", args.get("command", "?"))
+                    tool_summaries.append(f"git {sub}")
+                elif name == "web_search":
+                    tool_summaries.append(f"searched web for '{args.get('query', '?')[:50]}'")
+                else:
+                    tool_summaries.append(name)
+            return f"- Agent {', '.join(tool_summaries)}"
+        # Plain text response
+        if content:
+            first_line = content.split("\n", 1)[0]
+            return f"- Agent responded: {first_line[:100]}"
+        return None
+
+    if role == "tool":
+        # Skip tool results — they're bulky and the tool_call already captures the action
+        return None
+
+    return None
+
+
+def _compact_history(history: list[dict]) -> list[dict]:
+    """Summarize the oldest 2/3 of messages into a single summary message.
+
+    Instead of just dropping old messages (losing all context), this builds
+    a compact programmatic summary of what happened, so the LLM retains
+    awareness of earlier conversation.
+    """
+    if len(history) < 6:
+        return history
+
+    keep_count = max(4, len(history) // 3)
+    old_msgs = history[:-keep_count]
+    recent_msgs = history[-keep_count:]
+
+    summary_lines = []
+    for msg in old_msgs:
+        line = _extract_action_summary(msg)
+        if line:
+            summary_lines.append(line)
+
+    if not summary_lines:
+        summary_text = "(earlier conversation with no notable actions)"
+    else:
+        summary_text = "\n".join(summary_lines)
+
+    n_compressed = len(old_msgs)
+    summary_msg = {
+        "role": "user",
+        "content": (
+            f"[Previous conversation summary]\n"
+            f"{summary_text}\n"
+            f"[End summary — {n_compressed} messages compressed]"
+        ),
+    }
+
+    try:
+        _ensure_console()
+        console.print(
+            f"  [dim italic]Context compacted: {n_compressed} messages summarized into conversation summary[/]"
+        )
+    except Exception:
+        pass
+
+    return [summary_msg] + recent_msgs
 
 
 def _truncate(text: str, max_chars: int = MAX_TOOL_OUTPUT_CHARS) -> str:
@@ -125,21 +255,6 @@ def _store_interaction(prompt: str, response: str) -> None:
             )
     except Exception as e:
         logger.debug(f"[AgenticLoop] Memory store failed (non-fatal): {e}")
-
-
-def _typewriter_print(text: str, delay: float = 0.008) -> None:
-    """Print text with a typewriter effect for streaming feel."""
-    for char in text:
-        sys.stdout.write(char)
-        sys.stdout.flush()
-        if char in ('.', '!', '?', '\n'):
-            time.sleep(delay * 3)
-        elif char == ' ':
-            time.sleep(delay * 0.5)
-        else:
-            time.sleep(delay)
-    sys.stdout.write('\n')
-    sys.stdout.flush()
 
 
 class ToolExecutor:
@@ -199,6 +314,17 @@ class ToolExecutor:
             resolved = os.path.realpath(path)
         else:
             resolved = os.path.realpath(os.path.join(self.project_root, path))
+
+        # LLM often prefixes paths with the project folder name (e.g., "Aura/main.py"
+        # when project root is already D:/Aura). If resolved doesn't exist, try stripping.
+        if not os.path.exists(resolved) and not os.path.isabs(path):
+            project_name = os.path.basename(self.project_root)
+            if path.startswith(project_name + "/") or path.startswith(project_name + "\\"):
+                stripped = path[len(project_name) + 1:]
+                alt = os.path.realpath(os.path.join(self.project_root, stripped))
+                if os.path.exists(alt):
+                    resolved = alt
+
         # Allow project root and home directory, block everything else
         allowed_roots = [os.path.realpath(self.project_root)]
         home = os.path.realpath(os.path.expanduser("~"))
@@ -241,6 +367,8 @@ class ToolExecutor:
         # If args has 'action' but no structured params, try to parse it
         if "action" in args and len(args) == 1:
             args = self._parse_action_to_args(tool_name, args["action"])
+            if "error" in args:
+                return args  # Surface the parse error directly to the LLM
 
         if tool_name == "read_file":
             return self._read_file(args)
@@ -266,11 +394,13 @@ class ToolExecutor:
         elif tool_name == "write_file":
             return self._write_file(args)
         elif tool_name == "shell":
-            return self.shell.run_sandboxed(
+            cwd = self._resolve_path(args.get("cwd", "."))
+            result = self.shell.run_sandboxed(
                 command=args["command"],
-                cwd=args.get("cwd", self.project_root),
+                cwd=cwd,
                 timeout=min(args.get("timeout", 60), 300),
             )
+            return self._enrich_shell_error(result, args.get("command", ""))
         elif tool_name == "git":
             return self._git_dispatch(args)
         elif tool_name == "search_web":
@@ -280,6 +410,25 @@ class ToolExecutor:
                 path=self._resolve_path(args.get("path", ".")),
                 max_depth=args.get("max_depth", 3),
             )
+        elif tool_name == "fetch_url":
+            return self._fetch_url(args)
+        elif tool_name == "create_directory":
+            path = self._resolve_path(args.get("path", ""))
+            os.makedirs(path, exist_ok=True)
+            return {"success": True, "path": path}
+        elif tool_name == "move_file":
+            src = self._resolve_path(args.get("source", ""))
+            dst = self._resolve_path(args.get("destination", ""))
+            import shutil
+            shutil.move(src, dst)
+            return {"success": True, "source": src, "destination": dst}
+        elif tool_name == "multi_edit":
+            return self.code_edit.multi_edit(
+                path=self._resolve_path(args["path"]),
+                edits=args.get("edits", []),
+            )
+        elif tool_name == "run_tests":
+            return self._run_tests(args)
         elif tool_name == "spawn_agent":
             if self.sub_agent_mgr is None:
                 return {"error": "Sub-agents not available"}
@@ -392,7 +541,7 @@ class ToolExecutor:
             with open(path, "r", encoding="utf-8", errors="ignore") as f:
                 lines = f.readlines()
         except FileNotFoundError:
-            return {"error": f"File not found: {path}"}
+            return self._read_file_not_found(path, args.get("path", ""))
         except PermissionError:
             return {"error": f"Permission denied: {path}"}
 
@@ -415,6 +564,101 @@ class ToolExecutor:
             "showing": f"{offset + 1}-{offset + len(selected)}",
             "content": "\n".join(numbered),
         }
+
+    def _read_file_not_found(self, resolved_path: str, original_path: str) -> dict:
+        """Enrich a file-not-found error with suggestions from glob search."""
+        basename = os.path.basename(original_path or resolved_path)
+        if not basename:
+            return {"error": f"File not found: {resolved_path}"}
+
+        suggestions = []
+        try:
+            # Search for files with the same name anywhere in project
+            result = self.search.glob(
+                pattern=f"**/{basename}",
+                path=self.project_root,
+                max_results=5,
+            )
+            if result.get("success") and result.get("files"):
+                suggestions = [f["path"] for f in result["files"][:5]]
+        except Exception:
+            pass
+
+        if not suggestions:
+            # Try partial match — strip extension and search broader
+            stem = os.path.splitext(basename)[0]
+            if len(stem) >= 3:
+                try:
+                    result = self.search.glob(
+                        pattern=f"**/{stem}*",
+                        path=self.project_root,
+                        max_results=5,
+                    )
+                    if result.get("success") and result.get("files"):
+                        suggestions = [f["path"] for f in result["files"][:5]]
+                except Exception:
+                    pass
+
+        error_msg = f"File not found: {resolved_path}"
+        if suggestions:
+            return {"error": error_msg, "did_you_mean": suggestions}
+        return {"error": error_msg}
+
+    # Common command alternatives for "command not found" enrichment
+    _COMMAND_ALTERNATIVES = {
+        "python": ["python3", "py"],
+        "python3": ["python", "py"],
+        "py": ["python", "python3"],
+        "pip": ["pip3", "python -m pip"],
+        "pip3": ["pip", "python3 -m pip"],
+        "npx": ["npm exec", "pnpm exec"],
+        "npm": ["pnpm", "yarn"],
+        "pnpm": ["npm", "yarn"],
+        "yarn": ["npm", "pnpm"],
+        "node": ["nodejs"],
+        "nodejs": ["node"],
+        "make": ["cmake", "nmake"],
+        "gcc": ["cc", "clang"],
+        "g++": ["c++", "clang++"],
+        "curl": ["wget", "Invoke-WebRequest"],
+        "wget": ["curl"],
+        "cat": ["type", "Get-Content"],
+        "ls": ["dir", "Get-ChildItem"],
+        "rm": ["del", "Remove-Item"],
+        "cp": ["copy", "Copy-Item"],
+        "mv": ["move", "Move-Item"],
+        "grep": ["findstr", "Select-String"],
+    }
+
+    def _enrich_shell_error(self, result: dict, command: str) -> dict:
+        """Enrich shell errors with actionable suggestions."""
+        if result.get("success", False):
+            return result
+
+        stderr = result.get("stderr", "") or result.get("error", "") or ""
+        # Detect "command not found" patterns (bash, PowerShell, cmd)
+        not_found_patterns = [
+            "command not found",
+            "not recognized as an internal or external command",
+            "is not recognized as",
+            "No such file or directory",
+            "The term",  # PowerShell: "The term 'X' is not recognized"
+        ]
+
+        is_cmd_not_found = any(p.lower() in stderr.lower() for p in not_found_patterns)
+        if not is_cmd_not_found:
+            return result
+
+        # Extract the failed command name (first token)
+        cmd_name = command.strip().split()[0] if command.strip() else ""
+        # Strip path prefixes if present
+        cmd_name = os.path.basename(cmd_name)
+
+        alternatives = self._COMMAND_ALTERNATIVES.get(cmd_name, [])
+        if alternatives:
+            result["suggestion"] = f"'{cmd_name}' not found. Try: {', '.join(alternatives)}"
+
+        return result
 
     def _edit_file(self, args: dict) -> dict:
         """Edit file with diff preview and approval. Uses CodeEditTool for fuzzy matching."""
@@ -556,6 +800,79 @@ class ToolExecutor:
         except Exception as e:
             return {"error": f"All search providers failed: {e}"}
 
+    def _fetch_url(self, args: dict) -> dict:
+        """Fetch a URL and return stripped text content."""
+        url = args.get("url", "")
+        if not url:
+            return {"error": "No URL provided"}
+        try:
+            import requests
+            resp = requests.get(url, timeout=15, headers={"User-Agent": "Aura-Dev-Agent/1.0"})
+            resp.raise_for_status()
+            content = resp.text
+        except Exception as e:
+            return {"error": f"Failed to fetch {url}: {e}"}
+        # Strip HTML tags
+        try:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(content, "html.parser")
+            # Remove script/style elements
+            for tag in soup(["script", "style", "nav", "footer", "header"]):
+                tag.decompose()
+            text = soup.get_text(separator="\n", strip=True)
+        except ImportError:
+            # Fallback: simple regex strip
+            text = re.sub(r"<script[^>]*>.*?</script>", "", content, flags=re.DOTALL | re.IGNORECASE)
+            text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL | re.IGNORECASE)
+            text = re.sub(r"<[^>]+>", " ", text)
+            text = re.sub(r"\s+", " ", text).strip()
+        # Truncate to 15000 chars
+        if len(text) > 15000:
+            text = text[:15000] + "\n... [truncated]"
+        return {"success": True, "url": url, "length": len(text), "content": text}
+
+    def _run_tests(self, args: dict) -> dict:
+        """Run project tests, auto-detecting the test framework."""
+        target = args.get("target", "")
+        cwd = self.project_root
+
+        # Try auto_verify if available
+        try:
+            from aura.tools.auto_verify import AutoVerifyTool
+            av = AutoVerifyTool()
+            result = av.run(project_root=cwd, target=target)
+            if result and "error" not in result:
+                return result
+        except (ImportError, Exception) as e:
+            logger.debug(f"[ToolExecutor] auto_verify unavailable: {e}")
+
+        # Detect test framework and run
+        cmd = None
+        if os.path.exists(os.path.join(cwd, "pytest.ini")) or os.path.exists(os.path.join(cwd, "pyproject.toml")) or os.path.exists(os.path.join(cwd, "setup.py")):
+            cmd = f"python -m pytest {target} -x -q --tb=short" if target else "python -m pytest -x -q --tb=short"
+        elif os.path.exists(os.path.join(cwd, "package.json")):
+            # Check for vitest or jest
+            try:
+                with open(os.path.join(cwd, "package.json"), "r") as f:
+                    import json as _json
+                    pkg = _json.load(f)
+                deps = {**pkg.get("devDependencies", {}), **pkg.get("dependencies", {})}
+                if "vitest" in deps:
+                    cmd = f"npx vitest run {target}" if target else "npx vitest run"
+                else:
+                    cmd = f"npx jest {target}" if target else "npx jest"
+            except Exception:
+                cmd = f"npm test -- {target}" if target else "npm test"
+        elif os.path.exists(os.path.join(cwd, "Cargo.toml")):
+            cmd = f"cargo test {target}" if target else "cargo test"
+        elif os.path.exists(os.path.join(cwd, "go.mod")):
+            cmd = f"go test {target}" if target else "go test ./..."
+
+        if not cmd:
+            return {"error": "Could not detect test framework. Use shell tool to run tests manually."}
+
+        return self.shell.run_sandboxed(command=cmd, cwd=cwd, timeout=120)
+
 
 class AgenticLoop:
     """Core autonomous loop: LLM calls tools until task is complete."""
@@ -607,6 +924,11 @@ class AgenticLoop:
 
         # Action mode detected by intent classifier (set per run())
         self._current_action_mode = None
+
+        # Hot files: recently read/edited file paths and content snapshots
+        # Persists across iterations within a task so the LLM remembers what it was working on
+        self._hot_files: list[str] = []  # recently touched file paths (max 10)
+        self._hot_file_contents: dict[str, str] = {}  # path -> first 200 lines snapshot
 
         # Cancellation event for mid-loop abort (Ctrl+C)
         self._cancel_event = threading.Event()
@@ -681,7 +1003,112 @@ class AgenticLoop:
         except ImportError:
             pass
 
+        # Inject semantic codebase context (same as brain.py path)
+        try:
+            from aura.tools.codebase_index import CodebaseIndex
+            from pathlib import Path as _P
+            _idx_db = _P("data/codebase_index/index.db")
+            _idx_legacy = _P(self.project_root) / ".aura" / "index.db"
+            if (_idx_db.exists() or _idx_legacy.exists()) and len(system_prompt) < 22000:
+                idx = CodebaseIndex(self.project_root)
+                if idx.stats()["total_chunks"] > 0:
+                    relevant = idx.search(prompt, top_k=5)
+                    if relevant:
+                        chunks = "\n".join(
+                            f"[{r['file']}:{r.get('start_line','')}] {r['content'][:500]}"
+                            for r in relevant
+                        )
+                        system_prompt += f"\n\n## Relevant codebase context\n{chunks}"
+        except Exception:
+            pass
+
+        # Pre-load files mentioned in the prompt
+        try:
+            import re as _re_files
+            file_patterns = _re_files.findall(
+                r'(?:^|\s)([a-zA-Z_][\w/\\.-]*\.(?:py|js|ts|jsx|tsx|rs|go|java|c|cpp|h|rb|php|swift|kt|sql|yaml|yml|json|toml|md))\b',
+                prompt
+            )
+            if file_patterns:
+                file_contents = []
+                for fp in file_patterns[:3]:  # max 3 files
+                    resolved = self.executor._resolve_path(fp)
+                    if os.path.isfile(resolved) and os.path.getsize(resolved) < 50000:
+                        with open(resolved, 'r', encoding='utf-8', errors='replace') as f:
+                            content = f.read(8000)
+                        file_contents.append(f"### {fp}\n```\n{content}\n```")
+                if file_contents and len(system_prompt) < 22000:
+                    system_prompt += "\n\n## Pre-loaded files from prompt\n" + "\n".join(file_contents)
+        except Exception:
+            pass
+
+        # Hot files: inject recently touched file paths so LLM remembers
+        # what it was working on across iterations and after context compaction
+        if self._hot_files:
+            hot_lines = ["## Recently touched files"]
+            for fp in self._hot_files:
+                name = Path(fp).name
+                rel = os.path.relpath(fp, self.project_root)
+                has_snapshot = "(content cached)" if fp in self._hot_file_contents else ""
+                hot_lines.append(f"- {rel} {has_snapshot}")
+            system_prompt += "\n\n" + "\n".join(hot_lines)
+
         return system_prompt
+
+    def _track_hot_file(self, tool_name: str, args: dict, tool_result: str) -> None:
+        """Track recently touched files for context injection.
+
+        Called after each tool execution for read_file, edit_file, write_file.
+        Keeps _hot_files deduplicated, most-recent-first, max 10 entries.
+        For read_file, also snapshots the first 200 lines into _hot_file_contents.
+        """
+        resolved_name = self.executor._TOOL_ALIASES.get(tool_name, tool_name)
+        if resolved_name not in ("read_file", "edit_file", "write_file"):
+            return
+
+        path = args.get("path")
+        if not path:
+            return
+
+        # Resolve to absolute path for consistency
+        try:
+            path = self.executor._resolve_path(path)
+        except (PermissionError, Exception):
+            return
+
+        # Deduplicate: remove if already present, then prepend (most recent first)
+        if path in self._hot_files:
+            self._hot_files.remove(path)
+        self._hot_files.insert(0, path)
+
+        # Cap at 10
+        if len(self._hot_files) > 10:
+            evicted = self._hot_files.pop()
+            self._hot_file_contents.pop(evicted, None)
+
+        # Snapshot first 200 lines on read_file (or edit/write if we can)
+        if resolved_name == "read_file":
+            try:
+                # Extract content from the tool result if available
+                parsed = json.loads(tool_result) if isinstance(tool_result, str) else tool_result
+                if isinstance(parsed, dict) and parsed.get("content"):
+                    # Take first 200 lines from the numbered content
+                    lines = parsed["content"].split("\n")[:200]
+                    self._hot_file_contents[path] = "\n".join(lines)
+                    return
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass
+            # Fallback: read from disk
+            try:
+                with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                    lines = []
+                    for i, line in enumerate(f):
+                        if i >= 200:
+                            break
+                        lines.append(line.rstrip())
+                    self._hot_file_contents[path] = "\n".join(lines)
+            except Exception:
+                pass
 
     def plan_first(self, prompt: str) -> dict:
         """Generate a plan without executing anything. Returns plan dict.
@@ -692,7 +1119,7 @@ class AgenticLoop:
         Returns:
             {"plan_text": str, "plan": ExecutionPlan, "prompt": str}
         """
-        from aura.cli.plan_mode import (
+        from aura.core.planner import (
             PLAN_GENERATION_PROMPT, parse_plan_from_llm,
         )
 
@@ -713,7 +1140,7 @@ class AgenticLoop:
         plan = parse_plan_from_llm(response)
         return {"plan_text": response, "plan": plan, "prompt": prompt}
 
-    def run(self, prompt: str, on_tool_call=None, on_response=None, steering_queue=None, on_chunk=None) -> dict:
+    def run(self, prompt: str, on_tool_call=None, on_response=None, steering_queue=None, on_chunk=None, on_tool_start=None) -> dict:
         """Run the agentic loop until completion.
 
         Args:
@@ -722,6 +1149,7 @@ class AgenticLoop:
             on_response: Callback(text, iteration) for streaming text
             steering_queue: Optional SteeringQueue for mid-turn user messages
             on_chunk: Callback(text) for live token streaming
+            on_tool_start: Callback(tool_name, args) fired before tool execution
 
         Returns:
             {success, response, iterations, tool_calls, model}
@@ -777,10 +1205,6 @@ class AgenticLoop:
             messages.extend(history)
 
         messages.append({"role": "user", "content": prompt})
-
-        # Track in session
-        if self.session:
-            self.session.append({"role": "user", "content": prompt})
 
         final_response = ""
         model_used = ""
@@ -906,6 +1330,28 @@ class AgenticLoop:
                         sys.stdout.write("\r\033[K")  # Clear spinner if no output
                         sys.stdout.flush()
 
+            except ConnectionError as e:
+                sys.stdout.write("\r\033[K")
+                sys.stdout.flush()
+                _model_label = step_model or "default model"
+                final_response = (
+                    f"Connection failed to {_model_label}.\n"
+                    f"  - Is Ollama running? Try: ollama serve\n"
+                    f"  - Check your network connection."
+                )
+                self._loop_error = True
+                break
+            except TimeoutError as e:
+                sys.stdout.write("\r\033[K")
+                sys.stdout.flush()
+                _model_label = step_model or "default model"
+                final_response = (
+                    f"Request timed out for {_model_label}.\n"
+                    f"  - The model may be overloaded or too large.\n"
+                    f"  - Try a smaller model with: /model <name>"
+                )
+                self._loop_error = True
+                break
             except Exception as e:
                 stream_error = str(e)
 
@@ -1015,8 +1461,13 @@ class AgenticLoop:
                 final_response = f"Cancelled after {self.iteration} iterations."
                 break
 
-            # Execute: parallel if 2+ calls, direct if 1
+            # Fire on_tool_start before execution so UI can show tool immediately
             needs_exec = [(i, t, a) for i, (t, a, r) in enumerate(approved) if r is None]
+            if on_tool_start:
+                for _idx, _t, _a in needs_exec:
+                    on_tool_start(_t, _a)
+
+            # Execute: parallel if 2+ calls, direct if 1
             if len(needs_exec) == 1:
                 idx, t, a = needs_exec[0]
                 result = self.executor.execute(t, a)
@@ -1046,6 +1497,10 @@ class AgenticLoop:
                     self._last_tools_were_reads = True
                 else:
                     self._last_tools_were_reads = False
+
+                # Track hot files for context injection
+                self._track_hot_file(tool_name, args, tool_result)
+
                 if on_tool_call:
                     on_tool_call(tool_name, args, tool_result)
                 tool_msg = {"role": "tool", "content": tool_result}
@@ -1057,12 +1512,14 @@ class AgenticLoop:
                 guard_result = guard.record(tool_name, str(args))
                 if guard_result and guard_result.triggered:
                     final_response = guard_result.fallback_message
+                    self._loop_error = True
                     _guard_tripped = True
                     break
 
                 # ── Cancellation check: after each tool result ──
                 if self._cancel_event.is_set():
                     final_response = f"Cancelled after {self.iteration} iterations."
+                    self._loop_error = True
                     _guard_tripped = True  # reuse flag to break outer loop
                     break
 
@@ -1091,16 +1548,9 @@ class AgenticLoop:
             if self.session:
                 self.session.append({"role": "assistant", "content": final_response})
 
-        # Keep history bounded (last 100 messages, only 40 sent to LLM anyway)
+        # Keep history bounded — summarize old messages instead of dropping them
         if len(self._conversation_history) > 100:
-            dropped = len(self._conversation_history) - 100
-            self._conversation_history = self._conversation_history[-100:]
-            # Notify user about context compaction
-            try:
-                _ensure_console()
-                console.print(f"  [dim italic]Context compacted: {dropped} oldest messages trimmed[/]")
-            except Exception:
-                pass
+            self._conversation_history = _compact_history(self._conversation_history)
 
         # Update session stats and save
         if self.session:
@@ -1149,6 +1599,7 @@ class AgenticLoop:
         """Run project tests after edits. Returns test output for LLM or None."""
         try:
             from aura.tools.auto_verify import auto_verify
+            _ensure_console()
             console.print("  [dim cyan]auto[/dim cyan] running tests...", highlight=False)
             result = auto_verify(self.project_root, self.executor.shell)
 
@@ -1191,13 +1642,14 @@ class AgenticLoop:
         """
         from .router import classify_task
 
-        # Phase 1: First iteration — classify from user prompt
+        # Phase 1: First iteration — classify from the latest user prompt
         if self.iteration == 1:
             user_prompt = ""
-            for msg in messages:
+            for msg in reversed(messages):
                 if msg.get("role") == "user":
                     user_prompt = msg.get("content", "")
-            category = classify_task(user_prompt) if user_prompt else "orchestrator"
+                    break
+            category, _conf = classify_task(user_prompt) if user_prompt else ("orchestrator", 1.0)
 
         # Phase 3: Test failure — stay on code model to fix
         elif self._has_test_failure and self._has_edits:
@@ -1234,8 +1686,10 @@ class AgenticLoop:
         return True
 
     def clear_history(self):
-        """Clear conversation history."""
+        """Clear conversation history and hot files (new session)."""
         self._conversation_history.clear()
+        self._hot_files.clear()
+        self._hot_file_contents.clear()
 
     def _show_tool_status(self, tool_name: str, args: dict, denied: bool = False):
         """Show compact tool call status in the console."""

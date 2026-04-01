@@ -133,6 +133,30 @@ def show_welcome_info(agent: Any) -> None:
         t.append(f" \u00b7 {tool_count} tools", style="dim")
     console.print(t)
 
+    # CWD + Ollama cloud status + model count
+    info = Text("  ")
+    cwd = os.getcwd().replace("\\", "/")
+    info.append(cwd, style="dim")
+
+    has_cloud_key = bool(os.environ.get("OLLAMA_API_KEY"))
+    if has_cloud_key:
+        info.append(" \u00b7 ", style="dim")
+        info.append("Ollama cloud", style="dim")
+    else:
+        info.append(" \u00b7 ", style="dim")
+        info.append("Ollama local", style="dim")
+
+    # Count available models (fast, no network)
+    try:
+        from aura.providers import list_all_provider_models
+        model_count = len(list_all_provider_models())
+        if model_count:
+            info.append(f" ({model_count} models)", style="dim")
+    except Exception:
+        logger.debug("welcome_model_count_failed", exc_info=True)
+
+    console.print(info)
+
     # Compact shortcut hints
     h = Text("  ")
     shortcuts = [
@@ -253,13 +277,13 @@ def show_tool_call(
     step: int = 0,
     max_steps: int = 0,
 ) -> None:
-    """Print a tool call with step counter, status dot, icon, name, and description.
+    """Print a tool call with step counter, status dot, label, and description.
 
-    Visual style: ┃ Step N · ● → tool_name description
-    Shows the workflow progress so user can see what's happening.
+    Visual style: ┃ [N] ● Read src/main.py (0.3s)
+    Uses short text labels (Read, Edit, Run, etc.) instead of cryptic icons.
     """
     colors = _get_theme_colors()
-    time_str = f" {format_elapsed(elapsed)}" if elapsed > 0 else ""
+    time_str = f" ({elapsed:.1f}s)" if elapsed >= 0.5 else ""
 
     # For edit/write with diff info, show compact diff summary
     if tool_name in ("edit_file", "write_file") and result and isinstance(result, dict) and result.get("diff"):
@@ -283,13 +307,13 @@ def show_tool_call(
     # Status dot
     dot_char, dot_style = _get_status_dot(status, colors)
 
-    # Tool icon
-    icon = get_tool_icon(tool_name)
+    # Tool label (text, e.g. "Read", "Edit", "Run")
+    label = get_tool_icon(tool_name)
 
     # Build the line with left border + step counter
     line = Text()
 
-    # Left border for visual grouping (like OpenCode's ┃)
+    # Left border for visual grouping
     line.append("  \u2503 ", style=f"{colors['accent']}")
 
     # Step prefix
@@ -297,12 +321,11 @@ def show_tool_call(
         line.append(f"[{step}] ", style=f"bold {colors['accent']}")
 
     line.append(dot_char, style=dot_style)
-    line.append(f" {icon} ", style=f"{colors['tool']}")
-    line.append(tool_name, style=f"bold {colors['tool']}")
+    line.append(f" {label}", style=f"bold {colors['tool']}")
     if description:
         line.append(f" {description}", style="dim")
     if time_str:
-        line.append(f" {time_str}", style="dim")
+        line.append(time_str, style="dim")
     console.print(line)
 
 
@@ -310,11 +333,11 @@ def show_tool_result_inline(tool_name: str, result: Any) -> None:
     """Show a compact inline tool result — just enough to see what happened.
 
     This is the KEY to workflow visibility. User sees:
-      Step 2 · ● → read_file src/main.py
+      [2] ● Read src/main.py (0.3s)
         245 lines | python
-      Step 2 · ● ← edit_file src/app.py
+      [2] ● Edit src/app.py (1.2s)
         +12/-3 lines changed
-      Step 3 · ● $ shell npm test
+      [3] ● Run npm test (4.5s)
         ✓ (4 lines)
     """
     if not result:
@@ -528,14 +551,26 @@ def show_permission_prompt(
 # ─────────────────────────────────────────────────────────
 
 def show_response(text: str, model: str = "", stream: bool = True) -> None:
-    """Render agent response as clean markdown with block-level streaming."""
+    """Render agent response as clean markdown.
+
+    When stream=False (full text already available), renders immediately
+    with no artificial delays.
+    """
     code_theme = _get_code_theme()
 
     console.print()  # breathing room
 
     max_width = min(console.width - 4, 100)
 
-    if stream and len(text) > 20:
+    if not stream:
+        # Full text available — render immediately, no fake streaming
+        try:
+            md = Markdown(text, code_theme=code_theme)
+        except (ValueError, TypeError):
+            md = Text(text)
+        console.print(Padding(md, (0, 2)), width=max_width)
+    elif len(text) > 20:
+        # Real streaming playback for incrementally-arriving text
         import time
 
         chunks = _split_for_streaming(text)
@@ -579,7 +614,7 @@ def show_response(text: str, model: str = "", stream: bool = True) -> None:
                     block_md = Text(blocks[i])
                 console.print(Padding(block_md, (0, 2)), width=max_width)
     else:
-        # Non-streaming: render full markdown directly
+        # Short text — render directly
         try:
             md = Markdown(text, code_theme=code_theme)
         except (ValueError, TypeError):
@@ -779,6 +814,12 @@ class StreamingResponse:
     Clean output — no panels, no borders. Just markdown flowing in.
     When pause() is called (for tool-call display), accumulated text is
     printed permanently. When resume() is called, a fresh Live starts.
+
+    Partial code blocks: if the stream is inside an unclosed code fence,
+    the block is temporarily closed for rendering so the user sees code
+    as it arrives instead of a blank gap.
+
+    Token stats: after finish(), shows (N tokens . X.X tok/s) dimmed.
     """
 
     def __init__(self, model: str = "") -> None:
@@ -788,12 +829,15 @@ class StreamingResponse:
         self._displayed: bool = False
         self._permanent_len: int = 0
         self._spinner_active: bool = False
+        self._start_time: float = 0.0
+        self._first_chunk_time: float = 0.0
 
     def start(self) -> None:
         """Begin live rendering context with a themed thinking spinner."""
+        import time as _t
         console.print()  # breathing room
         self._spinner_active = True
-        colors = _get_theme_colors()
+        self._start_time = _t.monotonic()
 
         # Use shimmer spinner instead of plain "thinking..."
         from .spinner import AuraSpinner
@@ -805,15 +849,33 @@ class StreamingResponse:
         self._live._aura_spinner = spinner
         self._live.start()
 
+    @staticmethod
+    def _close_partial_fences(text: str) -> str:
+        """If text has an unclosed code fence, append a closing ``` so
+        Rich Markdown renders the partial block as a proper code block."""
+        fence_count = 0
+        for line in text.split("\n"):
+            stripped = line.strip()
+            if stripped.startswith("```"):
+                fence_count += 1
+        if fence_count % 2 == 1:
+            # Odd number of fences = unclosed block
+            return text + "\n```"
+        return text
+
     def chunk(self, text: str) -> None:
         """Append a text chunk and re-render NEW content since last pause."""
         if self._spinner_active:
             self._spinner_active = False
+            if not self._first_chunk_time:
+                import time as _t
+                self._first_chunk_time = _t.monotonic()
         self._accumulated += text
         if self._live:
             new_content = self._accumulated[self._permanent_len:]
+            renderable = self._close_partial_fences(new_content)
             try:
-                md = Markdown(new_content, code_theme=_get_code_theme())
+                md = Markdown(renderable, code_theme=_get_code_theme())
                 self._live.update(Padding(md, (0, 2)))
             except (ValueError, TypeError):
                 self._live.update(Padding(Text(new_content), (0, 2)))
@@ -823,8 +885,9 @@ class StreamingResponse:
         if self._live:
             new_content = self._accumulated[self._permanent_len:]
             if new_content.strip():
+                renderable = self._close_partial_fences(new_content)
                 try:
-                    md = Markdown(new_content, code_theme=_get_code_theme())
+                    md = Markdown(renderable, code_theme=_get_code_theme())
                     self._live.update(Padding(md, (0, 2)))
                 except (ValueError, TypeError):
                     self._live.update(Padding(Text(new_content), (0, 2)))
@@ -842,7 +905,9 @@ class StreamingResponse:
         self._live.start()
 
     def finish(self) -> None:
-        """Finalize display — print remaining content, show attribution."""
+        """Finalize display — print remaining content, show attribution + token stats."""
+        import time as _t
+
         if self._live:
             new_content = self._accumulated[self._permanent_len:]
             if new_content.strip():
@@ -863,6 +928,16 @@ class StreamingResponse:
                 self._displayed = bool(self._accumulated.strip())
         else:
             self._displayed = bool(self._accumulated.strip())
+
+        # Token speed stats
+        if self._displayed and self._accumulated and self._first_chunk_time:
+            elapsed = _t.monotonic() - self._first_chunk_time
+            token_estimate = int(len(self._accumulated) / 3.5)
+            if elapsed > 0.1 and token_estimate > 5:
+                tok_per_sec = token_estimate / elapsed
+                console.print(
+                    f"  [dim]({token_estimate} tokens \u00b7 {tok_per_sec:.1f} tok/s)[/dim]"
+                )
 
         # Model attribution below the response
         if self._model and self._displayed:

@@ -43,10 +43,17 @@ try:
 except Exception:
     _EMBED_URL = os.getenv("OLLAMA_HOST", "http://localhost:11434") + "/api/embeddings"
 
-# SECURITY: Validate embedding URL against SSRF at import time
+# SECURITY: Validate embedding URL against SSRF at import time.
+# Whitelist localhost/127.0.0.1 — the Ollama embedding service runs locally.
 try:
+    from urllib.parse import urlparse as _urlparse
     from aura.security.ssrf_guard import validate_url_safe
-    validate_url_safe(_EMBED_URL)
+    _parsed_embed = _urlparse(_EMBED_URL)
+    _embed_host = (_parsed_embed.hostname or "").lower()
+    if _embed_host in ("localhost", "127.0.0.1", "::1"):
+        pass  # Trusted local embedding service (Ollama)
+    else:
+        validate_url_safe(_EMBED_URL)
 except ValueError as _e:
     logger.warning(f"[CodebaseIndex] Embed URL failed SSRF validation: {_e}")
     _EMBED_URL = None  # Disable embeddings — callers must check

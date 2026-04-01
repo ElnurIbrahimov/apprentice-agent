@@ -3,6 +3,8 @@ import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
 from typing import Optional
 
+from aura.cli.context import CLIContext
+
 
 def _make_mock_agent():
     """Create a mock agent with common attributes handlers expect."""
@@ -20,15 +22,36 @@ def _make_mock_agent():
     agent.brain.compact_history.return_value = "Summary"
     agent.brain.think.return_value = {"response": "test response"}
     agent.tools = {}
-    agent._hook_manager = None
-    agent._agentic_loop = None
-    agent._research_ctx = None
-    agent._bg_manager = None
-    agent._file_watcher = None
-    agent._agentic_permissions = None
     agent.recall_memories.return_value = []
     agent._speak = MagicMock()
     return agent
+
+
+def _make_mock_cli_ctx(agent=None, *, with_loop=False, with_permissions=False,
+                       with_session=False, with_bg=False, with_research=False,
+                       with_hooks=False):
+    """Create a mock CLIContext with optional subsystems."""
+    if agent is None:
+        agent = _make_mock_agent()
+    ctx = CLIContext(agent=agent)
+    if with_loop:
+        ctx.agentic_loop = MagicMock()
+    if with_permissions:
+        ctx.permissions = MagicMock()
+    if with_session:
+        ctx.session = MagicMock()
+    if with_bg:
+        ctx.bg_manager = MagicMock()
+    if with_research:
+        ctx.research_ctx = MagicMock()
+    if with_hooks:
+        ctx.hook_manager = MagicMock()
+    return ctx
+
+
+def _patch_ctx(cli_ctx):
+    """Patch the module-level _current in context.py."""
+    return patch("aura.cli.context._current", cli_ctx)
 
 
 def _ctx(speak=False):
@@ -66,9 +89,9 @@ def test_handle_recall_no_query(capsys):
 def test_handle_clear_smoke(capsys):
     from aura.cli.commands.handlers import handle_clear
     agent = _make_mock_agent()
-    # Remove _agentic_loop so hasattr returns False (MagicMock auto-creates attrs)
-    del agent._agentic_loop
-    handle_clear(agent, "", _ctx())
+    cli_ctx = _make_mock_cli_ctx(agent)  # no agentic_loop
+    with _patch_ctx(cli_ctx):
+        handle_clear(agent, "--force", _ctx())
     out = capsys.readouterr().out
     assert "cleared" in out.lower()
 
@@ -76,10 +99,10 @@ def test_handle_clear_smoke(capsys):
 def test_handle_clear_with_agentic_loop(capsys):
     from aura.cli.commands.handlers import handle_clear
     agent = _make_mock_agent()
-    mock_loop = MagicMock()
-    agent._agentic_loop = mock_loop
-    handle_clear(agent, "", _ctx())
-    mock_loop.clear_history.assert_called_once()
+    cli_ctx = _make_mock_cli_ctx(agent, with_loop=True)
+    with _patch_ctx(cli_ctx):
+        handle_clear(agent, "--force", _ctx())
+    cli_ctx.agentic_loop.clear_history.assert_called_once()
     out = capsys.readouterr().out
     assert "cleared" in out.lower()
 
@@ -107,8 +130,9 @@ def test_handle_speak_no_text(capsys):
 def test_handle_model_set_by_name(capsys):
     from aura.cli.commands.handlers import handle_model
     agent = _make_mock_agent()
-    del agent._agentic_loop
-    handle_model(agent, "devstral-2:cloud", _ctx())
+    cli_ctx = _make_mock_cli_ctx(agent)  # no loop
+    with _patch_ctx(cli_ctx):
+        handle_model(agent, "devstral-2:cloud", _ctx())
     agent.brain.set_model_override.assert_called_once_with("devstral-2:cloud")
     out = capsys.readouterr().out
     assert "devstral-2:cloud" in out
@@ -117,8 +141,9 @@ def test_handle_model_set_by_name(capsys):
 def test_handle_model_set_auto(capsys):
     from aura.cli.commands.handlers import handle_model
     agent = _make_mock_agent()
-    del agent._agentic_loop
-    handle_model(agent, "auto", _ctx())
+    cli_ctx = _make_mock_cli_ctx(agent)
+    with _patch_ctx(cli_ctx):
+        handle_model(agent, "auto", _ctx())
     agent.brain.set_model_override.assert_called_once_with(None)
     out = capsys.readouterr().out
     assert "auto" in out.lower()
@@ -127,11 +152,11 @@ def test_handle_model_set_auto(capsys):
 def test_handle_model_set_with_agentic_loop(capsys):
     from aura.cli.commands.handlers import handle_model
     agent = _make_mock_agent()
-    mock_loop = MagicMock()
-    agent._agentic_loop = mock_loop
-    handle_model(agent, "test-model", _ctx())
+    cli_ctx = _make_mock_cli_ctx(agent, with_loop=True)
+    with _patch_ctx(cli_ctx):
+        handle_model(agent, "test-model", _ctx())
     agent.brain.set_model_override.assert_called_once_with("test-model")
-    assert mock_loop.model_override == "test-model"
+    assert cli_ctx.agentic_loop.model_override == "test-model"
 
 
 # ── handle_compact ────────────────────────────────────────────────────────
@@ -221,8 +246,9 @@ def test_handle_fleet_no_arg(mock_console):
 def test_handle_tasks_no_bg_manager(mock_console):
     from aura.cli.commands.handlers import handle_tasks
     agent = _make_mock_agent()
-    agent._bg_manager = None
-    handle_tasks(agent, "", _ctx())
+    cli_ctx = _make_mock_cli_ctx(agent)  # no bg_manager
+    with _patch_ctx(cli_ctx):
+        handle_tasks(agent, "", _ctx())
     mock_console.print.assert_called()
 
 
@@ -232,8 +258,9 @@ def test_handle_tasks_no_bg_manager(mock_console):
 def test_handle_research_no_arg(mock_console):
     from aura.cli.commands.handlers import handle_research
     agent = _make_mock_agent()
-    agent._research_ctx = None
-    handle_research(agent, "", _ctx())
+    cli_ctx = _make_mock_cli_ctx(agent)  # no research_ctx
+    with _patch_ctx(cli_ctx):
+        handle_research(agent, "", _ctx())
     mock_console.print.assert_called()
 
 
@@ -241,11 +268,12 @@ def test_handle_research_no_arg(mock_console):
 def test_handle_research_with_topic(mock_console):
     from aura.cli.commands.handlers import handle_research
     agent = _make_mock_agent()
-    agent._research_ctx = None
-    handle_research(agent, "quantum computing", _ctx())
+    cli_ctx = _make_mock_cli_ctx(agent)  # no research_ctx initially
+    with _patch_ctx(cli_ctx):
+        handle_research(agent, "quantum computing", _ctx())
     mock_console.print.assert_called()
-    # Should have set _research_ctx on the agent
-    assert agent._research_ctx is not None
+    # Should have set research_ctx on the CLIContext
+    assert cli_ctx.research_ctx is not None
 
 
 # ── handle_sources ────────────────────────────────────────────────────────
@@ -254,8 +282,9 @@ def test_handle_research_with_topic(mock_console):
 def test_handle_sources_no_research(mock_console):
     from aura.cli.commands.handlers import handle_sources
     agent = _make_mock_agent()
-    agent._research_ctx = None
-    handle_sources(agent, "", _ctx())
+    cli_ctx = _make_mock_cli_ctx(agent)
+    with _patch_ctx(cli_ctx):
+        handle_sources(agent, "", _ctx())
     mock_console.print.assert_called()
 
 
@@ -265,8 +294,9 @@ def test_handle_sources_no_research(mock_console):
 def test_handle_export_no_research(mock_console):
     from aura.cli.commands.handlers import handle_export
     agent = _make_mock_agent()
-    agent._research_ctx = None
-    handle_export(agent, "", _ctx())
+    cli_ctx = _make_mock_cli_ctx(agent)
+    with _patch_ctx(cli_ctx):
+        handle_export(agent, "", _ctx())
     mock_console.print.assert_called()
 
 
@@ -286,24 +316,21 @@ def test_handle_mood_no_engine(mock_console):
 def test_handle_trust_smoke(capsys):
     from aura.cli.commands.handlers import handle_trust
     agent = _make_mock_agent()
-    # Remove the attribute so hasattr returns False
-    del agent._agentic_permissions
-    with patch("aura.core.permissions.PermissionManager") as MockPM:
-        mock_pm = MagicMock()
-        MockPM.return_value = mock_pm
+    cli_ctx = _make_mock_cli_ctx(agent, with_permissions=True)
+    with _patch_ctx(cli_ctx):
         handle_trust(agent, "", _ctx())
-        mock_pm.set_trust_mode.assert_called_once_with(True)
+    cli_ctx.permissions.set_trust_mode.assert_called_once_with(True)
     out = capsys.readouterr().out
     assert "Trust mode" in out
 
 
-def test_handle_trust_existing_permissions(capsys):
+def test_handle_trust_off(capsys):
     from aura.cli.commands.handlers import handle_trust
     agent = _make_mock_agent()
-    mock_perms = MagicMock()
-    agent._agentic_permissions = mock_perms
-    handle_trust(agent, "", _ctx())
-    mock_perms.set_trust_mode.assert_called_once_with(True)
+    cli_ctx = _make_mock_cli_ctx(agent, with_permissions=True)
+    with _patch_ctx(cli_ctx):
+        handle_trust(agent, "off", _ctx())
+    cli_ctx.permissions.set_trust_mode.assert_called_once_with(False)
 
 
 # ── handle_context ────────────────────────────────────────────────────────
@@ -311,10 +338,9 @@ def test_handle_trust_existing_permissions(capsys):
 def test_handle_context_no_agentic_loop(capsys):
     from aura.cli.commands.handlers import handle_context
     agent = _make_mock_agent()
-    agent._agentic_loop = None
-    # hasattr on MagicMock returns True, so explicitly delete
-    del agent._agentic_loop
-    handle_context(agent, "", _ctx())
+    cli_ctx = _make_mock_cli_ctx(agent)  # no loop
+    with _patch_ctx(cli_ctx):
+        handle_context(agent, "", _ctx())
     out = capsys.readouterr().out
     assert "not available" in out.lower()
 
@@ -324,20 +350,11 @@ def test_handle_context_no_agentic_loop(capsys):
 def test_handle_rewind_no_agentic_loop(capsys):
     from aura.cli.commands.handlers import handle_rewind
     agent = _make_mock_agent()
-    del agent._agentic_loop
-    handle_rewind(agent, "", _ctx())
+    cli_ctx = _make_mock_cli_ctx(agent)  # no loop
+    with _patch_ctx(cli_ctx):
+        handle_rewind(agent, "", _ctx())
     out = capsys.readouterr().out
     assert "No checkpoint" in out
-
-
-# ── handle_retry ──────────────────────────────────────────────────────────
-
-@patch("aura.cli.display.console")
-def test_handle_retry_smoke(mock_console):
-    from aura.cli.commands.handlers import handle_retry
-    handle_retry(_make_mock_agent(), "", _ctx())
-    # show_info is called, which uses console.print
-    mock_console.print.assert_called()
 
 
 # ── handle_cost ───────────────────────────────────────────────────────────
@@ -357,8 +374,9 @@ def test_handle_cost_smoke(capsys):
 def test_handle_undo_no_agentic_loop(capsys):
     from aura.cli.commands.handlers import handle_undo
     agent = _make_mock_agent()
-    del agent._agentic_loop
-    handle_undo(agent, "", _ctx())
+    cli_ctx = _make_mock_cli_ctx(agent)  # no loop
+    with _patch_ctx(cli_ctx):
+        handle_undo(agent, "", _ctx())
     out = capsys.readouterr().out
     assert "No active" in out
 
@@ -437,8 +455,9 @@ def test_handle_blame_bad_format(mock_console):
 def test_handle_mcp_no_loop(capsys):
     from aura.cli.commands.handlers import handle_mcp
     agent = _make_mock_agent()
-    del agent._agentic_loop
-    handle_mcp(agent, "", _ctx())
+    cli_ctx = _make_mock_cli_ctx(agent)  # no loop
+    with _patch_ctx(cli_ctx):
+        handle_mcp(agent, "", _ctx())
     out = capsys.readouterr().out
     assert "No MCP" in out or "Configure" in out
 
@@ -482,8 +501,9 @@ def test_handle_theme_set_unknown(mock_console):
 def test_handle_hook_list(mock_console):
     from aura.cli.commands.handlers import handle_hook
     agent = _make_mock_agent()
-    agent._hook_manager = None
-    handle_hook(agent, "", _ctx())
+    cli_ctx = _make_mock_cli_ctx(agent)  # no hook_manager initially
+    with _patch_ctx(cli_ctx):
+        handle_hook(agent, "", _ctx())
     # Should create a HookManager and call render_hooks_table
 
 
@@ -494,6 +514,8 @@ def test_handle_watch_stop(mock_console):
     from aura.cli.commands.handlers import handle_watch
     agent = _make_mock_agent()
     mock_watcher = MagicMock()
-    agent._file_watcher = mock_watcher
-    handle_watch(agent, "stop", _ctx())
+    cli_ctx = _make_mock_cli_ctx(agent)
+    cli_ctx.file_watcher = mock_watcher
+    with _patch_ctx(cli_ctx):
+        handle_watch(agent, "stop", _ctx())
     mock_watcher.stop.assert_called_once()

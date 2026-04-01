@@ -18,19 +18,25 @@ from aura.core.router import classify_task, ModelRouter
 
 
 def test_classify_task_code_gen():
-    assert classify_task("implement a login feature") == "code_gen"
+    category, confidence = classify_task("implement a login feature")
+    assert category == "code_gen"
+    assert confidence > 0.0
 
 
 def test_classify_task_reasoning():
-    assert classify_task("explain how auth works") == "reasoning"
+    category, confidence = classify_task("explain how auth works")
+    assert category == "reasoning"
+    assert confidence > 0.0
 
 
 def test_classify_task_fallback():
-    assert classify_task("hello") == "orchestrator"
+    category, confidence = classify_task("hello")
+    assert category == "orchestrator"
+    assert confidence == 0.0
 
 
 def test_select_model_per_tier():
-    router = ModelRouter("local")
+    router = ModelRouter("fast")
     model = router.select("code_gen")
     assert model == "qwen3-coder-next:cloud"
 
