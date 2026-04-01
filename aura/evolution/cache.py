@@ -39,9 +39,16 @@ class EvaluationCache:
         self._misses += 1
         return None
 
+    _MAX_ENTRIES = 5000
+
     def put(self, candidate_hash: str, example_hash: str, score: float):
         key = self._make_key(candidate_hash, example_hash)
         self._memory[key] = score
+        # Evict oldest 10% when cache exceeds max size
+        if len(self._memory) > self._MAX_ENTRIES:
+            evict_count = self._MAX_ENTRIES // 10
+            for k in list(self._memory.keys())[:evict_count]:
+                del self._memory[k]
 
     def save(self):
         if self._cache_path:

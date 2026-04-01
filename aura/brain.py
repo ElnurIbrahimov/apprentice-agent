@@ -184,10 +184,20 @@ def _neuro_scale(base_value: float, neuro_level: float, sensitivity: float = 0.5
     return base_value * multiplier
 
 # Shared pools — centralized in aura.pools (2026-03-22)
+# Use functions instead of cached references to avoid stale pool handles
+# after pool re-initialization (e.g., in tests or daemon restarts).
 from aura.pools import llm_pool as _llm_pool_fn, bg_pool as _bg_pool_fn
-_SHARED_EXECUTOR = _llm_pool_fn()
-_BG_EXECUTOR = _bg_pool_fn()
+_SHARED_EXECUTOR = _llm_pool_fn()  # used only by call_with_timeout
 # atexit cleanup now handled by aura.pools
+
+
+def _bg_submit(fn, *args, **kwargs):
+    """Submit work to the background pool, with fallback for shutdown."""
+    try:
+        _bg_pool_fn().submit(fn, *args, **kwargs)
+    except RuntimeError:
+        # Pool shut down — run in daemon thread as last resort
+        threading.Thread(target=fn, args=args, kwargs=kwargs, daemon=True).start()
 
 
 # --- Retry decorator for transient network/connection errors ---
@@ -1182,7 +1192,7 @@ class OllamaBrain:
                 p.write_text(d, encoding="utf-8")
             except OSError as _e:
                 logger.warning(f"[BRAIN] Background history write failed: {_e}")
-        _BG_EXECUTOR.submit(_bg_write, path, data_str)
+        _bg_submit(_bg_write, path, data_str)
         self._update_conversation_index_entry(
             snap_message_count=snap_count, snap_last_content=snap_last,
             snap_history=snap_history,
@@ -1209,7 +1219,7 @@ class OllamaBrain:
                     p.write_text(d, encoding="utf-8")
                 except OSError as _e:
                     logger.warning(f"[BRAIN] Background history write failed: {_e}")
-            _BG_EXECUTOR.submit(_bg_write_snap, path, data_str)
+            _bg_submit(_bg_write_snap, path, data_str)
             self._update_conversation_index_entry(
                 snap_message_count=len(history),
                 snap_last_content=history[-1].get("content", "") if history else None,
@@ -1419,16 +1429,17 @@ class OllamaBrain:
                     if entry["title"] == "New Chat" and msg_count > 0:
                         entry["title"] = self._auto_title(history_for_title)
                     break
-            self._conversations_index_cache = index
+            # Store a copy so concurrent mutations don't affect the bg write
+            self._conversations_index_cache = list(index)
 
-        # Disk write outside lock, in background
+        # Disk write outside lock, in background — uses the snapshot (immutable string)
         _index_snapshot = json.dumps(index, indent=2, ensure_ascii=False)
         def _bg_write_index(path, data):
             try:
                 path.write_text(data, encoding="utf-8")
             except IOError as e:
                 logger.warning(f"[BRAIN] Could not save conversations index: {e}")
-        _BG_EXECUTOR.submit(_bg_write_index, self._conversations_index_file, _index_snapshot)
+        _bg_submit(_bg_write_index, self._conversations_index_file, _index_snapshot)
 
     def create_conversation(self, title: Optional[str] = None) -> str:
         """Create a new conversation.
@@ -1820,6 +1831,16 @@ class OllamaBrain:
                     "[BRAIN] Preserved %d messages added during compaction",
                     len(new_messages),
                 )
+            elif current_len < snapshot_len:
+                # History was truncated (e.g., by _update_history_and_cleanup).
+                # The messages after the truncation point are already in the
+                # current history — grab everything that's still there beyond
+                # what we already included in recent_messages.
+                logger.info(
+                    "[BRAIN] History truncated during compaction (%d -> %d), "
+                    "preserving current tail",
+                    snapshot_len, current_len,
+                )
             self.conversation_history = new_history
         self._save_history()
 
@@ -1871,7 +1892,7 @@ class OllamaBrain:
         )
         # Submit compaction to background executor (non-blocking)
         try:
-            _BG_EXECUTOR.submit(self.compact_history)
+            _bg_submit(self.compact_history)
         except Exception as e:
             logger.warning(f"[BRAIN] Auto-compact submission failed: {e}")
 
@@ -2315,6 +2336,16 @@ class OllamaBrain:
         # Note: auto-compaction is handled by _check_auto_reset() above (via background executor).
         # A duplicate synchronous compaction was removed here to prevent double triggers.
 
+        # Safety valve: clear stale flag from abandoned generators.
+        # In CPython, generator finally blocks run on GC, but this guards
+        # against delayed collection or reference cycles.
+        if self._user_inference_active.is_set():
+            elapsed = time.time() - getattr(self, '_user_inference_started_at', 0)
+            if elapsed > 120:
+                logger.warning("[BRAIN] Clearing stale _user_inference_active flag (%.0fs old)", elapsed)
+                self._user_inference_active.clear()
+
+        self._user_inference_started_at = time.time()
         self._user_inference_active.set()
 
         return {
@@ -2404,7 +2435,7 @@ class OllamaBrain:
         # Self-improvement: record interaction outcome (background)
         try:
             from aura.consciousness.self_improvement import get_self_improvement_engine
-            _BG_EXECUTOR.submit(
+            _bg_submit(
                 get_self_improvement_engine().record_chat_outcome,
                 prompt, assistant_message, actual_model
             )
@@ -2532,7 +2563,7 @@ class OllamaBrain:
                             f"{self._consecutive_think_failures} consecutive failures — "
                             f"cooldown {self._think_cb_cooldown}s"
                         )
-                _BG_EXECUTOR.submit(
+                _bg_submit(
                     self._record_routing_outcome, actual_model, task_type, False,
                     (time.time() - _llm_start_ts) * 1000
                 )
@@ -2546,7 +2577,7 @@ class OllamaBrain:
             with self._cb_lock:
                 self._consecutive_think_failures = 0
 
-            _BG_EXECUTOR.submit(
+            _bg_submit(
                 self._record_routing_outcome, actual_model, task_type, True,
                 _llm_elapsed * 1000
             )
@@ -2688,7 +2719,7 @@ class OllamaBrain:
                 # Still trigger self-improvement and world model extraction
                 try:
                     from aura.consciousness.self_improvement import get_self_improvement_engine
-                    _BG_EXECUTOR.submit(
+                    _bg_submit(
                         get_self_improvement_engine().record_chat_outcome,
                         prompt, full_response, actual_model
                     )

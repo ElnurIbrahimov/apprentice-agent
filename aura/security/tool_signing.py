@@ -36,11 +36,15 @@ def _ensure_keypair() -> Tuple[bytes, bytes]:
     """Generate or load the signing keypair."""
     os.makedirs(_KEY_DIR, exist_ok=True)
 
-    if os.path.exists(_PRIVATE_KEY_FILE) and os.path.exists(_PUBLIC_KEY_FILE):
+    if os.path.exists(_PRIVATE_KEY_FILE):
         with open(_PRIVATE_KEY_FILE, "rb") as f:
             private = f.read()
-        with open(_PUBLIC_KEY_FILE, "rb") as f:
-            public = f.read()
+        if os.path.exists(_PUBLIC_KEY_FILE):
+            with open(_PUBLIC_KEY_FILE, "rb") as f:
+                public = f.read()
+        else:
+            # HMAC mode: private key is also the verify key
+            public = private
         return private, public
 
     if _HAS_NACL:
@@ -54,20 +58,23 @@ def _ensure_keypair() -> Tuple[bytes, bytes]:
 
     with open(_PRIVATE_KEY_FILE, "wb") as f:
         f.write(private)
-    # Restrict private key permissions (Unix only — Windows ACLs are different)
     try:
         os.chmod(_PRIVATE_KEY_FILE, 0o600)
     except OSError:
         pass  # Windows: chmod doesn't work the same way
 
-    with open(_PUBLIC_KEY_FILE, "wb") as f:
-        f.write(public)
-    # HMAC mode: "public" key IS the secret — restrict permissions to match private key
-    if not _HAS_NACL:
-        try:
-            os.chmod(_PUBLIC_KEY_FILE, 0o600)
-        except OSError:
-            pass  # Windows: chmod doesn't work the same way
+    if _HAS_NACL:
+        # Only write .pub when it's a real public key (Ed25519 verify key)
+        with open(_PUBLIC_KEY_FILE, "wb") as f:
+            f.write(public)
+    else:
+        # HMAC mode: do NOT write a .pub file — the "public" key IS the secret.
+        # Both sign and verify read from _PRIVATE_KEY_FILE.
+        if _PUBLIC_KEY_FILE.exists():
+            try:
+                os.unlink(str(_PUBLIC_KEY_FILE))
+            except OSError:
+                pass
 
     logger.info(f"[ToolSign] Generated new {'Ed25519' if _HAS_NACL else 'HMAC'} keypair")
     return private, public

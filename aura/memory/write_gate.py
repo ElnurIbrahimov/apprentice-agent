@@ -420,9 +420,11 @@ class MemoryWriteGate:
     def _record_hash(self, c: MemoryCandidate) -> None:
         with self._hash_lock:
             self._recent_hashes[c.content_hash] = time.time()
-            # Hard cap to prevent unbounded growth
+            # Evict oldest half when cap exceeded (not clear-all, to preserve dedup)
             if len(self._recent_hashes) > 10000:
-                self._recent_hashes.clear()
+                evict_count = len(self._recent_hashes) // 2
+                for k in list(self._recent_hashes.keys())[:evict_count]:
+                    del self._recent_hashes[k]
 
     def _decide(
         self,

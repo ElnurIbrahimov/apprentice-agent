@@ -277,7 +277,8 @@ class ToolExecutor:
     def fs(self):
         if self._fs is None:
             from aura.tools.filesystem import FileSystemTool
-            self._fs = FileSystemTool()
+            # Disable sandbox since ToolExecutor._resolve_path handles path containment
+            self._fs = FileSystemTool(sandbox_enabled=False)
         return self._fs
 
     @property
@@ -325,11 +326,22 @@ class ToolExecutor:
                 if os.path.exists(alt):
                     resolved = alt
 
-        # Allow project root and home directory, block everything else
+        # Allow project root and specific safe subdirs under home
         allowed_roots = [os.path.realpath(self.project_root)]
         home = os.path.realpath(os.path.expanduser("~"))
         if home:
-            allowed_roots.append(home)
+            # Only allow Aura's own data directories, not the entire home
+            for subdir in [".aura", "Desktop"]:
+                candidate = os.path.join(home, subdir)
+                if os.path.isdir(candidate):
+                    allowed_roots.append(os.path.realpath(candidate))
+        # Block sensitive directories even if they're under an allowed root
+        _SENSITIVE_DIRS = {".ssh", ".gnupg", ".aws", ".azure", ".kube",
+                           ".docker", ".config/gcloud", "AppData/Roaming/1Password"}
+        for sensitive in _SENSITIVE_DIRS:
+            sensitive_path = os.path.realpath(os.path.join(home, sensitive))
+            if resolved.startswith(sensitive_path + os.sep) or resolved == sensitive_path:
+                raise PermissionError(f"Access to sensitive directory blocked: {path}")
         for root in allowed_roots:
             if resolved.startswith(root + os.sep) or resolved == root:
                 return resolved
@@ -805,6 +817,26 @@ class ToolExecutor:
         url = args.get("url", "")
         if not url:
             return {"error": "No URL provided"}
+        # SSRF protection: block internal/private network requests
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            if parsed.scheme not in ("http", "https"):
+                return {"error": f"Only http/https URLs allowed, got: {parsed.scheme}"}
+            host = (parsed.hostname or "").lower()
+            if not host:
+                return {"error": "No hostname in URL"}
+            _blocked = {"localhost", "127.0.0.1", "::1", "0.0.0.0",
+                        "169.254.169.254", "metadata.google.internal"}
+            if (host in _blocked or host.startswith("10.")
+                    or host.startswith("192.168.")
+                    or host.startswith("172.16.") or host.startswith("172.17.")
+                    or host.startswith("172.18.") or host.startswith("172.19.")
+                    or host.startswith("172.2") or host.startswith("172.3")
+                    or host.endswith(".internal") or host.endswith(".local")):
+                return {"error": f"Requests to internal/private addresses blocked: {host}"}
+        except Exception as e:
+            return {"error": f"URL validation failed: {e}"}
         try:
             import requests
             resp = requests.get(url, timeout=15, headers={"User-Agent": "Aura-Dev-Agent/1.0"})

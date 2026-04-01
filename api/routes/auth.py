@@ -138,7 +138,7 @@ async def chatgpt_login_url():
         # Store verifier + redirect_uri server-side keyed by state
         _pkce_store_put(state, verifier)
         # Also store redirect_uri for the token exchange
-        _pkce_redirect_store[state] = redirect_uri
+        _pkce_redirect_put(state, redirect_uri)
 
         return {
             "url": url,
@@ -151,8 +151,32 @@ async def chatgpt_login_url():
         return {"error": "Failed to generate login URL — check server logs"}
 
 
-# Store redirect_uri per state for callback exchange
-_pkce_redirect_store: dict[str, str] = {}
+# Store redirect_uri per state for callback exchange (with timestamps for TTL)
+_pkce_redirect_store: dict[str, tuple[str, float]] = {}
+_PKCE_REDIRECT_TTL = 600  # 10 minutes
+
+
+def _pkce_redirect_put(state: str, redirect_uri: str):
+    """Store a redirect_uri with TTL and bounded size."""
+    import time
+    now = time.time()
+    # Evict expired entries
+    expired = [k for k, (_, ts) in _pkce_redirect_store.items() if now - ts > _PKCE_REDIRECT_TTL]
+    for k in expired:
+        del _pkce_redirect_store[k]
+    # Hard cap
+    if len(_pkce_redirect_store) > 100:
+        oldest = min(_pkce_redirect_store, key=lambda k: _pkce_redirect_store[k][1])
+        del _pkce_redirect_store[oldest]
+    _pkce_redirect_store[state] = (redirect_uri, now)
+
+
+def _pkce_redirect_pop(state: str) -> str:
+    """Retrieve and remove a redirect_uri by state."""
+    entry = _pkce_redirect_store.pop(state, None)
+    if entry is None:
+        return ""
+    return entry[0]
 
 
 @router.get("/chatgpt/callback")
@@ -186,7 +210,7 @@ async def chatgpt_oauth_callback(code: str = "", state: str = "", error: str = "
             status_code=400,
         )
 
-    redirect_uri = _pkce_redirect_store.pop(state, "")
+    redirect_uri = _pkce_redirect_pop(state)
 
     # Exchange authorization code for tokens
     try:
@@ -251,8 +275,8 @@ async def chatgpt_oauth_callback(code: str = "", state: str = "", error: str = "
     except Exception as e:
         logging.getLogger(__name__).error("ChatGPT callback exchange failed: %s", e, exc_info=True)
         return HTMLResponse(
-            f"<html><body style='font-family:system-ui;text-align:center;padding:60px'>"
-            f"<h1>Error</h1><p>{e}</p></body></html>",
+            "<html><body style='font-family:system-ui;text-align:center;padding:60px'>"
+            "<h1>Error</h1><p>Authentication failed. Check server logs for details.</p></body></html>",
             status_code=500,
         )
 

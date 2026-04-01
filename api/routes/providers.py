@@ -91,6 +91,9 @@ def _update_env_file(env_var: str, value: str | None):
     # SECURITY: Reject newlines to prevent .env injection
     if value is not None and ('\n' in value or '\r' in value):
         raise HTTPException(400, "API key must not contain newline characters")
+    # Strip any embedded quotes to prevent .env parsing issues
+    if value is not None:
+        value = value.strip().strip('"').strip("'")
 
     env_path = Path(__file__).resolve().parent.parent.parent / ".env"
 
@@ -106,13 +109,13 @@ def _update_env_file(env_var: str, value: str | None):
         if stripped.startswith(f"{env_var}=") or stripped.startswith(f"{env_var} ="):
             found = True
             if value is not None:
-                new_lines.append(f"{env_var}={value}")
+                new_lines.append(f'{env_var}="{value}"')
             # else: skip line (remove)
         else:
             new_lines.append(line)
 
     # Append if not found and value is set
     if not found and value is not None:
-        new_lines.append(f"{env_var}={value}")
+        new_lines.append(f'{env_var}="{value}"')
 
     env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")

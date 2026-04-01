@@ -142,8 +142,9 @@ class HooksManager:
 
                 if triggered:
                     self._execute_action(hook)
-                    hook["last_triggered"] = now.isoformat()
-                    hook["trigger_count"] += 1
+                    with self._hooks_lock:
+                        hook["last_triggered"] = now.isoformat()
+                        hook["trigger_count"] += 1
                     self._save_hooks()
 
             except Exception as e:
@@ -415,7 +416,8 @@ class HooksManager:
         """Save hooks to JSON file (atomic write via temp file + rename)."""
         try:
             import tempfile
-            data = {"hooks": self._hooks}
+            with self._hooks_lock:
+                data = {"hooks": dict(self._hooks)}
             dir_path = self._storage_path.parent
             fd, tmp_path = tempfile.mkstemp(dir=str(dir_path), suffix=".tmp")
             try:

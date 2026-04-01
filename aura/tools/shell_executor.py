@@ -722,6 +722,13 @@ class ShellExecutorTool:
 
         Falls back to normal self.run() if no SandboxExecutor is wired in.
         """
+        # Always validate before any execution path (not just ImportError fallback)
+        is_valid, reason = self._validate_command(command)
+        if not is_valid:
+            return {"success": False, "error": f"Security: {reason}"}
+        if _contains_shell_injection(command):
+            return {"success": False, "error": "Command contains disallowed characters or flags", "exit_code": 1}
+
         with self._sandbox_lock:
             if self._sandbox is None:
                 try:

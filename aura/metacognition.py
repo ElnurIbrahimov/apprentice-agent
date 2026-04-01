@@ -2,6 +2,7 @@
 
 import json
 import os
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -21,6 +22,7 @@ class MetacognitionLogger:
         self._stats_cache: Optional[dict] = None
         self._stats_cache_date: Optional[str] = None
         self._stats_cache_size: int = -1
+        self._write_lock = threading.Lock()
 
     def start_goal(self, goal: str) -> None:
         """Mark the start of a new goal."""
@@ -63,8 +65,9 @@ class MetacognitionLogger:
 
         log_file = self._get_log_file()
         rotate_jsonl_if_needed(log_file)
-        with open(log_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(log_entry) + "\n")
+        with self._write_lock:
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(log_entry) + "\n")
 
     def _get_log_file(self) -> Path:
         """Get the log file path for today."""

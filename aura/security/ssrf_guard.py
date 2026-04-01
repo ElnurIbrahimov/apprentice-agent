@@ -81,22 +81,26 @@ def is_private_ip(ip_str: str) -> bool:
 def _resolve_hostname(hostname: str, timeout: float = 5.0) -> list[str]:
     """Resolve hostname to IP addresses. Raises on failure.
 
-    Uses a timeout to prevent DNS hanging (e.g., on attacker-controlled resolvers).
+    Uses a thread-pool timeout instead of socket.setdefaulttimeout to avoid
+    mutating process-global state (which is not thread-safe).
     """
-    old_timeout = socket.getdefaulttimeout()
-    try:
-        socket.setdefaulttimeout(timeout)
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+
+    def _do_resolve():
         results = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
-        ips = list({r[4][0] for r in results})
-        if not ips:
-            raise ValueError(f"DNS resolution returned no results for {hostname}")
-        return ips
-    except socket.gaierror as e:
-        raise ValueError(f"DNS resolution failed for {hostname}: {e}")
-    except socket.timeout:
-        raise ValueError(f"DNS resolution timed out for {hostname} ({timeout}s)")
-    finally:
-        socket.setdefaulttimeout(old_timeout)
+        return list({r[4][0] for r in results})
+
+    with ThreadPoolExecutor(max_workers=1) as ex:
+        fut = ex.submit(_do_resolve)
+        try:
+            ips = fut.result(timeout=timeout)
+        except FuturesTimeout:
+            raise ValueError(f"DNS resolution timed out for {hostname} ({timeout}s)")
+        except socket.gaierror as e:
+            raise ValueError(f"DNS resolution failed for {hostname}: {e}")
+    if not ips:
+        raise ValueError(f"DNS resolution returned no results for {hostname}")
+    return ips
 
 
 def validate_url_safe(url: str, allow_redirects: bool = False) -> Tuple[str, Optional[str]]:

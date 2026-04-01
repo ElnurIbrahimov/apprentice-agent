@@ -379,6 +379,8 @@ class GEPAEngine:
                 scores[idx] = score
                 self.cache.put(cand_hash, examples[idx].cache_key(), score)
 
+        # Guard against None entries from partial evaluation failures
+        scores = [s if s is not None else 0.0 for s in scores]
         return scores
 
     def _get_next_id(self) -> int:

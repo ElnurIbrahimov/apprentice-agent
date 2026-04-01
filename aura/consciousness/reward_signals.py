@@ -318,5 +318,7 @@ class RewardSignalCollector:
         )
 
     def shutdown(self):
-        """Shutdown the thread pool."""
-        self._executor.shutdown(wait=False)
+        """Mark collector as inactive. Does NOT shut down the shared pool."""
+        # self._executor comes from llm_pool() — a shared resource.
+        # Calling shutdown() on it would break all other users.
+        pass

@@ -22,6 +22,17 @@ from api.utils import safe_error_detail
 
 logger = logging.getLogger(__name__)
 
+# Prevent background tasks from being garbage collected before completion.
+# _fire_and_forget() returns a Task that must be held by a strong reference.
+_background_tasks: set = set()
+
+
+def _fire_and_forget(coro):
+    """Schedule a coroutine as a background task with GC protection."""
+    task = _fire_and_forget(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
 router = APIRouter(
     prefix="/api/webhooks",
     tags=["webhooks"],
@@ -60,8 +71,8 @@ def _verify_github_signature(payload_body: bytes, signature_header: str) -> bool
     """Verify GitHub webhook signature using GITHUB_WEBHOOK_SECRET."""
     secret = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
     if not secret:
-        logger.warning("[Webhooks] GITHUB_WEBHOOK_SECRET not set — skipping signature check")
-        return True  # Allow in dev when no secret configured
+        logger.warning("[Webhooks] GITHUB_WEBHOOK_SECRET not set — rejecting unsigned request")
+        return False  # Reject when no secret configured (set env var to enable)
     if not signature_header:
         return False
     expected = "sha256=" + hmac.new(
@@ -219,7 +230,7 @@ async def github_webhook(
                     {"repo": repo, "check_name": name, "url": url, "sha": head_sha},
                 )
 
-            asyncio.create_task(_investigate_ci())
+            _fire_and_forget(_investigate_ci())
 
     elif event_type == "workflow_run":
         run = payload.get("workflow_run", {})
@@ -243,7 +254,7 @@ async def github_webhook(
                     {"repo": repo, "workflow": name, "url": url, "branch": branch},
                 )
 
-            asyncio.create_task(_investigate_workflow())
+            _fire_and_forget(_investigate_workflow())
 
     # --- Pull Request ---
     elif event_type == "pull_request":
@@ -269,7 +280,7 @@ async def github_webhook(
                     summary += f"\n\nDescription:\n{body_text}"
                 await _notify_surfaces(summary)
 
-            asyncio.create_task(_summarize_pr())
+            _fire_and_forget(_summarize_pr())
 
     # --- Push ---
     elif event_type == "push":
@@ -284,7 +295,7 @@ async def github_webhook(
                 f"{len(commits)} commit(s):\n" +
                 "\n".join(f"  - {m}" for m in commit_msgs)
             )
-            asyncio.create_task(_notify_surfaces(summary))
+            _fire_and_forget(_notify_surfaces(summary))
 
     return {"status": "accepted", "event": event_type, "repo": repo}
 
@@ -324,10 +335,10 @@ async def alert_webhook(alert: AlertRequest):
                 {"severity": alert.severity, "metadata": alert.metadata},
             )
 
-        asyncio.create_task(_handle_alert())
+        _fire_and_forget(_handle_alert())
     else:
         # Low/medium: just notify
-        asyncio.create_task(_notify_surfaces(notification))
+        _fire_and_forget(_notify_surfaces(notification))
 
     return {
         "status": "accepted",
@@ -346,7 +357,7 @@ async def notify_webhook(req: NotifyRequest):
     logger.info(f"[Webhooks] Notify: channel={req.channel} len={len(req.text)}")
     _log_event("notify", "message", req.text[:100], "info")
 
-    asyncio.create_task(_notify_surfaces(req.text, channel=req.channel))
+    _fire_and_forget(_notify_surfaces(req.text, channel=req.channel))
 
     return {"status": "sent", "channel": req.channel}
 
@@ -380,7 +391,7 @@ def _ensure_subscription(source: str, name: str, event_types: List[str]):
 @router.get("/list")
 async def list_webhooks():
     """List registered webhook subscriptions and recent events."""
-    base_url = os.environ.get("AURA_BASE_URL", "https://89.167.107.134")
+    base_url = os.environ.get("AURA_BASE_URL", "http://localhost:8000")
     return {
         "subscriptions": _webhook_registry,
         "recent_events": _webhook_log[-20:],

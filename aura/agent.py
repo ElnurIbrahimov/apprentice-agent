@@ -350,10 +350,10 @@ class ApprenticeAgent(KGBrainMixin, SkillManagerMixin, NarrativeMixin, DirectHan
                         self.neurodream.check_idle_trigger()
                 except Exception as e:  # Catch-all: protects daemon polling thread
                     logger.debug(f"[NeuroDream] Idle poll error: {e}")
-        _nd_poll_thread = _threading.Thread(
+        self._nd_poll_thread = _threading.Thread(
             target=_neurodream_idle_poll, daemon=True, name="NeuroDream-IdlePoll"
         )
-        _nd_poll_thread.start()
+        self._nd_poll_thread.start()
         logger.debug("[NeuroDream] Idle polling thread started (60s interval)")
 
         self.tools['neurodream'] = self.neurodream
@@ -2511,6 +2511,8 @@ IMPORTANT: If the user asks about something you are not sure about, something re
         try:
             if hasattr(self, '_neurodream_stop_event'):
                 self._neurodream_stop_event.set()
+                if hasattr(self, '_nd_poll_thread'):
+                    self._nd_poll_thread.join(timeout=5)
                 results["freed_resources"].append("neurodream_idle_poll_thread")
             if hasattr(self, 'neurodream') and self.neurodream:
                 if self.neurodream.current_phase != SleepPhase.AWAKE:

@@ -529,6 +529,7 @@ class StrategyBandit:
 
         with self._lock:
             conn = sqlite3.connect(self._db_path)
+            conn.execute("PRAGMA busy_timeout = 5000")
             try:
                 # Store outcome
                 conn.execute(
@@ -609,6 +610,7 @@ class StrategyBandit:
 
         with self._lock:
             conn = sqlite3.connect(self._db_path)
+            conn.execute("PRAGMA busy_timeout = 5000")
             try:
                 # Get existing outcome
                 row = conn.execute(

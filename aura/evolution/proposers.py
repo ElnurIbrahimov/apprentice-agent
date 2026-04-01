@@ -179,16 +179,20 @@ class MergeProposer:
         all_candidates: Dict[int, Candidate],
     ) -> Optional[int]:
         """Find lowest common ancestor in the genealogy tree."""
-        # Collect all ancestors of A
+        # Collect all ancestors of A (with cycle guard)
         ancestors_a = set()
         current = cand_a.id
-        while current >= 0 and current in all_candidates:
+        visited = set()
+        while current >= 0 and current in all_candidates and current not in visited:
+            visited.add(current)
             ancestors_a.add(current)
             current = all_candidates[current].parent_id
 
-        # Walk up from B until we hit an ancestor of A
+        # Walk up from B until we hit an ancestor of A (with cycle guard)
         current = cand_b.id
-        while current >= 0 and current in all_candidates:
+        visited = set()
+        while current >= 0 and current in all_candidates and current not in visited:
+            visited.add(current)
             if current in ancestors_a:
                 return current
             current = all_candidates[current].parent_id

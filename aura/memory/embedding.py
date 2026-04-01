@@ -6,11 +6,13 @@ used by retrieval.py and unified_memory.py.
 
 import hashlib
 import logging
+import threading
 from typing import Optional, List
 
 logger = logging.getLogger(__name__)
 
 _embedding_cache: dict[str, List[float]] = {}
+_embedding_lock = threading.Lock()
 _CACHE_MAX = 256
 
 
@@ -24,10 +26,10 @@ def get_embedding(text: str, timeout: float = 3.0) -> Optional[List[float]]:
     Returns:
         List of floats (embedding vector), or None on failure.
     """
-    # Cache key: hash of first 1000 chars (same truncation as the API call)
     key = hashlib.md5(text[:1000].encode()).hexdigest()
-    if key in _embedding_cache:
-        return _embedding_cache[key]
+    with _embedding_lock:
+        if key in _embedding_cache:
+            return _embedding_cache[key]
 
     try:
         import requests
@@ -41,10 +43,10 @@ def get_embedding(text: str, timeout: float = 3.0) -> Optional[List[float]]:
         if r.status_code == 200:
             emb = r.json().get("embedding")
             if emb:
-                if len(_embedding_cache) >= _CACHE_MAX:
-                    # Evict oldest (FIFO)
-                    _embedding_cache.pop(next(iter(_embedding_cache)))
-                _embedding_cache[key] = emb
+                with _embedding_lock:
+                    if len(_embedding_cache) >= _CACHE_MAX:
+                        _embedding_cache.pop(next(iter(_embedding_cache)))
+                    _embedding_cache[key] = emb
                 return emb
     except Exception as e:
         logger.debug("[Embedding] Failed: %s", e)

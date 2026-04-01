@@ -110,16 +110,18 @@ class GeminiProvider(BaseProvider):
         api_key = self._get_api_key()
 
         if stream:
-            url = f"{_CFG['base_url']}/models/{bare_model}:streamGenerateContent?alt=sse&key={api_key}"
-            return self._stream_chat(url, messages, options, tools)
+            url = f"{_CFG['base_url']}/models/{bare_model}:streamGenerateContent?alt=sse"
+            return self._stream_chat(url, messages, options, tools, api_key=api_key)
         else:
-            url = f"{_CFG['base_url']}/models/{bare_model}:generateContent?key={api_key}"
-            return self._sync_chat(url, messages, options, tools)
+            url = f"{_CFG['base_url']}/models/{bare_model}:generateContent"
+            return self._sync_chat(url, messages, options, tools, api_key=api_key)
 
     def _sync_chat(self, url: str, messages: list[dict], options: dict = None,
-                   tools: list | None = None) -> dict:
+                   tools: list | None = None, api_key: str = "") -> dict:
         body = self._build_body(messages, options)
         headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["x-goog-api-key"] = api_key
 
         # Convert OpenAI-format tools to Gemini format
         if tools:
@@ -133,7 +135,7 @@ class GeminiProvider(BaseProvider):
                 })
             body["tools"] = [{"function_declarations": declarations}]
 
-        safe_url = url.split("?")[0] + "?key=REDACTED"
+        safe_url = url.split("?")[0]
         try:
             resp = self._session.post(url, headers=headers, json=body, timeout=120)
         except requests.exceptions.RequestException as e:
@@ -182,9 +184,11 @@ class GeminiProvider(BaseProvider):
         return result
 
     def _stream_chat(self, url: str, messages: list[dict], options: dict = None,
-                     tools: list | None = None) -> Iterator[dict]:
+                     tools: list | None = None, api_key: str = "") -> Iterator[dict]:
         body = self._build_body(messages, options)
         headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["x-goog-api-key"] = api_key
 
         # Convert OpenAI-format tools to Gemini format
         if tools:
@@ -198,7 +202,7 @@ class GeminiProvider(BaseProvider):
                 })
             body["tools"] = [{"function_declarations": declarations}]
 
-        safe_url = url.split("?")[0] + "?key=REDACTED"
+        safe_url = url.split("?")[0]
         try:
             resp = self._session.post(url, headers=headers, json=body, stream=True, timeout=(10, 90))
         except requests.exceptions.RequestException as e:
