@@ -24,6 +24,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 import re
 import ast
@@ -43,6 +44,14 @@ from enum import Enum, auto
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+# Optional embedding support
+try:
+    from aura.memory.embedding import get_embedding as _get_embedding
+    _EMBEDDINGS_AVAILABLE = True
+except ImportError:
+    _EMBEDDINGS_AVAILABLE = False
+    _get_embedding = None
 
 
 # ============================================================================
@@ -726,6 +735,7 @@ class VerifiedMemoryTrace:
     last_accessed: float
     access_count: int = 0
     content_hash: str = ""  # Dedup hash for content
+    embedding: Optional[List[float]] = None  # Cached embedding vector
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -740,6 +750,7 @@ class VerifiedMemoryTrace:
             "last_accessed": self.last_accessed,
             "access_count": self.access_count,
             "content_hash": self.content_hash
+            # Note: embeddings are NOT persisted to keep JSON small
         }
 
     @classmethod
@@ -863,6 +874,7 @@ class VerifiedMemory:
                 last_accessed=time.time(),
                 content_hash=h
             )
+            self._cache_embedding(trace)
 
             self.traces[trace.trace_id] = trace
             self._save()
@@ -871,6 +883,15 @@ class VerifiedMemory:
     def _content_hash(self, content: str) -> str:
         """Return a short hash of content for deduplication."""
         return hashlib.md5(content.strip().lower().encode()).hexdigest()[:16]
+
+    @staticmethod
+    def _cache_embedding(trace: "VerifiedMemoryTrace") -> None:
+        """Compute and cache embedding on a trace (best-effort, non-blocking)."""
+        if _EMBEDDINGS_AVAILABLE and trace.embedding is None:
+            try:
+                trace.embedding = _get_embedding(trace.content, timeout=2.0)
+            except Exception:
+                pass  # Embeddings are optional — never block on failure
 
     def store_belief(
         self,
@@ -905,6 +926,7 @@ class VerifiedMemory:
                 last_accessed=time.time(),
                 content_hash=h
             )
+            self._cache_embedding(trace)
 
             self.traces[trace.trace_id] = trace
             self._save()
@@ -943,10 +965,83 @@ class VerifiedMemory:
                 last_accessed=time.time(),
                 content_hash=h
             )
+            self._cache_embedding(trace)
 
             self.traces[trace.trace_id] = trace
             self._save()
             return trace
+
+    # ---- Auto-classification heuristics ----
+
+    _FACT_PATTERNS = re.compile(
+        r'(?:'
+        r'\d{4}[-/]\d{2}[-/]\d{2}'          # dates
+        r'|https?://'                         # URLs
+        r'|[A-Za-z]:[/\\]'                    # Windows file paths
+        r'|/(?:home|usr|var|tmp|etc)/'        # Unix file paths
+        r'|\breturn(?:ed)?\s+(?:code\s+)?\d'  # return codes
+        r'|\b(?:verified|confirmed)\b'        # verification keywords
+        r'|\bsha256[:=]'                       # hashes
+        r'|\b\d+\.\d+\.\d+'                   # version numbers
+        r')',
+        re.IGNORECASE,
+    )
+
+    _SPECULATION_PATTERNS = re.compile(
+        r'\b(?:might|could|possibly|I\s+think|maybe|probably|not\s+sure'
+        r'|seems?\s+like|perhaps|unclear|uncertain|guess(?:ing)?)\b',
+        re.IGNORECASE,
+    )
+
+    def auto_store(self, content: str, source: str = "", context: str = "") -> dict:
+        """Classify content as FACT/BELIEF/SPECULATION and store automatically.
+
+        Heuristics:
+            FACT: contains verifiable data (numbers, dates, URLs, paths, confirmed/verified)
+            SPECULATION: contains hedging language (might, could, maybe, probably, etc.)
+            BELIEF: everything else (inferred from conversation but not verified)
+
+        Args:
+            content: The text to classify and store.
+            source: Origin of the content (e.g. "user", "tool_output", "llm").
+            context: Optional context string appended to reasoning.
+
+        Returns:
+            dict with keys: tier (str), trace_id (str), content (str)
+        """
+        text = content.strip()
+        ctx_note = f" | ctx: {context}" if context else ""
+
+        # Check speculation first — hedging overrides factual patterns
+        if self._SPECULATION_PATTERNS.search(text):
+            trace = self.store_speculation(
+                content=text,
+                source=source or "auto",
+                reason=f"Hedging language detected{ctx_note}",
+            )
+            return {"tier": "SPECULATION", "trace_id": trace.trace_id, "content": text}
+
+        # Check for fact-like patterns
+        if self._FACT_PATTERNS.search(text):
+            # Facts normally need VerificationResult, but auto-classified "facts"
+            # are really strong beliefs (no artifact). Store as high-importance belief.
+            trace = self.store_belief(
+                content=text,
+                source=source or "auto",
+                reasoning=f"Auto-classified FACT-like (verifiable data pattern){ctx_note}",
+                importance=0.7,
+            )
+            return {"tier": "BELIEF", "trace_id": trace.trace_id, "content": text,
+                    "note": "Contains fact-like data but no artifact; stored as high-importance belief"}
+
+        # Default: belief
+        trace = self.store_belief(
+            content=text,
+            source=source or "auto",
+            reasoning=f"Auto-classified belief (no hedging, no verifiable data){ctx_note}",
+            importance=0.5,
+        )
+        return {"tier": "BELIEF", "trace_id": trace.trace_id, "content": text}
 
     def retrieve_facts(self, query: str, k: int = 5) -> List[VerifiedMemoryTrace]:
         """Retrieve only verified facts matching query"""
@@ -966,20 +1061,73 @@ class VerifiedMemory:
             all_traces = list(self.traces.values())
             return self._rank_by_relevance(all_traces, query, k)
 
+    @staticmethod
+    def _cosine_similarity(a: List[float], b: List[float]) -> float:
+        """Compute cosine similarity between two vectors."""
+        dot = sum(x * y for x, y in zip(a, b))
+        norm_a = math.sqrt(sum(x * x for x in a))
+        norm_b = math.sqrt(sum(x * x for x in b))
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+        return dot / (norm_a * norm_b)
+
     def _rank_by_relevance(
         self,
         traces: List[VerifiedMemoryTrace],
         query: str,
         k: int
     ) -> List[VerifiedMemoryTrace]:
-        """Rank traces by relevance to query (simple keyword matching for now)"""
+        """Rank traces by relevance to query.
+
+        Scoring blend (when embeddings available):
+            40% embedding cosine similarity
+            40% keyword overlap
+            20% importance weight
+
+        Falls back to keyword-only + importance when embeddings are unavailable.
+        """
+        if not traces:
+            return []
+
         query_words = set(query.lower().split())
+
+        # Try to get query embedding (best-effort)
+        query_emb = None
+        if _EMBEDDINGS_AVAILABLE:
+            try:
+                query_emb = _get_embedding(query, timeout=2.0)
+            except Exception:
+                pass
+
+        use_embeddings = query_emb is not None
 
         scored = []
         for trace in traces:
+            # --- keyword overlap score (0..1) ---
             content_words = set(trace.content.lower().split())
             overlap = len(query_words & content_words)
-            score = (overlap / max(len(query_words), 1)) * trace.importance
+            keyword_score = overlap / max(len(query_words), 1)
+
+            # --- embedding similarity score (0..1) ---
+            emb_score = 0.0
+            if use_embeddings:
+                # Lazy-fill embedding if missing
+                if trace.embedding is None:
+                    self._cache_embedding(trace)
+                if trace.embedding is not None:
+                    raw_sim = self._cosine_similarity(query_emb, trace.embedding)
+                    emb_score = max(0.0, raw_sim)  # clamp negatives
+
+            # --- importance weight (0..1) ---
+            imp = trace.importance
+
+            # --- blended score ---
+            if use_embeddings:
+                score = 0.4 * emb_score + 0.4 * keyword_score + 0.2 * imp
+            else:
+                # Original behavior: keyword * importance
+                score = keyword_score * imp
+
             if score > 0:
                 trace.last_accessed = time.time()
                 trace.access_count += 1

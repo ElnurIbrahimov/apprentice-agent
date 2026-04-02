@@ -82,8 +82,18 @@ class ResultRanker:
 
     # ---- scoring components ----
 
-    def _bm25_score(self, text: str, query: str) -> float:
-        """Simple BM25-inspired keyword overlap score (no external deps)."""
+    def _bm25_score(self, text: str, query: str,
+                    doc_freq: Optional[Dict[str, int]] = None,
+                    total_docs: int = 1, avg_dl: float = 1.0) -> float:
+        """BM25 scoring with IDF weighting.
+
+        Args:
+            text: Document text (title + snippet).
+            query: Search query.
+            doc_freq: {term: count_of_docs_containing_term} across the result set.
+            total_docs: Total number of documents in the result set.
+            avg_dl: Average document length (in tokens) across the result set.
+        """
         if not text or not query:
             return 0.0
         text_lower = text.lower()
@@ -92,16 +102,26 @@ class ResultRanker:
             return 0.0
 
         k1 = 1.2
+        b = 0.75
         score = 0.0
         text_tokens = text_lower.split()
-        text_len = len(text_tokens) + 1  # avoid div-by-zero
+        dl = len(text_tokens) + 1  # avoid div-by-zero
+
+        N = max(total_docs, 1)
 
         for term in query_terms:
             tf = text_lower.count(term)
-            # BM25 saturation: tf / (tf + k1)
-            score += tf / (tf + k1) if tf > 0 else 0.0
+            if tf == 0:
+                continue
+            # IDF: log((N - df + 0.5) / (df + 0.5) + 1)
+            df = doc_freq.get(term, 0) if doc_freq else 0
+            idf = math.log((N - df + 0.5) / (df + 0.5) + 1.0)
+            # BM25 TF saturation with length normalization
+            tf_norm = (tf * (k1 + 1.0)) / (tf + k1 * (1.0 - b + b * dl / max(avg_dl, 1.0)))
+            score += idf * tf_norm
 
-        return min(score / len(query_terms), 1.0)
+        # Normalize by number of query terms for comparability
+        return min(score / len(query_terms), 1.0) if score > 0 else 0.0
 
     def _snippet_quality(self, snippet: str) -> float:
         """Score snippet by length and specificity."""
@@ -154,11 +174,37 @@ class ResultRanker:
         """
         Composite ranking: 0.4*bm25 + 0.3*snippet_quality + 0.3*domain_authority.
         Returns sorted list (highest first) with '_rank_score' attached.
+
+        BM25 component uses proper IDF computed from the result set.
         """
+        if not results:
+            return []
+
+        query_terms = topic.lower().split()
+
+        # Pre-compute document texts and token counts for BM25
+        doc_texts = []
+        for r in results:
+            doc_texts.append(f"{r.get('title', '')} {r.get('snippet', '')}".lower())
+
+        # Document frequency: how many docs contain each query term
+        doc_freq: Dict[str, int] = {}
+        doc_lengths = []
+        for dt in doc_texts:
+            tokens = dt.split()
+            doc_lengths.append(len(tokens) + 1)
+            for term in query_terms:
+                if term in dt:
+                    doc_freq[term] = doc_freq.get(term, 0) + 1
+
+        total_docs = len(results)
+        avg_dl = sum(doc_lengths) / total_docs if total_docs else 1.0
+
         scored = []
         for r in results:
             text = f"{r.get('title', '')} {r.get('snippet', '')}"
-            bm25 = self._bm25_score(text, topic)
+            bm25 = self._bm25_score(text, topic, doc_freq=doc_freq,
+                                     total_docs=total_docs, avg_dl=avg_dl)
             snip = self._snippet_quality(r.get('snippet', ''))
             auth = self._domain_authority(r.get('url', ''))
             composite = 0.4 * bm25 + 0.3 * snip + 0.3 * auth
@@ -732,9 +778,9 @@ class HierarchicalSummarizer:
     def _extract_claims_with_sources(self, synthesis: str,
                                      page_summaries: List[Dict]) -> List[Dict]:
         """Split synthesis into sentences and match each against source pages
-        by keyword overlap. Returns claim-level verification data.
+        using embedding similarity (primary) with keyword overlap fallback.
 
-        Each claim dict: {claim, source_urls, source_count, verification_score}
+        Each claim dict: {claim, source_urls, source_count, verification_score, unverified}
         Score: 1.0 = multi-source, 0.5 = single-source, 0.3 = unverified.
         """
         try:
@@ -759,7 +805,19 @@ class HierarchicalSummarizer:
                 words = set(
                     w.lower() for w in re.findall(r'[a-zA-Z]{3,}', summary_text)
                 )
-                source_keywords.append({"url": url, "words": words})
+                source_keywords.append({"url": url, "words": words, "text": summary_text})
+
+            # Try to get embeddings for source summaries (best-effort)
+            source_embeddings = []
+            embeddings_available = False
+            try:
+                from aura.memory.embedding import get_embedding
+                for src in source_keywords:
+                    emb = get_embedding(src["text"][:500], timeout=3.0)
+                    source_embeddings.append(emb)  # May be None
+                embeddings_available = any(e is not None for e in source_embeddings)
+            except Exception:
+                source_embeddings = [None] * len(source_keywords)
 
             claims = []
             for sentence in sentences:
@@ -773,17 +831,38 @@ class HierarchicalSummarizer:
                         "source_urls": [],
                         "source_count": 0,
                         "verification_score": 0.3,
+                        "unverified": True,
                     })
                     continue
 
-                # Match against each source by keyword overlap (33% threshold)
+                # Get claim embedding if embeddings are available
+                claim_emb = None
+                if embeddings_available:
+                    try:
+                        claim_emb = get_embedding(sentence[:500], timeout=3.0)
+                    except Exception:
+                        pass
+
+                # Match against each source using embedding similarity + keyword overlap
                 matching_urls = []
-                for src in source_keywords:
+                for i, src in enumerate(source_keywords):
                     if not src["words"]:
                         continue
+
+                    # Embedding similarity check
+                    emb_match = False
+                    if claim_emb and i < len(source_embeddings) and source_embeddings[i] is not None:
+                        sim = _cosine_similarity(claim_emb, source_embeddings[i])
+                        if sim > 0.65:
+                            emb_match = True
+
+                    # Keyword overlap check (raised threshold to 0.40)
                     overlap = len(claim_words & src["words"])
                     overlap_ratio = overlap / len(claim_words)
-                    if overlap_ratio >= 0.33:
+                    kw_match = overlap_ratio >= 0.40
+
+                    # Attribution: embedding similarity > 0.65 OR keyword overlap > 0.40
+                    if emb_match or kw_match:
                         matching_urls.append(src["url"])
 
                 source_count = len(matching_urls)
@@ -797,6 +876,7 @@ class HierarchicalSummarizer:
                 claims.append({
                     "claim": sentence,
                     "source_urls": matching_urls,
+                    "unverified": source_count == 0,
                     "source_count": source_count,
                     "verification_score": score,
                 })
@@ -1787,8 +1867,10 @@ Return as JSON (no markdown fences):
         return new_urls, cached_count
 
     def _fetch_pages_parallel(self, urls: List[Dict], max_pages: int,
-                               deadline: float) -> tuple:
+                               deadline: float,
+                               fetched_urls: Optional[Set[str]] = None) -> tuple:
         """Fetch pages in parallel with timeout protection.
+        Skips URLs already in fetched_urls set (cross-phase dedup).
         Returns (pages, cached_count).
         """
         if not self.browser or not urls:
@@ -1798,7 +1880,16 @@ Return as JSON (no markdown fences):
         if remaining <= 0:
             return [], 0
 
+        # Filter out already-fetched URLs
+        if fetched_urls is not None:
+            urls = [u for u in urls if u.get("url", "") not in fetched_urls]
+
         urls_to_fetch = urls[:max_pages]
+
+        # Record these URLs as fetched
+        if fetched_urls is not None:
+            for u in urls_to_fetch:
+                fetched_urls.add(u.get("url", ""))
         pages = []
         cached_count = 0
 
@@ -1951,6 +2042,7 @@ Return as JSON (no markdown fences):
         page_summaries = []
         knowledge_gaps = []
         synthesis = ""
+        fetched_urls: Set[str] = set()  # Cross-phase URL dedup
         contradictions = []
         research_plan = {}
         kg_priors = {}
@@ -2027,7 +2119,7 @@ Return as JSON (no markdown fences):
         if not timed_out and all_urls:
             fetch_deadline = min(p2_deadline, overall_deadline)
             pages, page_cached = self._fetch_pages_parallel(
-                all_urls, max_pages, fetch_deadline
+                all_urls, max_pages, fetch_deadline, fetched_urls=fetched_urls
             )
             total_cached += page_cached
 
@@ -2062,7 +2154,8 @@ Return as JSON (no markdown fences):
                 remaining_page_slots = max(0, max_pages - len(pages))
                 if remaining_page_slots > 0:
                     new_pages, new_page_cached = self._fetch_pages_parallel(
-                        new_urls, remaining_page_slots, min(p3_deadline, overall_deadline)
+                        new_urls, remaining_page_slots, min(p3_deadline, overall_deadline),
+                        fetched_urls=fetched_urls
                     )
                     total_cached += new_page_cached
                     pages.extend(new_pages)

@@ -11,6 +11,7 @@ Features:
 - Automatic context injection for LLM queries
 """
 
+import ast
 import json
 import hashlib
 import logging
@@ -20,7 +21,7 @@ import os
 import threading
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from dataclasses import dataclass, asdict
 import numpy as np
 
@@ -49,6 +50,347 @@ DEFAULT_CHUNK_SIZE = 512  # tokens (approx 4 chars per token)
 DEFAULT_CHUNK_OVERLAP = 64
 EMBEDDING_MODEL = "nomic-embed-text"
 DEFAULT_TOP_K = 5
+SEMANTIC_OVERLAP = 200  # chars of overlap between semantic chunks
+MAX_SECTION_CHARS = 2000  # split markdown sections larger than this
+
+
+# ==================== Semantic Chunking ====================
+
+def _add_overlap(chunks: List[Dict[str, Any]], overlap: int = SEMANTIC_OVERLAP) -> List[Dict[str, Any]]:
+    """Add trailing overlap from the next chunk to each chunk for context continuity."""
+    if not chunks or overlap <= 0:
+        return chunks
+    for i in range(len(chunks) - 1):
+        next_text = chunks[i + 1]["content"]
+        overlap_text = next_text[:overlap]
+        if overlap_text:
+            chunks[i]["content"] = chunks[i]["content"] + "\n" + overlap_text
+    return chunks
+
+
+def _chunk_code_python(content: str, file_path: str) -> List[Dict[str, Any]]:
+    """Chunk Python code using AST — split on functions and classes.
+    Falls back to empty list if AST parsing fails (caller will use fallback)."""
+    chunks: List[Dict[str, Any]] = []
+    lines = content.split("\n")
+    try:
+        tree = ast.parse(content, filename=file_path)
+    except SyntaxError:
+        return []
+
+    covered_lines: set = set()
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            kind = "code_class"
+            name = node.name
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            kind = "code_function"
+            name = node.name
+        else:
+            continue
+
+        start = node.lineno  # 1-based
+        end = node.end_lineno or start
+
+        snippet = "\n".join(lines[start - 1:end])
+        start_offset = sum(len(lines[j]) + 1 for j in range(start - 1))  # byte offset
+
+        covered_lines.update(range(start, end + 1))
+        chunks.append({
+            "content": snippet,
+            "chunk_type": kind,
+            "name": name,
+            "start_offset": start_offset,
+            "line_start": start,
+            "line_end": end,
+        })
+
+    # Capture module-level code not inside any function/class
+    uncovered = []
+    current_start = None
+    for i in range(1, len(lines) + 1):
+        if i not in covered_lines and lines[i - 1].strip():
+            if current_start is None:
+                current_start = i
+        else:
+            if current_start is not None:
+                uncovered.append((current_start, i - 1))
+                current_start = None
+    if current_start is not None:
+        uncovered.append((current_start, len(lines)))
+
+    for start, end in uncovered:
+        snippet = "\n".join(lines[start - 1:end]).strip()
+        if len(snippet) > 30:  # skip trivial fragments (imports-only, etc.)
+            start_offset = sum(len(lines[j]) + 1 for j in range(start - 1))
+            chunks.append({
+                "content": snippet,
+                "chunk_type": "code_module",
+                "name": "module_level",
+                "start_offset": start_offset,
+                "line_start": start,
+                "line_end": end,
+            })
+
+    # Sort by position in file
+    chunks.sort(key=lambda c: c["line_start"])
+    return chunks
+
+
+# Regex patterns for JS/TS/Go/Rust/Java/etc top-level symbols
+_CODE_PATTERNS = [
+    # JS/TS
+    (re.compile(r'^(export\s+)?(default\s+)?(async\s+)?function\s+(\w+)', re.MULTILINE), "code_function"),
+    (re.compile(r'^(export\s+)?(default\s+)?class\s+(\w+)', re.MULTILINE), "code_class"),
+    (re.compile(r'^(export\s+)?(const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?\([^)]*\)\s*(?::\s*[^=]*)?=>', re.MULTILINE), "code_function"),
+    # Rust
+    (re.compile(r'^\s*(pub\s+)?(async\s+)?fn\s+(\w+)', re.MULTILINE), "code_function"),
+    (re.compile(r'^\s*(pub\s+)?struct\s+(\w+)', re.MULTILINE), "code_class"),
+    (re.compile(r'^\s*(pub\s+)?enum\s+(\w+)', re.MULTILINE), "code_class"),
+    (re.compile(r'^\s*(pub\s+)?trait\s+(\w+)', re.MULTILINE), "code_class"),
+    # Go
+    (re.compile(r'^\s*func\s+(?:\([^)]*\)\s+)?(\w+)\s*\(', re.MULTILINE), "code_function"),
+    (re.compile(r'^\s*type\s+(\w+)\s+struct\b', re.MULTILINE), "code_class"),
+    # Java/C#
+    (re.compile(r'^\s*(public|private|protected)?\s*(static\s+)?(?:class|interface)\s+(\w+)', re.MULTILINE), "code_class"),
+    # Python fallback (if AST fails)
+    (re.compile(r'^\s*(async\s+)?def\s+(\w+)\s*\(', re.MULTILINE), "code_function"),
+    (re.compile(r'^\s*class\s+(\w+)[\s(:]', re.MULTILINE), "code_class"),
+]
+
+
+def _chunk_code_regex(content: str, file_path: str) -> List[Dict[str, Any]]:
+    """Chunk code files using regex symbol detection. Works for JS/TS/Go/Rust/etc."""
+    lines = content.split("\n")
+    # Find all symbol start positions
+    symbols: List[Tuple[int, str, str]] = []  # (line_start_0based, kind, name)
+
+    for regex, kind in _CODE_PATTERNS:
+        for m in regex.finditer(content):
+            line_num = content[:m.start()].count("\n")  # 0-based
+            # Extract name: last non-None capturing group that's not a keyword
+            keywords = {"export", "default", "async", "const", "let", "var", "pub",
+                        "static", "public", "private", "protected", "struct", "interface", "class", "def"}
+            name = None
+            for g in reversed(m.groups()):
+                if g and g.strip() not in keywords:
+                    name = g.strip()
+                    break
+            if name:
+                symbols.append((line_num, kind, name))
+
+    if not symbols:
+        return []
+
+    # Deduplicate by line
+    seen_lines: set = set()
+    unique_symbols = []
+    for line_num, kind, name in sorted(symbols, key=lambda x: x[0]):
+        if line_num not in seen_lines:
+            seen_lines.add(line_num)
+            unique_symbols.append((line_num, kind, name))
+
+    # Create chunks: each symbol extends to the line before the next symbol (or EOF)
+    chunks: List[Dict[str, Any]] = []
+    for idx, (line_num, kind, name) in enumerate(unique_symbols):
+        if idx + 1 < len(unique_symbols):
+            end_line = unique_symbols[idx + 1][0]  # exclusive, 0-based
+        else:
+            end_line = len(lines)
+
+        snippet = "\n".join(lines[line_num:end_line]).rstrip()
+        if not snippet.strip():
+            continue
+
+        start_offset = sum(len(lines[j]) + 1 for j in range(line_num))
+        chunks.append({
+            "content": snippet,
+            "chunk_type": kind,
+            "name": name,
+            "start_offset": start_offset,
+            "line_start": line_num + 1,
+            "line_end": end_line,
+        })
+
+    return chunks
+
+
+def _chunk_markdown(content: str, file_path: str) -> List[Dict[str, Any]]:
+    """Chunk markdown/text by headers, then by paragraph boundaries within large sections."""
+    chunks: List[Dict[str, Any]] = []
+
+    # Split on markdown headers (# ## ### etc)
+    header_re = re.compile(r'^(#{1,6})\s+(.+)$', re.MULTILINE)
+    sections: List[Tuple[str, str, int]] = []  # (title, body, char_offset)
+
+    matches = list(header_re.finditer(content))
+    if not matches:
+        # No headers — treat entire content as one section, split on paragraphs
+        sections = [("", content, 0)]
+    else:
+        # Content before first header
+        if matches[0].start() > 0:
+            preamble = content[:matches[0].start()].strip()
+            if preamble:
+                sections.append(("preamble", preamble, 0))
+
+        for i, m in enumerate(matches):
+            title = m.group(2).strip()
+            start = m.end()
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(content)
+            body = content[start:end].strip()
+            sections.append((title, f"{m.group(0)}\n{body}" if body else m.group(0), m.start()))
+
+    for title, body, char_offset in sections:
+        if len(body) <= MAX_SECTION_CHARS:
+            if body.strip():
+                chunks.append({
+                    "content": body.strip(),
+                    "chunk_type": "markdown_section",
+                    "name": title or "untitled",
+                    "start_offset": char_offset,
+                    "line_start": content[:char_offset].count("\n") + 1,
+                    "line_end": content[:char_offset + len(body)].count("\n") + 1,
+                })
+        else:
+            # Section too long — split on paragraph boundaries (double newline)
+            paragraphs = re.split(r'\n\n+', body)
+            current_chunk = ""
+            chunk_start = char_offset
+
+            for para in paragraphs:
+                para = para.strip()
+                if not para:
+                    continue
+                if len(current_chunk) + len(para) + 2 > MAX_SECTION_CHARS and current_chunk:
+                    chunks.append({
+                        "content": current_chunk.strip(),
+                        "chunk_type": "paragraph",
+                        "name": title or "untitled",
+                        "start_offset": chunk_start,
+                        "line_start": content[:chunk_start].count("\n") + 1,
+                        "line_end": content[:chunk_start + len(current_chunk)].count("\n") + 1,
+                    })
+                    chunk_start = chunk_start + len(current_chunk)
+                    current_chunk = para
+                else:
+                    current_chunk = (current_chunk + "\n\n" + para) if current_chunk else para
+
+            if current_chunk.strip():
+                chunks.append({
+                    "content": current_chunk.strip(),
+                    "chunk_type": "paragraph" if len(chunks) > 0 else "markdown_section",
+                    "name": title or "untitled",
+                    "start_offset": chunk_start,
+                    "line_start": content[:chunk_start].count("\n") + 1,
+                    "line_end": content[:chunk_start + len(current_chunk)].count("\n") + 1,
+                })
+
+    return chunks
+
+
+def _chunk_pdf_pages(path: "Path") -> List[Dict[str, Any]]:
+    """Chunk PDF by page boundaries, then by paragraphs within large pages.
+    Returns chunks with page metadata. Requires PyMuPDF."""
+    if not PYMUPDF_AVAILABLE:
+        return []
+
+    chunks: List[Dict[str, Any]] = []
+    doc = fitz.open(path)
+    offset = 0
+
+    for page_idx, page in enumerate(doc):
+        page_text = page.get_text().strip()
+        if not page_text:
+            continue
+
+        page_num = page_idx + 1
+
+        if len(page_text) <= MAX_SECTION_CHARS:
+            chunks.append({
+                "content": page_text,
+                "chunk_type": "page",
+                "name": f"page_{page_num}",
+                "start_offset": offset,
+                "line_start": page_num,  # Repurposed as page number for PDFs
+                "line_end": page_num,
+                "page": page_num,
+            })
+        else:
+            # Split large pages on paragraph boundaries
+            paragraphs = re.split(r'\n\n+', page_text)
+            current_chunk = ""
+            para_idx = 0
+
+            for para in paragraphs:
+                para = para.strip()
+                if not para:
+                    continue
+                if len(current_chunk) + len(para) + 2 > MAX_SECTION_CHARS and current_chunk:
+                    chunks.append({
+                        "content": current_chunk.strip(),
+                        "chunk_type": "paragraph",
+                        "name": f"page_{page_num}_part_{para_idx}",
+                        "start_offset": offset,
+                        "line_start": page_num,
+                        "line_end": page_num,
+                        "page": page_num,
+                    })
+                    offset += len(current_chunk)
+                    para_idx += 1
+                    current_chunk = para
+                else:
+                    current_chunk = (current_chunk + "\n\n" + para) if current_chunk else para
+
+            if current_chunk.strip():
+                chunks.append({
+                    "content": current_chunk.strip(),
+                    "chunk_type": "paragraph" if para_idx > 0 else "page",
+                    "name": f"page_{page_num}" + (f"_part_{para_idx}" if para_idx > 0 else ""),
+                    "start_offset": offset,
+                    "line_start": page_num,
+                    "line_end": page_num,
+                    "page": page_num,
+                })
+
+        offset += len(page_text) + 2  # account for page separator
+
+    doc.close()
+    return chunks
+
+
+def _chunk_code_by_lines(content: str, file_path: str, max_chars: int = MAX_SECTION_CHARS) -> List[Dict[str, Any]]:
+    """Line-based code chunking fallback: split on blank-line boundaries."""
+    chunks: List[Dict[str, Any]] = []
+    lines = content.split("\n")
+    current_chunk_lines: List[str] = []
+    chunk_start = 1  # 1-based
+
+    for i, line in enumerate(lines):
+        current_chunk_lines.append(line)
+        text_so_far = "\n".join(current_chunk_lines)
+
+        # Split at blank lines when chunk is big enough
+        at_blank = (line.strip() == "")
+        at_end = (i == len(lines) - 1)
+
+        if (at_blank and len(text_so_far) >= max_chars) or at_end:
+            snippet = text_so_far.strip()
+            if snippet:
+                start_offset = sum(len(lines[j]) + 1 for j in range(chunk_start - 1))
+                chunks.append({
+                    "content": snippet,
+                    "chunk_type": "code_block",
+                    "name": f"lines_{chunk_start}_{i + 1}",
+                    "start_offset": start_offset,
+                    "line_start": chunk_start,
+                    "line_end": i + 1,
+                })
+            current_chunk_lines = []
+            chunk_start = i + 2  # next line, 1-based
+
+    return chunks
 
 
 @dataclass
@@ -272,6 +614,69 @@ class LocalRAG:
 
         return chunks
 
+    def _smart_chunk(self, path: Path, content: str) -> List[Dict[str, Any]]:
+        """Route to semantic chunking based on file type.
+
+        Returns list of dicts with keys: content, chunk_type, name, start_offset,
+        line_start, line_end (and optionally 'page' for PDFs).
+        Falls back to naive _chunk_text for unknown types.
+        """
+        suffix = path.suffix.lower()
+        path_str = str(path)
+        chunks: List[Dict[str, Any]] = []
+
+        # --- Code files: AST or regex-based ---
+        code_extensions = {
+            '.py', '.pyi', '.pyw',
+            '.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx', '.mts', '.cts',
+            '.vue', '.svelte',
+            '.go', '.rs', '.java', '.c', '.cpp', '.h', '.hpp', '.cs',
+            '.rb', '.php', '.swift', '.kt',
+        }
+        if suffix in code_extensions:
+            if suffix in ('.py', '.pyi', '.pyw'):
+                chunks = _chunk_code_python(content, path_str)
+                if not chunks:
+                    # AST failed — try regex
+                    chunks = _chunk_code_regex(content, path_str)
+            else:
+                chunks = _chunk_code_regex(content, path_str)
+
+            if not chunks:
+                # Regex found nothing — fall back to line-based splitting
+                chunks = _chunk_code_by_lines(content, path_str)
+
+        # --- PDF files: page-based ---
+        elif suffix == '.pdf':
+            chunks = _chunk_pdf_pages(path)
+
+        # --- Markdown / text ---
+        elif suffix in ('.md', '.mdx', '.txt', '.rst', '.adoc'):
+            chunks = _chunk_markdown(content, path_str)
+
+        # --- Unknown / other text: try markdown-style first, then naive ---
+        if not chunks:
+            # Try markdown chunker (works on any text with paragraphs)
+            chunks = _chunk_markdown(content, path_str)
+
+        if not chunks:
+            # Final fallback: original naive character-split
+            text_chunks = self._chunk_text(content)
+            for i, text in enumerate(text_chunks):
+                chunks.append({
+                    "content": text,
+                    "chunk_type": "text_block",
+                    "name": f"chunk_{i}",
+                    "start_offset": 0,
+                    "line_start": 0,
+                    "line_end": 0,
+                })
+
+        # Add overlap between adjacent chunks
+        chunks = _add_overlap(chunks)
+
+        return chunks
+
     # ==================== Document Loaders ====================
 
     def _load_text_file(self, path: Path) -> str:
@@ -302,24 +707,16 @@ class LocalRAG:
         paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
         return "\n\n".join(paragraphs)
 
-    def _load_code_file(self, path: Path) -> str:
-        """Load code file with language hint."""
-        content = self._load_text_file(path)
-        lang = path.suffix.lstrip('.')
-        return f"```{lang}\n# File: {path.name}\n{content}\n```"
-
     def _load_document(self, path: Path) -> str:
-        """Load document based on file type."""
+        """Load document based on file type. Returns raw text (no fencing)."""
         suffix = path.suffix.lower()
 
         if suffix == '.pdf':
             return self._load_pdf(path)
         elif suffix == '.docx':
             return self._load_docx(path)
-        elif suffix in ['.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.cpp', '.c', '.h', '.go', '.rs', '.rb', '.php', '.cs', '.swift', '.kt']:
-            return self._load_code_file(path)
         else:
-            # Treat as text (txt, md, json, yaml, etc.)
+            # All text-based files (code, markdown, config, etc.) — load raw
             return self._load_text_file(path)
 
     # ==================== Indexing ====================
@@ -350,18 +747,25 @@ class LocalRAG:
                 return {"success": True, "message": "File already indexed", "chunks_added": 0}
 
         try:
-            # Load and chunk document
-            content = self._load_document(path)
-            text_chunks = self._chunk_text(content)
+            # Load document content (PDF chunking handles its own loading)
+            suffix = path.suffix.lower()
+            if suffix == '.pdf':
+                content = ""  # PDF chunker reads the file directly
+            else:
+                content = self._load_document(path)
 
-            if not text_chunks:
+            # Use semantic chunking (falls back to naive splits internally)
+            smart_chunks = self._smart_chunk(path, content)
+
+            if not smart_chunks:
                 return {"success": False, "error": "No content extracted"}
 
             # Create chunk objects with embeddings
             new_chunks = []
             new_embeddings = []
 
-            for i, text in enumerate(text_chunks):
+            for i, sc in enumerate(smart_chunks):
+                text = sc["content"]
                 chunk_id = f"{path.stem}_{i}_{hashlib.md5(text.encode()).hexdigest()[:8]}"
 
                 embedding = self._get_embedding(text)
@@ -374,6 +778,12 @@ class LocalRAG:
                     metadata={
                         "filename": path.name,
                         "file_type": path.suffix,
+                        "chunk_type": sc.get("chunk_type", "unknown"),
+                        "chunk_name": sc.get("name", ""),
+                        "start_offset": sc.get("start_offset", 0),
+                        "line_start": sc.get("line_start", 0),
+                        "line_end": sc.get("line_end", 0),
+                        "page": sc.get("page"),
                         "indexed_at": datetime.now().isoformat()
                     },
                     embedding=embedding
@@ -606,8 +1016,17 @@ class LocalRAG:
                 break
 
             source = Path(r.chunk.source).name
+            meta = r.chunk.metadata
+            chunk_type = meta.get("chunk_type", "")
+            chunk_name = meta.get("chunk_name", "")
+            label = f"{source}"
+            if chunk_type:
+                label += f" ({chunk_type}"
+                if chunk_name:
+                    label += f": {chunk_name}"
+                label += ")"
             context_parts.append(
-                f"[Source: {source} | Relevance: {r.score:.0%}]\n{r.chunk.content}"
+                f"[Source: {label} | Relevance: {r.score:.0%}]\n{r.chunk.content}"
             )
             total_chars += len(r.chunk.content)
 
@@ -729,6 +1148,8 @@ class LocalRAGTool:
                     {
                         "content": r.chunk.content[:500] + "..." if len(r.chunk.content) > 500 else r.chunk.content,
                         "source": Path(r.chunk.source).name,
+                        "chunk_type": r.chunk.metadata.get("chunk_type", ""),
+                        "chunk_name": r.chunk.metadata.get("chunk_name", ""),
                         "score": f"{r.score:.0%}"
                     }
                     for r in results

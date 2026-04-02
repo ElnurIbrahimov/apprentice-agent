@@ -18,12 +18,21 @@ Author: Aura reliability upgrade (2026-03)
 from __future__ import annotations
 
 import logging
+import math
 import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
+
+# Optional embedding support — graceful fallback to Jaccard if unavailable
+try:
+    from aura.memory.embedding import get_embedding as _get_embedding
+    _HAS_EMBEDDINGS = True
+except Exception:
+    _HAS_EMBEDDINGS = False
+    _get_embedding = None  # type: ignore[assignment]
 
 # ---------------------------------------------------------------------------
 # Edge types for contradiction/supersession
@@ -93,12 +102,25 @@ class KGContradictionDetector:
         detector.supersede(old_id, new_id, reason="user_correction")
     """
 
-    # Negation phrase patterns
+    # Negation phrase patterns (expanded with common antonyms)
     NEGATION_PAIRS = [
         ({"always", "every", "all"}, {"never", "none", "no"}),
         ({"prefers", "likes", "uses"}, {"hates", "dislikes", "avoids"}),
         ({"enabled", "on", "active"}, {"disabled", "off", "inactive"}),
         ({"increased", "more", "added"}, {"decreased", "less", "removed"}),
+        ({"like", "love", "enjoy"}, {"dislike", "hate", "detest"}),
+        ({"prefer",}, {"avoid", "reject", "refuse"}),
+        ({"want", "desire", "need"}, {"reject", "refuse", "deny"}),
+        ({"good", "great", "excellent"}, {"bad", "terrible", "poor"}),
+        ({"fast", "quick", "rapid"}, {"slow", "sluggish", "lethargic"}),
+        ({"easy", "simple"}, {"hard", "difficult", "complex"}),
+        ({"new", "modern", "current"}, {"old", "legacy", "outdated"}),
+        ({"true", "yes", "correct"}, {"false", "no", "wrong", "incorrect"}),
+        ({"open", "public"}, {"closed", "private", "restricted"}),
+        ({"start", "begin", "create"}, {"stop", "end", "delete", "destroy"}),
+        ({"accept", "approve", "allow"}, {"reject", "deny", "block", "forbid"}),
+        ({"include", "contains"}, {"exclude", "omit", "lacks"}),
+        ({"supports", "compatible"}, {"unsupported", "incompatible"}),
     ]
 
     def __init__(self, kg) -> None:
@@ -262,16 +284,79 @@ class KGContradictionDetector:
             logger.debug(f"[KGContradiction] non-critical: {e}")
         return None
 
+    @staticmethod
+    def _cosine_similarity(a: List[float], b: List[float]) -> float:
+        """Compute cosine similarity between two vectors."""
+        dot = sum(x * y for x, y in zip(a, b))
+        norm_a = math.sqrt(sum(x * x for x in a))
+        norm_b = math.sqrt(sum(x * x for x in b))
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+        return dot / (norm_a * norm_b)
+
     def _find_similar_nodes(
         self, node_id: str, label: str, node_type: str, limit: int = 10
     ) -> List[str]:
-        """Find nodes of same type with overlapping label words."""
+        """Find nodes of same type with semantic similarity.
+
+        Primary: embedding cosine similarity (threshold 0.6).
+        Fallback: Jaccard word overlap (threshold 0.4) if embeddings unavailable.
+        """
+        # Try embedding-based similarity first
+        if _HAS_EMBEDDINGS:
+            try:
+                new_emb = _get_embedding(label)
+                if new_emb is not None:
+                    return self._find_similar_by_embedding(
+                        node_id, new_emb, node_type, limit,
+                    )
+            except Exception as e:
+                logger.debug("[KGContradiction] Embedding similarity failed, falling back to Jaccard: %s", e)
+
+        # Fallback: Jaccard word overlap
+        return self._find_similar_by_jaccard(node_id, label, node_type, limit)
+
+    def _find_similar_by_embedding(
+        self, node_id: str, new_emb: List[float], node_type: str, limit: int,
+        threshold: float = 0.6,
+    ) -> List[str]:
+        """Find candidate nodes using embedding cosine similarity."""
+        g = self._kg.graph
+        results: List[Tuple[float, str]] = []
+        for nid, data in g.nodes(data=True):
+            if nid == node_id:
+                continue
+            if data.get("type") != node_type:
+                continue
+            other_label = data.get("label", "")
+            if not other_label:
+                continue
+            # Check if node already has a cached embedding
+            other_emb = data.get("_embedding")
+            if other_emb is None:
+                other_emb = _get_embedding(other_label)
+                if other_emb is not None:
+                    # Cache on the node to avoid recomputing
+                    g.nodes[nid]["_embedding"] = other_emb
+            if other_emb is None:
+                continue
+            sim = self._cosine_similarity(new_emb, other_emb)
+            if sim >= threshold:
+                results.append((sim, nid))
+        results.sort(reverse=True)
+        return [nid for _, nid in results[:limit]]
+
+    def _find_similar_by_jaccard(
+        self, node_id: str, label: str, node_type: str, limit: int,
+        threshold: float = 0.4,
+    ) -> List[str]:
+        """Fallback: find candidate nodes using Jaccard word overlap."""
         words = set(label.lower().split())
         if len(words) < 2:
             return []
         try:
             g = self._kg.graph
-            results = []
+            results: List[Tuple[float, str]] = []
             for nid, data in g.nodes(data=True):
                 if nid == node_id:
                     continue
@@ -279,12 +364,12 @@ class KGContradictionDetector:
                     continue
                 other_words = set(data.get("label", "").lower().split())
                 overlap = len(words & other_words) / max(len(words | other_words), 1)
-                if overlap >= 0.4:   # 40% word overlap
+                if overlap >= threshold:
                     results.append((overlap, nid))
             results.sort(reverse=True)
             return [nid for _, nid in results[:limit]]
         except Exception as e:
-            logger.warning("[KG Contradiction] Node similarity search failed: %s", e)
+            logger.warning("[KG Contradiction] Jaccard similarity search failed: %s", e)
             return []
 
     def _detect_contradiction(
@@ -294,7 +379,7 @@ class KGContradictionDetector:
     ) -> Optional[ContradictionRecord]:
         """Return a ContradictionRecord if the two nodes likely contradict."""
 
-        # Check value conflicts in shared properties
+        # 1. Check value conflicts in shared properties
         shared_keys = set(props_a.keys()) & set(props_b.keys())
         for key in shared_keys:
             va = str(props_a[key]).lower()
@@ -307,7 +392,7 @@ class KGContradictionDetector:
                     confidence=0.75,
                 )
 
-        # Check negation pairs in labels
+        # 2. Check negation pairs in labels (expanded set)
         words_a = set(label_a.lower().split())
         words_b = set(label_b.lower().split())
         for pos_set, neg_set in self.NEGATION_PAIRS:
@@ -319,6 +404,33 @@ class KGContradictionDetector:
                     contradiction_type="direct_negation",
                     confidence=0.80,
                 )
+
+        # 3. Embedding-based semantic contradiction:
+        #    High label similarity (>0.8) + different property values = likely contradiction.
+        #    Catches cases like "prefers Python" vs "prefers JavaScript" that share
+        #    semantic structure but differ in the key value.
+        if _HAS_EMBEDDINGS and (props_a or props_b):
+            try:
+                emb_a = _get_embedding(label_a)
+                emb_b = _get_embedding(label_b)
+                if emb_a is not None and emb_b is not None:
+                    sim = self._cosine_similarity(emb_a, emb_b)
+                    if sim > 0.8:
+                        # Very similar semantically — check if any property differs
+                        all_keys = set(props_a.keys()) | set(props_b.keys())
+                        for key in all_keys:
+                            va = str(props_a.get(key, "")).lower().strip()
+                            vb = str(props_b.get(key, "")).lower().strip()
+                            # One has the property and the other doesn't, or values differ
+                            if (va and vb and va != vb) or (va and not vb) or (vb and not va):
+                                return ContradictionRecord(
+                                    node_a_id=id_a, node_b_id=id_b,
+                                    label_a=label_a, label_b=label_b,
+                                    contradiction_type="semantic_conflict",
+                                    confidence=round(min(sim, 0.95), 3),
+                                )
+            except Exception as e:
+                logger.debug("[KGContradiction] Embedding contradiction check failed: %s", e)
 
         return None
 

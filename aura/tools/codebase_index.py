@@ -4,7 +4,7 @@ Features:
 - Incremental indexing with SHA-256 content hashing (skip unchanged files)
 - Content-hash embedding cache: only re-embed chunks whose text actually changed
 - mtime fast-path: skip reading files whose modification time hasn't changed
-- Smart semantic chunking: Python AST, JS/TS regex-based, section-based fallback
+- Smart semantic chunking: tree-sitter AST (8 languages), Python AST, JS/TS regex, section fallback
 - Multi-signal ranking: BM25 keyword + semantic similarity + recency + importance
 - Project structure awareness: entry points, import graph, metadata, test detection
 - Aider-style repo map: compact symbol listing for LLM context windows
@@ -34,6 +34,88 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+# ── Tree-sitter (optional, preferred chunking path) ────────────
+_TREESITTER_AVAILABLE = False
+try:
+    from tree_sitter_language_pack import get_parser as _ts_get_parser
+    _TREESITTER_AVAILABLE = True
+    logger.debug("[CodebaseIndex] tree-sitter-language-pack available")
+except ImportError:
+    logger.debug("[CodebaseIndex] tree-sitter not installed, using fallback chunkers")
+
+# Extension → tree-sitter language name
+_EXT_TO_TS_LANG: Dict[str, str] = {
+    ".py": "python", ".pyi": "python", ".pyw": "python",
+    ".js": "javascript", ".jsx": "javascript", ".mjs": "javascript", ".cjs": "javascript",
+    ".ts": "typescript", ".tsx": "typescript", ".mts": "typescript", ".cts": "typescript",
+    ".go": "go",
+    ".rs": "rust",
+    ".java": "java",
+    ".c": "c", ".h": "c",
+    ".cpp": "cpp", ".hpp": "cpp", ".cc": "cpp", ".cxx": "cpp",
+}
+
+# Per-language config: which top-level node types to extract and how to get names.
+# Each entry: node_type → (chunk_kind, name_strategy)
+# name_strategy: "name" = child_by_field_name('name'),
+#                "declarator" = child_by_field_name('declarator') then recurse,
+#                "type_spec" = Go type_declaration child type_spec
+_TS_NODE_CONFIG: Dict[str, Dict[str, Tuple[str, str]]] = {
+    "python": {
+        "function_definition": ("function", "name"),
+        "class_definition": ("class", "name"),
+        "decorated_definition": ("decorated", "unwrap"),
+    },
+    "javascript": {
+        "function_declaration": ("function", "name"),
+        "class_declaration": ("class", "name"),
+        "lexical_declaration": ("variable", "js_lexical"),
+        "variable_declaration": ("variable", "js_lexical"),
+        "export_statement": ("export", "unwrap_export"),
+    },
+    "typescript": {
+        "function_declaration": ("function", "name"),
+        "class_declaration": ("class", "name"),
+        "interface_declaration": ("interface", "name"),
+        "type_alias_declaration": ("type", "name"),
+        "enum_declaration": ("enum", "name"),
+        "lexical_declaration": ("variable", "js_lexical"),
+        "variable_declaration": ("variable", "js_lexical"),
+        "export_statement": ("export", "unwrap_export"),
+    },
+    "go": {
+        "function_declaration": ("function", "name"),
+        "method_declaration": ("method", "name"),
+        "type_declaration": ("type", "go_type_decl"),
+    },
+    "rust": {
+        "function_item": ("function", "name"),
+        "struct_item": ("struct", "name"),
+        "enum_item": ("enum", "name"),
+        "trait_item": ("trait", "name"),
+        "impl_item": ("impl", "rust_impl"),
+    },
+    "java": {
+        "class_declaration": ("class", "name"),
+        "interface_declaration": ("interface", "name"),
+        "enum_declaration": ("enum", "name"),
+        "method_declaration": ("method", "name"),
+    },
+    "c": {
+        "function_definition": ("function", "c_func"),
+        "struct_specifier": ("struct", "name"),
+        "enum_specifier": ("enum", "name"),
+        "type_definition": ("type", "c_typedef"),
+    },
+    "cpp": {
+        "function_definition": ("function", "c_func"),
+        "class_specifier": ("class", "name"),
+        "struct_specifier": ("struct", "name"),
+        "enum_specifier": ("enum", "name"),
+        "namespace_definition": ("namespace", "name"),
+    },
+}
 
 # ── Embedding config ────────────────────────────────────────────
 _EMBED_MODEL = "nomic-embed-text:latest"
@@ -327,6 +409,254 @@ _bm25 = _BM25()
 
 # ── Semantic chunking ───────────────────────────────────────────
 
+# ── Tree-sitter AST chunking (preferred path) ──────────────────
+
+def _ts_get_node_name(node, strategy: str, lang: str) -> Optional[str]:
+    """Extract a human-readable name from a tree-sitter node using the given strategy."""
+    try:
+        if strategy == "name":
+            n = node.child_by_field_name("name")
+            return n.text.decode("utf-8") if n else None
+
+        elif strategy == "c_func":
+            # C/C++: function_definition → declarator (function_declarator) → declarator (identifier)
+            decl = node.child_by_field_name("declarator")
+            if decl and decl.type == "function_declarator":
+                inner = decl.child_by_field_name("declarator")
+                return inner.text.decode("utf-8") if inner else None
+            return decl.text.decode("utf-8") if decl else None
+
+        elif strategy == "c_typedef":
+            # C: type_definition → declarator is the alias name
+            decl = node.child_by_field_name("declarator")
+            return decl.text.decode("utf-8") if decl else None
+
+        elif strategy == "go_type_decl":
+            # Go: type_declaration → child type_spec → name field
+            for child in node.children:
+                if child.type == "type_spec":
+                    n = child.child_by_field_name("name")
+                    return n.text.decode("utf-8") if n else None
+            return None
+
+        elif strategy == "rust_impl":
+            # Rust: impl_item → type field gives the type being implemented
+            t = node.child_by_field_name("type")
+            trait = node.child_by_field_name("trait")
+            if trait and t:
+                return f"{trait.text.decode('utf-8')} for {t.text.decode('utf-8')}"
+            return t.text.decode("utf-8") if t else None
+
+        elif strategy == "js_lexical":
+            # JS/TS: lexical_declaration → first variable_declarator → name
+            for child in node.children:
+                if child.type == "variable_declarator":
+                    n = child.child_by_field_name("name")
+                    return n.text.decode("utf-8") if n else None
+            return None
+
+        elif strategy == "unwrap":
+            # Python decorated_definition: the inner node is the actual def/class
+            body = node.child_by_field_name("definition")
+            if body:
+                n = body.child_by_field_name("name")
+                return n.text.decode("utf-8") if n else None
+            return None
+
+        elif strategy == "unwrap_export":
+            # JS/TS export_statement: find the inner declaration
+            for child in node.children:
+                if child.type in (
+                    "function_declaration", "class_declaration",
+                    "interface_declaration", "type_alias_declaration",
+                    "enum_declaration", "lexical_declaration", "variable_declaration",
+                ):
+                    inner_cfg = _TS_NODE_CONFIG.get(lang, {}).get(child.type)
+                    if inner_cfg:
+                        return _ts_get_node_name(child, inner_cfg[1], lang)
+            return None
+
+    except Exception:
+        return None
+    return None
+
+
+def _ts_get_node_kind(node, kind_raw: str, name_strategy: str, lang: str) -> str:
+    """Get the chunk kind, resolving wrappers like export/decorated to the inner kind."""
+    if name_strategy == "unwrap_export":
+        for child in node.children:
+            inner_cfg = _TS_NODE_CONFIG.get(lang, {}).get(child.type)
+            if inner_cfg:
+                return inner_cfg[0]
+        return "variable"
+    if name_strategy == "unwrap":
+        body = node.child_by_field_name("definition")
+        if body:
+            if body.type == "class_definition":
+                return "class"
+            return "function"
+        return "function"
+    return kind_raw
+
+
+def _ts_extract_methods(class_node, rel_path: str, class_name: str,
+                        content_bytes: bytes, lang: str) -> List[dict]:
+    """Extract method-level chunks from inside a class/struct/impl body."""
+    methods = []
+    # Find the body node (different field names per language)
+    body = (
+        class_node.child_by_field_name("body") or
+        class_node.child_by_field_name("declaration_list")  # Rust impl
+    )
+    if not body:
+        return methods
+
+    # Node types that represent methods inside a class body
+    method_types = {
+        "python": ("function_definition",),
+        "javascript": ("method_definition",),
+        "typescript": ("method_definition", "public_field_definition"),
+        "java": ("method_declaration", "constructor_declaration"),
+        "rust": ("function_item",),
+        "cpp": ("function_definition",),
+        "go": (),  # Go methods are top-level, not inside struct bodies
+        "c": (),
+    }
+    target_types = method_types.get(lang, ())
+
+    for child in body.children:
+        if child.type not in target_types:
+            continue
+        name_node = child.child_by_field_name("name")
+        if not name_node:
+            # C/C++ methods use declarator
+            decl = child.child_by_field_name("declarator")
+            if decl and decl.type == "function_declarator":
+                name_node = decl.child_by_field_name("declarator")
+            elif decl:
+                name_node = decl
+        if not name_node:
+            continue
+
+        method_name = name_node.text.decode("utf-8")
+        start_line = child.start_point[0] + 1  # 1-based
+        end_line = child.end_point[0] + 1
+        node_text = content_bytes[child.start_byte:child.end_byte].decode("utf-8", errors="ignore")
+
+        methods.append({
+            "id": f"{rel_path}:{class_name}.{method_name}:{start_line}",
+            "file_path": rel_path,
+            "name": f"{class_name}.{method_name}",
+            "kind": "method",
+            "line_start": start_line,
+            "line_end": end_line,
+            "content": node_text[:800],
+            "docstring": "",
+            "decorators": "",
+            "language": lang,
+            "node_type": "method",
+            "node_name": method_name,
+        })
+
+    return methods
+
+
+def _chunk_treesitter(content: str, rel_path: str) -> Optional[List[dict]]:
+    """AST-aware chunking via tree-sitter. Returns None if unsupported/unavailable."""
+    if not _TREESITTER_AVAILABLE:
+        return None
+
+    ext = Path(rel_path).suffix.lower()
+    lang = _EXT_TO_TS_LANG.get(ext)
+    if not lang:
+        return None
+
+    node_config = _TS_NODE_CONFIG.get(lang)
+    if not node_config:
+        return None
+
+    try:
+        parser = _ts_get_parser(lang)
+        content_bytes = content.encode("utf-8")
+        tree = parser.parse(content_bytes)
+        root = tree.root_node
+    except Exception as e:
+        logger.debug("[CodebaseIndex] tree-sitter parse failed for %s: %s", rel_path, e)
+        return None
+
+    chunks = []
+
+    for node in root.children:
+        node_type = node.type
+
+        # Skip non-declaration nodes (comments, whitespace, semicolons, etc.)
+        if node_type not in node_config:
+            continue
+
+        kind_raw, name_strategy = node_config[node_type]
+
+        # Get chunk kind (resolve wrappers)
+        chunk_kind = _ts_get_node_kind(node, kind_raw, name_strategy, lang)
+
+        # Get the name
+        name = _ts_get_node_name(node, name_strategy, lang)
+        if not name:
+            continue
+
+        start_line = node.start_point[0] + 1  # 1-based
+        end_line = node.end_point[0] + 1
+        node_text = content_bytes[node.start_byte:node.end_byte].decode("utf-8", errors="ignore")
+
+        chunks.append({
+            "id": f"{rel_path}:{name}:{start_line}",
+            "file_path": rel_path,
+            "name": name,
+            "kind": chunk_kind,
+            "line_start": start_line,
+            "line_end": end_line,
+            "content": node_text[:800],
+            "docstring": "",
+            "decorators": "",
+            "language": lang,
+            "node_type": node.type,
+            "node_name": name,
+        })
+
+        # For classes/structs/impl blocks, also extract methods as separate chunks
+        if chunk_kind in ("class", "struct", "impl", "trait", "interface"):
+            method_chunks = _ts_extract_methods(node, rel_path, name, content_bytes, lang)
+            chunks.extend(method_chunks)
+
+        # For export_statement / decorated_definition wrappers, extract inner methods too
+        if name_strategy == "unwrap_export":
+            for child in node.children:
+                if child.type in ("class_declaration",):
+                    inner_name = _ts_get_node_name(child, "name", lang)
+                    if inner_name:
+                        method_chunks = _ts_extract_methods(
+                            child, rel_path, inner_name, content_bytes, lang
+                        )
+                        chunks.extend(method_chunks)
+        elif name_strategy == "unwrap":
+            body = node.child_by_field_name("definition")
+            if body and body.type == "class_definition":
+                method_chunks = _ts_extract_methods(
+                    body, rel_path, name, content_bytes, lang
+                )
+                chunks.extend(method_chunks)
+
+    if not chunks:
+        return None  # Fall back to existing chunkers
+
+    logger.debug(
+        "[CodebaseIndex] tree-sitter extracted %d chunks from %s (%s)",
+        len(chunks), rel_path, lang
+    )
+    return chunks
+
+
+# ── Fallback chunkers ──────────────────────────────────────────
+
 def _chunk_python_ast(content: str, rel_path: str) -> List[dict]:
     """Use Python AST to extract function/class chunks."""
     chunks = []
@@ -570,9 +900,18 @@ def _chunk_by_sections(content: str, rel_path: str) -> List[dict]:
 
 
 def _extract_chunks(rel_path: str, content: str) -> List[dict]:
-    """Route to the right chunker based on file extension."""
+    """Route to the right chunker based on file extension.
+
+    Priority: tree-sitter AST → language-specific fallback → generic regex → sections.
+    """
     ext = Path(rel_path).suffix.lower()
 
+    # ── Preferred path: tree-sitter AST chunking ──
+    chunks = _chunk_treesitter(content, rel_path)
+    if chunks:
+        return chunks
+
+    # ── Fallback: language-specific chunkers ──
     chunks = []
     if ext in (".py", ".pyi", ".pyw"):
         chunks = _chunk_python_ast(content, rel_path)
