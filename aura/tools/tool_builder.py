@@ -470,10 +470,142 @@ class ToolBuilderTool:
 
         return tools
 
+    def _resolve_tool_import_info(self, tool_name: str) -> Optional[dict]:
+        """Resolve a tool name to its import path, class name, and public methods.
+
+        Checks _LAZY_IMPORTS for builtin tools, or the custom registry for custom tools.
+        Returns None if the tool cannot be resolved.
+        """
+        from . import _LAZY_IMPORTS
+
+        # Try to find a matching class in _LAZY_IMPORTS
+        # tool_name from the contract registry may be like "filesystem_read" but
+        # the importable class is "FileSystemTool" in ".filesystem"
+        # Strategy: look for *Tool classes whose module or name relates to tool_name
+        best_match = None
+        tool_name_lower = tool_name.lower().replace("_", "")
+
+        for symbol, (rel_module, attr) in _LAZY_IMPORTS.items():
+            if not symbol.endswith("Tool"):
+                continue
+            # Match by symbol name or module path
+            symbol_lower = symbol.lower().replace("tool", "").replace("_", "")
+            module_lower = rel_module.replace(".", "").replace("_", "")
+            if (tool_name_lower.startswith(symbol_lower)
+                    or symbol_lower.startswith(tool_name_lower)
+                    or tool_name_lower in module_lower
+                    or module_lower in tool_name_lower):
+                # Resolve full module path
+                full_module = f"aura.tools{rel_module[1:]}" if rel_module.startswith(".") else rel_module
+                best_match = {
+                    "class_name": attr,
+                    "module_path": full_module,
+                    "rel_module": rel_module,
+                }
+                break
+
+        if not best_match:
+            # Check custom tools
+            registry = self._load_registry()
+            for tool in registry.get("tools", []):
+                if tool["name"] == tool_name and tool.get("status") == "active":
+                    module_name = self._sanitize_name(tool["name"])
+                    best_match = {
+                        "class_name": tool.get("class_name", self._to_class_name(tool["name"])),
+                        "module_path": f"aura.tools.custom.{module_name}",
+                        "rel_module": f".custom.{module_name}",
+                    }
+                    break
+
+        if not best_match:
+            return None
+
+        # Try to inspect the class for public method signatures
+        methods = []
+        try:
+            import importlib
+            mod = importlib.import_module(best_match["module_path"])
+            cls = getattr(mod, best_match["class_name"], None)
+            if cls:
+                import inspect
+                for name, method in inspect.getmembers(cls, predicate=inspect.isfunction):
+                    if name.startswith("_"):
+                        continue
+                    if name == "execute":
+                        continue  # Skip generic dispatch
+                    try:
+                        sig = inspect.signature(method)
+                        # Build a compact signature string
+                        params = []
+                        for pname, param in sig.parameters.items():
+                            if pname == "self":
+                                continue
+                            if param.default is inspect.Parameter.empty:
+                                params.append(pname)
+                            else:
+                                params.append(f"{pname}={param.default!r}")
+                        ret = sig.return_annotation
+                        ret_str = ""
+                        if ret is not inspect.Parameter.empty:
+                            ret_str = f" -> {ret.__name__}" if hasattr(ret, "__name__") else f" -> {ret}"
+                        methods.append(f"{name}({', '.join(params)}){ret_str}")
+                    except (ValueError, TypeError):
+                        methods.append(name)
+        except Exception as e:
+            logger.debug(f"[ToolBuilder] Could not inspect {best_match['class_name']}: {e}")
+
+        best_match["methods"] = methods
+        return best_match
+
+    def _build_composition_block(self, composable: list) -> tuple:
+        """Build real import statements and usage context for composable tools.
+
+        Returns:
+            (code_block, prompt_context)
+            - code_block: Python import+instantiation code to prepend to the generated file
+            - prompt_context: Text description for the LLM prompt so it knows what's available
+        """
+        if not composable:
+            return "", ""
+
+        import_lines = []
+        instantiation_lines = []
+        prompt_lines = ["The following existing tools are available for composition. "
+                        "You SHOULD import and call them directly in your implementation:\n"]
+
+        for comp in composable:
+            info = comp.get("_import_info")
+            if not info:
+                continue
+
+            class_name = info["class_name"]
+            module_path = info["module_path"]
+            var_name = f"_{self._sanitize_name(comp['name'])}"
+
+            import_lines.append(f"from {module_path} import {class_name}")
+            instantiation_lines.append(f"{var_name} = {class_name}()")
+
+            # Build prompt context with method signatures
+            prompt_lines.append(f"  from {module_path} import {class_name}")
+            prompt_lines.append(f"  {var_name} = {class_name}()")
+            if info.get("methods"):
+                for m in info["methods"][:8]:  # Cap at 8 methods
+                    prompt_lines.append(f"  # {var_name}.{m}")
+            prompt_lines.append(f"  # Usage hint: {comp.get('usage', 'reusable tool')}")
+            prompt_lines.append("")
+
+        if not import_lines:
+            return "", ""
+
+        code_block = "\n".join(import_lines) + "\n\n" + "\n".join(instantiation_lines) + "\n"
+        prompt_context = "\n".join(prompt_lines)
+        return code_block, prompt_context
+
     def _find_composable_tools(self, description: str, max_results: int = 5) -> list:
         """Find existing tools that could be composed into the new tool (VOYAGER pattern).
 
         Uses LLM if available, falls back to keyword matching.
+        Enriches results with import paths and method signatures for real composition.
         """
         all_tools = self._get_registered_tools()
         if not all_tools:
@@ -501,21 +633,31 @@ Return empty list [] if none are relevant. Return ONLY the JSON.""",
             timeout=20,
         )
 
+        results = None
         if llm_result:
             parsed = self._parse_json_response(llm_result)
             if parsed:
-                return parsed[:max_results]
+                results = parsed[:max_results]
 
-        # Fallback: keyword overlap
-        desc_words = set(re.findall(r'\b[a-z]+\b', description.lower()))
-        scored = []
-        for t in all_tools.values():
-            tool_words = set(re.findall(r'\b[a-z]+\b', (t['name'] + ' ' + t['description']).lower()))
-            overlap = len(desc_words & tool_words)
-            if overlap > 1:
-                scored.append({"name": t["name"], "usage": f"Keyword overlap ({overlap} words)", "_score": overlap})
-        scored.sort(key=lambda x: x["_score"], reverse=True)
-        return [{"name": s["name"], "usage": s["usage"]} for s in scored[:max_results]]
+        if results is None:
+            # Fallback: keyword overlap
+            desc_words = set(re.findall(r'\b[a-z]+\b', description.lower()))
+            scored = []
+            for t in all_tools.values():
+                tool_words = set(re.findall(r'\b[a-z]+\b', (t['name'] + ' ' + t['description']).lower()))
+                overlap = len(desc_words & tool_words)
+                if overlap > 1:
+                    scored.append({"name": t["name"], "usage": f"Keyword overlap ({overlap} words)", "_score": overlap})
+            scored.sort(key=lambda x: x["_score"], reverse=True)
+            results = [{"name": s["name"], "usage": s["usage"]} for s in scored[:max_results]]
+
+        # Enrich each result with import info and method signatures
+        for comp in results:
+            info = self._resolve_tool_import_info(comp.get("name", ""))
+            if info:
+                comp["_import_info"] = info
+
+        return results
 
     def _parse_json_response(self, text: str) -> Optional[list]:
         """Extract a JSON list from LLM response text."""
@@ -757,13 +899,12 @@ Include 'if __name__ == "__main__": pytest.main([__file__, "-x", "-q"])' at the 
 '''
         methods.append(param_extractor)
 
-        # Add composition comment if composable tools found
-        composition_comment = ""
-        if composable:
-            comp_lines = [f"# VOYAGER Composition hints — these existing tools may be reusable:"]
-            for c in composable:
-                comp_lines.append(f"#   - {c.get('name', '?')}: {c.get('usage', '')}")
-            composition_comment = "\n".join(comp_lines) + "\n\n"
+        # Build real composition imports for composable tools (VOYAGER)
+        composition_code, composition_prompt = self._build_composition_block(composable)
+
+        # If we have composable tools with real imports, append them to extra_imports
+        if composition_code:
+            extra_imports = (extra_imports + "\n" if extra_imports else "") + composition_code
 
         # Build complete tool code
         created_at = datetime.now().isoformat()
@@ -777,14 +918,6 @@ Include 'if __name__ == "__main__": pytest.main([__file__, "-x", "-q"])' at the 
             methods="\n".join(methods),
             execute_logic="\n".join(execute_dispatches)
         )
-
-        # Inject composition comment at top of file (after docstring)
-        if composition_comment:
-            # Insert after the first triple-quoted docstring block
-            doc_end = tool_code.find('"""', tool_code.find('"""') + 3)
-            if doc_end > 0:
-                insert_pos = doc_end + 3
-                tool_code = tool_code[:insert_pos] + "\n\n" + composition_comment + tool_code[insert_pos:]
 
         # Reject excessively large generated code (>100KB is suspicious)
         if len(tool_code) > 100_000:
@@ -890,10 +1023,13 @@ Include 'if __name__ == "__main__": pytest.main([__file__, "-x", "-q"])' at the 
 
                     # Try to fix with LLM on retry
                     if retry_count <= max_retries and self._brain:
+                        composition_hint = ""
+                        if composition_prompt:
+                            composition_hint = f"\n\n{composition_prompt}\nYou SHOULD use the available tools listed above. Import and call them directly in your implementation.\n"
                         fix_prompt = f"""The template tests for tool '{safe_name}' failed.
 
 Test output:
-{test_output[-500:]}
+{test_output[-500:]}{composition_hint}
 
 Tool code:
 ```python
@@ -996,6 +1132,7 @@ that would make it pass. Return ONLY the corrected tool code between ```python a
                 "tests_passed": test_passed,
                 "signed": sig_path is not None,
                 "composable_tools": [c.get("name") for c in composable] if composable else [],
+                "composition_imports": composition_code if composition_code else None,
                 "gepa_registered": True,
                 "message": msg,
             },

@@ -273,21 +273,24 @@ class ConversationManager:
         Call this AFTER a message has been added to the brain's history.
         Records surface attribution and broadcasts to all listeners.
         """
-        # Get current message count to determine index
-        messages = self.brain.get_conversation_messages(conversation_id)
-        index = len(messages) - 1  # Last message is the one just added
+        # Lock to prevent concurrent surface log corruption when two
+        # surfaces add messages to the same conversation simultaneously.
+        with self._rw_lock:
+            # Get current message count to determine index
+            messages = self.brain.get_conversation_messages(conversation_id)
+            index = len(messages) - 1  # Last message is the one just added
 
-        # Record in surface log
-        log = self._load_surface_log(conversation_id)
-        log.append({
-            "index": index,
-            "surface": surface,
-            "surface_user": surface_user,
-            "timestamp": time.time(),
-            "role": role,
-            "preview": content[:100] if content else "",
-        })
-        self._save_surface_log(conversation_id, log)
+            # Record in surface log
+            log = self._load_surface_log(conversation_id)
+            log.append({
+                "index": index,
+                "surface": surface,
+                "surface_user": surface_user,
+                "timestamp": time.time(),
+                "role": role,
+                "preview": content[:100] if content else "",
+            })
+            self._save_surface_log(conversation_id, log)
 
         # Broadcast to all listeners
         self._broadcast(ConversationEvent(

@@ -16,6 +16,284 @@ from typing import Optional, List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Structured output parsers — regex-based, best-effort.
+# Each parser returns a dict or None.
+# ---------------------------------------------------------------------------
+
+def _parse_pytest(stdout: str, stderr: str) -> Optional[Dict[str, Any]]:
+    """Parse pytest summary output."""
+    combined = stdout + "\n" + stderr
+
+    result: Dict[str, Any] = {
+        "tests_passed": 0,
+        "tests_failed": 0,
+        "tests_error": 0,
+        "duration_seconds": 0.0,
+        "failures": [],
+    }
+
+    # Summary line: "X passed, Y failed, Z errors in N.NNs"
+    # Also handles: "X passed in N.NNs", "Y failed, Z errors in N.NNs", etc.
+    summary = re.search(
+        r'=+\s*(.*?)\s+in\s+([\d.]+)s?\s*=+',
+        combined,
+    )
+    if summary:
+        summary_text = summary.group(1)
+        result["duration_seconds"] = float(summary.group(2))
+
+        m = re.search(r'(\d+)\s+passed', summary_text)
+        if m:
+            result["tests_passed"] = int(m.group(1))
+        m = re.search(r'(\d+)\s+failed', summary_text)
+        if m:
+            result["tests_failed"] = int(m.group(1))
+        m = re.search(r'(\d+)\s+error', summary_text)
+        if m:
+            result["tests_error"] = int(m.group(1))
+
+    # Extract failure names from "FAILED test_file.py::test_name" lines
+    for m in re.finditer(r'FAILED\s+(\S+)', combined):
+        result["failures"].append(m.group(1))
+
+    # Only return structured data if we actually found the summary line
+    if summary:
+        return result
+    return None
+
+
+def _parse_git_status(stdout: str, stderr: str) -> Optional[Dict[str, Any]]:
+    """Parse git status output (both porcelain and human-readable)."""
+    combined = stdout + "\n" + stderr
+
+    result: Dict[str, Any] = {
+        "staged": [],
+        "modified": [],
+        "untracked": [],
+        "branch": "",
+        "clean": False,
+    }
+
+    # Branch name from "On branch <name>" (human-readable)
+    m = re.search(r'On branch\s+(\S+)', combined)
+    if m:
+        result["branch"] = m.group(1)
+
+    # Porcelain-style two-char status codes (git status --short / --porcelain)
+    # XY filename — X = staging, Y = worktree
+    porcelain_lines = re.findall(r'^([MADRCU?! ]{2})\s+(.+)$', stdout, re.MULTILINE)
+    if porcelain_lines:
+        for status, filepath in porcelain_lines:
+            x, y = status[0], status[1]
+            filepath = filepath.strip().strip('"')
+            if x == '?' and y == '?':
+                result["untracked"].append(filepath)
+            else:
+                if x in ('M', 'A', 'D', 'R', 'C'):
+                    result["staged"].append(filepath)
+                if y in ('M', 'D'):
+                    result["modified"].append(filepath)
+    else:
+        # Human-readable parsing fallback
+        # "Changes to be committed:" section
+        staged_section = re.search(
+            r'Changes to be committed:.*?\n(.*?)(?:\n\n|\nChanges|\nUntracked|\Z)',
+            combined, re.DOTALL,
+        )
+        if staged_section:
+            for line in staged_section.group(1).splitlines():
+                m2 = re.search(r'(?:new file|modified|deleted|renamed):\s+(.+)', line)
+                if m2:
+                    result["staged"].append(m2.group(1).strip())
+
+        # "Changes not staged for commit:" section
+        unstaged_section = re.search(
+            r'Changes not staged for commit:.*?\n(.*?)(?:\n\n|\nUntracked|\Z)',
+            combined, re.DOTALL,
+        )
+        if unstaged_section:
+            for line in unstaged_section.group(1).splitlines():
+                m2 = re.search(r'(?:modified|deleted):\s+(.+)', line)
+                if m2:
+                    result["modified"].append(m2.group(1).strip())
+
+        # "Untracked files:" section
+        untracked_section = re.search(
+            r'Untracked files:.*?\n(.*?)(?:\n\n|\Z)',
+            combined, re.DOTALL,
+        )
+        if untracked_section:
+            for line in untracked_section.group(1).splitlines():
+                line = line.strip()
+                if line and not line.startswith('('):
+                    result["untracked"].append(line)
+
+    # Clean check
+    if 'nothing to commit' in combined or (
+        not result["staged"] and not result["modified"] and not result["untracked"]
+        and ('working tree clean' in combined or 'nothing to commit' in combined)
+    ):
+        result["clean"] = True
+
+    # Only return if we found branch info or any file status
+    if result["branch"] or result["staged"] or result["modified"] or result["untracked"] or result["clean"]:
+        return result
+    return None
+
+
+def _parse_git_diff_stat(stdout: str, stderr: str) -> Optional[Dict[str, Any]]:
+    """Parse git diff --stat summary output."""
+    result: Dict[str, Any] = {
+        "files_changed": 0,
+        "insertions": 0,
+        "deletions": 0,
+        "files": [],
+    }
+
+    # Individual file lines: " src/foo.py | 10 ++++---"
+    for m in re.finditer(r'^\s*(.+?)\s+\|\s+(\d+)', stdout, re.MULTILINE):
+        result["files"].append(m.group(1).strip())
+
+    # Summary line: "3 files changed, 10 insertions(+), 5 deletions(-)"
+    summary = re.search(
+        r'(\d+)\s+files?\s+changed',
+        stdout,
+    )
+    if summary:
+        result["files_changed"] = int(summary.group(1))
+
+    m = re.search(r'(\d+)\s+insertions?\(\+\)', stdout)
+    if m:
+        result["insertions"] = int(m.group(1))
+
+    m = re.search(r'(\d+)\s+deletions?\(-\)', stdout)
+    if m:
+        result["deletions"] = int(m.group(1))
+
+    if result["files_changed"] > 0 or result["files"]:
+        return result
+    return None
+
+
+def _parse_npm_pip_install(stdout: str, stderr: str) -> Optional[Dict[str, Any]]:
+    """Parse npm install or pip install output."""
+    combined = stdout + "\n" + stderr
+
+    result: Dict[str, Any] = {
+        "packages_installed": 0,
+        "warnings": [],
+        "errors": [],
+    }
+
+    # npm: "added 5 packages" or "added 5 packages, removed 2 packages"
+    m = re.search(r'added\s+(\d+)\s+package', combined)
+    if m:
+        result["packages_installed"] = int(m.group(1))
+
+    # npm: "up to date" means 0 new
+    if 'up to date' in combined and result["packages_installed"] == 0:
+        result["packages_installed"] = 0
+
+    # pip: "Successfully installed pkg1-1.0 pkg2-2.0"
+    m = re.search(r'Successfully installed\s+(.+)', combined)
+    if m:
+        result["packages_installed"] = len(m.group(1).split())
+
+    # pip: "Requirement already satisfied" — count unique packages
+    already = re.findall(r'Requirement already satisfied:\s+(\S+)', combined)
+    if already and result["packages_installed"] == 0:
+        result["packages_installed"] = len(set(already))
+
+    # Warnings: npm "WARN" or pip "WARNING"
+    for m in re.finditer(r'(?:npm\s+)?(?:WARN|WARNING)[:\s]+(.+)', combined, re.IGNORECASE):
+        result["warnings"].append(m.group(1).strip()[:200])
+
+    # Errors: npm "ERR!" or pip "ERROR"
+    for m in re.finditer(r'(?:npm\s+)?(?:ERR!|ERROR)[:\s]+(.+)', combined, re.IGNORECASE):
+        result["errors"].append(m.group(1).strip()[:200])
+
+    # Only return if we found install-related output
+    if (result["packages_installed"] > 0 or result["warnings"]
+            or result["errors"] or 'up to date' in combined
+            or 'Successfully installed' in combined
+            or 'Requirement already satisfied' in combined):
+        return result
+    return None
+
+
+def _parse_ruff(stdout: str, stderr: str) -> Optional[Dict[str, Any]]:
+    """Parse ruff check output."""
+    combined = stdout + "\n" + stderr
+
+    result: Dict[str, Any] = {
+        "errors": 0,
+        "warnings": 0,
+        "fixable": 0,
+        "rules": {},
+    }
+
+    # Individual violation lines: "file.py:10:1: E501 ..."
+    for m in re.finditer(r':\d+:\d+:\s+([A-Z]+\d+)', combined):
+        rule = m.group(1)
+        result["rules"][rule] = result["rules"].get(rule, 0) + 1
+
+    total_issues = sum(result["rules"].values())
+    result["errors"] = total_issues
+
+    # "Found N errors" line
+    m = re.search(r'Found\s+(\d+)\s+error', combined)
+    if m:
+        result["errors"] = int(m.group(1))
+
+    # "N fixable with" line
+    m = re.search(r'\[(\d+)\s+fixable', combined)
+    if not m:
+        m = re.search(r'(\d+)\s+(?:potentially\s+)?fixable', combined)
+    if m:
+        result["fixable"] = int(m.group(1))
+
+    # "All checks passed" means clean
+    if 'All checks passed' in combined:
+        result["errors"] = 0
+        result["warnings"] = 0
+        return result
+
+    if result["errors"] > 0 or result["rules"] or result["fixable"] > 0:
+        return result
+    return None
+
+
+def _parse_structured_output(
+    command: str, stdout: str, stderr: str, exit_code: int
+) -> Optional[Dict[str, Any]]:
+    """Detect command type and return structured parsed data, or None."""
+    cmd = command.strip().lower()
+
+    # pytest
+    if cmd.startswith('pytest') or cmd.startswith('python -m pytest'):
+        return _parse_pytest(stdout, stderr)
+
+    # git status
+    if re.match(r'^git\s+status\b', cmd):
+        return _parse_git_status(stdout, stderr)
+
+    # git diff --stat
+    if re.match(r'^git\s+diff\b', cmd) and '--stat' in cmd:
+        return _parse_git_diff_stat(stdout, stderr)
+
+    # npm install / pip install
+    if re.match(r'^(?:npm|pnpm|yarn)\s+install\b', cmd) or re.match(r'^(?:pip|pip3)\s+install\b', cmd):
+        return _parse_npm_pip_install(stdout, stderr)
+
+    # ruff
+    if re.match(r'^ruff\b', cmd):
+        return _parse_ruff(stdout, stderr)
+
+    return None
+
+
 # Environment keys safe to pass to child processes.
 # Everything else (API keys, tokens, secrets) is stripped.
 _SAFE_ENV_KEYS = {
@@ -474,6 +752,9 @@ class ShellExecutorTool:
             "cwd": session.cwd,
         }
 
+        # Structured output parsing
+        result["structured"] = _parse_structured_output(command, stdout, stderr, exit_code)
+
         # Build response string
         output_parts = []
         if stdout.strip():
@@ -663,6 +944,9 @@ class ShellExecutorTool:
             "cwd": session.cwd,
         }
 
+        # Structured output parsing
+        result["structured"] = _parse_structured_output(command, stdout, stderr, exit_code)
+
         output_parts = []
         if stdout.strip():
             output_parts.append(stdout.strip())
@@ -752,20 +1036,24 @@ class ShellExecutorTool:
                             timeout=min(timeout, MAX_TIMEOUT), cwd=cwd,
                             env=_get_sanitized_env(),
                         )
-                        return {
+                        ret = {
                             "success": result.returncode == 0,
                             "stdout": result.stdout,
                             "stderr": result.stderr,
                             "exit_code": result.returncode,
                             "response": result.stdout.strip() or result.stderr.strip() or f"Exit code {result.returncode}",
                         }
+                        ret["structured"] = _parse_structured_output(
+                            command, result.stdout, result.stderr, result.returncode
+                        )
+                        return ret
                     except subprocess.TimeoutExpired:
                         return {"success": False, "error": f"Command timed out after {timeout}s"}
                     except Exception as e:
                         return {"success": False, "error": str(e)}
 
         result = self._sandbox.run_shell(command, cwd=cwd)
-        return {
+        ret = {
             "success": result.success,
             "stdout": result.stdout,
             "stderr": result.stderr,
@@ -776,6 +1064,10 @@ class ShellExecutorTool:
             "response": result.stdout.strip() or result.stderr.strip() or f"Command completed (exit code {result.exit_code})",
             **({"error": result.error} if result.error else {}),
         }
+        ret["structured"] = _parse_structured_output(
+            command, result.stdout, result.stderr, result.exit_code
+        )
+        return ret
 
 
 # Singleton

@@ -54,6 +54,8 @@ class ScreenMonitor(BaseMonitor):
     - Detects app switches
     - Integrates with Screenpipe for OCR content
     - Detects user idle state
+
+    Automatically disables on headless servers (no DISPLAY).
     """
 
     def __init__(
@@ -73,6 +75,14 @@ class ScreenMonitor(BaseMonitor):
             use_screenpipe: Whether to use Screenpipe integration
         """
         super().__init__(event_bus, poll_interval)
+
+        # Detect headless: no display on Linux = nothing to monitor
+        import sys as _sys, os as _os
+        self._headless = bool(_os.environ.get("AURA_HEADLESS")) or (
+            _sys.platform != "win32" and not _os.environ.get("DISPLAY")
+        )
+        if self._headless:
+            logger.info("[ScreenMonitor] Headless mode detected -- polling disabled")
 
         self._idle_threshold = idle_threshold
         self._use_screenpipe = use_screenpipe and SCREENPIPE_AVAILABLE
@@ -141,6 +151,9 @@ class ScreenMonitor(BaseMonitor):
 
     async def _poll(self) -> List[Event]:
         """Poll for screen events."""
+        if self._headless:
+            return []  # Nothing to monitor without a display
+
         events = []
 
         # Get current window info

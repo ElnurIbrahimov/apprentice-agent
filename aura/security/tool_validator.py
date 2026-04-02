@@ -16,6 +16,7 @@ ALLOWED_TOOL_IMPORTS = {
     "pathlib", "collections", "enum", "abc", "math",
     "itertools", "functools", "operator", "string",
     "urllib.parse",  # urllib.parse is safe (URL encoding/decoding)
+    "aura",  # Allow importing aura.tools.* for VOYAGER tool composition
 }
 
 # Forbidden patterns that indicate potentially malicious code

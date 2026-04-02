@@ -385,12 +385,20 @@ class DreamSummary:
 
 @dataclass
 class RoutinePattern:
-    """A repeated behavioral pattern detected across episodic memory."""
+    """A repeated behavioral sequence detected from interaction logs.
+
+    Extracted by mining metacognition JSONL logs for tool-call N-grams
+    that recur across 3+ successful goals.
+    """
     pattern_id: str = field(default_factory=lambda: str(uuid.uuid4())[:10])
-    trigger_context: str = ""
-    expected_action: str = ""
-    frequency: int = 0
+    trigger_context: str = ""          # goal/domain that triggers this sequence
+    expected_action: str = ""          # human-readable description
+    frequency: int = 0                 # backward-compat alias for occurrence_count
     last_seen: float = field(default_factory=time.time)
+    # New fields for real behavioral sequences
+    sequence: List[str] = field(default_factory=list)   # e.g. ["code_search", "code_edit", "shell_executor"]
+    success_rate: float = 0.0          # 0.0-1.0 how often this sequence led to success
+    occurrence_count: int = 0          # how many goals contained this sequence
 
 
 @dataclass
@@ -446,6 +454,38 @@ def _jaccard(a: set, b: set) -> float:
     if not a and not b:
         return 0.0
     return len(a & b) / len(a | b)
+
+
+def _is_subsequence(short: tuple, long: tuple) -> bool:
+    """Check if *short* appears as a contiguous sub-sequence within *long*."""
+    n, m = len(short), len(long)
+    if n > m:
+        return False
+    for i in range(m - n + 1):
+        if long[i:i + n] == short:
+            return True
+    return False
+
+
+# Cosmetic names for display — keeps log output readable
+_TOOL_DISPLAY_MAP = {
+    "shell_executor": "Run shell",
+    "code_search": "Search code",
+    "code_edit": "Edit code",
+    "file_read": "Read file",
+    "file_write": "Write file",
+    "web_search": "Web search",
+    "knowledge_graph": "Query KG",
+    "memory_search": "Search memory",
+    "memory_store": "Store memory",
+    "reasoning_tree": "MCTS reason",
+    "think": "Think",
+}
+
+
+def _tool_display_name(tool: str) -> str:
+    """Return a human-readable name for a tool, falling back to the raw name."""
+    return _TOOL_DISPLAY_MAP.get(tool, tool.replace("_", " ").title())
 
 
 def _get_embeddings(texts: List[str]) -> Optional[List[List[float]]]:
@@ -906,7 +946,212 @@ class DreamConsolidator:
     def _extract_routines(
         self, memories: List[Dict[str, Any]]
     ) -> List[RoutinePattern]:
-        """Detect repeated patterns: same-ish content appearing 3+ times."""
+        """Extract real behavioral sequences from metacognition logs.
+
+        Mines the JSONL interaction logs for tool-call N-grams (2-4 tools)
+        that recur in 3+ successful goals.  Falls back to the legacy
+        bag-of-words approach if no interaction logs are available.
+        """
+        routines = self._extract_routines_from_logs()
+        if routines:
+            return routines
+
+        # Cold-start fallback: no metacognition logs yet
+        logger.warning(
+            "[DreamConsolidator] No metacognition logs found — "
+            "falling back to bag-of-words routine extraction. "
+            "Behavioral sequences will appear once interaction logs accumulate."
+        )
+        return self._extract_routines_fallback_bow(memories)
+
+    # ------------------------------------------------------------------
+    # Primary: mine metacognition JSONL for tool-call sequences
+    # ------------------------------------------------------------------
+
+    def _extract_routines_from_logs(self) -> List[RoutinePattern]:
+        """Read recent metacognition JSONL logs and extract recurring
+        tool-call sequences grouped by goal."""
+        log_dir = Path("logs/metacognition")
+        if not log_dir.exists():
+            return []
+
+        # Collect entries from the most recent log files (up to 14 days)
+        entries: List[Dict[str, Any]] = []
+        jsonl_files = sorted(log_dir.glob("*.jsonl"), reverse=True)[:14]
+        if not jsonl_files:
+            return []
+
+        for fpath in jsonl_files:
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            entries.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            continue
+            except OSError:
+                continue
+
+        if len(entries) < 6:
+            # Not enough data to find meaningful sequences
+            return []
+
+        # --- Group tool calls by goal ---
+        # Each entry has: goal, tool, success, iteration, timestamp
+        goals: Dict[str, List[Dict[str, Any]]] = {}
+        for e in entries:
+            goal = e.get("goal") or "(unknown)"
+            goals.setdefault(goal, []).append(e)
+
+        # Sort each goal's entries by iteration then timestamp
+        for goal_entries in goals.values():
+            goal_entries.sort(key=lambda x: (
+                x.get("iteration", 0),
+                x.get("timestamp", ""),
+            ))
+
+        # --- Build per-goal tool sequences and success flags ---
+        goal_sequences: List[Dict[str, Any]] = []
+        for goal, goal_entries in goals.items():
+            tools = [e.get("tool", "") for e in goal_entries if e.get("tool")]
+            if len(tools) < 2:
+                continue
+            # A goal is "successful" if the majority of its tool calls succeeded
+            success_count = sum(1 for e in goal_entries if e.get("success"))
+            goal_success = success_count > len(goal_entries) / 2
+            # Infer domain from the goal text
+            domain = self._infer_domain_from_goal(goal)
+            goal_sequences.append({
+                "goal": goal,
+                "tools": tools,
+                "success": goal_success,
+                "domain": domain,
+                "timestamp": goal_entries[-1].get("timestamp", ""),
+            })
+
+        if not goal_sequences:
+            return []
+
+        # --- Extract N-grams (2, 3, 4) across all goals ---
+        # Key: tuple of tool names -> {count, success_count, domains, last_seen}
+        ngram_stats: Dict[tuple, Dict[str, Any]] = {}
+        for gs in goal_sequences:
+            tools = gs["tools"]
+            for n in (2, 3, 4):
+                if len(tools) < n:
+                    continue
+                seen_in_this_goal: set = set()
+                for i in range(len(tools) - n + 1):
+                    ngram = tuple(tools[i:i + n])
+                    if ngram in seen_in_this_goal:
+                        continue  # Count each ngram once per goal
+                    seen_in_this_goal.add(ngram)
+                    if ngram not in ngram_stats:
+                        ngram_stats[ngram] = {
+                            "count": 0,
+                            "success_count": 0,
+                            "domains": {},
+                            "last_seen": "",
+                        }
+                    stats = ngram_stats[ngram]
+                    stats["count"] += 1
+                    if gs["success"]:
+                        stats["success_count"] += 1
+                    domain = gs["domain"]
+                    stats["domains"][domain] = stats["domains"].get(domain, 0) + 1
+                    if gs["timestamp"] > stats["last_seen"]:
+                        stats["last_seen"] = gs["timestamp"]
+
+        # --- Filter: 3+ occurrences, prefer longer N-grams ---
+        min_occurrences = self._min_cluster  # default 3
+        candidates = [
+            (ngram, stats) for ngram, stats in ngram_stats.items()
+            if stats["count"] >= min_occurrences
+        ]
+
+        if not candidates:
+            return []
+
+        # Remove N-grams that are strict sub-sequences of a higher-count longer one
+        # Sort by length desc, then count desc
+        candidates.sort(key=lambda x: (-len(x[0]), -x[1]["count"]))
+        kept: List[tuple] = []
+        for ngram, stats in candidates:
+            # Check if this ngram is a sub-sequence of any already-kept longer ngram
+            subsumed = False
+            for longer in kept:
+                if len(longer) > len(ngram) and _is_subsequence(ngram, longer):
+                    subsumed = True
+                    break
+            if not subsumed:
+                kept.append(ngram)
+
+        # --- Build RoutinePattern objects ---
+        routines: List[RoutinePattern] = []
+        for ngram in kept:
+            stats = ngram_stats[ngram]
+            count = stats["count"]
+            success_count = stats["success_count"]
+            success_rate = success_count / count if count > 0 else 0.0
+            # Primary domain = most common trigger
+            primary_domain = max(stats["domains"], key=stats["domains"].get) if stats["domains"] else "general"
+            # Human-readable description
+            readable = " -> ".join(
+                _tool_display_name(t) for t in ngram
+            )
+            # Parse last_seen timestamp
+            try:
+                last_ts = datetime.fromisoformat(stats["last_seen"]).timestamp()
+            except (ValueError, TypeError):
+                last_ts = time.time()
+
+            routines.append(RoutinePattern(
+                trigger_context=primary_domain,
+                expected_action=readable,
+                frequency=count,
+                last_seen=last_ts,
+                sequence=list(ngram),
+                success_rate=round(success_rate, 3),
+                occurrence_count=count,
+            ))
+
+        # Sort by occurrence count desc, then success rate desc
+        routines.sort(key=lambda r: (-r.occurrence_count, -r.success_rate))
+        return routines[:20]  # Cap at 20 to avoid noise
+
+    @staticmethod
+    def _infer_domain_from_goal(goal: str) -> str:
+        """Lightweight keyword match to bucket a goal string into a domain."""
+        if not goal:
+            return "general"
+        g = goal.lower()
+        if any(kw in g for kw in ("fix", "bug", "error", "debug", "broken", "fail")):
+            return "bug_fix"
+        if any(kw in g for kw in ("write", "create", "implement", "build", "generate", "add")):
+            return "code_gen"
+        if any(kw in g for kw in ("refactor", "clean", "rename", "reorganize", "simplify")):
+            return "refactor"
+        if any(kw in g for kw in ("test", "spec", "assert", "coverage")):
+            return "testing"
+        if any(kw in g for kw in ("search", "find", "look", "where", "locate")):
+            return "search"
+        if any(kw in g for kw in ("explain", "what", "how", "why", "describe")):
+            return "explanation"
+        if any(kw in g for kw in ("plan", "design", "architect", "strategy")):
+            return "planning"
+        return "general"
+
+    # ------------------------------------------------------------------
+    # Fallback: legacy bag-of-words (cold start only)
+    # ------------------------------------------------------------------
+
+    def _extract_routines_fallback_bow(
+        self, memories: List[Dict[str, Any]]
+    ) -> List[RoutinePattern]:
+        """Legacy bag-of-words fallback for when no interaction logs exist."""
         if len(memories) < self._min_cluster:
             return []
 
@@ -921,8 +1166,9 @@ class DreamConsolidator:
             if len(ids) >= self._min_cluster:
                 routines.append(RoutinePattern(
                     trigger_context=fp,
-                    expected_action="(recurring memory pattern)",
+                    expected_action="(recurring memory pattern — no interaction logs yet)",
                     frequency=len(ids),
+                    occurrence_count=len(ids),
                 ))
         return routines
 

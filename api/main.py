@@ -25,7 +25,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from api.routes import chat, status, upload, features, multi_agent, reasoning_tree, proactive, memory, context, conversation_starters, thinking, idle_behaviors, self_improvement, thinking_mode, tools_new, activity, multi_model, knowledge, search, pdf, transcribe, ocr, image_gen, agent_action, models as models_route, summarize, youtube, math as math_route, research, evolution, artifacts, feed, providers as providers_route, code as code_route, webhooks as webhooks_route, generate as generate_route
+from api.routes import chat, status, upload, features, multi_agent, reasoning_tree, proactive, memory, context, conversation_starters, thinking, idle_behaviors, self_improvement, thinking_mode, tools_new, activity, multi_model, knowledge, search, pdf, transcribe, ocr, image_gen, agent_action, build as build_route, models as models_route, summarize, youtube, math as math_route, research, evolution, artifacts, feed, providers as providers_route, code as code_route, webhooks as webhooks_route, generate as generate_route
 try:
     from api.routes import reliability as reliability_route
     _reliability_available = True
@@ -131,17 +131,24 @@ async def lifespan(app: FastAPI):
             await sys_monitor.start()
 
             # Start ScreenMonitor for app/window tracking + Screenpipe OCR
+            # Skip on headless servers (no display = no useful screen data)
+            _is_headless = bool(os.environ.get("AURA_HEADLESS")) or (
+                sys.platform != "win32" and not os.environ.get("DISPLAY")
+            )
             screen_monitor = None
-            try:
-                from aura.proactive.monitors.screen_monitor import ScreenMonitor
-                screen_monitor = ScreenMonitor(
-                    event_bus=daemon.event_bus,
-                    poll_interval=10.0,  # Was 3.0, reduce CPU/thread pressure
-                )
-                await screen_monitor.start()
-                logger.info("[API] ScreenMonitor started")
-            except Exception as e:
-                logger.warning(f"[API] ScreenMonitor failed to start: {e}")
+            if _is_headless:
+                logger.info("[API] ScreenMonitor skipped (headless mode)")
+            else:
+                try:
+                    from aura.proactive.monitors.screen_monitor import ScreenMonitor
+                    screen_monitor = ScreenMonitor(
+                        event_bus=daemon.event_bus,
+                        poll_interval=10.0,  # Was 3.0, reduce CPU/thread pressure
+                    )
+                    await screen_monitor.start()
+                    logger.info("[API] ScreenMonitor started")
+                except Exception as e:
+                    logger.warning(f"[API] ScreenMonitor failed to start: {e}")
 
             # Start CalendarMonitor for meeting/event awareness
             calendar_monitor = None
@@ -154,14 +161,18 @@ async def lifespan(app: FastAPI):
                 logger.warning(f"[API] CalendarMonitor failed to start: {e}")
 
             # Start WorkflowDetector for interruption timing
+            # Skip on headless servers (depends on Screenpipe / display)
             workflow_detector = None
-            try:
-                from aura.proactive.monitors.workflow_detector import get_workflow_detector
-                workflow_detector = get_workflow_detector(event_bus=daemon.event_bus)
-                await workflow_detector.start()
-                logger.info("[API] WorkflowDetector started")
-            except Exception as e:
-                logger.warning(f"[API] WorkflowDetector failed to start: {e}")
+            if _is_headless:
+                logger.info("[API] WorkflowDetector skipped (headless mode)")
+            else:
+                try:
+                    from aura.proactive.monitors.workflow_detector import get_workflow_detector
+                    workflow_detector = get_workflow_detector(event_bus=daemon.event_bus)
+                    await workflow_detector.start()
+                    logger.info("[API] WorkflowDetector started")
+                except Exception as e:
+                    logger.warning(f"[API] WorkflowDetector failed to start: {e}")
 
             # Store refs for shutdown
             app.state.proactive_daemon = daemon
@@ -170,7 +181,14 @@ async def lifespan(app: FastAPI):
             app.state.calendar_monitor = calendar_monitor
             app.state.workflow_detector = workflow_detector
 
-            logger.info("[API] Proactive system started (Gateway Daemon + SystemMonitor + ScreenMonitor + CalendarMonitor + WorkflowDetector)")
+            _active = ["GatewayDaemon", "SystemMonitor", "CalendarMonitor"]
+            if screen_monitor:
+                _active.append("ScreenMonitor")
+            if workflow_detector:
+                _active.append("WorkflowDetector")
+            logger.info("[API] Proactive system started (%s)%s",
+                        " + ".join(_active),
+                        " [headless]" if _is_headless else "")
             logger.info("[API] SQLite persistence active for proactive subsystem")
         except Exception as e:
             logger.warning(f"[API] Proactive system failed to start: {e}")
@@ -388,6 +406,7 @@ app.include_router(transcribe.router)
 app.include_router(ocr.router)
 app.include_router(image_gen.router)
 app.include_router(agent_action.router)
+app.include_router(build_route.router)
 app.include_router(models_route.router)
 app.include_router(summarize.router)
 app.include_router(youtube.router)

@@ -80,6 +80,14 @@ class WorkflowDetector(BaseMonitor):
     ):
         super().__init__(event_bus=event_bus, poll_interval=poll_interval)
 
+        # Detect headless: no display on Linux = nothing to monitor
+        import sys as _sys, os as _os
+        self._headless = bool(_os.environ.get("AURA_HEADLESS")) or (
+            _sys.platform != "win32" and not _os.environ.get("DISPLAY")
+        )
+        if self._headless:
+            logger.info("[WorkflowDetector] Headless mode detected -- polling disabled")
+
         # State tracking
         self._current_app: str = ""
         self._current_window: str = ""
@@ -109,6 +117,9 @@ class WorkflowDetector(BaseMonitor):
 
     async def _poll(self) -> List[Event]:
         """Poll screen state to detect workflow boundaries."""
+        if self._headless:
+            return []  # Nothing to monitor without a display
+
         events = []
 
         try:
