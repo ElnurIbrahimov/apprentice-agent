@@ -3,6 +3,7 @@ import { useStore } from '../store';
 import { User, FileText, Sparkles, RotateCcw, Save, Check, Server, Key, ChevronDown, ChevronRight, Zap, Eye, EyeOff } from 'lucide-react';
 import { getBackendUrl, setBackendUrl, setApiKey, API_KEY } from '../api';
 import { connectWS, fetchStatus, resetWsRetry } from '../ws';
+import { getDefaultCreationSettings, loadCreationSettings, saveCreationSettings, type CreationSettings } from '../utils/creationSettings';
 
 // Direct API provider definitions — categorized
 const API_PROVIDER_CATEGORIES = [
@@ -298,6 +299,7 @@ export default function SettingsPanel() {
   const [providerShowKey, setProviderShowKey] = useState<Record<string, boolean>>({});
   const [providerSaving, setProviderSaving] = useState<string | null>(null);
   const [providerMsg, setProviderMsg] = useState<Record<string, { ok: boolean; text: string }>>({});
+  const [creationSettings, setCreationSettings] = useState<CreationSettings>(getDefaultCreationSettings());
 
   // Load provider status on mount
   useEffect(() => {
@@ -318,6 +320,10 @@ export default function SettingsPanel() {
       } catch { /* ignore */ }
     };
     fetchProviders();
+  }, []);
+
+  useEffect(() => {
+    loadCreationSettings().then(setCreationSettings).catch(() => {});
   }, []);
 
   const handleSaveProviderKey = useCallback(async (name: string) => {
@@ -363,6 +369,16 @@ export default function SettingsPanel() {
       setProviderMsg((prev) => ({ ...prev, [name]: { ok: true, text: 'Key removed' } }));
       setTimeout(() => setProviderMsg((prev) => ({ ...prev, [name]: undefined as any })), 4000);
     } catch { /* ignore */ }
+  }, []);
+
+  const handleCreationSettingToggle = useCallback(async (key: keyof CreationSettings, value: boolean) => {
+    setCreationSettings((prev) => ({ ...prev, [key]: value }));
+    await saveCreationSettings({ [key]: value });
+  }, []);
+
+  const handleCreationSettingNumber = useCallback(async (key: keyof CreationSettings, value: number) => {
+    setCreationSettings((prev) => ({ ...prev, [key]: value }));
+    await saveCreationSettings({ [key]: value });
   }, []);
 
   const charCount = localInstructions.length;
@@ -713,6 +729,160 @@ export default function SettingsPanel() {
                 </div>
               </div>
             ))}
+          </div>
+        </section>
+
+        {/* Section: Creation Automation */}
+        <section>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <Sparkles size={16} style={{ color: 'var(--pl)' }} />
+            <h3 style={{ margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--fg)', letterSpacing: '0.03em' }}>
+              CREATION AUTOMATION
+            </h3>
+          </div>
+          <p style={{ margin: '0 0 10px', fontSize: 11, color: 'var(--fg2)' }}>
+            Controls how Artifacts and Web Creator react to preview failures. Changes save immediately.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <label style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              justifyContent: 'space-between',
+              gap: 12,
+              padding: '12px 14px',
+              borderRadius: 10,
+              border: '1px solid var(--b2)',
+              background: 'var(--glass)',
+              cursor: 'pointer',
+            }}>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg)', marginBottom: 3 }}>
+                  Auto-fix preview errors
+                </div>
+                <div style={{ fontSize: 10.5, color: 'var(--fg3)', lineHeight: 1.45 }}>
+                  Aura will automatically try up to 3 repair passes when generated code crashes in the preview iframe.
+                </div>
+              </div>
+              <input
+                type="checkbox"
+                checked={creationSettings.autoFixErrors}
+                onChange={(e) => handleCreationSettingToggle('autoFixErrors', e.target.checked)}
+                style={{ marginTop: 2, accentColor: 'var(--pl)' }}
+              />
+            </label>
+
+            <label style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              justifyContent: 'space-between',
+              gap: 12,
+              padding: '12px 14px',
+              borderRadius: 10,
+              border: '1px solid var(--b2)',
+              background: 'var(--glass)',
+              cursor: 'pointer',
+            }}>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg)', marginBottom: 3 }}>
+                  Auto-open console on errors
+                </div>
+                <div style={{ fontSize: 10.5, color: 'var(--fg3)', lineHeight: 1.45 }}>
+                  Opens the Artifacts console drawer the first time an error is detected so the failure is visible immediately.
+                </div>
+              </div>
+              <input
+                type="checkbox"
+                checked={creationSettings.autoOpenConsoleOnError}
+                onChange={(e) => handleCreationSettingToggle('autoOpenConsoleOnError', e.target.checked)}
+                style={{ marginTop: 2, accentColor: 'var(--pl)' }}
+              />
+            </label>
+
+            <label style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              justifyContent: 'space-between',
+              gap: 12,
+              padding: '12px 14px',
+              borderRadius: 10,
+              border: '1px solid var(--b2)',
+              background: 'var(--glass)',
+              cursor: 'pointer',
+            }}>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg)', marginBottom: 3 }}>
+                  Show diff before applying AI changes
+                </div>
+                <div style={{ fontSize: 10.5, color: 'var(--fg3)', lineHeight: 1.45 }}>
+                  Keeps the current artifact or page live until Aura finishes a proposal, then lets you accept or reject the AI edit from a side-by-side diff.
+                </div>
+              </div>
+              <input
+                type="checkbox"
+                checked={creationSettings.showDiffBeforeApply}
+                onChange={(e) => handleCreationSettingToggle('showDiffBeforeApply', e.target.checked)}
+                style={{ marginTop: 2, accentColor: 'var(--pl)' }}
+              />
+            </label>
+
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 120px',
+              alignItems: 'center',
+              gap: 12,
+              padding: '12px 14px',
+              borderRadius: 10,
+              border: '1px solid var(--b2)',
+              background: 'var(--glass)',
+            }}>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg)', marginBottom: 3 }}>
+                  Auto-accept tiny edits
+                </div>
+                <div style={{ fontSize: 10.5, color: 'var(--fg3)', lineHeight: 1.45 }}>
+                  If the AI changes this many lines or fewer, Aura applies the update immediately instead of opening the diff review.
+                </div>
+              </div>
+              <input
+                type="number"
+                min={0}
+                max={20}
+                value={creationSettings.autoAcceptDiffLineThreshold}
+                onChange={(e) => handleCreationSettingNumber('autoAcceptDiffLineThreshold', Math.max(0, Math.min(20, Number(e.target.value) || 0)))}
+                style={{ ...inputStyle, padding: '8px 10px', fontSize: 12, textAlign: 'right' }}
+              />
+            </div>
+
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 120px',
+              alignItems: 'center',
+              gap: 12,
+              padding: '12px 14px',
+              borderRadius: 10,
+              border: '1px solid var(--b2)',
+              background: 'var(--glass)',
+            }}>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg)', marginBottom: 3 }}>
+                  Large-change review threshold
+                </div>
+                <div style={{ fontSize: 10.5, color: 'var(--fg3)', lineHeight: 1.45 }}>
+                  Percentage of changed code that counts as a meaningful rewrite. Larger edits always stay in review mode when diff review is enabled.
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input
+                  type="number"
+                  min={5}
+                  max={100}
+                  value={creationSettings.forceDiffReviewChangePercent}
+                  onChange={(e) => handleCreationSettingNumber('forceDiffReviewChangePercent', Math.max(5, Math.min(100, Number(e.target.value) || 5)))}
+                  style={{ ...inputStyle, padding: '8px 10px', fontSize: 12, textAlign: 'right' }}
+                />
+                <span style={{ fontSize: 11, color: 'var(--fg2)' }}>%</span>
+              </div>
+            </div>
           </div>
         </section>
 

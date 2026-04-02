@@ -746,7 +746,11 @@ class ToolExecutor:
                 except Exception:
                     return
             if content:
-                filename = Path(path).name
+                try:
+                    filename = os.path.relpath(path, self.project_root)
+                except Exception:
+                    filename = Path(path).name
+                filename = filename.replace("\\", "/")
                 broadcast_artifact(filename, content)
                 logger.debug(f"[AgenticLoop] Artifact broadcast: {filename} ({len(content)} chars)")
         except ImportError:

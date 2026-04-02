@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Terminal, ChevronRight, Copy, Play, Upload, Check, Pencil, Bug, RotateCcw, Zap, Square, Globe, Server } from 'lucide-react';
+import { Terminal, ChevronRight, Copy, Play, Upload, Check, Pencil, Bug, RotateCcw, Zap, Square, Globe, Server, FilePlus, X, FileCode2, ExternalLink, Sparkles, Presentation } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { useStore } from '../store';
 import { HTTP, getAuthHeaders } from '../api';
+import CodeEditor from '../components/CodeEditor';
 import ModelPill from '../components/ModelPill';
 import { getPyodideExecutor, PyodideExecutor } from '../utils/PyodideExecutor';
 import type { OutputBlock as PyOutputBlock, VariableInfo as PyVariableInfo } from '../utils/PyodideExecutor';
@@ -42,6 +43,14 @@ interface Exchange {
   executionStartTime?: number;
 }
 
+/* ── Multi-file Python support ── */
+interface PythonFile {
+  name: string;
+  content: string;
+}
+
+const DEFAULT_FILE = 'main.py';
+
 const SYSTEM_PROMPT =
   'You are a Python data analyst. Write and explain code to accomplish the user\'s request. ' +
   'Use matplotlib for charts (call plt.show()). Use print() for output. ' +
@@ -59,6 +68,13 @@ function newId() { return `ex-${Date.now()}-${++_exchangeCounter}`; }
 
 /* ── Sub-components ── */
 
+const handoffBtnStyle: React.CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', gap: 3,
+  background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.25)',
+  borderRadius: 'var(--r-sm)', color: '#a78bfa', padding: '3px 8px',
+  fontSize: '9.5px', cursor: 'pointer', fontFamily: 'inherit', marginTop: 4, marginRight: 4,
+};
+
 function OutputBlockRenderer({ block, idx, exchangeId, code, onFix }: {
   block: OutputBlock; idx: number; exchangeId: string; code: string;
   onFix: (id: string, error: string, code: string) => void;
@@ -71,17 +87,60 @@ function OutputBlockRenderer({ block, idx, exchangeId, code, onFix }: {
           alt="Chart output"
           style={{ maxWidth: '100%', borderRadius: 'var(--r-sm)', border: '1px solid var(--b1)' }}
         />
+        <div>
+          <button
+            style={handoffBtnStyle}
+            onClick={() => {
+              const { handoffToPanel } = useStore.getState();
+              const imgHtml = `<img src="data:${block.mime || 'image/png'};base64,${block.data}" style="max-width:100%;" />`;
+              handoffToPanel('webcreator', { code: `<!DOCTYPE html><html><body style="margin:0;display:flex;justify-content:center;padding:20px;">${imgHtml}</body></html>`, from: 'Code' });
+            }}
+          >
+            <ExternalLink size={9} /> Web Creator
+          </button>
+          <button
+            style={handoffBtnStyle}
+            onClick={() => {
+              const { handoffToPanel } = useStore.getState();
+              const imgHtml = `<img src="data:${block.mime || 'image/png'};base64,${block.data}" style="max-width:100%;" />`;
+              handoffToPanel('artifacts', { code: imgHtml, type: 'html', from: 'Code' });
+            }}
+          >
+            <Sparkles size={9} /> Artifact
+          </button>
+        </div>
       </div>
     );
   }
   if (block.type === 'html') {
     return (
-      <div
-        key={idx}
-        className="code-table-wrap"
-        style={{ marginTop: 8, overflow: 'auto', maxHeight: 300 }}
-        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(block.content || '') }}
-      />
+      <div key={idx}>
+        <div
+          className="code-table-wrap"
+          style={{ marginTop: 8, overflow: 'auto', maxHeight: 300 }}
+          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(block.content || '') }}
+        />
+        <div>
+          <button
+            style={handoffBtnStyle}
+            onClick={() => {
+              const { handoffToPanel } = useStore.getState();
+              handoffToPanel('webcreator', { code: block.content || '', from: 'Code' });
+            }}
+          >
+            <ExternalLink size={9} /> Web Creator
+          </button>
+          <button
+            style={handoffBtnStyle}
+            onClick={() => {
+              const { handoffToPanel } = useStore.getState();
+              handoffToPanel('artifacts', { code: block.content || '', type: 'html', from: 'Code' });
+            }}
+          >
+            <Sparkles size={9} /> Artifact
+          </button>
+        </div>
+      </div>
     );
   }
   if (block.type === 'error') {
@@ -230,6 +289,52 @@ export default function CodePanel() {
   const generateAbortRef = useRef<AbortController | null>(null);
   const executeAbortRef = useRef<AbortController | null>(null);
 
+  /* ── Multi-file state ── */
+  const [pythonFiles, setPythonFiles] = useState<PythonFile[]>([{ name: DEFAULT_FILE, content: '' }]);
+  const [activeFileName, setActiveFileName] = useState(DEFAULT_FILE);
+  const [showFileTabs, setShowFileTabs] = useState(false);
+
+  const activeFile = pythonFiles.find(f => f.name === activeFileName) || pythonFiles[0];
+
+  const addPythonFile = useCallback((name?: string) => {
+    const baseName = name || 'untitled';
+    let finalName = baseName.endsWith('.py') ? baseName : `${baseName}.py`;
+    const existing = new Set(pythonFiles.map(f => f.name));
+    let counter = 1;
+    while (existing.has(finalName)) {
+      finalName = baseName.replace(/\.py$/, '') + `_${counter}.py`;
+      counter++;
+    }
+    setPythonFiles(prev => [...prev, { name: finalName, content: '' }]);
+    setActiveFileName(finalName);
+    setShowFileTabs(true);
+  }, [pythonFiles]);
+
+  const removePythonFile = useCallback((name: string) => {
+    if (pythonFiles.length <= 1) return;
+    setPythonFiles(prev => prev.filter(f => f.name !== name));
+    if (activeFileName === name) {
+      setActiveFileName(pythonFiles.find(f => f.name !== name)?.name || DEFAULT_FILE);
+    }
+  }, [pythonFiles, activeFileName]);
+
+  const updateFileContent = useCallback((name: string, content: string) => {
+    setPythonFiles(prev => prev.map(f => f.name === name ? { ...f, content } : f));
+  }, []);
+
+  /** Build import preamble: make sibling .py files importable by writing them into Pyodide's virtual FS */
+  const buildMultiFilePreamble = useCallback((): string => {
+    if (pythonFiles.length <= 1) return '';
+    const parts = pythonFiles
+      .filter(f => f.name !== activeFileName && f.content.trim())
+      .map(f => {
+        const moduleName = f.name.replace(/\.py$/, '');
+        const escaped = f.content.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n');
+        return `open('${f.name}', 'w').write('${escaped}')`;
+      });
+    return parts.length ? parts.join('\n') + '\n' : '';
+  }, [pythonFiles, activeFileName]);
+
   useEffect(() => {
     return () => {
       if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
@@ -346,8 +451,12 @@ export default function CodePanel() {
         }
       }, 300000);
 
+      // Prepend sibling Python files so cross-file imports work in Pyodide
+      const preamble = buildMultiFilePreamble();
+      const fullCode = preamble ? preamble + code : code;
+
       executorRef.current.execute(
-        code,
+        fullCode,
         {
           onOutput: (block) => { if (!resolved) outputs.push(block as OutputBlock); },
           onVariables: (vars) => {
@@ -522,6 +631,9 @@ export default function CodePanel() {
     setExchanges([]);
     setSessionId(`code-${Date.now()}`);
     setHasSessionState(false);
+    setPythonFiles([{ name: DEFAULT_FILE, content: '' }]);
+    setActiveFileName(DEFAULT_FILE);
+    setShowFileTabs(false);
   }, [sessionId]);
 
   const stopExecution = useCallback(() => {
@@ -567,6 +679,20 @@ export default function CodePanel() {
         {pyodideState === 'error' && (
           <span style={{ fontSize: '9px', color: 'var(--rd)' }}>Python unavailable</span>
         )}
+        <button
+          onClick={() => { setShowFileTabs(!showFileTabs); if (!showFileTabs && pythonFiles.length === 1) addPythonFile('utils.py'); }}
+          title={showFileTabs ? 'Hide file tabs' : 'Multi-file mode'}
+          style={{
+            background: showFileTabs ? 'rgba(124,58,237,0.15)' : 'var(--s2)',
+            border: `1px solid ${showFileTabs ? 'rgba(124,58,237,0.3)' : 'var(--b1)'}`,
+            borderRadius: 'var(--r-pill)', color: showFileTabs ? 'var(--pl)' : 'var(--mu)',
+            padding: '1px 7px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3,
+            fontSize: '9.5px', fontFamily: 'inherit', fontWeight: 500,
+          }}
+        >
+          <FileCode2 size={10} />
+          Files{pythonFiles.length > 1 ? ` (${pythonFiles.length})` : ''}
+        </button>
         <span style={{ flex: 1 }} />
         <ModelPill featureKey="code" />
         {exchanges.length > 0 && (
@@ -583,6 +709,67 @@ export default function CodePanel() {
           </button>
         )}
       </div>
+
+      {/* Multi-file tabs */}
+      {showFileTabs && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 0, borderBottom: '1px solid var(--b1)',
+          padding: '0 8px', overflow: 'auto', flexShrink: 0,
+        }}>
+          {pythonFiles.map(f => (
+            <div
+              key={f.name}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 4,
+                padding: '5px 10px', fontSize: '10.5px', cursor: 'pointer',
+                color: f.name === activeFileName ? 'var(--tx)' : 'var(--mu)',
+                background: f.name === activeFileName ? 'rgba(124,58,237,0.1)' : 'transparent',
+                borderBottom: f.name === activeFileName ? '2px solid var(--p)' : '2px solid transparent',
+              }}
+              onClick={() => setActiveFileName(f.name)}
+            >
+              <FileCode2 size={11} />
+              <span>{f.name}</span>
+              {pythonFiles.length > 1 && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); removePythonFile(f.name); }}
+                  style={{ background: 'none', border: 'none', color: 'var(--mu)', cursor: 'pointer', padding: 0, display: 'flex', marginLeft: 2 }}
+                  title="Close file"
+                >
+                  <X size={10} />
+                </button>
+              )}
+            </div>
+          ))}
+          <button
+            onClick={() => {
+              const name = prompt('File name:', 'utils.py');
+              if (name) addPythonFile(name);
+            }}
+            style={{
+              background: 'none', border: 'none', color: 'var(--mu)', cursor: 'pointer',
+              padding: '5px 8px', display: 'flex', alignItems: 'center',
+            }}
+            title="New Python file"
+          >
+            <FilePlus size={12} />
+          </button>
+        </div>
+      )}
+
+      {/* File editor — shows when a non-main file is active and has content or is being edited */}
+      {showFileTabs && activeFileName !== DEFAULT_FILE && (
+        <div style={{
+          borderBottom: '1px solid var(--b1)', flexShrink: 0,
+          height: Math.max(80, Math.min(200, (activeFile.content.split('\n').length + 1) * 20 + 20)),
+        }}>
+          <CodeEditor
+            code={activeFile.content}
+            language="python"
+            onChange={(val) => updateFileContent(activeFileName, val)}
+          />
+        </div>
+      )}
 
       {/* Conversation thread */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto panel-scroll-root" style={{ padding: '8px 12px' }}>
@@ -662,27 +849,24 @@ export default function CodePanel() {
                 </div>
 
                 {ex.codeVisible && !ex.editing && (
-                  <pre style={{
-                    margin: 0, padding: '10px 12px', fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
-                    fontSize: '11px', color: '#e6edf3', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                    overflow: 'auto', maxHeight: 300, lineHeight: 1.5,
-                  }}>
-                    {highlightPython(ex.code)}
-                  </pre>
+                  <div style={{ height: `${Math.max(3, Math.min(20, ex.code.split('\n').length)) * 22 + 24}px` }}>
+                    <CodeEditor
+                      code={ex.code}
+                      language="python"
+                      readOnly
+                    />
+                  </div>
                 )}
 
                 {ex.editing && (
                   <div style={{ padding: '8px' }}>
-                    <textarea
-                      value={ex.editCode}
-                      onChange={e => updateExchange(ex.id, { editCode: e.target.value })}
-                      style={{
-                        width: '100%', minHeight: 120, background: '#0d1117', color: '#e6edf3',
-                        border: '1px solid #30363d', borderRadius: 'var(--r-sm)', padding: '8px 10px',
-                        fontFamily: "'JetBrains Mono', 'Fira Code', monospace", fontSize: '11px',
-                        resize: 'vertical', outline: 'none', lineHeight: 1.5,
-                      }}
-                    />
+                    <div style={{ height: `${Math.max(3, Math.min(20, ex.editCode.split('\n').length)) * 22 + 24}px`, border: '1px solid #30363d', borderRadius: 'var(--r-sm)', overflow: 'hidden' }}>
+                      <CodeEditor
+                        code={ex.editCode}
+                        language="python"
+                        onChange={(nextCode) => updateExchange(ex.id, { editCode: nextCode })}
+                      />
+                    </div>
                     <div style={{ display: 'flex', gap: 6, marginTop: 6, justifyContent: 'flex-end' }}>
                       <button
                         onClick={() => updateExchange(ex.id, { editing: false })}
@@ -819,52 +1003,4 @@ export default function CodePanel() {
       />
     </div>
   );
-}
-
-/* ── Minimal Python syntax highlighting ── */
-function highlightPython(code: string): React.ReactNode[] {
-  const lines = code.split('\n');
-  return lines.map((line, i) => (
-    <React.Fragment key={i}>
-      {i > 0 && '\n'}
-      {highlightLine(line)}
-    </React.Fragment>
-  ));
-}
-
-function highlightLine(line: string): React.ReactNode[] {
-  const tokens: React.ReactNode[] = [];
-  // Note: triple-quoted strings removed — they span multiple lines and can't match in per-line highlighting
-  const regex = /(#.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|\b(import|from|as|def|class|return|if|elif|else|for|while|in|not|and|or|is|with|try|except|finally|raise|yield|lambda|pass|break|continue|True|False|None|print|len|range|list|dict|set|tuple|int|float|str|bool|type|isinstance|open|self)\b|(\d+\.?\d*(?:e[+-]?\d+)?)\b/g;
-
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = regex.exec(line)) !== null) {
-    if (match.index > lastIndex) {
-      tokens.push(line.slice(lastIndex, match.index));
-    }
-    if (match[1]) {
-      // Comment
-      tokens.push(<span key={match.index} style={{ color: '#8b949e', fontStyle: 'italic' }}>{match[1]}</span>);
-    } else if (match[2]) {
-      // String
-      tokens.push(<span key={match.index} style={{ color: '#a5d6ff' }}>{match[2]}</span>);
-    } else if (match[3]) {
-      // Keyword
-      tokens.push(<span key={match.index} style={{ color: '#ff7b72' }}>{match[3]}</span>);
-    } else if (match[4]) {
-      // Number
-      tokens.push(<span key={match.index} style={{ color: '#79c0ff' }}>{match[4]}</span>);
-    } else {
-      tokens.push(match[0]);
-    }
-    lastIndex = regex.lastIndex;
-  }
-
-  if (lastIndex < line.length) {
-    tokens.push(line.slice(lastIndex));
-  }
-
-  return tokens;
 }

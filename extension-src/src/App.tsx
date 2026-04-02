@@ -4,36 +4,36 @@ import Header from './components/Header';
 import Rail from './components/Rail';
 import ErrorBoundary from './components/ErrorBoundary';
 import ChatPanel from './panels/ChatPanel';
-import SearchPanel from './panels/SearchPanel';
-import TranslatePanel from './panels/TranslatePanel';
-import WritePanel from './panels/WritePanel';
-import GrammarPanel from './panels/GrammarPanel';
-import WisebasePanel from './panels/WisebasePanel';
-import AskPanel from './panels/AskPanel';
-import SummaryPanel from './panels/SummaryPanel';
-import ToolsPanel from './panels/ToolsPanel';
-import PdfPanel from './panels/PdfPanel';
-import VoicePanel from './panels/VoicePanel';
-import RecordPanel from './panels/RecordPanel';
-import OcrPanel from './panels/OcrPanel';
-import YoutubePanel from './panels/YoutubePanel';
-import MathPanel from './panels/MathPanel';
-import ImagePanel from './panels/ImagePanel';
-import CapturePanel from './panels/CapturePanel';
-import SlidesPanel from './panels/SlidesPanel';
-import ModelsPanel from './panels/ModelsPanel';
-import SettingsPanel from './panels/SettingsPanel';
 import CommandPalette from './components/CommandPalette';
 import ext from './ext';
 import type { PanelId } from './types';
 
-// Lazy-loaded heavy panels (~350KB combined — load on demand)
+// Lazy-load every non-chat panel so the initial sidebar boot stays lean.
+const SearchPanel = React.lazy(() => import('./panels/SearchPanel'));
+const TranslatePanel = React.lazy(() => import('./panels/TranslatePanel'));
+const WritePanel = React.lazy(() => import('./panels/WritePanel'));
+const GrammarPanel = React.lazy(() => import('./panels/GrammarPanel'));
+const WisebasePanel = React.lazy(() => import('./panels/WisebasePanel'));
+const AskPanel = React.lazy(() => import('./panels/AskPanel'));
+const SummaryPanel = React.lazy(() => import('./panels/SummaryPanel'));
+const ToolsPanel = React.lazy(() => import('./panels/ToolsPanel'));
+const PdfPanel = React.lazy(() => import('./panels/PdfPanel'));
+const VoicePanel = React.lazy(() => import('./panels/VoicePanel'));
+const RecordPanel = React.lazy(() => import('./panels/RecordPanel'));
+const OcrPanel = React.lazy(() => import('./panels/OcrPanel'));
+const YoutubePanel = React.lazy(() => import('./panels/YoutubePanel'));
 const ResearchPanel = React.lazy(() => import('./panels/ResearchPanel'));
+const MathPanel = React.lazy(() => import('./panels/MathPanel'));
 const CodePanel = React.lazy(() => import('./panels/CodePanel'));
 const ArtifactsPanel = React.lazy(() => import('./panels/ArtifactsPanel'));
 const WebCreatorPanel = React.lazy(() => import('./panels/WebCreatorPanel'));
+const ImagePanel = React.lazy(() => import('./panels/ImagePanel'));
 const ComparePanel = React.lazy(() => import('./panels/ComparePanel'));
+const CapturePanel = React.lazy(() => import('./panels/CapturePanel'));
 const AgentPanel = React.lazy(() => import('./panels/AgentPanel'));
+const SlidesPanel = React.lazy(() => import('./panels/SlidesPanel'));
+const ModelsPanel = React.lazy(() => import('./panels/ModelsPanel'));
+const SettingsPanel = React.lazy(() => import('./panels/SettingsPanel'));
 
 function LazyFallback() {
   return (
@@ -43,7 +43,7 @@ function LazyFallback() {
   );
 }
 
-const PANEL_ENTRIES: { id: PanelId; Component: React.FC }[] = [
+const PANEL_ENTRIES: { id: PanelId; Component: React.ComponentType }[] = [
   { id: 'chat', Component: ChatPanel },
   { id: 'search', Component: SearchPanel },
   { id: 'translate', Component: TranslatePanel },

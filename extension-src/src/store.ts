@@ -90,6 +90,11 @@ interface AuraStore {
   setConnectionAbandoned: (abandoned: boolean) => void;
   reconnect: () => void;
   setPanel: (panel: PanelId) => void;
+  /** Navigate to a panel with a data handoff */
+  handoffToPanel: (panel: PanelId, data: Record<string, any>) => void;
+  /** Consume pending handoff data (one-shot, clears after read) */
+  consumePanelHandoff: () => Record<string, any> | null;
+  _pendingHandoff: Record<string, any> | null;
   setMoreOpen: (open: boolean) => void;
   toggleTheme: () => void;
   addMessage: (msg: Message) => void;
@@ -211,6 +216,15 @@ export const useStore = create<AuraStore>((set, get) => {
       if (_reconnectHandler) _reconnectHandler();
     },
     setPanel: (activePanel) => set({ activePanel }),
+    _pendingHandoff: null,
+    handoffToPanel: (panel, data) => set({ activePanel: panel, _pendingHandoff: data }),
+    consumePanelHandoff: () => {
+      const state = get();
+      if (!state._pendingHandoff) return null;
+      const data = state._pendingHandoff;
+      set({ _pendingHandoff: null });
+      return data;
+    },
     setMoreOpen: (moreOpen) => set({ moreOpen }),
     toggleTheme: () => {
       const next = get().theme === 'dark' ? 'light' : 'dark';

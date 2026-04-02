@@ -1,18 +1,27 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Copy, Download, Maximize2, Minimize2, Code2, Eye, SplitSquareHorizontal,
   Sparkles, Wand2, Wrench, RotateCcw, Globe, BarChart3, GitBranch,
   Gamepad2, Presentation, FileCode, ChevronRight, Radio, X, Terminal, Undo2, Redo2,
+  Save, FolderOpen, Search, Pencil, Trash2, GitFork, ExternalLink, Package,
 } from 'lucide-react';
-import DOMPurify from 'dompurify';
 import { useStore } from '../store';
+import CodeEditor, { type CodeEditorDiagnostic, type CodeEditorLanguage } from '../components/CodeEditor';
+import FileTree from '../components/FileTree';
 import ModelPill from '../components/ModelPill';
+import OverlayModal from '../components/OverlayModal';
 import { HTTP, getAuthHeaders } from '../api';
 import { streamRawGenerate } from '../utils/streamChat';
 import { StreamingPreviewController } from '../utils/StreamingPreviewController';
 import { useVersionHistory } from '../utils/useVersionHistory';
-import { highlightCode, detectLanguage } from '../utils/highlighter';
 import { generateDynamicImports } from '../utils/importDetector';
+import { clearArtifactsPanelState, loadArtifactsPanelState, saveArtifactsPanelState } from '../utils/artifactPersistence';
+import { captureIframeThumbnailDataUrl } from '../utils/captureIframeThumbnail';
+import { getDefaultCreationSettings, loadCreationSettings, type CreationSettings } from '../utils/creationSettings';
+import { summarizeDiff } from '../utils/diffHeuristics';
+import { galleryStore, type SavedArtifact } from '../utils/artifactGallery';
+
+const DiffEditor = React.lazy(() => import('../components/DiffEditor'));
 
 /* ─── Types ─── */
 type ArtifactType = 'html' | 'react' | 'svg' | 'mermaid' | 'chart' | 'markdown' | 'css';
@@ -32,6 +41,23 @@ interface LiveFile {
   type: ArtifactType;
   timestamp: number;
 }
+
+interface ConsoleEntry {
+  id: string;
+  level: 'log' | 'warn' | 'error' | 'info';
+  args: string[];
+  timestamp: number;
+  stack?: string;
+}
+
+interface PendingArtifactDiff {
+  modified: string;
+  original: string;
+  prompt: string;
+  type: ArtifactType;
+}
+
+type ConsoleFilter = 'all' | 'error' | 'warn' | 'info' | 'log';
 
 /* ─── Constants ─── */
 const QUICK_STARTS: QuickStart[] = [
@@ -53,6 +79,139 @@ const SYSTEM_PROMPTS: Record<string, string> = {
 };
 
 const ARTIFACTS_WS_URL = HTTP.replace(/^http/, 'ws') + '/api/artifacts/stream';
+const MAX_AUTO_FIX_ATTEMPTS = 3;
+const CONSOLE_FILTERS: ConsoleFilter[] = ['all', 'error', 'warn', 'info', 'log'];
+
+function isArtifactType(value: string): value is ArtifactType {
+  return ['html', 'react', 'svg', 'mermaid', 'chart', 'markdown', 'css'].includes(value);
+}
+
+function getArtifactEditorLanguage(type: ArtifactType): CodeEditorLanguage {
+  switch (type) {
+    case 'react':
+      return 'jsx';
+    case 'chart':
+      return 'javascript';
+    case 'markdown':
+    case 'mermaid':
+      return 'markdown';
+    case 'css':
+      return 'css';
+    case 'svg':
+      return 'svg';
+    case 'html':
+    default:
+      return 'html';
+  }
+}
+
+function buildRuntimeDiagnostics(message: string, line?: number): CodeEditorDiagnostic[] {
+  if (!line || line < 1) return [];
+  return [{ line, message, severity: 'error' }];
+}
+
+function parseConsoleArg(value: string): string {
+  try {
+    const parsed = JSON.parse(value);
+    if (typeof parsed === 'string') return parsed;
+    return JSON.stringify(parsed);
+  } catch {
+    return value;
+  }
+}
+
+function buildArtifactRepairPrompt(type: ArtifactType, currentCode: string, errorMessage: string, line?: number): string {
+  return `The ${type.toUpperCase()} code you generated has a runtime error in the preview iframe.
+
+ERROR: ${errorMessage}
+LINE: ${line || 'unknown'}
+
+Current code:
+\`\`\`${type}
+${currentCode}
+\`\`\`
+
+Fix the error and return the complete corrected code only. Preserve the existing design and intended functionality.`;
+}
+
+function buildArtifactName(prompt: string, type: ArtifactType): string {
+  const trimmed = prompt.trim();
+  if (!trimmed) return `${type.toUpperCase()} Artifact`;
+  const compact = trimmed.replace(/\s+/g, ' ').slice(0, 36).trim();
+  return compact || `${type.toUpperCase()} Artifact`;
+}
+
+function getArtifactTypePalette(type: ArtifactType): { start: string; end: string; accent: string } {
+  switch (type) {
+    case 'react':
+      return { start: '#0f172a', end: '#0b3b5f', accent: '#61dafb' };
+    case 'svg':
+      return { start: '#1f2937', end: '#4c1d95', accent: '#c084fc' };
+    case 'mermaid':
+      return { start: '#111827', end: '#1d4ed8', accent: '#93c5fd' };
+    case 'chart':
+      return { start: '#172554', end: '#14532d', accent: '#34d399' };
+    case 'markdown':
+      return { start: '#292524', end: '#0f172a', accent: '#f5f5f4' };
+    case 'css':
+      return { start: '#1e1b4b', end: '#3730a3', accent: '#a5b4fc' };
+    default:
+      return { start: '#2e1065', end: '#1d4ed8', accent: '#e9d5ff' };
+  }
+}
+
+function toDataUrl(svg: string): string {
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function buildArtifactThumbnailDataUrl(name: string, type: ArtifactType, prompt: string, code: string): string {
+  const palette = getArtifactTypePalette(type);
+  const title = name.slice(0, 26);
+  const summary = (prompt.trim() || code.replace(/\s+/g, ' ').trim()).slice(0, 56);
+  const svg = `
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="320" viewBox="0 0 640 320">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="${palette.start}"/>
+      <stop offset="100%" stop-color="${palette.end}"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="320" rx="28" fill="url(#bg)"/>
+  <circle cx="582" cy="58" r="48" fill="${palette.accent}" fill-opacity="0.16"/>
+  <circle cx="78" cy="270" r="62" fill="${palette.accent}" fill-opacity="0.10"/>
+  <rect x="34" y="34" width="112" height="28" rx="14" fill="rgba(15,23,42,0.35)"/>
+  <text x="90" y="53" text-anchor="middle" fill="${palette.accent}" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700" letter-spacing="1.4">${type.toUpperCase()}</text>
+  <text x="34" y="116" fill="#F8FAFC" font-family="Inter, Arial, sans-serif" font-size="30" font-weight="700">${escapeXml(title)}</text>
+  <text x="34" y="154" fill="rgba(248,250,252,0.85)" font-family="Inter, Arial, sans-serif" font-size="16">${escapeXml(summary)}</text>
+  <rect x="34" y="198" width="572" height="82" rx="18" fill="rgba(15,23,42,0.22)" stroke="rgba(255,255,255,0.08)"/>
+  <text x="54" y="226" fill="rgba(248,250,252,0.68)" font-family="'JetBrains Mono', Consolas, monospace" font-size="13">${escapeXml(code.replace(/\s+/g, ' ').trim().slice(0, 72) || '<empty>')}</text>
+  <text x="54" y="252" fill="rgba(248,250,252,0.52)" font-family="'JetBrains Mono', Consolas, monospace" font-size="13">${escapeXml(code.replace(/\s+/g, ' ').trim().slice(72, 144))}</text>
+</svg>`;
+  return toDataUrl(svg);
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function buildDirectoriesFromPaths(paths: string[]): string[] {
+  const directories = new Set<string>();
+  for (const path of paths) {
+    const parts = path.replace(/\\/g, '/').split('/').filter(Boolean);
+    parts.pop();
+    let current = '';
+    for (const part of parts) {
+      current = current ? `${current}/${part}` : part;
+      directories.add(current);
+    }
+  }
+  return Array.from(directories).sort((a, b) => a.localeCompare(b));
+}
 
 /** Build the full srcdoc HTML for the iframe given the artifact type and user code. */
 function buildSrcdoc(type: ArtifactType, code: string, includeErrorHandler = true): string {
@@ -430,6 +589,7 @@ function ActionBtn({ id, icon, label, onClick, accent, hoveredBtn, setHoveredBtn
    ═══════════════════════════════════════════════════════════════════════════ */
 export default function ArtifactsPanel() {
   const { getModel } = useStore();
+  const [creationSettings, setCreationSettings] = useState<CreationSettings>(getDefaultCreationSettings());
 
   // Panel mode: "generate" (manual) or "live" (agent loop)
   const [panelMode, setPanelMode] = useState<PanelMode>('generate');
@@ -444,9 +604,25 @@ export default function ArtifactsPanel() {
   const [iframeError, setIframeError] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [hoveredBtn, setHoveredBtn] = useState<string | null>(null);
-  const [consoleLogs, setConsoleLogs] = useState<Array<{level: string, args: string[], timestamp: number}>>([]);
+  const [consoleLogs, setConsoleLogs] = useState<ConsoleEntry[]>([]);
   const [consoleOpen, setConsoleOpen] = useState(false);
-  const { versions, currentIdx, pushVersion, goToVersion, undo, redo, canUndo, canRedo } = useVersionHistory(20, 'aura_artifacts_versions');
+  const [consoleFilter, setConsoleFilter] = useState<ConsoleFilter>('all');
+  const [expandedConsoleIds, setExpandedConsoleIds] = useState<string[]>([]);
+  const [unreadErrorCount, setUnreadErrorCount] = useState(0);
+  const [editorDiagnostics, setEditorDiagnostics] = useState<CodeEditorDiagnostic[]>([]);
+  const [autoFixAttempts, setAutoFixAttempts] = useState(0);
+  const [isAutoFixing, setIsAutoFixing] = useState(false);
+  const [galleryItems, setGalleryItems] = useState<SavedArtifact[]>([]);
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [saveName, setSaveName] = useState('');
+  const [renameDialogArtifact, setRenameDialogArtifact] = useState<SavedArtifact | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [deleteDialogArtifact, setDeleteDialogArtifact] = useState<SavedArtifact | null>(null);
+  const [galleryQuery, setGalleryQuery] = useState('');
+  const [galleryTypeFilter, setGalleryTypeFilter] = useState<'all' | ArtifactType>('all');
+  const [pendingDiff, setPendingDiff] = useState<PendingArtifactDiff | null>(null);
+  const { versions, currentIdx, pushVersion, goToVersion, undo, redo, canUndo, canRedo, clear: clearVersions } = useVersionHistory(20, 'aura_artifacts_versions');
 
   // --- Live mode state ---
   const [liveActiveFile, setLiveActiveFile] = useState<string | null>(null);
@@ -455,6 +631,7 @@ export default function ArtifactsPanel() {
 
   // Auto-select latest file in live mode
   const liveFileNames = Object.keys(liveFiles);
+  const liveDirectories = useMemo(() => buildDirectoriesFromPaths(liveFileNames), [liveFileNames]);
   const activeLiveFile = (liveActiveFile && liveFiles[liveActiveFile]) ? liveFiles[liveActiveFile] : (liveFileNames.length > 0 ? liveFiles[liveFileNames[liveFileNames.length - 1]] : null);
 
   // Auto-switch to newest file when a new one arrives
@@ -481,13 +658,169 @@ export default function ArtifactsPanel() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const codeRef = useRef('');
   const abortRef = useRef<AbortController | null>(null);
+  const loadingRef = useRef(false);
+  const autoFixAttemptsRef = useRef(0);
+  const autoFixingRef = useRef(false);
+  const lastAutoFixSignatureRef = useRef<string | null>(null);
+  const restoredStateRef = useRef(false);
+  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const manualPreviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    loadingRef.current = loading;
+  }, [loading]);
+
+  useEffect(() => {
+    loadCreationSettings().then(setCreationSettings).catch(() => {});
+  }, []);
+
+  const setTimedStatus = useCallback((nextStatus: string, duration = 2200) => {
+    setStatus(nextStatus);
+    if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+    if (!nextStatus) return;
+    statusTimerRef.current = setTimeout(() => setStatus(''), duration);
+  }, []);
+
+  const refreshGallery = useCallback(async () => {
+    const items = await galleryStore.list();
+    const missingThumbnails = items.filter((item) => !item.thumbnail);
+    if (missingThumbnails.length > 0) {
+      await Promise.all(
+        missingThumbnails.map((item) => galleryStore.update(item.id, {
+          thumbnail: buildArtifactThumbnailDataUrl(
+            item.name,
+            item.type as ArtifactType,
+            item.prompt || '',
+            item.code,
+          ),
+        })),
+      );
+      setGalleryItems(await galleryStore.list());
+      return;
+    }
+    setGalleryItems(items);
+  }, []);
+
+  useEffect(() => {
+    void refreshGallery();
+  }, [refreshGallery]);
 
   /* ─── Abort fetch on unmount ─── */
   useEffect(() => {
     return () => {
       if (abortRef.current) abortRef.current.abort();
+      if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
+      if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+      if (manualPreviewTimerRef.current) clearTimeout(manualPreviewTimerRef.current);
     };
   }, []);
+
+  /* ─── Restore persisted generate state ─── */
+  useEffect(() => {
+    if (restoredStateRef.current) return;
+    restoredStateRef.current = true;
+
+    // Check for panel handoff first (e.g., from CodePanel)
+    const { consumePanelHandoff } = useStore.getState();
+    const handoff = consumePanelHandoff();
+    if (handoff?.code) {
+      const hType = isArtifactType(handoff.type) ? handoff.type : 'html';
+      setArtifactType(hType);
+      setCode(handoff.code);
+      codeRef.current = handoff.code;
+      setPanelMode('generate');
+      if (iframeRef.current) {
+        iframeRef.current.srcdoc = buildSrcdoc(hType, handoff.code, true);
+      }
+      return;
+    }
+
+    loadArtifactsPanelState().then((saved) => {
+      if (!saved) return;
+      const nextType = isArtifactType(saved.type) ? saved.type : 'html';
+      setArtifactType(nextType);
+      setPrompt(saved.prompt);
+      setCode(saved.code);
+      codeRef.current = saved.code;
+      if (saved.activeFile) setLiveActiveFile(saved.activeFile);
+      if (saved.code && iframeRef.current) {
+        iframeRef.current.srcdoc = buildSrcdoc(nextType, saved.code, true);
+      }
+    }).catch(() => {});
+  }, []);
+
+  /* ─── Persist generate state ─── */
+  useEffect(() => {
+    if (panelMode !== 'generate') return;
+    if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
+    persistTimerRef.current = setTimeout(() => {
+      void saveArtifactsPanelState({
+        code,
+        prompt,
+        type: artifactType,
+        timestamp: Date.now(),
+        activeFile: liveActiveFile || undefined,
+      });
+    }, 1000);
+
+    return () => {
+      if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
+    };
+  }, [artifactType, code, liveActiveFile, panelMode, prompt]);
+
+  useEffect(() => {
+    if (!consoleOpen) return;
+    setUnreadErrorCount(0);
+  }, [consoleOpen]);
+
+  const attemptArtifactAutoFix = useCallback(async (errorMessage: string, line?: number) => {
+    if (autoFixingRef.current || !codeRef.current.trim()) return;
+    if (autoFixAttemptsRef.current >= MAX_AUTO_FIX_ATTEMPTS) return;
+
+    const attempt = autoFixAttemptsRef.current + 1;
+    const type = artifactType;
+    const systemPrompt = SYSTEM_PROMPTS[type] || SYSTEM_PROMPTS.html;
+    const model = getModel('artifacts') || undefined;
+
+    setIsAutoFixing(true);
+    autoFixingRef.current = true;
+    setStatus(`Auto-fixing error (${attempt}/${MAX_AUTO_FIX_ATTEMPTS})...`);
+
+    try {
+      let repairedCode = '';
+      for await (const chunk of streamRawGenerate(
+        buildArtifactRepairPrompt(type, codeRef.current, errorMessage, line),
+        { systemPrompt, model },
+      )) {
+        repairedCode += chunk;
+      }
+
+      const finalCode = stripFences(repairedCode);
+      if (!finalCode.trim()) {
+        throw new Error('Auto-fix returned empty code');
+      }
+
+      autoFixAttemptsRef.current = attempt;
+      setAutoFixAttempts(attempt);
+      setIframeError(null);
+      setEditorDiagnostics([]);
+      setCode(finalCode);
+      codeRef.current = finalCode;
+      pushVersion(`Auto-fix attempt ${attempt}: ${errorMessage}`, finalCode, `Fix ${attempt}`);
+      if (iframeRef.current) {
+        iframeRef.current.srcdoc = buildSrcdoc(type, finalCode, true);
+      }
+      setTimedStatus(`Auto-fix applied (${attempt}/${MAX_AUTO_FIX_ATTEMPTS})`);
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') {
+        setTimedStatus(err?.message || 'Auto-fix failed', 3000);
+      }
+    } finally {
+      setIsAutoFixing(false);
+      autoFixingRef.current = false;
+    }
+  }, [artifactType, getModel, pushVersion, setTimedStatus]);
 
   /* ─── iframe error listener ─── */
   useEffect(() => {
@@ -495,23 +828,61 @@ export default function ArtifactsPanel() {
       if (!e.data || typeof e.data !== 'object') return;
       const targetIframe = panelMode === 'live' ? liveIframeRef.current : iframeRef.current;
       if (e.source !== targetIframe?.contentWindow) return;
+
       if (e.data?.type === 'artifact-error') {
         const msg = e.data.msg || 'Unknown error';
-        const line = e.data.line ? ` (line ${e.data.line})` : '';
+        const lineNumber = typeof e.data.line === 'number' ? e.data.line : 0;
+        const line = lineNumber ? ` (line ${lineNumber})` : '';
+        const entry: ConsoleEntry = {
+          id: crypto.randomUUID(),
+          level: 'error',
+          args: [`${msg}${line}`],
+          timestamp: e.data.timestamp || Date.now(),
+          stack: typeof e.data.stack === 'string' ? e.data.stack : undefined,
+        };
+
         setIframeError(`${msg}${line}`);
+        setEditorDiagnostics(buildRuntimeDiagnostics(msg, lineNumber));
+        setConsoleLogs((prev) => [...prev.slice(-99), entry]);
+        if (!consoleOpen) setUnreadErrorCount((prev) => prev + 1);
+        if (creationSettings.autoOpenConsoleOnError) setConsoleOpen(true);
+
+        const shouldAutoFix =
+          panelMode === 'generate' &&
+          creationSettings.autoFixErrors &&
+          !loadingRef.current &&
+          !!codeRef.current.trim();
+
+        if (shouldAutoFix) {
+          const signature = `${msg}|${lineNumber}|${codeRef.current}`;
+          if (lastAutoFixSignatureRef.current !== signature) {
+            lastAutoFixSignatureRef.current = signature;
+            void attemptArtifactAutoFix(msg, lineNumber);
+          }
+        }
       }
+
       if (e.data?.type === 'console') {
-        setConsoleLogs(prev => [...prev.slice(-99), { level: e.data.level, args: e.data.args, timestamp: e.data.timestamp }]);
+        const level = (['log', 'warn', 'error', 'info'].includes(e.data.level) ? e.data.level : 'log') as ConsoleEntry['level'];
+        const entry: ConsoleEntry = {
+          id: crypto.randomUUID(),
+          level,
+          args: Array.isArray(e.data.args) ? e.data.args : [String(e.data.args ?? '')],
+          timestamp: e.data.timestamp || Date.now(),
+        };
+        setConsoleLogs((prev) => [...prev.slice(-99), entry]);
+        if (level === 'error' && !consoleOpen) setUnreadErrorCount((prev) => prev + 1);
       }
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
-  }, [panelMode]);
+  }, [attemptArtifactAutoFix, consoleOpen, creationSettings.autoFixErrors, creationSettings.autoOpenConsoleOnError, panelMode]);
 
   /* ─── Update live preview when active file changes ─── */
   useEffect(() => {
     if (panelMode !== 'live' || !activeLiveFile || !liveIframeRef.current) return;
     setIframeError(null);
+    setEditorDiagnostics([]);
     liveIframeRef.current.srcdoc = buildSrcdoc(activeLiveFile.type, activeLiveFile.code);
   }, [panelMode, activeLiveFile?.code, activeLiveFile?.type, activeLiveFile?.filename]);
 
@@ -521,14 +892,28 @@ export default function ArtifactsPanel() {
     if (!text) return;
 
     const type = overrideType ?? artifactType;
+    const previousCode = codeRef.current;
+    const shouldReviewDiff = creationSettings.showDiffBeforeApply && !!previousCode.trim();
     setArtifactType(type);
+    setAutoFixAttempts(0);
+    autoFixAttemptsRef.current = 0;
+    setIsAutoFixing(false);
+    autoFixingRef.current = false;
+    lastAutoFixSignatureRef.current = null;
+    setPendingDiff(null);
     setLoading(true);
     setStatus('Generating...');
-    setCode('');
     setIframeError(null);
+    setEditorDiagnostics([]);
     setConsoleLogs([]);
-    codeRef.current = '';
-    if (iframeRef.current) iframeRef.current.srcdoc = '';
+    setExpandedConsoleIds([]);
+    setConsoleFilter('all');
+    setUnreadErrorCount(0);
+    if (!shouldReviewDiff) {
+      setCode('');
+      codeRef.current = '';
+      if (iframeRef.current) iframeRef.current.srcdoc = '';
+    }
 
     if (abortRef.current) abortRef.current.abort();
     const ctrl = new AbortController();
@@ -537,11 +922,13 @@ export default function ArtifactsPanel() {
     const systemPrompt = SYSTEM_PROMPTS[type] || SYSTEM_PROMPTS.html;
     const model = getModel('artifacts') || undefined;
 
-    const previewCtrl = new StreamingPreviewController((html) => {
-      if (iframeRef.current) {
-        iframeRef.current.srcdoc = buildSrcdoc(type, html, true);
-      }
-    });
+    const previewCtrl = shouldReviewDiff
+      ? null
+      : new StreamingPreviewController((html) => {
+          if (iframeRef.current) {
+            iframeRef.current.srcdoc = buildSrcdoc(type, html, true);
+          }
+        });
 
     try {
       let streamedCode = '';
@@ -554,28 +941,54 @@ export default function ArtifactsPanel() {
         streamedCode += chunk;
         // Throttle code display to every 200ms to avoid render thrashing
         const now = Date.now();
-        if (now - lastCodeUpdate > 200) {
+        if (!shouldReviewDiff && now - lastCodeUpdate > 200) {
           setCode(streamedCode);
           lastCodeUpdate = now;
         }
         // Update preview via debounced controller
-        previewCtrl.append(chunk);
+        previewCtrl?.append(chunk);
       }
       // Ensure final code is shown
-      setCode(streamedCode);
+      if (!shouldReviewDiff) {
+        setCode(streamedCode);
+      }
 
       // Cancel any pending timer without rendering to avoid fenced content flash
-      previewCtrl.reset();
+      previewCtrl?.reset();
       const finalCode = stripFences(streamedCode);
-      codeRef.current = finalCode;
-      setCode(finalCode);
-      pushVersion(text, finalCode);
-      // Final preview render with clean code
-      if (iframeRef.current) {
-        iframeRef.current.srcdoc = buildSrcdoc(type, finalCode, true);
+      const diffMetrics = shouldReviewDiff ? summarizeDiff(previousCode, finalCode) : null;
+      const shouldAutoAcceptDiff =
+        !!diffMetrics &&
+        diffMetrics.changedLineCount > 0 &&
+        diffMetrics.changedLineCount <= creationSettings.autoAcceptDiffLineThreshold;
+      const shouldReviewProposal =
+        !!diffMetrics &&
+        diffMetrics.changedLineCount > 0 &&
+        !shouldAutoAcceptDiff;
+
+      if (shouldReviewProposal && finalCode.trim() && finalCode !== previousCode) {
+        setPendingDiff({
+          original: previousCode,
+          modified: finalCode,
+          prompt: text,
+          type,
+        });
+        if (diffMetrics.changeRatio >= creationSettings.forceDiffReviewChangePercent / 100) {
+          setStatus('Large update ready for review');
+        } else {
+          setStatus('Review changes');
+        }
+        setViewMode('code');
+      } else {
+        codeRef.current = finalCode;
+        setCode(finalCode);
+        pushVersion(text, finalCode);
+        if (iframeRef.current) {
+          iframeRef.current.srcdoc = buildSrcdoc(type, finalCode, true);
+        }
+        setStatus(shouldAutoAcceptDiff ? 'Applied small update automatically' : '');
+        setViewMode('preview');
       }
-      setStatus('');
-      setViewMode('preview');
     } catch (err: any) {
       if (err.name !== 'AbortError') {
         setStatus(err.message || 'Request failed');
@@ -583,29 +996,28 @@ export default function ArtifactsPanel() {
     } finally {
       setLoading(false);
       abortRef.current = null;
-      previewCtrl.dispose();
+      previewCtrl?.dispose();
     }
-  }, [prompt, artifactType, getModel, pushVersion]);
+  }, [
+    prompt,
+    artifactType,
+    creationSettings.autoAcceptDiffLineThreshold,
+    creationSettings.forceDiffReviewChangePercent,
+    creationSettings.showDiffBeforeApply,
+    getModel,
+    pushVersion,
+  ]);
 
   /* ─── Actions ─── */
-  const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    return () => {
-      if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
-    };
-  }, []);
-
   const activeCode = panelMode === 'live' ? (activeLiveFile?.code || '') : code;
   const activeType = panelMode === 'live' ? (activeLiveFile?.type || 'html') : artifactType;
 
   const copyCode = useCallback(() => {
     if (!activeCode) return;
     navigator.clipboard.writeText(activeCode).then(() => {
-      setStatus('Copied!');
-      if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
-      statusTimerRef.current = setTimeout(() => setStatus(''), 1500);
+      setTimedStatus('Copied!', 1500);
     });
-  }, [activeCode]);
+  }, [activeCode, setTimedStatus]);
 
   const downloadFile = useCallback(() => {
     if (!activeCode) return;
@@ -643,6 +1055,189 @@ export default function ArtifactsPanel() {
     generate(qs.template, qs.type);
   }, [generate]);
 
+  const clearGeneratedArtifact = useCallback(() => {
+    setCode('');
+    setPrompt('');
+    setStatus('');
+    setIframeError(null);
+    setEditorDiagnostics([]);
+    setConsoleLogs([]);
+    setConsoleOpen(false);
+    setConsoleFilter('all');
+    setExpandedConsoleIds([]);
+    setUnreadErrorCount(0);
+    setAutoFixAttempts(0);
+    setIsAutoFixing(false);
+    setPendingDiff(null);
+    autoFixAttemptsRef.current = 0;
+    autoFixingRef.current = false;
+    lastAutoFixSignatureRef.current = null;
+    codeRef.current = '';
+    setViewMode('preview');
+    clearVersions();
+    void clearArtifactsPanelState();
+    if (iframeRef.current) iframeRef.current.srcdoc = '';
+  }, [clearVersions]);
+
+  const toggleConsoleEntry = useCallback((id: string) => {
+    setExpandedConsoleIds((prev) => (
+      prev.includes(id) ? prev.filter((entryId) => entryId !== id) : [...prev, id]
+    ));
+  }, []);
+
+  const clearConsole = useCallback(() => {
+    setConsoleLogs([]);
+    setExpandedConsoleIds([]);
+    setUnreadErrorCount(0);
+  }, []);
+
+  const openSaveDialog = useCallback(() => {
+    if (panelMode !== 'generate' || !code.trim()) return;
+    setSaveName(buildArtifactName(prompt, artifactType));
+    setSaveDialogOpen(true);
+  }, [artifactType, code, panelMode, prompt]);
+
+  const saveCurrentArtifact = useCallback(async () => {
+    if (!code.trim()) return;
+    const nextName = saveName.trim() || buildArtifactName(prompt, artifactType);
+    const thumbnail = await captureIframeThumbnailDataUrl({
+      iframe: iframeRef.current,
+      fallback: { name: nextName, prompt, code, type: artifactType },
+      buildFallback: ({ name, prompt: fallbackPrompt, code: fallbackCode, type }) =>
+        buildArtifactThumbnailDataUrl(name, type, fallbackPrompt, fallbackCode),
+    });
+    await galleryStore.save({
+      name: nextName,
+      type: artifactType,
+      code,
+      prompt,
+      thumbnail,
+      tags: prompt.trim() ? prompt.trim().toLowerCase().split(/\s+/).filter(Boolean).slice(0, 6) : [],
+    });
+    setSaveDialogOpen(false);
+    await refreshGallery();
+    setTimedStatus(`Saved "${nextName}"`, 1800);
+  }, [artifactType, code, prompt, refreshGallery, saveName, setTimedStatus]);
+
+  const loadSavedArtifact = useCallback((artifact: SavedArtifact) => {
+    setPanelMode('generate');
+    setArtifactType(artifact.type as ArtifactType);
+    setCode(artifact.code);
+    codeRef.current = artifact.code;
+    setPrompt(artifact.prompt || '');
+    setViewMode('preview');
+    setIframeError(null);
+    setEditorDiagnostics([]);
+    setConsoleLogs([]);
+    setExpandedConsoleIds([]);
+    setConsoleFilter('all');
+    setUnreadErrorCount(0);
+    setAutoFixAttempts(0);
+    setIsAutoFixing(false);
+    setPendingDiff(null);
+    autoFixAttemptsRef.current = 0;
+    autoFixingRef.current = false;
+    lastAutoFixSignatureRef.current = null;
+    if (iframeRef.current) {
+      iframeRef.current.srcdoc = buildSrcdoc(artifact.type as ArtifactType, artifact.code, true);
+    }
+    setGalleryOpen(false);
+    setTimedStatus(`Loaded "${artifact.name}"`, 1800);
+  }, [setTimedStatus]);
+
+  const forkSavedArtifact = useCallback(async (artifact: SavedArtifact) => {
+    const forkName = `${artifact.name} Copy`;
+    const id = await galleryStore.save({
+      name: forkName,
+      type: artifact.type,
+      code: artifact.code,
+      prompt: artifact.prompt,
+      tags: artifact.tags,
+      thumbnail: artifact.thumbnail || buildArtifactThumbnailDataUrl(forkName, artifact.type as ArtifactType, artifact.prompt || '', artifact.code),
+    });
+    await refreshGallery();
+    const next = await galleryStore.get(id);
+    if (next) loadSavedArtifact(next);
+    setTimedStatus(`Forked "${artifact.name}"`, 1800);
+  }, [loadSavedArtifact, refreshGallery, setTimedStatus]);
+
+  const openRenameDialog = useCallback((artifact: SavedArtifact) => {
+    setRenameDialogArtifact(artifact);
+    setRenameValue(artifact.name);
+  }, []);
+
+  const submitRenameArtifact = useCallback(async () => {
+    if (!renameDialogArtifact) return;
+    const nextName = renameValue.trim() || renameDialogArtifact.name;
+    await galleryStore.update(renameDialogArtifact.id, { name: nextName });
+    setRenameDialogArtifact(null);
+    setRenameValue('');
+    await refreshGallery();
+    setTimedStatus('Artifact renamed', 1500);
+  }, [refreshGallery, renameDialogArtifact, renameValue, setTimedStatus]);
+
+  const openDeleteDialog = useCallback((artifact: SavedArtifact) => {
+    setDeleteDialogArtifact(artifact);
+  }, []);
+
+  const confirmDeleteArtifact = useCallback(async () => {
+    if (!deleteDialogArtifact) return;
+    await galleryStore.delete(deleteDialogArtifact.id);
+    setDeleteDialogArtifact(null);
+    await refreshGallery();
+    setTimedStatus('Artifact deleted', 1500);
+  }, [deleteDialogArtifact, refreshGallery, setTimedStatus]);
+
+  const acceptPendingDiff = useCallback(() => {
+    if (!pendingDiff) return;
+    setArtifactType(pendingDiff.type);
+    setCode(pendingDiff.modified);
+    codeRef.current = pendingDiff.modified;
+    setIframeError(null);
+    setEditorDiagnostics([]);
+    pushVersion(pendingDiff.prompt, pendingDiff.modified);
+    if (iframeRef.current) {
+      iframeRef.current.srcdoc = buildSrcdoc(pendingDiff.type, pendingDiff.modified, true);
+    }
+    setPendingDiff(null);
+    setViewMode('preview');
+    setTimedStatus('Changes applied', 1800);
+  }, [pendingDiff, pushVersion, setTimedStatus]);
+
+  const rejectPendingDiff = useCallback(() => {
+    setPendingDiff(null);
+    setTimedStatus('Kept current artifact', 1800);
+  }, [setTimedStatus]);
+
+  const handleEditorCodeChange = useCallback((nextCode: string) => {
+    if (panelMode !== 'generate') return;
+    setCode(nextCode);
+    codeRef.current = nextCode;
+    setIframeError(null);
+    setEditorDiagnostics([]);
+    lastAutoFixSignatureRef.current = null;
+  }, [panelMode]);
+
+  useEffect(() => {
+    if (panelMode !== 'generate' || loading) return;
+    if (manualPreviewTimerRef.current) clearTimeout(manualPreviewTimerRef.current);
+
+    if (!code.trim()) {
+      if (iframeRef.current) iframeRef.current.srcdoc = '';
+      return;
+    }
+
+    manualPreviewTimerRef.current = setTimeout(() => {
+      if (iframeRef.current) {
+        iframeRef.current.srcdoc = buildSrcdoc(artifactType, code, true);
+      }
+    }, 250);
+
+    return () => {
+      if (manualPreviewTimerRef.current) clearTimeout(manualPreviewTimerRef.current);
+    };
+  }, [artifactType, code, loading, panelMode]);
+
   /* ─── View mode tabs ─── */
   const viewTabs: { mode: ViewMode; icon: React.ReactNode; label: string }[] = [
     { mode: 'preview', icon: <Eye size={13} />, label: 'Preview' },
@@ -650,17 +1245,20 @@ export default function ArtifactsPanel() {
     { mode: 'split', icon: <SplitSquareHorizontal size={13} />, label: 'Split' },
   ];
 
-  /* ─── Syntax-highlighted code display ─── */
-  const highlightedCode = React.useMemo(() => {
-    if (!activeCode) return '';
-    return highlightCode(activeCode, detectLanguage(activeCode, activeType));
-  }, [activeCode, activeType]);
-
   /* ─── Current view mode based on panel mode ─── */
   const currentViewMode = panelMode === 'live' ? liveViewMode : viewMode;
   const setCurrentViewMode = panelMode === 'live' ? setLiveViewMode : setViewMode;
   const currentIframeRef = panelMode === 'live' ? liveIframeRef : iframeRef;
   const hasCode = panelMode === 'live' ? !!activeLiveFile?.code : !!code;
+  const filteredConsoleLogs = consoleLogs.filter((log) => consoleFilter === 'all' ? true : log.level === consoleFilter);
+  const errorLogCount = consoleLogs.filter((log) => log.level === 'error').length;
+  const normalizedGalleryQuery = galleryQuery.trim().toLowerCase();
+  const filteredGalleryItems = galleryItems.filter((item) => {
+    const matchesType = galleryTypeFilter === 'all' || item.type === galleryTypeFilter;
+    const haystack = `${item.name} ${item.prompt || ''} ${(item.tags || []).join(' ')}`.toLowerCase();
+    const matchesQuery = !normalizedGalleryQuery || haystack.includes(normalizedGalleryQuery);
+    return matchesType && matchesQuery;
+  });
 
   /* ─── Render ─── */
   const panelStyle: React.CSSProperties = fullscreen
@@ -721,6 +1319,36 @@ export default function ArtifactsPanel() {
             <option value="chart">Chart.js</option>
             <option value="markdown">Markdown</option>
           </select>
+        )}
+
+        {panelMode === 'generate' && (
+          <button
+            onClick={() => setGalleryOpen(true)}
+            style={{
+              ...btnBase,
+              padding: '4px 10px',
+              fontSize: '10.5px',
+            }}
+          >
+            <FolderOpen size={12} /> Gallery
+            {galleryItems.length > 0 && (
+              <span style={{
+                minWidth: 16,
+                height: 16,
+                padding: '0 4px',
+                borderRadius: 999,
+                background: 'rgba(124,58,237,0.18)',
+                color: 'var(--pl)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '9px',
+                fontWeight: 700,
+              }}>
+                {galleryItems.length}
+              </span>
+            )}
+          </button>
         )}
 
         {/* Live mode: connection indicator */}
@@ -832,64 +1460,6 @@ export default function ArtifactsPanel() {
         </div>
       )}
 
-      {/* ═══ Live mode: file tab bar ═══ */}
-      {panelMode === 'live' && liveFileNames.length > 0 && (
-        <div style={{
-          display: 'flex', alignItems: 'center', flexShrink: 0,
-          borderBottom: '1px solid var(--b1)', padding: '0 4px',
-          overflowX: 'auto', gap: 1,
-        }}>
-          {liveFileNames.map(fname => {
-            const f = liveFiles[fname];
-            const isActive = activeLiveFile?.filename === fname;
-            return (
-              <div
-                key={fname}
-                onClick={() => setLiveActiveFile(fname)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 5,
-                  padding: '6px 10px', cursor: 'pointer',
-                  borderBottom: isActive ? '2px solid var(--p)' : '2px solid transparent',
-                  color: isActive ? 'var(--pl)' : 'var(--mu)',
-                  fontSize: '11px', fontFamily: 'inherit',
-                  transition: 'all 0.15s ease',
-                  whiteSpace: 'nowrap', flexShrink: 0,
-                }}
-              >
-                <span style={{ fontWeight: isActive ? 600 : 400 }}>{fname}</span>
-                <span style={{
-                  fontSize: '9px', color: 'rgba(255,255,255,0.3)',
-                  fontVariantNumeric: 'tabular-nums',
-                }}>
-                  {timeAgo(f.timestamp)}
-                </span>
-                <button
-                  onClick={e => { e.stopPropagation(); liveClearFile(fname); }}
-                  style={{
-                    background: 'none', border: 'none', padding: '1px', cursor: 'pointer',
-                    color: 'rgba(255,255,255,0.25)', display: 'flex',
-                  }}
-                  title="Remove from preview"
-                >
-                  <X size={10} />
-                </button>
-              </div>
-            );
-          })}
-          <div style={{ flex: 1 }} />
-          {liveFileNames.length > 1 && (
-            <button
-              onClick={liveClearAll}
-              style={{
-                ...btnBase, padding: '3px 8px', fontSize: '9.5px', flexShrink: 0,
-              }}
-            >
-              Clear all
-            </button>
-          )}
-        </div>
-      )}
-
       {/* ═══ Live mode: "Last updated" indicator ═══ */}
       {panelMode === 'live' && activeLiveFile && (
         <div style={{
@@ -911,33 +1481,61 @@ export default function ArtifactsPanel() {
             {' '}&middot;{' '}
             {activeLiveFile.code.length.toLocaleString()} chars
           </span>
+          <div style={{ flex: 1 }} />
+          {liveFileNames.length > 1 && (
+            <button
+              onClick={liveClearAll}
+              style={{ ...btnBase, padding: '3px 8px', fontSize: '9.5px', flexShrink: 0 }}
+            >
+              Clear all
+            </button>
+          )}
         </div>
       )}
 
       {/* ═══ Status bar ═══ */}
-      {(status || iframeError) && (
+      {(status || iframeError || isAutoFixing) && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 8,
           padding: '5px 12px', fontSize: '11px', flexShrink: 0,
           borderBottom: '1px solid var(--b1)',
-          background: iframeError ? 'rgba(239,68,68,0.06)' : status === 'Copied!' ? 'rgba(16,185,129,0.06)' : 'rgba(124,58,237,0.04)',
+          background: isAutoFixing
+            ? 'rgba(59,130,246,0.08)'
+            : iframeError
+              ? 'rgba(239,68,68,0.06)'
+              : status === 'Copied!'
+                ? 'rgba(16,185,129,0.06)'
+                : 'rgba(124,58,237,0.04)',
         }}>
           <span style={{
-            color: iframeError ? 'var(--rd)' : status === 'Copied!' ? 'var(--gr)' : 'var(--pl)',
+            color: isAutoFixing
+              ? '#60a5fa'
+              : iframeError
+                ? 'var(--rd)'
+                : status === 'Copied!'
+                  ? 'var(--gr)'
+                  : 'var(--pl)',
             flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}>
-            {iframeError ? `Error: ${iframeError}` : status}
+            {isAutoFixing
+              ? `Auto-fixing preview error (${Math.min(autoFixAttempts + 1, MAX_AUTO_FIX_ATTEMPTS)}/${MAX_AUTO_FIX_ATTEMPTS})`
+              : iframeError
+                ? `Error: ${iframeError}`
+                : status}
           </span>
           {iframeError && panelMode === 'generate' && (
             <button
               onClick={fixError}
+              disabled={isAutoFixing}
               style={{
                 ...btnBase, padding: '3px 10px', fontSize: '10.5px',
                 background: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.2)',
                 color: 'var(--rd)', flexShrink: 0,
+                opacity: isAutoFixing ? 0.6 : 1,
+                cursor: isAutoFixing ? 'wait' : 'pointer',
               }}
             >
-              <Wand2 size={11} /> Fix with AI
+              <Wand2 size={11} /> {isAutoFixing ? 'Fixing...' : 'Fix with AI'}
             </button>
           )}
         </div>
@@ -978,20 +1576,40 @@ export default function ArtifactsPanel() {
 
       {/* ═══ Main content area ═══ */}
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden', display: 'flex' }}>
+        {panelMode === 'live' && liveFileNames.length > 0 && (
+          <div style={{
+            width: 220,
+            borderRight: '1px solid var(--b1)',
+            background: 'rgba(255,255,255,0.02)',
+            flexShrink: 0,
+            minHeight: 0,
+          }}>
+            <FileTree
+              files={liveFileNames}
+              directories={liveDirectories}
+              activeFile={activeLiveFile?.filename || ''}
+              onFileSelect={setLiveActiveFile}
+              onFileDelete={liveClearFile}
+              title="Live Files"
+            />
+          </div>
+        )}
         {/* ── Code editor pane ── */}
         {hasCode && (currentViewMode === 'code' || currentViewMode === 'split') && (
           <div style={{
             width: currentViewMode === 'split' ? '50%' : '100%',
-            height: '100%', overflow: 'auto',
+            height: '100%',
             background: '#0d0d14',
             borderRight: currentViewMode === 'split' ? '1px solid var(--b1)' : 'none',
+            display: 'flex',
+            flexDirection: 'column',
           }}>
             <div style={{
-              position: 'sticky', top: 0, zIndex: 2,
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               padding: '6px 12px',
               background: 'rgba(13,13,20,0.95)', backdropFilter: 'blur(8px)',
               borderBottom: '1px solid rgba(255,255,255,0.04)',
+              flexShrink: 0,
             }}>
               <span style={{
                 fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.06em',
@@ -1004,15 +1622,15 @@ export default function ArtifactsPanel() {
                 {activeCode.length.toLocaleString()} chars
               </span>
             </div>
-            <pre
-              style={{
-                margin: 0, padding: '12px 14px', background: 'transparent', border: 'none',
-                fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
-                fontSize: '11.5px', lineHeight: 1.6, color: '#e2e0f0',
-                whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflow: 'visible',
-              }}
-              dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(highlightedCode) }}
-            />
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <CodeEditor
+                code={activeCode}
+                diagnostics={editorDiagnostics}
+                language={getArtifactEditorLanguage(activeType)}
+                onChange={panelMode === 'generate' ? handleEditorCodeChange : undefined}
+                readOnly={panelMode === 'live' || loading}
+              />
+            </div>
           </div>
         )}
 
@@ -1063,6 +1681,24 @@ export default function ArtifactsPanel() {
                 </span>
               </div>
             )}
+            {isAutoFixing && panelMode === 'generate' && (
+              <div style={{
+                position: 'absolute', top: 12, right: 12, zIndex: 6,
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '6px 12px', borderRadius: 'var(--r-pill)',
+                background: 'rgba(59,130,246,0.14)', border: '1px solid rgba(59,130,246,0.28)',
+                backdropFilter: 'blur(8px)',
+              }}>
+                <span style={{
+                  width: 8, height: 8, borderRadius: '50%',
+                  background: '#60a5fa',
+                  animation: 'pulse 1.25s ease-in-out infinite',
+                }} />
+                <span style={{ fontSize: '10.5px', color: '#bfdbfe', fontWeight: 600 }}>
+                  Fixing... {Math.min(autoFixAttempts + 1, MAX_AUTO_FIX_ATTEMPTS)}/{MAX_AUTO_FIX_ATTEMPTS}
+                </span>
+              </div>
+            )}
             {/* Console Drawer */}
             {consoleOpen && (
               <div style={{
@@ -1070,23 +1706,81 @@ export default function ArtifactsPanel() {
                 background: '#1e1e1e', borderTop: '1px solid #333', overflow: 'auto',
                 fontFamily: 'monospace', fontSize: '11px', zIndex: 10,
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', padding: '4px 8px', background: '#252526', borderBottom: '1px solid #333' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', background: '#252526', borderBottom: '1px solid #333', flexWrap: 'wrap' }}>
                   <span style={{ color: '#ccc', fontSize: '10px', fontWeight: 600 }}>Console</span>
+                  {CONSOLE_FILTERS.map((filter) => (
+                    <button
+                      key={filter}
+                      onClick={() => setConsoleFilter(filter)}
+                      style={{
+                        background: consoleFilter === filter ? 'rgba(55,148,255,0.18)' : 'transparent',
+                        border: '1px solid ' + (consoleFilter === filter ? 'rgba(55,148,255,0.35)' : 'transparent'),
+                        color: consoleFilter === filter ? '#8cc6ff' : '#888',
+                        cursor: 'pointer',
+                        fontSize: '9px',
+                        padding: '2px 6px',
+                        borderRadius: 999,
+                        textTransform: 'uppercase',
+                      }}
+                    >
+                      {filter}
+                    </button>
+                  ))}
                   <span style={{ flex: 1 }} />
-                  <button onClick={() => setConsoleLogs([])} style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: '10px', padding: '2px 6px' }}>Clear</button>
+                  <button onClick={clearConsole} style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: '10px', padding: '2px 6px' }}>Clear</button>
                   <button onClick={() => setConsoleOpen(false)} style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: '14px', padding: '2px 6px' }}>&times;</button>
                 </div>
-                {consoleLogs.map((log, i) => (
-                  <div key={i} style={{
-                    padding: '3px 8px', borderBottom: '1px solid #2a2a2a',
-                    color: log.level === 'error' ? '#f44747' : log.level === 'warn' ? '#cca700' : log.level === 'info' ? '#3794ff' : '#d4d4d4',
-                  }}>
-                    {log.args.map((a) => {
-                      try { return JSON.parse(a); } catch { return a; }
-                    }).join(' ')}
+                {filteredConsoleLogs.map((log) => {
+                  const expanded = expandedConsoleIds.includes(log.id);
+                  const text = log.args.map(parseConsoleArg).join(' ');
+                  return (
+                    <div
+                      key={log.id}
+                      onClick={() => {
+                        navigator.clipboard.writeText([text, log.stack].filter(Boolean).join('\n\n')).catch(() => {});
+                        setTimedStatus('Console entry copied', 1200);
+                      }}
+                      style={{
+                        padding: '5px 8px', borderBottom: '1px solid #2a2a2a',
+                        color: log.level === 'error' ? '#f44747' : log.level === 'warn' ? '#cca700' : log.level === 'info' ? '#3794ff' : '#d4d4d4',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                        <span style={{ opacity: 0.7, minWidth: 42 }}>{log.level.toUpperCase()}</span>
+                        <span style={{ flex: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{text}</span>
+                        {log.stack && (
+                          <button
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              toggleConsoleEntry(log.id);
+                            }}
+                            style={{ background: 'none', border: 'none', color: '#8cc6ff', cursor: 'pointer', fontSize: '10px', padding: 0 }}
+                          >
+                            {expanded ? 'Hide' : 'Stack'}
+                          </button>
+                        )}
+                      </div>
+                      {expanded && log.stack && (
+                        <pre style={{
+                          margin: '6px 0 0 50px',
+                          padding: '6px 8px',
+                          background: 'rgba(0,0,0,0.28)',
+                          borderRadius: 6,
+                          color: '#cbd5e1',
+                          whiteSpace: 'pre-wrap',
+                        }}>
+                          {log.stack}
+                        </pre>
+                      )}
+                    </div>
+                  );
+                })}
+                {filteredConsoleLogs.length === 0 && (
+                  <div style={{ padding: '8px', color: '#666', textAlign: 'center' }}>
+                    {consoleLogs.length === 0 ? 'No console output' : `No ${consoleFilter} entries`}
                   </div>
-                ))}
-                {consoleLogs.length === 0 && <div style={{ padding: '8px', color: '#666', textAlign: 'center' }}>No console output</div>}
+                )}
               </div>
             )}
           </div>
@@ -1198,6 +1892,370 @@ export default function ArtifactsPanel() {
         )}
       </div>
 
+      {saveDialogOpen && (
+        <OverlayModal
+          onClose={() => setSaveDialogOpen(false)}
+          title="Save Artifact"
+          icon={<Save size={16} style={{ color: 'var(--pl)' }} />}
+        >
+            <div style={{ fontSize: '11px', color: 'var(--mu)', lineHeight: 1.5 }}>
+              Give this artifact a name so you can reload it later from the gallery.
+            </div>
+            <input
+              value={saveName}
+              onChange={(event) => setSaveName(event.target.value)}
+              placeholder="Artifact name"
+              autoFocus
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  void saveCurrentArtifact();
+                }
+              }}
+              style={{
+                background: 'var(--s2)', border: '1px solid var(--b1)', borderRadius: 'var(--r-md)',
+                color: 'var(--tx)', fontSize: '12px', padding: '10px 12px', outline: 'none', fontFamily: 'inherit',
+              }}
+            />
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button onClick={() => setSaveDialogOpen(false)} style={{ ...btnBase, padding: '8px 12px' }}>
+                Cancel
+              </button>
+              <button
+                onClick={() => void saveCurrentArtifact()}
+                style={{
+                  background: 'var(--p)', color: '#fff', border: 'none', borderRadius: 'var(--r-md)',
+                  padding: '8px 14px', cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit', fontWeight: 600,
+                }}
+              >
+                Save
+              </button>
+            </div>
+        </OverlayModal>
+      )}
+
+      {renameDialogArtifact && (
+        <OverlayModal
+          onClose={() => { setRenameDialogArtifact(null); setRenameValue(''); }}
+          title="Rename Artifact"
+          icon={<Pencil size={16} style={{ color: 'var(--pl)' }} />}
+          zIndex={10011}
+        >
+            <div style={{ fontSize: '11px', color: 'var(--mu)', lineHeight: 1.5 }}>
+              Update how this artifact appears in the gallery.
+            </div>
+            <input
+              value={renameValue}
+              onChange={(event) => setRenameValue(event.target.value)}
+              placeholder="Artifact name"
+              autoFocus
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  void submitRenameArtifact();
+                }
+              }}
+              style={{
+                background: 'var(--s2)', border: '1px solid var(--b1)', borderRadius: 'var(--r-md)',
+                color: 'var(--tx)', fontSize: '12px', padding: '10px 12px', outline: 'none', fontFamily: 'inherit',
+              }}
+            />
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button onClick={() => { setRenameDialogArtifact(null); setRenameValue(''); }} style={{ ...btnBase, padding: '8px 12px' }}>
+                Cancel
+              </button>
+              <button
+                onClick={() => void submitRenameArtifact()}
+                style={{
+                  background: 'var(--p)', color: '#fff', border: 'none', borderRadius: 'var(--r-md)',
+                  padding: '8px 14px', cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit', fontWeight: 600,
+                }}
+              >
+                Save Name
+              </button>
+            </div>
+        </OverlayModal>
+      )}
+
+      {deleteDialogArtifact && (
+        <OverlayModal
+          onClose={() => setDeleteDialogArtifact(null)}
+          title="Delete Artifact"
+          icon={<Trash2 size={16} style={{ color: '#fca5a5' }} />}
+          zIndex={10012}
+        >
+            <div style={{ fontSize: '11px', color: 'var(--mu)', lineHeight: 1.5 }}>
+              Permanently remove <span style={{ color: 'var(--tx)', fontWeight: 700 }}>{deleteDialogArtifact.name}</span> from the gallery?
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button onClick={() => setDeleteDialogArtifact(null)} style={{ ...btnBase, padding: '8px 12px' }}>
+                Cancel
+              </button>
+              <button
+                onClick={() => void confirmDeleteArtifact()}
+                style={{
+                  background: '#dc2626', color: '#fff', border: 'none', borderRadius: 'var(--r-md)',
+                  padding: '8px 14px', cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit', fontWeight: 600,
+                }}
+              >
+                Delete
+              </button>
+            </div>
+        </OverlayModal>
+      )}
+
+      {pendingDiff && (
+        <OverlayModal
+          onClose={rejectPendingDiff}
+          title="Review Artifact Changes"
+          icon={<GitFork size={16} style={{ color: 'var(--pl)' }} />}
+          zIndex={10013}
+          contentStyle={{
+            width: 'min(1120px, 100%)',
+            height: 'min(82vh, 900px)',
+            gap: 10,
+          }}
+        >
+          <div style={{ fontSize: '11px', color: 'var(--mu)', lineHeight: 1.5 }}>
+            Compare the current artifact with Aura&apos;s proposed update before it replaces the live version.
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, fontSize: '10px', color: 'var(--mu)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            <div>Current</div>
+            <div>AI Proposal</div>
+          </div>
+          <React.Suspense
+            fallback={
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--mu)', fontSize: 12 }}>
+                Loading diff...
+              </div>
+            }
+          >
+            <DiffEditor
+              original={pendingDiff.original}
+              modified={pendingDiff.modified}
+              language={getArtifactEditorLanguage(pendingDiff.type)}
+            />
+          </React.Suspense>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button onClick={rejectPendingDiff} style={{ ...btnBase, padding: '8px 12px' }}>
+              Keep Current
+            </button>
+            <button
+              onClick={acceptPendingDiff}
+              style={{
+                background: 'var(--p)', color: '#fff', border: 'none', borderRadius: 'var(--r-md)',
+                padding: '8px 14px', cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit', fontWeight: 600,
+              }}
+            >
+              Apply Changes
+            </button>
+          </div>
+        </OverlayModal>
+      )}
+
+      {galleryOpen && (
+        <div
+          onClick={() => setGalleryOpen(false)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 10000,
+            background: 'rgba(0,0,0,0.48)',
+            display: 'flex', justifyContent: 'flex-end',
+          }}
+        >
+          <div
+            onClick={(event) => event.stopPropagation()}
+            style={{
+              width: 'min(520px, 100vw)',
+              height: '100%',
+              background: '#10111a',
+              borderLeft: '1px solid rgba(255,255,255,0.08)',
+              boxShadow: '-20px 0 50px rgba(0,0,0,0.35)',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '16px 16px 12px', borderBottom: '1px solid var(--b1)' }}>
+              <FolderOpen size={16} style={{ color: 'var(--pl)' }} />
+              <div>
+                <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--tx)' }}>Artifact Gallery</div>
+                <div style={{ fontSize: '10.5px', color: 'var(--mu)' }}>{galleryItems.length} saved items</div>
+              </div>
+              <div style={{ flex: 1 }} />
+              <button onClick={() => setGalleryOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--mu)', cursor: 'pointer' }}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <div style={{ padding: '12px 16px', display: 'flex', gap: 8, borderBottom: '1px solid var(--b1)' }}>
+              <div style={{ position: 'relative', flex: 1 }}>
+                <Search size={12} style={{ position: 'absolute', left: 10, top: 10, color: 'var(--mu)' }} />
+                <input
+                  value={galleryQuery}
+                  onChange={(event) => setGalleryQuery(event.target.value)}
+                  placeholder="Search saved artifacts"
+                  style={{
+                    width: '100%',
+                    background: 'var(--s2)',
+                    border: '1px solid var(--b1)',
+                    borderRadius: 'var(--r-md)',
+                    color: 'var(--tx)',
+                    fontSize: '11.5px',
+                    padding: '8px 10px 8px 30px',
+                    outline: 'none',
+                    fontFamily: 'inherit',
+                  }}
+                />
+              </div>
+              <select
+                value={galleryTypeFilter}
+                onChange={(event) => setGalleryTypeFilter(event.target.value as 'all' | ArtifactType)}
+                style={{
+                  background: 'var(--s2)', border: '1px solid var(--b1)', borderRadius: 'var(--r-md)',
+                  color: 'var(--tx)', fontSize: '11px', padding: '8px 10px', fontFamily: 'inherit',
+                }}
+              >
+                <option value="all">All types</option>
+                <option value="html">HTML</option>
+                <option value="react">React</option>
+                <option value="svg">SVG</option>
+                <option value="mermaid">Mermaid</option>
+                <option value="chart">Chart</option>
+                <option value="markdown">Markdown</option>
+                <option value="css">CSS</option>
+              </select>
+            </div>
+
+            <div style={{ flex: 1, overflow: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {filteredGalleryItems.map((item) => (
+                <div
+                  key={item.id}
+                  style={{
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    borderRadius: 14,
+                    background: 'rgba(255,255,255,0.02)',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div style={{
+                    height: 112,
+                    borderBottom: '1px solid rgba(255,255,255,0.06)',
+                    background: item.thumbnail
+                      ? `center / cover no-repeat url("${item.thumbnail}")`
+                      : 'linear-gradient(135deg, rgba(124,58,237,0.18), rgba(59,130,246,0.12))',
+                    position: 'relative',
+                    display: 'flex',
+                    alignItems: 'flex-end',
+                  }}>
+                    <div style={{
+                      position: 'absolute',
+                      inset: 0,
+                      background: 'linear-gradient(180deg, rgba(3,7,18,0.04), rgba(3,7,18,0.72))',
+                    }} />
+                    <div style={{
+                      position: 'relative',
+                      zIndex: 1,
+                      width: '100%',
+                      padding: 12,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 6,
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{
+                          fontSize: '9px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+                          color: '#d8b4fe', background: 'rgba(15,23,42,0.48)', padding: '3px 7px', borderRadius: 999,
+                        }}>
+                          {item.type}
+                        </span>
+                        <span style={{ fontSize: '10px', color: '#e2e8f0' }}>
+                          {new Date(item.updatedAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '13px', fontWeight: 700, color: '#f8fafc' }}>{item.name}</div>
+                    </div>
+                  </div>
+                  <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{ fontSize: '11px', color: 'var(--mu)', lineHeight: 1.5 }}>
+                      {(item.prompt || item.code).slice(0, 140)}{(item.prompt || item.code).length > 140 ? '...' : ''}
+                    </div>
+                    {!!item.tags?.length && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        {item.tags.slice(0, 4).map((tag) => (
+                          <span
+                            key={tag}
+                            style={{
+                              fontSize: '9px',
+                              color: '#c4b5fd',
+                              background: 'rgba(124,58,237,0.12)',
+                              border: '1px solid rgba(124,58,237,0.18)',
+                              padding: '3px 6px',
+                              borderRadius: 999,
+                            }}
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: '10px', color: 'var(--mu)' }}>
+                      <span>{item.code.length.toLocaleString()} chars</span>
+                      <span>Created {new Date(item.createdAt).toLocaleDateString()}</span>
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      <button onClick={() => loadSavedArtifact(item)} style={{ ...btnBase, padding: '6px 10px', fontSize: '10.5px' }}>
+                        <FolderOpen size={12} /> Load
+                      </button>
+                      <button onClick={() => void forkSavedArtifact(item)} style={{ ...btnBase, padding: '6px 10px', fontSize: '10.5px' }}>
+                        <GitFork size={12} /> Fork
+                      </button>
+                      <button onClick={() => openRenameDialog(item)} style={{ ...btnBase, padding: '6px 10px', fontSize: '10.5px' }}>
+                        <Pencil size={12} /> Rename
+                      </button>
+                      <button
+                        onClick={() => openDeleteDialog(item)}
+                        style={{
+                          ...btnBase, padding: '6px 10px', fontSize: '10.5px',
+                          color: '#fca5a5', borderColor: 'rgba(239,68,68,0.18)',
+                        }}
+                      >
+                        <Trash2 size={12} /> Delete
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              {filteredGalleryItems.length === 0 && (
+                <div style={{
+                  flex: 1,
+                  minHeight: 180,
+                  border: '1px dashed rgba(255,255,255,0.12)',
+                  borderRadius: 16,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 10,
+                  color: 'var(--mu)',
+                  textAlign: 'center',
+                  padding: 24,
+                }}>
+                  <FolderOpen size={22} style={{ color: 'var(--pl)' }} />
+                  <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--tx)' }}>
+                    {galleryItems.length === 0 ? 'No saved artifacts yet' : 'No matches for this filter'}
+                  </div>
+                  <div style={{ fontSize: '10.5px', lineHeight: 1.5, maxWidth: 280 }}>
+                    {galleryItems.length === 0
+                      ? 'Save generated work here so you can reload it later and use it as a starting point.'
+                      : 'Try another search term or switch the type filter.'}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ═══ Footer action bar ═══ */}
       {hasCode && (
         <div style={{
@@ -1206,6 +2264,45 @@ export default function ArtifactsPanel() {
         }}>
           <ActionBtn id="copy" icon={<Copy size={13} />} label="Copy Code" onClick={copyCode} hoveredBtn={hoveredBtn} setHoveredBtn={setHoveredBtn} />
           <ActionBtn id="download" icon={<Download size={13} />} label="Download" onClick={downloadFile} hoveredBtn={hoveredBtn} setHoveredBtn={setHoveredBtn} />
+          <ActionBtn
+            id="webcreator"
+            icon={<ExternalLink size={13} />}
+            label="Edit in Web Creator"
+            onClick={() => {
+              const { handoffToPanel } = useStore.getState();
+              handoffToPanel('webcreator', { code: activeCode, from: 'Artifacts' });
+            }}
+            hoveredBtn={hoveredBtn}
+            setHoveredBtn={setHoveredBtn}
+          />
+          <ActionBtn
+            id="savecomp"
+            icon={<Package size={13} />}
+            label="Save Component"
+            onClick={async () => {
+              const compName = window.prompt('Component name:');
+              if (!compName) return;
+              const { componentLibrary } = await import('../utils/componentLibrary');
+              await componentLibrary.save({
+                name: compName,
+                description: 'Saved from Artifacts',
+                category: 'other',
+                html: activeCode,
+                css: '',
+                tags: [activeType],
+                source: 'generated',
+              });
+              setTimedStatus('Component saved!');
+            }}
+            hoveredBtn={hoveredBtn}
+            setHoveredBtn={setHoveredBtn}
+          />
+          {panelMode === 'generate' && (
+            <ActionBtn id="save" icon={<Save size={13} />} label="Save" onClick={openSaveDialog} hoveredBtn={hoveredBtn} setHoveredBtn={setHoveredBtn} />
+          )}
+          {panelMode === 'generate' && (
+            <ActionBtn id="clear" icon={<X size={13} />} label="Clear" onClick={clearGeneratedArtifact} hoveredBtn={hoveredBtn} setHoveredBtn={setHoveredBtn} />
+          )}
           <button
             onClick={() => { const v = undo(); if (v) { setCode(v.code); codeRef.current = v.code; if (iframeRef.current) iframeRef.current.srcdoc = buildSrcdoc(artifactType, v.code, true); } }}
             disabled={!canUndo}
@@ -1234,13 +2331,13 @@ export default function ArtifactsPanel() {
             }}
           >
             <Terminal size={12} /> Console
-            {consoleLogs.filter(l => l.level === 'error').length > 0 && (
+            {(unreadErrorCount > 0 || errorLogCount > 0) && (
               <span style={{
                 position: 'absolute', top: -4, right: -4, background: '#f44747',
                 color: 'white', borderRadius: '50%', width: 14, height: 14,
                 fontSize: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
-                {consoleLogs.filter(l => l.level === 'error').length}
+                {consoleOpen ? errorLogCount : unreadErrorCount || errorLogCount}
               </span>
             )}
           </button>
@@ -1248,7 +2345,7 @@ export default function ArtifactsPanel() {
             <ActionBtn id="remix" icon={<RotateCcw size={13} />} label="Remix" onClick={remix} hoveredBtn={hoveredBtn} setHoveredBtn={setHoveredBtn} />
           )}
           {iframeError && panelMode === 'generate' && (
-            <ActionBtn id="fix" icon={<Wrench size={13} />} label="Fix Error" onClick={fixError} accent hoveredBtn={hoveredBtn} setHoveredBtn={setHoveredBtn} />
+            <ActionBtn id="fix" icon={<Wrench size={13} />} label="Fix Error" onClick={fixError} hoveredBtn={hoveredBtn} setHoveredBtn={setHoveredBtn} />
           )}
           <div style={{ flex: 1 }} />
           <ActionBtn

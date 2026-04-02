@@ -14,7 +14,7 @@ import json
 import logging
 import threading
 import time
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
 from pydantic import BaseModel
@@ -107,6 +107,19 @@ async def _broadcast_to_clients(payload: dict) -> None:
                     pass
 
 
+def broadcast_event(payload: Dict[str, Any]) -> None:
+    """Broadcast an arbitrary event payload to connected artifact clients."""
+    global _event_loop
+    if _event_loop and not _event_loop.is_closed():
+        try:
+            _event_loop.call_soon_threadsafe(
+                _event_loop.create_task,
+                _broadcast_to_clients(payload),
+            )
+        except RuntimeError:
+            pass
+
+
 def broadcast_artifact(filename: str, code: str, file_type: Optional[str] = None) -> None:
     """Called from the agent loop (sync context) to push a file change.
 
@@ -122,15 +135,7 @@ def broadcast_artifact(filename: str, code: str, file_type: Optional[str] = None
         "timestamp": preview.timestamp,
     }
 
-    global _event_loop
-    if _event_loop and not _event_loop.is_closed():
-        try:
-            _event_loop.call_soon_threadsafe(
-                _event_loop.create_task,
-                _broadcast_to_clients(payload),
-            )
-        except RuntimeError:
-            pass  # Loop closed between check and call — ignore
+    broadcast_event(payload)
 
 
 # ---------------------------------------------------------------------------

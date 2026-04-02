@@ -35,6 +35,7 @@ class GenerateRequest(BaseModel):
     system_prompt: Optional[str] = Field(default=None, max_length=10_000, description="System prompt for the LLM")
     model: Optional[str] = Field(default=None, description="Model override (None = default)")
     history: Optional[List[HistoryItem]] = Field(default=None, max_length=20, description="Conversation history")
+    images: Optional[List[str]] = Field(default=None, max_length=5, description="Base64 images for vision models")
 
 
 def _get_brain():
@@ -54,6 +55,7 @@ async def generate_raw(request: GenerateRequest) -> StreamingResponse:
     system_prompt = request.system_prompt
     model = request.model
     history = request.history or []
+    images = request.images or []
 
     loop = asyncio.get_running_loop()
     chunk_queue: asyncio.Queue = asyncio.Queue()
@@ -77,11 +79,22 @@ async def generate_raw(request: GenerateRequest) -> StreamingResponse:
             for msg in history:
                 messages.append({"role": msg.role, "content": msg.content})
 
-            # Add the current user message
-            messages.append({"role": "user", "content": message})
+            # Add the current user message (with images if provided for vision models)
+            user_msg: dict = {"role": "user", "content": message}
+            if images:
+                # Strip data URI prefix if present (Ollama expects raw base64)
+                clean_images = []
+                for img in images:
+                    if "," in img:
+                        clean_images.append(img.split(",", 1)[1])
+                    else:
+                        clean_images.append(img)
+                user_msg["images"] = clean_images
+            messages.append(user_msg)
 
             logger.info(f"[Generate/Raw] Streaming with model={actual_model}, "
-                        f"msgs={len(messages)}, system={'yes' if system_prompt else 'no'}")
+                        f"msgs={len(messages)}, system={'yes' if system_prompt else 'no'}, "
+                        f"images={len(images)}")
 
             # Direct streaming call — no agent, no tools, no personality
             response = client.chat(

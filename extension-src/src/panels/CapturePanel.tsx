@@ -2,10 +2,10 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Crosshair, Copy, Eye, Code2, Wand2, Sparkles, X,
   Image as ImageIcon, Layers, SplitSquareHorizontal,
-  Globe, Send, Palette, Type, Check, RefreshCw, Trash2, FileText,
+  Globe, Send, Palette, Type, Check, RefreshCw, Trash2, FileText, ExternalLink,
 } from 'lucide-react';
-import DOMPurify from 'dompurify';
 import { useStore } from '../store';
+import CodeEditor from '../components/CodeEditor';
 import ModelPill from '../components/ModelPill';
 import { HTTP, getAuthHeaders } from '../api';
 import ext from '../ext';
@@ -88,10 +88,6 @@ function cssMapToString(cssMap: Record<string, Record<string, string>>): string 
     lines.push('');
   }
   return lines.join('\n');
-}
-
-function escHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 function stripFences(s: string): string {
@@ -518,21 +514,6 @@ ${generatedCode}
     });
   }, [flash]);
 
-  /* ─── Syntax highlight ─── */
-  const highlightCode = (code: string): string => {
-    let h = escHtml(code);
-    h = h.replace(/(&quot;|&#39;)(.*?)\1/g, '<span style="color:#a5d6ff">$1$2$1</span>');
-    h = h.replace(/(&lt;\/?)([\w-]+)/g, '$1<span style="color:#ff7b72">$2</span>');
-    h = h.replace(/\s([\w-]+)=/g, ' <span style="color:#d2a8ff">$1</span>=');
-    h = h.replace(/(\/\/.*?)(\n|$)/g, '<span style="color:#6a737d">$1</span>$2');
-    const kw = ['const', 'let', 'var', 'function', 'return', 'if', 'else', 'for', 'while', 'class', 'import', 'export', 'from', 'new', 'try', 'catch', 'async', 'await'];
-    for (const k of kw) {
-      h = h.replace(new RegExp(`\\b(${k})\\b`, 'g'), '<span style="color:#ff7b72">$1</span>');
-    }
-    h = h.replace(/\b(\d+\.?\d*)\b/g, '<span style="color:#79c0ff">$1</span>');
-    return h;
-  };
-
   /* ─── Button helper ─── */
   const ActionBtn = ({ id, icon, label, onClick, accent, disabled }: {
     id: string; icon: React.ReactNode; label: string; onClick: () => void; accent?: boolean; disabled?: boolean;
@@ -898,58 +879,46 @@ ${generatedCode}
 
         {/* HTML tab */}
         {captureMode === 'component' && captured && activeTab === 'html' && (
-          <div style={{ height: '100%', overflow: 'auto', background: '#0d0d14' }}>
+          <div style={{ height: '100%', background: '#0d0d14', display: 'flex', flexDirection: 'column' }}>
             <div style={{
-              position: 'sticky', top: 0, zIndex: 2,
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               padding: '6px 12px',
               background: 'rgba(13,13,20,0.95)', backdropFilter: 'blur(8px)',
               borderBottom: '1px solid rgba(255,255,255,0.04)',
+              flexShrink: 0,
             }}>
               <Badge accent>HTML</Badge>
               <span style={{ fontSize: '9.5px', color: 'rgba(255,255,255,0.3)', fontVariantNumeric: 'tabular-nums' }}>
                 {captured.html.length.toLocaleString()} chars
               </span>
             </div>
-            <pre
-              style={{
-                margin: 0, padding: '12px 14px', background: 'transparent', border: 'none',
-                fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
-                fontSize: '11.5px', lineHeight: 1.6, color: '#e2e0f0',
-                whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflow: 'visible',
-              }}
-              dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(highlightCode(captured.html)) }}
-            />
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <CodeEditor code={captured.html} language="html" readOnly />
+            </div>
           </div>
         )}
 
         {/* CSS tab */}
         {captureMode === 'component' && captured && activeTab === 'css' && (
-          <div style={{ height: '100%', overflow: 'auto', background: '#0d0d14' }}>
+          <div style={{ height: '100%', background: '#0d0d14', display: 'flex', flexDirection: 'column' }}>
             <div style={{
-              position: 'sticky', top: 0, zIndex: 2,
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               padding: '6px 12px',
               background: 'rgba(13,13,20,0.95)', backdropFilter: 'blur(8px)',
               borderBottom: '1px solid rgba(255,255,255,0.04)',
+              flexShrink: 0,
             }}>
               <Badge accent>CSS</Badge>
             </div>
-            <pre
-              style={{
-                margin: 0, padding: '12px 14px', background: 'transparent', border: 'none',
-                fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
-                fontSize: '11.5px', lineHeight: 1.6, color: '#e2e0f0',
-                whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflow: 'visible',
-              }}
-              dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(highlightCode(cssMapToString(captured.css))) }}
-            />
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <CodeEditor code={cssMapToString(captured.css)} language="css" readOnly />
+            </div>
           </div>
         )}
 
         {/* Generated AI code tab */}
         {captureMode === 'component' && captured && activeTab === 'generated' && (
-          <div style={{ height: '100%', overflow: 'auto', background: '#0d0d14' }}>
+          <div style={{ height: '100%', background: '#0d0d14', display: 'flex', flexDirection: 'column' }}>
             {!generatedCode && !loading && (
               <div style={{
                 display: 'flex', flexDirection: 'column',
@@ -979,26 +948,20 @@ ${generatedCode}
             {generatedCode && !loading && (
               <>
                 <div style={{
-                  position: 'sticky', top: 0, zIndex: 2,
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                   padding: '6px 12px',
                   background: 'rgba(13,13,20,0.95)', backdropFilter: 'blur(8px)',
                   borderBottom: '1px solid rgba(255,255,255,0.04)',
+                  flexShrink: 0,
                 }}>
                   <Badge accent>React + Tailwind</Badge>
                   <span style={{ fontSize: '9.5px', color: 'rgba(255,255,255,0.3)', fontVariantNumeric: 'tabular-nums' }}>
                     {generatedCode.length.toLocaleString()} chars
                   </span>
                 </div>
-                <pre
-                  style={{
-                    margin: 0, padding: '12px 14px', background: 'transparent', border: 'none',
-                    fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
-                    fontSize: '11.5px', lineHeight: 1.6, color: '#e2e0f0',
-                    whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflow: 'visible',
-                  }}
-                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(highlightCode(generatedCode)) }}
-                />
+                <div style={{ flex: 1, minHeight: 0 }}>
+                  <CodeEditor code={generatedCode} language="jsx" readOnly />
+                </div>
               </>
             )}
           </div>
@@ -1123,30 +1086,22 @@ ${generatedCode}
 
         {/* Page HTML tab */}
         {captureMode === 'page' && pageCaptured && pageTab === 'html' && (
-          <div style={{ height: '100%', overflow: 'auto', background: '#0d0d14' }}>
+          <div style={{ height: '100%', background: '#0d0d14', display: 'flex', flexDirection: 'column' }}>
             <div style={{
-              position: 'sticky', top: 0, zIndex: 2,
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               padding: '6px 12px',
               background: 'rgba(13,13,20,0.95)', backdropFilter: 'blur(8px)',
               borderBottom: '1px solid rgba(255,255,255,0.04)',
+              flexShrink: 0,
             }}>
               <Badge accent>HTML</Badge>
               <span style={{ fontSize: '9.5px', color: 'rgba(255,255,255,0.3)', fontVariantNumeric: 'tabular-nums' }}>
                 {pageCaptured.html.length.toLocaleString()} chars
               </span>
             </div>
-            <pre
-              style={{
-                margin: 0, padding: '12px 14px', background: 'transparent', border: 'none',
-                fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
-                fontSize: '11.5px', lineHeight: 1.6, color: '#e2e0f0',
-                whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflow: 'visible',
-              }}
-              dangerouslySetInnerHTML={{
-                __html: DOMPurify.sanitize(highlightCode(pageCaptured.html.slice(0, 50000)))
-              }}
-            />
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <CodeEditor code={pageCaptured.html.slice(0, 50000)} language="html" readOnly />
+            </div>
           </div>
         )}
 
@@ -1373,6 +1328,16 @@ ${generatedCode}
                 icon={<Copy size={13} />}
                 label="HTML"
                 onClick={() => copyText(pageCaptured.html.slice(0, 100000), 'HTML')}
+              />
+              <ActionBtn
+                id="edit-webcreator"
+                icon={<ExternalLink size={13} />}
+                label="Web Creator"
+                onClick={() => {
+                  const { handoffToPanel } = useStore.getState();
+                  const code = generatedCode || pageCaptured.html.slice(0, 200000);
+                  handoffToPanel('webcreator', { code, from: 'Capture' });
+                }}
               />
             </>
           )}

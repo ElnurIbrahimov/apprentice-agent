@@ -7,6 +7,7 @@ import InputBar from '../components/InputBar';
 import DropZone from '../components/DropZone';
 import { PAGE_KEYWORDS } from '../ws';
 import { getPageContentCached, getCurrentTab } from '../ext';
+import { API_KEY, HTTP as API_HTTP } from '../api';
 import type { StreamState, FileAttachment } from '../types';
 import { speak } from '../tts';
 import { ChevronDown, Brain, Pen, Square } from 'lucide-react';
@@ -113,10 +114,9 @@ export default function ChatPanel() {
     if (!useWs && bs === 'offline') {
       // Quick HTTP health check before giving up — WS might be down but HTTP works
       try {
-        const { HTTP: httpUrl, API_KEY: key } = await import('../api');
         const headers: Record<string, string> = {};
-        if (key) headers['X-API-Key'] = key;
-        const probe = await fetch(`${httpUrl}/api/status`, { headers, signal: AbortSignal.timeout(5000) });
+        if (API_KEY) headers['X-API-Key'] = API_KEY;
+        const probe = await fetch(`${API_HTTP}/api/status`, { headers, signal: AbortSignal.timeout(5000) });
         if (probe.ok) {
           // Server is actually reachable — update status and continue with HTTP fallback
           useStore.getState().setBackendStatus('online');
@@ -209,7 +209,6 @@ export default function ChatPanel() {
       // HTTP fallback when WebSocket is unavailable
       (async () => {
         try {
-          const { HTTP, API_KEY } = await import('../api');
           const headers: Record<string, string> = { 'Content-Type': 'application/json' };
           if (API_KEY) headers['X-API-Key'] = API_KEY;
           // Send full payload (same fields as WS) so the server has all context
@@ -224,7 +223,7 @@ export default function ChatPanel() {
             httpPayload.thinking = true;
             httpPayload.thinking_level = payload.thinking_level;
           }
-          const resp = await fetch(`${HTTP}/api/chat`, {
+          const resp = await fetch(`${API_HTTP}/api/chat`, {
             method: 'POST',
             headers,
             body: JSON.stringify(httpPayload),
