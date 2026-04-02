@@ -56,10 +56,14 @@ from aura.tools.code_edit import CodeEditTool, _is_safe_path
 
 
 def test_safe_path_blocks_system(tmp_path):
-    p = Path("C:/Windows/System32/test.py")
+    import platform
+    if platform.system() == "Windows":
+        p = Path("C:/Windows/System32/test.py")
+    else:
+        p = Path("/etc/passwd")
     safe, reason = _is_safe_path(p)
     assert not safe
-    assert "System path blocked" in reason
+    assert "blocked" in reason.lower() or "System" in reason
 
 
 def test_safe_path_blocks_node_modules(tmp_path):

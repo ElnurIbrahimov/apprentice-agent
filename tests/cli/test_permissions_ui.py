@@ -15,8 +15,9 @@ def test_permission_modes_exist():
     assert PermissionMode.FULL_AUTO == "full_auto"
 
 def test_cycle_forward():
-    # Cycle: careful -> plan_approve -> full_auto -> careful
-    assert cycle_permission_mode("careful") == "plan_approve"
+    # Cycle: careful -> auto_edit -> plan_approve -> full_auto -> careful
+    assert cycle_permission_mode("careful") == "auto_edit"
+    assert cycle_permission_mode("auto_edit") == "plan_approve"
     assert cycle_permission_mode("plan_approve") == "full_auto"
     assert cycle_permission_mode("full_auto") == "careful"
 

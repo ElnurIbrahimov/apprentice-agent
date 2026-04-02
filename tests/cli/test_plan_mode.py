@@ -201,6 +201,7 @@ def test_plan_first_returns_plan_dict(mock_getmtime, mock_recall):
     loop.tools = {}
     loop.memory = None
     loop.project_root = "."
+    loop._current_action_mode = None
 
     result = loop.plan_first("fix the login bug")
     assert "plan_text" in result
@@ -228,6 +229,7 @@ def test_plan_first_empty_llm_response(mock_getmtime, mock_recall):
     loop.tools = {}
     loop.memory = None
     loop.project_root = "."
+    loop._current_action_mode = None
 
     result = loop.plan_first("do something")
     assert "plan" in result
@@ -250,6 +252,7 @@ def test_plan_first_llm_error():
     loop.tools = {}
     loop.memory = None
     loop.project_root = "."
+    loop._current_action_mode = None
 
     result = loop.plan_first("test")
     assert "error" in result
@@ -263,9 +266,9 @@ def test_permission_mode_cycle_includes_plan_approve():
 
     assert PermissionMode.PLAN_APPROVE in _MODE_ORDER
 
-    # Cycling from CAREFUL should reach PLAN_APPROVE
+    # Cycling from CAREFUL should reach AUTO_EDIT (order: careful -> auto_edit -> plan_approve -> full_auto)
     next_mode = cycle_permission_mode(PermissionMode.CAREFUL.value)
-    assert next_mode == PermissionMode.PLAN_APPROVE.value
+    assert next_mode == PermissionMode.AUTO_EDIT.value
 
     # Cycling from PLAN_APPROVE should reach FULL_AUTO
     next_mode2 = cycle_permission_mode(PermissionMode.PLAN_APPROVE.value)

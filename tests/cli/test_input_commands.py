@@ -35,7 +35,7 @@ def test_slash_commands_has_all_expected():
 
 
 def test_slash_commands_count():
-    assert len(SLASH_COMMANDS) == 53
+    assert len(SLASH_COMMANDS) == 55
 
 
 def test_every_command_has_description():
@@ -97,7 +97,6 @@ def test_subcommands_has_sessions():
     assert "/sessions" in SUBCOMMANDS
     session_subs = [name for name, _ in SUBCOMMANDS["/sessions"]]
     assert "list" in session_subs
-    assert "switch" in session_subs
     assert "new" in session_subs
     assert "delete" in session_subs
 

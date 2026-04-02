@@ -48,7 +48,6 @@ jobs:
           pip install pytest pytest-asyncio pytest-cov
 
       - name: Run tests
-        continue-on-error: true
         run: |
           python -m pytest tests/ \
             --maxfail=10 \
