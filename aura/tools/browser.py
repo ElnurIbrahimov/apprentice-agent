@@ -17,14 +17,28 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def _auto_retry(max_retries: int = 3, delay: float = 0.3):
-    """Retry on playwright errors (stale element, detached frame, etc.)."""
+    """Retry on playwright errors (stale element, detached frame, etc.).
+
+    When a selector-based method fails, attempts self-healing by calling
+    _heal_selector before retrying with an alternative selector.
+    """
+    # Error substrings that suggest a selector failed to match
+    _SELECTOR_ERRORS = [
+        "waiting for selector",
+        "no element matches selector",
+        "failed to find element",
+        "element not found",
+        "selector resolved to hidden",
+    ]
+
     def decorator(fn: Callable) -> Callable:
         @functools.wraps(fn)
         def wrapper(self, *args, **kwargs):
             last_err = None
+            current_args = list(args)
             for attempt in range(1, max_retries + 1):
                 try:
-                    return fn(self, *args, **kwargs)
+                    return fn(self, *current_args, **kwargs)
                 except Exception as e:
                     last_err = e
                     err_str = str(e).lower()
@@ -36,6 +50,21 @@ def _auto_retry(max_retries: int = 3, delay: float = 0.3):
                         "target closed",
                         "navigation",
                     ])
+
+                    # Try selector healing if the first arg looks like a selector
+                    is_selector_error = any(k in err_str for k in _SELECTOR_ERRORS)
+                    if is_selector_error and current_args and isinstance(current_args[0], str):
+                        retryable = True  # selector errors are retryable via healing
+                        healer = getattr(self, "_heal_selector", None)
+                        if healer:
+                            healed = healer(current_args[0], str(e)[:200])
+                            if healed:
+                                logger.debug(
+                                    "[BrowserTool] Healed selector %r -> %r",
+                                    current_args[0], healed,
+                                )
+                                current_args[0] = healed
+
                     if not retryable or attempt == max_retries:
                         raise
                     logger.debug(

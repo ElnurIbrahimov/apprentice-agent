@@ -208,8 +208,62 @@ class ResearchTool:
             "response": f"Saved skill: '{title}' -> skills/{cat}/{filename}"
         }
 
+    def _cosine_similarity(self, a: List[float], b: List[float]) -> float:
+        """Compute cosine similarity between two vectors."""
+        dot = sum(x * y for x, y in zip(a, b))
+        norm_a = sum(x * x for x in a) ** 0.5
+        norm_b = sum(x * x for x in b) ** 0.5
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+        return dot / (norm_a * norm_b)
+
+    def _semantic_search(self, query: str, search_dirs: List[Path], top_k: int = 3) -> List[Dict]:
+        """Fallback semantic search using embeddings when substring search finds nothing."""
+        try:
+            from aura.memory.embedding import get_embedding
+        except ImportError:
+            return []
+
+        query_emb = get_embedding(query)
+        if not query_emb:
+            return []
+
+        scored = []
+        seen_dirs = set()
+        for d in search_dirs:
+            d_str = str(d)
+            if d_str in seen_dirs:
+                continue
+            seen_dirs.add(d_str)
+            if not d.exists():
+                continue
+            for f in d.glob("*.md"):
+                try:
+                    text = f.read_text(encoding="utf-8")
+                    # Use first 2000 chars for embedding to keep it fast
+                    file_emb = get_embedding(text[:2000])
+                    if not file_emb:
+                        continue
+                    sim = self._cosine_similarity(query_emb, file_emb)
+                    # Extract first non-empty line for context
+                    first_line = next((l.strip() for l in text.split("\n") if l.strip()), "")
+                    scored.append((sim, {
+                        "file": f.name,
+                        "path": str(f),
+                        "category": f.parent.name,
+                        "context": first_line[:120],
+                        "similarity": round(sim, 3),
+                    }))
+                except Exception:
+                    continue
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [item for _, item in scored[:top_k]]
+
     def search(self, query: str, category: Optional[str] = None) -> dict:
         """Search across all research files by content.
+
+        Falls back to semantic search (embeddings) when substring search returns 0 results.
 
         Args:
             query: Search text
@@ -262,15 +316,28 @@ class ResearchTool:
                 except Exception:
                     continue
 
+        # Semantic fallback: if substring search returned nothing, try embeddings
+        search_method = "substring"
+        if not results:
+            try:
+                semantic_results = self._semantic_search(query, search_dirs, top_k=3)
+                if semantic_results:
+                    results = semantic_results
+                    search_method = "semantic"
+            except Exception as e:
+                logger.debug(f"[Research] Semantic search fallback failed: {e}")
+
         formatted = []
         for r in results[:30]:
-            formatted.append(f"  [{r['category']}] {r['file']}: {r['context']}")
+            sim_note = f" (sim: {r['similarity']})" if "similarity" in r else ""
+            formatted.append(f"  [{r['category']}] {r['file']}: {r['context']}{sim_note}")
 
         return {
             "success": True,
             "count": len(results),
+            "search_method": search_method,
             "results": results[:30],
-            "response": f"Found {len(results)} match(es) for '{query}':\n" +
+            "response": f"Found {len(results)} match(es) for '{query}' ({search_method}):\n" +
                         "\n".join(formatted) if results else f"No results for '{query}'"
         }
 

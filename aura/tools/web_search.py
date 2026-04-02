@@ -3,7 +3,9 @@
 SECURITY: Rate limited to prevent abuse and DDoS.
 """
 
+import math
 import os
+import re
 import requests
 import logging
 import threading
@@ -94,6 +96,67 @@ def basic_retry(func, max_attempts=3, base_delay=1.0):
                     time.sleep(delay)
         raise last_exception
     return wrapper
+
+
+# ============================================================================
+#                    BM25 RERANKING
+# ============================================================================
+
+_BM25_K1 = 1.2
+_BM25_B = 0.75
+_SPLIT_RE = re.compile(r'\W+')
+
+
+def _rerank_results(results: List[Dict], query: str) -> List[Dict]:
+    """Rerank search results using BM25 scoring against the query.
+
+    Scores each result's title + snippet against the query terms.
+    IDF is computed from the result set itself (N = len(results)).
+    """
+    if not results or not query:
+        return results
+
+    query_terms = [t.lower() for t in _SPLIT_RE.split(query) if t]
+    if not query_terms:
+        return results
+
+    N = len(results)
+
+    # Build documents: title + snippet for each result
+    docs = []
+    for r in results:
+        text = (r.get("title", "") + " " + r.get("snippet", "")).lower()
+        tokens = [t for t in _SPLIT_RE.split(text) if t]
+        docs.append(tokens)
+
+    # Average document length
+    avg_dl = sum(len(d) for d in docs) / max(N, 1)
+
+    # Document frequency for each query term
+    df = {}
+    for term in query_terms:
+        df[term] = sum(1 for d in docs if term in d)
+
+    # Score each document
+    scored = []
+    for i, doc_tokens in enumerate(docs):
+        dl = len(doc_tokens)
+        score = 0.0
+        for term in query_terms:
+            tf = doc_tokens.count(term)
+            if tf == 0:
+                continue
+            # IDF: log((N - df + 0.5) / (df + 0.5) + 1)
+            n = df.get(term, 0)
+            idf = math.log((N - n + 0.5) / (n + 0.5) + 1.0)
+            # TF saturation
+            tf_sat = (tf * (_BM25_K1 + 1)) / (tf + _BM25_K1 * (1 - _BM25_B + _BM25_B * dl / max(avg_dl, 1)))
+            score += idf * tf_sat
+        scored.append((score, i))
+
+    # Sort by score descending, stable (preserves original order for ties)
+    scored.sort(key=lambda x: -x[0])
+    return [results[i] for _, i in scored]
 
 
 class WebSearchTool:
@@ -214,6 +277,9 @@ class WebSearchTool:
                 "snippet": r.get("content", ""),
                 "engine": r.get("engine", "searxng"),
             } for r in results]
+
+            # Rerank by BM25 relevance to query
+            formatted = _rerank_results(formatted, query)
 
             if formatted:
                 logger.info(f"[SEARXNG] Found {len(formatted)} results from {instance}")

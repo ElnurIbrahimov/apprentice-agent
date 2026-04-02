@@ -18,6 +18,7 @@ import logging
 import os
 import re
 import smtplib
+import sqlite3
 import ssl
 import threading
 from dataclasses import dataclass, field, asdict
@@ -1336,10 +1337,54 @@ class EmailTool:
         except Exception as e:
             return {"success": False, "error": f"Draft generation failed: {e}"}
 
+    # ------------------------------------------------------------------
+    #  Sender profile cache (SQLite-backed)
+    # ------------------------------------------------------------------
+
+    def _get_sender_cache_db(self):
+        """Open (and bootstrap) the sender profile cache."""
+        cache_path = Path(__file__).parent.parent.parent / "data" / "email_sender_cache.db"
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(cache_path))
+        conn.execute("""CREATE TABLE IF NOT EXISTS sender_profiles (
+            sender TEXT PRIMARY KEY,
+            category TEXT NOT NULL,
+            last_classified TEXT NOT NULL)""")
+        conn.commit()
+        return conn
+
+    def _lookup_sender_cache(self, sender: str) -> Optional[str]:
+        """Check if sender is in the cache. Returns category or None."""
+        try:
+            conn = self._get_sender_cache_db()
+            try:
+                row = conn.execute(
+                    "SELECT category FROM sender_profiles WHERE sender=?", (sender,)
+                ).fetchone()
+                return row[0] if row else None
+            finally:
+                conn.close()
+        except Exception:
+            return None
+
+    def _store_sender_cache(self, sender: str, category: str) -> None:
+        """Store sender -> category mapping in the cache."""
+        try:
+            conn = self._get_sender_cache_db()
+            try:
+                conn.execute(
+                    "INSERT OR REPLACE INTO sender_profiles (sender, category, last_classified) VALUES (?,?,?)",
+                    (sender, category, datetime.now().isoformat()))
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug(f"[Email] Sender cache store error: {e}")
+
     def categorize(self, message_id: str) -> dict:
         """Auto-categorize an email into: urgent, action_needed, fyi, newsletter, spam, personal.
 
-        Uses AI if available, otherwise uses heuristics.
+        Uses sender cache first, then AI if available, otherwise heuristics.
         """
         msg_result = self.read(message_id)
         if not msg_result.get("success"):
@@ -1349,6 +1394,17 @@ class EmailTool:
         subject = email_data.get("subject", "").lower()
         body = email_data.get("body_text", "")[:500].lower()
         sender = email_data.get("sender", "").lower()
+
+        # Check sender cache first — skip LLM for known senders
+        cached = self._lookup_sender_cache(sender)
+        if cached:
+            return {
+                "success": True,
+                "message_id": message_id,
+                "category": cached,
+                "method": "sender_cache",
+                "response": f"Email categorized as: {cached} (cached sender profile)"
+            }
 
         brain = self._get_brain()
         if brain:
@@ -1370,6 +1426,10 @@ class EmailTool:
                             break
                     else:
                         category = "fyi"  # default
+
+                # Store in sender cache for future lookups
+                if sender:
+                    self._store_sender_cache(sender, category)
 
                 return {
                     "success": True,
@@ -1399,6 +1459,10 @@ class EmailTool:
             category = "spam"
         elif any(kw in combined for kw in newsletter_keywords) or "noreply" in sender or "no-reply" in sender:
             category = "newsletter"
+
+        # Store heuristic result in sender cache too
+        if sender:
+            self._store_sender_cache(sender, category)
 
         return {
             "success": True,

@@ -2,6 +2,8 @@
 
 Routes to optimal model based on tier (fast/balanced/max) and budget cap.
 Uses existing Config model chains and routing_stats for performance data.
+Learns from outcomes: tracks success/failure per (category, model) pair
+and consults the strategy bandit for category-level performance signals.
 
 Ollama cloud ($20/mo) supports 3 concurrent model slots. The routing table
 is designed to maximize parallelism by using at most 3 distinct models per
@@ -10,6 +12,8 @@ stay warm and requests don't queue behind each other.
 """
 
 import logging
+import threading
+from collections import defaultdict
 from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -141,6 +145,31 @@ TASK_KEYWORDS: dict[str, list[tuple[str, int]]] = {
 }
 
 
+# ── Strategy bandit integration (optional) ──
+# Maps bandit ProblemCategory values → router task categories
+_BANDIT_TO_ROUTER_CATEGORY = {
+    "math": "reasoning",
+    "code": "code_gen",
+    "analysis": "reasoning",
+    "creative": "orchestrator",
+    "planning": "orchestrator",
+    "debug": "small_edit",
+}
+
+# Maps router categories → bandit ProblemCategory values (reverse)
+_ROUTER_TO_BANDIT_CATEGORY = {
+    "code_gen": "code",
+    "small_edit": "debug",
+    "reasoning": "math",       # closest match
+    "orchestrator": "planning",
+    "frontend": "code",
+    "tool_dispatch": None,     # no bandit equivalent
+    "long_context": None,
+    "vision": None,
+    "throughput": None,
+}
+
+
 def classify_task(prompt: str) -> Tuple[str, float]:
     """Classify a prompt into a task category using weighted keyword scoring.
 
@@ -170,7 +199,11 @@ def classify_task(prompt: str) -> Tuple[str, float]:
 
 
 class ModelRouter:
-    """Selects models based on tier and budget constraints."""
+    """Selects models based on tier and budget constraints.
+
+    Learns from outcomes: tracks success/failure per (category, model)
+    and consults the strategy bandit for category-level performance data.
+    """
 
     def __init__(self, tier: str = "balanced", budget_usd: Optional[float] = None):
         # Backward compat: "local" → "fast"
@@ -183,24 +216,189 @@ class ModelRouter:
         self.tier = tier
         self.budget_usd = budget_usd
 
+        # Outcome tracking: {(category, model): {"successes": int, "failures": int, "total_iters": int, "count": int}}
+        self._outcome_stats: dict[tuple, dict] = defaultdict(
+            lambda: {"successes": 0, "failures": 0, "total_iters": 0, "count": 0}
+        )
+        self._stats_lock = threading.Lock()
+
+        # Lazy bandit reference (loaded on first use)
+        self._bandit = None
+        self._bandit_loaded = False
+
+    def _get_bandit(self):
+        """Lazy-load the strategy bandit singleton. Returns None if unavailable."""
+        if not self._bandit_loaded:
+            self._bandit_loaded = True
+            try:
+                from aura.consciousness.strategy_bandit import get_strategy_bandit
+                self._bandit = get_strategy_bandit()
+                logger.debug("[Router] Strategy bandit connected")
+            except Exception as e:
+                logger.debug(f"[Router] Strategy bandit unavailable: {e}")
+                self._bandit = None
+        return self._bandit
+
+    def record_outcome(
+        self,
+        task_category: str,
+        model_used: str,
+        success: bool,
+        iterations: int = 1,
+    ):
+        """Record a routing outcome for learning.
+
+        Args:
+            task_category: The task category that was routed.
+            model_used: The model that handled the task.
+            success: Whether the task completed successfully.
+            iterations: Number of agentic loop iterations used.
+        """
+        key = (task_category, model_used)
+        with self._stats_lock:
+            stats = self._outcome_stats[key]
+            if success:
+                stats["successes"] += 1
+            else:
+                stats["failures"] += 1
+            stats["total_iters"] += iterations
+            stats["count"] += 1
+
+        logger.debug(
+            f"[Router] Outcome: {task_category}/{model_used} "
+            f"success={success} iters={iterations} "
+            f"(total: {stats['successes']}S/{stats['failures']}F)"
+        )
+
+    def _should_override_model(self, task_category: str, model: str) -> bool:
+        """Check if a model has consistently failed for a category.
+
+        Returns True if the model has >3 failures and 0 successes,
+        meaning the caller should use the fallback instead.
+        """
+        key = (task_category, model)
+        with self._stats_lock:
+            stats = self._outcome_stats.get(key)
+        if not stats:
+            return False
+        return stats["failures"] > 3 and stats["successes"] == 0
+
+    def _get_fallback_model(self, task_category: str, failed_model: str) -> Optional[str]:
+        """Get the next model in the tier chain for a category.
+
+        Tries the next tier up (fast -> balanced -> max) to find a
+        different model for the same category.
+        """
+        tier_order = ["fast", "balanced", "max"]
+        current_idx = tier_order.index(self.tier) if self.tier in tier_order else 1
+
+        # Try higher tiers first, then lower
+        for offset in [1, 2, -1]:
+            try_idx = current_idx + offset
+            if 0 <= try_idx < len(tier_order):
+                try_tier = tier_order[try_idx]
+                entry = ROUTING_TABLE.get(task_category, ROUTING_TABLE.get("orchestrator", {}))
+                candidate = entry.get(try_tier)
+                if candidate and candidate != failed_model:
+                    return candidate
+
+        return None
+
+    def _bandit_tier_hint(self, task_category: str) -> Optional[str]:
+        """Consult the strategy bandit for a tier hint.
+
+        If the bandit shows high reward for MCTS in a category that maps
+        to this router category, suggest the "max" tier (reasoning model).
+        If it shows chain_of_thought dominates, suggest "fast" tier.
+
+        Returns None if no strong signal.
+        """
+        bandit = self._get_bandit()
+        if not bandit:
+            return None
+
+        bandit_cat = _ROUTER_TO_BANDIT_CATEGORY.get(task_category)
+        if not bandit_cat:
+            return None
+
+        try:
+            arm_stats = bandit.get_arm_stats()
+            cat_arms = arm_stats.get(bandit_cat, [])
+            if not cat_arms:
+                return None
+
+            # Only act on data with sufficient pulls
+            total_pulls = sum(a.get("total_pulls", 0) for a in cat_arms)
+            if total_pulls < 5:
+                return None
+
+            # Find the dominant strategy
+            best_arm = max(cat_arms, key=lambda a: a.get("mean_reward", 0.5))
+            best_strategy = best_arm.get("strategy", "")
+            mean_reward = best_arm.get("mean_reward", 0.5)
+
+            # Strong signal threshold
+            if mean_reward < 0.6:
+                return None
+
+            # MCTS dominates → complex task, use max tier
+            if best_strategy == "mcts" and mean_reward > 0.65:
+                logger.debug(
+                    f"[Router] Bandit hint: {bandit_cat} favors MCTS "
+                    f"(reward={mean_reward:.3f}) → suggesting 'max' tier"
+                )
+                return "max"
+
+            # Chain-of-thought dominates with high reward → simpler task, fast is fine
+            if best_strategy == "chain_of_thought" and mean_reward > 0.75:
+                logger.debug(
+                    f"[Router] Bandit hint: {bandit_cat} favors CoT "
+                    f"(reward={mean_reward:.3f}) → suggesting 'fast' tier"
+                )
+                return "fast"
+
+        except Exception as e:
+            logger.debug(f"[Router] Bandit hint failed: {e}")
+
+        return None
+
     def select(self, task_category: str = "orchestrator") -> str:
         """Pick model based on tier for the given task category.
 
         Uses the 3-slot concurrent model system to avoid model switching.
         Maps task categories to slot roles (orchestrator/coder/fast),
         then looks up which model is assigned to that slot for the current tier.
+
+        Enhanced with outcome learning and bandit-informed tier hints.
         """
-        # Use concurrent slot mapping for efficient 3-model utilization
+        # Step 1: Check if the bandit suggests a different tier for this category
+        effective_tier = self.tier
+        bandit_hint = self._bandit_tier_hint(task_category)
+        if bandit_hint and bandit_hint != self.tier:
+            effective_tier = bandit_hint
+            logger.debug(f"[Router] Bandit override: {task_category} tier {self.tier} -> {effective_tier}")
+
+        # Step 2: Standard slot-based model selection
         slot = _CATEGORY_TO_SLOT.get(task_category, "orchestrator")
-        tier_slots = CONCURRENT_SLOTS.get(self.tier, CONCURRENT_SLOTS["balanced"])
+        tier_slots = CONCURRENT_SLOTS.get(effective_tier, CONCURRENT_SLOTS["balanced"])
         model = tier_slots.get(slot, tier_slots["orchestrator"])
 
         # Fall back to ROUTING_TABLE for categories not in slot mapping
         if not model:
             entry = ROUTING_TABLE.get(task_category, ROUTING_TABLE["orchestrator"])
-            model = entry.get(self.tier, entry.get("balanced"))
+            model = entry.get(effective_tier, entry.get("balanced"))
 
-        logger.debug(f"[Router] {task_category}/{self.tier} -> slot:{slot} -> {model}")
+        # Step 3: Check outcome history — override if model consistently fails
+        if self._should_override_model(task_category, model):
+            fallback = self._get_fallback_model(task_category, model)
+            if fallback:
+                logger.info(
+                    f"[Router] Overriding {model} for {task_category} "
+                    f"(consistent failures) -> {fallback}"
+                )
+                model = fallback
+
+        logger.debug(f"[Router] {task_category}/{effective_tier} -> slot:{slot} -> {model}")
         return model
 
     def select_agentic(self, prompt: str = None) -> str:
@@ -229,6 +427,13 @@ class ModelRouter:
     def get_routing_info(self) -> dict:
         """Return current routing configuration for display."""
         tier_slots = CONCURRENT_SLOTS.get(self.tier, CONCURRENT_SLOTS["balanced"])
+        # Include outcome stats summary
+        with self._stats_lock:
+            overrides = {
+                f"{cat}/{model}": f"{s['successes']}S/{s['failures']}F"
+                for (cat, model), s in self._outcome_stats.items()
+                if s["count"] > 0
+            }
         return {
             "tier": self.tier,
             "budget_usd": self.budget_usd,
@@ -237,4 +442,6 @@ class ModelRouter:
                 cat: self.select(cat)
                 for cat in ROUTING_TABLE.keys()
             },
+            "outcome_stats": overrides,
+            "bandit_connected": self._get_bandit() is not None,
         }

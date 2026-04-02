@@ -63,6 +63,16 @@ MULTI_AGENT_PATTERNS = [
     (r"(find|search) .+ and (explain|analyze)", ["searcher", "analyst"]),
 ]
 
+# Debate trigger patterns -> CollaborationMode.DEBATE with [analyst, creative]
+DEBATE_PATTERNS = [
+    (r"\bdebate\b", ["analyst", "creative"]),
+    (r"\bargue both sides\b", ["analyst", "creative"]),
+    (r"\bpros and cons\b", ["analyst", "creative"]),
+    (r"\bcompare approaches\b", ["analyst", "creative"]),
+    (r"\bdevil'?s advocate\b", ["analyst", "creative"]),
+    (r"\bweigh options\b", ["analyst", "creative"]),
+]
+
 
 class IntentRouter:
     """Routes user queries to appropriate specialist agents.
@@ -168,6 +178,18 @@ class IntentRouter:
 
     def _check_multi_agent_patterns(self, query: str) -> Optional[RoutingDecision]:
         """Check if query matches multi-agent collaboration patterns."""
+        # Check debate patterns first
+        for pattern, agents in DEBATE_PATTERNS:
+            if re.search(pattern, query, re.IGNORECASE):
+                valid_agents = [a for a in agents if a in self.specialists]
+                if len(valid_agents) >= 2:
+                    return RoutingDecision(
+                        agents=valid_agents,
+                        mode=CollaborationMode.DEBATE,
+                        reasoning=f"Pattern match for debate: {' vs '.join(valid_agents)}",
+                        confidence=0.85
+                    )
+
         for pattern, agents in MULTI_AGENT_PATTERNS:
             if re.search(pattern, query, re.IGNORECASE):
                 # Verify agents exist

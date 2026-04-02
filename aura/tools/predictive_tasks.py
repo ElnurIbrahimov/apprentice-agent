@@ -42,12 +42,20 @@ def _get_db() -> sqlite3.Connection:
         conn.execute("ALTER TABLE task_events ADD COLUMN context_hint TEXT DEFAULT ''")
     except Exception:
         pass  # Column already exists
-    # Markov transition tracking
+    # Markov transition tracking (first-order)
     conn.execute("""CREATE TABLE IF NOT EXISTS tool_transitions (
         id INTEGER PRIMARY KEY AUTOINCREMENT, from_tool TEXT NOT NULL,
         from_action TEXT NOT NULL, to_tool TEXT NOT NULL,
         to_action TEXT NOT NULL, timestamp TEXT NOT NULL)""")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_transitions_from ON tool_transitions(from_tool, from_action)")
+    # Second-order Markov transitions: (t-2, t-1) -> t
+    conn.execute("""CREATE TABLE IF NOT EXISTS tool_transitions_2nd (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        from2_tool TEXT NOT NULL, from2_action TEXT NOT NULL,
+        from1_tool TEXT NOT NULL, from1_action TEXT NOT NULL,
+        to_tool TEXT NOT NULL, to_action TEXT NOT NULL,
+        timestamp TEXT NOT NULL)""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_transitions_2nd ON tool_transitions_2nd(from2_tool, from2_action, from1_tool, from1_action)")
     # User feedback on predictions
     conn.execute("""CREATE TABLE IF NOT EXISTS prediction_feedback (
         id INTEGER PRIMARY KEY AUTOINCREMENT, prediction_id TEXT NOT NULL,
@@ -63,6 +71,7 @@ class PredictiveTaskEngine:
 
     def __init__(self):
         self._last_event: Optional[Tuple[str, str]] = None
+        self._prev_prev_event: Optional[Tuple[str, str]] = None
         try:
             _get_db().close()
         except Exception as e:
@@ -71,23 +80,32 @@ class PredictiveTaskEngine:
     # ---- Internal helpers ---- #
 
     def _record_transition(self, tool: str, action: str) -> None:
-        """Record a Markov transition from the previous event to the current one."""
+        """Record first-order and second-order Markov transitions."""
         if self._last_event is None:
             self._last_event = (tool, action)
             return
         from_tool, from_action = self._last_event
+        now_ts = datetime.now().isoformat()
         try:
             with _db_lock:
                 conn = _get_db()
                 try:
+                    # First-order: (t-1) -> t
                     conn.execute(
                         "INSERT INTO tool_transitions (from_tool,from_action,to_tool,to_action,timestamp) VALUES (?,?,?,?,?)",
-                        (from_tool, from_action, tool, action, datetime.now().isoformat()))
+                        (from_tool, from_action, tool, action, now_ts))
+                    # Second-order: (t-2, t-1) -> t
+                    if self._prev_prev_event is not None:
+                        f2_tool, f2_action = self._prev_prev_event
+                        conn.execute(
+                            "INSERT INTO tool_transitions_2nd (from2_tool,from2_action,from1_tool,from1_action,to_tool,to_action,timestamp) VALUES (?,?,?,?,?,?,?)",
+                            (f2_tool, f2_action, from_tool, from_action, tool, action, now_ts))
                     conn.commit()
                 finally:
                     conn.close()
         except Exception as e:
             logger.warning(f"[PredictiveTasks] Transition record error: {e}")
+        self._prev_prev_event = self._last_event
         self._last_event = (tool, action)
 
     @staticmethod
@@ -303,16 +321,69 @@ class PredictiveTaskEngine:
                 matrix[src] = {dst: cnt / t for dst, cnt in dests.items()}
         return matrix
 
-    def get_sequence_predictions(self, last_tool: str = None, last_action: str = None) -> Dict:
-        """Predict next tools based on Markov chain transitions."""
+    def _build_2nd_order_matrix(self) -> Dict[Tuple[str, str, str, str], Dict[Tuple[str, str], float]]:
+        """Build second-order Markov transition probability matrix."""
+        try:
+            with _db_lock:
+                conn = _get_db()
+                try:
+                    rows = conn.execute("""SELECT from2_tool, from2_action, from1_tool, from1_action,
+                        to_tool, to_action, COUNT(*) as cnt
+                        FROM tool_transitions_2nd
+                        GROUP BY from2_tool, from2_action, from1_tool, from1_action, to_tool, to_action""").fetchall()
+                finally:
+                    conn.close()
+        except Exception:
+            return {}
+        totals: Dict[Tuple[str, str, str, str], int] = defaultdict(int)
+        raw: Dict[Tuple[str, str, str, str], Dict[Tuple[str, str], int]] = defaultdict(lambda: defaultdict(int))
+        for r in rows:
+            src = (r["from2_tool"], r["from2_action"], r["from1_tool"], r["from1_action"])
+            dst = (r["to_tool"], r["to_action"])
+            raw[src][dst] += r["cnt"]
+            totals[src] += r["cnt"]
+        matrix: Dict[Tuple[str, str, str, str], Dict[Tuple[str, str], float]] = {}
+        for src, dests in raw.items():
+            t = totals[src]
+            if t > 0:
+                matrix[src] = {dst: cnt / t for dst, cnt in dests.items()}
+        return matrix
+
+    def get_sequence_predictions(self, last_tool: str = None, last_action: str = None,
+                                  prev_tool: str = None, prev_action: str = None) -> Dict:
+        """Predict next tools based on Markov chain transitions.
+
+        Uses second-order (t-2, t-1) -> t when data is available, falls back to first-order.
+        """
         if last_tool and last_action:
             state = (last_tool, last_action)
         elif self._last_event:
             state = self._last_event
         else:
             return {"success": True, "count": 0, "predictions": [], "note": "No previous event to base sequence on."}
-        matrix = self._build_transition_matrix()
-        transitions = matrix.get(state, {})
+
+        # Determine the t-2 state for second-order lookup
+        prev_state = None
+        if prev_tool and prev_action:
+            prev_state = (prev_tool, prev_action)
+        elif self._prev_prev_event:
+            prev_state = self._prev_prev_event
+
+        # Try second-order first
+        transitions = {}
+        order_used = "first"
+        if prev_state:
+            matrix_2nd = self._build_2nd_order_matrix()
+            key_2nd = (prev_state[0], prev_state[1], state[0], state[1])
+            transitions = matrix_2nd.get(key_2nd, {})
+            if transitions:
+                order_used = "second"
+
+        # Fall back to first-order
+        if not transitions:
+            matrix = self._build_transition_matrix()
+            transitions = matrix.get(state, {})
+
         if not transitions:
             return {"success": True, "from": f"{state[0]}.{state[1]}",
                     "count": 0, "predictions": [],
@@ -324,9 +395,11 @@ class PredictiveTaskEngine:
                 "prediction_id": uuid.uuid4().hex[:12],
                 "tool": to_tool, "action": to_action,
                 "probability": round(prob, 3), "confidence": round(min(prob * fb, 1.0), 3),
+                "order": order_used,
                 "suggestion": f"After {state[0]}.{state[1]}, you usually run {to_tool}.{to_action}",
             })
         return {"success": True, "from": f"{state[0]}.{state[1]}",
+                "order": order_used,
                 "count": len(preds), "predictions": preds[:10]}
 
     # ---- Feedback loop ---- #

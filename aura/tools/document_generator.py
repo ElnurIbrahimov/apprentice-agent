@@ -227,6 +227,9 @@ class DocumentGeneratorTool:
                 elif btype == "table":
                     self._add_markdown_table(doc, block["raw"])
 
+            # Insert Table of Contents if document has 3+ headings
+            self._maybe_insert_toc(doc, blocks)
+
             doc.save(str(out))
             return {
                 "success": True,
@@ -238,6 +241,66 @@ class DocumentGeneratorTool:
         except Exception as e:
             logger.error(f"[DocGen] Word creation failed: {e}")
             return {"success": False, "error": str(e)}
+
+    def _maybe_insert_toc(self, doc, blocks: List[Dict]):
+        """Insert a Table of Contents after the title if there are 3+ headings."""
+        headings = [b for b in blocks if b["type"] == "heading"]
+        if len(headings) < 3:
+            return
+        try:
+            from docx.oxml.ns import qn
+            from docx.oxml import OxmlElement
+
+            # Find insertion point: after the first few paragraphs (title, subtitle, date, spacer)
+            # We insert before the first content paragraph
+            insert_idx = min(4, len(doc.paragraphs))
+
+            # Add TOC heading
+            toc_heading = doc.add_paragraph('Table of Contents', style='TOC Heading')
+
+            # Add a TOC field code (Word will render it when opened)
+            p = doc.add_paragraph()
+            run = p.add_run()
+            fldChar1 = OxmlElement('w:fldChar')
+            fldChar1.set(qn('w:fldCharType'), 'begin')
+            run._r.append(fldChar1)
+
+            run2 = p.add_run()
+            instrText = OxmlElement('w:instrText')
+            instrText.set(qn('xml:space'), 'preserve')
+            instrText.text = ' TOC \\o "1-3" \\h \\z \\u '
+            run2._r.append(instrText)
+
+            run3 = p.add_run()
+            fldChar2 = OxmlElement('w:fldChar')
+            fldChar2.set(qn('w:fldCharType'), 'separate')
+            run3._r.append(fldChar2)
+
+            # Placeholder text for the TOC entries (replaced when Word updates fields)
+            for h in headings:
+                indent = "  " * (h["level"] - 1)
+                run_entry = p.add_run(f'{indent}{h["text"]}\n')
+                run_entry.font.size = Pt(10)
+
+            run4 = p.add_run()
+            fldChar3 = OxmlElement('w:fldChar')
+            fldChar3.set(qn('w:fldCharType'), 'end')
+            run4._r.append(fldChar3)
+
+            doc.add_paragraph()  # spacer after TOC
+
+            # Move TOC heading and TOC paragraph to the insertion point
+            body = doc.element.body
+            toc_elements = [toc_heading._p, p._p, doc.paragraphs[-1]._p]
+            ref_element = doc.paragraphs[insert_idx]._p if insert_idx < len(doc.paragraphs) else None
+            for elem in toc_elements:
+                body.remove(elem)
+                if ref_element is not None:
+                    ref_element.addprevious(elem)
+                else:
+                    body.append(elem)
+        except Exception as e:
+            logger.debug(f"[DocGen] TOC insertion failed: {e}")
 
     def _add_markdown_table(self, doc, raw_lines: List[str]):
         """Add a markdown table to a Word doc."""

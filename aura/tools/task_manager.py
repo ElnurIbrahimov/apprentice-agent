@@ -545,6 +545,52 @@ class TaskManagerTool:
             "response": f"{len(tasks)} task(s)\n" + "\n".join(formatted),
         }
 
+    def get_unblocked(self, project: str = None) -> dict:
+        """Return only tasks whose dependencies are all satisfied (done/cancelled).
+
+        These are tasks in todo/in_progress that are ready to work on.
+        """
+        conditions = ["parent_id IS NULL", "status IN ('todo','in_progress')"]
+        params = []
+        if project:
+            conditions.append("project=?")
+            params.append(project)
+
+        where = " AND ".join(conditions)
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"""SELECT * FROM tasks WHERE {where}
+                    ORDER BY CASE priority WHEN 'P0' THEN 0 WHEN 'P1' THEN 1 WHEN 'P2' THEN 2 ELSE 3 END,
+                    deadline ASC NULLS LAST""",
+                params,
+            ).fetchall()
+
+            unblocked = []
+            for r in rows:
+                task = _row_to_dict(r)
+                deps = task.get("dependencies", [])
+                if not deps:
+                    unblocked.append(task)
+                    continue
+                # Check if all dependencies are done or cancelled
+                blockers = self._check_dependencies_met(conn, task["id"])
+                if not blockers:
+                    unblocked.append(task)
+
+        formatted = []
+        for t in unblocked:
+            icon = _priority_icon(t["priority"])
+            dl = f" (due {t['deadline']})" if t.get("deadline") else ""
+            formatted.append(f"[{t['id']}] {icon} {t['priority']} [{t['status']}] {t['title']}{dl}")
+
+        return {
+            "success": True,
+            "count": len(unblocked),
+            "tasks": unblocked,
+            "formatted": "\n".join(formatted) if formatted else "No unblocked tasks",
+            "response": f"{len(unblocked)} unblocked task(s) ready to work on\n" + "\n".join(formatted),
+        }
+
     def board(self, project: str = None) -> dict:
         """Kanban board view grouped by status."""
         conditions = ["parent_id IS NULL"]
@@ -1092,6 +1138,10 @@ class TaskManagerTool:
         # Projects
         if action_lower in ("projects", "list_projects"):
             return self.list_projects()
+
+        # Unblocked tasks
+        if action_lower in ("unblocked", "ready", "available", "get_unblocked"):
+            return self.get_unblocked(project=kwargs.get("project"))
 
         # Overdue
         if action_lower in ("overdue", "past_due"):

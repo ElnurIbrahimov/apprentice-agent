@@ -48,14 +48,21 @@ class ThinkerState:
     timestamp: float = 0.0
     turn_number: int = 0
     processing_ms: int = 0
+    last_touched: float = 0.0     # Last activity time (reset on each user message)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
+    def touch(self) -> None:
+        """Reset staleness clock — call on each new user message."""
+        self.last_touched = time.time()
+
     def is_stale(self) -> bool:
         if self.timestamp == 0.0:
             return True
-        return (time.time() - self.timestamp) > THINKER_STATE_TTL
+        # Use the most recent of creation time or last touch time
+        anchor = max(self.timestamp, self.last_touched)
+        return (time.time() - anchor) > THINKER_STATE_TTL
 
     def to_system_context(self) -> str:
         """Format thinker state as private context for the Talker.
@@ -225,6 +232,16 @@ class ThinkerEngine:
         with self._lock:
             return ThinkerState(**asdict(self._state))
 
+    def touch(self) -> None:
+        """Reset staleness clock — call when a new user message arrives.
+
+        This makes the TTL measure "time since last activity" instead of
+        "time since thinker cycle completed", so a user pausing and
+        resuming the same conversation keeps the thinker state alive.
+        """
+        with self._lock:
+            self._state.touch()
+
     def is_running(self) -> bool:
         """Check if a thinker cycle is currently in progress."""
         return self._running.is_set()
@@ -292,6 +309,7 @@ class ThinkerEngine:
             audit_data = results.get("audit", {})
             memory_data = results.get("memory", {})
 
+            now = time.time()
             new_state = ThinkerState(
                 goal_state=goal_data.get("goal_state", "")[:300],
                 goal_progress=goal_data.get("goal_progress", "")[:300],
@@ -299,7 +317,8 @@ class ThinkerEngine:
                 reasoning_gaps=audit_data.get("reasoning_gaps", "")[:300],
                 memory_suggestions=memory_data.get("memory_suggestions", "")[:300],
                 context_notes=memory_data.get("context_notes", "")[:300],
-                timestamp=time.time(),
+                timestamp=now,
+                last_touched=now,
                 turn_number=turn,
                 processing_ms=elapsed_ms,
             )

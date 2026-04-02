@@ -137,39 +137,82 @@ class SpacedRepetitionTool:
             "response": f"Flashcard added to '{deck}' deck: {front[:50]}..."
         }
 
+    def _generate_cards_via_llm(self, text: str) -> List[tuple]:
+        """Try to generate Q&A pairs using LLM. Returns list of (front, back) tuples, or empty on failure."""
+        try:
+            import ollama
+            from aura.config import Config
+        except ImportError:
+            return []
+
+        prompt = (
+            "Generate exactly 5 flashcard question-answer pairs from the following text. "
+            "Format each pair on its own line as: Q: <question> | A: <answer>\n"
+            "Do not add numbering, explanations, or extra text.\n\n"
+            f"Text:\n{text[:3000]}"
+        )
+        try:
+            model = getattr(Config, 'DEFAULT_MODEL', 'qwen2.5-coder:7b')
+            response = ollama.generate(model=model, prompt=prompt, options={"temperature": 0.3})
+            raw = response.get("response", "")
+            pairs = []
+            for line in raw.strip().splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                # Parse "Q: ... | A: ..." format
+                match = re.match(r'Q:\s*(.+?)\s*\|\s*A:\s*(.+)', line, re.IGNORECASE)
+                if match:
+                    pairs.append((match.group(1).strip(), match.group(2).strip()))
+            return pairs[:5]
+        except Exception:
+            return []
+
     def add_cards_from_text(self, text: str, tags: List[str] = None, deck: str = "default") -> dict:
-        """Auto-generate flashcards from text using proposition extraction."""
+        """Auto-generate flashcards from text. Tries LLM first, falls back to regex extraction."""
         if not text:
             return {"success": False, "error": "No text provided"}
 
-        propositions = self._extract_propositions_simple(text)
+        # Try LLM path first
+        llm_pairs = self._generate_cards_via_llm(text)
+        source = "auto:llm"
 
-        if not propositions:
-            return {"success": False, "error": "Could not extract any facts from the text"}
+        if not llm_pairs:
+            # Fall back to regex-based proposition extraction
+            propositions = self._extract_propositions_simple(text)
+            if not propositions:
+                return {"success": False, "error": "Could not extract any facts from the text"}
+            llm_pairs = []
+            for prop in propositions:
+                front, back = self._proposition_to_qa(prop)
+                if front and back:
+                    llm_pairs.append((front, back))
+            source = "auto:text"
+
+        if not llm_pairs:
+            return {"success": False, "error": "Could not generate any flashcards from the text"}
 
         cards = self._load_cards()
         created = 0
 
-        for prop in propositions:
-            # Turn proposition into Q&A
-            front, back = self._proposition_to_qa(prop)
-            if front and back:
-                card = FlashCard(
-                    id=self._generate_id(),
-                    front=front,
-                    back=back,
-                    deck=deck,
-                    tags=tags or [],
-                    source="auto:text",
-                )
-                cards.append(card.to_dict())
-                created += 1
+        for front, back in llm_pairs:
+            card = FlashCard(
+                id=self._generate_id(),
+                front=front,
+                back=back,
+                deck=deck,
+                tags=tags or [],
+                source=source,
+            )
+            cards.append(card.to_dict())
+            created += 1
 
         self._save_cards(cards)
         return {
             "success": True,
             "created": created,
-            "response": f"Auto-generated {created} flashcard(s) from text"
+            "method": source,
+            "response": f"Auto-generated {created} flashcard(s) from text ({source})"
         }
 
     def _extract_propositions_simple(self, text: str) -> List[str]:

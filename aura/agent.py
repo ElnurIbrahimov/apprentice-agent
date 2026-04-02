@@ -2086,6 +2086,7 @@ IMPORTANT: If the user asks about something you are not sure about, something re
         try:
             _thinker_ctx = None
             if hasattr(self, 'thinker') and self.thinker:
+                self.thinker.touch()  # Reset staleness clock on new user message
                 _thinker_ctx = self.thinker.get_talker_context()
             if not _thinker_ctx and hasattr(self, 'monologue') and self.monologue:
                 _thinker_ctx = self.monologue.generate_thinking_context(brain=self.brain)

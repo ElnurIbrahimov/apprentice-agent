@@ -938,6 +938,17 @@ class AgenticLoop:
         # Cancellation event for mid-loop abort (Ctrl+C)
         self._cancel_event = threading.Event()
 
+        # Completion verification: one extra LLM call to check task was actually done
+        self._verify_completion = True
+
+        # Adaptive planner (enhancement — non-fatal if unavailable)
+        self._planner = None
+        try:
+            from .adaptive_planner import AdaptivePlanner
+            self._planner = AdaptivePlanner(brain=brain)
+        except Exception as e:
+            logger.debug(f"[AgenticLoop] AdaptivePlanner init failed (non-fatal): {e}")
+
         # MCP client for external tool servers
         from .mcp_client import MCPClientManager
         self._mcp_client = MCPClientManager()
@@ -1044,6 +1055,15 @@ class AgenticLoop:
                         file_contents.append(f"### {fp}\n```\n{content}\n```")
                 if file_contents and len(system_prompt) < 22000:
                     system_prompt += "\n\n## Pre-loaded files from prompt\n" + "\n".join(file_contents)
+        except Exception:
+            pass
+
+        # Adaptive plan context: inject current plan so LLM knows what to do next
+        try:
+            if self._planner and self._planner.current_plan:
+                plan_ctx = self._planner.current_plan.to_prompt_context()
+                if plan_ctx:
+                    system_prompt += "\n\n" + plan_ctx
         except Exception:
             pass
 
@@ -1170,6 +1190,7 @@ class AgenticLoop:
         self._has_test_failure = False
         self._last_tools_were_reads = True
         self._loop_error = False
+        self._verification_done = False  # Only verify once per run
 
         # Reset cancellation for this run
         self._cancel_event.clear()
@@ -1197,6 +1218,26 @@ class AgenticLoop:
                         logger.info(f"[AgenticLoop] Model routed to: {routed_model}")
         except Exception as e:
             logger.debug(f"[AgenticLoop] Intent classification failed (non-fatal): {e}")
+
+        # ── Adaptive planning: classify task and generate plan if complex ──
+        try:
+            if self._planner:
+                self._planner.reset()
+                is_complex = self._planner.classify(prompt)
+                if is_complex:
+                    plan = self._planner.generate_plan(prompt)
+                    if plan:
+                        logger.info(f"[AgenticLoop] Plan generated: {len(plan.steps)} steps")
+                        try:
+                            _ensure_console()
+                            console.print(
+                                f"  [dim cyan]plan[/dim cyan] {len(plan.steps)} steps generated",
+                                highlight=False,
+                            )
+                        except Exception:
+                            pass
+        except Exception as e:
+            logger.debug(f"[AgenticLoop] Adaptive planning failed (non-fatal): {e}")
 
         system_prompt = self._build_system_prompt(prompt)
 
@@ -1256,6 +1297,20 @@ class AgenticLoop:
 
             self.iteration += 1
             self._edits_this_turn = 0  # Reset per iteration to avoid redundant auto-test
+
+            # Adaptive planner: tick and check for replan
+            try:
+                if self._planner and self._planner.current_plan:
+                    self._planner.tick()
+                    if self._planner.should_replan():
+                        progress = self._planner.current_plan.progress_summary
+                        self._planner.replan(results_so_far=progress)
+                        logger.info("[AgenticLoop] Re-planned based on progress")
+                        # Rebuild system prompt with updated plan
+                        system_prompt = self._build_system_prompt(prompt)
+                        messages[0] = {"role": "system", "content": system_prompt}
+            except Exception as e:
+                logger.debug(f"[AgenticLoop] Planner tick/replan failed (non-fatal): {e}")
 
             # Budget check (before any injection or model call)
             if self.budget_usd is not None:
@@ -1396,6 +1451,32 @@ class AgenticLoop:
                     messages.append({"role": "assistant", "content": ""})
                     messages.append({"role": "user", "content": "Continue. Execute the task using tools."})
                     continue
+
+                # ── Completion verification ──
+                # Only verify when: verification enabled, 2+ iterations ran,
+                # tools were actually used (not simple chat), and not already verified.
+                if (
+                    self._verify_completion
+                    and not self._verification_done
+                    and self.iteration >= 2
+                    and self.tool_calls_total > 0
+                ):
+                    self._verification_done = True
+                    incomplete_reason = self._verify_task_completion(prompt, content)
+                    if incomplete_reason:
+                        # Re-enter the loop with the missing context
+                        logger.info(f"[AgenticLoop] Verification found incomplete work, continuing")
+                        messages.append({"role": "assistant", "content": content})
+                        messages.append({
+                            "role": "user",
+                            "content": (
+                                f"[Verification check] You said you were done, but verification found: "
+                                f"{incomplete_reason}\n\n"
+                                f"Please complete the remaining work."
+                            ),
+                        })
+                        continue
+
                 final_response = content
                 if on_response and not accumulated:
                     on_response(final_response, self.iteration)
@@ -1506,6 +1587,17 @@ class AgenticLoop:
                 # Track hot files for context injection
                 self._track_hot_file(tool_name, args, tool_result)
 
+                # Adaptive planner: advance step on successful tool completions
+                try:
+                    if (self._planner and self._planner.current_plan
+                            and not self._tool_result_has_error(tool_result)):
+                        # Advance on substantive actions (edits, writes, shell commands)
+                        if tool_name in ("edit_file", "write_file", "shell", "run_tests"):
+                            result_snippet = tool_result[:100] if tool_result else ""
+                            self._planner.advance_step(result=result_snippet)
+                except Exception:
+                    pass
+
                 if on_tool_call:
                     on_tool_call(tool_name, args, tool_result)
                 tool_msg = {"role": "tool", "content": tool_result}
@@ -1599,6 +1691,55 @@ class AgenticLoop:
         except (json.JSONDecodeError, TypeError, ValueError):
             # Fallback: string matching for non-JSON results
             return '"error"' in tool_result
+
+    def _verify_task_completion(self, original_task: str, agent_response: str) -> Optional[str]:
+        """Quick LLM check: did the agent actually complete the task?
+
+        Uses the fast model to minimize cost. Returns None if complete,
+        or a string describing what's missing if incomplete.
+        """
+        try:
+            from aura.config import Config
+            fast_model = Config.get_model("fast")
+
+            verify_prompt = (
+                f"Task the agent was given:\n{original_task[:1000]}\n\n"
+                f"Agent's final response:\n{agent_response[:2000]}\n\n"
+                "Did the agent complete ALL parts of the task? "
+                "If anything is incomplete or was skipped, respond with INCOMPLETE: [what's missing]. "
+                "If everything is done, respond with COMPLETE."
+            )
+
+            _ensure_console()
+            console.print("  [dim cyan]verify[/dim cyan] checking completion...", highlight=False)
+
+            result = self.brain.think(
+                verify_prompt,
+                system_prompt="You are a task completion verifier. Be brief and precise.",
+                use_history=False,
+                model_override=fast_model,
+            )
+
+            # brain.think returns str or dict
+            if isinstance(result, dict):
+                result = result.get("response", result.get("content", str(result)))
+            result = str(result).strip()
+
+            if result.upper().startswith("INCOMPLETE"):
+                # Extract the reason after "INCOMPLETE:" prefix
+                reason = result.split(":", 1)[1].strip() if ":" in result else result
+                console.print(f"  [yellow]incomplete[/yellow] {reason[:120]}", highlight=False)
+                logger.info(f"[AgenticLoop] Verification: INCOMPLETE — {reason[:200]}")
+                return reason
+            else:
+                console.print("  [green]verified[/green] task complete", highlight=False)
+                logger.info("[AgenticLoop] Verification: COMPLETE")
+                return None
+
+        except Exception as e:
+            # Verification failure must not break the loop
+            logger.debug(f"[AgenticLoop] Completion verification failed (non-fatal): {e}")
+            return None
 
     def _run_auto_test(self) -> Optional[str]:
         """Run project tests after edits. Returns test output for LLM or None."""
