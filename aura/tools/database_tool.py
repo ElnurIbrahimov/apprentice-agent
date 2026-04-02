@@ -369,6 +369,158 @@ class DatabaseTool:
             return {"success": False, "error": err, "blocked_by": "validation"}
         return self.query(f'SELECT COUNT(*) as count FROM "{table}"', db=db)
 
+    # -- LLM-powered methods -----------------------------------------------
+
+    def _get_full_schema_text(self, db: str = "default") -> tuple:
+        """Build schema text for LLM prompts. Returns (schema_str, error_dict)."""
+        tables_result = self.tables(db=db)
+        if not tables_result.get("success"):
+            return None, tables_result
+
+        table_rows = tables_result.get("rows", [])
+        if not table_rows:
+            return None, {"success": False, "error": "Database has no tables"}
+
+        schema_parts = []
+        for t in table_rows:
+            tname = t.get("name", "")
+            if not tname or t.get("type") != "table":
+                continue
+            col_result = self.schema(db=db, table=tname)
+            if col_result.get("success"):
+                cols = col_result.get("rows", [])
+                col_lines = ", ".join(
+                    f"{c['name']} {c['type']}"
+                    + (" PK" if c.get("pk") else "")
+                    + (" NOT NULL" if c.get("notnull") else "")
+                    for c in cols
+                )
+                schema_parts.append(f"{tname}({col_lines})")
+        return "\n".join(schema_parts), None
+
+    def _call_llm(self, prompt: str) -> tuple:
+        """Call ollama LLM. Returns (response_text, error_dict)."""
+        try:
+            import ollama
+            from aura.config import Config
+        except Exception:
+            return None, {"success": False, "error": "LLM not available for natural language queries"}
+
+        try:
+            resp = ollama.chat(
+                model=Config.get_model("fast"),
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = resp.get("message", {}).get("content", "").strip()
+            return text, None
+        except Exception as e:
+            return None, {"success": False, "error": f"LLM call failed: {e}"}
+
+    @staticmethod
+    def _strip_sql_fences(text: str) -> str:
+        """Remove markdown ```sql ... ``` fences if present."""
+        text = text.strip()
+        if text.startswith("```"):
+            lines = text.split("\n")
+            # Drop first line (```sql) and last line (```)
+            if lines[-1].strip() == "```":
+                lines = lines[1:-1]
+            else:
+                lines = lines[1:]
+            text = "\n".join(lines).strip()
+        return text
+
+    def ask(self, question: str, db: str = "default") -> dict:
+        """Answer a natural-language question by generating and executing SQL."""
+        if not question or not question.strip():
+            return {"success": False, "error": "No question provided"}
+
+        # Gather schema
+        schema_text, err = self._get_full_schema_text(db=db)
+        if err:
+            return err
+
+        # Gather sample rows
+        tables_result = self.tables(db=db)
+        sample_parts = []
+        for t in tables_result.get("rows", []):
+            tname = t.get("name", "")
+            if not tname or t.get("type") != "table":
+                continue
+            db_path, path_err = self._get_db_path(db)
+            if path_err:
+                continue
+            sample = self._execute_query(db_path, f'SELECT * FROM "{tname}" LIMIT 3')
+            if sample.get("success") and sample.get("rows"):
+                sample_parts.append(f"-- {tname}\n{json.dumps(sample['rows'], default=str)}")
+
+        prompt = (
+            f"Given this SQLite database schema:\n{schema_text}\n\n"
+            f"Sample data from each table:\n" + "\n".join(sample_parts) + "\n\n"
+            f"Write a single SELECT query to answer this question: {question}\n\n"
+            f"Return ONLY the SQL query, nothing else."
+        )
+
+        llm_text, llm_err = self._call_llm(prompt)
+        if llm_err:
+            return llm_err
+
+        generated_sql = self._strip_sql_fences(llm_text)
+
+        # Validate — must be read-only
+        valid, safety_err = self._check_sql_safety(generated_sql)
+        if not valid:
+            return {
+                "success": False,
+                "error": f"Generated SQL failed safety check: {safety_err}",
+                "generated_sql": generated_sql,
+            }
+
+        result = self.query(generated_sql, db=db)
+        return {
+            "success": result.get("success", False),
+            "question": question,
+            "generated_sql": generated_sql,
+            "results": result.get("rows", []),
+            "row_count": result.get("row_count", 0),
+            "response": result.get("response", ""),
+            **({"error": result["error"]} if "error" in result else {}),
+        }
+
+    def explain(self, sql: str, db: str = "default") -> dict:
+        """Explain a SQL query in plain English using the LLM."""
+        if not sql or not sql.strip():
+            return {"success": False, "error": "No SQL provided"}
+
+        valid, err = self._check_sql_safety(sql)
+        if not valid:
+            return {"success": False, "error": err, "blocked_by": "validation"}
+
+        prompt = f"Explain this SQL query in plain English, be concise:\n{sql}"
+        llm_text, llm_err = self._call_llm(prompt)
+        if llm_err:
+            return llm_err
+
+        return {"success": True, "sql": sql, "explanation": llm_text}
+
+    def suggest_indexes(self, db: str = "default") -> dict:
+        """Suggest indexes to improve query performance (advisory only)."""
+        schema_text, err = self._get_full_schema_text(db=db)
+        if err:
+            return err
+
+        prompt = (
+            f"Given this SQLite schema:\n{schema_text}\n\n"
+            "Suggest useful indexes to improve query performance. "
+            "Return each suggestion as: CREATE INDEX idx_name ON table(columns); "
+            "with a brief reason."
+        )
+        llm_text, llm_err = self._call_llm(prompt)
+        if llm_err:
+            return llm_err
+
+        return {"success": True, "suggestions": llm_text}
+
     # -- Dispatch -----------------------------------------------------------
 
     def execute(self, action: str, **kwargs) -> dict:
@@ -421,6 +573,28 @@ class DatabaseTool:
             if table:
                 return self.count(table, db=db)
             return {"success": False, "error": "Usage: count <table_name>"}
+
+        # Ask / Question (natural language to SQL)
+        if action_lower.startswith("ask") or action_lower.startswith("question"):
+            question = kwargs.get("question")
+            if not question and len(action.split()) > 1:
+                question = action.split(None, 1)[-1].strip()
+            if question:
+                return self.ask(question, db=db)
+            return {"success": False, "error": "Usage: ask <natural language question>"}
+
+        # Explain SQL
+        if action_lower.startswith("explain"):
+            sql = kwargs.get("sql")
+            if not sql and len(action.split()) > 1:
+                sql = action.split(None, 1)[-1].strip()
+            if sql:
+                return self.explain(sql, db=db)
+            return {"success": False, "error": "Usage: explain <SQL query>"}
+
+        # Suggest indexes
+        if action_lower in ("suggest_indexes", "suggest indexes"):
+            return self.suggest_indexes(db=db)
 
         # Default: treat as SQL query
         sql = kwargs.get("sql") or action

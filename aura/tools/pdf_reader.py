@@ -336,6 +336,414 @@ class PDFReaderTool:
 
         return result
 
+    def extract_tables(self, path: str, pages: str = "all") -> dict:
+        """Extract tables from PDF pages.
+
+        Args:
+            path: Path to the PDF file
+            pages: Page specification (e.g., "1-3,5", "all", "last")
+
+        Returns:
+            dict with success status and extracted tables
+        """
+        if not FITZ_AVAILABLE:
+            return {"success": False, "error": "PyMuPDF (fitz) not installed. Run: pip install PyMuPDF"}
+
+        from pathlib import Path as _Path
+        DOCS_DIR = _Path(__file__).parent.parent.parent / "data"
+        resolved = _Path(path).resolve()
+        docs_dir_resolved = DOCS_DIR.resolve()
+        if not (str(resolved).startswith(str(docs_dir_resolved) + os.sep) or str(resolved) == str(docs_dir_resolved)):
+            return {"success": False, "error": "Path not within allowed data directory"}
+
+        pdf_path = resolved
+
+        if not pdf_path.exists():
+            return {"success": False, "error": f"PDF not found: {path}"}
+
+        try:
+            doc = fitz.open(str(pdf_path))
+            total_pages = len(doc)
+            page_numbers = self._parse_page_spec(pages, total_pages)
+
+            if not page_numbers:
+                doc.close()
+                return {"success": False, "error": f"Invalid page specification: {pages}"}
+
+            tables = []
+
+            for page_num in page_numbers:
+                page = doc[page_num]
+
+                if not hasattr(page, 'find_tables'):
+                    doc.close()
+                    return {
+                        "success": False,
+                        "error": "PyMuPDF version too old for table extraction. Upgrade: pip install --upgrade PyMuPDF"
+                    }
+
+                found = page.find_tables()
+                for table in found.tables:
+                    raw = table.extract()
+                    if len(raw) < 2:
+                        continue
+                    headers = [str(h) if h is not None else "" for h in raw[0]]
+                    rows = []
+                    for row in raw[1:]:
+                        rows.append({headers[i]: (str(cell) if cell is not None else "") for i, cell in enumerate(row) if i < len(headers)})
+                    tables.append({
+                        "page": page_num + 1,
+                        "headers": headers,
+                        "rows": rows,
+                        "row_count": len(rows)
+                    })
+
+            doc.close()
+
+            return {
+                "success": True,
+                "tables": tables,
+                "total_tables": len(tables)
+            }
+
+        except Exception as e:
+            return {"success": False, "error": f"Failed to extract tables: {str(e)}"}
+
+    def extract_structured(self, path: str, pages: str = "all") -> dict:
+        """Extract structured content (headers, paragraphs, tables) with font/position info.
+
+        Args:
+            path: Path to the PDF file
+            pages: Page specification (e.g., "1-3,5", "all", "last")
+
+        Returns:
+            dict with success status and structured sections
+        """
+        if not FITZ_AVAILABLE:
+            return {"success": False, "error": "PyMuPDF (fitz) not installed. Run: pip install PyMuPDF"}
+
+        from pathlib import Path as _Path
+        from collections import Counter
+        DOCS_DIR = _Path(__file__).parent.parent.parent / "data"
+        resolved = _Path(path).resolve()
+        docs_dir_resolved = DOCS_DIR.resolve()
+        if not (str(resolved).startswith(str(docs_dir_resolved) + os.sep) or str(resolved) == str(docs_dir_resolved)):
+            return {"success": False, "error": "Path not within allowed data directory"}
+
+        pdf_path = resolved
+
+        if not pdf_path.exists():
+            return {"success": False, "error": f"PDF not found: {path}"}
+
+        try:
+            doc = fitz.open(str(pdf_path))
+            total_pages = len(doc)
+            page_numbers = self._parse_page_spec(pages, total_pages)
+
+            if not page_numbers:
+                doc.close()
+                return {"success": False, "error": f"Invalid page specification: {pages}"}
+
+            sections = []
+
+            for page_num in page_numbers:
+                page = doc[page_num]
+                text_dict = page.get_text("dict")
+                blocks = text_dict.get("blocks", [])
+
+                # Collect font sizes from text spans to find body size
+                font_sizes = []
+                for block in blocks:
+                    if block.get("type") == 0:  # text block
+                        for line in block.get("lines", []):
+                            for span in line.get("spans", []):
+                                text = span.get("text", "").strip()
+                                if text:
+                                    font_sizes.extend([round(span["size"], 1)] * len(text))
+
+                body_size = Counter(font_sizes).most_common(1)[0][0] if font_sizes else 12.0
+
+                # Detect multi-column layout by analyzing x-coordinates
+                x_positions = []
+                for block in blocks:
+                    if block.get("type") == 0:
+                        x_positions.append(round(block.get("bbox", [0])[0], 0))
+                x_clusters = len(set(x for x in x_positions if x_positions.count(x) >= 2)) if x_positions else 1
+                is_multi_column = x_clusters >= 2
+
+                # Extract inline tables for this page
+                page_tables = []
+                if hasattr(page, 'find_tables'):
+                    found = page.find_tables()
+                    for table in found.tables:
+                        raw = table.extract()
+                        if len(raw) >= 2:
+                            headers = [str(h) if h is not None else "" for h in raw[0]]
+                            rows = []
+                            for row in raw[1:]:
+                                rows.append({headers[i]: (str(cell) if cell is not None else "") for i, cell in enumerate(row) if i < len(headers)})
+                            page_tables.append({
+                                "headers": headers,
+                                "rows": rows,
+                                "row_count": len(rows)
+                            })
+
+                # Process text blocks into sections
+                for block in blocks:
+                    if block.get("type") == 0:  # text block
+                        text_parts = []
+                        max_font_size = 0.0
+                        for line in block.get("lines", []):
+                            for span in line.get("spans", []):
+                                t = span.get("text", "")
+                                if t.strip():
+                                    text_parts.append(t)
+                                    if span["size"] > max_font_size:
+                                        max_font_size = span["size"]
+
+                        content = " ".join(text_parts).strip()
+                        if not content:
+                            continue
+
+                        rounded_size = round(max_font_size, 1)
+                        if rounded_size > body_size + 1.0:
+                            block_type = "header"
+                        else:
+                            block_type = "paragraph"
+
+                        sections.append({
+                            "type": block_type,
+                            "content": content,
+                            "page": page_num + 1,
+                            "font_size": rounded_size
+                        })
+
+                # Embed tables inline
+                for tbl in page_tables:
+                    header_str = " | ".join(tbl["headers"])
+                    row_strs = []
+                    for row in tbl["rows"]:
+                        row_strs.append(" | ".join(row.get(h, "") for h in tbl["headers"]))
+                    content = header_str + "\n" + "\n".join(row_strs)
+                    sections.append({
+                        "type": "table",
+                        "content": content,
+                        "page": page_num + 1,
+                        "font_size": body_size
+                    })
+
+            doc.close()
+
+            return {
+                "success": True,
+                "sections": sections
+            }
+
+        except Exception as e:
+            return {"success": False, "error": f"Failed to extract structured content: {str(e)}"}
+
+    def extract_images(self, path: str, pages: str = "all", output_dir: str = None) -> dict:
+        """Extract images from PDF pages.
+
+        Args:
+            path: Path to the PDF file
+            pages: Page specification (e.g., "1-3,5", "all", "last")
+            output_dir: Optional directory to save images as PNG (must be within data/)
+
+        Returns:
+            dict with success status and image metadata
+        """
+        if not FITZ_AVAILABLE:
+            return {"success": False, "error": "PyMuPDF (fitz) not installed. Run: pip install PyMuPDF"}
+
+        from pathlib import Path as _Path
+        DOCS_DIR = _Path(__file__).parent.parent.parent / "data"
+        resolved = _Path(path).resolve()
+        docs_dir_resolved = DOCS_DIR.resolve()
+        if not (str(resolved).startswith(str(docs_dir_resolved) + os.sep) or str(resolved) == str(docs_dir_resolved)):
+            return {"success": False, "error": "Path not within allowed data directory"}
+
+        if output_dir:
+            out_resolved = _Path(output_dir).resolve()
+            if not (str(out_resolved).startswith(str(docs_dir_resolved) + os.sep) or str(out_resolved) == str(docs_dir_resolved)):
+                return {"success": False, "error": "output_dir must be within the data/ directory"}
+            out_resolved.mkdir(parents=True, exist_ok=True)
+        else:
+            out_resolved = None
+
+        pdf_path = resolved
+
+        if not pdf_path.exists():
+            return {"success": False, "error": f"PDF not found: {path}"}
+
+        try:
+            doc = fitz.open(str(pdf_path))
+            total_pages = len(doc)
+            page_numbers = self._parse_page_spec(pages, total_pages)
+
+            if not page_numbers:
+                doc.close()
+                return {"success": False, "error": f"Invalid page specification: {pages}"}
+
+            images = []
+            img_index = 0
+
+            for page_num in page_numbers:
+                page = doc[page_num]
+                image_list = page.get_images()
+
+                for img_info in image_list:
+                    xref = img_info[0]
+                    try:
+                        pix = fitz.Pixmap(doc, xref)
+                        # Convert CMYK to RGB if needed
+                        if pix.n - pix.alpha > 3:
+                            pix = fitz.Pixmap(fitz.csRGB, pix)
+
+                        saved_path = None
+                        if out_resolved:
+                            img_filename = f"page{page_num + 1}_img{img_index}.png"
+                            save_path = out_resolved / img_filename
+                            pix.save(str(save_path))
+                            saved_path = str(save_path)
+
+                        images.append({
+                            "page": page_num + 1,
+                            "width": pix.width,
+                            "height": pix.height,
+                            "path": saved_path
+                        })
+
+                        pix = None
+                        img_index += 1
+                    except Exception:
+                        continue
+
+            doc.close()
+
+            return {
+                "success": True,
+                "images": images,
+                "total_images": len(images)
+            }
+
+        except Exception as e:
+            return {"success": False, "error": f"Failed to extract images: {str(e)}"}
+
+    def extract_links(self, path: str) -> dict:
+        """Extract URI links from all PDF pages.
+
+        Args:
+            path: Path to the PDF file
+
+        Returns:
+            dict with success status and extracted links
+        """
+        if not FITZ_AVAILABLE:
+            return {"success": False, "error": "PyMuPDF (fitz) not installed. Run: pip install PyMuPDF"}
+
+        from pathlib import Path as _Path
+        DOCS_DIR = _Path(__file__).parent.parent.parent / "data"
+        resolved = _Path(path).resolve()
+        docs_dir_resolved = DOCS_DIR.resolve()
+        if not (str(resolved).startswith(str(docs_dir_resolved) + os.sep) or str(resolved) == str(docs_dir_resolved)):
+            return {"success": False, "error": "Path not within allowed data directory"}
+
+        pdf_path = resolved
+
+        if not pdf_path.exists():
+            return {"success": False, "error": f"PDF not found: {path}"}
+
+        try:
+            doc = fitz.open(str(pdf_path))
+            total_pages = len(doc)
+            links = []
+
+            for page_num in range(total_pages):
+                page = doc[page_num]
+                for link in page.get_links():
+                    if link.get("kind") == 2:  # URI link
+                        uri = link.get("uri", "")
+                        if uri:
+                            links.append({
+                                "page": page_num + 1,
+                                "uri": uri
+                            })
+
+            doc.close()
+
+            return {
+                "success": True,
+                "links": links,
+                "total_links": len(links)
+            }
+
+        except Exception as e:
+            return {"success": False, "error": f"Failed to extract links: {str(e)}"}
+
+    def page_info(self, path: str, page_num: int) -> dict:
+        """Get detailed info about a specific PDF page.
+
+        Args:
+            path: Path to the PDF file
+            page_num: 1-indexed page number
+
+        Returns:
+            dict with success status and page details
+        """
+        if not FITZ_AVAILABLE:
+            return {"success": False, "error": "PyMuPDF (fitz) not installed. Run: pip install PyMuPDF"}
+
+        from pathlib import Path as _Path
+        DOCS_DIR = _Path(__file__).parent.parent.parent / "data"
+        resolved = _Path(path).resolve()
+        docs_dir_resolved = DOCS_DIR.resolve()
+        if not (str(resolved).startswith(str(docs_dir_resolved) + os.sep) or str(resolved) == str(docs_dir_resolved)):
+            return {"success": False, "error": "Path not within allowed data directory"}
+
+        pdf_path = resolved
+
+        if not pdf_path.exists():
+            return {"success": False, "error": f"PDF not found: {path}"}
+
+        try:
+            doc = fitz.open(str(pdf_path))
+            total_pages = len(doc)
+
+            idx = page_num - 1  # Convert to 0-indexed
+            if idx < 0 or idx >= total_pages:
+                doc.close()
+                return {"success": False, "error": f"Page {page_num} out of range (1-{total_pages})"}
+
+            page = doc[idx]
+            rect = page.rect
+
+            text = page.get_text()
+            image_count = len(page.get_images())
+            link_count = len([l for l in page.get_links() if l.get("kind") == 2])
+
+            table_count = 0
+            if hasattr(page, 'find_tables'):
+                table_count = len(page.find_tables().tables)
+
+            result = {
+                "success": True,
+                "page_num": page_num,
+                "width": round(rect.width, 2),
+                "height": round(rect.height, 2),
+                "rotation": page.rotation,
+                "text_length": len(text),
+                "image_count": image_count,
+                "table_count": table_count,
+                "link_count": link_count
+            }
+
+            doc.close()
+            return result
+
+        except Exception as e:
+            return {"success": False, "error": f"Failed to get page info: {str(e)}"}
+
     def execute(self, action: str, **kwargs) -> dict:
         """Execute a PDF action.
 
@@ -373,6 +781,28 @@ class PDFReaderTool:
                     "error": "No search query provided."
                 }
             return self.search(path, query)
+
+        elif "table" in action_lower:
+            pages = kwargs.get("pages", "all")
+            return self.extract_tables(path, pages)
+
+        elif "structured" in action_lower or "layout" in action_lower:
+            pages = kwargs.get("pages", "all")
+            return self.extract_structured(path, pages)
+
+        elif "image" in action_lower:
+            pages = kwargs.get("pages", "all")
+            output_dir = kwargs.get("output_dir")
+            return self.extract_images(path, pages, output_dir)
+
+        elif "link" in action_lower:
+            return self.extract_links(path)
+
+        elif "page_info" in action_lower:
+            page_num = kwargs.get("page_num")
+            if not page_num:
+                return {"success": False, "error": "No page_num provided for page_info action."}
+            return self.page_info(path, int(page_num))
 
         elif "extract" in action_lower:
             pages = kwargs.get("pages", "all")

@@ -260,6 +260,7 @@ class APITesterTool:
         self._collections: Dict[str, List[Dict[str, Any]]] = {}  # name -> list of saved requests
         self._auth: Dict[str, Dict[str, Any]] = {}  # profile_name -> {type, credentials}
         self._variables: Dict[str, str] = {}  # key -> value for interpolation
+        self._openapi_specs: Dict[str, Any] = {}  # spec_path_or_url -> parsed spec
         self._load_all()
 
     # -----------------------------------------------------------------------
@@ -1109,6 +1110,509 @@ class APITesterTool:
         return {"success": True, "cleared": count, "response": f"Cleared {count} request(s)"}
 
     # -----------------------------------------------------------------------
+    #  OpenAPI helpers
+    # -----------------------------------------------------------------------
+
+    def _load_openapi_spec(self, spec_path_or_url: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        """Load and parse an OpenAPI spec from URL or file. Caches results."""
+        if spec_path_or_url in self._openapi_specs:
+            return self._openapi_specs[spec_path_or_url], None
+
+        raw = None
+
+        # Determine if URL or file path
+        if spec_path_or_url.startswith(("http://", "https://")):
+            url, url_err = self._validate_url(spec_path_or_url)
+            if url_err:
+                return None, url_err
+            try:
+                import requests as req_lib
+            except ImportError:
+                return None, "requests library not installed. Run: pip install requests"
+            try:
+                resp = req_lib.get(url, timeout=30)
+                resp.raise_for_status()
+                raw = resp.text
+            except Exception as e:
+                return None, f"Failed to fetch spec: {e}"
+        else:
+            spec_file = Path(spec_path_or_url)
+            if not spec_file.exists():
+                return None, f"Spec file not found: {spec_path_or_url}"
+            try:
+                raw = spec_file.read_text(encoding="utf-8")
+            except Exception as e:
+                return None, f"Failed to read spec file: {e}"
+
+        # Parse: try JSON first, then YAML
+        spec = None
+        try:
+            spec = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            try:
+                import yaml
+                spec = yaml.safe_load(raw)
+            except ImportError:
+                return None, "Spec is not JSON and PyYAML is not installed. Run: pip install pyyaml"
+            except Exception as e:
+                return None, f"Failed to parse spec as JSON or YAML: {e}"
+
+        if not isinstance(spec, dict):
+            return None, "Parsed spec is not a valid OpenAPI object"
+
+        self._openapi_specs[spec_path_or_url] = spec
+        return spec, None
+
+    def _match_spec_path(self, spec: Dict[str, Any], request_url: str, method: str) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+        """Match a request URL+method to a path in the OpenAPI spec.
+        Returns (spec_path, path_item_method_obj) or (None, None)."""
+        paths = spec.get("paths", {})
+        base_url = ""
+        servers = spec.get("servers", [])
+        if servers and isinstance(servers[0], dict):
+            base_url = servers[0].get("url", "").rstrip("/")
+
+        method_lower = method.lower()
+
+        for spec_path, path_item in paths.items():
+            if not isinstance(path_item, dict):
+                continue
+            if method_lower not in path_item:
+                continue
+
+            # Build a regex from the spec path to match against request URL
+            # Replace {param} with a capture group
+            pattern = re.sub(r'\{[^}]+\}', r'[^/]+', spec_path)
+            # Try with and without base_url
+            for prefix in [base_url, ""]:
+                full_pattern = re.escape(prefix) + pattern.replace(r'[^/]+', '§§§')
+                full_pattern = full_pattern.replace('§§§', '[^/]+')
+                full_pattern = "^" + full_pattern + "$"
+                parsed_req = urlparse(request_url)
+                req_path = parsed_req.path
+                if re.match(full_pattern, req_path) or re.match(full_pattern, request_url):
+                    return spec_path, path_item[method_lower]
+
+        return None, None
+
+    # -----------------------------------------------------------------------
+    #  import_openapi()
+    # -----------------------------------------------------------------------
+
+    def import_openapi(self, spec_path_or_url: str) -> dict:
+        """Import endpoints from an OpenAPI spec into a collection.
+
+        Args:
+            spec_path_or_url: URL or local file path to an OpenAPI spec (JSON or YAML).
+        """
+        spec, err = self._load_openapi_spec(spec_path_or_url)
+        if err:
+            return {"success": False, "error": err}
+
+        info = spec.get("info", {})
+        collection_name = info.get("title", "openapi_import").replace(" ", "_").lower()
+
+        base_url = ""
+        servers = spec.get("servers", [])
+        if servers and isinstance(servers[0], dict):
+            base_url = servers[0].get("url", "").rstrip("/")
+
+        paths = spec.get("paths", {})
+        count = 0
+
+        for path, path_item in paths.items():
+            if not isinstance(path_item, dict):
+                continue
+            for method in ("get", "post", "put", "patch", "delete", "head", "options"):
+                if method not in path_item:
+                    continue
+                operation = path_item[method]
+                op_id = operation.get("operationId", f"{method}_{path}").replace("/", "_").replace("{", "").replace("}", "")
+                endpoint_url = base_url + path
+
+                # Build headers from parameters
+                headers = {}
+                body = None
+                json_body = None
+
+                params = operation.get("parameters", []) + path_item.get("parameters", [])
+                for param in params:
+                    if not isinstance(param, dict):
+                        continue
+                    if param.get("in") == "header":
+                        headers[param["name"]] = "{" + param["name"] + "}"
+
+                # Request body
+                req_body = operation.get("requestBody", {})
+                if isinstance(req_body, dict):
+                    content = req_body.get("content", {})
+                    if "application/json" in content:
+                        schema = content["application/json"].get("schema", {})
+                        json_body = self._schema_to_example(schema, spec)
+                        headers.setdefault("Content-Type", "application/json")
+
+                description = operation.get("summary", operation.get("description", ""))
+                if isinstance(description, str) and len(description) > 200:
+                    description = description[:200]
+
+                self.save_request(
+                    name=op_id,
+                    method=method.upper(),
+                    url=endpoint_url,
+                    headers=headers if headers else None,
+                    json_body=json_body,
+                    collection=collection_name,
+                    description=description,
+                )
+                count += 1
+
+        return {
+            "success": True,
+            "collection": collection_name,
+            "endpoints_imported": count,
+            "base_url": base_url,
+            "response": f"Imported {count} endpoint(s) from '{info.get('title', spec_path_or_url)}' into collection '{collection_name}' (base: {base_url})",
+        }
+
+    def _schema_to_example(self, schema: Dict[str, Any], spec: Dict[str, Any], depth: int = 0) -> Any:
+        """Generate an example value from an OpenAPI schema object."""
+        if depth > 5:
+            return None
+
+        # Resolve $ref
+        ref = schema.get("$ref")
+        if ref and isinstance(ref, str):
+            parts = ref.lstrip("#/").split("/")
+            resolved = spec
+            for part in parts:
+                resolved = resolved.get(part, {}) if isinstance(resolved, dict) else {}
+            if isinstance(resolved, dict):
+                schema = resolved
+            else:
+                return None
+
+        # Use example if provided
+        if "example" in schema:
+            return schema["example"]
+
+        schema_type = schema.get("type", "")
+        if schema_type == "object":
+            props = schema.get("properties", {})
+            result = {}
+            for prop_name, prop_schema in props.items():
+                if isinstance(prop_schema, dict):
+                    result[prop_name] = self._schema_to_example(prop_schema, spec, depth + 1)
+            return result
+        elif schema_type == "array":
+            items = schema.get("items", {})
+            if isinstance(items, dict):
+                return [self._schema_to_example(items, spec, depth + 1)]
+            return []
+        elif schema_type == "string":
+            fmt = schema.get("format", "")
+            if fmt == "date":
+                return "2024-01-01"
+            elif fmt == "date-time":
+                return "2024-01-01T00:00:00Z"
+            elif fmt == "email":
+                return "test@example.com"
+            elif fmt == "uri" or fmt == "url":
+                return "https://example.com"
+            elif fmt == "uuid":
+                return "00000000-0000-0000-0000-000000000000"
+            return schema.get("enum", ["test"])[0] if "enum" in schema else "test"
+        elif schema_type == "integer":
+            return schema.get("enum", [1])[0] if "enum" in schema else 1
+        elif schema_type == "number":
+            return schema.get("enum", [1.0])[0] if "enum" in schema else 1.0
+        elif schema_type == "boolean":
+            return True
+        return None
+
+    # -----------------------------------------------------------------------
+    #  validate_response()
+    # -----------------------------------------------------------------------
+
+    def validate_response(self, request_id: str = None, spec_path_or_url: str = None) -> dict:
+        """Validate a response against an OpenAPI spec.
+
+        Args:
+            request_id: ID of a request in history (or None for last request).
+            spec_path_or_url: Path or URL to the OpenAPI spec.
+        """
+        if not spec_path_or_url:
+            return {"success": False, "error": "spec_path_or_url is required"}
+
+        # Find the request
+        record = None
+        if request_id:
+            for r in reversed(self._history):
+                if r.get("id") == request_id:
+                    record = r
+                    break
+            if not record:
+                return {"success": False, "error": f"Request '{request_id}' not found in history"}
+        else:
+            if not self._history:
+                return {"success": False, "error": "No requests in history"}
+            record = self._history[-1]
+
+        spec, err = self._load_openapi_spec(spec_path_or_url)
+        if err:
+            return {"success": False, "error": err}
+
+        req_method = record.get("method", "GET")
+        req_url = record.get("url", "")
+        status_code = record.get("status_code")
+        resp_body = record.get("response_body", "")
+
+        spec_path, operation = self._match_spec_path(spec, req_url, req_method)
+        if not operation:
+            return {
+                "success": True,
+                "valid": False,
+                "errors": [f"No matching path found in spec for {req_method} {req_url}"],
+            }
+
+        errors = []
+
+        # Validate status code
+        responses = operation.get("responses", {})
+        status_str = str(status_code) if status_code else "unknown"
+        if status_str not in responses and "default" not in responses:
+            errors.append(f"Status code {status_code} not defined in spec for {spec_path} (expected one of: {', '.join(responses.keys())})")
+
+        # Validate response body against schema
+        resp_def = responses.get(status_str, responses.get("default", {}))
+        if isinstance(resp_def, dict) and resp_body:
+            content = resp_def.get("content", {})
+            json_schema = None
+            for ct in ("application/json", "application/json; charset=utf-8"):
+                if ct in content:
+                    json_schema = content[ct].get("schema")
+                    break
+
+            if json_schema and resp_body:
+                try:
+                    resp_json = json.loads(resp_body)
+                    schema_errors = self._validate_against_schema(resp_json, json_schema, spec, "$")
+                    errors.extend(schema_errors)
+                except (json.JSONDecodeError, TypeError):
+                    pass  # Not JSON, skip body validation
+
+        valid = len(errors) == 0
+        return {
+            "success": True,
+            "valid": valid,
+            "errors": errors,
+            "request_id": record.get("id"),
+            "spec_path": spec_path,
+            "response": f"Validation {'PASSED' if valid else 'FAILED'} for [{record.get('id')}] {req_method} {req_url}"
+                        + (("\n  Errors:\n    " + "\n    ".join(errors)) if errors else ""),
+        }
+
+    def _validate_against_schema(self, data: Any, schema: Dict[str, Any], spec: Dict[str, Any], path: str, depth: int = 0) -> List[str]:
+        """Basic type/required-field validation of data against an OpenAPI schema."""
+        errors = []
+        if depth > 10:
+            return errors
+
+        # Resolve $ref
+        ref = schema.get("$ref")
+        if ref and isinstance(ref, str):
+            parts = ref.lstrip("#/").split("/")
+            resolved = spec
+            for part in parts:
+                resolved = resolved.get(part, {}) if isinstance(resolved, dict) else {}
+            if isinstance(resolved, dict):
+                schema = resolved
+            else:
+                return errors
+
+        schema_type = schema.get("type", "")
+
+        if schema_type == "object" and isinstance(data, dict):
+            # Check required fields
+            required = schema.get("required", [])
+            for field_name in required:
+                if field_name not in data:
+                    errors.append(f"{path}: missing required field '{field_name}'")
+            # Recurse into properties
+            props = schema.get("properties", {})
+            for prop_name, prop_schema in props.items():
+                if prop_name in data and isinstance(prop_schema, dict):
+                    errors.extend(self._validate_against_schema(data[prop_name], prop_schema, spec, f"{path}.{prop_name}", depth + 1))
+        elif schema_type == "array" and isinstance(data, list):
+            items_schema = schema.get("items", {})
+            if isinstance(items_schema, dict):
+                for i, item in enumerate(data[:10]):  # Cap at 10 items
+                    errors.extend(self._validate_against_schema(item, items_schema, spec, f"{path}[{i}]", depth + 1))
+        elif schema_type and data is not None:
+            # Basic type checking
+            type_map = {
+                "string": str, "integer": int, "number": (int, float),
+                "boolean": bool, "array": list, "object": dict,
+            }
+            expected = type_map.get(schema_type)
+            if expected and not isinstance(data, expected):
+                errors.append(f"{path}: expected {schema_type}, got {type(data).__name__}")
+
+        return errors
+
+    # -----------------------------------------------------------------------
+    #  generate_tests()
+    # -----------------------------------------------------------------------
+
+    def generate_tests(self, spec_path_or_url: str, collection: str = "auto_tests") -> dict:
+        """Generate test requests from an OpenAPI spec.
+
+        Args:
+            spec_path_or_url: Path or URL to the OpenAPI spec.
+            collection: Collection name to save generated tests (default: "auto_tests").
+        """
+        spec, err = self._load_openapi_spec(spec_path_or_url)
+        if err:
+            return {"success": False, "error": err}
+
+        base_url = ""
+        servers = spec.get("servers", [])
+        if servers and isinstance(servers[0], dict):
+            base_url = servers[0].get("url", "").rstrip("/")
+
+        paths = spec.get("paths", {})
+        count = 0
+
+        for path, path_item in paths.items():
+            if not isinstance(path_item, dict):
+                continue
+            for method in ("get", "post", "put", "patch", "delete", "head", "options"):
+                if method not in path_item:
+                    continue
+                operation = path_item[method]
+
+                # Build test URL: substitute path params with example values
+                test_url = base_url + path
+                params = operation.get("parameters", []) + path_item.get("parameters", [])
+                query_parts = []
+                headers = {}
+
+                for param in params:
+                    if not isinstance(param, dict):
+                        continue
+                    p_name = param.get("name", "")
+                    p_in = param.get("in", "")
+                    p_schema = param.get("schema", {})
+                    example_val = self._schema_to_example(p_schema, spec) if isinstance(p_schema, dict) else "test"
+
+                    if p_in == "path":
+                        test_url = test_url.replace("{" + p_name + "}", str(example_val))
+                    elif p_in == "query":
+                        query_parts.append(f"{p_name}={example_val}")
+                    elif p_in == "header":
+                        headers[p_name] = str(example_val)
+
+                if query_parts:
+                    test_url += "?" + "&".join(query_parts)
+
+                # Request body
+                json_body = None
+                req_body = operation.get("requestBody", {})
+                if isinstance(req_body, dict):
+                    content = req_body.get("content", {})
+                    if "application/json" in content:
+                        schema = content["application/json"].get("schema", {})
+                        json_body = self._schema_to_example(schema, spec)
+                        headers.setdefault("Content-Type", "application/json")
+
+                op_id = operation.get("operationId", f"{method}_{path}").replace("/", "_").replace("{", "").replace("}", "")
+                test_name = f"test_{op_id}"
+
+                self.save_request(
+                    name=test_name,
+                    method=method.upper(),
+                    url=test_url,
+                    headers=headers if headers else None,
+                    json_body=json_body,
+                    collection=collection,
+                    description=f"Auto-generated test for {method.upper()} {path}",
+                )
+                count += 1
+
+        return {
+            "success": True,
+            "collection": collection,
+            "tests_generated": count,
+            "response": f"Generated {count} test request(s) in collection '{collection}'",
+        }
+
+    # -----------------------------------------------------------------------
+    #  retry()
+    # -----------------------------------------------------------------------
+
+    def retry(self, request_id: str = None, max_retries: int = 3, backoff: float = 1.0) -> dict:
+        """Retry a request with exponential backoff.
+
+        Args:
+            request_id: ID of a request in history (or None for last request).
+            max_retries: Maximum retry attempts (capped at 5).
+            backoff: Base backoff in seconds (doubles each attempt).
+        """
+        max_retries = min(max_retries, 5)
+
+        # Find the original request
+        record = None
+        if request_id:
+            for r in reversed(self._history):
+                if r.get("id") == request_id:
+                    record = r
+                    break
+            if not record:
+                return {"success": False, "error": f"Request '{request_id}' not found in history"}
+        else:
+            if not self._history:
+                return {"success": False, "error": "No requests in history"}
+            record = self._history[-1]
+
+        method = record.get("method", "GET")
+        url = record.get("url", "")
+        req_headers = record.get("request_headers", {})
+        req_body = record.get("request_body")
+        name = record.get("name", "")
+
+        # Determine if body is JSON
+        json_body = None
+        body = None
+        if req_body:
+            try:
+                json_body = json.loads(req_body)
+            except (json.JSONDecodeError, TypeError):
+                body = req_body
+
+        last_result = None
+        for attempt in range(max_retries):
+            if attempt > 0:
+                time.sleep(backoff * (2 ** attempt))
+
+            result = self.request(
+                method=method,
+                url=url,
+                headers=req_headers,
+                body=body,
+                json_body=json_body,
+                name=name or f"retry_{record.get('id', '')}",
+            )
+            last_result = result
+
+            if result.get("success") and result.get("status_code") and result["status_code"] < 500:
+                result["retries"] = attempt + 1
+                result["response"] = f"Succeeded on attempt {attempt + 1}/{max_retries}\n" + result.get("response", "")
+                return result
+
+        last_result["retries"] = max_retries
+        last_result["response"] = f"All {max_retries} attempts failed\n" + last_result.get("response", "")
+        return last_result
+
+    # -----------------------------------------------------------------------
     #  Dispatch (extended)
     # -----------------------------------------------------------------------
 
@@ -1213,6 +1717,34 @@ class APITesterTool:
             steps = kwargs.get("steps", [])
             return self.run_chain(steps)
 
+        # Import OpenAPI
+        if action_lower in ("import_openapi", "import openapi") or action_lower.startswith("import_openapi") or action_lower.startswith("import openapi"):
+            spec = kwargs.get("spec_path_or_url") or kwargs.get("spec") or kwargs.get("url", "")
+            return self.import_openapi(spec)
+
+        # Validate response
+        if action_lower in ("validate_response", "validate") or action_lower.startswith("validate_response") or action_lower.startswith("validate"):
+            return self.validate_response(
+                request_id=kwargs.get("request_id"),
+                spec_path_or_url=kwargs.get("spec_path_or_url") or kwargs.get("spec") or kwargs.get("url", ""),
+            )
+
+        # Generate tests
+        if action_lower in ("generate_tests",) or action_lower.startswith("generate_tests") or action_lower.startswith("generate tests"):
+            spec = kwargs.get("spec_path_or_url") or kwargs.get("spec") or kwargs.get("url", "")
+            return self.generate_tests(
+                spec_path_or_url=spec,
+                collection=kwargs.get("collection", "auto_tests"),
+            )
+
+        # Retry
+        if action_lower == "retry" or action_lower.startswith("retry"):
+            return self.retry(
+                request_id=kwargs.get("request_id"),
+                max_retries=kwargs.get("max_retries", 3),
+                backoff=kwargs.get("backoff", 1.0),
+            )
+
         # Parse method + URL from action (original behavior)
         method = kwargs.get("method")
         url = kwargs.get("url")
@@ -1262,7 +1794,8 @@ class APITesterTool:
             "success": False,
             "error": f"Could not parse: {action}. "
                      "Try: 'GET https://...', 'save_request', 'list_requests', "
-                     "'run_saved <name>', 'chain', 'set_auth', 'compare', 'extract'"
+                     "'run_saved <name>', 'chain', 'set_auth', 'compare', 'extract', "
+                     "'import_openapi', 'validate', 'generate_tests', 'retry'"
         }
 
 

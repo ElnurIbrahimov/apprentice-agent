@@ -1,4 +1,4 @@
-"""Code Search Tool — grep, glob, and definition finder for codebases.
+"""Code Search Tool — grep, glob, definition finder, and semantic search for codebases.
 
 This is the #1 tool that makes coding agents effective. 60%+ of agent time
 is spent searching for code, not writing it. Fast, accurate search = faster everything.
@@ -6,15 +6,20 @@ is spent searching for code, not writing it. Fast, accurate search = faster ever
 Inspired by Claude Code's Grep/Glob tools, ripgrep, and tree-sitter.
 """
 
+import hashlib
 import json as _json
 import logging
 import os
 import re
 import shutil
+import sqlite3
+import struct
 import subprocess
+import time
 from fnmatch import fnmatch
+from math import sqrt
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -137,19 +142,358 @@ def _walk_files(root: Path, file_type: Optional[str] = None,
     return results
 
 
+# ---------------------------------------------------------------------------
+# Semantic Index — SQLite-backed embedding store for code chunks
+# ---------------------------------------------------------------------------
+
+_DB_PATH = Path(os.environ.get("AURA_DATA_DIR", "data")) / "code_search_index.db"
+
+
+class _SemanticIndex:
+    """SQLite-backed semantic index for code search by meaning."""
+
+    def __init__(self):
+        self._conn: Optional[sqlite3.Connection] = None
+
+    # -- DB lifecycle -------------------------------------------------------
+
+    def _get_conn(self) -> sqlite3.Connection:
+        if self._conn is not None:
+            return self._conn
+        _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(_DB_PATH), timeout=10)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS chunks(
+                id TEXT PRIMARY KEY,
+                file_path TEXT,
+                name TEXT,
+                kind TEXT,
+                line_start INTEGER,
+                line_end INTEGER,
+                content TEXT,
+                embedding BLOB,
+                mtime REAL
+            );
+            CREATE TABLE IF NOT EXISTS files(
+                path TEXT PRIMARY KEY,
+                mtime REAL,
+                indexed_at TEXT
+            );
+        """)
+        conn.commit()
+        self._conn = conn
+        return conn
+
+    def close(self):
+        if self._conn:
+            self._conn.close()
+            self._conn = None
+
+    # -- Helpers ------------------------------------------------------------
+
+    @staticmethod
+    def _embed(text: str) -> Optional[List[float]]:
+        """Lazy-import get_embedding from aura.memory.embedding."""
+        try:
+            from aura.memory.embedding import get_embedding
+            return get_embedding(text, timeout=5.0)
+        except Exception as e:
+            logger.debug("[SemanticIndex] embedding failed: %s", e)
+            return None
+
+    @staticmethod
+    def _pack_embedding(vec: List[float]) -> bytes:
+        return struct.pack(f"{len(vec)}f", *vec)
+
+    @staticmethod
+    def _unpack_embedding(blob: bytes) -> List[float]:
+        n = len(blob) // 4
+        return list(struct.unpack(f"{n}f", blob))
+
+    @staticmethod
+    def _chunk_id(file_path: str, content: str) -> str:
+        h = hashlib.sha256(f"{file_path}|{content[:2000]}".encode()).hexdigest()[:24]
+        return h
+
+    @staticmethod
+    def _cosine_sim(a: List[float], b: List[float]) -> float:
+        dot = sum(x * y for x, y in zip(a, b))
+        na = sqrt(sum(x * x for x in a))
+        nb = sqrt(sum(x * x for x in b))
+        if na == 0 or nb == 0:
+            return 0.0
+        return dot / (na * nb)
+
+    # -- Regex fallback chunker --------------------------------------------
+
+    @staticmethod
+    def _regex_chunk(content: str, file_path: str) -> List[dict]:
+        """Extract functions/classes via regex when tree-sitter is unavailable."""
+        chunks: List[dict] = []
+        ext = Path(file_path).suffix.lower()
+        lines = content.split("\n")
+
+        patterns: List[Tuple[str, str]] = []
+        if ext in (".py", ".pyi", ".pyw"):
+            patterns = [
+                (r"^\s*(async\s+)?def\s+(\w+)\s*\(", "function"),
+                (r"^\s*class\s+(\w+)[\s(:]", "class"),
+            ]
+        elif ext in (".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"):
+            patterns = [
+                (r"^\s*(export\s+)?(default\s+)?(async\s+)?function\s+(\w+)", "function"),
+                (r"^\s*(export\s+)?(default\s+)?class\s+(\w+)", "class"),
+                (r"^\s*(export\s+)?(const|let|var)\s+(\w+)\s*=\s*(async\s+)?\(", "function"),
+            ]
+        elif ext == ".rs":
+            patterns = [
+                (r"^\s*(pub\s+)?(async\s+)?fn\s+(\w+)", "function"),
+                (r"^\s*(pub\s+)?struct\s+(\w+)", "struct"),
+                (r"^\s*(pub\s+)?enum\s+(\w+)", "enum"),
+                (r"^\s*(pub\s+)?trait\s+(\w+)", "trait"),
+            ]
+        elif ext == ".go":
+            patterns = [
+                (r"^\s*func\s+(\([^)]*\)\s+)?(\w+)\s*\(", "function"),
+                (r"^\s*type\s+(\w+)\s+struct\b", "struct"),
+                (r"^\s*type\s+(\w+)\s+interface\b", "interface"),
+            ]
+
+        if not patterns:
+            # Fallback: split into ~40-line windows for unknown languages
+            window = 40
+            for start in range(0, len(lines), window):
+                end = min(start + window, len(lines))
+                chunk_text = "\n".join(lines[start:end])
+                if chunk_text.strip():
+                    chunks.append({
+                        "name": f"block_{start + 1}",
+                        "kind": "block",
+                        "line_start": start + 1,
+                        "line_end": end,
+                        "content": chunk_text[:800],
+                    })
+            return chunks
+
+        compiled = [(re.compile(p), kind) for p, kind in patterns]
+        # Find all definition start lines
+        defs: List[Tuple[int, str, str]] = []  # (line_idx, name, kind)
+        for i, line in enumerate(lines):
+            for regex, kind in compiled:
+                m = regex.search(line)
+                if m:
+                    # Pick the last capturing group as the name
+                    name = [g for g in m.groups() if g and g.strip()]
+                    name = name[-1].strip() if name else f"anon_{i + 1}"
+                    defs.append((i, name, kind))
+                    break
+
+        if not defs:
+            # No definitions found — single chunk for the whole file
+            chunks.append({
+                "name": Path(file_path).stem,
+                "kind": "module",
+                "line_start": 1,
+                "line_end": len(lines),
+                "content": content[:800],
+            })
+            return chunks
+
+        for idx, (start_line, name, kind) in enumerate(defs):
+            # End = next def start or EOF
+            end_line = defs[idx + 1][0] if idx + 1 < len(defs) else len(lines)
+            chunk_text = "\n".join(lines[start_line:end_line])
+            chunks.append({
+                "name": name,
+                "kind": kind,
+                "line_start": start_line + 1,
+                "line_end": end_line,
+                "content": chunk_text[:800],
+            })
+
+        return chunks
+
+    # -- Build / Update -----------------------------------------------------
+
+    def build_or_update(self, root: str) -> dict:
+        """Walk files, chunk, embed, and store. Incremental by mtime.
+
+        Returns stats dict with counts of added/skipped/removed chunks.
+        """
+        conn = self._get_conn()
+        root_path = Path(root).resolve()
+        if not root_path.exists():
+            return {"error": f"Path not found: {root}"}
+
+        # Attempt tree-sitter chunker import
+        _ts_chunk = None
+        try:
+            from aura.tools.codebase_index import _chunk_treesitter
+            _ts_chunk = _chunk_treesitter
+        except Exception:
+            pass
+
+        # Get current file mtimes from DB
+        db_files: Dict[str, float] = {}
+        for row in conn.execute("SELECT path, mtime FROM files"):
+            db_files[row[0]] = row[1]
+
+        # Walk source files
+        disk_files = _walk_files(root_path)
+        disk_paths: set = set()
+
+        added = 0
+        skipped = 0
+        chunk_cap = 1000
+
+        for fpath in disk_files:
+            if added >= chunk_cap:
+                break
+
+            rel = str(fpath.relative_to(root_path))
+            disk_paths.add(rel)
+
+            try:
+                mtime = fpath.stat().st_mtime
+            except OSError:
+                continue
+
+            # Skip if unchanged
+            if rel in db_files and abs(db_files[rel] - mtime) < 0.01:
+                skipped += 1
+                continue
+
+            # Read file
+            try:
+                content = fpath.read_text(encoding="utf-8", errors="ignore")
+            except (OSError, PermissionError):
+                continue
+
+            # Chunk the file
+            chunks = None
+            if _ts_chunk:
+                try:
+                    chunks = _ts_chunk(content, rel)
+                except Exception:
+                    pass
+
+            if not chunks:
+                chunks = self._regex_chunk(content, rel)
+
+            if not chunks:
+                continue
+
+            # Delete old chunks for this file
+            conn.execute("DELETE FROM chunks WHERE file_path = ?", (rel,))
+
+            for chunk in chunks:
+                if added >= chunk_cap:
+                    break
+
+                cid = self._chunk_id(rel, chunk["content"])
+                emb = self._embed(chunk["content"][:600])
+                if emb is None:
+                    continue
+
+                conn.execute(
+                    "INSERT OR REPLACE INTO chunks(id, file_path, name, kind, "
+                    "line_start, line_end, content, embedding, mtime) "
+                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        cid,
+                        rel,
+                        chunk.get("name", ""),
+                        chunk.get("kind", ""),
+                        chunk.get("line_start", 0),
+                        chunk.get("line_end", 0),
+                        chunk["content"][:800],
+                        self._pack_embedding(emb),
+                        mtime,
+                    ),
+                )
+                added += 1
+
+            # Update files table
+            conn.execute(
+                "INSERT OR REPLACE INTO files(path, mtime, indexed_at) VALUES(?, ?, ?)",
+                (rel, mtime, time.strftime("%Y-%m-%dT%H:%M:%S")),
+            )
+
+        # Remove chunks for deleted files
+        removed = 0
+        for db_path in list(db_files.keys()):
+            if db_path not in disk_paths:
+                conn.execute("DELETE FROM chunks WHERE file_path = ?", (db_path,))
+                conn.execute("DELETE FROM files WHERE path = ?", (db_path,))
+                removed += 1
+
+        conn.commit()
+        return {"added": added, "skipped": skipped, "removed": removed}
+
+    # -- Search -------------------------------------------------------------
+
+    def search(self, query: str, root: str, k: int = 10) -> List[dict]:
+        """Embed query, compare against stored chunks, return top-k."""
+        conn = self._get_conn()
+        root_path = Path(root).resolve()
+
+        query_emb = self._embed(query)
+        if query_emb is None:
+            return []
+
+        # Load chunks under root, score them, chunked loading via fetchmany
+        scored: List[Tuple[float, dict]] = []
+
+        # Filter to files that are under root (by prefix on file_path)
+        # Since file_path is relative to root at build time, we load all.
+        cursor = conn.execute(
+            "SELECT file_path, name, kind, line_start, line_end, content, embedding "
+            "FROM chunks"
+        )
+
+        while True:
+            rows = cursor.fetchmany(200)
+            if not rows:
+                break
+            for row in rows:
+                file_path, name, kind, line_start, line_end, content, emb_blob = row
+                if emb_blob is None:
+                    continue
+                chunk_emb = self._unpack_embedding(emb_blob)
+                score = self._cosine_sim(query_emb, chunk_emb)
+                scored.append((score, {
+                    "file": file_path,
+                    "name": name,
+                    "kind": kind,
+                    "line_start": line_start,
+                    "line_end": line_end,
+                    "content_preview": content[:200],
+                    "score": round(score, 4),
+                }))
+
+        # Sort descending by score
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [item for _, item in scored[:k]]
+
+
 class CodeSearchTool:
-    """Fast code search: grep (content), glob (files), and definition finder.
+    """Fast code search: grep (content), glob (files), definition finder, and semantic search.
 
     The most important tool for any coding agent. Replaces the need to
     read entire files when you just need to find specific code.
     """
 
     name = "code_search"
-    description = "Search code: grep for content patterns, glob for file patterns, find definitions"
+    description = "Search code: grep for content patterns, glob for file patterns, find definitions, semantic search"
 
     # Cache ripgrep availability (None = not checked yet)
     _rg_path: Optional[str] = None
     _rg_checked: bool = False
+
+    def __init__(self):
+        self._semantic_index: Optional[_SemanticIndex] = None
 
     @classmethod
     def _rg_available(cls) -> Optional[str]:
@@ -962,6 +1306,42 @@ class CodeSearchTool:
             logger.error(f"[CodeSearch] detect_project_type error: {e}")
             return {"success": False, "error": str(e)}
 
+    def semantic_search(self, query: str, path: str = ".", k: int = 10) -> dict:
+        """Search code by meaning using embeddings.
+
+        Args:
+            query: Natural language description of what you're looking for
+            path: Directory to search in
+            k: Number of top results to return
+
+        Returns:
+            {success, query, results, count, note}
+        """
+        try:
+            if self._semantic_index is None:
+                self._semantic_index = _SemanticIndex()
+
+            abs_path = str(Path(path).resolve())
+
+            # Build/update index if stale
+            build_stats = self._semantic_index.build_or_update(abs_path)
+            if "error" in build_stats:
+                return {"success": False, "error": build_stats["error"]}
+
+            results = self._semantic_index.search(query, abs_path, k)
+
+            return {
+                "success": True,
+                "query": query,
+                "results": results,
+                "count": len(results),
+                "index_stats": build_stats,
+                "note": "Semantic search (by meaning)",
+            }
+        except Exception as e:
+            logger.error("[CodeSearch] semantic_search error: %s", e)
+            return {"success": False, "error": str(e)}
+
     def execute(self, action: str, **kwargs) -> dict:
         """Execute a code search action by name."""
         action_lower = action.lower().strip()
@@ -1003,6 +1383,19 @@ class CodeSearchTool:
         elif "detect" in action_lower or "project type" in action_lower:
             return self.detect_project_type(
                 path=kwargs.get("path", "."),
+            )
+        elif "semantic" in action_lower or "meaning" in action_lower:
+            # Extract query: strip the keyword prefix
+            query = action
+            for prefix in ("semantic ", "meaning "):
+                if action_lower.startswith(prefix):
+                    query = action[len(prefix):]
+                    break
+            query = kwargs.get("query", query)
+            return self.semantic_search(
+                query=query,
+                path=kwargs.get("path", "."),
+                k=kwargs.get("k", 10),
             )
         else:
             # Default: treat as grep pattern

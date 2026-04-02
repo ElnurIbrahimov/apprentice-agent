@@ -719,6 +719,317 @@ class GitTool:
 
         return response
 
+    def smart_commit(self, repo_path: str = ".", paths: list = None) -> dict:
+        """Generate an AI-powered commit message from staged/unstaged changes.
+
+        Stages files if paths provided, analyzes the diff, and uses an LLM
+        to suggest a conventional commit message. Does NOT actually commit.
+
+        Args:
+            repo_path: Path to the git repository
+            paths: Optional list of file paths to stage before analyzing
+
+        Returns:
+            dict with suggested_message, files_changed, diff_preview
+        """
+        # Stage specific paths if provided
+        if paths:
+            add_result = self._run_git(["add"] + paths, repo_path)
+            if not add_result.get("success"):
+                return add_result
+
+        # Get staged diff
+        diff_result = self._run_git(["diff", "--cached"], repo_path)
+        diff_text = diff_result.get("output", "") if diff_result.get("success") else ""
+
+        # Get file list for staged changes
+        stat_result = self._run_git(["diff", "--cached", "--stat"], repo_path)
+        file_list = stat_result.get("output", "") if stat_result.get("success") else ""
+
+        # Fall back to unstaged if nothing is staged
+        if not diff_text.strip():
+            diff_result = self._run_git(["diff"], repo_path)
+            diff_text = diff_result.get("output", "") if diff_result.get("success") else ""
+            stat_result = self._run_git(["diff", "--stat"], repo_path)
+            file_list = stat_result.get("output", "") if stat_result.get("success") else ""
+
+        if not diff_text.strip():
+            return {
+                "success": False,
+                "error": "No staged or unstaged changes found"
+            }
+
+        # Parse file names from stat output
+        files_changed = []
+        for line in file_list.strip().split("\n"):
+            if "|" in line:
+                fname = line.split("|")[0].strip()
+                if fname:
+                    files_changed.append(fname)
+
+        # Truncate diff for the LLM prompt
+        diff_preview = diff_text[:4000]
+        if len(diff_text) > 4000:
+            diff_preview += "\n... (truncated)"
+
+        # Try LLM-powered message generation
+        try:
+            import ollama
+            from aura.config import Config
+
+            prompt = (
+                "Write a conventional commit message for these changes.\n"
+                "Format: type(scope): subject\n\nbody\n\n"
+                "Types: feat, fix, refactor, chore, docs, style, test, perf, ci, build\n"
+                "Keep subject under 72 chars. Body should be 1-2 sentences max.\n\n"
+                f"Files changed:\n{file_list}\n\n"
+                f"Diff:\n{diff_preview}\n\n"
+                "Reply with ONLY the commit message, nothing else."
+            )
+
+            response = ollama.chat(
+                model=Config.get_model("fast"),
+                messages=[{"role": "user", "content": prompt}]
+            )
+            suggested = response["message"]["content"].strip()
+
+            return {
+                "success": True,
+                "suggested_message": suggested,
+                "files_changed": files_changed,
+                "diff_preview": diff_preview
+            }
+
+        except ImportError:
+            # Fallback: auto-generate from file list
+            if files_changed:
+                file_summary = ", ".join(files_changed[:5])
+                if len(files_changed) > 5:
+                    file_summary += f" (+{len(files_changed) - 5} more)"
+                suggested = f"chore: update {file_summary}"
+            else:
+                suggested = "chore: update files"
+
+            return {
+                "success": True,
+                "suggested_message": suggested,
+                "files_changed": files_changed,
+                "diff_preview": diff_preview,
+                "warning": "ollama not available, used fallback message generation"
+            }
+        except Exception as e:
+            # Fallback on any LLM error
+            if files_changed:
+                file_summary = ", ".join(files_changed[:5])
+                if len(files_changed) > 5:
+                    file_summary += f" (+{len(files_changed) - 5} more)"
+                suggested = f"chore: update {file_summary}"
+            else:
+                suggested = "chore: update files"
+
+            return {
+                "success": True,
+                "suggested_message": suggested,
+                "files_changed": files_changed,
+                "diff_preview": diff_preview,
+                "warning": f"LLM generation failed ({str(e)}), used fallback"
+            }
+
+    def diff_summary(self, repo_path: str = ".") -> dict:
+        """Get a plain-English summary of current changes using an LLM.
+
+        Args:
+            repo_path: Path to the git repository
+
+        Returns:
+            dict with summary and files_changed
+        """
+        diff_result = self.diff(repo_path)
+        if not diff_result.get("success"):
+            return diff_result
+        if not diff_result.get("has_changes"):
+            return {
+                "success": True,
+                "summary": "No changes detected.",
+                "files_changed": []
+            }
+
+        # Get stat for file list
+        stat_result = self._run_git(["diff", "--stat"], repo_path)
+        stat_output = stat_result.get("output", "") if stat_result.get("success") else ""
+        files_changed = []
+        for line in stat_output.strip().split("\n"):
+            if "|" in line:
+                fname = line.split("|")[0].strip()
+                if fname:
+                    files_changed.append(fname)
+
+        # Get raw diff text for the LLM
+        raw_diff = self._run_git(["diff", "--no-color"], repo_path)
+        diff_text = raw_diff.get("output", "") if raw_diff.get("success") else ""
+        diff_text = diff_text[:4000]
+
+        try:
+            import ollama
+            from aura.config import Config
+
+            prompt = (
+                "Summarize these code changes in 2-3 plain English sentences. "
+                "Be specific about what was changed and why it likely matters.\n\n"
+                f"{diff_text}"
+            )
+
+            response = ollama.chat(
+                model=Config.get_model("fast"),
+                messages=[{"role": "user", "content": prompt}]
+            )
+            summary = response["message"]["content"].strip()
+
+            return {
+                "success": True,
+                "summary": summary,
+                "files_changed": files_changed
+            }
+
+        except ImportError:
+            return {
+                "success": True,
+                "summary": stat_output or "Changes detected (install ollama for AI summary).",
+                "files_changed": files_changed,
+                "warning": "ollama not available, returning stat output as fallback"
+            }
+        except Exception as e:
+            return {
+                "success": True,
+                "summary": stat_output or "Changes detected.",
+                "files_changed": files_changed,
+                "warning": f"LLM summary failed ({str(e)}), returning stat output"
+            }
+
+    def blame(self, file: str, line: int = None, repo_path: str = ".") -> dict:
+        """Show git blame information for a file.
+
+        Args:
+            file: Path to the file (relative to repo root)
+            line: Optional specific line number to blame
+            repo_path: Path to the git repository
+
+        Returns:
+            dict with structured blame entries
+        """
+        if not file:
+            return {"success": False, "error": "File path is required"}
+
+        args = ["blame", "--porcelain"]
+        if line is not None:
+            args.extend(["-L", f"{line},{line}"])
+        args.append(file)
+
+        result = self._run_git(args, repo_path)
+        if not result.get("success"):
+            return result
+
+        # Parse porcelain output into structured entries
+        entries = []
+        output = result.get("output", "")
+        lines = output.split("\n")
+
+        current_entry = {}
+        i = 0
+        while i < len(lines):
+            line_text = lines[i]
+
+            # Header line: <hash> <orig_line> <final_line> [<num_lines>]
+            import re
+            header_match = re.match(r'^([0-9a-f]{40})\s+(\d+)\s+(\d+)', line_text)
+            if header_match:
+                if current_entry.get("commit"):
+                    entries.append(current_entry)
+                current_entry = {
+                    "commit": header_match.group(1)[:7],
+                    "commit_full": header_match.group(1),
+                    "line_num": int(header_match.group(3)),
+                    "author": "",
+                    "date": "",
+                    "content": ""
+                }
+            elif line_text.startswith("author "):
+                current_entry["author"] = line_text[7:]
+            elif line_text.startswith("author-time "):
+                # Convert unix timestamp to readable date
+                try:
+                    import datetime
+                    ts = int(line_text.split(" ", 1)[1])
+                    current_entry["date"] = datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+                except (ValueError, IndexError):
+                    current_entry["date"] = line_text[12:]
+            elif line_text.startswith("\t"):
+                # Content line (starts with tab)
+                current_entry["content"] = line_text[1:]
+
+            i += 1
+
+        # Don't forget the last entry
+        if current_entry.get("commit"):
+            entries.append(current_entry)
+
+        return {
+            "success": True,
+            "file": file,
+            "entries": entries,
+            "count": len(entries)
+        }
+
+    def cherry_pick(self, commit_hash: str, repo_path: str = ".") -> dict:
+        """Cherry-pick a specific commit into the current branch.
+
+        Args:
+            commit_hash: The commit hash to cherry-pick (4-40 hex chars)
+            repo_path: Path to the git repository
+
+        Returns:
+            dict with success/error and conflict info if applicable
+        """
+        import re
+        if not commit_hash or not re.match(r'^[0-9a-f]{4,40}$', commit_hash):
+            return {
+                "success": False,
+                "error": f"Invalid commit hash: {commit_hash!r}. Must be 4-40 hex characters."
+            }
+
+        result = self._run_git(["cherry-pick", commit_hash], repo_path)
+
+        if result.get("success"):
+            # Get the new HEAD hash
+            head_result = self._run_git(["rev-parse", "HEAD"], repo_path)
+            new_hash = head_result.get("output", "")[:7] if head_result.get("success") else "unknown"
+
+            return {
+                "success": True,
+                "message": f"Cherry-picked {commit_hash[:7]} successfully",
+                "new_head": new_hash,
+                "output": result.get("output", "")
+            }
+
+        # Check for conflicts
+        error_msg = result.get("error", "")
+        if result.get("error_type") == "merge_conflict" or "conflict" in error_msg.lower():
+            # Get list of conflicted files
+            conflict_result = self._run_git(["diff", "--name-only", "--diff-filter=U"], repo_path)
+            conflicted_files = []
+            if conflict_result.get("success") and conflict_result.get("output"):
+                conflicted_files = [f.strip() for f in conflict_result["output"].split("\n") if f.strip()]
+
+            return {
+                "success": False,
+                "error": f"Cherry-pick of {commit_hash[:7]} resulted in conflicts",
+                "error_type": "merge_conflict",
+                "conflicted_files": conflicted_files,
+                "hint": "Resolve conflicts then run 'git cherry-pick --continue', or 'git cherry-pick --abort' to cancel"
+            }
+
+        return result
+
     def auto_commit(self, message: str, paths: list = None, repo_path: str = ".") -> dict:
         """Stage specified paths (or all) and commit. Returns commit hash."""
         if paths:
@@ -761,6 +1072,38 @@ class GitTool:
             potential_path = path_match.group(1).strip()
             if os.path.isdir(potential_path):
                 repo_path = potential_path
+
+        # Smart commit (must be checked before generic "commit")
+        if any(x in action_lower for x in ["smart_commit", "smart commit"]):
+            paths = kwargs.get("paths")
+            return self.smart_commit(repo_path, paths)
+
+        # Diff summary / summarize (must be checked before generic "diff")
+        if any(x in action_lower for x in ["diff_summary", "summarize"]):
+            return self.diff_summary(repo_path)
+
+        # Blame
+        if "blame" in action_lower:
+            file = kwargs.get("file", "")
+            if not file:
+                file_match = re.search(r'blame\s+["\']?([^\s"\']+)["\']?', action)
+                if file_match:
+                    file = file_match.group(1)
+            line = kwargs.get("line")
+            if line is None:
+                line_match = re.search(r'line\s+(\d+)', action_lower)
+                if line_match:
+                    line = int(line_match.group(1))
+            return self.blame(file, line, repo_path)
+
+        # Cherry-pick (must be checked before generic "commit")
+        if any(x in action_lower for x in ["cherry_pick", "cherry-pick", "cherry pick"]):
+            commit_hash = kwargs.get("commit_hash", "")
+            if not commit_hash:
+                hash_match = re.search(r'(?:cherry[_\-\s]?pick)\s+([0-9a-f]{4,40})', action_lower)
+                if hash_match:
+                    commit_hash = hash_match.group(1)
+            return self.cherry_pick(commit_hash, repo_path)
 
         # Status
         if any(x in action_lower for x in ["status", "what changed", "current state"]):
@@ -849,7 +1192,7 @@ class GitTool:
         return {
             "success": False,
             "error": f"Unknown git action: {action}",
-            "hint": "Try: status, log, diff, branch, add, commit, push, pull, clone, stash"
+            "hint": "Try: status, log, diff, diff_summary, branch, add, commit, smart_commit, push, pull, clone, stash, blame, cherry_pick"
         }
 
 
