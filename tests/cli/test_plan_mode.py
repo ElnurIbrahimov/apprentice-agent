@@ -202,6 +202,7 @@ def test_plan_first_returns_plan_dict(mock_getmtime, mock_recall):
     loop.memory = None
     loop.project_root = "."
     loop._current_action_mode = None
+    loop._hot_files = {}
 
     result = loop.plan_first("fix the login bug")
     assert "plan_text" in result
@@ -230,6 +231,7 @@ def test_plan_first_empty_llm_response(mock_getmtime, mock_recall):
     loop.memory = None
     loop.project_root = "."
     loop._current_action_mode = None
+    loop._hot_files = {}
 
     result = loop.plan_first("do something")
     assert "plan" in result
@@ -253,6 +255,7 @@ def test_plan_first_llm_error():
     loop.memory = None
     loop.project_root = "."
     loop._current_action_mode = None
+    loop._hot_files = {}
 
     result = loop.plan_first("test")
     assert "error" in result
