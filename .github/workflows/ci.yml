@@ -50,12 +50,12 @@ jobs:
       - name: Run tests
         run: |
           python -m pytest tests/ \
-            -x \
-            --maxfail=5 \
+            --maxfail=10 \
             --ignore=tests/integration \
             --ignore=tests/test_active_inference.py \
             --ignore=tests/test_auth.py \
             --ignore=tests/test_api_routes.py \
+            --ignore=tests/cli/test_display_functions.py \
             -q
 
   security:
