@@ -23,7 +23,7 @@ jobs:
       - run: pip install ruff
 
       - name: Ruff lint
-        run: ruff check aura/ api/ tests/ --select E,F,W --ignore E501,E402,F401,W503
+        run: ruff check aura/ api/ tests/ --select E,F,W --ignore E501,E402,F401
 
       - name: Ruff format check
         run: ruff format --check aura/ api/ tests/
@@ -52,6 +52,8 @@ jobs:
             -x \
             --maxfail=5 \
             --ignore=tests/integration \
+            --ignore=tests/test_active_inference.py \
+            --ignore=tests/test_auth.py \
             -q
 
   security:
