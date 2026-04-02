@@ -52,18 +52,6 @@ jobs:
           python -m pytest tests/ \
             --maxfail=10 \
             --ignore=tests/integration \
-            --ignore=tests/test_active_inference.py \
-            --ignore=tests/test_auth.py \
-            --ignore=tests/test_api_routes.py \
-            --ignore=tests/test_engineering_fixes.py \
-            --ignore=tests/test_integration_pipeline.py \
-            --ignore=tests/test_memory_persistence.py \
-            --ignore=tests/test_mixins.py \
-            --ignore=tests/test_proactive_awareness.py \
-            --ignore=tests/test_reliability_upgrade.py \
-            --ignore=tests/test_security.py \
-            --ignore=tests/test_security_hardening.py \
-            --ignore=tests/cli/test_display_functions.py \
             -q
 
   security:

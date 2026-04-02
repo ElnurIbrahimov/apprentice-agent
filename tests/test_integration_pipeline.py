@@ -451,6 +451,7 @@ class TestWebSocketProtocol:
 
         Mocks agent_service to avoid real agent initialization.
         """
+        pytest.importorskip("fastapi")
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
 

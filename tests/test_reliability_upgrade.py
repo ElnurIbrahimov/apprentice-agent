@@ -12,6 +12,8 @@ import time
 import unittest
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 
 # ============================================================================
 # PHASE 1 — Memory Write Gate
@@ -392,6 +394,7 @@ class _FakeKG:
 class TestKGContradiction(unittest.TestCase):
 
     def setUp(self):
+        pytest.importorskip("networkx")
         self.kg = _FakeKG()
         from aura.memory.kg_contradiction import KGContradictionDetector
         self.detector = KGContradictionDetector(self.kg)

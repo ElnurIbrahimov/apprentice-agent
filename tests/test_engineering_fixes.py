@@ -138,6 +138,7 @@ class TestConfigThresholds:
 
 class TestRequestIDMiddleware:
     def test_response_has_valid_uuid(self):
+        fastapi = pytest.importorskip("fastapi")
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
         from api.middleware import RequestIDMiddleware
@@ -160,6 +161,7 @@ class TestRequestIDMiddleware:
         assert str(parsed) == rid
 
     def test_client_provided_id_is_reused(self):
+        fastapi = pytest.importorskip("fastapi")
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
         from api.middleware import RequestIDMiddleware

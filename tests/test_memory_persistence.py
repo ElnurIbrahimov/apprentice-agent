@@ -30,6 +30,7 @@ def test_store_fact_dedup():
 
 def test_knowledge_graph_edge_weight_persists(tmp_path):
     """strengthen_edge() should persist to disk."""
+    pytest.importorskip("networkx")
     from aura.tools.knowledge_graph import KnowledgeGraphTool
     kg = KnowledgeGraphTool(db_path=str(tmp_path))
     n1 = kg.add_node("concept", "NodeA")

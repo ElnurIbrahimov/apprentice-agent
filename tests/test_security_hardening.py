@@ -12,6 +12,10 @@ import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+pytest.importorskip("fastapi")
+
 
 # ============================================================================
 # Path traversal in conversation management
