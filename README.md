@@ -6,17 +6,27 @@ Not a chatbot. A being with presence that remembers you, has moods, dreams, and 
 
 ### What's New (v4.7.0)
 
-**World-class tool upgrades** — 5 core tools rebuilt to compete with Perplexity, o1, VOYAGER, and Browser Use:
+**Deep wiring pass** — systems that were built but disconnected are now fully connected:
 
-- **Deep Research** — now integrates with Knowledge Graph (queries priors before research, saves findings after). Source verification tracks claims as verified/single-source/unverified. Adaptive depth auto-adjusts research phases based on topic complexity. Cross-session memory caches research for 30 days.
-- **MCTS Reasoning** — Monte Carlo rollouts (fast LLM prior before full evaluation), warm-starting from cached similar problems, adaptive branching (fewer branches on confident nodes), parallel node evaluation via thread pool.
-- **Knowledge Graph** — embedding-powered hybrid search (50% keyword + 50% cosine similarity), LLM-to-structured-query translation for natural language questions, semantic entity linking via embedding similarity in consolidation.
-- **Tool Builder** — tool versioning (keeps last 3 versions with rollback), usage-driven evolution (auto-flags underperforming tools for GEPA), dependency tracking (re-tests dependents when a tool changes).
-- **Browser** — vision integration (screenshot + VisionTool analysis), visual element clicking, LLM-powered action planning (plan_and_execute), file download handling, tab session persistence.
+- **Emotion → Memory pipeline** — ALMA PAD values now auto-tag every stored memory. Retrieval biases 15% toward mood-congruent memories. Write gate scores emotional salience from real arousal/pleasure (was keyword matching).
+- **Strategy bandit learns from quality** — now receives coherence + judge heuristics (70% signal coverage). Was learning from latency only.
+- **Metacognition gets real signals** — reflexion signals wired to reasoning templates DB, guardian signals wired to strategy bandit stats. Were empty dicts.
+- **NeuroDream uses live memory** — light sleep phase now queries UnifiedMemory (was pointing at removed ChromaDB/hybrid_memory backends).
+- **pymdp Active Inference fixed** — module-level global assignment bug meant pymdp never loaded even when installed. Fixed.
+- **MCTS thread-safe** — added per-node locks on backpropagation to prevent race conditions during parallel evaluation.
+- **Embedding quality 8x** — nomic-embed-text truncation raised from 1000→8000 chars, using full model capacity.
+- **JSON parsing consolidated** — 5 duplicate implementations replaced with shared `aura/core/json_utils.py`.
+- **API utilities centralized** — shared `get_agent()`, `call_tool()`, `get_amem()`, `run_sync()` in `api/utils.py`. Eliminated 35+ duplicate accessor functions across route files.
+- **6,140 lines removed** — dead code (code_intelligence.py, stale docs, build artifacts), old engineering reviews archived.
+- **Version synced to 4.7.0** across pyproject.toml, \_\_init\_\_.py, and all docs.
 
-**Telegram** — SQLite persistence replacing in-memory state. Conversations, settings, document context, group messages, and premium status all survive restarts. Added DOCX/XLSX/CSV document processing. Smart progress indicators.
+**Previous v4.7.0 highlights:**
 
-**Extension** — on-device AI via Transformers.js Web Worker. Local embeddings (all-MiniLM-L6-v2), zero-shot classification, summarization, language detection, and semantic search — all running in-browser with zero server calls.
+- **Deep Research** — STORM pipeline with KG integration, source verification, adaptive depth, cross-session cache.
+- **MCTS Reasoning** — Monte Carlo rollouts, warm-start cache, adaptive branching, parallel evaluation.
+- **Tool Builder** — versioning, usage-driven GEPA evolution, dependency tracking.
+- **Telegram** — SQLite persistence, DOCX/XLSX/CSV processing, smart progress indicators.
+- **Extension** — on-device AI via Transformers.js (embeddings, classification, summarization in-browser).
 
 ---
 
@@ -24,11 +34,11 @@ Not a chatbot. A being with presence that remembers you, has moods, dreams, and 
 
 | | |
 |---|---|
-| **Persistent memory** | SQLite + Kuzu KG with BM25 + semantic retrieval, FadeMem decay, cross-encoder reranking |
+| **Persistent memory** | SQLite + Kuzu KG with BM25 + semantic retrieval, FadeMem decay, cross-encoder reranking, mood-congruent retrieval bias |
 | **Knowledge Graph** | Embedding-powered hybrid search, LLM-to-graph query translation, semantic entity linking, bi-temporal edges |
 | **Deep Research** | 4-phase STORM pipeline with KG integration, source verification, adaptive depth, cross-session memory |
 | **MCTS Reasoning** | Monte Carlo rollouts, adaptive branching, warm-start cache, parallel evaluation — LATS-style tool grounding |
-| **Emotions** | ALMA neuromodulator engine (PAD space) — mood shapes every response |
+| **Emotions** | ALMA neuromodulator engine (PAD space) — mood shapes responses, tags memories, biases retrieval, modulates LLM temperature |
 | **Dreams** | NeuroDream: light sleep re-scores memories, deep sleep extracts patterns, REM generates novel connections |
 | **Proactive awareness** | Active inference daemon, screen/calendar/workflow monitors, theory-of-mind gating |
 | **Identity** | OCEAN personality traits, narrative self-model, skill evolution (GEPA) |
@@ -99,7 +109,7 @@ A Rich-powered terminal interface with 55 slash commands, 6 modes, and full tool
 | **Reasoning** | mcts_reasoning (Monte Carlo rollouts + warm-start + adaptive branching + parallel eval), reasoning_tree_tool |
 | **Knowledge** | knowledge_graph (embedding search + LLM queries + semantic entity linking), kg_extractor |
 | **Memory** | memory_save, memory_recall, kg_query, user_profile |
-| **Code** | code_intelligence, codebase_index (hybrid BM25 + embedding search), git operations, project context |
+| **Code** | codebase_index (hybrid BM25 + embedding search), git operations, project context |
 | **Browser** | browser (vision integration + visual click + action planning + downloads + session persistence) |
 | **Tool Building** | tool_builder (versioning + usage-driven evolution + dependency tracking), tool_rag, marketplace |
 | **Communication** | email, notifications, clipboard |
@@ -324,13 +334,14 @@ USER INPUT (CLI / Web UI / Extension / Telegram / WhatsApp)
     '-- Loop guards (dedup, failure count, iteration cap)
     |
 [Memory]
-    |-- UnifiedMemory: SQLite + FTS5 + vector embeddings (nomic-embed-text)
+    |-- UnifiedMemory: SQLite + FTS5 + vector embeddings (nomic-embed-text, 8K chars)
     |-- Kuzu temporal KG (entities + relationships, bi-temporal edges)
     |-- KG Sync Bridge (NetworkX runtime <-> Kuzu persistent, bidirectional)
     |-- BM25 + semantic + graph retrieval -> RRF fusion
     |-- Cross-encoder reranking (ms-marco-MiniLM)
+    |-- Mood-congruent retrieval bias (15% weight from ALMA PAD)
     |-- FadeMem decay (2-week half-life, spaced repetition)
-    '-- Write gate: merge / supersede / insert decision
+    '-- Write gate: ALMA emotion scoring + merge / supersede / insert
     |
 [Skills]
     |-- Progressive loading (names in prompt, full content on-demand)
@@ -346,8 +357,8 @@ USER INPUT (CLI / Web UI / Extension / Telegram / WhatsApp)
     |
 [Consciousness]
     |-- World model (Endsley L1-L3 situation awareness)
-    |-- Metacognition (reasoning quality tracking)
-    |-- Strategy bandit (Thompson sampling for approach selection)
+    |-- Metacognition (wired to reasoning templates + strategy bandit stats)
+    |-- Strategy bandit (Thompson sampling, coherence + judge + latency signals)
     |-- Intrinsic motivation (curiosity-driven exploration)
     |-- Skill evolution (GEPA self-improvement)
     '-- Idle presence (8 behavior types, 4 intensities)
@@ -425,7 +436,7 @@ See [deploy/README.md](deploy/README.md) for full instructions, SSL setup, and t
 
 ```
 aura/                     # Core Python package
-  brain.py                # OllamaBrain — reasoning engine (~2900 lines)
+  brain.py                # OllamaBrain — reasoning engine (~3100 lines)
   agent.py                # ApprenticeAgent — orchestrator
   config.py               # Thread-safe configuration, model chains
   pools.py                # 3 shared thread pools (llm/bg/tool)

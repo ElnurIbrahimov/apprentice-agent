@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aura"
-version = "4.3.0"
+version = "4.7.0"
 description = "AURA - Autonomous Universal Reasoning Agent"
 requires-python = ">=3.12"
 dependencies = [

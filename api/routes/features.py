@@ -8,15 +8,9 @@ from fastapi import APIRouter, HTTPException, Response, Depends
 from pydantic import BaseModel
 
 from api.auth import require_api_key
-from api.utils import safe_error_detail
+from api.utils import safe_error_detail, get_agent_service as _get_agent_service, get_agent, get_amem, run_sync
 
 logger = logging.getLogger(__name__)
-
-# Lazy import to avoid blocking event loop at module load
-def _get_agent_service():
-    """Get agent_service with lazy loading."""
-    from api.services.agent_service import agent_service
-    return agent_service
 
 router = APIRouter(prefix="/api", tags=["features"], dependencies=[Depends(require_api_key)])
 
@@ -47,7 +41,7 @@ async def get_mood():
 
 
 def _get_mood_sync() -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "evoemo" in agent.tools:
         evoemo = agent.tools["evoemo"]
         state = evoemo.get_state() if hasattr(evoemo, 'get_state') else {}
@@ -75,7 +69,7 @@ async def get_mood_history():
 
 
 def _get_mood_history_sync() -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "evoemo" in agent.tools:
         evoemo = agent.tools["evoemo"]
         session = evoemo.get_session_summary() if hasattr(evoemo, 'get_session_summary') else {}
@@ -117,7 +111,7 @@ async def get_aura_status():
 
 
 def _get_aura_sync() -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if not getattr(agent, 'aura_enabled', False):
         return {"enabled": False}
     try:
@@ -167,7 +161,7 @@ async def aura_remember(request: RememberRequest):
 
 
 def _aura_remember_sync(fact: str) -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if hasattr(agent, 'aura') and agent.aura and fact.strip():
         success = agent.aura.remember(fact.strip(), importance=0.7)
         return {"success": success, "fact": fact[:50]}
@@ -205,7 +199,7 @@ async def get_thoughts():
 
 
 def _get_thoughts_sync() -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "inner_monologue" in agent.tools:
         monologue = agent.tools["inner_monologue"]
         thoughts = monologue.get_recent_thoughts(15) if hasattr(monologue, 'get_recent_thoughts') else []
@@ -240,7 +234,7 @@ async def get_reasoning_chain():
 
 
 def _get_reasoning_sync() -> str:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "inner_monologue" in agent.tools:
         return agent.tools["inner_monologue"].get_reasoning_chain()
     return "No reasoning chain available."
@@ -250,7 +244,7 @@ def _get_reasoning_sync() -> str:
 async def clear_thoughts():
     """Clear the thought stream."""
     try:
-        agent = _get_agent_service().agent
+        agent = get_agent()
         if "inner_monologue" in agent.tools:
             agent.tools["inner_monologue"].stream.clear()
         return {"success": True}
@@ -283,7 +277,7 @@ async def get_knowledge_graph(center: Optional[str] = None, depth: int = 2):
 
 
 def _get_kg_sync(center: Optional[str], depth: int) -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "knowledge_graph" not in agent.tools:
         return {"nodes": [], "edges": [], "stats": {}}
 
@@ -399,7 +393,7 @@ def _trigger_sleep_sync() -> dict:
     start = time.time()
     logger.info("[NeuroDream] Starting sleep trigger...")
 
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if not hasattr(agent, 'neurodream') or not agent.neurodream:
         return {"success": False, "error": "NeuroDream not available"}
 
@@ -435,7 +429,7 @@ async def trigger_sleep():
 
 def _trigger_wake_sync() -> dict:
     """Sync helper for wake trigger."""
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if hasattr(agent, 'neurodream') and agent.neurodream:
         result = agent.neurodream.wake_up(reason="user_request")
         return {"success": True, "result": result}
@@ -457,7 +451,7 @@ async def trigger_wake():
 async def get_learned_context():
     """Get the current Letta-style learned context (Phase 4D)."""
     try:
-        agent = _get_agent_service().agent
+        agent = get_agent()
         if hasattr(agent, 'neurodream') and agent.neurodream:
             nd = agent.neurodream
             ctx = nd.get_learned_context()
@@ -474,7 +468,7 @@ async def get_learned_context():
 
 def _generate_learned_context_sync() -> dict:
     """Sync helper for learned context generation."""
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if hasattr(agent, 'neurodream') and agent.neurodream:
         return agent.neurodream.generate_learned_context()
     return {"success": False, "error": "NeuroDream not available"}
@@ -587,7 +581,7 @@ _TOOL_CATEGORIES: dict = {
 async def get_available_tools():
     """Get list of available tools with categories for frontend filtering."""
     try:
-        agent = _get_agent_service().agent
+        agent = get_agent()
         tools = []
         for name, tool in agent.tools.items():
             tools.append({
@@ -630,7 +624,7 @@ async def submit_prediction_feedback(request: PredictionFeedbackRequest):
 
 
 def _prediction_feedback_sync(prediction_id: str, tool: str, action: str, accepted: bool) -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "predictive_tasks" not in agent.tools:
         return {"success": False, "error": "Predictive tasks not available"}
     pred_tool = agent.tools["predictive_tasks"]
@@ -664,7 +658,7 @@ async def get_costs_summary():
 async def reload_plugins():
     """Reload custom tools from registry without restarting AURA."""
     try:
-        agent = _get_agent_service().agent
+        agent = get_agent()
         before = len(agent.tools)
         agent._load_custom_tools()
         after = len(agent.tools)
@@ -736,7 +730,7 @@ class RAGStatsResponse(BaseModel):
 async def get_rag_stats():
     """Get RAG index statistics."""
     try:
-        agent = _get_agent_service().agent
+        agent = get_agent()
         if "local_rag" not in agent.tools:
             return RAGStatsResponse()
 
@@ -752,7 +746,7 @@ async def get_rag_stats():
 async def get_rag_files():
     """List indexed files."""
     try:
-        agent = _get_agent_service().agent
+        agent = get_agent()
         if "local_rag" not in agent.tools:
             return {"files": [], "error": "RAG not available"}
 
@@ -778,7 +772,7 @@ async def index_documents(request: RAGIndexRequest):
 
 def _index_documents_sync(path: str, recursive: bool) -> dict:
     from pathlib import Path
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "local_rag" not in agent.tools:
         return {"success": False, "error": "RAG not available"}
 
@@ -810,7 +804,7 @@ async def search_documents(request: RAGSearchRequest):
 
 
 def _search_documents_sync(query: str, top_k: int) -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "local_rag" not in agent.tools:
         return {"success": False, "error": "RAG not available"}
 
@@ -835,7 +829,7 @@ def _search_documents_sync(query: str, top_k: int) -> dict:
 async def clear_rag_index():
     """Clear the RAG index."""
     try:
-        agent = _get_agent_service().agent
+        agent = get_agent()
         if "local_rag" not in agent.tools:
             return {"success": False, "error": "RAG not available"}
 
@@ -897,16 +891,8 @@ async def get_amem_stats():
 
 
 def _get_amem_stats_sync() -> dict:
-    agent = _get_agent_service().agent
-    # Check tools dict for amem
-    amem_tool = agent.tools.get('amem')
-    if amem_tool and hasattr(amem_tool, 'amem'):
-        return amem_tool.amem.get_stats()
-    # Try to get from hybrid memory
-    hybrid_mem = agent.tools.get('hybrid_amem')
-    if hybrid_mem and hasattr(hybrid_mem, 'amem'):
-        return hybrid_mem.amem.get_stats()
-    return {}
+    amem = get_amem()
+    return amem.get_stats() if amem else {}
 
 
 @router.get("/amem/notes")
@@ -925,18 +911,7 @@ async def get_amem_notes(limit: int = 20, category: Optional[str] = None):
 
 
 def _get_amem_notes_sync(limit: int, category: Optional[str]) -> dict:
-    agent = _get_agent_service().agent
-
-    # Get A-MEM instance from tools dict
-    amem = None
-    amem_tool = agent.tools.get('amem')
-    if amem_tool and hasattr(amem_tool, 'amem'):
-        amem = amem_tool.amem
-    else:
-        hybrid_mem = agent.tools.get('hybrid_amem')
-        if hybrid_mem and hasattr(hybrid_mem, 'amem'):
-            amem = hybrid_mem.amem
-
+    amem = get_amem()
     if not amem:
         return {"notes": [], "count": 0}
 
@@ -986,18 +961,7 @@ async def get_amem_note(note_id: str):
 
 
 def _get_amem_note_sync(note_id: str) -> dict:
-    agent = _get_agent_service().agent
-
-    # Get A-MEM instance from tools dict
-    amem = None
-    amem_tool = agent.tools.get('amem')
-    if amem_tool and hasattr(amem_tool, 'amem'):
-        amem = amem_tool.amem
-    else:
-        hybrid_mem = agent.tools.get('hybrid_amem')
-        if hybrid_mem and hasattr(hybrid_mem, 'amem'):
-            amem = hybrid_mem.amem
-
+    amem = get_amem()
     if not amem:
         return {"error": "A-MEM not available"}
 
@@ -1047,18 +1011,7 @@ async def search_amem(request: AMEMSearchRequest):
 
 
 def _search_amem_sync(query: str, k: int, follow_links: bool) -> dict:
-    agent = _get_agent_service().agent
-
-    # Get A-MEM instance from tools dict
-    amem = None
-    amem_tool = agent.tools.get('amem')
-    if amem_tool and hasattr(amem_tool, 'amem'):
-        amem = amem_tool.amem
-    else:
-        hybrid_mem = agent.tools.get('hybrid_amem')
-        if hybrid_mem and hasattr(hybrid_mem, 'amem'):
-            amem = hybrid_mem.amem
-
+    amem = get_amem()
     if not amem:
         return {"results": [], "error": "A-MEM not available"}
 
@@ -1100,7 +1053,7 @@ async def amem_remember(request: AMEMRememberRequest):
 def _amem_remember_sync(
     content: str, tags: List[str], category: str, importance: float
 ) -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
 
     # Prefer hybrid memory for cross-system storage
     hybrid_mem = agent.tools.get('hybrid_amem')
@@ -1142,21 +1095,9 @@ def _amem_remember_sync(
 async def get_amem_boxes():
     """Get A-MEM boxes (soft clusters)."""
     try:
-        agent = _get_agent_service().agent
-
-        # Get A-MEM instance from tools dict
-        amem = None
-        amem_tool = agent.tools.get('amem')
-        if amem_tool and hasattr(amem_tool, 'amem'):
-            amem = amem_tool.amem
-        else:
-            hybrid_mem = agent.tools.get('hybrid_amem')
-            if hybrid_mem and hasattr(hybrid_mem, 'amem'):
-                amem = hybrid_mem.amem
-
+        amem = get_amem()
         if not amem:
             return {"boxes": {}}
-
         return {"boxes": amem.list_boxes()}
     except Exception as e:
         return {"boxes": {}, "error": safe_error_detail(e)}
@@ -1174,7 +1115,7 @@ async def consolidate_amem():
 
 
 def _consolidate_amem_sync() -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
 
     # Prefer hybrid consolidation
     hybrid_mem = agent.tools.get('hybrid_amem')
@@ -1203,7 +1144,7 @@ def _consolidate_amem_sync() -> dict:
 async def get_hybrid_memory_stats():
     """Get combined hybrid memory statistics."""
     try:
-        agent = _get_agent_service().agent
+        agent = get_agent()
         hybrid_mem = agent.tools.get('hybrid_amem')
         if hybrid_mem:
             return hybrid_mem.get_stats()
@@ -1226,7 +1167,7 @@ async def search_hybrid_memory(request: AMEMSearchRequest):
 
 
 def _search_hybrid_sync(query: str, k: int) -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
 
     hybrid_mem = agent.tools.get('hybrid_amem')
     if not hybrid_mem:
@@ -1258,7 +1199,7 @@ def _search_hybrid_sync(query: str, k: int) -> dict:
 async def get_memory_context(query: str, max_tokens: int = 500):
     """Get memory context for a query (for LLM prompt injection)."""
     try:
-        agent = _get_agent_service().agent
+        agent = get_agent()
         hybrid_mem = agent.tools.get('hybrid_amem')
         if hybrid_mem:
             context = hybrid_mem.get_context(query, max_tokens=max_tokens)

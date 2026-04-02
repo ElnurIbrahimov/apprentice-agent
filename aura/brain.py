@@ -1632,8 +1632,8 @@ class OllamaBrain:
             try:
                 data = json.loads(history_file.read_text(encoding="utf-8"))
                 return data.get("history", [])
-            except (json.JSONDecodeError, IOError):
-                pass
+            except (json.JSONDecodeError, IOError) as e:
+                logger.warning(f"[Brain] Failed to load conversation history from {history_file}: {e}")
         return []
 
     def save_conversation_to_memory(self, conversation_id: Optional[str] = None) -> dict:

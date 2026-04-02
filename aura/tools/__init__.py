@@ -14,10 +14,8 @@ import logging as _logging
 _log = _logging.getLogger(__name__)
 _TOOLS_IMPORT_ERRORS: list[str] = []
 
-# SesameTTS removed — using external voice provider
+# Legacy stubs — kept for backward compatibility (resolved to None)
 SESAME_AVAILABLE = False
-
-# A-MEM removed 2026-03-22 — consolidated into UnifiedMemory
 AMEMSystem = None
 MemoryNote = None
 get_amem = None

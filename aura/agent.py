@@ -123,12 +123,14 @@ try:
     from aura.consciousness.strategy_bandit import (
         get_strategy_bandit,
         ReasoningStrategy,
+        compute_quality_metrics,
     )
     STRATEGY_BANDIT_AVAILABLE = True
 except ImportError:
     STRATEGY_BANDIT_AVAILABLE = False
     ReasoningStrategy = None
     get_strategy_bandit = None
+    compute_quality_metrics = None
 
 # Reasoning Template Library - Learn reusable reasoning patterns
 try:
@@ -2363,7 +2365,16 @@ IMPORTANT: If the user asks about something you are not sure about, something re
                     except (ImportError, AttributeError, TypeError, ValueError) as e:
                         logger.debug(f"[StrategyBandit] Eval setup error: {e}")
 
-                # Always record basic outcome with latency
+                # Compute cheap quality heuristics so the bandit learns
+                # from more than just latency (coherence + judge_score)
+                if compute_quality_metrics is not None:
+                    try:
+                        quality = compute_quality_metrics(message, response)
+                        metrics.update(quality)
+                    except Exception as qe:
+                        logger.debug(f"[StrategyBandit] Quality metrics error: {qe}")
+
+                # Always record basic outcome with latency + quality
                 composite_reward = bandit.record_outcome(
                     request_id=bandit_selection.request_id,
                     strategy=bandit_selection.strategy,

@@ -10,17 +10,11 @@ from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel
 
 from api.auth import require_api_key
-from api.utils import safe_error_detail
+from api.utils import safe_error_detail, get_agent_service as _get_agent_service, get_agent, run_sync
 
 from api.models.schemas import StatusResponse, HealthResponse, DeepHealthResponse, SubsystemStatus, MoodState
 
 logger = logging.getLogger(__name__)
-
-# Lazy import to avoid blocking event loop at module load
-def _get_agent_service():
-    """Get agent_service with lazy loading."""
-    from api.services.agent_service import agent_service
-    return agent_service
 
 # ALMA imports are done lazily inside endpoints to avoid blocking startup
 

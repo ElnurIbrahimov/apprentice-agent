@@ -337,9 +337,30 @@ class MemoryWriteGate:
         return max(0.0, min(1.0, score))
 
     def _score_emotion(self, c: MemoryCandidate) -> float:
-        """Emotionally salient memories are more worth keeping."""
+        """Emotionally salient memories are more worth keeping.
+
+        Uses ALMA's live PAD state when available (arousal + |pleasure| as
+        a proxy for emotional significance).  Falls back to keyword
+        matching when ALMA is not initialised.
+        """
         base = c.emotional_salience
-        # Explicit emotional markers
+
+        # --- Try ALMA PAD state first ---
+        try:
+            from aura.emotion.alma_engine import get_emotional_state
+            state = get_emotional_state()
+            pad = state.get("pad", {})
+            arousal = float(pad.get("arousal", 0.0))
+            pleasure = float(pad.get("pleasure", 0.0))
+            # arousal + |pleasure|: range -1..2 → clamp & normalise to 0..1
+            raw = arousal + abs(pleasure)
+            alma_score = max(0.0, min(1.0, raw / 2.0))
+            base = max(base, alma_score)
+            return max(0.0, min(1.0, base))
+        except Exception:
+            pass
+
+        # --- Keyword fallback (ALMA unavailable) ---
         emotional_words = {"love", "hate", "fear", "excited", "angry", "sad",
                            "happy", "worried", "frustrated", "thrilled"}
         lower = c.content.lower()

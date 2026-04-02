@@ -1,7 +1,13 @@
 """Shared utilities for the AURA API layer."""
 
+import asyncio
+import functools
+import logging
 import os
 import re
+from typing import Any, Callable, Optional
+
+logger = logging.getLogger(__name__)
 
 # Reusable validators for API input parameters
 _SAFE_ID_RE = re.compile(r"^[a-zA-Z0-9_\-]{1,128}$")
@@ -90,3 +96,61 @@ def error_response(message: str, status_code: int = 500, **extra) -> dict:
     result = {"success": False, "error": message}
     result.update(extra)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Lazy agent service accessor (single source of truth)
+# ---------------------------------------------------------------------------
+
+def get_agent_service():
+    """Get agent_service with lazy loading. Use this instead of duplicating per-route."""
+    from api.services.agent_service import agent_service
+    return agent_service
+
+
+def get_agent():
+    """Shorthand for get_agent_service().agent."""
+    return get_agent_service().agent
+
+
+# ---------------------------------------------------------------------------
+# Tool access helpers
+# ---------------------------------------------------------------------------
+
+def call_tool(tool_name: str, method: str, *args, **kwargs) -> Any:
+    """Call a method on a named tool, returning error dict if tool not loaded."""
+    agent = get_agent()
+    tool = agent.tools.get(tool_name)
+    if tool is None:
+        return {"success": False, "error": f"{tool_name} tool not loaded"}
+    fn = getattr(tool, method, None)
+    if fn is None:
+        return {"success": False, "error": f"{tool_name} has no method '{method}'"}
+    return fn(*args, **kwargs)
+
+
+def get_amem():
+    """Get the A-MEM instance from whichever tool provides it."""
+    agent = get_agent()
+    for name in ("amem", "hybrid_amem"):
+        tool = agent.tools.get(name)
+        if tool and hasattr(tool, "amem"):
+            return tool.amem
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Async executor wrapper
+# ---------------------------------------------------------------------------
+
+async def run_sync(fn: Callable, *args):
+    """Run a blocking function in the default executor.
+
+    Usage in a route::
+
+        @router.get("/foo")
+        async def foo():
+            return await run_sync(_foo_sync, arg1, arg2)
+    """
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, functools.partial(fn, *args))

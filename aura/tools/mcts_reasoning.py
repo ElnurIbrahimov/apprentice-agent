@@ -30,6 +30,7 @@ import json
 import hashlib
 import os
 import logging
+import threading
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from enum import Enum
@@ -104,6 +105,9 @@ class MCTSNode:
         self.children: List['MCTSNode'] = []
         self.context = context  # Accumulated context up to this point
 
+        # Lock for thread-safe backpropagation
+        self._lock = threading.Lock()
+
         # MCTS statistics
         self.visits = 0
         self.value = 0.0  # Cumulative value
@@ -176,9 +180,10 @@ class MCTSNode:
         """Iterative backpropagation up the tree."""
         node = self
         while node is not None:
-            node.visits += 1
-            node.value += value
-            node.avg_value = node.value / node.visits
+            with node._lock:
+                node.visits += 1
+                node.value += value
+                node.avg_value = node.value / node.visits
             node = node.parent
 
     def get_path(self) -> List['MCTSNode']:

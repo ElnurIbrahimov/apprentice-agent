@@ -28,7 +28,17 @@ except ImportError:
 from .store import MemoryStore, MemoryRecord, get_memory_store
 from .fade_mem import compute_strength, reinforce
 
+# Optional: mood-congruent retrieval bias (Phase 3.3)
+try:
+    from aura.emotion.memory_tagging import compute_mood_congruence, get_current_pad as _get_current_pad_retrieval
+    _HAS_MOOD_CONGRUENCE = True
+except ImportError:
+    _HAS_MOOD_CONGRUENCE = False
+
 logger = logging.getLogger(__name__)
+
+# Weight for mood-congruent retrieval bias (0-1)
+_MOOD_CONGRUENCE_WEIGHT = 0.15
 
 # RRF constant (standard value from Cormack et al.)
 RRF_K = 60
@@ -311,6 +321,32 @@ def retrieve(
             candidate.score = candidate.rerank_score * strength
         else:
             candidate.score = candidate.rrf_score * strength
+
+    # ------------------------------------------------------------------
+    # Mood-congruent retrieval bias (Phase 3.3)
+    # ------------------------------------------------------------------
+    if _HAS_MOOD_CONGRUENCE and _MOOD_CONGRUENCE_WEIGHT > 0:
+        try:
+            current_pad = _get_current_pad_retrieval()
+            if any(v != 0.0 for v in current_pad.values()):
+                for candidate in top_candidates:
+                    rec = candidate.record
+                    # Parse stored PAD from the record's emotional_pad field
+                    mem_pad = {}
+                    if rec.emotional_pad:
+                        try:
+                            import json as _json
+                            mem_pad = _json.loads(rec.emotional_pad)
+                        except (ValueError, TypeError):
+                            pass
+                    congruence = compute_mood_congruence(mem_pad, current_pad)
+                    # Blend: (1-w)*score + w*congruence
+                    candidate.score = (
+                        candidate.score * (1 - _MOOD_CONGRUENCE_WEIGHT)
+                        + congruence * _MOOD_CONGRUENCE_WEIGHT
+                    )
+        except Exception as e:
+            logger.debug("[Retrieval] Mood congruence error: %s", e)
 
     # Final sort by score
     top_candidates.sort(key=lambda c: c.score, reverse=True)

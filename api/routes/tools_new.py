@@ -8,15 +8,9 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field, field_validator
 
 from api.auth import require_api_key
+from api.utils import get_agent_service as _get_agent_service, get_agent, call_tool, run_sync, error_response
 
 logger = logging.getLogger(__name__)
-
-# Lazy import to avoid blocking event loop at module load
-def _get_agent_service():
-    """Get agent_service with lazy loading."""
-    from api.services.agent_service import agent_service
-    return agent_service
-
 
 router = APIRouter(prefix="/api", tags=["tools"], dependencies=[Depends(require_api_key)])
 
@@ -53,10 +47,7 @@ async def calendar_today():
 
 
 def _calendar_today_sync() -> dict:
-    agent = _get_agent_service().agent
-    if "calendar" in agent.tools:
-        return agent.tools["calendar"].today()
-    return {"success": False, "error": "Calendar tool not loaded"}
+    return call_tool("calendar", "today")
 
 
 @router.get("/calendar/upcoming")
@@ -72,10 +63,7 @@ async def calendar_upcoming(days: int = 7):
 
 
 def _calendar_upcoming_sync(days: int) -> dict:
-    agent = _get_agent_service().agent
-    if "calendar" in agent.tools:
-        return agent.tools["calendar"].upcoming(days=days)
-    return {"success": False, "error": "Calendar tool not loaded"}
+    return call_tool("calendar", "upcoming", days=days)
 
 
 @router.post("/calendar/add")
@@ -90,7 +78,7 @@ async def calendar_add(request: AddEventRequest):
 
 
 def _calendar_add_sync(request: AddEventRequest) -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "calendar" in agent.tools:
         return agent.tools["calendar"].add_event(
             title=request.title,
@@ -116,7 +104,7 @@ async def calendar_remove(event_id: str):
 
 
 def _calendar_remove_sync(event_id: str) -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "calendar" in agent.tools:
         return agent.tools["calendar"].remove_event(event_id)
     return {"success": False, "error": "Calendar tool not loaded"}
@@ -150,7 +138,7 @@ async def flashcards_due():
 
 
 def _flashcards_due_sync() -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "spaced_repetition" in agent.tools:
         return agent.tools["spaced_repetition"].review()
     return {"success": False, "error": "Spaced repetition tool not loaded"}
@@ -168,7 +156,7 @@ async def flashcards_answer(request: AnswerRequest):
 
 
 def _flashcards_answer_sync(request: AnswerRequest) -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "spaced_repetition" in agent.tools:
         return agent.tools["spaced_repetition"].answer(request.card_id, request.quality)
     return {"success": False, "error": "Spaced repetition tool not loaded"}
@@ -186,7 +174,7 @@ async def flashcards_stats():
 
 
 def _flashcards_stats_sync() -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "spaced_repetition" in agent.tools:
         return agent.tools["spaced_repetition"].list_decks()
     return {"success": False, "error": "Spaced repetition tool not loaded"}
@@ -204,7 +192,7 @@ async def flashcards_add(request: AddCardRequest):
 
 
 def _flashcards_add_sync(request: AddCardRequest) -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "spaced_repetition" in agent.tools:
         return agent.tools["spaced_repetition"].add_card(
             front=request.front,
@@ -239,7 +227,7 @@ async def email_status():
 
 
 def _email_status_sync() -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "email" in agent.tools:
         return agent.tools["email"].get_config_status()
     return {"success": False, "error": "Email tool not loaded"}
@@ -258,7 +246,7 @@ async def email_inbox(limit: int = 10):
 
 
 def _email_inbox_sync(limit: int) -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "email" in agent.tools:
         return agent.tools["email"].fetch_emails(limit=limit)
     return {"success": False, "error": "Email tool not loaded"}
@@ -276,7 +264,7 @@ async def email_send(request: SendEmailRequest):
 
 
 def _email_send_sync(request: SendEmailRequest) -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "email" in agent.tools:
         return agent.tools["email"].send_email(
             to=request.to,
@@ -304,7 +292,7 @@ async def screen_read():
 
 
 def _screen_read_sync() -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "screen_reader" in agent.tools:
         return agent.tools["screen_reader"].read_screen()
     return {"success": False, "error": "Screen reader tool not loaded"}
@@ -322,7 +310,7 @@ async def screen_active_window():
 
 
 def _screen_active_window_sync() -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "screen_reader" in agent.tools:
         return agent.tools["screen_reader"].get_active_window()
     return {"success": False, "error": "Screen reader tool not loaded"}
@@ -504,7 +492,7 @@ def _shell_run_sync(request: ShellRunRequest) -> dict:
     # Validate cwd to prevent path traversal into system directories
     validated_cwd = _validate_shell_cwd(request.cwd)
 
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "shell_executor" in agent.tools:
         return agent.tools["shell_executor"].run(
             command=request.command,
@@ -527,7 +515,7 @@ async def shell_sessions():
 
 
 def _shell_sessions_sync() -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "shell_executor" in agent.tools:
         return agent.tools["shell_executor"].list_sessions()
     return {"success": False, "error": "Shell executor tool not loaded"}
@@ -566,7 +554,7 @@ async def tasks_list(status: Optional[str] = None, project: Optional[str] = None
 
 
 def _tasks_list_sync(status: Optional[str], project: Optional[str]) -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "task_manager" in agent.tools:
         return agent.tools["task_manager"].list_tasks(status=status, project=project)
     return {"success": False, "error": "Task manager tool not loaded"}
@@ -584,7 +572,7 @@ async def tasks_board():
 
 
 def _tasks_board_sync() -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "task_manager" in agent.tools:
         return agent.tools["task_manager"].board()
     return {"success": False, "error": "Task manager tool not loaded"}
@@ -602,7 +590,7 @@ async def tasks_add(request: AddTaskRequest):
 
 
 def _tasks_add_sync(request: AddTaskRequest) -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "task_manager" in agent.tools:
         return agent.tools["task_manager"].add_task(
             title=request.title,
@@ -627,7 +615,7 @@ async def tasks_update(request: UpdateTaskRequest):
 
 
 def _tasks_update_sync(request: UpdateTaskRequest) -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "task_manager" in agent.tools:
         kwargs = {}
         if request.status:
@@ -654,7 +642,7 @@ async def tasks_remove(task_id: str):
 
 
 def _tasks_remove_sync(task_id: str) -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "task_manager" in agent.tools:
         return agent.tools["task_manager"].remove_task(task_id)
     return {"success": False, "error": "Task manager tool not loaded"}
@@ -672,7 +660,7 @@ async def tasks_overdue():
 
 
 def _tasks_overdue_sync() -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "task_manager" in agent.tools:
         return agent.tools["task_manager"].overdue()
     return {"success": False, "error": "Task manager tool not loaded"}
@@ -750,7 +738,7 @@ async def api_tester_run(request: APITestRequest):
 
 
 def _api_tester_run_sync(request: APITestRequest) -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "api_tester" in agent.tools:
         return agent.tools["api_tester"].request(
             method=request.method,
@@ -775,7 +763,7 @@ async def api_tester_history(limit: int = 20):
 
 
 def _api_tester_history_sync(limit: int) -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "api_tester" in agent.tools:
         return agent.tools["api_tester"].history(limit=limit)
     return {"success": False, "error": "API tester tool not loaded"}
@@ -828,7 +816,7 @@ async def database_query(request: SQLQueryRequest):
 
 
 def _database_query_sync(request: SQLQueryRequest) -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "database" in agent.tools:
         return agent.tools["database"].query(sql=request.sql, db=request.db)
     return {"success": False, "error": "Database tool not loaded"}
@@ -846,7 +834,7 @@ async def database_schema(db: str = "default", table: Optional[str] = None):
 
 
 def _database_schema_sync(db: str, table: Optional[str]) -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "database" in agent.tools:
         return agent.tools["database"].schema(db=db, table=table)
     return {"success": False, "error": "Database tool not loaded"}
@@ -877,7 +865,7 @@ def _database_import_sync(request: CSVImportRequest) -> dict:
     except ValueError:
         return {"success": False, "error": "CSV path must be within the data directory"}
 
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "database" in agent.tools:
         return agent.tools["database"].import_csv(
             csv_path=str(csv_resolved), table=request.table, db=request.db
@@ -919,7 +907,7 @@ def _audio_transcribe_sync(request: TranscribeRequest) -> dict:
     if not fp.exists():
         return {"success": False, "error": "File not found"}
 
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "audio_transcriber" in agent.tools:
         return agent.tools["audio_transcriber"].transcribe(
             file_path=str(fp),
@@ -941,7 +929,7 @@ async def audio_transcripts():
 
 
 def _audio_transcripts_sync() -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "audio_transcriber" in agent.tools:
         return agent.tools["audio_transcriber"].list_transcripts()
     return {"success": False, "error": "Audio transcriber tool not loaded"}
@@ -959,7 +947,7 @@ async def audio_status():
 
 
 def _audio_status_sync() -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "audio_transcriber" in agent.tools:
         return agent.tools["audio_transcriber"].status()
     return {"success": False, "error": "Audio transcriber tool not loaded"}
@@ -982,7 +970,7 @@ async def clipboard_history(limit: int = 20, category: Optional[str] = None):
 
 
 def _clipboard_history_sync(limit: int, category: Optional[str]) -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "clipboard" in agent.tools:
         return agent.tools["clipboard"].list_history(limit=limit, category=category)
     return {"success": False, "error": "Clipboard tool not loaded"}
@@ -1000,7 +988,7 @@ async def clipboard_capture():
 
 
 def _clipboard_capture_sync() -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "clipboard" in agent.tools:
         return agent.tools["clipboard"].capture()
     return {"success": False, "error": "Clipboard tool not loaded"}
@@ -1018,7 +1006,7 @@ async def clipboard_search(query: str):
 
 
 def _clipboard_search_sync(query: str) -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "clipboard" in agent.tools:
         return agent.tools["clipboard"].search(query)
     return {"success": False, "error": "Clipboard tool not loaded"}
@@ -1036,7 +1024,7 @@ async def clipboard_stats():
 
 
 def _clipboard_stats_sync() -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "clipboard" in agent.tools:
         return agent.tools["clipboard"].stats()
     return {"success": False, "error": "Clipboard tool not loaded"}
@@ -1066,7 +1054,7 @@ async def research_list(category: Optional[str] = None):
 
 
 def _research_list_sync(category: Optional[str]) -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "research" in agent.tools:
         return agent.tools["research"].list_research(category=category)
     return {"success": False, "error": "Research tool not loaded"}
@@ -1084,7 +1072,7 @@ async def research_save(request: SaveResearchRequest):
 
 
 def _research_save_sync(request: SaveResearchRequest) -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "research" in agent.tools:
         return agent.tools["research"].save(
             title=request.title,
@@ -1108,7 +1096,7 @@ async def research_search(query: str, category: Optional[str] = None):
 
 
 def _research_search_sync(query: str, category: Optional[str]) -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "research" in agent.tools:
         return agent.tools["research"].search(query, category=category)
     return {"success": False, "error": "Research tool not loaded"}
@@ -1126,7 +1114,7 @@ async def research_stats():
 
 
 def _research_stats_sync() -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "research" in agent.tools:
         return agent.tools["research"].stats()
     return {"success": False, "error": "Research tool not loaded"}
@@ -1144,7 +1132,7 @@ async def research_skills():
 
 
 def _research_skills_sync() -> dict:
-    agent = _get_agent_service().agent
+    agent = get_agent()
     if "research" in agent.tools:
         return agent.tools["research"].list_skills()
     return {"success": False, "error": "Research tool not loaded"}

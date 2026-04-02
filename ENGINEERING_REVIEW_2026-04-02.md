@@ -2,7 +2,7 @@
 
 **Scope:** Full-project audit and improvement pass
 **Method:** 6 parallel audit agents (core, API, memory/consciousness, tools/security, CLI/channels, tests/infra) + manual deep-dive on critical files
-**Codebase:** 90,071 LOC | 887 Python files | v4.3.0
+**Codebase:** 90,071 LOC | 887 Python files | v4.7.0
 
 ---
 

@@ -195,8 +195,8 @@ class MetacognitiveEngine:
         now = datetime.now().isoformat()
 
         # Gather signals from each source
-        reflexion_signals = {}
-        guardian_signals = {}
+        reflexion_signals = self._gather_reflexion_signals()
+        guardian_signals = self._gather_guardian_signals()
         skill_signals = self._gather_skill_signals()
         outcome_signals = self._gather_outcome_signals()
 
@@ -706,6 +706,126 @@ class MetacognitiveEngine:
                     "score": success_rate,
                     "detail": f"{sum(results)}/{len(results)} recent successes",
                 }
+
+        return signals
+
+    # Category-to-domain mapping shared by reflexion and guardian signals.
+    # Keys are lowercase category strings used by ReasoningTemplateLibrary
+    # and StrategyBandit; values are CapabilityDomain.value strings.
+    _CATEGORY_TO_DOMAIN = {
+        "code": "coding",
+        "debug": "coding",
+        "math": "analysis",
+        "analysis": "analysis",
+        "creative": "creative",
+        "planning": "research",
+        "general": "conversation",
+    }
+
+    def _gather_reflexion_signals(self) -> Dict[str, Dict]:
+        """Gather signals from ReasoningTemplateLibrary trace/template stats.
+
+        Reads per-category average reward from reasoning_traces and
+        per-template usage performance from reasoning_templates.
+        Falls back to empty dict if the template library is unavailable.
+        """
+        signals: Dict[str, Dict] = {}
+        try:
+            from aura.consciousness.reasoning_templates import get_template_library
+            lib = get_template_library()
+            if not lib.enabled:
+                return signals
+
+            import sqlite3
+            conn = sqlite3.connect(lib._db_path)
+            conn.execute("PRAGMA busy_timeout=3000")
+            try:
+                # Per-category average reward from collected traces
+                rows = conn.execute(
+                    "SELECT problem_category, AVG(composite_reward), COUNT(*) "
+                    "FROM reasoning_traces "
+                    "GROUP BY problem_category"
+                ).fetchall()
+            finally:
+                conn.close()
+
+            for category, avg_reward, count in rows:
+                if count < 2:
+                    continue
+                cat_key = (category or "general").lower()
+                domain = self._CATEGORY_TO_DOMAIN.get(cat_key)
+                if domain is None:
+                    continue
+                # If multiple categories map to the same domain, keep the
+                # one with the most data points.
+                if domain in signals and signals[domain].get("_count", 0) >= count:
+                    continue
+                signals[domain] = {
+                    "score": min(1.0, max(0.0, avg_reward)),
+                    "detail": f"avg trace reward {avg_reward:.2f} over {count} traces",
+                    "_count": count,
+                }
+
+            # Strip internal bookkeeping key before returning
+            for v in signals.values():
+                v.pop("_count", None)
+
+        except Exception as e:
+            logger.debug(f"[Metacognition] Reflexion signals unavailable: {e}")
+
+        return signals
+
+    def _gather_guardian_signals(self) -> Dict[str, Dict]:
+        """Gather signals from StrategyBandit per-category arm performance.
+
+        Reads mean reward (alpha / (alpha + beta)) and pull counts from
+        strategy_arms grouped by category.
+        Falls back to empty dict if the bandit is unavailable.
+        """
+        signals: Dict[str, Dict] = {}
+        try:
+            from aura.consciousness.strategy_bandit import get_strategy_bandit
+            bandit = get_strategy_bandit()
+            if not bandit.enabled:
+                return signals
+
+            arm_stats = bandit.get_arm_stats()  # {category: [arm_dicts]}
+
+            for category, arms in arm_stats.items():
+                cat_key = category.lower()
+                domain = self._CATEGORY_TO_DOMAIN.get(cat_key)
+                if domain is None:
+                    continue
+
+                # Aggregate across strategies for this category:
+                # weighted mean reward by pull count
+                total_pulls = sum(a["total_pulls"] for a in arms)
+                if total_pulls < 2:
+                    continue
+                weighted_reward = sum(
+                    a["mean_reward"] * a["total_pulls"] for a in arms
+                ) / total_pulls
+
+                best_arm = max(arms, key=lambda a: a["mean_reward"])
+
+                # If multiple categories map to same domain, keep more data
+                if domain in signals and signals[domain].get("_pulls", 0) >= total_pulls:
+                    continue
+                signals[domain] = {
+                    "score": min(1.0, max(0.0, weighted_reward)),
+                    "detail": (
+                        f"bandit reward {weighted_reward:.2f} over {total_pulls} pulls, "
+                        f"best: {best_arm['strategy']} ({best_arm['mean_reward']:.2f})"
+                    ),
+                    "_pulls": total_pulls,
+                }
+
+            # Strip internal bookkeeping key
+            for v in signals.values():
+                v.pop("_pulls", None)
+
+        except Exception as e:
+            logger.debug(f"[Metacognition] Guardian signals unavailable: {e}")
 
         return signals
 

@@ -217,21 +217,22 @@ class NeuroDreamEngine:
 
         Args:
             knowledge_graph: KnowledgeGraphTool instance
-            hybrid_memory: HybridMemory instance
+            hybrid_memory: Deprecated (ignored). UnifiedMemory used instead.
             evoemo: EvoEmoTool instance
             inner_monologue: InnerMonologueTool instance
-            chromadb: ChromaDB collection for memories
+            chromadb: Deprecated (ignored). UnifiedMemory used instead.
             brain: Brain instance for LLM calls and conversation access
             data_dir: Directory for dream data
             idle_threshold_minutes: Minutes of inactivity before auto-sleep
             max_vram_gb: Maximum VRAM to use during sleep
         """
         self.kg = knowledge_graph
-        self.memory = hybrid_memory
         self.evoemo = evoemo
         self.monologue = inner_monologue
-        self.chromadb = chromadb
         self.brain = brain
+
+        # Unified memory (lazy-loaded, replaces chromadb + hybrid_memory)
+        self._unified_memory = None
 
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -274,6 +275,17 @@ class NeuroDreamEngine:
 
         # Register atexit handler for graceful shutdown
         atexit.register(self._atexit_shutdown)
+
+    @property
+    def memory(self):
+        """Lazy-loaded UnifiedMemory (replaces removed ChromaDB + HybridMemory)."""
+        if self._unified_memory is None:
+            try:
+                from aura.memory.unified_memory import get_unified_memory
+                self._unified_memory = get_unified_memory()
+            except Exception as e:
+                logger.debug(f"[NeuroDream] Could not load UnifiedMemory: {e}")
+        return self._unified_memory
 
     def _atexit_shutdown(self):
         """Atexit handler — best-effort shutdown."""
@@ -638,7 +650,7 @@ class NeuroDreamEngine:
 
         start_time = time.time()
 
-        # Get recent memories from ChromaDB (with timeout protection)
+        # Get recent memories from UnifiedMemory (with timeout protection)
         try:
             recent_memories = self._get_recent_memories(hours=24)
         except Exception as e:
@@ -992,38 +1004,18 @@ class NeuroDreamEngine:
         """Get memories from the last N hours."""
         memories = []
 
-        # From ChromaDB if available
-        if self.chromadb:
+        # From UnifiedMemory (replaces removed ChromaDB + HybridMemory)
+        if self.memory:
             try:
-                cutoff = datetime.now() - timedelta(hours=hours)
-                # Query recent memories
-                results = self.chromadb.query(
-                    query_texts=["recent conversation memory"],
-                    n_results=100,
-                    where={"timestamp": {"$gte": cutoff.isoformat()}} if hasattr(self.chromadb, 'query') else None
-                )
-                if results and results.get("documents"):
-                    for i, doc in enumerate(results["documents"][0]):
-                        memories.append({
-                            "content": doc,
-                            "metadata": results["metadatas"][0][i] if results.get("metadatas") else {},
-                            "id": results["ids"][0][i] if results.get("ids") else f"mem_{i}"
-                        })
-            except Exception as e:
-                logger.debug(f"[NeuroDream] Error getting ChromaDB memories: {e}")
-
-        # From hybrid memory if available
-        if self.memory and hasattr(self.memory, 'recall'):
-            try:
-                recent = self.memory.recall("recent conversations", limit=50)
-                for mem in recent:
+                results = self.memory.query("recent conversation memory", k=100)
+                for r in results:
                     memories.append({
-                        "content": mem.get("content", str(mem)),
-                        "metadata": mem.get("metadata", {}),
-                        "id": mem.get("id", self._generate_id("mem"))
+                        "content": r.content,
+                        "metadata": r.metadata if r.metadata else {},
+                        "id": r.source_id or self._generate_id("mem"),
                     })
             except Exception as e:
-                logger.debug(f"[NeuroDream] Error getting hybrid memories: {e}")
+                logger.debug(f"[NeuroDream] Error getting UnifiedMemory memories: {e}")
 
         # From inner monologue logs
         monologue_memories = self._get_monologue_memories(hours)
@@ -1236,12 +1228,12 @@ class NeuroDreamEngine:
         return propositions[:15]  # Limit per chunk (raised from 10)
 
     def _store_atomic_facts(self, memories: List[Dict[str, Any]]) -> int:
-        """Extract and store atomic facts from memories into ChromaDB.
+        """Extract and store atomic facts from memories into UnifiedMemory.
 
         Called from run_deep_phase() after pattern finding.
         Returns count of facts stored.
         """
-        if not self.chromadb:
+        if not self.memory:
             return 0
 
         stored = 0
@@ -1251,20 +1243,16 @@ class NeuroDreamEngine:
                 propositions = self._extract_propositions(chunk)
                 for prop in propositions:
                     try:
-                        fact_id = f"fact_{hash(prop)}_{int(time.time() * 1000)}"
-                        self.chromadb.add(
-                            documents=[prop],
-                            ids=[fact_id],
-                            metadatas=[{
-                                "type": "atomic_fact",
-                                "parent_id": chunk.get("parent_id", ""),
-                                "chunk_idx": chunk.get("chunk_idx", 0),
-                                "timestamp": datetime.now().isoformat(),
-                            }]
+                        self.memory.store(
+                            content=prop,
+                            source="neurodream_atomic_fact",
+                            importance=0.5,
+                            tags=["atomic_fact", "neurodream"],
+                            episode_type="insight",
                         )
                         stored += 1
                     except Exception:
-                        continue  # Skip duplicates or DB errors
+                        continue  # Skip duplicates or store errors
 
         return stored
 
@@ -1920,24 +1908,10 @@ Rules:
 
     def _parse_json_response(self, response: str) -> dict:
         """Parse JSON from LLM response, handling markdown code blocks."""
-        text = response.strip()
-        # Strip markdown code block if present
-        if text.startswith("```"):
-            lines = text.split("\n")
-            # Remove first and last lines (```json and ```)
-            lines = [l for l in lines if not l.strip().startswith("```")]
-            text = "\n".join(lines)
+        from aura.core.json_utils import parse_llm_json
 
-        # Try to find JSON object in text
-        brace_start = text.find("{")
-        brace_end = text.rfind("}")
-        if brace_start >= 0 and brace_end > brace_start:
-            text = text[brace_start:brace_end + 1]
-
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            return {}
+        result = parse_llm_json(response, default={})
+        return result if isinstance(result, dict) else {}
 
     def _merge_lists(self, existing: List[str], new: List[str], max_items: int = 20) -> List[str]:
         """Merge two lists, deduplicating and limiting size."""

@@ -36,10 +36,10 @@ def _ensure_pymdp():
     if _PyMDPAgent is not None:
         return True
     try:
-        from pymdp.agent import Agent as _PyMDPAgent
-        from pymdp import utils as _pymdp_utils
-        _PyMDPAgent = _PyMDPAgent
-        _pymdp_utils = _pymdp_utils
+        from pymdp.agent import Agent as _Agent
+        from pymdp import utils as _utils
+        _PyMDPAgent = _Agent
+        _pymdp_utils = _utils
         return True
     except ImportError:
         PYMDP_AVAILABLE = False

@@ -20,13 +20,13 @@ def get_embedding(text: str, timeout: float = 3.0) -> Optional[List[float]]:
     """Get embedding vector for text via Ollama nomic-embed-text.
 
     Args:
-        text: Input text (truncated to first 1000 chars internally).
+        text: Input text (truncated to first 8000 chars internally).
         timeout: HTTP request timeout in seconds.
 
     Returns:
         List of floats (embedding vector), or None on failure.
     """
-    key = hashlib.sha256(text[:1000].encode()).hexdigest()
+    key = hashlib.sha256(text[:8000].encode()).hexdigest()
     with _embedding_lock:
         if key in _embedding_cache:
             return _embedding_cache[key]
@@ -37,7 +37,7 @@ def get_embedding(text: str, timeout: float = 3.0) -> Optional[List[float]]:
         url = getattr(Config, 'OLLAMA_HOST', 'http://localhost:11434') + '/api/embeddings'
         r = requests.post(
             url,
-            json={"model": "nomic-embed-text:latest", "prompt": text[:1000]},
+            json={"model": "nomic-embed-text:latest", "prompt": text[:8000]},
             timeout=timeout,
         )
         if r.status_code == 200:

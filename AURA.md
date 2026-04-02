@@ -17,8 +17,9 @@ Frameworks: FastAPI, PyTorch, Transformers
 
 ## Architecture
 
-- **Brain** (`aura/brain.py`): OllamaBrain — 2600-line reasoning engine. Handles LLM calls via Ollama (cloud) and ChatGPT (OAuth). Thread-safe with shared executor pool.
-- **Agent** (`aura/agent.py`): ApprenticeAgent — 5200-line orchestrator. ReAct loop, tool dispatch, adaptive planning, session persistence.
+- **Brain** (`aura/brain.py`): OllamaBrain — 3100-line reasoning engine. Handles LLM calls via Ollama (cloud) and ChatGPT (OAuth). Thread-safe with shared executor pool.
+- **Agent** (`aura/agent.py`): ApprenticeAgent — 2600-line orchestrator (mixin-based). ReAct loop, tool dispatch, adaptive planning, session persistence.
+- **Memory** (`aura/memory/unified_memory.py`): Consolidated retrieval pipeline — BM25 + semantic + KG, RRF fusion, cross-encoder reranking, FadeMem decay.
 - **Config** (`aura/config.py`): Thread-safe config with model chains and fallback logic. All models are cloud-only via Ollama Pro.
 - **Router** (`aura/core/router.py`): Task-aware model routing with 3 tiers (local/balanced/max) and 8 task categories.
 
@@ -49,7 +50,7 @@ Frameworks: FastAPI, PyTorch, Transformers
 
 ## Key Patterns
 
-- `_SHARED_EXECUTOR(12)` for LLM calls, `_BG_EXECUTOR(8)` for background tasks
+- Centralized thread pools in `aura/pools.py`: `llm_pool(12)`, `bg_pool(8)`, `tool_pool(4)`
 - TTL-cached system prompt additions
 - Circuit breaker on world model
 - FadeMem decay (2-week half-life) for memory

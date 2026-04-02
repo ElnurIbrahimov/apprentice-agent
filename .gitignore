@@ -77,6 +77,8 @@ skills/community/
 
 # Build backup files
 extension/sidebar.js.bak
+extension/sidebar-*.js
+extension/sidebar-*.js.map
 
 # Build outputs (browser extensions)
 dist-chrome/

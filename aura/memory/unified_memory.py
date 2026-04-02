@@ -24,6 +24,12 @@ try:
 except ImportError:
     np = None  # type: ignore[assignment]
 
+# Optional: emotion tagging from ALMA PAD (Phase 3.3)
+try:
+    from aura.emotion.memory_tagging import get_current_pad as _get_current_pad
+except ImportError:
+    _get_current_pad = None  # type: ignore[assignment]
+
 logger = logging.getLogger(__name__)
 
 
@@ -212,6 +218,15 @@ class UnifiedMemory:
 
         Returns {store: id} for cross-referencing.
         """
+        # Auto-fill emotional PAD from ALMA if caller didn't provide it
+        if emotional_pad is None and _get_current_pad is not None:
+            try:
+                pad = _get_current_pad()
+                if any(v != 0.0 for v in pad.values()):
+                    emotional_pad = pad
+            except Exception:
+                pass  # ALMA not running — proceed without PAD
+
         self._ensure_store()
         ids: Dict[str, str] = {}
         if not self._store:
@@ -268,6 +283,16 @@ class UnifiedMemory:
 
         Returns dict with store id, decision kind, score, lifecycle state.
         """
+        # Auto-fill emotional PAD from ALMA if caller didn't provide it
+        if emotional_pad is None and _get_current_pad is not None:
+            try:
+                pad = _get_current_pad()
+                # Only use if ALMA returned a non-zero state
+                if any(v != 0.0 for v in pad.values()):
+                    emotional_pad = pad
+            except Exception:
+                pass  # ALMA not running — proceed without PAD
+
         self._ensure_store()
 
         from aura.memory.write_gate import (

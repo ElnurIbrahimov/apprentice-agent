@@ -12,6 +12,7 @@ import logging
 import math
 import os
 import random
+import re
 import sqlite3
 import threading
 import time
@@ -142,6 +143,98 @@ class ProblemClassifier:
             best_category = ProblemCategory.ANALYSIS
 
         return best_category
+
+
+# ============================================================================
+# Quality Heuristics (cheap, no LLM calls)
+# ============================================================================
+
+# Phrases that indicate refusal or inability
+_REFUSAL_PHRASES = [
+    "i can't", "i cannot", "i'm unable", "i am unable",
+    "i don't have the ability", "i'm not able", "i am not able",
+    "i apologize, but i", "i'm sorry, but i can't",
+    "as an ai", "as a language model",
+]
+
+# Sentence-ending punctuation pattern
+_SENTENCE_END_RE = re.compile(r'[.!?]\s')
+
+
+def compute_quality_metrics(
+    query: str,
+    response: str,
+) -> Dict[str, float]:
+    """Compute cheap quality heuristics for a query-response pair.
+
+    Returns dict with:
+        coherence_score: 1.0 well-formed, 0.5 truncated/partial, 0.0 error/empty
+        judge_score: 0.0-1.0 based on relevance, structure, and refusal detection
+
+    No LLM calls — pure string heuristics. ~0.1ms.
+    """
+    if not response or not response.strip():
+        return {"coherence_score": 0.0, "judge_score": 0.0}
+
+    resp_lower = response.lower().strip()
+    resp_stripped = response.strip()
+
+    # --- coherence_score ---
+    # Check for well-formedness: ends with punctuation, has complete sentences
+    ends_cleanly = resp_stripped[-1] in '.!?"\')' or resp_stripped.endswith('```')
+    has_sentences = bool(_SENTENCE_END_RE.search(response))
+    long_enough = len(resp_stripped) > 40
+
+    if ends_cleanly and has_sentences and long_enough:
+        coherence = 1.0
+    elif long_enough and (ends_cleanly or has_sentences):
+        coherence = 0.75
+    elif long_enough:
+        coherence = 0.5  # long but no sentence structure — truncated or code dump
+    else:
+        coherence = 0.3  # very short, likely partial
+
+    # --- judge_score ---
+    score = 0.5  # neutral baseline
+
+    # 1) Keyword overlap: do query keywords appear in the response?
+    query_words = set(re.findall(r'\b[a-z]{3,}\b', query.lower()))
+    # Remove stop words
+    _stops = {"the", "and", "for", "are", "but", "not", "you", "all",
+              "can", "her", "was", "one", "our", "out", "has", "have",
+              "this", "that", "with", "what", "how", "why", "who",
+              "from", "they", "been", "will", "would", "could", "should",
+              "about", "which", "when", "make", "like", "just", "into",
+              "some", "than", "them", "very", "does", "also"}
+    query_keywords = query_words - _stops
+    if query_keywords:
+        resp_words = set(re.findall(r'\b[a-z]{3,}\b', resp_lower))
+        overlap = len(query_keywords & resp_words) / len(query_keywords)
+        score += 0.2 * overlap  # up to +0.2
+
+    # 2) Penalize refusals
+    refusal_count = sum(1 for p in _REFUSAL_PHRASES if p in resp_lower)
+    if refusal_count > 0:
+        score -= 0.3 * min(refusal_count, 2)  # up to -0.6
+
+    # 3) Reward structured responses (code blocks, lists, sections)
+    has_code_block = '```' in response
+    has_bullet_list = bool(re.search(r'^\s*[-*•]\s', response, re.MULTILINE))
+    has_numbered_list = bool(re.search(r'^\s*\d+[.)]\s', response, re.MULTILINE))
+    has_headers = bool(re.search(r'^#{1,3}\s', response, re.MULTILINE))
+    structure_signals = sum([has_code_block, has_bullet_list, has_numbered_list, has_headers])
+    score += 0.05 * structure_signals  # up to +0.2
+
+    # 4) Response length relative to query length (not just raw length)
+    if len(query) > 100 and len(response) < 80:
+        score -= 0.15  # complex query, tiny response
+    elif len(response) > 200:
+        score += 0.05  # substantive response
+
+    # Clamp to [0, 1]
+    judge = max(0.0, min(1.0, score))
+
+    return {"coherence_score": coherence, "judge_score": judge}
 
 
 # ============================================================================

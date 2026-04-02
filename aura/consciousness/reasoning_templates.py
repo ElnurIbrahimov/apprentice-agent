@@ -754,30 +754,12 @@ class ReasoningTemplateLibrary:
 
     def _parse_template_json(self, text: str) -> Optional[dict]:
         """Parse JSON from LLM response, handling markdown code blocks."""
-        if not text:
-            return None
+        from aura.core.json_utils import parse_llm_json
 
-        # Strip markdown code fences if present
-        cleaned = text.strip()
-        if cleaned.startswith("```"):
-            lines = cleaned.split("\n")
-            # Remove first and last lines (code fences)
-            lines = [l for l in lines if not l.strip().startswith("```")]
-            cleaned = "\n".join(lines)
-
-        try:
-            return json.loads(cleaned)
-        except json.JSONDecodeError:
-            # Try to find JSON object in text
-            start = cleaned.find("{")
-            end = cleaned.rfind("}") + 1
-            if start >= 0 and end > start:
-                try:
-                    return json.loads(cleaned[start:end])
-                except json.JSONDecodeError:
-                    pass
-        logger.warning(f"[TemplateLib] Failed to parse template JSON from LLM response")
-        return None
+        result = parse_llm_json(text)
+        if result is None:
+            logger.warning("[TemplateLib] Failed to parse template JSON from LLM response")
+        return result if isinstance(result, dict) else None
 
     def _is_duplicate(self, new_vec: List[float]) -> bool:
         """Check if a template with similar embedding already exists."""

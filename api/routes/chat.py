@@ -12,7 +12,7 @@ from typing import List
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Depends
 from starlette.responses import StreamingResponse
 from api.auth import verify_api_key_ws, require_api_key
-from api.utils import safe_error_detail
+from api.utils import safe_error_detail, get_agent_service as _get_agent_service, get_agent, run_sync
 
 from api.models.schemas import (
     ChatRequest, ChatResponse, RunRequest, RunResponse,
@@ -22,12 +22,6 @@ from api.models.schemas import (
 )
 
 logger = logging.getLogger(__name__)
-
-# Lazy import to avoid blocking event loop at module load
-def _get_agent_service():
-    """Get agent_service with lazy loading."""
-    from api.services.agent_service import agent_service
-    return agent_service
 
 def _get_conversation_manager():
     """Get ConversationManager with lazy loading."""

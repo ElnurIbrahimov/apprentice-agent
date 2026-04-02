@@ -157,28 +157,6 @@ def format_tool_result(tool_name: str, result: str) -> str:
 
 def _try_parse_json(raw: str) -> Optional[Dict[str, Any]]:
     """Try to parse JSON with fallbacks for common LLM formatting errors."""
-    if not raw:
-        return None
+    from aura.core.json_utils import parse_llm_json
 
-    # Direct parse
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        pass
-
-    # Fix: trailing comma before }
-    cleaned = re.sub(r',\s*}', '}', raw)
-    cleaned = re.sub(r',\s*]', ']', cleaned)
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        pass
-
-    # Fix: single quotes → double quotes (risky but common)
-    try:
-        return json.loads(raw.replace("'", '"'))
-    except json.JSONDecodeError:
-        pass
-
-    logger.debug(f"[PromptToolAdapter] Failed to parse JSON: {raw[:100]}")
-    return None
+    return parse_llm_json(raw)

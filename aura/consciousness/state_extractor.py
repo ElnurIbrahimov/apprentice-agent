@@ -264,43 +264,10 @@ class StateExtractor:
         return "\n\n".join(parts)
 
     def _parse_json(self, text: str) -> Optional[Dict]:
-        """
-        Parse JSON from LLM response, handling markdown code blocks.
+        """Parse JSON from LLM response, handling markdown code blocks."""
+        from aura.core.json_utils import parse_llm_json
 
-        Strategy (same as reasoning_templates.py):
-        1. Strip markdown code fences if present
-        2. Try json.loads on cleaned text
-        3. Fallback: extract {…} substring
-        4. Return None on total failure
-        """
-        if not text:
-            return None
-
-        cleaned = text.strip()
-
-        # Strip markdown code fences
-        if cleaned.startswith("```"):
-            lines = cleaned.split("\n")
-            lines = [l for l in lines if not l.strip().startswith("```")]
-            cleaned = "\n".join(lines)
-
-        # Try direct parse
-        try:
-            return json.loads(cleaned)
-        except json.JSONDecodeError:
-            pass
-
-        # Fallback: find first { and last }
-        start = cleaned.find("{")
-        end = cleaned.rfind("}") + 1
-        if start >= 0 and end > start:
-            try:
-                return json.loads(cleaned[start:end])
-            except json.JSONDecodeError:
-                pass
-
-        logger.debug("[StateExtractor] Failed to parse JSON from LLM response")
-        return None
+        return parse_llm_json(text)
 
 
 # ============================================================================

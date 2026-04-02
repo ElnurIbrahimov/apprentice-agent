@@ -349,38 +349,10 @@ class ThinkerEngine:
 
     def _parse_json_response(self, raw: str) -> dict:
         """Parse JSON from LLM response, handling markdown fences and junk."""
-        if not raw:
-            return {}
+        from aura.core.json_utils import parse_llm_json
 
-        # Strip markdown code fences
-        text = raw.strip()
-        if text.startswith("```"):
-            # Remove opening fence (with optional language tag)
-            first_newline = text.find("\n")
-            if first_newline != -1:
-                text = text[first_newline + 1:]
-            # Remove closing fence
-            if text.endswith("```"):
-                text = text[:-3]
-            text = text.strip()
-
-        # Try direct parse
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            pass
-
-        # Try to find JSON object in the text
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            try:
-                return json.loads(text[start:end + 1])
-            except json.JSONDecodeError:
-                pass
-
-        logger.debug(f"[Thinker] Could not parse JSON from: {text[:100]}")
-        return {}
+        result = parse_llm_json(raw, default={})
+        return result if isinstance(result, dict) else {}
 
     def _save_state(self) -> None:
         """Persist current state to disk atomically (tempfile + os.replace)."""

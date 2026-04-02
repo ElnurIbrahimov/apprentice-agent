@@ -265,21 +265,47 @@ class SelfImprovementEngine:
         if len(prompt) > 200 and len(response) < 100:
             return False
 
+        # Use quality heuristics for a more nuanced check
+        try:
+            from aura.consciousness.strategy_bandit import compute_quality_metrics
+            quality = compute_quality_metrics(prompt, response)
+            # Fail if both coherence and judge are low
+            if quality.get("coherence_score", 0.5) < 0.4 and quality.get("judge_score", 0.5) < 0.3:
+                return False
+        except Exception:
+            pass
+
         return True
 
     def _compute_confidence(self, prompt: str, response: str) -> float:
-        """Compute confidence in our success inference."""
+        """Compute confidence in our success inference.
+
+        Uses quality heuristics (keyword overlap, coherence, structure)
+        instead of pure length.
+        """
         if not response or len(response) < 20:
             return 0.9  # Very confident it failed
 
-        # Longer, substantive responses => higher confidence in success
         confidence = 0.5
-        if len(response) > 200:
-            confidence += 0.1
-        if len(response) > 500:
-            confidence += 0.1
-        if len(response) > 1000:
-            confidence += 0.1
+
+        try:
+            from aura.consciousness.strategy_bandit import compute_quality_metrics
+            quality = compute_quality_metrics(prompt, response)
+            coherence = quality.get("coherence_score", 0.5)
+            judge = quality.get("judge_score", 0.5)
+            # Weight quality signals into confidence
+            # High coherence + high judge = high confidence in success
+            # Low scores = high confidence in failure (inverted below)
+            quality_signal = 0.4 * coherence + 0.6 * judge
+            confidence = 0.3 + 0.6 * quality_signal  # range: 0.3 - 0.9
+        except Exception:
+            # Fallback to length-based if import fails
+            if len(response) > 200:
+                confidence += 0.1
+            if len(response) > 500:
+                confidence += 0.1
+            if len(response) > 1000:
+                confidence += 0.1
 
         return min(confidence, 0.9)
 

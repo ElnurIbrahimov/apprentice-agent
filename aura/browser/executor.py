@@ -454,8 +454,8 @@ class BrowserExecutor:
                     "error": result.error[:100] if result.error else "",
                 },
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[BrowserExecutor] Telemetry emit failed: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -488,8 +488,8 @@ class BrowserSession:
         try:
             from aura.reliability.loop_guard import get_guard
             self._guard = get_guard(self._session_id)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[BrowserExecutor] Loop guard init skipped: {e}")
 
     def step(self, raw_action: Dict[str, Any]) -> ActionResult:
         """
