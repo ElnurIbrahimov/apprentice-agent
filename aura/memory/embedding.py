@@ -26,7 +26,7 @@ def get_embedding(text: str, timeout: float = 3.0) -> Optional[List[float]]:
     Returns:
         List of floats (embedding vector), or None on failure.
     """
-    key = hashlib.md5(text[:1000].encode()).hexdigest()
+    key = hashlib.sha256(text[:1000].encode()).hexdigest()
     with _embedding_lock:
         if key in _embedding_cache:
             return _embedding_cache[key]

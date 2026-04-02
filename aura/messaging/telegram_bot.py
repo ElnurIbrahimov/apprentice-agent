@@ -916,48 +916,47 @@ class TelegramBot(BasePlatform):
         self.app: Optional[Application] = None
         self.bot: Optional[Bot] = None
 
-        # Track active chats for proactive messaging
-        self.active_chats: Dict[str, dict] = {}
+        # ===== SQLite-backed persistent store =====
+        from aura.messaging.telegram_store import TelegramStore
+        db_path = config.get("telegram_db_path", "data/telegram_state.db")
+        self.store = TelegramStore(db_path=db_path)
+        # One-time migration from legacy JSON files
+        self.store.migrate_from_json()
+
+        # Track active chats for proactive messaging (backed by store)
+        self.active_chats: Dict[str, dict] = self.store.get_active_chats()
         self._pending_forget: Dict[str, datetime] = {}
 
-        # Per-user document context for Q&A after upload
-        # Maps user_id -> {"text": str, "filename": str, "timestamp": float}
-        self._user_doc_context: Dict[int, dict] = {}
+        # Document context TTL (store handles persistence)
         self._DOC_CONTEXT_TTL = 30 * 60  # 30 minutes
 
         # Lazy-loaded code executor
         self._code_executor = None
 
-        # Inline query state
+        # Inline query state (cache in-memory for speed, store for persistence)
         self._inline_cache = _LRUCache(maxsize=50)
         self._inline_last_query: Dict[int, Tuple[str, float]] = {}  # user_id -> (query, timestamp)
         self._INLINE_DEBOUNCE_SEC = 1.0
         self._INLINE_TIMEOUT_SEC = 15.0
 
-        # Skill system state
-        self._skill_pending: Dict[int, dict] = {}    # user_id -> pending skill action
-        self._last_exchange: Dict[int, dict] = {}     # user_id -> {"input": str, "output": str}
+        # Skill system state (in-memory cache, write-through to store)
+        self._skill_pending: Dict[int, dict] = {}
+        self._last_exchange: Dict[int, dict] = {}
         self._skill_store = None   # Lazy-loaded SkillStore
         self._skill_learner = None # Lazy-loaded SkillLearner
-        self._skill_create_state: Dict[int, dict] = {}  # user_id -> multi-step create flow
+        self._skill_create_state: Dict[int, dict] = {}
 
-        # Group message cache for summarization (chat_id -> last 50 messages)
+        # Premium/payment state (backed by store)
+        self._premium_users: Dict[str, dict] = self.store.get_premium_users()
+
+        # Group message cache (backed by store, read-through cache)
         self._group_message_cache: Dict[str, List[dict]] = {}
 
-        # Premium/payment state
-        self._premium_users: Dict[str, dict] = {}
-        self._load_premium_state()
-
-        # Location sharing state (ephemeral, per-user)
+        # Location sharing state (backed by store)
         self._user_locations: Dict[str, dict] = {}
 
-        # --- Improvement state ---
-        self._keyboard_enabled: Dict[str, bool] = {}   # user_id -> keyboard on/off
-        self._user_language: Dict[str, str] = {}        # user_id -> lang code (e.g. "ru")
-        self._digest_enabled: Dict[str, bool] = {}      # chat_id -> digest on/off
-        self._digest_job_ids: Dict[str, str] = {}        # chat_id -> APScheduler job ID
-
-        self._load_state()
+        # Digest job tracking (backed by store)
+        self._digest_job_ids: Dict[str, str] = self.store.get_digest_jobs()
 
     @property
     def platform_name(self) -> str:
@@ -970,50 +969,26 @@ class TelegramBot(BasePlatform):
             self._code_executor = CodeExecutorTool(timeout=30)
         return self._code_executor
 
-    def _load_state(self):
-        """Load saved state (active chats, etc.)"""
-        state_file = Path("data/messaging/telegram_state.json")
-        if state_file.exists():
-            try:
-                with open(state_file, encoding="utf-8") as f:
-                    data = json.load(f)
-                    self.active_chats = data.get("active_chats", {})
-            except Exception as e:
-                logger.warning(f"Could not load Telegram state: {e}")
-
     def _save_state(self):
-        """Save state for persistence"""
-        state_file = Path("data/messaging/telegram_state.json")
-        state_file.parent.mkdir(parents=True, exist_ok=True)
-
+        """Persist current active_chats to SQLite store."""
         try:
-            with open(state_file, "w", encoding="utf-8") as f:
-                json.dump({
-                    "active_chats": self.active_chats,
-                    "last_saved": datetime.now().isoformat()
-                }, f, indent=2)
+            for chat_id, info in self.active_chats.items():
+                self.store.upsert_active_chat(
+                    chat_id=chat_id,
+                    user_id=info.get("user_id", ""),
+                    first_name=info.get("first_name", ""),
+                    username=info.get("username", ""),
+                )
         except Exception as e:
             logger.error(f"Could not save Telegram state: {e}")
 
-    def _load_premium_state(self):
-        """Load premium user data from disk."""
-        path = Path("data/premium_users.json")
-        if path.exists():
-            try:
-                self._premium_users = json.loads(path.read_text())
-            except Exception:
-                pass
-
     def _save_premium_state(self):
-        """Persist premium user data to disk."""
-        Path("data").mkdir(exist_ok=True)
-        Path("data/premium_users.json").write_text(
-            json.dumps(self._premium_users, indent=2)
-        )
+        """Premium state is auto-persisted via store — this is a no-op for compatibility."""
+        pass
 
     def is_premium(self, user_id: str) -> bool:
         """Check if a user has premium status."""
-        return user_id in self._premium_users
+        return user_id in self._premium_users or self.store.is_premium(user_id)
 
     async def start(self):
         """Start the Telegram bot"""
@@ -1206,6 +1181,12 @@ class TelegramBot(BasePlatform):
                 pass
             logger.info("Proactive polling stopped")
 
+        # Persist final state and close SQLite
+        self._save_state()
+        if hasattr(self, 'store'):
+            self.store.close()
+            logger.info("TelegramStore closed")
+
         if self.app:
             await self.app.updater.stop()
             await self.app.stop()
@@ -1320,7 +1301,7 @@ Inline mode: Type @Aura828Bot in any chat to ask me anything!
 Or just talk to me like a friend. What's on your mind?"""
 
         # Attach persistent reply keyboard by default
-        self._keyboard_enabled[str(user.id)] = True
+        self.store.set_keyboard_enabled(str(user.id), True)
         reply_markup = self._get_reply_keyboard()
         await update.message.reply_text(welcome, reply_markup=reply_markup)
 
@@ -2581,13 +2562,13 @@ Status: Online and ready!"""
             await update.message.reply_text("This command only works in groups.")
             return
 
-        cache = self._group_message_cache.get(chat_id, [])
+        cache = self.store.get_group_messages(chat_id, limit=50)
         if len(cache) < 3:
             await update.message.reply_text("Not enough messages to summarize yet. I need at least 3 cached messages.")
             return
 
         # Build context from last 30 cached messages
-        context_text = "\n".join([f"{m['user']}: {m['text']}" for m in cache[-30:]])
+        context_text = "\n".join([f"{m.get('user_name', m.get('user', 'Unknown'))}: {m['text']}" for m in cache[-30:]])
         prompt = f"Summarize this group conversation concisely. Focus on key topics and decisions:\n\n{context_text}"
 
         placeholder = await update.message.reply_text("Summarizing group conversation...")
@@ -2619,8 +2600,8 @@ Status: Online and ready!"""
         anchor_text = anchor_msg.text or anchor_msg.caption or "[non-text message]"
         anchor_user = anchor_msg.from_user.first_name if anchor_msg.from_user else "Unknown"
 
-        # Pull related messages from cache around the same timeframe
-        cache = self._group_message_cache.get(chat_id, [])
+        # Pull related messages from store around the same timeframe
+        cache = self.store.get_group_messages(chat_id, limit=50)
         if len(cache) < 2:
             await update.message.reply_text(
                 f"Not enough cached context. Here's the message you pointed to:\n\n"
@@ -2661,16 +2642,14 @@ Status: Online and ready!"""
 
         text = update.message.text or ""
 
-        # --- Group message caching (always, even if we don't respond) ---
+        # --- Group message caching (persisted to SQLite) ---
         if is_group:
-            cache = self._group_message_cache.setdefault(chat_id, [])
-            cache.append({
-                "user": user.first_name or "Unknown",
-                "text": text,
-                "time": _time.time(),
-            })
-            if len(cache) > 50:
-                cache.pop(0)
+            self.store.add_group_message(
+                chat_id=chat_id,
+                user_id=str(user.id),
+                user_name=user.first_name or "Unknown",
+                text=text,
+            )
 
         # --- Group gate: only respond if mentioned or replied-to ---
         if is_group:
@@ -2737,9 +2716,8 @@ Status: Online and ready!"""
                         if hasattr(self.aura, 'state') and hasattr(self.aura.state, '_history'):
                             self.aura.state._history.clear()
                             cleared_items.append("State history")
-                        if hasattr(self, '_user_doc_context') and int(user_id) in self._user_doc_context:
-                            del self._user_doc_context[int(user_id)]
-                            cleared_items.append("Document context")
+                        self.store.clear_doc_context(user_id)
+                        cleared_items.append("Document context")
                         del self._pending_forget[user_id]
                         if cleared_items:
                             cleared_list = "\n".join(f"- {item}" for item in cleared_items)
@@ -2787,12 +2765,12 @@ Status: Online and ready!"""
             text = self._build_doc_augmented_text(user.id, text)
 
         # Multi-language: prepend language instruction for non-English users
-        user_lang = self._user_language.get(str(user.id))
-        if not user_lang and hasattr(user, 'language_code') and user.language_code:
+        user_lang = self.store.get_user_language(str(user.id))
+        if (not user_lang or user_lang == "en") and hasattr(user, 'language_code') and user.language_code:
             lc = user.language_code.split("-")[0]
             if lc and lc != "en":
                 user_lang = lc
-                self._user_language[str(user.id)] = lc
+                self.store.set_user_language(str(user.id), lc)
         if user_lang and user_lang != "en":
             text = f"[Respond in {user_lang}] {text}"
 
@@ -2969,11 +2947,32 @@ Status: Online and ready!"""
                 self._save_state()
                 return
 
+            # --- DOCX ---
+            elif ext == ".docx" or mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+                text, char_count = await self._extract_docx(doc)
+                self._store_doc_context(user.id, text, filename)
+                await update.message.reply_text(
+                    f"\U0001f4c4 Extracted {char_count:,} characters from {filename}.\n"
+                    f"Ask me anything about this document!"
+                )
+
+            # --- XLSX / CSV ---
+            elif ext in (".xlsx", ".xls", ".csv") or mime in (
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "application/vnd.ms-excel", "text/csv",
+            ):
+                text, char_count = await self._extract_spreadsheet(doc, ext)
+                self._store_doc_context(user.id, text, filename)
+                await update.message.reply_text(
+                    f"\U0001f4ca Extracted {char_count:,} characters from {filename}.\n"
+                    f"Ask me anything about this data!"
+                )
+
             # --- Unsupported ---
             else:
                 await update.message.reply_text(
                     f"I can't read .{ext or '?'} files yet. "
-                    f"I support PDFs, text/code files, and images."
+                    f"I support PDFs, DOCX, XLSX, CSV, text/code files, and images."
                 )
 
         except Exception as e:
@@ -3051,27 +3050,81 @@ Status: Online and ready!"""
 
         return text, len(text)
 
+    async def _extract_docx(self, doc) -> "Tuple[str, int]":
+        """Download a Telegram document and extract DOCX text."""
+        tg_file = await doc.get_file()
+        file_bytes = await tg_file.download_as_bytearray()
+
+        def _extract(raw: bytes) -> str:
+            try:
+                from docx import Document as DocxDocument
+                doc_obj = DocxDocument(io.BytesIO(raw))
+                return "\n\n".join(p.text for p in doc_obj.paragraphs if p.text.strip())
+            except ImportError:
+                # Fallback: extract raw XML text
+                import zipfile
+                import re as _re
+                with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+                    xml = zf.read("word/document.xml").decode("utf-8")
+                    return _re.sub(r"<[^>]+>", " ", xml).strip()
+
+        text = await asyncio.to_thread(_extract, bytes(file_bytes))
+        if len(text) > 80_000:
+            text = text[:80_000] + "\n\n[... truncated at 80,000 characters ...]"
+        return text, len(text)
+
+    async def _extract_spreadsheet(self, doc, ext: str) -> "Tuple[str, int]":
+        """Download and extract spreadsheet data as readable text."""
+        tg_file = await doc.get_file()
+        file_bytes = await tg_file.download_as_bytearray()
+
+        def _extract(raw: bytes, file_ext: str) -> str:
+            if file_ext == ".csv":
+                import csv
+                reader = csv.reader(io.StringIO(raw.decode("utf-8", errors="replace")))
+                rows = list(reader)
+                if not rows:
+                    return "(empty CSV)"
+                header = " | ".join(rows[0])
+                body = "\n".join(" | ".join(r) for r in rows[1:200])
+                return f"{header}\n{'—' * len(header)}\n{body}"
+            else:
+                try:
+                    import openpyxl
+                    wb = openpyxl.load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+                    parts = []
+                    for sheet_name in wb.sheetnames[:5]:
+                        ws = wb[sheet_name]
+                        lines = [f"## Sheet: {sheet_name}"]
+                        for i, row in enumerate(ws.iter_rows(values_only=True)):
+                            if i > 200:
+                                lines.append(f"... ({ws.max_row - 200} more rows)")
+                                break
+                            lines.append(" | ".join(str(c) if c is not None else "" for c in row))
+                        parts.append("\n".join(lines))
+                    wb.close()
+                    return "\n\n".join(parts)
+                except ImportError:
+                    return "(openpyxl not installed — cannot read Excel files)"
+
+        text = await asyncio.to_thread(_extract, bytes(file_bytes), ext)
+        if len(text) > 80_000:
+            text = text[:80_000] + "\n\n[... truncated at 80,000 characters ...]"
+        return text, len(text)
+
     # ============ DOCUMENT CONTEXT HELPERS ============
 
     def _store_doc_context(self, user_id: int, text: str, filename: str):
         """Store extracted document text for subsequent Q&A."""
-        self._user_doc_context[user_id] = {
-            "text": text,
-            "filename": filename,
-            "timestamp": _time.time(),
-        }
+        self.store.set_doc_context(str(user_id), text, filename)
         logger.info(
             f"Stored doc context for user {user_id}: {filename} ({len(text)} chars)"
         )
 
     def _get_doc_context(self, user_id: int):
         """Get active document context, or None if expired/missing."""
-        ctx = self._user_doc_context.get(user_id)
+        ctx = self.store.get_doc_context(str(user_id), ttl=self._DOC_CONTEXT_TTL)
         if not ctx:
-            return None
-        if _time.time() - ctx["timestamp"] > self._DOC_CONTEXT_TTL:
-            del self._user_doc_context[user_id]
-            logger.info(f"Doc context expired for user {user_id}")
             return None
         return ctx
 
@@ -3569,6 +3622,28 @@ Status: Online and ready!"""
 
     _AGENT_TIMEOUT = 120  # seconds
 
+    @staticmethod
+    def _get_progress_text(goal: str) -> str:
+        """Return a contextual progress message based on the user's request."""
+        g = goal.lower()
+        if any(k in g for k in ["search", "find", "look up", "google"]):
+            return "\U0001f50d Searching..."
+        if any(k in g for k in ["research", "investigate", "deep dive", "analyze"]):
+            return "\U0001f9ea Researching..."
+        if any(k in g for k in ["code", "python", "script", "function", "debug"]):
+            return "\U0001f4bb Writing code..."
+        if any(k in g for k in ["image", "draw", "generate", "picture", "photo"]):
+            return "\U0001f3a8 Generating..."
+        if any(k in g for k in ["translate", "translation"]):
+            return "\U0001f310 Translating..."
+        if any(k in g for k in ["summarize", "summary", "tldr"]):
+            return "\U0001f4dd Summarizing..."
+        if any(k in g for k in ["math", "calculate", "solve", "equation"]):
+            return "\U0001f9ee Calculating..."
+        if "[document context" in g.lower():
+            return "\U0001f4c4 Analyzing document..."
+        return "\U0001f4ad Thinking..."
+
     async def _run_agent_and_reply(self, update: Update, goal: str, *,
                                     conv_id: str = None, user_id: str = None):
         """Run the full ReAct agent loop and send the result back to the user.
@@ -3593,8 +3668,9 @@ Status: Online and ready!"""
             except Exception as e:
                 logger.debug(f"[Telegram] ConversationManager user message tracking skipped: {e}")
 
-        # Send placeholder — we'll edit it with the real response
-        placeholder = await update.message.reply_text("Thinking...")
+        # Send contextual placeholder based on the goal
+        placeholder_text = self._get_progress_text(goal)
+        placeholder = await update.message.reply_text(placeholder_text)
 
         # Start typing indicator loop (cancelled when done)
         typing_task = asyncio.create_task(self._typing_loop(chat_id))
@@ -3634,16 +3710,15 @@ Status: Online and ready!"""
             except Exception as e:
                 logger.debug(f"[Telegram] ConversationManager assistant message tracking skipped: {e}")
 
-        # Store last exchange for /learn command
+        # Store last exchange for /learn command (persisted to SQLite)
         if user_id:
             try:
-                uid = int(user_id)
-                self._last_exchange[uid] = {
+                self.store.set_skill_state(user_id, last_exchange={
                     "input": goal[:2000],
                     "output": response_text[:2000],
                     "timestamp": _time.time(),
-                }
-            except (ValueError, TypeError):
+                })
+            except Exception:
                 pass
 
         # Build reply action buttons
@@ -4852,13 +4927,8 @@ Status: Online and ready!"""
         try:
             info, results = await self._get_location_info(lat, lon)
 
-            # Store last known location for /nearby
-            self._user_locations[str(update.effective_user.id)] = {
-                "lat": lat, "lon": lon,
-                "city": results.get("city", ""),
-                "country": results.get("country", ""),
-                "timestamp": _time.time(),
-            }
+            # Store last known location for /nearby (persisted to SQLite)
+            self.store.set_user_location(str(update.effective_user.id), lat, lon)
 
             await self._edit_or_send_response(placeholder, str(update.effective_chat.id), info, update)
         except Exception as e:
@@ -4958,15 +5028,15 @@ Status: Online and ready!"""
             return
 
         user_id = str(update.effective_user.id)
-        last_location = self._user_locations.get(user_id)
+        last_location = self.store.get_user_location(user_id)
 
         if not last_location:
             await update.message.reply_text("Please share your location first, then use /nearby <query>")
             return
 
         query = " ".join(context.args) if context.args else "restaurants"
-        lat, lon = last_location["lat"], last_location["lon"]
-        city = last_location.get("city", "the area")
+        lat, lon = last_location["latitude"], last_location["longitude"]
+        city = "the area"
 
         prompt = (
             f"Find {query} near coordinates {lat},{lon} (in {city}). "
@@ -5080,7 +5150,11 @@ Status: Online and ready!"""
             "amount": payment.total_amount,
             "currency": payment.currency,
         }
-        self._save_premium_state()
+        self.store.set_premium(
+            user_id=user_id, tier=tier_id,
+            stars_amount=payment.total_amount,
+            metadata={"currency": payment.currency, "paid_at": _time.time()},
+        )
 
         tier = PREMIUM_TIERS.get(tier_id, {})
         await update.message.reply_text(
@@ -5138,15 +5212,15 @@ Status: Online and ready!"""
         if not self._is_user_allowed(update.effective_user.id):
             return
         user_id = str(update.effective_user.id)
-        currently_on = self._keyboard_enabled.get(user_id, True)
+        currently_on = self.store.get_keyboard_enabled(user_id)
         if currently_on:
-            self._keyboard_enabled[user_id] = False
+            self.store.set_keyboard_enabled(user_id, False)
             await update.message.reply_text(
                 "Keyboard hidden. Use /keyboard to bring it back.",
                 reply_markup=ReplyKeyboardRemove()
             )
         else:
-            self._keyboard_enabled[user_id] = True
+            self.store.set_keyboard_enabled(user_id, True)
             await update.message.reply_text(
                 "Keyboard restored!",
                 reply_markup=self._get_reply_keyboard()
@@ -5329,7 +5403,6 @@ Status: Online and ready!"""
         cmd = args[0].lower() if args else "now"
 
         if cmd == "on":
-            self._digest_enabled[chat_id] = True
             # Schedule via APScheduler if available
             try:
                 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -5346,6 +5419,7 @@ Status: Online and ready!"""
                     replace_existing=True,
                 )
                 self._digest_job_ids[chat_id] = job.id
+                self.store.set_digest_job(chat_id, job.id, enabled=True)
                 await update.message.reply_text(
                     "\U0001f4ec Daily digest enabled! You'll get a summary at 9:00 AM.\n"
                     "Use /digest off to disable, /digest now for an instant digest."
@@ -5358,13 +5432,13 @@ Status: Online and ready!"""
                 return
 
         elif cmd == "off":
-            self._digest_enabled[chat_id] = False
             try:
                 scheduler = getattr(self, '_digest_scheduler', None)
                 job_id = self._digest_job_ids.get(chat_id)
                 if scheduler and job_id:
                     scheduler.remove_job(job_id)
-                    del self._digest_job_ids[chat_id]
+                    self._digest_job_ids.pop(chat_id, None)
+                self.store.set_digest_job(chat_id, "", enabled=False)
             except Exception:
                 pass
             await update.message.reply_text("\U0001f6d1 Daily digest disabled.")
@@ -5432,7 +5506,7 @@ Status: Online and ready!"""
         args = context.args or []
 
         if not args:
-            current = self._user_language.get(user_id, "en")
+            current = self.store.get_user_language(user_id)
             tg_lang = getattr(update.effective_user, 'language_code', 'unknown')
             await update.message.reply_text(
                 f"\U0001f310 Language settings:\n"
@@ -5444,7 +5518,7 @@ Status: Online and ready!"""
             return
 
         lang_code = args[0].lower().strip()[:5]
-        self._user_language[user_id] = lang_code
+        self.store.set_user_language(user_id, lang_code)
         if lang_code == "en":
             await update.message.reply_text(
                 "\U0001f310 Language set to English (default). "

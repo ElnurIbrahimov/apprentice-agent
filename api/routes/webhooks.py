@@ -29,7 +29,12 @@ _background_tasks: set = set()
 
 def _fire_and_forget(coro):
     """Schedule a coroutine as a background task with GC protection."""
-    task = _fire_and_forget(coro)
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        logger.warning("[Webhooks] No running event loop for background task")
+        return
+    task = loop.create_task(coro)
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
 
@@ -147,17 +152,17 @@ async def _route_to_agent(task_description: str, context: Dict[str, Any] = None)
 
 class AlertRequest(BaseModel):
     """Generic alert webhook payload."""
-    type: str = Field(..., description="Alert type: cpu, disk, error, custom")
-    message: str = Field(..., description="Alert message")
-    severity: str = Field(default="medium", description="low, medium, high, critical")
-    source: str = Field(default="unknown", description="Source system")
+    type: str = Field(..., max_length=64, pattern=r'^[a-zA-Z0-9_\-]+$', description="Alert type: cpu, disk, error, custom")
+    message: str = Field(..., max_length=2000, description="Alert message")
+    severity: str = Field(default="medium", pattern=r'^(low|medium|high|critical)$', description="low, medium, high, critical")
+    source: str = Field(default="unknown", max_length=128, description="Source system")
     metadata: Optional[Dict[str, Any]] = None
 
 
 class NotifyRequest(BaseModel):
     """Simple notification push payload."""
-    text: str = Field(..., description="Notification text")
-    channel: str = Field(default="all", description="telegram, web, or all")
+    text: str = Field(..., max_length=4000, description="Notification text")
+    channel: str = Field(default="all", pattern=r'^(telegram|web|all)$', description="telegram, web, or all")
 
 
 class WebhookSubscription(BaseModel):

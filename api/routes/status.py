@@ -362,6 +362,9 @@ async def trigger_mood(emotion: str, intensity: float = 0.7) -> MoodState:
     Returns:
         Updated mood state
     """
+    from api.utils import validate_emotion
+    emotion = validate_emotion(emotion)
+    intensity = max(0.0, min(1.0, intensity))
     try:
         from aura.emotion.alma_engine import alma_engine, trigger_emotion
         trigger_emotion(emotion, intensity=intensity)

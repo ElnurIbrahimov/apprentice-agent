@@ -17,11 +17,13 @@ router = APIRouter(prefix="/api/compare", tags=["compare"], dependencies=[Depend
 
 OLLAMA_BASE = os.getenv("OLLAMA_BASE_URL") or os.getenv("OLLAMA_HOST", "http://localhost:11434")
 
-DEFAULT_COMPARE_MODELS = [
-    "minimax-m2.7:cloud",
-    "qwen3.5:397b-cloud",
-    "kimi-k2.5:cloud",
-]
+def _get_default_compare_models():
+    """Get default models from Config to avoid hardcoding."""
+    try:
+        from aura.config import Config
+        return [Config.MODEL_CODE, Config.MODEL_THINK, Config.MODEL_REASON]
+    except Exception:
+        return ["minimax-m2.7:cloud", "qwen3.5:397b-cloud", "kimi-k2.5:cloud"]
 
 
 class CompareRequest(BaseModel):
@@ -65,9 +67,15 @@ async def _query_model(client: httpx.AsyncClient, model: str, prompt: str) -> Mo
 @router.post("", response_model=CompareResponse)
 async def compare_models(request: CompareRequest):
     """Run a prompt on multiple Ollama models in parallel and return side-by-side results."""
-    models = request.models if request.models else DEFAULT_COMPARE_MODELS
+    models = request.models if request.models else _get_default_compare_models()
     # Cap at 6 to avoid hammering the bridge
     models = models[:6]
+    # Validate model name format
+    import re
+    _model_re = re.compile(r'^[a-zA-Z0-9._:\-/]{1,128}$')
+    for m in models:
+        if not _model_re.match(m):
+            raise HTTPException(400, f"Invalid model name: {m}")
 
     async with httpx.AsyncClient() as client:
         tasks = [_query_model(client, m, request.message) for m in models]

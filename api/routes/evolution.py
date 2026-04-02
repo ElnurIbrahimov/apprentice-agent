@@ -36,8 +36,8 @@ class EvolutionRunRequest(BaseModel):
     skill_ids: Optional[List[str]] = Field(None, description="Specific skill IDs (None = all)")
     max_iterations: int = Field(5, ge=1, le=50)
     dry_run: bool = Field(False, description="Preview without running")
-    reflection_model: str = Field("qwen3.5:397b-cloud")
-    eval_model: str = Field("nemotron-3-super:cloud")
+    reflection_model: str = Field(default=None, description="Model for reflection (default: Config.MODEL_THINK)")
+    eval_model: str = Field(default=None, description="Model for evaluation (default: Config.MODEL_FAST)")
     timeout_seconds: int = Field(600, ge=60, le=3600)
 
 
@@ -52,12 +52,16 @@ def _run_evolution_sync(run_id: str, request: EvolutionRunRequest):
         with _run_lock:
             _current_run["status"] = "running"
             _current_run["run_id"] = run_id
+        # Resolve model defaults from Config
+        from aura.config import Config
+        ref_model = request.reflection_model or Config.MODEL_THINK
+        ev_model = request.eval_model or Config.MODEL_FAST
         result = run_evolution(
             skill_ids=request.skill_ids,
             config_overrides={
                 "max_iterations": request.max_iterations,
-                "reflection_model": request.reflection_model,
-                "eval_model": request.eval_model,
+                "reflection_model": ref_model,
+                "eval_model": ev_model,
                 "timeout_seconds": request.timeout_seconds,
             },
             dry_run=request.dry_run,

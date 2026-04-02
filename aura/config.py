@@ -133,7 +133,9 @@ def get_best_available_model(preferred: str, fallbacks: List[str], role: str = "
 
 
 class Config:
-    OLLAMA_HOST: str = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    _raw_ollama_host: str = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    # Validate scheme — reject non-http(s) to prevent SSRF via env misconfiguration
+    OLLAMA_HOST: str = _raw_ollama_host if _raw_ollama_host.startswith(("http://", "https://")) else "http://localhost:11434"
 
     # Feature toggles (configurable via env vars)
     KG_BRAIN_ENABLED: bool = os.getenv("KG_BRAIN_ENABLED", "true").lower() in ("true", "1", "yes")
@@ -418,10 +420,6 @@ class Config:
     # Reasoning Template Library Configuration — Phase 3
     REASONING_TEMPLATES_ENABLED: bool = os.getenv("REASONING_TEMPLATES_ENABLED", "true").lower() == "true"
 
-    # Prompt Evolution Engine removed — dead code (2026-03-22)
-    PROMPT_EVOLUTION_ENABLED: bool = False  # Kept for backward compat; module deleted
-    PROMPT_EVOLUTION_INTERVAL: int = 50    # Kept for backward compat; module deleted
-
     # World Model Configuration — ADV-02: Persistent situational awareness
     WORLD_MODEL_ENABLED: bool = os.getenv("WORLD_MODEL_ENABLED", "true").lower() == "true"
     WORLD_MODEL_DB_PATH: str = os.getenv("WORLD_MODEL_DB_PATH", "")
@@ -487,9 +485,7 @@ class Config:
         "default_mode": "whisper",  # Using external voice provider
     }
 
-    # Vision model VRAM requirements (GB) — used by _can_fit_model() in vision.py
-    # All vision is cloud-based now; keep dict for backward compat
-    VISION_MODEL_VRAM: Dict[str, float] = {}
+    # Vision model VRAM — all vision is cloud-based now; dead code path removed in vision.py
 
     # Florence-2 Vision (local HuggingFace model — for image preprocessing only)
     FLORENCE2_MODEL: str = "microsoft/Florence-2-base"

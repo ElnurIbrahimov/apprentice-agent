@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build && vite build --config vite.config.background.ts && vite build --config vite.config.content.ts && vite build --config vite.config.youtube.ts && vite build --config vite.config.netflix.ts && vite build --config vite.config.newtab.ts && vite build --config vite.config.worker.ts && cp newtab.html ../extension/newtab.html",
+    "build": "tsc --noEmit && vite build && vite build --config vite.config.background.ts && vite build --config vite.config.content.ts && vite build --config vite.config.youtube.ts && vite build --config vite.config.netflix.ts && vite build --config vite.config.newtab.ts && vite build --config vite.config.worker.ts && vite build --config vite.config.ai-worker.ts && cp newtab.html ../extension/newtab.html",
+    "build:ai-worker": "vite build --config vite.config.ai-worker.ts",
     "build:worker": "vite build --config vite.config.worker.ts",
     "build:netflix": "vite build --config vite.config.netflix.ts",
     "build:newtab": "vite build --config vite.config.newtab.ts && cp newtab.html ../extension/newtab.html",

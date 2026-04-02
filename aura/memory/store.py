@@ -362,7 +362,7 @@ class MemoryStore:
         lifecycle_states: Optional[List[str]] = None,
         user_id: Optional[str] = None,
     ) -> List[Tuple[MemoryRecord, float]]:
-        """Brute-force cosine similarity search on embedding BLOBs.
+        """Cosine similarity search on embedding BLOBs using chunked iteration.
 
         Returns list of (record, similarity_score) sorted descending.
         Only considers memories with non-NULL embeddings.
@@ -378,32 +378,37 @@ class MemoryStore:
             sql += " AND user_id=?"
             params.append(user_id)
 
-        with self._lock:
-            rows = self._get_conn().execute(sql, params).fetchall()
-
-        if not rows:
-            return []
-
-        # Vectorized cosine similarity
+        # Pre-compute query unit vector
         q = query_embedding.astype(np.float32)
         q_norm = np.linalg.norm(q)
         if q_norm < 1e-8:
             return []
         q_unit = q / q_norm
 
+        emb_idx = _COLUMNS.index("embedding")
         scored: List[Tuple[MemoryRecord, float]] = []
-        for row in rows:
-            emb_blob = row[_COLUMNS.index("embedding")]
-            if not emb_blob:
-                continue
-            vec = _blob_to_float32(emb_blob)
-            if vec.shape != q.shape:
-                continue
-            vec_norm = np.linalg.norm(vec)
-            if vec_norm < 1e-8:
-                continue
-            sim = float(np.dot(q_unit, vec / vec_norm))
-            scored.append((self._row_to_record(row), sim))
+
+        # Use chunked iteration to avoid loading all BLOBs into RAM at once
+        with self._lock:
+            cursor = self._get_conn().execute(sql, params)
+
+        _CHUNK_SIZE = 200
+        while True:
+            rows = cursor.fetchmany(_CHUNK_SIZE)
+            if not rows:
+                break
+            for row in rows:
+                emb_blob = row[emb_idx]
+                if not emb_blob:
+                    continue
+                vec = _blob_to_float32(emb_blob)
+                if vec.shape != q.shape:
+                    continue
+                vec_norm = np.linalg.norm(vec)
+                if vec_norm < 1e-8:
+                    continue
+                sim = float(np.dot(q_unit, vec / vec_norm))
+                scored.append((self._row_to_record(row), sim))
 
         scored.sort(key=lambda x: x[1], reverse=True)
         return scored[:k]

@@ -1638,6 +1638,19 @@ class WorldModel:
             return None
 
     # ----------------------------------------------------------------
+    # Public query API (used by ProactiveAwareness, etc.)
+    # ----------------------------------------------------------------
+
+    def days_since(self, iso_str: str) -> Optional[int]:
+        """Public wrapper: compute days since an ISO timestamp."""
+        return self._days_since(iso_str)
+
+    def get_relationships_snapshot(self) -> list:
+        """Return a thread-safe copy of all relationships."""
+        with self._lock:
+            return list(self._relationships.values())
+
+    # ----------------------------------------------------------------
     # Full state export
     # ----------------------------------------------------------------
 

@@ -9,6 +9,9 @@ from pathlib import Path
 
 HISTORY_FILE = Path.home() / ".aura_history"
 
+# Module-level state — safe because CLI runs as a single instance per process.
+# If multiple ChatSession instances were ever needed, these would need to move
+# to instance attributes.
 _session_ok = True
 
 # ---------------------------------------------------------------------------

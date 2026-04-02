@@ -25,6 +25,7 @@ import math
 import uuid
 import threading
 import tempfile
+import time
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -45,6 +46,15 @@ def _ensure_kg_deps():
         np = _np
 
 logger = logging.getLogger(__name__)
+
+# Optional embedding support for semantic search
+try:
+    from aura.memory.embedding import get_embedding
+    _HAS_EMBEDDINGS = True
+except ImportError:
+    _HAS_EMBEDDINGS = False
+    def get_embedding(*args, **kwargs):
+        return None
 
 
 # Node types in Aura's mind
@@ -214,10 +224,13 @@ class KnowledgeGraphTool:
     MAX_NODES = 50000  # Maximum number of nodes allowed
     MAX_EDGES = 100000  # Maximum number of edges allowed
 
-    def __init__(self, db_path: str = "data/knowledge_graph/"):
+    def __init__(self, db_path: str = "data/knowledge_graph/", llm_func=None):
         _ensure_kg_deps()
         self.db_path = Path(db_path)
         self.db_path.mkdir(parents=True, exist_ok=True)
+
+        # Optional LLM for query translation
+        self.llm = llm_func
 
         # NetworkX directed graph
         self.graph = nx.DiGraph()
@@ -398,6 +411,20 @@ class KnowledgeGraphTool:
                 return self.get_node(node_id)
             return None
 
+    def _compute_embedding_similarity(self, query_emb: list, candidate_emb: list) -> float:
+        """Cosine similarity between two embedding vectors."""
+        if not query_emb or not candidate_emb:
+            return 0.0
+        try:
+            dot = sum(a * b for a, b in zip(query_emb, candidate_emb))
+            norm_q = sum(x * x for x in query_emb) ** 0.5
+            norm_c = sum(x * x for x in candidate_emb) ** 0.5
+            if norm_q == 0 or norm_c == 0:
+                return 0.0
+            return dot / (norm_q * norm_c)
+        except Exception:
+            return 0.0
+
     def find_nodes(
         self,
         query: str,
@@ -407,7 +434,7 @@ class KnowledgeGraphTool:
         """
         Find nodes matching a query.
 
-        Uses word index for fast candidate lookup, then scores candidates.
+        Uses hybrid scoring: keyword matching + embedding similarity.
         Falls back to full scan for empty queries or property-based matches.
         """
         with self._lock:
@@ -422,9 +449,16 @@ class KnowledgeGraphTool:
                         candidate_ids.update(node_ids)
 
             # If no query words or no candidates from index, fall back to full scan
-            # (handles empty query and property-only matches)
             if not query_words:
                 candidate_ids = set(self._nodes.keys())
+
+            # Pre-compute query embedding for hybrid scoring
+            query_emb = None
+            if _HAS_EMBEDDINGS and query_lower:
+                try:
+                    query_emb = get_embedding(query_lower, timeout=2.0)
+                except Exception:
+                    pass
 
             matches = []
             for node_id in candidate_ids:
@@ -432,31 +466,46 @@ class KnowledgeGraphTool:
                 if not node:
                     continue
 
-                # Filter by type if specified
                 if node_type and node.type != node_type:
                     continue
 
-                # Score based on label match
-                score = 0.0
+                # Keyword-based scoring (existing logic)
+                keyword_score = 0.0
                 label_lower = node.label.lower()
 
                 if query_lower == label_lower:
-                    score = 1.0
+                    keyword_score = 1.0
                 elif query_lower in label_lower:
-                    score = 0.8
+                    keyword_score = 0.8
                 elif label_lower in query_lower:
-                    score = 0.6
+                    keyword_score = 0.6
                 else:
-                    # Check properties
                     for key, value in node.properties.items():
                         if query_lower in str(value).lower():
-                            score = 0.4
+                            keyword_score = 0.4
                             break
+
+                # Embedding-based scoring (new)
+                emb_score = 0.0
+                if query_emb:
+                    # Lazy-compute node embedding if missing
+                    if node.embedding is None and _HAS_EMBEDDINGS:
+                        try:
+                            node.embedding = get_embedding(node.label, timeout=2.0)
+                        except Exception:
+                            pass
+                    if node.embedding:
+                        emb_score = self._compute_embedding_similarity(query_emb, node.embedding)
+
+                # Hybrid score: 50% keyword + 50% embedding (if available)
+                if query_emb and emb_score > 0:
+                    score = 0.5 * keyword_score + 0.5 * emb_score
+                else:
+                    score = keyword_score
 
                 if score > 0:
                     matches.append((score * node.confidence, node))
 
-            # Sort by score and return top matches
             matches.sort(key=lambda x: x[0], reverse=True)
             final_nodes = [node for _, node in matches[:limit]]
             try:
@@ -893,17 +942,66 @@ class KnowledgeGraphTool:
     # QUERY OPERATIONS
     # =========================================================================
 
+    def _translate_nlp_query_to_structured(self, question: str) -> Dict[str, Any]:
+        """Convert natural language question to structured graph query via LLM."""
+        if not self.llm:
+            return {"entities": [], "relationships": [], "hops": 1}
+        try:
+            prompt = (
+                f"Question: {question}\n\n"
+                f"Extract from this question:\n"
+                f"1. Entity names (e.g., 'Python', 'FluxMind', 'John')\n"
+                f"2. Relationship types to follow: {list(EDGE_TYPES.keys())}\n"
+                f"3. Graph hops needed (1-3)\n\n"
+                f"Return ONLY JSON: {{\"entities\": [...], \"relationships\": [...], \"hops\": N}}"
+            )
+            result = self.llm(prompt, "Extract entities and relationships. Return JSON only.")
+            if result:
+                import re
+                cleaned = result.strip()
+                if cleaned.startswith("```"):
+                    cleaned = re.sub(r'^```\w*\n?', '', cleaned)
+                    cleaned = re.sub(r'\n?```$', '', cleaned).strip()
+                parsed = json.loads(cleaned)
+                return {
+                    "entities": parsed.get("entities", [])[:10],
+                    "relationships": parsed.get("relationships", []),
+                    "hops": max(1, min(3, int(parsed.get("hops", 1)))),
+                }
+        except Exception as e:
+            logger.debug(f"[KG] NLP query translation failed: {e}")
+        return {"entities": [], "relationships": [], "hops": 1}
+
     def query(self, question: str) -> List[Node]:
         """
-        Natural language query converted to graph traversal.
+        Natural language query with LLM-powered structured interpretation.
 
-        Interprets common question patterns and returns relevant nodes.
+        Tries LLM-structured query first, falls back to pattern matching.
         """
         question_lower = question.lower()
 
+        # Try LLM-structured query first
+        if self.llm:
+            structured = self._translate_nlp_query_to_structured(question)
+            if structured.get("entities"):
+                results = []
+                seen_ids = set()
+                for entity in structured["entities"]:
+                    nodes = self.find_nodes(entity, limit=5)
+                    for node in nodes:
+                        if node.id not in seen_ids:
+                            seen_ids.add(node.id)
+                            results.append(node)
+                            related = self.get_related(node.id, depth=structured.get("hops", 1))
+                            for rn in related.get("nodes", []):
+                                if rn.id not in seen_ids:
+                                    seen_ids.add(rn.id)
+                                    results.append(rn)
+                if results:
+                    return results[:10]
+
         # Pattern: "what do you know about X?"
         if "know about" in question_lower or "tell me about" in question_lower:
-            # Extract topic
             for phrase in ["know about", "tell me about"]:
                 if phrase in question_lower:
                     topic = question_lower.split(phrase)[-1].strip().rstrip("?")
@@ -911,8 +1009,6 @@ class KnowledgeGraphTool:
 
         # Pattern: "how is X related to Y?"
         if "related to" in question_lower or "connected to" in question_lower:
-            parts = question_lower.replace("?", "").split()
-            # Try to find two entities
             nodes = self.find_nodes(question_lower, limit=5)
             return nodes
 
@@ -1147,19 +1243,104 @@ class KnowledgeGraphTool:
             "success": success
         }
 
-    def consolidate(self) -> Dict[str, Any]:
+    def _find_similar_nodes_by_embedding(self, threshold: float = 0.85) -> List[List[str]]:
+        """Find groups of semantically similar nodes using embedding cosine similarity.
+        Uses Union-Find for connected components. 20s timeout."""
+        groups = []
+        deadline = time.time() + 20.0
+        try:
+            candidates = []
+            for nid, node in list(self._nodes.items()):
+                if time.time() > deadline:
+                    break
+                if node.confidence >= 0.7:
+                    if node.embedding is None and _HAS_EMBEDDINGS:
+                        try:
+                            node.embedding = get_embedding(node.label, timeout=1.5)
+                        except Exception:
+                            pass
+                    if node.embedding:
+                        candidates.append((nid, node))
+
+            if len(candidates) < 2:
+                return []
+
+            # Pairwise comparison (limited to avoid O(n^2) blow-up)
+            similar_pairs = []
+            for i, (id1, n1) in enumerate(candidates[:200]):
+                if time.time() > deadline:
+                    break
+                for id2, n2 in candidates[i + 1:200]:
+                    if time.time() > deadline:
+                        break
+                    sim = self._compute_embedding_similarity(n1.embedding, n2.embedding)
+                    if sim >= threshold:
+                        similar_pairs.append((id1, id2))
+
+            if not similar_pairs:
+                return []
+
+            # Union-Find
+            parent = {nid: nid for nid, _ in candidates}
+
+            def find(x):
+                while parent[x] != x:
+                    parent[x] = parent[parent[x]]
+                    x = parent[x]
+                return x
+
+            def union(x, y):
+                parent[find(x)] = find(y)
+
+            for id1, id2 in similar_pairs:
+                union(id1, id2)
+
+            comp = {}
+            for nid in [n for n, _ in candidates]:
+                root = find(nid)
+                comp.setdefault(root, []).append(nid)
+
+            groups = [g for g in comp.values() if len(g) >= 2]
+            if groups:
+                logger.info(f"[KG] Found {len(groups)} semantic duplicate groups")
+        except Exception as e:
+            logger.debug(f"[KG] Semantic linking failed: {e}")
+        return groups
+
+    def consolidate(self, max_seconds: float = 30.0) -> Dict[str, Any]:
         """
         Dream-mode: merge similar nodes, prune weak edges.
+
+        Args:
+            max_seconds: Maximum time budget for consolidation (default 30s).
+                         Prevents blocking during idle on large graphs.
 
         Returns summary of consolidation actions.
         """
         merged = 0
         pruned = 0
         strengthened = 0
+        _deadline = time.time() + max_seconds
 
         with self._lock:
             self._consolidating = True
             try:
+                # Phase 0: Embedding-based semantic deduplication
+                if _HAS_EMBEDDINGS and time.time() < _deadline:
+                    try:
+                        groups = self._find_similar_nodes_by_embedding(threshold=0.85)
+                        for group in groups:
+                            if time.time() > _deadline:
+                                break
+                            if len(group) >= 2:
+                                keeper_id = max(group, key=lambda nid: self._nodes.get(nid, Node(id="", type="concept", label="")).confidence if nid in self._nodes else 0)
+                                for nid in group:
+                                    if nid != keeper_id and nid in self._nodes:
+                                        self._merge_nodes(keeper_id, nid)
+                                        merged += 1
+                    except Exception as e:
+                        logger.debug(f"[KG] Embedding dedup non-critical: {e}")
+
                 # 1. Prune weak, old edges
                 edges_to_prune = []
                 now = datetime.now()
@@ -1190,6 +1371,9 @@ class KnowledgeGraphTool:
                     label_groups[normalized].append(node_id)
 
                 for label, node_ids in label_groups.items():
+                    if time.time() > _deadline:
+                        logger.info("[KG] Consolidation hit time budget (%.0fs), stopping merge phase", max_seconds)
+                        break
                     if len(node_ids) > 1:
                         # Keep the one with highest confidence
                         nodes = [(self._nodes[nid], nid) for nid in node_ids]
@@ -1203,6 +1387,10 @@ class KnowledgeGraphTool:
             finally:
                 self._consolidating = False
 
+        # Verify edge index consistency after merge operations
+        if merged > 0:
+            self._verify_edge_index()
+
         # Single save after all consolidation changes
         self.save()
 
@@ -1211,6 +1399,32 @@ class KnowledgeGraphTool:
             "pruned_edges": pruned,
             "strengthened_edges": strengthened
         }
+
+    def _verify_edge_index(self) -> int:
+        """Rebuild edge index entries that are out-of-sync with _edges dict.
+
+        Returns number of corrections made. Called after merge/consolidation.
+        """
+        corrections = 0
+        expected = {}
+        for edge in self._edges.values():
+            key = (edge.source_id, edge.target_id, edge.type)
+            expected[key] = edge.id
+
+        # Remove stale entries
+        stale_keys = [k for k in self._edge_index if k not in expected]
+        for k in stale_keys:
+            del self._edge_index[k]
+            corrections += 1
+
+        # Add missing entries
+        for key, eid in expected.items():
+            if key not in self._edge_index:
+                self._edge_index[key] = eid
+                corrections += 1
+
+        if corrections > 0:
+            logger.info(f"[KG] Edge index repaired: {corrections} corrections")
 
     def _prune_lowest_confidence_nodes(self, count: int = 100):
         """Remove lowest confidence nodes to free quota space.
@@ -1278,7 +1492,7 @@ class KnowledgeGraphTool:
         keeper.access_count += remove.access_count
         keeper.confidence = max(keeper.confidence, remove.confidence)
 
-        # Redirect edges (both in-memory dict and NetworkX graph)
+        # Redirect edges (both in-memory dict, edge index, and NetworkX graph)
         for edge in list(self._edges.values()):
             old_source = edge.source_id
             old_target = edge.target_id
@@ -1289,10 +1503,18 @@ class KnowledgeGraphTool:
             if edge.target_id == remove_id:
                 edge.target_id = keeper_id
                 changed = True
-            if changed and self.graph.has_edge(old_source, old_target):
-                data = self.graph.get_edge_data(old_source, old_target)
-                self.graph.remove_edge(old_source, old_target)
-                self.graph.add_edge(edge.source_id, edge.target_id, **(data or {}))
+            if changed:
+                # Update _edge_index: remove old key, add new key
+                old_key = (old_source, old_target, edge.type)
+                new_key = (edge.source_id, edge.target_id, edge.type)
+                if old_key in self._edge_index:
+                    del self._edge_index[old_key]
+                self._edge_index[new_key] = edge.id
+                # Update NetworkX graph
+                if self.graph.has_edge(old_source, old_target):
+                    data = self.graph.get_edge_data(old_source, old_target)
+                    self.graph.remove_edge(old_source, old_target)
+                    self.graph.add_edge(edge.source_id, edge.target_id, **(data or {}))
 
         # Remove the merged node
         self.delete_node(remove_id)

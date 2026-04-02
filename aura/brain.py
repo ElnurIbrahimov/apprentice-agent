@@ -1153,7 +1153,11 @@ class OllamaBrain:
         try:
             if self._history_file.exists():
                 data = json.loads(self._history_file.read_text(encoding="utf-8"))
-                self.conversation_history = data.get("history", [])
+                raw_history = data.get("history", [])
+                # Bound loaded history to prevent memory bloat from corrupted/huge files
+                if len(raw_history) > self._max_history:
+                    raw_history = raw_history[-self._max_history:]
+                self.conversation_history = raw_history
                 self._query_count = data.get("query_count", 0)
                 self._total_query_count = data.get("total_query_count", 0)
                 logger.info(f"[BRAIN] Loaded {len(self.conversation_history)} messages from history (total queries: {self._total_query_count})")

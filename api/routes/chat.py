@@ -548,6 +548,8 @@ async def create_conversation(request: CreateConversationRequest = None):
 @router.put("/conversations/{conversation_id}")
 async def rename_conversation(conversation_id: str, request: RenameConversationRequest):
     """Rename a conversation."""
+    from api.utils import validate_id
+    validate_id(conversation_id, "conversation_id")
     try:
         loop = asyncio.get_running_loop()
         success = await loop.run_in_executor(
@@ -566,6 +568,8 @@ async def rename_conversation(conversation_id: str, request: RenameConversationR
 @router.delete("/conversations/{conversation_id}")
 async def delete_conversation(conversation_id: str):
     """Delete a conversation."""
+    from api.utils import validate_id
+    validate_id(conversation_id, "conversation_id")
     try:
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
@@ -584,6 +588,8 @@ async def delete_conversation(conversation_id: str):
 @router.post("/conversations/{conversation_id}/switch", response_model=ConversationResponse)
 async def switch_conversation(conversation_id: str):
     """Switch to a different conversation."""
+    from api.utils import validate_id
+    validate_id(conversation_id, "conversation_id")
     try:
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
@@ -602,6 +608,8 @@ async def switch_conversation(conversation_id: str):
 @router.post("/conversations/{conversation_id}/save-to-memory", response_model=SaveToMemoryResponse)
 async def save_conversation_to_memory(conversation_id: str):
     """Save a conversation to AURA's long-term memory."""
+    from api.utils import validate_id
+    validate_id(conversation_id, "conversation_id")
     try:
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
@@ -637,6 +645,8 @@ async def get_sync_status():
 @router.get("/conversations/{conversation_id}/messages")
 async def get_conversation_messages(conversation_id: str):
     """Get messages for a conversation with surface attribution."""
+    from api.utils import validate_id
+    validate_id(conversation_id, "conversation_id")
     try:
         manager = _get_conversation_manager()
         loop = asyncio.get_running_loop()
@@ -700,6 +710,17 @@ async def websocket_chat(websocket: WebSocket):
     _ws_window_start = time.monotonic()
     WS_RATE_LIMIT = 30  # max messages per minute per connection
     WS_RATE_WINDOW = 60  # seconds
+
+    # Server-initiated keepalive: send pings every 30s to detect dead connections
+    async def _ws_keepalive():
+        try:
+            while True:
+                await asyncio.sleep(30)
+                await websocket.send_json({"type": "ping"})
+        except Exception:
+            pass  # Connection closed — keepalive exits silently
+
+    keepalive_task = asyncio.create_task(_ws_keepalive())
 
     try:
         while True:
@@ -781,13 +802,21 @@ async def websocket_chat(websocket: WebSocket):
             _last_attachments = attachments  # Track for outer finally cleanup
             logger.debug(f"[WebSocket] Received message: '{message[:50]}...' model={model_override} action_mode={action_mode} conv={conversation_id} attachments={len(attachments)}")
 
-            # Auto-switch conversation if needed
+            # Auto-switch conversation if needed (serialized to prevent race conditions)
+            if conversation_id:
+                from api.utils import validate_id
+                try:
+                    validate_id(conversation_id, "conversation_id")
+                except Exception:
+                    conversation_id = None  # Invalid ID — skip switch
             if conversation_id:
                 try:
                     svc = _get_agent_service()
                     current_conv = svc.agent.brain.get_current_conversation_id() if svc.is_ready else None
                     if current_conv and current_conv != conversation_id:
-                        svc.switch_conversation(conversation_id)
+                        await asyncio.get_running_loop().run_in_executor(
+                            None, lambda: svc.switch_conversation(conversation_id)
+                        )
                         logger.info(f"[WebSocket] Auto-switched to conversation: {conversation_id}")
                 except Exception as e:
                     logger.warning(f"[WebSocket] Conversation switch failed: {e}")
@@ -1043,6 +1072,7 @@ async def websocket_chat(websocket: WebSocket):
         except Exception:
             pass  # Intentional: client already gone, nothing to send to
     finally:
+        keepalive_task.cancel()
         unregister_websocket(websocket)
         # Safety net: cleanup leftover attachment files if the outer loop
         # broke mid-message before the per-message finally could run.

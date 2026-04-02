@@ -642,10 +642,23 @@ class ReasoningTemplateLibrary:
         except Exception as e:
             logger.error(f"[TemplateLib] Abstraction batch error: {e}")
 
+    # Cached brain instance to avoid per-batch instantiation overhead
+    _shared_brain = None
+    _shared_brain_lock = threading.Lock()
+
+    @classmethod
+    def _get_shared_brain(cls):
+        """Get or create a shared OllamaBrain instance for template abstraction."""
+        if cls._shared_brain is None:
+            with cls._shared_brain_lock:
+                if cls._shared_brain is None:
+                    from aura.brain import OllamaBrain
+                    cls._shared_brain = OllamaBrain(warmup=False)
+        return cls._shared_brain
+
     def _abstract_category(self, category: str, traces: list):
         """Use LLM to abstract reasoning patterns from traces in a category."""
         try:
-            from aura.brain import OllamaBrain
 
             # Build prompt with trace examples (limit to top 10)
             sample = traces[:10]
@@ -671,7 +684,7 @@ class ReasoningTemplateLibrary:
                 ' "applicable_categories": ["category1", "category2"]}'
             )
 
-            brain = OllamaBrain(warmup=False)
+            brain = self._get_shared_brain()
             result = brain.think(prompt, task_type=None)
 
             # Parse JSON from LLM response

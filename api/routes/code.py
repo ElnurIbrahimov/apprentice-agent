@@ -251,6 +251,10 @@ def _get_executor(timeout: int = 30):
     )
 
 
+from api.utils import EndpointRateLimiter
+_code_exec_limiter = EndpointRateLimiter(max_per_minute=20)
+
+
 @router.post("/execute")
 async def execute_code(body: dict):
     """Execute Python code in a sandboxed environment.
@@ -258,6 +262,7 @@ async def execute_code(body: dict):
     Body: { code: str, session_id?: str, timeout?: int }
     Returns: { success, outputs, variables, session_id, execution_time, sandbox }
     """
+    _code_exec_limiter.check()
     code = body.get("code", "").strip()
     if not code:
         raise HTTPException(400, "code is required")

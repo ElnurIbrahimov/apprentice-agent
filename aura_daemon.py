@@ -723,36 +723,13 @@ def main():
         logger.error("IPC server failed to start: %s", e)
 
     try:
-        while not _stop_event.is_set():
-            try:
-                now = time.monotonic()
-
-                if (daemon._agent is None
-                        and daemon._agent_ready.is_set()
-                        and now - daemon._last_agent_attempt >= daemon._agent_retry_interval):
-                    logger.info("Agent is None after failed load -- retrying _load_agent")
-                    daemon._agent_ready.clear()
-                    daemon._load_agent_thread = threading.Thread(target=daemon._load_agent, daemon=True)
-                    daemon._load_agent_thread.start()
-
-                if not daemon._headless and not daemon._screen_tick_pending:
-                    daemon._screen_tick_pending = True
-                    daemon._screen_pool.submit(daemon._tick_screen_wrapper)
-
-                if now - daemon._last_hooks_tick >= daemon.TICK_HOOKS:
-                    daemon._tick_hooks()
-                    daemon._last_hooks_tick = now
-
-                if now - daemon._last_idle_tick >= daemon.TICK_IDLE:
-                    daemon._tick_idle()
-                    daemon._last_idle_tick = now
-
-                daemon._check_dream_time()
-
-            except Exception as e:
-                logger.error("Tick error (non-fatal): %s", e)
-
-            _stop_event.wait(timeout=daemon.TICK_SCREEN)
+        # Reuse the daemon's _run_loop() to avoid duplicating tick logic.
+        # _run_loop checks self._running; wire _stop_event to it.
+        def _on_stop(*_):
+            daemon._running = False
+        _stop_event_cb = threading.Thread(target=lambda: (_stop_event.wait(), _on_stop()), daemon=True)
+        _stop_event_cb.start()
+        daemon._run_loop()
     except KeyboardInterrupt:
         pass
     finally:

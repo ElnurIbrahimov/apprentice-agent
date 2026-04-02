@@ -64,8 +64,8 @@ class MetacognitionLogger:
         }
 
         log_file = self._get_log_file()
-        rotate_jsonl_if_needed(log_file)
         with self._write_lock:
+            rotate_jsonl_if_needed(log_file)
             with open(log_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(log_entry) + "\n")
 

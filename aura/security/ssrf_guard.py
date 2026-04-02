@@ -212,6 +212,7 @@ def safe_request(url: str, method: str = "GET", **kwargs) -> "requests.Response"
 
     # Handle redirects manually with SSRF checks on each hop
     max_redirects = 5
+    visited_urls = {url}  # Track visited URLs to detect redirect loops
     current_url = url  # Track original URL for resolving relative redirects
     while response.is_redirect and max_redirects > 0:
         redirect_url = response.headers.get("Location", "")
@@ -220,6 +221,10 @@ def safe_request(url: str, method: str = "GET", **kwargs) -> "requests.Response"
         # Handle relative redirects (e.g., Location: /path)
         if not redirect_url.startswith(("http://", "https://")):
             redirect_url = urljoin(current_url, redirect_url)
+        # Detect redirect loops
+        if redirect_url in visited_urls:
+            raise ValueError(f"Redirect loop detected: {redirect_url}")
+        visited_urls.add(redirect_url)
         # Validate redirect target against SSRF (returns pinned URL)
         pinned_redirect, redir_hostname = validate_url_safe(redirect_url)
         headers_r = kwargs.get("headers", {}).copy()

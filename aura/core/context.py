@@ -171,7 +171,11 @@ def parse_aura_md(content: str) -> tuple[str, dict]:
             line = line.strip()
             if ":" in line and not line.startswith("#"):
                 key, _, value = line.partition(":")
-                config[key.strip()] = value.strip()
+                val = value.strip()
+                # Strip surrounding quotes (YAML style)
+                if len(val) >= 2 and val[0] == val[-1] and val[0] in ('"', "'"):
+                    val = val[1:-1]
+                config[key.strip()] = val
 
     return body, config
 

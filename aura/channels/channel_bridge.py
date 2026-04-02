@@ -154,8 +154,8 @@ class ChannelBridge:
             try:
                 adapter.stop()
                 logger.info("Stopped channel: %s", source.value)
-            except Exception:
-                logger.debug("Error stopping %s", source.value, exc_info=True)
+            except Exception as e:
+                logger.warning("Error stopping %s: %s", source.value, e)
 
         # Shut down the background event loop
         if self._loop and not self._loop.is_closed():

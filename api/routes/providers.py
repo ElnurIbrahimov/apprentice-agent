@@ -33,6 +33,9 @@ async def list_providers():
 @router.get("/{name}/models")
 async def list_provider_models(name: str):
     """List models for a specific provider."""
+    import re
+    if not re.match(r'^[a-z_]{1,32}$', name):
+        raise HTTPException(400, "Invalid provider name")
     from aura.providers import get_provider
     provider = get_provider(name)
     if not provider:
@@ -59,6 +62,9 @@ def _resolve_env_var(name: str) -> str:
 @router.post("/{name}/key")
 async def set_provider_key(name: str, body: ApiKeyBody):
     """Set API key for a provider (saves to .env file and env vars)."""
+    import re
+    if not re.match(r'^[a-z_]{1,32}$', name):
+        raise HTTPException(400, "Invalid provider name")
     env_var = _resolve_env_var(name)
 
     # Set in current process environment

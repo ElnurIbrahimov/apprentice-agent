@@ -15,6 +15,12 @@ v2 STORM-pattern upgrades:
 - Information saturation: stop iterating when entity novelty < 5%
 - Citation anchoring: post-filter verifies every [N] reference maps to a real source
 - Contradiction detection: flags where sources disagree on the same claim
+
+v3 upgrades:
+- Knowledge Graph integration: query prior knowledge + save discoveries
+- Source verification: claim-level provenance with multi-source scoring
+- Adaptive depth: auto-adjust research budget based on topic complexity
+- Cross-session memory: SQLite-backed research history with 30-day TTL
 """
 
 import hashlib
@@ -325,6 +331,19 @@ class ResearchCache:
                     expires_at REAL NOT NULL
                 )
             """)
+            self._conn.execute("""
+                CREATE TABLE IF NOT EXISTS research_history (
+                    topic_hash TEXT PRIMARY KEY,
+                    topic TEXT NOT NULL,
+                    findings_summary TEXT NOT NULL,
+                    entity_count INTEGER DEFAULT 0,
+                    source_count INTEGER DEFAULT 0,
+                    phases_completed INTEGER DEFAULT 0,
+                    estimated_complexity REAL DEFAULT 0.5,
+                    created_at REAL NOT NULL,
+                    expires_at REAL NOT NULL
+                )
+            """)
             self._conn.commit()
         except Exception as e:
             logger.debug(f"[ResearchCache] init failed (non-critical): {e}")
@@ -386,6 +405,65 @@ class ResearchCache:
         except Exception:
             pass
 
+    # ---- research history (cross-session memory) ----
+
+    def get_research_session(self, topic: str) -> Optional[Dict]:
+        """Retrieve cached research session by topic. Returns None if expired or missing."""
+        if not self._conn:
+            return None
+        try:
+            row = self._conn.execute(
+                "SELECT topic, findings_summary, entity_count, source_count, "
+                "phases_completed, estimated_complexity, created_at, expires_at "
+                "FROM research_history WHERE topic_hash = ? AND expires_at > ?",
+                (self._hash(topic.lower().strip()), time.time())
+            ).fetchone()
+            if not row:
+                return None
+            return {
+                "topic": row[0],
+                "findings_summary": row[1],
+                "entity_count": row[2],
+                "source_count": row[3],
+                "phases_completed": row[4],
+                "estimated_complexity": row[5],
+                "created_at": row[6],
+                "expires_at": row[7],
+                "from_cache": True,
+            }
+        except Exception as e:
+            logger.debug(f"[ResearchCache] get_research_session failed: {e}")
+            return None
+
+    def set_research_session(self, topic: str, findings: Dict, ttl_days: int = 30):
+        """Save research session findings for cross-session recall."""
+        if not self._conn:
+            return
+        try:
+            now = time.time()
+            summary = findings.get("synthesis", "") or findings.get("summary", "")
+            self._conn.execute(
+                "INSERT OR REPLACE INTO research_history "
+                "(topic_hash, topic, findings_summary, entity_count, source_count, "
+                "phases_completed, estimated_complexity, created_at, expires_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    self._hash(topic.lower().strip()),
+                    topic,
+                    summary[:10000],  # Cap at 10k chars
+                    findings.get("entities_tracked", 0),
+                    findings.get("urls_found", 0),
+                    findings.get("phases_completed", 0),
+                    findings.get("estimated_complexity", 0.5),
+                    now,
+                    now + ttl_days * 86400,
+                )
+            )
+            self._conn.commit()
+            logger.debug(f"[ResearchCache] Saved research session for '{topic[:50]}'")
+        except Exception as e:
+            logger.debug(f"[ResearchCache] set_research_session failed: {e}")
+
     # ---- maintenance ----
 
     def cleanup(self):
@@ -395,6 +473,7 @@ class ResearchCache:
             now = time.time()
             self._conn.execute("DELETE FROM search_cache WHERE expires_at < ?", (now,))
             self._conn.execute("DELETE FROM page_cache WHERE expires_at < ?", (now,))
+            self._conn.execute("DELETE FROM research_history WHERE expires_at < ?", (now,))
             self._conn.commit()
         except Exception:
             pass
@@ -648,6 +727,86 @@ class HierarchicalSummarizer:
 
         return citations
 
+    # ---- source verification: claim-level provenance ----
+
+    def _extract_claims_with_sources(self, synthesis: str,
+                                     page_summaries: List[Dict]) -> List[Dict]:
+        """Split synthesis into sentences and match each against source pages
+        by keyword overlap. Returns claim-level verification data.
+
+        Each claim dict: {claim, source_urls, source_count, verification_score}
+        Score: 1.0 = multi-source, 0.5 = single-source, 0.3 = unverified.
+        """
+        try:
+            if not synthesis or not page_summaries:
+                return []
+
+            # Split synthesis into sentences
+            sentences = re.split(r'(?<=[.!?])\s+', synthesis.strip())
+            sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
+
+            if not sentences:
+                return []
+
+            # Build keyword sets for each source page
+            source_keywords = []
+            for ps in page_summaries:
+                summary_text = ps.get("summary", "")
+                url = ps.get("url", "")
+                if not summary_text:
+                    continue
+                # Extract meaningful words (3+ chars, lowered)
+                words = set(
+                    w.lower() for w in re.findall(r'[a-zA-Z]{3,}', summary_text)
+                )
+                source_keywords.append({"url": url, "words": words})
+
+            claims = []
+            for sentence in sentences:
+                # Extract keywords from the claim sentence
+                claim_words = set(
+                    w.lower() for w in re.findall(r'[a-zA-Z]{3,}', sentence)
+                )
+                if not claim_words:
+                    claims.append({
+                        "claim": sentence,
+                        "source_urls": [],
+                        "source_count": 0,
+                        "verification_score": 0.3,
+                    })
+                    continue
+
+                # Match against each source by keyword overlap (33% threshold)
+                matching_urls = []
+                for src in source_keywords:
+                    if not src["words"]:
+                        continue
+                    overlap = len(claim_words & src["words"])
+                    overlap_ratio = overlap / len(claim_words)
+                    if overlap_ratio >= 0.33:
+                        matching_urls.append(src["url"])
+
+                source_count = len(matching_urls)
+                if source_count >= 2:
+                    score = 1.0
+                elif source_count == 1:
+                    score = 0.5
+                else:
+                    score = 0.3
+
+                claims.append({
+                    "claim": sentence,
+                    "source_urls": matching_urls,
+                    "source_count": source_count,
+                    "verification_score": score,
+                })
+
+            return claims
+
+        except Exception as e:
+            logger.debug(f"[Summarizer] _extract_claims_with_sources failed: {e}")
+            return []
+
     # ---- final report ----
 
     def build_final_report(self, synthesis: str, sources: List[Dict], metadata: Dict,
@@ -808,13 +967,14 @@ class DeepResearchTool:
     name = "deep_research"
     description = "Conduct deep research on a topic using STORM outline-first planning and MMR diversity"
 
-    def __init__(self, llm_func: Optional[Callable] = None):
+    def __init__(self, llm_func: Optional[Callable] = None, kg_tool=None):
         self.timeout = PAGE_FETCH_TIMEOUT
         self.overall_timeout = OVERALL_TIMEOUT
         self.searcher = None
         self.tavily = None
         self.browser = None
         self.llm = llm_func
+        self.kg = kg_tool  # Optional KnowledgeGraphTool instance
         self._progress_callback: Optional[Callable[[str], None]] = None
         self._emitter = ResearchProgressEmitter()
         # Shared pool — centralized in aura.pools
@@ -884,6 +1044,264 @@ class DeepResearchTool:
                 logger.debug(f"[DeepResearch] non-critical: {e}")
 
     # ------------------------------------------------------------------
+    #  Knowledge Graph integration
+    # ------------------------------------------------------------------
+
+    def _query_kg_for_priors(self, topic: str) -> Dict:
+        """Query knowledge graph for existing knowledge about this topic.
+
+        Returns dict with prior_nodes (list of dicts) and prior_context (str).
+        Gracefully returns empty on any failure.
+        """
+        try:
+            if not self.kg:
+                return {"prior_nodes": [], "prior_context": ""}
+
+            nodes = self.kg.find_nodes(topic, limit=15)
+            if not nodes:
+                return {"prior_nodes": [], "prior_context": ""}
+
+            prior_nodes = []
+            context_parts = []
+            for node in nodes:
+                node_dict = {
+                    "id": node.id,
+                    "label": node.label,
+                    "type": node.type,
+                }
+                prior_nodes.append(node_dict)
+                context_parts.append(f"- {node.label} ({node.type})")
+
+                # Get related nodes at depth=1 for richer context
+                try:
+                    related = self.kg.get_related(node.id, depth=1)
+                    for rel_node in related.get("nodes", []):
+                        if rel_node.id != node.id:
+                            context_parts.append(
+                                f"  -> related: {rel_node.label} ({rel_node.type})"
+                            )
+                except Exception:
+                    pass  # Best-effort for related nodes
+
+            prior_context = "\n".join(context_parts) if context_parts else ""
+            logger.info(
+                f"[DeepResearch] KG priors: {len(prior_nodes)} nodes found for '{topic[:50]}'"
+            )
+            return {"prior_nodes": prior_nodes, "prior_context": prior_context}
+
+        except Exception as e:
+            logger.debug(f"[DeepResearch] _query_kg_for_priors failed: {e}")
+            return {"prior_nodes": [], "prior_context": ""}
+
+    def _save_research_findings_to_kg(self, findings: Dict) -> Dict[str, int]:
+        """Extract entities from research synthesis and save to knowledge graph.
+
+        Uses LLM to extract structured entities when available, falls back to
+        regex extraction of capitalized phrases.
+
+        Returns counts: {"nodes_added": N, "edges_added": N}
+        """
+        try:
+            if not self.kg:
+                return {"nodes_added": 0, "edges_added": 0}
+
+            synthesis = findings.get("synthesis", "")
+            topic = findings.get("topic", "")
+            if not synthesis and not topic:
+                return {"nodes_added": 0, "edges_added": 0}
+
+            # Valid types from knowledge_graph module
+            valid_node_types = {"concept", "entity", "person", "project", "tool", "event"}
+            valid_edge_types = {"relates_to", "is_a", "part_of", "causes", "uses"}
+
+            entities_to_add = []
+
+            # Try LLM extraction first
+            if self.llm and synthesis:
+                try:
+                    result = self.llm(
+                        f"Extract key entities from this research synthesis about '{topic}'.\n\n"
+                        f"{synthesis[:4000]}\n\n"
+                        "Return as JSON list (no markdown fences):\n"
+                        '[{"label": "Entity Name", "type": "concept|entity|person|project|tool|event", '
+                        '"related_to": ["Other Entity"]}]\n'
+                        "Only include the most important 10-15 entities.",
+                        system_prompt="You are an entity extraction tool. Return valid JSON only."
+                    )
+                    if result:
+                        cleaned = result.strip()
+                        if cleaned.startswith("```"):
+                            cleaned = re.sub(r'^```\w*\n?', '', cleaned)
+                            cleaned = re.sub(r'\n?```$', '', cleaned)
+                            cleaned = cleaned.strip()
+                        entities_to_add = json.loads(cleaned)
+                except Exception as e:
+                    logger.debug(f"[DeepResearch] LLM entity extraction failed: {e}")
+
+            # Fallback: regex for capitalized phrases
+            if not entities_to_add:
+                text = synthesis or topic
+                seen = set()
+                for match in re.finditer(r'(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})', text):
+                    phrase = match.group().strip()
+                    if phrase.lower() not in seen and len(phrase) > 2:
+                        seen.add(phrase.lower())
+                        entities_to_add.append({
+                            "label": phrase,
+                            "type": "concept",
+                            "related_to": [],
+                        })
+                # Cap at 15
+                entities_to_add = entities_to_add[:15]
+
+            # Add the topic itself as a node
+            topic_node = self.kg.add_node(
+                node_type="concept",
+                label=topic[:100],
+                properties={"source": "deep_research"},
+                confidence=0.9,
+                source="deep_research",
+            )
+
+            nodes_added = 1 if topic_node else 0
+            edges_added = 0
+
+            # Add extracted entities and edges
+            node_map = {}  # label -> node
+            if topic_node:
+                node_map[topic.lower()] = topic_node
+
+            for ent in entities_to_add:
+                label = ent.get("label", "")
+                if not label or len(label) < 2:
+                    continue
+                node_type = ent.get("type", "concept")
+                if node_type not in valid_node_types:
+                    node_type = "concept"
+
+                try:
+                    node = self.kg.add_node(
+                        node_type=node_type,
+                        label=label,
+                        properties={"source": "deep_research", "topic": topic[:100]},
+                        confidence=0.7,
+                        source="deep_research",
+                    )
+                    if node:
+                        nodes_added += 1
+                        node_map[label.lower()] = node
+
+                        # Connect to topic node
+                        if topic_node:
+                            edge = self.kg.add_edge(
+                                source_id=topic_node.id,
+                                target_id=node.id,
+                                edge_type="relates_to",
+                                weight=0.6,
+                                properties={"source": "deep_research"},
+                            )
+                            if edge:
+                                edges_added += 1
+                except Exception:
+                    pass
+
+                # Handle explicit relationships
+                for related_label in ent.get("related_to", []):
+                    if not related_label:
+                        continue
+                    related_lower = related_label.lower()
+                    if related_lower in node_map and label.lower() in node_map:
+                        try:
+                            edge = self.kg.add_edge(
+                                source_id=node_map[label.lower()].id,
+                                target_id=node_map[related_lower].id,
+                                edge_type="relates_to",
+                                weight=0.5,
+                                properties={"source": "deep_research"},
+                            )
+                            if edge:
+                                edges_added += 1
+                        except Exception:
+                            pass
+
+            logger.info(
+                f"[DeepResearch] KG save: {nodes_added} nodes, {edges_added} edges "
+                f"for '{topic[:50]}'"
+            )
+            return {"nodes_added": nodes_added, "edges_added": edges_added}
+
+        except Exception as e:
+            logger.debug(f"[DeepResearch] _save_research_findings_to_kg failed: {e}")
+            return {"nodes_added": 0, "edges_added": 0}
+
+    # ------------------------------------------------------------------
+    #  Adaptive depth — topic complexity estimation
+    # ------------------------------------------------------------------
+
+    def _estimate_topic_complexity(self, initial_results: List[Dict]) -> float:
+        """Estimate topic complexity from initial search results (0-1 scale).
+
+        Scoring based on four weighted signals (25% each):
+        - Entity diversity: unique capitalized phrases in snippets
+        - Domain diversity: unique source domains
+        - Temporal references: year patterns (2000-2099)
+        - Technical density: acronyms, dotted identifiers
+        """
+        try:
+            if not initial_results:
+                return 0.5  # Default mid-complexity
+
+            all_snippets = " ".join(
+                r.get("snippet", "") + " " + r.get("title", "")
+                for r in initial_results
+            )
+
+            if not all_snippets.strip():
+                return 0.5
+
+            # 1. Entity diversity — unique capitalized phrases
+            cap_phrases = set()
+            for match in re.finditer(r'[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}', all_snippets):
+                cap_phrases.add(match.group().lower())
+            entity_score = min(len(cap_phrases) / 30.0, 1.0)
+
+            # 2. Domain diversity — unique domains across results
+            domains = set()
+            for r in initial_results:
+                url = r.get("url", "")
+                if url:
+                    try:
+                        domains.add(urlparse(url).netloc.lower())
+                    except Exception:
+                        pass
+            domain_score = min(len(domains) / 10.0, 1.0)
+
+            # 3. Temporal references — year patterns
+            years = set(re.findall(r'\b(20[0-9]{2}|19[0-9]{2})\b', all_snippets))
+            temporal_score = min(len(years) / 5.0, 1.0)
+
+            # 4. Technical density — acronyms + dotted identifiers
+            acronyms = set(re.findall(r'\b[A-Z]{2,6}\b', all_snippets))
+            dotted = set(re.findall(r'\b\w+\.\w+\.\w+\b', all_snippets))
+            tech_count = len(acronyms) + len(dotted)
+            tech_score = min(tech_count / 15.0, 1.0)
+
+            # Weighted average (25% each)
+            complexity = 0.25 * entity_score + 0.25 * domain_score + \
+                         0.25 * temporal_score + 0.25 * tech_score
+
+            logger.info(
+                f"[DeepResearch] Topic complexity: {complexity:.2f} "
+                f"(entities={entity_score:.2f}, domains={domain_score:.2f}, "
+                f"temporal={temporal_score:.2f}, tech={tech_score:.2f})"
+            )
+            return round(complexity, 3)
+
+        except Exception as e:
+            logger.debug(f"[DeepResearch] _estimate_topic_complexity failed: {e}")
+            return 0.5
+
+    # ------------------------------------------------------------------
     #  Query generation
     # ------------------------------------------------------------------
 
@@ -903,7 +1321,7 @@ class DeepResearchTool:
                     lines = result.strip().split('\n')
                     queries = []
                     for line in lines:
-                        cleaned = line.strip().lstrip('0123456789.-) •*')
+                        cleaned = line.strip().lstrip('0123456789.-) \u2022*')
                         cleaned = cleaned.strip('"\'').strip()
                         if cleaned and len(cleaned) > 5:
                             queries.append(cleaned)
@@ -1094,7 +1512,7 @@ Return as JSON (no markdown fences):
         return candidates
 
     # ------------------------------------------------------------------
-    #  Search execution (Tavily → SearXNG)
+    #  Search execution (Tavily -> SearXNG)
     # ------------------------------------------------------------------
 
     def _search(self, query: str, num_results: int = 10) -> Dict:
@@ -1469,11 +1887,55 @@ Return as JSON (no markdown fences):
                 "contradictions": [], "research_plan": {},
                 "entities_tracked": 0, "saturated": False,
                 "citations": [],
+                "kg_priors": {}, "kg_saved": {},
+                "claims_by_verification": {},
+                "estimated_complexity": 0.5,
+                "from_session_cache": False,
             }
 
         # Depth config
         max_pages = {"quick": 5, "standard": 10, "deep": 20}.get(depth, 10)
         max_phase = {"quick": 1, "standard": 4, "deep": 4}.get(depth, 4)
+
+        # --- Cross-session memory: check cache before doing work ---
+        cached_session = self.cache.get_research_session(topic)
+        if cached_session:
+            cached_complexity = cached_session.get("estimated_complexity", 0.5)
+            # For simple topics (complexity < 0.4), return cached findings directly
+            if cached_complexity < 0.4:
+                elapsed = round(time.time() - start_time, 1)
+                self._log_progress(
+                    f"Returning cached research for simple topic '{topic[:50]}' "
+                    f"(complexity={cached_complexity:.2f})"
+                )
+                return {
+                    "success": True,
+                    "topic": topic,
+                    "depth": depth,
+                    "queries_run": 0,
+                    "urls_found": cached_session.get("source_count", 0),
+                    "pages_read": 0,
+                    "time_seconds": elapsed,
+                    "timed_out": False,
+                    "sources": [],
+                    "content": cached_session.get("findings_summary", ""),
+                    "summary": f"Returned cached research for '{topic}' (complexity {cached_complexity:.2f})",
+                    "synthesis": cached_session.get("findings_summary", ""),
+                    "page_summaries": [],
+                    "knowledge_gaps": [],
+                    "phases_completed": cached_session.get("phases_completed", 0),
+                    "cached_results": 0,
+                    "contradictions": [],
+                    "research_plan": {},
+                    "entities_tracked": cached_session.get("entity_count", 0),
+                    "saturated": False,
+                    "citations": [],
+                    "kg_priors": {},
+                    "kg_saved": {},
+                    "claims_by_verification": {},
+                    "estimated_complexity": cached_complexity,
+                    "from_session_cache": True,
+                }
 
         # Phase deadlines
         p1_deadline = start_time + self.overall_timeout * PHASE_BUDGET["broad"]
@@ -1491,6 +1953,10 @@ Return as JSON (no markdown fences):
         synthesis = ""
         contradictions = []
         research_plan = {}
+        kg_priors = {}
+        kg_saved = {}
+        claims_by_verification = {}
+        estimated_complexity = 0.5
 
         # ============================================================
         # PHASE 0: STORM research planning (standard + deep)
@@ -1513,6 +1979,16 @@ Return as JSON (no markdown fences):
             )
 
         # ============================================================
+        # KG PRIORS: Query knowledge graph after plan phase
+        # ============================================================
+        if self.kg and time.time() < overall_deadline:
+            kg_priors = self._query_kg_for_priors(topic)
+            if kg_priors.get("prior_context"):
+                self._log_progress(
+                    f"KG priors: {len(kg_priors.get('prior_nodes', []))} relevant nodes found"
+                )
+
+        # ============================================================
         # PHASE 1: Broad search (with plan-derived queries + MMR)
         # ============================================================
         all_urls, queries_completed, cached = self._phase1_broad_search(
@@ -1523,6 +1999,29 @@ Return as JSON (no markdown fences):
 
         if time.time() > overall_deadline:
             timed_out = True
+
+        # ============================================================
+        # ADAPTIVE DEPTH: Estimate complexity and adjust budgets
+        # ============================================================
+        if all_urls and not timed_out:
+            estimated_complexity = self._estimate_topic_complexity(all_urls)
+
+            if estimated_complexity > 0.7:
+                # Complex topic — increase gap + targeted budgets
+                extra_time = self.overall_timeout * 0.10  # Borrow 10% more
+                p2_deadline += extra_time * 0.5
+                p3_deadline += extra_time * 0.5
+                self._log_progress(
+                    f"Adaptive depth: high complexity ({estimated_complexity:.2f}), "
+                    f"extending gap+targeted budgets"
+                )
+            elif estimated_complexity < 0.3:
+                # Simple topic — reduce max_pages to save time
+                max_pages = max(3, max_pages // 2)
+                self._log_progress(
+                    f"Adaptive depth: low complexity ({estimated_complexity:.2f}), "
+                    f"reduced max_pages to {max_pages}"
+                )
 
         # Fetch pages for Phase 1 results (use remaining Phase 1 + some Phase 2 budget)
         if not timed_out and all_urls:
@@ -1634,7 +2133,40 @@ Return as JSON (no markdown fences):
             if synthesis:
                 synthesis = self.summarizer.anchor_citations(synthesis, sources_for_synthesis)
 
+            # Source verification: claim-level provenance
+            if synthesis and page_summaries:
+                claims = self.summarizer._extract_claims_with_sources(
+                    synthesis, page_summaries
+                )
+                if claims:
+                    verified = [c for c in claims if c["verification_score"] >= 1.0]
+                    single_source = [c for c in claims if c["verification_score"] == 0.5]
+                    unverified = [c for c in claims if c["verification_score"] <= 0.3]
+                    claims_by_verification = {
+                        "verified": verified,
+                        "single_source_warnings": single_source,
+                        "unverified": unverified,
+                        "total_claims": len(claims),
+                        "verification_rate": (
+                            len(verified) / len(claims) if claims else 0.0
+                        ),
+                    }
+                    self._log_progress(
+                        f"Source verification: {len(verified)} verified, "
+                        f"{len(single_source)} single-source, "
+                        f"{len(unverified)} unverified out of {len(claims)} claims"
+                    )
+
             phases_completed = 4
+
+        # ============================================================
+        # KG SAVE: Save research findings to knowledge graph
+        # ============================================================
+        if self.kg and (synthesis or page_summaries):
+            kg_saved = self._save_research_findings_to_kg({
+                "synthesis": synthesis,
+                "topic": topic,
+            })
 
         # ============================================================
         # Build output
@@ -1724,6 +2256,19 @@ Return as JSON (no markdown fences):
         except Exception:
             pass
 
+        # --- Cross-session memory: save this research session ---
+        try:
+            self.cache.set_research_session(topic, {
+                "synthesis": synthesis,
+                "summary": summary_text,
+                "entities_tracked": self.saturation.total_entities,
+                "urls_found": len(all_urls),
+                "phases_completed": phases_completed,
+                "estimated_complexity": estimated_complexity,
+            })
+        except Exception:
+            pass
+
         return {
             # Original keys (backward-compatible)
             "success": True,
@@ -1750,6 +2295,12 @@ Return as JSON (no markdown fences):
             "saturated": self.saturation.is_saturated(),
             # v3 Structured citations for frontend rendering
             "citations": structured_citations,
+            # v3 new keys
+            "kg_priors": kg_priors,
+            "kg_saved": kg_saved,
+            "claims_by_verification": claims_by_verification,
+            "estimated_complexity": estimated_complexity,
+            "from_session_cache": False,
         }
 
     # ------------------------------------------------------------------
@@ -1911,6 +2462,10 @@ Return as JSON (no markdown fences):
                         "contradictions": [], "research_plan": {},
                         "entities_tracked": 0, "saturated": False,
                         "citations": [],
+                        "kg_priors": {}, "kg_saved": {},
+                        "claims_by_verification": {},
+                        "estimated_complexity": 0.5,
+                        "from_session_cache": False,
                     }
         except Exception as e:
             return {
@@ -1928,6 +2483,10 @@ Return as JSON (no markdown fences):
                 "contradictions": [], "research_plan": {},
                 "entities_tracked": 0, "saturated": False,
                 "citations": [],
+                "kg_priors": {}, "kg_saved": {},
+                "claims_by_verification": {},
+                "estimated_complexity": 0.5,
+                "from_session_cache": False,
             }
 
 

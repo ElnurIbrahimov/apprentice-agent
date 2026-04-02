@@ -396,20 +396,33 @@ class TelegramChannel(ChannelAdapter):
 
         return ids
 
+    _rejection_log_count: int = 0
+    _rejection_log_last: float = 0.0
+
     def _is_user_allowed(self, user_id: int) -> bool:
         """Check if user is allowed to interact with the bot."""
+        import time as _t
         allowed = self._get_allowed_users()
         if not allowed:
-            logger.warning(
-                "[TelegramChannel] Rejected user %s -- no allowed users configured",
-                user_id,
-            )
+            # Rate-limit rejection logs: first 3, then once per 60s
+            now = _t.time()
+            self._rejection_log_count += 1
+            if self._rejection_log_count <= 3 or (now - self._rejection_log_last) > 60:
+                logger.warning(
+                    "[TelegramChannel] Rejected user %s -- no allowed users configured (count=%d)",
+                    user_id, self._rejection_log_count,
+                )
+                self._rejection_log_last = now
             return False
         if user_id not in allowed:
-            logger.warning(
-                "[TelegramChannel] Rejected user %s -- not in allowed list",
-                user_id,
-            )
+            now = _t.time()
+            self._rejection_log_count += 1
+            if self._rejection_log_count <= 3 or (now - self._rejection_log_last) > 60:
+                logger.warning(
+                    "[TelegramChannel] Rejected user %s -- not in allowed list (count=%d)",
+                    user_id, self._rejection_log_count,
+                )
+                self._rejection_log_last = now
             return False
         return True
 

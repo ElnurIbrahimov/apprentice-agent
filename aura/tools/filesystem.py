@@ -244,9 +244,16 @@ class FileSystemTool:
                 # Absolute path - pre-check before expensive resolve()
                 path_str = str(p)
                 sandbox_str = str(self.sandbox_dir)
-                if not path_str.startswith(sandbox_str):
-                    logger.warning(f"[SECURITY] Blocked absolute path outside sandbox: {path}")
-                    return None, "Absolute paths outside sandbox not allowed"
+                # Case-insensitive comparison on Windows
+                import sys
+                if sys.platform == "win32":
+                    if not path_str.lower().startswith(sandbox_str.lower()):
+                        logger.warning("[SECURITY] Blocked absolute path outside sandbox")
+                        return None, "Absolute paths outside sandbox not allowed"
+                else:
+                    if not path_str.startswith(sandbox_str):
+                        logger.warning("[SECURITY] Blocked absolute path outside sandbox")
+                        return None, "Absolute paths outside sandbox not allowed"
 
             # === ATOMIC RESOLUTION ===
             # resolve() follows ALL symlinks and normalizes the path

@@ -23,10 +23,11 @@ jobs:
       - run: pip install ruff
 
       - name: Ruff lint
-        run: ruff check aura/ api/ tests/ --select E,F,W --ignore E501,E402,F401,W503 || true
+        run: ruff check aura/ api/ tests/ --select E,F,W --ignore E501,E402,F401,W503
 
       - name: Ruff format check
-        run: ruff format --check aura/ api/ tests/ || true
+        run: ruff format --check aura/ api/ tests/
+        continue-on-error: true
 
   tests:
     name: Tests
@@ -50,9 +51,8 @@ jobs:
           python -m pytest tests/ \
             -x \
             --maxfail=5 \
-            --timeout=30 \
             --ignore=tests/integration \
-            -q 2>&1 || true
+            -q
 
   security:
     name: Security Scan

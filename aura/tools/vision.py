@@ -59,26 +59,11 @@ def _get_available_vram_gb() -> Optional[float]:
 
 
 def _can_fit_model(model_name: str) -> bool:
-    """Check if a model can fit in available VRAM."""
-    vram_free = _get_available_vram_gb()
-    if vram_free is None:
-        return True  # Can't check, assume it fits (CPU fallback)
+    """Check if a model can fit in available VRAM.
 
-    # Look up estimated size
-    base_name = model_name.split("/")[-1].lower().replace("microsoft/", "")
-    vram_needed = Config.VISION_MODEL_VRAM.get(base_name)
-
-    # Also try the raw model name
-    if vram_needed is None:
-        vram_needed = Config.VISION_MODEL_VRAM.get(model_name)
-
-    if vram_needed is None:
-        return True  # Unknown model, let it try
-
-    if vram_free < vram_needed:
-        logger.info("[Vision] Skipping %s: needs %.1fGB VRAM, only %.1fGB free",
-                     model_name, vram_needed, vram_free)
-        return False
+    Note: All vision models are now cloud-based, so this always returns True.
+    Kept for backward compatibility with callers.
+    """
     return True
 
 

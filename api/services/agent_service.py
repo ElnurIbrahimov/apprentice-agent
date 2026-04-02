@@ -381,16 +381,26 @@ def detect_action_mode(message: str) -> Optional[str]:
 
 def _keyword_fallback(message: str) -> Optional[str]:
     """Fallback keyword-based detection when LLM classifier is unavailable."""
+    import re as _re
     msg_lower = message.lower().strip()
 
-    # Check for trigger words (longer phrases first to avoid partial matches)
+    # Check for trigger words (longer phrases first to avoid partial matches).
+    # Use word boundaries to prevent "research" matching inside "re-searching".
     sorted_triggers = sorted(ACTION_TRIGGERS.keys(), key=len, reverse=True)
 
     for trigger in sorted_triggers:
-        if trigger in msg_lower:
-            mode = ACTION_TRIGGERS[trigger]
-            logger.info(f"[ActionMode] Keyword fallback '{trigger}' -> mode: {mode}")
-            return mode
+        # Multi-word phrases: plain substring match is fine (low false-positive risk)
+        # Single words: require word boundary to avoid substring false positives
+        if " " in trigger:
+            if trigger in msg_lower:
+                mode = ACTION_TRIGGERS[trigger]
+                logger.info(f"[ActionMode] Keyword fallback '{trigger}' -> mode: {mode}")
+                return mode
+        else:
+            if _re.search(r'\b' + _re.escape(trigger) + r'\b', msg_lower):
+                mode = ACTION_TRIGGERS[trigger]
+                logger.info(f"[ActionMode] Keyword fallback '{trigger}' -> mode: {mode}")
+                return mode
 
     return None
 

@@ -361,10 +361,17 @@ class ExtensionChannel(ChannelAdapter):
 
     async def _handle_message(self, conn: _Connection, raw: str) -> None:
         """Parse and route a single incoming message."""
+        # Reject oversized messages
+        if len(raw) > 1_000_000:
+            await self._send_json(conn, {"type": "error", "error": "Message too large (1MB max)"})
+            return
         try:
             msg = json.loads(raw)
         except json.JSONDecodeError:
             await self._send_json(conn, {"type": "error", "error": "Invalid JSON"})
+            return
+        if not isinstance(msg, dict):
+            await self._send_json(conn, {"type": "error", "error": "Expected JSON object"})
             return
 
         msg_type = msg.get("type", "")

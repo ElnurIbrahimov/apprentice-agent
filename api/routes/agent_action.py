@@ -84,8 +84,8 @@ async def agent_action(body: dict):
                     "description": f"Loop guard: {guard_result.reason}. {guard_result.fallback_message}",
                     "loop_guard": True,
                 }
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("[AgentAction] Loop guard check failed: %s", e)
 
     try:
         async with httpx.AsyncClient(timeout=30) as c:
@@ -107,8 +107,8 @@ async def agent_action(body: dict):
     if m:
         try:
             raw_action = _json.loads(m.group())
-        except Exception:
-            pass
+        except (_json.JSONDecodeError, ValueError, TypeError) as e:
+            logger.debug("[AgentAction] JSON parse failed: %s", e)
 
     if not raw_action:
         raw_action = {
@@ -123,8 +123,8 @@ async def agent_action(body: dict):
         planned = planner.parse(raw_action)
         raw_action["safety_class"]    = planned.safety_class.value
         raw_action["success_signals"] = planned.success_signals
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("[AgentAction] Planner enrichment failed: %s", e)
 
     # Telemetry
     try:
@@ -136,8 +136,8 @@ async def agent_action(body: dict):
             model_used=model,
             extra={"action": raw_action.get("action"), "phase": "plan"},
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("[AgentAction] Telemetry emit failed: %s", e)
 
     return raw_action
 

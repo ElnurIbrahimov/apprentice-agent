@@ -1106,9 +1106,23 @@ IMPORTANT: If the user asks about something you are not sure about, something re
                 tool_calls_total += step_result.get("tool_calls_count", 0)
                 consecutive_failures = step_result.get("consecutive_failures", consecutive_failures)
 
-                # Prevent unbounded message growth — keep system+goal + last N messages
+                # Prevent unbounded message growth — keep system+goal + last N messages.
+                # Trim at a safe boundary: never split a tool_calls/tool result pair.
                 if len(messages) > 30:
-                    messages = messages[:2] + messages[-28:]
+                    tail = messages[2:]  # skip system + goal
+                    # Find safe trim point — walk from oldest toward newest,
+                    # ensure we don't start mid-pair (orphaned tool result).
+                    trim_start = len(tail) - 28
+                    if trim_start < 0:
+                        trim_start = 0
+                    # If the trim point lands on a "tool" message (result),
+                    # back up to include the preceding assistant message with tool_calls.
+                    while trim_start < len(tail) and tail[trim_start].get("role") == "tool":
+                        trim_start -= 1
+                        if trim_start < 0:
+                            trim_start = 0
+                            break
+                    messages = messages[:2] + tail[trim_start:]
 
                 # === Adaptive Re-planning (Roadmap 5.4) ===
                 if task_plan and self.adaptive_planner and status == "continue":
@@ -1322,6 +1336,14 @@ IMPORTANT: If the user asks about something you are not sure about, something re
         """
         MAX_RESULT = 8000
 
+        def _safe_truncate_json(obj, limit: int = MAX_RESULT) -> str:
+            """Serialize and truncate without producing invalid JSON."""
+            raw = json.dumps(obj, default=str)
+            if len(raw) <= limit:
+                return raw
+            # Truncate the string representation and wrap as valid JSON
+            return json.dumps({"result": raw[:limit - 60], "_truncated": True})
+
         # 1. Try ToolExecutor first — handles dev tools + aliases + sandbox bypass
         if self._tool_executor:
             result = self._tool_executor.execute(tool_name, args)
@@ -1332,7 +1354,7 @@ IMPORTANT: If the user asks about something you are not sure about, something re
                     if isinstance(parsed, dict) and parsed.get("error", "").startswith("Unknown tool"):
                         pass  # Fall through to agent tools
                     else:
-                        return result[:MAX_RESULT]
+                        return result[:MAX_RESULT] if len(result) <= MAX_RESULT else json.dumps({"result": result[:MAX_RESULT - 60], "_truncated": True})
                 except (json.JSONDecodeError, ValueError):
                     return result[:MAX_RESULT]
 
@@ -1346,21 +1368,16 @@ IMPORTANT: If the user asks about something you are not sure about, something re
                     action = " ".join(f"{v}" for v in args.values()) if isinstance(args, dict) else str(args)
                 if hasattr(tool, 'execute'):
                     result = tool.execute(action)
-                    return json.dumps(result, default=str)[:MAX_RESULT]
+                    return _safe_truncate_json(result)
             except Exception as e:  # Catch-all: unknown tool implementations may raise anything
                 return json.dumps({"error": f"Tool '{tool_name}' failed: {e}"})
 
-        # 3. Web search fallback chain
+        # 3. Web search fallback chain (shared implementation)
         if tool_name in ("search_web", "web_search", "search"):
             query = args.get("query", args.get("action", str(args)))
-            for sn in ("tavily_search", "brave_search", "web_search"):
-                if sn in self.tools:
-                    try:
-                        result = self.tools[sn].execute(f"search {query}")
-                        return json.dumps(result, default=str)[:MAX_RESULT]
-                    except (AttributeError, KeyError, TypeError, ValueError, ConnectionError, TimeoutError, OSError) as e:
-                        logger.debug(f"[Agent] Search fallback {sn} failed: {e}")
-                        continue
+            from aura.tools.search_fallback import web_search_with_fallback
+            result = web_search_with_fallback(query=query, tool_registry=self.tools)
+            return _safe_truncate_json(result)
 
         return json.dumps({"error": f"No handler for tool: {tool_name}"})
 

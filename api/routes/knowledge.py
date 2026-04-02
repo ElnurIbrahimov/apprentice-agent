@@ -63,9 +63,13 @@ class SearchResponse(BaseModel):
 
 # -- Endpoints -------------------------------------------------------------
 
+from api.utils import EndpointRateLimiter
+_knowledge_save_limiter = EndpointRateLimiter(max_per_minute=30)
+
 @router.post("/save", response_model=SaveResponse)
 async def save_knowledge(body: SaveRequest):
     """Save a web selection into AURA's unified memory."""
+    _knowledge_save_limiter.check()
     mem = _get_unified_memory()
     if mem is None:
         raise HTTPException(status_code=503, detail="Memory store unavailable.")

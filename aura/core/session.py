@@ -16,6 +16,11 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
+def _is_safe_session_id(session_id: str) -> bool:
+    """Reject session IDs containing path traversal characters."""
+    return ".." not in session_id and "/" not in session_id and "\\" not in session_id
+
+
 class AgenticSession:
     """Persist full agentic sessions to JSON on disk."""
 
@@ -80,7 +85,7 @@ class AgenticSession:
 
     def load(self, session_id: str) -> list[dict]:
         """Load session from disk. Returns messages list."""
-        if ".." in session_id or "/" in session_id or "\\" in session_id:
+        if not _is_safe_session_id(session_id):
             logger.warning(f"[Session] Rejected path traversal in session_id: {session_id}")
             return []
         session_file = self.sessions_dir / session_id / "session.json"
@@ -134,7 +139,7 @@ class AgenticSession:
 
     def delete(self, session_id: str) -> bool:
         """Delete a session directory."""
-        if ".." in session_id or "/" in session_id or "\\" in session_id:
+        if not _is_safe_session_id(session_id):
             logger.warning(f"[Session] Rejected path traversal in session_id: {session_id}")
             return False
         session_dir = self.sessions_dir / session_id
@@ -189,7 +194,8 @@ class AgenticSession:
                     if isinstance(tc, dict):
                         serialized_calls.append(tc)
                     else:
-                        # Pydantic ToolCall object
+                        # Pydantic ToolCall object — preserve id for tool result mapping
+                        tc_id = getattr(tc, "id", None) or ""
                         func = getattr(tc, "function", None)
                         if func:
                             args = getattr(func, "arguments", {})
@@ -198,22 +204,28 @@ class AgenticSession:
                                     args = json.loads(args)
                                 except (json.JSONDecodeError, TypeError):
                                     pass
-                            serialized_calls.append({
+                            entry = {
                                 "function": {
                                     "name": getattr(func, "name", ""),
                                     "arguments": args,
                                 }
-                            })
+                            }
+                            if tc_id:
+                                entry["id"] = tc_id
+                            serialized_calls.append(entry)
                 result["tool_calls"] = serialized_calls
             else:
                 result[key] = value
         return result
 
     def _auto_title(self, content: str) -> str:
-        """Title from first user message (first 60 chars)."""
+        """Title from first user message (first 60 chars), sanitized."""
         if not content:
             return "Untitled"
-        title = content.strip().split("\n")[0][:60]
+        # Strip control chars, ANSI escapes, and null bytes
+        import re
+        cleaned = re.sub(r'[\x00-\x1f\x7f]|\x1b\[[0-9;]*m', '', content.strip())
+        title = cleaned.split("\n")[0][:60]
         if len(content.strip().split("\n")[0]) > 60:
             title += "..."
         return title

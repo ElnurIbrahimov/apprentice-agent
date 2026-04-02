@@ -127,6 +127,7 @@ class IdlePresenceEngine:
             "background_tasks_run": 0,
             "reflections_generated": 0,
             "load_computations": 0,
+            "consecutive_failures": 0,
         }
 
         logger.info("[IdlePresence] Engine initialized")
@@ -436,11 +437,20 @@ class IdlePresenceEngine:
                 if idle_seconds > 15:
                     self._run_idle_tasks(idle_seconds)
                     self._stats["background_tasks_run"] += 1
+                    self._stats["consecutive_failures"] = 0
 
                 time.sleep(self._idle_task_interval)
 
             except Exception as e:
-                logger.error(f"[IdlePresence] Background loop error: {e}")
+                self._stats["consecutive_failures"] += 1
+                n = self._stats["consecutive_failures"]
+                if n <= 3:
+                    logger.error(f"[IdlePresence] Background loop error ({n}): {e}")
+                elif n == 10:
+                    logger.warning(f"[IdlePresence] 10 consecutive failures — idle tasks may be broken: {e}")
+                # After 3 failures, only log every 10th to avoid log flooding
+                elif n % 10 == 0:
+                    logger.warning(f"[IdlePresence] {n} consecutive failures: {e}")
                 time.sleep(30)
 
     def _get_idle_duration(self) -> float:

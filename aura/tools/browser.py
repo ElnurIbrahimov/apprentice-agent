@@ -126,6 +126,11 @@ class BrowserTool:
         self._active_tab: Optional[str] = None
         self._tab_counter: int = 0
 
+        # World-class upgrades
+        self._vision_tool = None       # Lazy VisionTool
+        self._downloads: Dict[str, dict] = {}  # Download tracking
+        self.session_file = self.output_dir / "session.json"
+
     # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
@@ -1021,6 +1026,254 @@ class BrowserTool:
         except Exception as e:
             return {"success": False, "error": str(e), "query": query}
 
+    # ==================================================================
+    # WORLD-CLASS UPGRADES
+    # ==================================================================
+
+    def _heal_selector(self, failed_selector: str, error_context: str = "") -> Optional[str]:
+        """Try alternative selectors when CSS selector fails."""
+        if self._page is None:
+            return None
+        try:
+            for tag in ["button", "a", "input", "select", "textarea", "*"]:
+                candidates = [
+                    f"{tag}[aria-label]",
+                    f"{tag}[role='button']",
+                    f"{tag}[role='link']",
+                ]
+                for sel in candidates:
+                    try:
+                        el = self._page.query_selector(sel)
+                        if el and el.is_visible():
+                            return sel
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        return None
+
+    def visual_query(self, question: str) -> dict:
+        """Screenshot current page and ask vision model a question about it."""
+        try:
+            self._ensure_browser()
+            ss = self.screenshot()
+            if not ss.get("success"):
+                return {"success": False, "error": "Screenshot failed"}
+
+            if self._vision_tool is None:
+                from aura.tools.vision import VisionTool
+                self._vision_tool = VisionTool()
+
+            import tempfile, os
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                tmp.write(base64.b64decode(ss["base64"]))
+                tmp_path = tmp.name
+
+            result = self._vision_tool.analyze_image(tmp_path, question)
+            os.unlink(tmp_path)
+
+            return {
+                "success": True,
+                "analysis": result.get("description", result.get("content", str(result))),
+                "question": question,
+            }
+        except ImportError:
+            return {"success": False, "error": "VisionTool not available"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def visual_click(self, description: str) -> dict:
+        """Use vision to locate an element by description and click it."""
+        try:
+            self._ensure_browser()
+            ss = self.screenshot()
+            if not ss.get("success"):
+                return {"success": False, "error": "Screenshot failed"}
+
+            if self._vision_tool is None:
+                from aura.tools.vision import VisionTool
+                self._vision_tool = VisionTool()
+
+            import tempfile, os, re as _re
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                tmp.write(base64.b64decode(ss["base64"]))
+                tmp_path = tmp.name
+
+            prompt = (
+                f"Find the UI element matching: '{description}'. "
+                "Return ONLY the pixel coordinates as: x,y (from top-left). "
+                "If not found, return 'not_found'."
+            )
+            result = self._vision_tool.analyze_image(tmp_path, prompt)
+            os.unlink(tmp_path)
+
+            text = result.get("description", result.get("content", str(result)))
+            if "not_found" in text.lower():
+                return {"success": False, "error": f"Element not found: {description}"}
+
+            match = _re.search(r'(\d+)\s*,\s*(\d+)', text)
+            if not match:
+                return {"success": False, "error": f"Could not parse coordinates from: {text[:100]}"}
+
+            x, y = int(match.group(1)), int(match.group(2))
+            self._page.mouse.click(x, y)
+            return {"success": True, "description": description, "coordinates": [x, y]}
+        except ImportError:
+            return {"success": False, "error": "VisionTool not available"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _get_page_context(self) -> dict:
+        """Extract current page context for LLM planning."""
+        try:
+            self._ensure_browser()
+            return {
+                "url": self._page.url if self._page else "about:blank",
+                "title": self._page.title() if self._page else "",
+                "text": self.get_page_text().get("text", "")[:2000],
+                "forms_count": len(self.get_page_forms().get("forms", [])),
+                "links_count": len(self.get_page_links().get("links", [])),
+            }
+        except Exception:
+            return {"url": "unknown", "title": "", "text": "", "forms_count": 0, "links_count": 0}
+
+    def plan_and_execute(self, goal: str, max_steps: int = 10) -> dict:
+        """Decompose a goal into browser steps via LLM, execute with re-planning."""
+        try:
+            self._ensure_browser()
+            try:
+                from aura.core.brain import OllamaBrain
+                brain = OllamaBrain()
+            except Exception:
+                return {"success": False, "error": "LLM not available for planning"}
+
+            execution_log = []
+            for replan in range(3):
+                ctx = self._get_page_context()
+                prompt = (
+                    f"Goal: {goal}\n\nCurrent page: {ctx['url']} - {ctx['title']}\n"
+                    f"Text: {ctx['text'][:1000]}\n\n"
+                    f"Return a JSON array of steps. Each step: "
+                    f'[{{"action":"click|fill|wait|screenshot|get_text","selector":"...","value":"...","description":"..."}}]'
+                )
+                try:
+                    import re as _re
+                    resp = brain.chat(prompt) if hasattr(brain, 'chat') else brain.think(prompt)
+                    match = _re.search(r'\[.*\]', resp, _re.DOTALL)
+                    if not match:
+                        return {"success": False, "error": f"Plan not JSON: {resp[:200]}"}
+                    plan = json.loads(match.group())
+                except Exception as e:
+                    return {"success": False, "error": f"Planning failed: {e}"}
+
+                failed = False
+                for i, step in enumerate(plan[:max_steps]):
+                    act = step.get("action", "").lower()
+                    try:
+                        if act == "click":
+                            r = self.click(step.get("selector", ""))
+                        elif act == "fill":
+                            r = self.fill(step.get("selector", ""), step.get("value", ""))
+                        elif act == "wait":
+                            r = self.wait_for_text(step.get("value", ""), timeout=5)
+                        elif act == "screenshot":
+                            r = self.screenshot()
+                        elif act == "get_text":
+                            r = self.get_page_text()
+                        else:
+                            r = {"success": False, "error": f"Unknown: {act}"}
+
+                        execution_log.append({"step": i + 1, "desc": step.get("description", act), "success": r.get("success", False)})
+                        if not r.get("success"):
+                            failed = True
+                            break
+                    except Exception as e:
+                        execution_log.append({"step": i + 1, "desc": step.get("description", act), "success": False, "error": str(e)})
+                        failed = True
+                        break
+
+                if not failed:
+                    return {"success": True, "goal": goal, "steps": len(execution_log), "log": execution_log}
+
+            return {"success": False, "goal": goal, "log": execution_log, "error": "Plan failed after re-planning"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def download(self, url_or_selector: str) -> dict:
+        """Download a file by URL or by clicking a download link."""
+        try:
+            self._ensure_browser()
+            is_url = url_or_selector.startswith(("http://", "https://"))
+
+            with self._page.expect_download(timeout=30000) as dl_info:
+                if is_url:
+                    self._page.goto(url_or_selector)
+                else:
+                    self._page.click(url_or_selector, timeout=10000)
+
+            dl = dl_info.value
+            filename = dl.suggested_filename or "download"
+            target = self.output_dir / filename
+            dl.save_as(str(target))
+            size = target.stat().st_size if target.exists() else 0
+            self._downloads[filename] = {"path": str(target), "filename": filename, "size": size}
+            return {"success": True, "filename": filename, "path": str(target), "size": size}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def get_downloads(self) -> dict:
+        """List all downloads from this session."""
+        return {"success": True, "count": len(self._downloads), "downloads": list(self._downloads.values())}
+
+    def save_session(self, path: Optional[str] = None) -> dict:
+        """Save tab URLs and scroll positions to JSON."""
+        try:
+            self._ensure_browser()
+            tabs = []
+            for tid, page in self._tabs.items():
+                try:
+                    scroll = page.evaluate("() => ({x: window.scrollX, y: window.scrollY})")
+                except Exception:
+                    scroll = {"x": 0, "y": 0}
+                tabs.append({"tab_id": tid, "url": page.url, "title": page.title(), "scroll": scroll})
+
+            save_path = Path(path) if path else self.session_file
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            save_path.write_text(json.dumps({"active_tab": self._active_tab, "tabs": tabs}, indent=2))
+            return {"success": True, "path": str(save_path), "tab_count": len(tabs)}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def restore_session(self, path: Optional[str] = None) -> dict:
+        """Restore tabs and scroll positions from saved session."""
+        try:
+            self._ensure_browser()
+            load_path = Path(path) if path else self.session_file
+            if not load_path.exists():
+                return {"success": False, "error": f"Session file not found: {load_path}"}
+
+            session = json.loads(load_path.read_text())
+            restored = 0
+            for i, tab_data in enumerate(session.get("tabs", [])):
+                try:
+                    if i == 0 and self._page:
+                        self._page.goto(tab_data["url"], wait_until="domcontentloaded", timeout=15000)
+                    else:
+                        page = self._context.new_page()
+                        tid = self._make_tab_id()
+                        self._tabs[tid] = page
+                        page.goto(tab_data["url"], wait_until="domcontentloaded", timeout=15000)
+
+                    scroll = tab_data.get("scroll", {})
+                    self._page.evaluate(f"window.scrollTo({scroll.get('x', 0)}, {scroll.get('y', 0)})")
+                    restored += 1
+                except Exception as e:
+                    logger.debug(f"[BrowserTool] Tab restore failed: {e}")
+
+            return {"success": True, "tabs_restored": restored}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     def close(self) -> dict:
         """Close the browser and all tabs.
 
@@ -1147,6 +1400,22 @@ class BrowserTool:
                 width=kwargs.get("width", 1280),
                 height=kwargs.get("height", 720),
             )
+
+        # --- World-class upgrades ---
+        elif action_lower == "visual_query":
+            return self.visual_query(question=kwargs.get("question", ""))
+        elif action_lower == "visual_click":
+            return self.visual_click(description=kwargs.get("description", ""))
+        elif action_lower == "plan_and_execute":
+            return self.plan_and_execute(goal=kwargs.get("goal", ""))
+        elif action_lower == "download":
+            return self.download(url_or_selector=kwargs.get("url") or kwargs.get("selector", ""))
+        elif action_lower == "get_downloads":
+            return self.get_downloads()
+        elif action_lower == "save_session":
+            return self.save_session(path=kwargs.get("path"))
+        elif action_lower == "restore_session":
+            return self.restore_session(path=kwargs.get("path"))
 
         # --- Original actions (backward compat) ---
         elif "open" in action_lower or "goto" in action_lower or "navigate" in action_lower:

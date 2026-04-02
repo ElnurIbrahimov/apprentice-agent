@@ -347,25 +347,23 @@ class TestDeadStubRemoval:
 
 
 # ============================================================================
-# Phase 2: Deprecated channels module deleted
+# Phase 2: Channels module is ACTIVE (Telegram, Extension channels)
+# The earlier test assumed channels would be deleted; it was not — channels are live.
 # ============================================================================
 
-class TestChannelsDeleted:
-    """Verify the deprecated aura/channels module has been removed."""
+class TestChannelsActive:
+    """Verify the aura/channels module exists (it is actively used)."""
 
-    def test_channels_directory_gone(self):
+    def test_channels_directory_exists(self):
         channels_path = Path(__file__).parent.parent / "aura" / "channels"
-        assert not channels_path.exists(), f"Deprecated channels dir should be deleted: {channels_path}"
+        assert channels_path.exists(), f"aura/channels should exist — it contains TelegramChannel and ExtensionChannel"
 
-    def test_no_channels_import_anywhere(self):
-        """No live code should import from aura.channels."""
-        import subprocess
-        result = subprocess.run(
-            ["python", "-c", "from aura.channels import get_channel_manager"],
-            capture_output=True, text=True,
-            cwd=str(Path(__file__).parent.parent),
-        )
-        assert result.returncode != 0, "aura.channels should not be importable"
+    def test_channels_has_key_modules(self):
+        """Verify key channel modules are present."""
+        channels_path = Path(__file__).parent.parent / "aura" / "channels"
+        assert (channels_path / "telegram_channel.py").exists()
+        assert (channels_path / "extension_channel.py").exists()
+        assert (channels_path / "channel_bridge.py").exists()
 
 
 # ============================================================================

@@ -68,9 +68,9 @@ class MemoryCandidate:
     content_hash: str = field(default="", init=False)
 
     def __post_init__(self) -> None:
-        self.content_hash = hashlib.md5(
+        self.content_hash = hashlib.sha256(
             self.content[:300].lower().strip().encode()
-        ).hexdigest()[:16]
+        ).hexdigest()[:24]
 
 
 @dataclass

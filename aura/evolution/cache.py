@@ -5,17 +5,18 @@ Evaluation Cache — SHA256-keyed memoization for (candidate, example) pairs.
 import json
 import logging
 import os
+from collections import OrderedDict
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 
 class EvaluationCache:
-    """Caches evaluation results to avoid redundant LLM calls."""
+    """Caches evaluation results to avoid redundant LLM calls (LRU eviction)."""
 
     def __init__(self, cache_dir: Optional[str] = None):
-        self._memory: Dict[str, float] = {}
+        self._memory: OrderedDict[str, float] = OrderedDict()
         self._cache_path = Path(cache_dir) / "eval_cache.json" if cache_dir else None
         self._hits = 0
         self._misses = 0
@@ -35,6 +36,8 @@ class EvaluationCache:
         key = self._make_key(candidate_hash, example_hash)
         if key in self._memory:
             self._hits += 1
+            # Move to end (most recently used)
+            self._memory.move_to_end(key)
             return self._memory[key]
         self._misses += 1
         return None
@@ -44,11 +47,10 @@ class EvaluationCache:
     def put(self, candidate_hash: str, example_hash: str, score: float):
         key = self._make_key(candidate_hash, example_hash)
         self._memory[key] = score
-        # Evict oldest 10% when cache exceeds max size
-        if len(self._memory) > self._MAX_ENTRIES:
-            evict_count = self._MAX_ENTRIES // 10
-            for k in list(self._memory.keys())[:evict_count]:
-                del self._memory[k]
+        self._memory.move_to_end(key)
+        # Evict least-recently-used entries when over capacity
+        while len(self._memory) > self._MAX_ENTRIES:
+            self._memory.popitem(last=False)  # pop oldest
 
     def save(self):
         if self._cache_path:

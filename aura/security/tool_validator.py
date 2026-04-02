@@ -50,11 +50,32 @@ def _normalize_code_for_check(code: str) -> str:
     return code
 
 
+def _extract_string_constants(node: ast.AST) -> list:
+    """Recursively extract all string constants from an AST expression.
+
+    Handles: Constant("str"), IfExp branches, BoolOp values.
+    Returns a list of possible string values the expression could produce.
+    """
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return [node.value]
+    if isinstance(node, ast.IfExp):
+        # f"sub{'process' if x else ''}" — check both branches
+        return _extract_string_constants(node.body) + _extract_string_constants(node.orelse)
+    if isinstance(node, ast.BoolOp):
+        # 'a' or 'b' — check all values
+        result = []
+        for v in node.values:
+            result.extend(_extract_string_constants(v))
+        return result
+    return []
+
+
 def _check_fstring_evasion(tree: ast.AST, forbidden: list, source: str) -> Tuple[bool, str]:
     """Check f-strings for forbidden pattern evasion.
 
     Walks the AST for JoinedStr (f-string) nodes and reconstructs the
     constant parts to detect smuggled forbidden strings like f"sub{'process'}".
+    Also handles conditional expressions: f"sub{'process' if x else ''}".
     """
     for node in ast.walk(tree):
         if not isinstance(node, ast.JoinedStr):
@@ -63,25 +84,30 @@ def _check_fstring_evasion(tree: ast.AST, forbidden: list, source: str) -> Tuple
         # FormattedValue nodes, then check each possible expansion.
         # Strategy: concatenate all Constant children (ignoring FormattedValue)
         # and also try concatenating Constant + the string literal inside
-        # FormattedValue if the latter is itself a Constant string.
+        # FormattedValue if the latter is itself a Constant string or conditional.
         parts = []
         for value in node.values:
             if isinstance(value, ast.Constant) and isinstance(value.value, str):
-                parts.append(value.value)
+                parts.append([value.value])
             elif isinstance(value, ast.FormattedValue):
-                # If the expression inside the braces is a string constant,
-                # include it (this catches f"sub{'process'}")
-                inner = value.value
-                if isinstance(inner, ast.Constant) and isinstance(inner.value, str):
-                    parts.append(inner.value)
+                extracted = _extract_string_constants(value.value)
+                if extracted:
+                    parts.append(extracted)
                 else:
-                    # Unknown expression — insert separator so we don't
-                    # accidentally merge unrelated constant parts
-                    parts.append("\x00")
-        reconstructed = "".join(parts)
-        for pattern in forbidden:
-            if pattern in reconstructed:
-                return False, f"Forbidden pattern '{pattern}' found in f-string in {source}"
+                    # Unknown expression — insert separator
+                    parts.append(["\x00"])
+            else:
+                parts.append(["\x00"])
+
+        # Build all possible reconstructions (cartesian product of branches)
+        # Limit combinations to prevent explosion (max 32 paths)
+        from itertools import product
+        combos = list(product(*parts))[:32]
+        for combo in combos:
+            reconstructed = "".join(combo)
+            for pattern in forbidden:
+                if pattern in reconstructed:
+                    return False, f"Forbidden pattern '{pattern}' found in f-string in {source}"
     return True, ""
 
 

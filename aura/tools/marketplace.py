@@ -71,6 +71,10 @@ class MarketplaceTool:
         self.ratings_file = self.data_path / "plugin_ratings.json"
         self.custom_tools_registry = self.data_path / "custom_tools.json"
 
+        # Rate limiting for downloads (max 10 installs per hour)
+        self._install_timestamps: list = []
+        self._MAX_INSTALLS_PER_HOUR = 10
+
         # Initialize files if they don't exist
         self._init_files()
 
@@ -351,6 +355,14 @@ class MarketplaceTool:
             # SECURITY: Sanitize plugin_id — prevent path traversal and URL injection
             if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}', plugin_id):
                 return {"success": False, "error": "Invalid plugin ID: must be 1-64 alphanumeric/underscore/dash characters"}
+
+            # Rate limit installs
+            import time as _time
+            now = _time.time()
+            self._install_timestamps = [t for t in self._install_timestamps if now - t < 3600]
+            if len(self._install_timestamps) >= self._MAX_INSTALLS_PER_HOUR:
+                return {"success": False, "error": f"Install rate limit exceeded ({self._MAX_INSTALLS_PER_HOUR}/hour)"}
+            self._install_timestamps.append(now)
 
             # Check if already installed
             installed = self._read_json(self.installed_plugins_file)

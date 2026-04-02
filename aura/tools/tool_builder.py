@@ -198,6 +198,8 @@ def get_usage_tracker() -> ToolUsageTracker:
     global _usage_tracker
     if _usage_tracker is None:
         _usage_tracker = ToolUsageTracker()
+        import atexit
+        atexit.register(lambda: _usage_tracker.close() if _usage_tracker else None)
     return _usage_tracker
 
 
@@ -784,6 +786,10 @@ Include 'if __name__ == "__main__": pytest.main([__file__, "-x", "-q"])' at the 
                 insert_pos = doc_end + 3
                 tool_code = tool_code[:insert_pos] + "\n\n" + composition_comment + tool_code[insert_pos:]
 
+        # Reject excessively large generated code (>100KB is suspicious)
+        if len(tool_code) > 100_000:
+            return ToolResult(success=False, error=f"Generated code too large ({len(tool_code)} bytes, max 100KB)")
+
         # Scan for dangerous patterns
         is_dangerous, reason = self._scan_for_dangerous_code(tool_code)
         if is_dangerous:
@@ -803,6 +809,19 @@ Include 'if __name__ == "__main__": pytest.main([__file__, "-x", "-q"])' at the 
                     success=False,
                     error=f"Dangerous code in function '{func.get('name')}': {reason}",
                 )
+
+        # AST-level security validation (import checks, forbidden patterns, f-string evasion)
+        try:
+            from aura.security.tool_validator import validate_custom_tool_code
+            is_valid, validation_reason = validate_custom_tool_code(tool_code, safe_name)
+            if not is_valid:
+                logger.error(f"[ToolBuilder] AST validation failed for {safe_name}: {validation_reason}")
+                return ToolResult(
+                    success=False,
+                    error=f"Security validation failed: {validation_reason}",
+                )
+        except ImportError:
+            logger.warning("[ToolBuilder] tool_validator not available, skipping AST validation")
 
         # Save tool file
         tool_file = CUSTOM_TOOLS_DIR / f"{module_name}.py"
@@ -952,6 +971,9 @@ that would make it pass. Return ONLY the corrected tool code between ```python a
 
         # === Step 8: Initialize usage tracking ===
         self._usage_tracker.register_tool(safe_name)
+
+        # === Step 9: Version tracking ===
+        self._init_tool_versions(safe_name, str(tool_file))
 
         # Build result message
         if test_passed:
@@ -1226,6 +1248,202 @@ that would make it pass. Return ONLY the corrected tool code between ```python a
         """Record a custom tool invocation for usage tracking."""
         self._usage_tracker.record_use(tool_name, success=success, latency_ms=latency_ms)
 
+    # ==================================================================
+    # VERSIONING SYSTEM
+    # ==================================================================
+
+    def _compute_file_hash(self, file_path: str) -> str:
+        """Compute SHA256 hash of a file for integrity tracking."""
+        import hashlib
+        try:
+            with open(file_path, "rb") as f:
+                return hashlib.sha256(f.read()).hexdigest()
+        except Exception:
+            return ""
+
+    def _init_tool_versions(self, tool_name: str, tool_file: str):
+        """Initialize version tracking for a newly created tool."""
+        registry = self._load_registry()
+        for tool in registry["tools"]:
+            if tool["name"] == tool_name:
+                tool["versions"] = [{
+                    "version": 1,
+                    "file": tool_file,
+                    "created": datetime.now().isoformat(),
+                    "test_passed": tool.get("auto_tested", False),
+                    "hash": self._compute_file_hash(tool_file),
+                }]
+                self._save_registry(registry)
+                logger.info(f"[Versioning] Initialized v1 for {tool_name}")
+                return
+        logger.debug(f"[Versioning] Tool {tool_name} not found in registry for version init")
+
+    def _increment_tool_version(self, tool_name: str, tool_file: str, test_passed: bool):
+        """Record a new version when a tool is updated. Keeps last 3 versions."""
+        registry = self._load_registry()
+        for tool in registry["tools"]:
+            if tool["name"] == tool_name:
+                versions = tool.get("versions", [])
+                max_ver = max((v["version"] for v in versions), default=0)
+                versions.append({
+                    "version": max_ver + 1,
+                    "file": tool_file,
+                    "created": datetime.now().isoformat(),
+                    "test_passed": test_passed,
+                    "hash": self._compute_file_hash(tool_file),
+                })
+                # Keep only last 3 versions
+                while len(versions) > 3:
+                    old = versions.pop(0)
+                    old_path = Path(old.get("file", ""))
+                    if old_path.exists() and str(old_path) != tool_file:
+                        try:
+                            old_path.unlink()
+                            logger.info(f"[Versioning] Cleaned up old v{old['version']} of {tool_name}")
+                        except Exception:
+                            pass
+                tool["versions"] = versions
+                self._save_registry(registry)
+                logger.info(f"[Versioning] {tool_name} now at v{max_ver + 1}")
+                return
+
+    def rollback_to_version(self, name: str, version: int) -> dict:
+        """Roll back a tool to a previous version."""
+        import shutil
+        safe_name = self._sanitize_name(name)
+        registry = self._load_registry()
+        for tool in registry["tools"]:
+            if tool["name"] == safe_name:
+                versions = tool.get("versions", [])
+                target = next((v for v in versions if v["version"] == version), None)
+                if not target:
+                    return {"success": False, "error": f"Version {version} not found for {safe_name}"}
+                version_file = Path(target["file"])
+                if not version_file.exists():
+                    return {"success": False, "error": f"Version file {version_file} missing"}
+                current_file = Path(tool["file"])
+                try:
+                    shutil.copy2(str(version_file), str(current_file))
+                    tool["status"] = "pending"
+                    self._save_registry(registry)
+                    logger.info(f"[Versioning] Rolled back {safe_name} to v{version}")
+                    return {"success": True, "name": safe_name, "rolled_back_to": version,
+                            "message": f"Rolled back to v{version}. Run test_tool() to validate."}
+                except Exception as e:
+                    return {"success": False, "error": f"Rollback failed: {e}"}
+        return {"success": False, "error": f"Tool '{safe_name}' not found"}
+
+    # ==================================================================
+    # USAGE-DRIVEN EVOLUTION
+    # ==================================================================
+
+    def _check_evolution_candidates(self) -> list:
+        """Find tools with low success rate that need GEPA evolution."""
+        registry = self._load_registry()
+        candidates = []
+        for tool in registry.get("tools", []):
+            stats = self._usage_tracker.get_stats(tool["name"])
+            if not stats:
+                continue
+            total = stats.get("total_uses", 0)
+            rate = stats.get("success_rate", 1.0)
+            if total > 10 and rate < 0.7:
+                candidates.append(tool["name"])
+                logger.info(f"[Evolution] Candidate: {tool['name']} (uses={total}, rate={rate:.2f})")
+        return candidates
+
+    def trigger_evolution_for_tool(self, tool_name: str) -> dict:
+        """Submit an underperforming tool to GEPA for evolution."""
+        safe_name = self._sanitize_name(tool_name)
+        registry = self._load_registry()
+        tool_entry = None
+        for t in registry.get("tools", []):
+            if t["name"] == safe_name:
+                tool_entry = t
+                break
+        if not tool_entry:
+            return {"success": False, "error": f"Tool '{safe_name}' not found"}
+
+        stats = self._usage_tracker.get_stats(safe_name)
+        if not stats:
+            return {"success": False, "error": f"No usage data for {safe_name}"}
+
+        # Save evolution trigger to registry
+        try:
+            evo_path = Path(__file__).parent.parent.parent / "data" / "evolution_registry.json"
+            evo_data = {}
+            if evo_path.exists():
+                try:
+                    evo_data = json.loads(evo_path.read_text())
+                except Exception:
+                    pass
+            evo_data[safe_name] = {
+                "trigger_reason": "low_success_rate",
+                "success_rate": stats.get("success_rate", 0),
+                "total_uses": stats.get("total_uses", 0),
+                "triggered_at": datetime.now().isoformat(),
+                "status": "submitted",
+            }
+            evo_path.parent.mkdir(parents=True, exist_ok=True)
+            evo_path.write_text(json.dumps(evo_data, indent=2))
+            logger.info(f"[Evolution] Triggered evolution for {safe_name}")
+            return {"success": True, "name": safe_name, "submitted": True,
+                    "message": f"Tool {safe_name} submitted to GEPA for evolution"}
+        except Exception as e:
+            return {"success": False, "error": f"Evolution trigger failed: {e}"}
+
+    def monitor_and_evolve(self) -> dict:
+        """Check all tools for evolution candidates and trigger GEPA."""
+        candidates = self._check_evolution_candidates()
+        results = {"candidates": len(candidates), "triggered": []}
+        for name in candidates:
+            r = self.trigger_evolution_for_tool(name)
+            results["triggered"].append({"name": name, "success": r.get("success", False)})
+        return {"success": True, **results}
+
+    # ==================================================================
+    # DEPENDENCY TRACKING
+    # ==================================================================
+
+    def _build_dependency_graph(self) -> dict:
+        """Build inverse dependency map: tool -> [tools that depend on it]."""
+        registry = self._load_registry()
+        dependents = {}
+        for tool in registry.get("tools", []):
+            for dep in tool.get("composable_tools", []):
+                if dep not in dependents:
+                    dependents[dep] = []
+                dependents[dep].append(tool["name"])
+        return dependents
+
+    def _propagate_changes(self, tool_name: str) -> dict:
+        """When a tool changes, re-test all tools that depend on it."""
+        safe_name = self._sanitize_name(tool_name)
+        dep_graph = self._build_dependency_graph()
+        dependents = dep_graph.get(safe_name, [])
+        if not dependents:
+            return {"success": True, "name": safe_name, "dependents": [],
+                    "message": f"No tools depend on {safe_name}"}
+
+        test_results = {}
+        registry = self._load_registry()
+        for dep_name in dependents:
+            result = self.test_tool(dep_name)
+            passed = result.success if hasattr(result, "success") else False
+            test_results[dep_name] = {"passed": passed}
+            if not passed:
+                for t in registry["tools"]:
+                    if t["name"] == dep_name:
+                        t["status"] = "pending"
+                        logger.warning(f"[Deps] {dep_name} failed after {safe_name} change — marked pending")
+        self._save_registry(registry)
+
+        passed_count = sum(1 for r in test_results.values() if r["passed"])
+        failed_count = len(test_results) - passed_count
+        return {"success": True, "name": safe_name, "dependents": dependents,
+                "passed": passed_count, "failed": failed_count,
+                "test_results": test_results}
+
     # ------------------------------------------------------------------
     # execute (enhanced)
     # ------------------------------------------------------------------
@@ -1270,6 +1488,25 @@ that would make it pass. Return ONLY the corrected tool code between ```python a
             if not name:
                 return {"success": False, "error": "No tool name specified for rollback"}
             return self.rollback_tool(name)
+
+        elif "propagate" in action_lower or "depend" in action_lower:
+            name = self._extract_tool_name(action)
+            if not name:
+                return {"success": False, "error": "No tool name specified for propagation"}
+            return self._propagate_changes(name)
+
+        elif "monitor" in action_lower or "evolve" in action_lower:
+            return self.monitor_and_evolve()
+
+        elif "version" in action_lower and "rollback" not in action_lower:
+            name = self._extract_tool_name(action)
+            if not name:
+                return {"success": False, "error": "No tool name specified"}
+            # Extract version number
+            ver_match = re.search(r'v(?:ersion)?\s*(\d+)', action, re.IGNORECASE)
+            if ver_match:
+                return self.rollback_to_version(name, int(ver_match.group(1)))
+            return {"success": False, "error": "No version number found. Use: version 'tool_name' v2"}
 
         elif "create" in action_lower:
             return {

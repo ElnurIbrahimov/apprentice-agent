@@ -138,8 +138,12 @@ _tracker_lock = threading.Lock()
 
 
 _MAX_TRACKERS = 50
+_SESSION_ID_RE = __import__("re").compile(r'^[a-zA-Z0-9_\-]{1,128}$')
 
 def _get_tracker(session_id: str) -> MemoryRecallTracker:
+    if not _SESSION_ID_RE.match(session_id):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Invalid session_id format")
     with _tracker_lock:
         if session_id not in _trackers:
             # Evict oldest if at capacity

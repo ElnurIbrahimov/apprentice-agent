@@ -24,6 +24,10 @@
     {
       "resources": ["netflix-inject.js"],
       "matches": ["*://www.netflix.com/*"]
+    },
+    {
+      "resources": ["pyodide-worker.js"],
+      "matches": ["<all_urls>"]
     }
   ],
   "chrome_url_overrides": {

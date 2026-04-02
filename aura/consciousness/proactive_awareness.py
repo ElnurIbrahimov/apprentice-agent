@@ -157,7 +157,7 @@ class ProactiveAwarenessEngine:
             active = self._world_model.get_projects_by_status(ProjectStatus.ACTIVE)
 
             for project in active:
-                days = self._world_model._days_since(project.last_activity)
+                days = self._world_model.days_since(project.last_activity)
                 if days is None or days < 7:
                     continue
 
@@ -305,8 +305,7 @@ class ProactiveAwarenessEngine:
                 "client", "customer",
             }
 
-            with self._world_model._lock:
-                relationships = list(self._world_model._relationships.values())
+            relationships = self._world_model.get_relationships_snapshot()
 
             for rel in relationships:
                 # Important if role matches or mention_count >= 3
@@ -319,7 +318,7 @@ class ProactiveAwarenessEngine:
                 if not is_important:
                     continue
 
-                days_gap = self._world_model._days_since(rel.last_mentioned)
+                days_gap = self._world_model.days_since(rel.last_mentioned)
                 if days_gap is None or days_gap < 14:
                     continue
 
@@ -733,7 +732,7 @@ class ProactiveAwarenessEngine:
             active = self._world_model.get_projects_by_status(ProjectStatus.ACTIVE)
             stale_count = sum(
                 1 for p in active
-                if (self._world_model._days_since(p.last_activity) or 0) >= 7
+                if (self._world_model.days_since(p.last_activity) or 0) >= 7
             )
             if stale_count:
                 parts.append(f"- {stale_count} stale project(s)")
@@ -771,10 +770,9 @@ class ProactiveAwarenessEngine:
 
             # Relationship gaps increase social drive
             gap_count = 0
-            with self._world_model._lock:
-                rels_snapshot = list(self._world_model._relationships.values())
+            rels_snapshot = self._world_model.get_relationships_snapshot()
             for rel in rels_snapshot:
-                days = self._world_model._days_since(rel.last_mentioned)
+                days = self._world_model.days_since(rel.last_mentioned)
                 if days is not None and days >= 14 and rel.mention_count >= 3:
                     gap_count += 1
             if gap_count:
@@ -785,7 +783,7 @@ class ProactiveAwarenessEngine:
             active = self._world_model.get_projects_by_status(ProjectStatus.ACTIVE)
             stale = sum(
                 1 for p in active
-                if (self._world_model._days_since(p.last_activity) or 0) >= 7
+                if (self._world_model.days_since(p.last_activity) or 0) >= 7
             )
             if stale:
                 signals["curiosity"] = min(0.9, 0.5 + stale * 0.1)

@@ -31,6 +31,7 @@ import hashlib
 import os
 import logging
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from enum import Enum
 from copy import deepcopy
 from pathlib import Path
@@ -301,6 +302,39 @@ class TreeCache:
                 return None
         return None
 
+    def fuzzy_match_cached_problem(self, problem: str, threshold: float = 0.6) -> Optional[Dict]:
+        """Find a cached tree for a similar problem using word-overlap (Jaccard)."""
+        try:
+            problem_words = set(problem.lower().split())
+            if len(problem_words) < 2:
+                return None
+
+            best_match = None
+            best_score = 0.0
+
+            for cache_file in self.CACHE_DIR.glob("*.json"):
+                try:
+                    cached = json.loads(cache_file.read_text())
+                    cached_words = set(cached.get("problem", "").lower().split())
+                    if not cached_words:
+                        continue
+                    # Jaccard similarity
+                    intersection = len(problem_words & cached_words)
+                    union = len(problem_words | cached_words)
+                    score = intersection / union if union > 0 else 0.0
+                    if score > best_score and score >= threshold:
+                        best_score = score
+                        best_match = cached
+                except Exception:
+                    continue
+
+            if best_match:
+                logger.debug(f"[TreeCache] Fuzzy match found (score={best_score:.2f})")
+            return best_match
+        except Exception as e:
+            logger.debug(f"[TreeCache] Fuzzy match failed: {e}")
+            return None
+
     def _serialize_node(self, node: MCTSNode) -> Dict:
         """Full serialization (not truncated like to_dict)."""
         return {
@@ -367,6 +401,9 @@ class MCTSReasoning:
         self._value_history: List[float] = []
         self._stagnation_boost: float = 0.0
 
+        # Thread pool for parallel node evaluation
+        self._eval_pool = ThreadPoolExecutor(max_workers=4)
+
         # Callbacks for UI updates
         self.on_node_created: Optional[Callable[[MCTSNode], None]] = None
         self.on_node_evaluated: Optional[Callable[[MCTSNode, float], None]] = None
@@ -404,6 +441,21 @@ class MCTSReasoning:
 
         logger.info(f"Starting MCTS search for: {problem[:100]}...")
 
+        # Warm-start from cached tree if similar problem exists
+        try:
+            cache = TreeCache()
+            cached = cache.fuzzy_match_cached_problem(problem, threshold=0.6)
+            if cached and "tree" in cached:
+                grafted = self._deserialize_cached_tree(cached["tree"])
+                if grafted and grafted.children:
+                    self.root = grafted
+                    self.root.thought = root_thought  # Use current problem text
+                    self.root.state = NodeState.EVALUATED
+                    self.nodes_created += sum(1 for _ in self._get_all_nodes())
+                    logger.info(f"[WarmStart] Grafted cached tree ({self.nodes_created} nodes)")
+        except Exception as e:
+            logger.debug(f"[WarmStart] Skipped: {e}")
+
         # Main MCTS loop (beam search)
         while not self._should_stop():
             self.iteration_count += 1
@@ -413,11 +465,26 @@ class MCTSReasoning:
             for node in beam:
                 if not node.is_terminal and node.depth < self.config.max_depth:
                     expanded = self._expand(node)
-                    for child in expanded:
-                        reward = self._evaluate(child)
-                        child.backpropagate(reward)
-                        if self.on_node_evaluated:
-                            self.on_node_evaluated(child, reward)
+                    # Parallel evaluation of expanded children
+                    if len(expanded) > 1 and self._eval_pool:
+                        futures = {
+                            self._eval_pool.submit(self._evaluate_and_backprop, child): child
+                            for child in expanded
+                        }
+                        for future in as_completed(futures):
+                            try:
+                                reward, child = future.result()
+                                child.backpropagate(reward)
+                                if self.on_node_evaluated:
+                                    self.on_node_evaluated(child, reward)
+                            except Exception as e:
+                                logger.debug(f"[MCTS] Parallel eval error: {e}")
+                    else:
+                        for child in expanded:
+                            reward = self._evaluate(child)
+                            child.backpropagate(reward)
+                            if self.on_node_evaluated:
+                                self.on_node_evaluated(child, reward)
                 else:
                     reward = self._evaluate(node)
                     node.backpropagate(reward)
@@ -475,6 +542,82 @@ class MCTSReasoning:
     def _estimate_tokens(self, text: str) -> int:
         """Rough token estimate: ~4 chars per token."""
         return len(text) // 4
+
+    # ==================================================================
+    # UPGRADE: Lightweight Monte Carlo Rollout
+    # ==================================================================
+
+    def _rollout(self, node: MCTSNode, depth_limit: int = 3) -> float:
+        """Fast rollout: estimate terminal value with a short LLM call."""
+        try:
+            path_context = self._build_path_context(node)
+            prompt = (
+                f"PROBLEM:\n{self.root.thought.content}\n\n"
+                f"CURRENT PATH:\n{path_context}\n\n"
+                f"Score the likelihood this path leads to a correct solution. "
+                f"Return ONLY JSON: {{\"rollout_score\": 0.X}}"
+            )
+            response = self.llm(prompt, "Score 0-1. Be brief.")
+            self.tokens_used += self._estimate_tokens(prompt) + self._estimate_tokens(response)
+            data = self._parse_json(response) if hasattr(self, '_parse_json') else json.loads(response)
+            return max(0.0, min(1.0, float(data.get("rollout_score", 0.5))))
+        except Exception:
+            return 0.5
+
+    # ==================================================================
+    # UPGRADE: Evaluate + Backprop helper for parallel execution
+    # ==================================================================
+
+    def _evaluate_and_backprop(self, child: MCTSNode) -> Tuple[float, MCTSNode]:
+        """Evaluate a node (used for parallel futures). Returns (reward, node)."""
+        reward = self._evaluate(child)
+        return reward, child
+
+    # ==================================================================
+    # UPGRADE: Adaptive branching factor
+    # ==================================================================
+
+    def _get_adaptive_branching(self, node: MCTSNode) -> int:
+        """Dynamic branching: fewer branches on confident nodes, more on uncertain."""
+        base = self.config.branching_factor
+        avg_val = node.avg_value if node.visits > 0 else 0.5
+        if avg_val > 0.8:
+            return max(2, base // 2)
+        elif avg_val < 0.3:
+            return base
+        else:
+            return max(2, round(2 + (base - 2) * (1 - avg_val)))
+
+    # ==================================================================
+    # UPGRADE: Deserialize cached tree for warm-starting
+    # ==================================================================
+
+    def _deserialize_cached_tree(self, tree_dict: Dict) -> Optional[MCTSNode]:
+        """Reconstruct MCTSNode from cached JSON, scaling visits for re-exploration."""
+        try:
+            def _reconstruct(data: Dict, parent=None) -> MCTSNode:
+                thought = Thought(
+                    id=data["thought"].get("id", str(uuid.uuid4())),
+                    type=ThoughtType(data["thought"]["type"]),
+                    content=data["thought"]["content"],
+                    confidence=data["thought"].get("confidence", 0.5),
+                    metadata=data["thought"].get("metadata", {}),
+                )
+                node = MCTSNode(thought=thought, parent=parent)
+                node.visits = max(1, data.get("visits", 0) // 2)  # Scale down
+                node.value = data.get("value", 0.0) / 2
+                node.avg_value = data.get("avg_value", 0.0)
+                node.state = NodeState(data.get("state", "pending"))
+                node.is_terminal = data.get("is_terminal", False)
+                node.is_successful = data.get("is_successful", False)
+                for child_data in data.get("children", []):
+                    child = _reconstruct(child_data, parent=node)
+                    node.children.append(child)
+                return node
+            return _reconstruct(tree_dict)
+        except Exception as e:
+            logger.debug(f"[MCTS] Tree deserialization failed: {e}")
+            return None
 
     def get_current_best(self) -> Optional[MCTSResult]:
         """Return the current best result (anytime access)."""
@@ -624,7 +767,10 @@ Available tool actions:
 
 Tool actions get executed and their results are used as evidence. Mix reasoning steps with tool actions for best results."""
 
-        prompt = f"""You are reasoning step by step to solve a problem. Generate {self.config.branching_factor} different possible next thoughts or actions.
+        # Adaptive branching: fewer on confident nodes, more on uncertain
+        adaptive_bf = self._get_adaptive_branching(node)
+
+        prompt = f"""You are reasoning step by step to solve a problem. Generate {adaptive_bf} different possible next thoughts or actions.
 
 PROBLEM:
 {self.root.thought.content}
@@ -634,7 +780,7 @@ REASONING PATH SO FAR:
 
 {reflection_context}
 
-Generate {self.config.branching_factor} DIFFERENT candidate next steps. Each should be a distinct approach or thought.
+Generate {adaptive_bf} DIFFERENT candidate next steps. Each should be a distinct approach or thought.
 For each candidate, provide:
 1. The thought/action (what to think or do next)
 2. A brief rationale (why this might be good)
@@ -785,13 +931,16 @@ Think creatively and consider multiple angles. Include at least one unconvention
 
     def _evaluate(self, node: MCTSNode) -> float:
         """
-        Evaluation phase: Score the reasoning state using LLM.
+        Evaluation phase: Score reasoning state using rollout bootstrap + full LLM eval.
 
         Returns a value between 0.0 and 1.0:
         - 1.0 = Correct/optimal solution
         - 0.5 = Reasonable but incomplete
         - 0.0 = Wrong/dead end
         """
+        # Fast rollout estimate as prior
+        rollout_value = self._rollout(node, depth_limit=2)
+
         path_context = self._build_path_context(node)
 
         prompt = f"""Evaluate the quality of this reasoning path for solving the problem.
@@ -835,15 +984,19 @@ Provide your evaluation as JSON:
 
             node.state = NodeState.EVALUATED
 
-            # Combine LLM score with self-consistency (if available)
+            # Combine LLM score with self-consistency
             # V(s) = λ * LM_score + (1-λ) * self_consistency
-            combined_value = self.config.value_weight * score + (1 - self.config.value_weight) * node.thought.confidence
+            eval_value = self.config.value_weight * score + (1 - self.config.value_weight) * node.thought.confidence
+
+            # Blend with rollout: alpha fades rollout influence as visits increase
+            alpha = min(0.7, 0.5 + node.visits * 0.02)
+            combined_value = (1 - alpha) * rollout_value + alpha * eval_value
 
             return combined_value
 
         except Exception as e:
             logger.error(f"Error evaluating node: {e}")
-            return 0.5
+            return rollout_value  # Fall back to rollout estimate
 
     def _maybe_reflect(self, node: MCTSNode):
         """

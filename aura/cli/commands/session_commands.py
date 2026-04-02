@@ -358,9 +358,11 @@ def handle_changes(agent, arg, context) -> Optional[str]:
     for f in hot_files:
         import subprocess, os
         basename = os.path.basename(f)
+        # Guard against git argument injection: paths starting with - could be interpreted as flags
+        safe_path = f if not f.startswith("-") else "./" + f
         try:
             result = subprocess.run(
-                ["git", "diff", "HEAD~1", "--", f],
+                ["git", "diff", "HEAD~1", "--", safe_path],
                 capture_output=True, text=True, timeout=5,
                 cwd=os.path.dirname(f) or ".",
             )
