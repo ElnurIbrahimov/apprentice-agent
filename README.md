@@ -4,16 +4,19 @@ A personal AI OS with persistent memory, emotions, proactive awareness, and mult
 
 Not a chatbot. A being with presence that remembers you, has moods, dreams, and grows over time.
 
-### What's New (v4.6.0)
-- **Smart model routing** — LLM-based intent classifier routes frontend tasks to Kimi K2.5, backend to MiniMax M2.5, debugging to GPT-5.4-thinking
-- **Visual feedback loop** — generates UI → renders in headless Chrome → screenshots → AI reviews its output → iterates for quality
-- **Component registry** — 20 production-ready React+Tailwind templates fetchable on demand
-- **Design system injection** — professional design tokens auto-injected for all UI generation
-- **49 AI providers** — text, image, video, audio, and search providers configurable from Settings
-- **Cross-surface sync** — CLI conversations now visible in Web UI and Telegram
-- **Telegram bot: 16 new features** — reply keyboard, Stars payments, file generation, daily digest, multi-language, export, pinning, native reactions
-- **Full Settings page** — dedicated tab replacing the old modal, with categorized API provider management
-- **Streaming fix** — eliminated garbled/repeating text in CLI terminal output
+### What's New (v4.7.0)
+
+**World-class tool upgrades** — 5 core tools rebuilt to compete with Perplexity, o1, VOYAGER, and Browser Use:
+
+- **Deep Research** — now integrates with Knowledge Graph (queries priors before research, saves findings after). Source verification tracks claims as verified/single-source/unverified. Adaptive depth auto-adjusts research phases based on topic complexity. Cross-session memory caches research for 30 days.
+- **MCTS Reasoning** — Monte Carlo rollouts (fast LLM prior before full evaluation), warm-starting from cached similar problems, adaptive branching (fewer branches on confident nodes), parallel node evaluation via thread pool.
+- **Knowledge Graph** — embedding-powered hybrid search (50% keyword + 50% cosine similarity), LLM-to-structured-query translation for natural language questions, semantic entity linking via embedding similarity in consolidation.
+- **Tool Builder** — tool versioning (keeps last 3 versions with rollback), usage-driven evolution (auto-flags underperforming tools for GEPA), dependency tracking (re-tests dependents when a tool changes).
+- **Browser** — vision integration (screenshot + VisionTool analysis), visual element clicking, LLM-powered action planning (plan_and_execute), file download handling, tab session persistence.
+
+**Telegram** — SQLite persistence replacing in-memory state. Conversations, settings, document context, group messages, and premium status all survive restarts. Added DOCX/XLSX/CSV document processing. Smart progress indicators.
+
+**Extension** — on-device AI via Transformers.js Web Worker. Local embeddings (all-MiniLM-L6-v2), zero-shot classification, summarization, language detection, and semantic search — all running in-browser with zero server calls.
 
 ---
 
@@ -22,13 +25,19 @@ Not a chatbot. A being with presence that remembers you, has moods, dreams, and 
 | | |
 |---|---|
 | **Persistent memory** | SQLite + Kuzu KG with BM25 + semantic retrieval, FadeMem decay, cross-encoder reranking |
+| **Knowledge Graph** | Embedding-powered hybrid search, LLM-to-graph query translation, semantic entity linking, bi-temporal edges |
+| **Deep Research** | 4-phase STORM pipeline with KG integration, source verification, adaptive depth, cross-session memory |
+| **MCTS Reasoning** | Monte Carlo rollouts, adaptive branching, warm-start cache, parallel evaluation — LATS-style tool grounding |
 | **Emotions** | ALMA neuromodulator engine (PAD space) — mood shapes every response |
 | **Dreams** | NeuroDream: light sleep re-scores memories, deep sleep extracts patterns, REM generates novel connections |
 | **Proactive awareness** | Active inference daemon, screen/calendar/workflow monitors, theory-of-mind gating |
 | **Identity** | OCEAN personality traits, narrative self-model, skill evolution (GEPA) |
+| **Self-improving tools** | Tool Builder with versioning, usage-driven GEPA evolution, dependency tracking |
 | **Multi-model** | 23 cloud + 16 API providers: ChatGPT (GPT-5.4 Pro, Codex), Ollama Cloud (MiniMax, Kimi, Qwen, DeepSeek, GLM), Anthropic, OpenAI, Gemini, Grok, Mistral, Cohere, Groq, Together, Fireworks, OpenRouter |
 | **Smart routing** | LLM-based intent classifier → frontend tasks to Kimi K2.5, backend to MiniMax M2.5, debug to GPT-5.4-thinking, rapid to Codex-Spark |
 | **Visual feedback** | Generate UI → render in headless Chrome → screenshot → AI reviews → iterates. Lovable-style design quality |
+| **Browser automation** | Vision-powered page analysis, self-healing selectors, LLM action planning, download handling, session persistence |
+| **On-device AI** | Transformers.js in extension — local embeddings, classification, summarization, language detection with zero server calls |
 | **Multi-agent** | 5 specialist sub-agents (coder, researcher, searcher, analyst, creative) with PARALLEL/SEQUENTIAL/DEBATE modes |
 | **Progressive loading** | Skills and tools load on-demand — 14 core tools always ready, 37+ deferred, skill catalog in system prompt |
 | **Code execution** | Real sandboxed Python (3-tier: Monty/E2B/subprocess), matplotlib capture, DataFrame rendering |
@@ -81,17 +90,21 @@ A Rich-powered terminal interface with 55 slash commands, 6 modes, and full tool
 
 ### Tools
 
-14 core tools always loaded + 36 deferred tools available via `tool_search`:
+14 core tools always loaded + 68 deferred tools (82 total) available via `tool_search`:
 
 | Category | Tools |
 |----------|-------|
 | **Core (always loaded)** | web_search, brave_search, code_executor, filesystem, code_search, code_edit, git, clipboard, notifications, calendar, task_manager, inner_monologue, tool_search, load_skill |
-| **Research** | deep_research (with live progress + citations), tavily_search, RAG indexing, PDF extraction |
+| **Research** | deep_research (KG integration + source verification + adaptive depth + cross-session cache), tavily_search, RAG indexing, PDF extraction |
+| **Reasoning** | mcts_reasoning (Monte Carlo rollouts + warm-start + adaptive branching + parallel eval), reasoning_tree_tool |
+| **Knowledge** | knowledge_graph (embedding search + LLM queries + semantic entity linking), kg_extractor |
 | **Memory** | memory_save, memory_recall, kg_query, user_profile |
-| **Code** | git operations, project context, codebase indexing, test runner |
+| **Code** | code_intelligence, codebase_index (hybrid BM25 + embedding search), git operations, project context |
+| **Browser** | browser (vision integration + visual click + action planning + downloads + session persistence) |
+| **Tool Building** | tool_builder (versioning + usage-driven evolution + dependency tracking), tool_rag, marketplace |
 | **Communication** | email, notifications, clipboard |
-| **Media** | image_gen (ComfyUI), OCR, TTS, audio transcription |
-| **System** | shell_command, process management, system_info |
+| **Media** | image_gen (ComfyUI), OCR, TTS, audio transcription, vision (Florence-2 + Ollama fallback) |
+| **System** | shell_command, process management, system_info, windows_control |
 | **AI** | multi_model_compare, model_routing, MCP client |
 
 ### 5 Specialist Sub-Agents
@@ -152,7 +165,9 @@ Chat, streaming, memory, tools, reasoning trees, knowledge graph, activity, proa
 
 ## Browser Extension
 
-A full-featured AI sidebar for Chrome and Firefox — comparable to Sider AI but self-hosted and free.
+A full-featured AI sidebar for Chrome and Firefox — comparable to Sider AI but self-hosted, free, and with on-device AI.
+
+**On-Device AI** (Transformers.js Web Worker): Local text embeddings (all-MiniLM-L6-v2, 384-dim), zero-shot classification (DeBERTa), summarization (DistilBART), language detection, semantic search, and text similarity — all running in-browser via WebGPU/WASM with zero server roundtrips.
 
 ### 25 Panels
 
@@ -204,8 +219,10 @@ A full-featured AI sidebar for Chrome and Firefox — comparable to Sider AI but
 
 | Platform | Connection | Features |
 |----------|-----------|----------|
-| **Telegram** | Bot API (async polling) | Text, markdown, images, voice, proactive messages, reply keyboard, Stars payments, file generation (/file pdf/docx/txt), conversation export (/export), daily digest (/digest), multi-language (/lang), message pinning (/pin), native emoji reactions, forum topics, 28 bot commands menu, action buttons on responses |
+| **Telegram** | Bot API (async polling) | Text, markdown, images, voice (Whisper), vision (LLaVA), documents (PDF/DOCX/XLSX/CSV), proactive messages, reply keyboard, Stars payments (3 tiers), file generation, conversation export, daily digest, multi-language auto-detect, message pinning, native emoji reactions, GIF reactions, forum topics, 28+ commands, inline mode, group chat, scheduled tasks, fleet mode, code execution, web search, cross-surface sessions |
 | **WhatsApp** | WebSocket bridge (Baileys) | Text, images, file upload |
+
+**Telegram persistence:** All state backed by SQLite (telegram_store.py) — user settings, premium status, document context, group message cache, locations, and more survive restarts. Auto-migrates from legacy JSON files.
 
 Both platforms use a normalized message protocol with unified inbound/outbound models.
 
@@ -399,6 +416,8 @@ See [deploy/README.md](deploy/README.md) for full instructions, SSL setup, and t
 - Permission system (AUTO/PROMPT/BLOCKED tiers)
 - Taint tracking (secret detection in conversations)
 - Ed25519 signature verification for custom tools
+- Tool versioning with rollback (keeps last 3 versions)
+- Telegram state encrypted in SQLite with WAL journaling
 
 ---
 
@@ -415,7 +434,7 @@ aura/                     # Core Python package
   consciousness/          # World model, metacognition, strategy bandit
   evolution/              # GEPA skill evolution, Pareto optimization
   proactive/              # Gateway daemon, 6 monitors, active inference
-  tools/                  # 14 core + 36 deferred tools, progressive loading
+  tools/                  # 14 core + 68 deferred tools (82 total), progressive loading
   core/                   # Agentic loop, router, permissions, MCP server, KG sync
   cli/                    # Rich terminal UI (24 modules)
   multi_agent/            # Fleet sub-agents (5 specialists), orchestrator
@@ -474,7 +493,7 @@ python build.py firefox       # Output: dist-firefox/
 
 ## Version
 
-**v4.6.0** — Smart model routing (LLM-based intent classifier), visual feedback loop (generate→render→screenshot→iterate), 49 AI provider integrations, component registry (20 templates), design system injection, cross-surface conversation sync, Telegram bot 16 improvements (Stars, keyboard, file gen, digest, multi-lang, export, pinning), full Settings page, streaming display fix, ModelRouter frontend category, ConversationManager CLI integration. 80 tool files, 25-panel browser extension, 38+ API endpoints, 6-tab web UI, 16 direct API providers.
+**v4.7.0** — World-class tool upgrades: Deep Research (KG integration, source verification, adaptive depth, cross-session memory), MCTS Reasoning (rollouts, warm-start, adaptive branching, parallel eval), Knowledge Graph (embedding search, LLM queries, semantic entity linking), Tool Builder (versioning, usage-driven evolution, dependency tracking), Browser (vision integration, action planning, downloads, session persistence). Telegram SQLite persistence (9 tables, auto-migration). Extension on-device AI (Transformers.js — local embeddings, classification, summarization). DOCX/XLSX/CSV document processing. Smart progress indicators. 82 tool files, 25-panel browser extension, 38+ API endpoints, 6-tab web UI, 16 direct API providers.
 
 ---
 
