@@ -70,9 +70,9 @@ def _ensure_keypair() -> Tuple[bytes, bytes]:
     else:
         # HMAC mode: do NOT write a .pub file — the "public" key IS the secret.
         # Both sign and verify read from _PRIVATE_KEY_FILE.
-        if _PUBLIC_KEY_FILE.exists():
+        if os.path.exists(_PUBLIC_KEY_FILE):
             try:
-                os.unlink(str(_PUBLIC_KEY_FILE))
+                os.unlink(_PUBLIC_KEY_FILE)
             except OSError:
                 pass
 

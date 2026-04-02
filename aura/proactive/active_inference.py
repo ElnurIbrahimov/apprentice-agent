@@ -21,7 +21,13 @@ from enum import Enum
 logger = logging.getLogger(__name__)
 
 # pymdp is lazy-loaded on first use to avoid ~1s startup penalty
-PYMDP_AVAILABLE = True  # assumed; will be set False on first failure
+# Check importability at module load so PYMDP_AVAILABLE is accurate for skipif
+try:
+    import pymdp  # noqa: F401
+    PYMDP_AVAILABLE = True
+except ImportError:
+    PYMDP_AVAILABLE = False
+
 _PyMDPAgent = None
 _pymdp_utils = None
 

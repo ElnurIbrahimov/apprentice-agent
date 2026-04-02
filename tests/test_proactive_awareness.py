@@ -887,8 +887,9 @@ class TestTuneThresholds:
             wm.store_insight(insight)
             wm.update_insight_feedback(f"tune_hi_{i}", "engaged")
 
-        # Force tune (reset rate limit)
-        engine._last_tune_time = 0
+        # Force tune (bypass rate limit — set far in the past so monotonic() - it > 3600)
+        import time as _time
+        engine._last_tune_time = _time.monotonic() - 7200
         engine._tune_thresholds()
 
         assert "staleness_alert" in engine._confidence_overrides
@@ -913,7 +914,8 @@ class TestTuneThresholds:
             wm.store_insight(insight)
             wm.update_insight_feedback(f"tune_lo_{i}", "dismissed")
 
-        engine._last_tune_time = 0
+        import time as _time
+        engine._last_tune_time = _time.monotonic() - 7200
         engine._tune_thresholds()
 
         assert "contradiction_alert" in engine._confidence_overrides
