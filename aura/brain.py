@@ -187,7 +187,7 @@ def _neuro_scale(base_value: float, neuro_level: float, sensitivity: float = 0.5
 # Use functions instead of cached references to avoid stale pool handles
 # after pool re-initialization (e.g., in tests or daemon restarts).
 from aura.pools import llm_pool as _llm_pool_fn, bg_pool as _bg_pool_fn
-_SHARED_EXECUTOR = _llm_pool_fn()  # used only by call_with_timeout
+# Don't cache pool references — call functions to get fresh handles
 # atexit cleanup now handled by aura.pools
 
 
@@ -295,7 +295,7 @@ def call_with_timeout(func: Callable, timeout: int = LLM_TIMEOUT, default: Any =
     # Double retry (tenacity + caller) caused timeout multiplication.
 
     try:
-        future = _SHARED_EXECUTOR.submit(func)
+        future = _llm_pool_fn().submit(func)
         try:
             return future.result(timeout=timeout)
         except concurrent.futures.TimeoutError:

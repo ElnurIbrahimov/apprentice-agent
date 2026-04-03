@@ -1126,13 +1126,12 @@ class APITesterTool:
             if url_err:
                 return None, url_err
             try:
-                import requests as req_lib
-            except ImportError:
-                return None, "requests library not installed. Run: pip install requests"
-            try:
-                resp = req_lib.get(url, timeout=30)
+                from aura.security.ssrf_guard import safe_request
+                resp = safe_request(url=url, method="GET", timeout=30)
                 resp.raise_for_status()
                 raw = resp.text
+            except ImportError:
+                return None, "SSRF guard not available"
             except Exception as e:
                 return None, f"Failed to fetch spec: {e}"
         else:

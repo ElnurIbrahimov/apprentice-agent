@@ -1,6 +1,7 @@
 """Authentication routes for external providers (ChatGPT OAuth, etc.)."""
 
 import logging
+from html import escape as html_escape
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
@@ -187,7 +188,7 @@ async def chatgpt_oauth_callback(code: str = "", state: str = "", error: str = "
     if error:
         return HTMLResponse(
             f"<html><body style='font-family:system-ui;text-align:center;padding:60px'>"
-            f"<h1>Authentication Failed</h1><p>{error}</p>"
+            f"<h1>Authentication Failed</h1><p>{html_escape(str(error))}</p>"
             f"<p>Close this window and try again.</p></body></html>",
             status_code=400,
         )

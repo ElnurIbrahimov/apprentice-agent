@@ -199,7 +199,7 @@ export function ArtifactsPanel({ code, type, onClose }: ArtifactsPanelProps) {
               <iframe
                 ref={iframeRef}
                 srcDoc={srcdoc}
-                sandbox="allow-scripts allow-same-origin"
+                sandbox="allow-scripts"
                 className="w-full h-full border-none"
                 title="Artifact preview"
               />
