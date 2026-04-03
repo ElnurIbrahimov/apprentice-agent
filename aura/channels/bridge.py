@@ -25,6 +25,7 @@ class ChannelSource(Enum):
     DISCORD = "discord"
     WHATSAPP = "whatsapp"
     SLACK = "slack"
+    MATRIX = "matrix"
     API = "api"
 
 

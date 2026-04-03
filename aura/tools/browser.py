@@ -920,6 +920,15 @@ class BrowserTool:
                 "url": url,
             }
 
+        # SSRF protection: block private IPs and DNS rebinding
+        try:
+            from aura.security.ssrf_guard import validate_url_safe
+            validate_url_safe(url)
+        except ValueError as e:
+            return {"success": False, "error": f"SSRF blocked: {e}", "url": url}
+        except ImportError:
+            pass
+
         try:
             self._ensure_browser()
             response = self._page.goto(url, wait_until="domcontentloaded", timeout=30000)

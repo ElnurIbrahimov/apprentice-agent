@@ -355,6 +355,7 @@ def _handle_hand_command(agent, arg: str):
     from aura.hands.researcher import ResearcherHand
     from aura.hands.guardian import GuardianHand
     from aura.hands.memory_hand import MemoryHand
+    from aura.hands.collector import CollectorHand
 
     manager = get_hand_manager()
 
@@ -362,6 +363,7 @@ def _handle_hand_command(agent, arg: str):
         manager.register(ResearcherHand())
         manager.register(GuardianHand())
         manager.register(MemoryHand())
+        manager.register(CollectorHand())
 
     parts = arg.strip().split(maxsplit=1)
     subcmd = parts[0].lower() if parts else "list"

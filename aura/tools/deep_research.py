@@ -1659,6 +1659,16 @@ Return as JSON (no markdown fences):
         if cached_content is not None:
             return {"url": url, "content": cached_content, "success": True, "cached": True}
 
+        # SSRF protection: block private IPs
+        try:
+            from aura.security.ssrf_guard import validate_url_safe
+            validate_url_safe(url)
+        except ValueError as e:
+            logger.warning(f"SSRF blocked in deep_research: {url} — {e}")
+            return {"url": url, "content": "", "success": False, "cached": False}
+        except ImportError:
+            pass
+
         try:
             if self.browser and hasattr(self.browser, 'open'):
                 nav_result = self.browser.open(url)

@@ -56,7 +56,19 @@ def load_custom_tools(custom_dir: Path | None = None) -> dict:
                     continue
                 logger.debug(f"[CustomLoader] Signature verified: {tool_file.name}")
             else:
-                logger.debug(f"[CustomLoader] No signature for {tool_file.name} (unsigned tools allowed in dev mode)")
+                # Block unsigned tools unless in trust mode
+                _allow_unsigned = False
+                try:
+                    from aura.core.permissions import PermissionManager
+                    pm = PermissionManager.get_instance() if hasattr(PermissionManager, 'get_instance') else None
+                    if pm and getattr(pm, '_trust_mode', False):
+                        _allow_unsigned = True
+                except Exception:
+                    _allow_unsigned = True  # If permission system unavailable, allow (dev environment)
+                if not _allow_unsigned:
+                    logger.warning(f"[CustomLoader] BLOCKED {tool_file.name}: unsigned tool (not in trust mode)")
+                    continue
+                logger.debug(f"[CustomLoader] Unsigned tool allowed (trust mode): {tool_file.name}")
         except Exception as e:
             logger.debug(f"[CustomLoader] Signature check skipped: {e}")
 

@@ -468,9 +468,24 @@ class InnerMonologueTool:
             session_file = self.sessions_dir / f"{now.strftime('%Y-%m-%d')}_session_{self.current_session.session_id}.jsonl"
 
             try:
+                # Taint protection: redact secrets before writing to disk
+                _taint_redact = None
+                try:
+                    from aura.security.taint_tracker import scan_for_secrets, redact
+                    _taint_redact = (scan_for_secrets, redact)
+                except ImportError:
+                    pass
+
                 with open(session_file, 'w', encoding='utf-8') as f:
                     for thought in self.current_session.thoughts:
-                        f.write(json.dumps(thought.to_dict()) + '\n')
+                        thought_dict = thought.to_dict()
+                        if _taint_redact:
+                            _scan, _redact = _taint_redact
+                            raw = json.dumps(thought_dict)
+                            matches = _scan(raw)
+                            if matches:
+                                thought_dict = json.loads(_redact(raw, matches))
+                        f.write(json.dumps(thought_dict) + '\n')
             except Exception as e:
                 logger.debug(f"[Monologue] Failed to save session: {e}")
 

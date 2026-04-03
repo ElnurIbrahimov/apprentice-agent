@@ -5180,12 +5180,14 @@ Status: Online and ready!"""
         from aura.hands.researcher import ResearcherHand
         from aura.hands.guardian import GuardianHand
         from aura.hands.memory_hand import MemoryHand
+        from aura.hands.collector import CollectorHand
 
         manager = get_hand_manager()
         if not manager.list_hands():
             manager.register(ResearcherHand())
             manager.register(GuardianHand())
             manager.register(MemoryHand())
+            manager.register(CollectorHand())
 
         args = context.args or []
         subcmd = args[0].lower() if args else "list"

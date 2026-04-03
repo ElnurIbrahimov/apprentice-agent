@@ -78,8 +78,14 @@ scheduler = [
 security = [
     "cryptography>=41.0.0,<44.0.0",
 ]
+discord = [
+    "discord.py>=2.3.0,<3.0.0",
+]
+matrix = [
+    "matrix-nio>=0.24.0,<1.0.0",
+]
 all = [
-    "aura[ml,memory,telegram,api,voice,vision,tools,calendar,treesitter,windows,scheduler,security]",
+    "aura[ml,memory,telegram,api,voice,vision,tools,calendar,treesitter,windows,scheduler,security,discord,matrix]",
 ]
 
 [project.scripts]

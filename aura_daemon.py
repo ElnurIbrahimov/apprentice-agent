@@ -382,12 +382,14 @@ class AuraDaemon:
             from aura.hands.researcher import ResearcherHand
             from aura.hands.guardian import GuardianHand
             from aura.hands.memory_hand import MemoryHand
+            from aura.hands.collector import CollectorHand
 
             manager = get_hand_manager()
             if not manager.list_hands():
                 manager.register(ResearcherHand())
                 manager.register(GuardianHand())
                 manager.register(MemoryHand())
+                manager.register(CollectorHand())
 
             def _get_idle_seconds():
                 return time.monotonic() - self._last_activity
