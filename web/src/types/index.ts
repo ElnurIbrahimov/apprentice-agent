@@ -111,7 +111,7 @@ export interface ResearchProgress {
 }
 
 export interface WebSocketMessage {
-  type: 'chat' | 'chunk' | 'done' | 'error' | 'ping' | 'pong' | 'stopped' | 'proactive' | 'tool_status' | 'citations' | 'tool_trace' | 'research_progress';
+  type: 'chat' | 'chunk' | 'done' | 'error' | 'ping' | 'pong' | 'stopped' | 'proactive' | 'tool_status' | 'citations' | 'tool_trace' | 'research_progress' | 'hand_event' | 'hand_approval_request' | 'conv_sync';
   content?: string;
   message?: string;
   response?: string;
@@ -134,6 +134,14 @@ export interface WebSocketMessage {
   // research_progress fields
   stage?: ResearchStage;
   data?: Record<string, unknown>;
+  // hand_event fields
+  hand?: string;
+  success?: boolean;
+  summary?: string;
+  // hand_approval_request fields
+  hand_name?: string;
+  tool_name?: string;
+  request_id?: string;
 }
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
