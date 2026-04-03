@@ -112,10 +112,8 @@ export function WebCreator() {
       ? `${SYSTEM_PROMPT}\n\nCurrent page HTML:\n${currentHtml}`
       : SYSTEM_PROMPT;
 
-    // Build history from prior chat messages (exclude system messages)
-    const history = chatMessages
-      .filter((m) => m.role !== 'system')
-      .map((m) => ({ role: m.role, content: m.content }));
+    // Build history from prior chat messages
+    const history = chatMessages.map((m) => ({ role: m.role, content: m.content }));
 
     const controller = new AbortController();
     abortRef.current = controller;
