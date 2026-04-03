@@ -1920,7 +1920,7 @@ class OllamaBrain:
                 return self._cached_system_additions
 
             additions = []
-            _PER_SOURCE_CAP = 500   # max chars per subsystem
+            _PER_SOURCE_CAP = 1000  # max chars per subsystem
             _TOTAL_CAP = 2000       # max chars for all additions combined
 
             def _cap(text: str, source: str) -> str:

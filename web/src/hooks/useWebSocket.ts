@@ -361,7 +361,7 @@ export function useWebSocket() {
 
     const selectedModel = modelOverride !== undefined
       ? modelOverride
-      : (actionMode ? null : useChatStore.getState().selectedModel);
+      : useChatStore.getState().selectedModel;
 
     const payload: {
       type: string;

@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { PlayIcon, StopIcon, ArrowPathIcon, ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline';
+import { PlayIcon, StopIcon, ArrowPathIcon, ChevronDownIcon, ChevronUpIcon, SparklesIcon } from '@heroicons/react/24/outline';
 import { highlightCode } from '../utils/codeHighlighter';
 import { sanitizeHtml } from '../utils/sanitize';
 import { execute, resetRuntime, subscribe, isReady, type OutputBlock, type VariableInfo } from '../utils/pyodideExecutor';
@@ -125,6 +125,12 @@ function ExchangeCard({ exchange }: { exchange: Exchange }) {
   );
 }
 
+const CODE_SYSTEM_PROMPT = `You are a Python code generator. Output ONLY executable Python code, no markdown fences, no explanation.
+Available libraries: numpy, pandas, matplotlib, scipy, scikit-learn, sympy.
+For plots, always call plt.show() at the end.
+For DataFrames, print them with print(df).
+Write clean, commented code. Output ONLY the Python code.`;
+
 /* ── Main component ── */
 export function CodeInterpreter() {
   const [exchanges, setExchanges] = useState<Exchange[]>([]);
@@ -132,8 +138,14 @@ export function CodeInterpreter() {
   const [workerReady, setWorkerReady] = useState(isReady());
   const [loading, setLoading] = useState(isReady() ? '' : 'Initializing...');
   const [isExecuting, setIsExecuting] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [showModelMenu, setShowModelMenu] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const modelMenuRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   // Subscribe to global worker events (ready/loading)
   useEffect(() => {
@@ -147,6 +159,105 @@ export function CodeInterpreter() {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [exchanges]);
+
+  // Fetch models
+  useEffect(() => {
+    fetch('/api/models')
+      .then(res => res.json())
+      .then(data => {
+        const all = [
+          ...(data.chatgpt_models || []),
+          ...(data.direct_api_models || []),
+          ...(data.cloud_models || []),
+          ...(data.local_models || []),
+        ];
+        if (all.length > 0) setAvailableModels(all);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Close model menu on click outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (modelMenuRef.current && !modelMenuRef.current.contains(e.target as Node)) setShowModelMenu(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  // Cleanup abort on unmount
+  useEffect(() => {
+    return () => { abortRef.current?.abort(); };
+  }, []);
+
+  const handleAskAI = useCallback(async () => {
+    const prompt = code.trim();
+    if (!prompt || isGenerating) return;
+
+    setIsGenerating(true);
+    setCode('');
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    try {
+      const res = await fetch('/api/generate/raw', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: prompt,
+          system_prompt: CODE_SYSTEM_PROMPT,
+          ...(selectedModel ? { model: selectedModel } : {}),
+        }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) throw new Error(`API error: ${res.status}`);
+
+      let fullCode = '';
+      if (res.body) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
+          for (const line of chunk.split('\n')) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+              if (data === '[DONE]') continue;
+              try {
+                const parsed = JSON.parse(data);
+                const text = parsed.choices?.[0]?.delta?.content || parsed.content || parsed.chunk || '';
+                if (text) { fullCode += text; setCode(fullCode); }
+              } catch {
+                fullCode += data;
+                setCode(fullCode);
+              }
+            } else if (line.trim() && !line.startsWith(':')) {
+              fullCode += line;
+              setCode(fullCode);
+            }
+          }
+        }
+      } else {
+        fullCode = await res.text();
+        setCode(fullCode);
+      }
+
+      // Strip markdown fences if present
+      let clean = fullCode.trim();
+      const fenceMatch = clean.match(/```python?\s*\n([\s\S]*?)```/);
+      if (fenceMatch) clean = fenceMatch[1].trim();
+      if (clean !== fullCode.trim()) setCode(clean);
+    } catch (e: any) {
+      if (e.name !== 'AbortError') {
+        setCode(`# Error generating code: ${e.message}`);
+      }
+    } finally {
+      setIsGenerating(false);
+      abortRef.current = null;
+    }
+  }, [code, isGenerating, selectedModel]);
 
   const handleRun = useCallback(() => {
     const trimmed = code.trim();
@@ -260,21 +371,56 @@ export function CodeInterpreter() {
             rows={3}
             disabled={!workerReady}
           />
-          <button
-            onClick={handleRun}
-            disabled={!workerReady || !code.trim() || isExecuting}
-            className="self-end px-4 py-2.5 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors flex items-center gap-1.5"
-          >
-            {isExecuting ? (
-              <><StopIcon className="w-4 h-4" />Running</>
-            ) : (
-              <><PlayIcon className="w-4 h-4" />Run</>
-            )}
-          </button>
+          <div className="flex flex-col gap-1.5 self-end">
+            <button
+              onClick={handleAskAI}
+              disabled={!code.trim() || isGenerating || isExecuting}
+              className="px-3 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium transition-colors flex items-center gap-1.5"
+              title="Generate code from description"
+            >
+              {isGenerating ? (
+                <><StopIcon className="w-3.5 h-3.5" />AI...</>
+              ) : (
+                <><SparklesIcon className="w-3.5 h-3.5" />Ask AI</>
+              )}
+            </button>
+            <button
+              onClick={handleRun}
+              disabled={!workerReady || !code.trim() || isExecuting || isGenerating}
+              className="px-3 py-2 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium transition-colors flex items-center gap-1.5"
+            >
+              {isExecuting ? (
+                <><StopIcon className="w-3.5 h-3.5" />Run...</>
+              ) : (
+                <><PlayIcon className="w-3.5 h-3.5" />Run</>
+              )}
+            </button>
+          </div>
         </div>
-        <div className="flex items-center justify-between mt-1.5 text-[10px] text-chat-text-secondary/50">
-          <span>Ctrl+Enter to run</span>
-          <span>numpy, pandas, matplotlib, scipy, scikit-learn available</span>
+        <div className="flex items-center justify-between mt-1.5">
+          {/* Model selector */}
+          <div ref={modelMenuRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setShowModelMenu(p => !p)}
+              className="flex items-center gap-1 text-[10px] text-chat-text-secondary hover:text-chat-text transition-colors px-2 py-1 rounded-md"
+              style={{ background: 'var(--border-subtle)' }}
+            >
+              <span className="max-w-[140px] truncate">{selectedModel ? selectedModel.split('/').pop() : 'Auto'}</span>
+              <ChevronDownIcon className="w-2.5 h-2.5 opacity-50" />
+            </button>
+            {showModelMenu && availableModels.length > 0 && (
+              <div style={{ position: 'absolute', bottom: 28, left: 0, width: 220, maxHeight: 280, background: 'var(--surface-1)', border: '1px solid var(--border-default)', borderRadius: 10, overflow: 'hidden', zIndex: 50 }}>
+                <div style={{ maxHeight: 280, overflowY: 'auto', padding: 4 }}>
+                  <button onClick={() => { setSelectedModel(null); setShowModelMenu(false); }} className="w-full px-2.5 py-1.5 rounded-lg text-xs text-left" style={{ color: !selectedModel ? 'var(--text-primary)' : 'var(--text-secondary)', background: !selectedModel ? 'var(--surface-3)' : 'transparent' }}>Auto</button>
+                  {availableModels.map(m => (
+                    <button key={m} onClick={() => { setSelectedModel(m); setShowModelMenu(false); }} className="w-full px-2.5 py-1.5 rounded-lg text-xs text-left truncate" style={{ color: selectedModel === m ? 'var(--text-primary)' : 'var(--text-secondary)', background: selectedModel === m ? 'var(--surface-3)' : 'transparent' }}>{m}</button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <span className="text-[10px] text-chat-text-secondary/50">Ctrl+Enter to run · Ask AI to generate code</span>
         </div>
       </div>
     </div>
