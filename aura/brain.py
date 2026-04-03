@@ -2454,7 +2454,7 @@ class OllamaBrain:
         except Exception as e:
             logger.debug(f"[Brain] non-critical: {e}")
 
-        self._trigger_world_model_extraction(list(recent), _BG_EXECUTOR)
+        self._trigger_world_model_extraction(list(recent))
         return recent
 
     def think(
@@ -2741,7 +2741,7 @@ class OllamaBrain:
                     {"role": "user", "content": prompt},
                     {"role": "assistant", "content": full_response},
                 ]
-                self._trigger_world_model_extraction(list(recent), _BG_EXECUTOR)
+                self._trigger_world_model_extraction(list(recent))
         finally:
             self._user_inference_active.clear()
 

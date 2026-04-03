@@ -112,11 +112,10 @@ export function WebCreator() {
       ? `${SYSTEM_PROMPT}\n\nCurrent page HTML:\n${currentHtml}`
       : SYSTEM_PROMPT;
 
-    const apiMessages = [
-      { role: 'system', content: systemCtx },
-      ...chatMessages.map((m) => ({ role: m.role, content: m.content })),
-      { role: 'user', content: message },
-    ];
+    // Build history from prior chat messages (exclude system messages)
+    const history = chatMessages
+      .filter((m) => m.role !== 'system')
+      .map((m) => ({ role: m.role, content: m.content }));
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -125,7 +124,11 @@ export function WebCreator() {
       const res = await fetch('/api/generate/raw', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: apiMessages, stream: true }),
+        body: JSON.stringify({
+          message: message,
+          system_prompt: systemCtx,
+          history: history,
+        }),
         signal: controller.signal,
       });
 
