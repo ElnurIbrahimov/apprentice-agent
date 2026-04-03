@@ -336,9 +336,24 @@ def detect_action_mode(message: str) -> Optional[str]:
         'frontend', 'rapid', 'artifact', 'debug', 'search', 'research',
         'agent', 'code', 'vision', 'deep_research', 'swarm', or None
     """
-    # Quick skip for very short messages (greetings, etc.)
-    if len(message.split()) < 4:
+    words = message.split()
+
+    # Quick skip for short messages — most are conversational
+    if len(words) < 4:
         return None
+
+    # Skip LLM classification for casual/conversational messages (≤12 words, no task indicators)
+    # This avoids 1-5s overhead and frequent misclassification as "agent"
+    if len(words) <= 12:
+        msg_lower = message.lower()
+        _TASK_INDICATORS = {
+            'create', 'build', 'make', 'generate', 'write', 'code', 'fix', 'debug',
+            'search', 'find', 'look up', 'research', 'analyze', 'deploy', 'implement',
+            'design', 'draw', 'render', 'screenshot', 'review', 'compare', 'test',
+            'refactor', 'optimize', 'automate', 'scrape', 'crawl', 'translate',
+        }
+        if not any(ind in msg_lower for ind in _TASK_INDICATORS):
+            return None
 
     # Try LLM classification first
     client = _get_classifier_client()
