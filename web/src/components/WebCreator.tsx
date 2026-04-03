@@ -60,12 +60,19 @@ export function WebCreator() {
   const [input, setInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [currentHtml, setCurrentHtml] = useState('');
+  const [streamingCode, setStreamingCode] = useState('');
   const [versions, setVersions] = useState<Version[]>([]);
   const [versionIndex, setVersionIndex] = useState(-1);
   const [device, setDevice] = useState<DeviceSize>('desktop');
   const [viewMode, setViewMode] = useState<ViewMode>('preview');
+  const [preGenViewMode, setPreGenViewMode] = useState<ViewMode | null>(null);
   const [codeHtml, setCodeHtml] = useState('');
   const [showTemplates, setShowTemplates] = useState(true);
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [showModelMenu, setShowModelMenu] = useState(false);
+  const modelMenuRef = useRef<HTMLDivElement>(null);
+  const codeEndRef = useRef<HTMLPreElement>(null);
 
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -88,6 +95,40 @@ export function WebCreator() {
   useEffect(() => {
     return () => { abortRef.current?.abort(); };
   }, []);
+
+  // Fetch available models
+  useEffect(() => {
+    fetch('/api/models')
+      .then(res => res.json())
+      .then(data => {
+        const all = [
+          ...(data.chatgpt_models || []),
+          ...(data.direct_api_models || []),
+          ...(data.cloud_models || []),
+          ...(data.local_models || []),
+        ];
+        if (all.length > 0) setAvailableModels(all);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Close model menu on click outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (modelMenuRef.current && !modelMenuRef.current.contains(e.target as Node)) {
+        setShowModelMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  // Auto-scroll code view during streaming
+  useEffect(() => {
+    if (isGenerating && codeEndRef.current) {
+      codeEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [streamingCode, isGenerating]);
 
   const addVersion = useCallback((html: string) => {
     setVersions((prev) => {
@@ -118,6 +159,11 @@ export function WebCreator() {
     const controller = new AbortController();
     abortRef.current = controller;
 
+    // Switch to split/code view so user sees code being written
+    setPreGenViewMode(viewMode);
+    if (viewMode === 'preview') setViewMode('split');
+    setStreamingCode('');
+
     try {
       const res = await fetch('/api/generate/raw', {
         method: 'POST',
@@ -126,6 +172,7 @@ export function WebCreator() {
           message: message,
           system_prompt: systemCtx,
           history: history,
+          ...(selectedModel ? { model: selectedModel } : {}),
         }),
         signal: controller.signal,
       });
@@ -156,6 +203,7 @@ export function WebCreator() {
                 const text = parsed.choices?.[0]?.delta?.content || parsed.content || parsed.chunk || '';
                 if (text) {
                   fullResponse += text;
+                  setStreamingCode(fullResponse);
                   setChatMessages((prev) => {
                     const updated = [...prev];
                     updated[updated.length - 1] = { role: 'assistant', content: fullResponse };
@@ -165,10 +213,12 @@ export function WebCreator() {
               } catch {
                 // Raw text chunk
                 fullResponse += data;
+                setStreamingCode(fullResponse);
               }
             } else if (line.trim() && !line.startsWith(':')) {
               // Non-SSE — raw streaming
               fullResponse += line;
+              setStreamingCode(fullResponse);
               setChatMessages((prev) => {
                 const updated = [...prev];
                 updated[updated.length - 1] = { role: 'assistant', content: fullResponse };
@@ -205,6 +255,12 @@ export function WebCreator() {
       }
     } finally {
       setIsGenerating(false);
+      setStreamingCode('');
+      // Restore previous view mode after generation
+      if (preGenViewMode !== null) {
+        setViewMode(preGenViewMode);
+        setPreGenViewMode(null);
+      }
       abortRef.current = null;
     }
   }, [chatMessages, currentHtml, isGenerating, addVersion]);
@@ -294,7 +350,12 @@ export function WebCreator() {
               ) : (
                 <div className="text-xs text-chat-text-secondary">
                   {msg.content.includes('<!DOCTYPE') || msg.content.includes('<html')
-                    ? <span className="text-green-400">Generated website ({Math.round(msg.content.length / 1024)}KB)</span>
+                    ? <span className="text-green-400">
+                        {isGenerating && i === chatMessages.length - 1
+                          ? `Writing code... (${Math.round(msg.content.length / 1024)}KB)`
+                          : `Generated website (${Math.round(msg.content.length / 1024)}KB)`
+                        }
+                      </span>
                     : msg.content.length > 300 ? msg.content.slice(0, 300) + '...' : msg.content
                   }
                 </div>
@@ -334,6 +395,49 @@ export function WebCreator() {
             >
               {isGenerating ? <StopIcon className="w-4 h-4" /> : <PaperAirplaneIcon className="w-4 h-4" />}
             </button>
+          </div>
+          {/* Model selector */}
+          <div className="flex items-center mt-1.5" ref={modelMenuRef}>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowModelMenu(p => !p)}
+                className="flex items-center gap-1 text-[10px] text-chat-text-secondary hover:text-chat-text transition-colors px-2 py-1 rounded-md"
+                style={{ background: 'var(--border-subtle)' }}
+              >
+                <span className="max-w-[140px] truncate">{selectedModel ? selectedModel.split('/').pop() : 'Auto'}</span>
+                <svg className="w-2.5 h-2.5 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+              </button>
+              {showModelMenu && availableModels.length > 0 && (
+                <div
+                  style={{
+                    position: 'absolute', bottom: 28, left: 0, width: 220, maxHeight: 280,
+                    background: 'var(--surface-1)', border: '1px solid var(--border-default)',
+                    borderRadius: 10, overflow: 'hidden', zIndex: 50,
+                  }}
+                >
+                  <div style={{ maxHeight: 280, overflowY: 'auto', padding: 4 }}>
+                    <button
+                      onClick={() => { setSelectedModel(null); setShowModelMenu(false); }}
+                      className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-left transition-colors"
+                      style={{ color: !selectedModel ? 'var(--text-primary)' : 'var(--text-secondary)', background: !selectedModel ? 'var(--surface-3)' : 'transparent' }}
+                    >
+                      Auto (recommended)
+                    </button>
+                    {availableModels.map((m) => (
+                      <button
+                        key={m}
+                        onClick={() => { setSelectedModel(m); setShowModelMenu(false); }}
+                        className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-left transition-colors truncate"
+                        style={{ color: selectedModel === m ? 'var(--text-primary)' : 'var(--text-secondary)', background: selectedModel === m ? 'var(--surface-3)' : 'transparent' }}
+                      >
+                        {m}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -419,7 +523,13 @@ export function WebCreator() {
 
           {showCode && (
             <div className={`${viewMode === 'split' ? 'w-1/2' : 'flex-1'} overflow-auto bg-surface-1`}>
-              {currentHtml ? (
+              {isGenerating && streamingCode ? (
+                /* Live streaming code view */
+                <pre className="p-4 text-xs font-mono text-green-400 whitespace-pre-wrap leading-relaxed">
+                  {streamingCode}
+                  <span ref={codeEndRef} className="inline-block w-1.5 h-3.5 bg-green-400 animate-pulse ml-0.5 align-middle" />
+                </pre>
+              ) : currentHtml ? (
                 codeHtml ? (
                   <div
                     dangerouslySetInnerHTML={{ __html: codeHtml }}
