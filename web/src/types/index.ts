@@ -140,7 +140,6 @@ export interface WebSocketMessage {
   summary?: string;
   // hand_approval_request fields
   hand_name?: string;
-  tool_name?: string;
   request_id?: string;
 }
 
