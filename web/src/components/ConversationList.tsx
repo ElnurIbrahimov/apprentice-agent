@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useChatStore } from '../store/chatStore';
+import { toast } from './Toast';
 import type { Conversation } from '../types';
 import {
   PlusIcon,
@@ -285,10 +286,10 @@ export function ConversationList() {
       if (res.ok) {
         const data = await res.json();
         if (data.success) {
-          // Brief success indicator (will fade)
+          toast.success('Saved to memory');
           setTimeout(() => setSavingToMemory(null), 1500);
         } else {
-          console.error('[ConversationList] Save to memory failed:', data.error);
+          toast.error('Failed to save', data.error);
           setSavingToMemory(null);
         }
       }
@@ -420,9 +421,9 @@ export function ConversationList() {
                       <span className="text-[10px] text-green-400 animate-pulse">Saved!</span>
                     )}
 
-                    {/* Hover actions */}
+                    {/* Actions — visible on hover (desktop) or always (touch) */}
                     {editingId !== conv.id && (
-                      <div className="hidden group-hover:flex items-center gap-0.5 flex-shrink-0">
+                      <div className="flex items-center gap-0.5 flex-shrink-0 opacity-50 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                         <button
                           onClick={(e) => { e.stopPropagation(); handleRenameStart(conv.id, conv.title); }}
                           className="p-1 text-chat-text-secondary/50 hover:text-chat-text rounded transition-colors"

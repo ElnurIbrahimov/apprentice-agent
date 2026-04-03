@@ -7,28 +7,29 @@ export default {
   theme: {
     extend: {
       colors: {
-        // NextGen dark theme
-        'chat-bg': '#030303',
-        'chat-sidebar': '#0a0a0c',
-        'chat-user': '#030303',
-        'chat-assistant': 'rgba(20, 20, 25, 0.4)',
-        'chat-border': 'rgba(255, 255, 255, 0.06)',
-        'chat-text': '#ededed',
-        'chat-text-secondary': '#a1a1aa',
-        'chat-text-tertiary': '#444444',
-        'chat-accent': '#7c3aed',
-        'chat-accent-hover': '#6d28d9',
+        // Theme-aware via CSS variables (overridden in html.light)
+        'chat-bg': 'var(--chat-bg, #030303)',
+        'chat-sidebar': 'var(--chat-sidebar, #0a0a0c)',
+        'chat-user': 'var(--chat-user, #030303)',
+        'chat-assistant': 'var(--chat-assistant, rgba(20, 20, 25, 0.4))',
+        'chat-border': 'var(--chat-border, rgba(255, 255, 255, 0.06))',
+        'chat-text': 'var(--chat-text, #ededed)',
+        'chat-text-secondary': 'var(--chat-text-secondary, #a1a1aa)',
+        'chat-text-tertiary': 'var(--chat-text-tertiary, #444444)',
+        'chat-accent': 'var(--chat-accent, #7c3aed)',
+        'chat-accent-hover': 'var(--chat-accent-hover, #6d28d9)',
+        'chat-input': 'var(--chat-input, #0a0a0c)',
         // Extended palette for glows and accents
         'aura-purple': '#8b5cf6',
         'aura-purple-light': '#a78bfa',
         'aura-blue': '#3b82f6',
         'aura-glow': 'rgba(139, 92, 246, 0.4)',
         // Surface elevation
-        'surface-0': '#09090b',
-        'surface-1': '#121214',
-        'surface-2': '#1a1a1d',
-        'surface-3': '#1e1e21',
-        'surface-4': '#232326',
+        'surface-0': 'var(--surface-0)',
+        'surface-1': 'var(--surface-1)',
+        'surface-2': 'var(--surface-2)',
+        'surface-3': 'var(--surface-3)',
+        'surface-4': 'var(--surface-4)',
       },
       animation: {
         'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',

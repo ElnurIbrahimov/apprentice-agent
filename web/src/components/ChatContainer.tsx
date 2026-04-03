@@ -13,37 +13,51 @@ import { FleetDashboard } from './FleetDashboard';
 import { ProactiveCard } from './ProactiveCard';
 import { ResearchProgress } from './ResearchProgress';
 import { CitationsPanel } from './CitationsPanel';
+import { ArtifactsPanel } from './ArtifactsPanel';
+import { ConversationList } from './ConversationList';
+import { exportAsMarkdown, exportAsJSON, downloadExport } from '../utils/exportConversation';
+import { copyText } from '../utils/clipboard';
+import { toast } from './Toast';
+import type { ArtifactType } from '../utils/artifactRenderer';
 import {
-  ChatBubbleLeftRightIcon,
-  MagnifyingGlassIcon,
-  CalculatorIcon,
+  GlobeAltIcon,
+  CommandLineIcon,
+  ScaleIcon,
   CpuChipIcon,
   ChevronDownIcon,
   XMarkIcon,
   BookOpenIcon,
+  EllipsisHorizontalIcon,
+  ArrowDownTrayIcon,
+  DocumentTextIcon,
+  CodeBracketIcon,
 } from '@heroicons/react/24/outline';
 
 // Swipe drawer constants
-const EDGE_ZONE = 20; // px from left edge to trigger
+const EDGE_ZONE = 30; // px from left edge to trigger
 const DRAWER_WIDTH = 280;
 const OPEN_THRESHOLD = 0.35; // fraction of drawer width to snap open
 
 // Quick action button configurations with icons
 const QUICK_ACTIONS = [
   {
-    text: 'What can you do?',
-    icon: ChatBubbleLeftRightIcon,
+    text: 'Research the latest breakthroughs in AI',
+    subtitle: 'Deep web research with citations',
+    icon: GlobeAltIcon,
   },
   {
-    text: 'Search online for AI news',
-    icon: MagnifyingGlassIcon,
+    text: 'Generate a Python data visualization',
+    subtitle: 'Code interpreter with live output',
+    icon: CommandLineIcon,
   },
   {
-    text: 'Calculate factorial of 20',
-    icon: CalculatorIcon,
+    text: 'Compare models on a creative task',
+    subtitle: 'Side-by-side model comparison',
+    icon: ScaleIcon,
   },
   {
-    text: 'Tell me about yourself',
+    text: 'Build me a landing page',
+    subtitle: 'Web creator with live preview',
     icon: CpuChipIcon,
   },
 ];
@@ -99,6 +113,15 @@ export function ChatContainer() {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
   const initialMessageCountRef = useRef(messages.length);
+
+  // Artifact panel state
+  const [artifactCode, setArtifactCode] = useState<string | null>(null);
+  const [artifactType, setArtifactType] = useState<ArtifactType>('html');
+
+  const handleOpenArtifact = useCallback((code: string, type: ArtifactType) => {
+    setArtifactCode(code);
+    setArtifactType(type);
+  }, []);
   const prevIsLoadingRef = useRef(isLoading);
 
   // Thinking history tracking
@@ -118,6 +141,33 @@ export function ChatContainer() {
     setDismissedProactiveIds(prev => new Set(prev).add(id));
   }, []);
 
+  // --- Export menu ---
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+
+  const handleExportMarkdown = useCallback(() => {
+    const md = exportAsMarkdown(messages);
+    downloadExport(md, `aura-chat-${Date.now()}.md`, 'text/markdown');
+    toast.success('Exported as Markdown');
+    setExportMenuOpen(false);
+  }, [messages]);
+
+  const handleExportJSON = useCallback(() => {
+    const json = exportAsJSON(messages);
+    downloadExport(json, `aura-chat-${Date.now()}.json`, 'application/json');
+    toast.success('Exported as JSON');
+    setExportMenuOpen(false);
+  }, [messages]);
+
+  const [copyFeedback, setCopyFeedback] = useState(false);
+  const handleCopyConversation = useCallback(async () => {
+    const md = exportAsMarkdown(messages);
+    if (await copyText(md)) {
+      setCopyFeedback(true);
+      setTimeout(() => setCopyFeedback(false), 1500);
+    }
+    setExportMenuOpen(false);
+  }, [messages]);
+
   // --- Swipe drawer state ---
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerDragging, setDrawerDragging] = useState(false);
@@ -126,6 +176,7 @@ export function ChatContainer() {
   const drawerTouchStartXRef = useRef(0);
   const drawerTouchStartYRef = useRef(0);
   const drawerActiveRef = useRef(false); // whether this swipe is a drawer gesture
+  const drawerTranslateXRef = useRef(-DRAWER_WIDTH);
 
   const handleDrawerTouchStart = useCallback((e: React.TouchEvent) => {
     if (window.innerWidth >= 768) return;
@@ -152,6 +203,7 @@ export function ChatContainer() {
       return;
     }
     const clamped = Math.min(Math.max(deltaX - DRAWER_WIDTH, -DRAWER_WIDTH), 0);
+    drawerTranslateXRef.current = clamped;
     setDrawerTranslateX(clamped);
   }, []);
 
@@ -160,15 +212,19 @@ export function ChatContainer() {
     drawerActiveRef.current = false;
     setDrawerDragging(false);
     setEdgeHintActive(false);
-    const progress = (drawerTranslateX + DRAWER_WIDTH) / DRAWER_WIDTH;
+    // Read from ref to avoid stale closure (state may not have re-rendered yet)
+    const currentX = drawerTranslateXRef.current;
+    const progress = (currentX + DRAWER_WIDTH) / DRAWER_WIDTH;
     if (progress > OPEN_THRESHOLD) {
       setDrawerOpen(true);
       setDrawerTranslateX(0);
+      drawerTranslateXRef.current = 0;
     } else {
       setDrawerOpen(false);
       setDrawerTranslateX(-DRAWER_WIDTH);
+      drawerTranslateXRef.current = -DRAWER_WIDTH;
     }
-  }, [drawerTranslateX]);
+  }, []);
 
   const closeDrawer = useCallback(() => {
     setDrawerOpen(false);
@@ -200,7 +256,7 @@ export function ChatContainer() {
     const container = scrollContainerRef.current;
     if (!container) return;
     const distFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-    setIsUserScrolledUp(distFromBottom > 150);
+    setIsUserScrolledUp(distFromBottom > 80);
   }, []);
 
   // Smart auto-scroll: only scroll if user is already at bottom and autoScroll is enabled
@@ -233,7 +289,7 @@ export function ChatContainer() {
     if (!error) return;
     haptic(100);
     if (settings.soundEnabled) sounds.error();
-    const timer = setTimeout(() => setError(null), 10000);
+    const timer = setTimeout(() => setError(null), 30000);
     return () => clearTimeout(timer);
   }, [error, setError, settings.soundEnabled]);
 
@@ -308,6 +364,40 @@ export function ChatContainer() {
         </div>
       )}
 
+      {/* Chat toolbar — export menu */}
+      {messages.length > 0 && (
+        <div className="flex justify-end px-4 py-1.5 relative z-20">
+          <div className="relative">
+            <button
+              onClick={() => setExportMenuOpen(!exportMenuOpen)}
+              className="p-1.5 rounded-lg text-chat-text-secondary hover:text-chat-text hover:bg-white/[0.06] transition-colors"
+              aria-label="Chat options"
+            >
+              <EllipsisHorizontalIcon className="w-5 h-5" />
+            </button>
+            {exportMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-[40]" onClick={() => setExportMenuOpen(false)} />
+                <div className="absolute right-0 top-full mt-1 z-[50] ctx-menu min-w-[180px]">
+                  <button className="ctx-menu-item w-full" onClick={handleExportMarkdown}>
+                    <DocumentTextIcon className="w-4 h-4" />
+                    Export as Markdown
+                  </button>
+                  <button className="ctx-menu-item w-full" onClick={handleExportJSON}>
+                    <CodeBracketIcon className="w-4 h-4" />
+                    Export as JSON
+                  </button>
+                  <button className="ctx-menu-item w-full" onClick={handleCopyConversation}>
+                    <ArrowDownTrayIcon className="w-4 h-4" />
+                    {copyFeedback ? 'Copied!' : 'Copy to Clipboard'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Connection status banner */}
       {connectionStatus !== 'connected' && (
         <div className={`px-4 py-2 text-center text-sm transition-all duration-300 ${
@@ -357,12 +447,18 @@ export function ChatContainer() {
         className={`swipe-drawer${drawerOpen ? ' drawer-open' : ''}`}
         style={drawerDragging ? { transform: `translateX(${drawerTranslateX}px)`, transition: 'none' } : undefined}
       >
-        <div className="swipe-drawer-header">Conversations</div>
+        <div className="swipe-drawer-header flex items-center justify-between">
+          <span>Conversations</span>
+          <button
+            onClick={closeDrawer}
+            className="p-1 rounded-md text-gray-400 hover:text-gray-200 hover:bg-white/[0.06] transition-colors"
+            aria-label="Close drawer"
+          >
+            <XMarkIcon className="w-4 h-4" />
+          </button>
+        </div>
         <div className="swipe-drawer-body">
-          <p className="swipe-drawer-placeholder">
-            Swipe from the left edge to open this drawer.
-            Conversation history will appear here.
-          </p>
+          <ConversationList />
         </div>
       </div>
 
@@ -403,11 +499,14 @@ export function ChatContainer() {
                 letterSpacing: '-0.04em',
               }}
             >
-              What will we build today?
+              What should we explore?
             </h1>
 
-            <p className="text-center max-w-md text-chat-text-secondary mb-12 leading-relaxed animate-fade-in animation-delay-100">
-              AURA is ready to assist with complex design, deep research, and architectural engineering.
+            <p className="text-center max-w-md text-chat-text-secondary mb-4 leading-relaxed animate-fade-in animation-delay-100">
+              Research, create, code, and compare — powered by 40+ AI models.
+            </p>
+            <p className="text-center text-xs text-chat-text-tertiary mb-10 animate-fade-in animation-delay-200">
+              Upload files, use voice, or pick a starting point
             </p>
 
             {/* NextGen suggestion cards */}
@@ -424,35 +523,22 @@ export function ChatContainer() {
                       group flex flex-col gap-3 p-5 text-left
                       disabled:opacity-50 disabled:cursor-not-allowed
                       animate-slide-up-fade transition-all duration-300
+                      bg-surface-1 border border-chat-border rounded-xl backdrop-blur-sm
+                      hover:bg-surface-2 hover:border-chat-text-secondary/20
                       ${index === 0 ? 'animation-delay-100' : ''}
                       ${index === 1 ? 'animation-delay-200' : ''}
                       ${index === 2 ? 'animation-delay-300' : ''}
                       ${index === 3 ? 'animation-delay-400' : ''}
                     `}
-                    style={{
-                      background: 'rgba(20, 20, 25, 0.4)',
-                      border: '1px solid rgba(255,255,255,0.06)',
-                      borderRadius: '12px',
-                      backdropFilter: 'blur(12px)',
-                    }}
-                    onMouseEnter={e => {
-                      (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.05)';
-                      (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.15)';
-                    }}
-                    onMouseLeave={e => {
-                      (e.currentTarget as HTMLElement).style.background = 'rgba(20, 20, 25, 0.4)';
-                      (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.06)';
-                    }}
                   >
-                    <div style={{
-                      background: 'rgba(255,255,255,0.1)',
-                      width: 36, height: 36, borderRadius: 8,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    }}>
-                      <Icon className="w-4 h-4 text-white" />
+                    <div className="w-9 h-9 rounded-lg bg-surface-2 flex items-center justify-center">
+                      <Icon className="w-4 h-4 text-chat-text" />
                     </div>
                     <span className="text-sm font-medium text-chat-text group-hover:text-white transition-colors">
                       {action.text}
+                    </span>
+                    <span className="text-xs text-chat-text-secondary mt-0.5">
+                      {action.subtitle}
                     </span>
                   </button>
                 );
@@ -471,6 +557,9 @@ export function ChatContainer() {
                   message={message}
                   animateIn={isNew}
                   animationIndex={animIndex}
+                  onRegenerate={(text, attachments) => handleSend(text, attachments)}
+                  onStop={message.isStreaming ? stopGeneration : undefined}
+                  onOpenArtifact={handleOpenArtifact}
                 />
               );
             })}
@@ -493,12 +582,12 @@ export function ChatContainer() {
       </div>
 
       {/* Tool status / thinking shimmer */}
-      {toolStatus && (
+      {toolStatus && settings.showThinking && (
         <ThinkingShimmer toolStatus={toolStatus} />
       )}
 
       {/* Collapsed thinking history pill */}
-      {!toolStatus && thinkingHistory && (
+      {!toolStatus && thinkingHistory && settings.showThinking && (
         <div className="px-4 py-2">
           <div className="max-w-3xl mx-auto">
             <button
@@ -509,23 +598,23 @@ export function ChatContainer() {
                 gap: '6px',
                 padding: '4px 12px',
                 fontSize: '12px',
-                color: 'rgba(255,255,255,0.5)',
-                background: 'rgba(255,255,255,0.04)',
-                border: '1px solid rgba(255,255,255,0.08)',
+                color: 'var(--text-secondary)',
+                background: 'var(--border-subtle)',
+                border: '1px solid var(--border-default)',
                 borderRadius: '999px',
                 cursor: 'pointer',
                 backdropFilter: 'blur(8px)',
                 transition: 'all 0.2s ease',
               }}
               onMouseEnter={e => {
-                (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.08)';
-                (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.15)';
-                (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.7)';
+                (e.currentTarget as HTMLElement).style.background = 'var(--surface-2)';
+                (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-strong)';
+                (e.currentTarget as HTMLElement).style.color = 'var(--text-primary)';
               }}
               onMouseLeave={e => {
-                (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.04)';
-                (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.08)';
-                (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.5)';
+                (e.currentTarget as HTMLElement).style.background = 'var(--border-subtle)';
+                (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-default)';
+                (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)';
               }}
             >
               <ChevronDownIcon
@@ -543,8 +632,8 @@ export function ChatContainer() {
                 style={{
                   marginTop: '8px',
                   padding: '12px 16px',
-                  background: 'rgba(255,255,255,0.02)',
-                  border: '1px solid rgba(255,255,255,0.06)',
+                  background: 'var(--surface-0)',
+                  border: '1px solid var(--border-subtle)',
                   borderRadius: '10px',
                   animation: 'fadeIn 0.2s ease',
                 }}
@@ -553,16 +642,16 @@ export function ChatContainer() {
                   <div className="flex-shrink-0 mt-1">
                     <div
                       className="w-9 h-9 rounded-lg"
-                      style={{ background: 'rgba(255,255,255,0.06)' }}
+                      style={{ background: 'var(--surface-2)' }}
                     />
                   </div>
                   <div className="flex-1 min-w-0 space-y-3">
                     <span className="text-xs text-chat-text-secondary">
                       Thought for {thinkingHistory.elapsed}s
                     </span>
-                    <div style={{ height: 12, width: '80%', background: 'rgba(255,255,255,0.04)', borderRadius: 4 }} />
-                    <div style={{ height: 12, width: '60%', background: 'rgba(255,255,255,0.04)', borderRadius: 4 }} />
-                    <div style={{ height: 12, width: '40%', background: 'rgba(255,255,255,0.04)', borderRadius: 4 }} />
+                    <div style={{ height: 12, width: '80%', background: 'var(--border-subtle)', borderRadius: 4 }} />
+                    <div style={{ height: 12, width: '60%', background: 'var(--border-subtle)', borderRadius: 4 }} />
+                    <div style={{ height: 12, width: '40%', background: 'var(--border-subtle)', borderRadius: 4 }} />
                   </div>
                 </div>
               </div>
@@ -573,21 +662,27 @@ export function ChatContainer() {
 
       {/* Suggestion chips */}
       {suggestions.length > 0 && !isLoading && (
-        <div className="px-4 pb-2 overflow-x-auto">
-          <div className="max-w-3xl mx-auto flex gap-2">
-            {suggestions.map((text, i) => (
-              <button
-                key={text}
-                onClick={() => {
-                  clearSuggestions();
-                  handleSend(text);
-                }}
-                className={`suggestion-chip chip-delay-${i}`}
-              >
-                {text}
-              </button>
-            ))}
+        <div className="px-4 pb-2 relative">
+          <div className="overflow-x-auto scrollbar-hide">
+            <div className="max-w-3xl mx-auto flex gap-2 pr-8">
+              {suggestions.map((text, i) => (
+                <button
+                  key={text}
+                  onClick={() => {
+                    clearSuggestions();
+                    handleSend(text);
+                  }}
+                  className={`suggestion-chip chip-delay-${i} whitespace-nowrap flex-shrink-0`}
+                >
+                  {text}
+                </button>
+              ))}
+            </div>
           </div>
+          <div
+            className="absolute right-4 top-0 bottom-2 w-12 pointer-events-none"
+            style={{ background: 'linear-gradient(to right, transparent, var(--bg-base))' }}
+          />
         </div>
       )}
 
@@ -607,7 +702,7 @@ export function ChatContainer() {
         }
       />
 
-      {/* Citations panel toggle — floating button */}
+      {/* Citations panel toggle — floating button (always visible when citations exist) */}
       {hasCitationsInConversation && (
         <button
           onClick={toggleCitationsPanel}
@@ -615,23 +710,39 @@ export function ChatContainer() {
           style={{
             background: citationsPanelOpen
               ? 'rgba(139, 92, 246, 0.3)'
-              : 'rgba(20, 20, 28, 0.8)',
-            border: `1px solid ${citationsPanelOpen ? 'rgba(139, 92, 246, 0.5)' : 'rgba(255, 255, 255, 0.1)'}`,
-            color: citationsPanelOpen ? '#e9d5ff' : '#a1a1aa',
+              : 'var(--bg-panel)',
+            border: `1px solid ${citationsPanelOpen ? 'rgba(139, 92, 246, 0.5)' : 'var(--border-default)'}`,
+            color: citationsPanelOpen ? '#e9d5ff' : 'var(--text-secondary)',
             backdropFilter: 'blur(12px)',
             boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
-            display: citationsPanelOpen ? 'none' : 'flex',
           }}
-          aria-label="Toggle sources panel"
+          aria-label={citationsPanelOpen ? 'Close sources panel' : 'Open sources panel'}
         >
-          <BookOpenIcon className="w-4 h-4" />
-          Sources
+          {citationsPanelOpen ? (
+            <><XMarkIcon className="w-4 h-4" />Close</>
+          ) : (
+            <><BookOpenIcon className="w-4 h-4" />Sources</>
+          )}
         </button>
       )}
     </div>
 
     {/* Citations panel (right sidebar) */}
     <CitationsPanel />
+
+    {/* Artifacts panel — side panel on desktop, full-screen on mobile */}
+    {artifactCode && (
+      <>
+        <div className="fixed inset-0 z-[99] bg-black/50 backdrop-blur-sm md:hidden" onClick={() => setArtifactCode(null)} />
+        <div className="fixed inset-0 z-[100] artifact-panel-enter md:static md:inset-auto md:z-auto md:w-[45%] md:min-w-[360px] md:max-w-[600px] md:flex-shrink-0">
+          <ArtifactsPanel
+            code={artifactCode}
+            type={artifactType}
+            onClose={() => setArtifactCode(null)}
+          />
+        </div>
+      </>
+    )}
     </div>
   );
 }

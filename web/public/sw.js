@@ -1,4 +1,4 @@
-const CACHE_NAME = 'aura-shell-v1';
+const CACHE_NAME = 'aura-shell-v2';
 const SHELL_ASSETS = ['/', '/index.html'];
 
 self.addEventListener('install', (e) => {
@@ -14,7 +14,49 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
+  const url = new URL(e.request.url);
+
+  // Navigation: network-first, fallback to cached shell
   if (e.request.mode === 'navigate') {
-    e.respondWith(fetch(e.request).catch(() => caches.match('/index.html')));
+    e.respondWith(
+      fetch(e.request).catch(() => caches.match('/index.html'))
+    );
+    return;
   }
+
+  // Static assets (JS, CSS, fonts, images): cache-first
+  if (/\.(js|css|woff2?|ttf|png|svg|ico|jpg|webp)(\?|$)/.test(url.pathname)) {
+    e.respondWith(
+      caches.match(e.request).then(cached => {
+        if (cached) return cached;
+        return fetch(e.request).then(response => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then(cache => cache.put(e.request, clone));
+          }
+          return response;
+        });
+      })
+    );
+    return;
+  }
+
+  // API calls: network-first, fallback to cache
+  if (url.pathname.startsWith('/api/')) {
+    e.respondWith(
+      fetch(e.request)
+        .then(response => {
+          if (response.ok && e.request.method === 'GET') {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then(cache => cache.put(e.request, clone));
+          }
+          return response;
+        })
+        .catch(() => caches.match(e.request))
+    );
+    return;
+  }
+
+  // Everything else: network-first
+  e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
 });

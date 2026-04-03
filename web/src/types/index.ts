@@ -55,6 +55,7 @@ export interface Message {
   content: string;
   timestamp: number;
   isStreaming?: boolean;
+  edited?: boolean;
   model_used?: string | null;
   attachments?: FileAttachment[];
   citations?: Citation[];
@@ -296,7 +297,7 @@ export interface FleetTask {
 }
 
 // Tab types
-export type TabId = 'chat' | 'monitoring' | 'tools' | 'advanced' | 'activity' | 'settings';
+export type TabId = 'chat' | 'create' | 'tools' | 'insights' | 'settings';
 
 // A-MEM (Agentic Memory)
 export interface AMEMNote {

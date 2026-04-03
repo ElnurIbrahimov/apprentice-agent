@@ -146,7 +146,7 @@ export function CitationsPanel() {
       style={{
         width: 320,
         minWidth: 320,
-        background: 'rgba(10, 10, 15, 0.85)',
+        background: 'var(--bg-panel)',
         borderColor: 'rgba(255, 255, 255, 0.06)',
         backdropFilter: 'blur(20px)',
       }}

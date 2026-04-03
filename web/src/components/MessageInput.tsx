@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, KeyboardEvent, FormEvent, DragEvent, ClipboardEvent } from 'react';
 import {
-  PlusIcon, SpeakerWaveIcon, ChevronDownIcon,
+  PlusIcon, MicrophoneIcon, ChevronDownIcon,
   PhotoIcon, MagnifyingGlassIcon, BeakerIcon, CpuChipIcon, UserGroupIcon, ScaleIcon, GlobeAltIcon,
   PaperAirplaneIcon,
 } from '@heroicons/react/24/outline';
@@ -27,12 +27,22 @@ const MODE_LABELS: Record<ActionMode, string> = {
 
 const MODE_COLORS: Record<ActionMode, string> = {
   none: '',
-  search: 'rgba(59,130,246,0.2)',
-  research: 'rgba(16,185,129,0.2)',
-  deep_research: 'rgba(245,158,11,0.2)',
-  agent: 'rgba(168,85,247,0.2)',
-  swarm: 'rgba(6,182,212,0.2)',
-  compare: 'rgba(249,115,22,0.2)',
+  search: 'rgba(59,130,246,0.25)',
+  research: 'rgba(16,185,129,0.25)',
+  deep_research: 'rgba(245,158,11,0.25)',
+  agent: 'rgba(168,85,247,0.25)',
+  swarm: 'rgba(6,182,212,0.25)',
+  compare: 'rgba(249,115,22,0.25)',
+};
+
+const MODE_ICONS: Record<ActionMode, string> = {
+  none: '',
+  search: '\uD83D\uDD0D',
+  research: '\uD83D\uDCDA',
+  deep_research: '\uD83E\uDDD0',
+  agent: '\u26A1',
+  swarm: '\uD83D\uDC1D',
+  compare: '\u2696\uFE0F',
 };
 
 interface MessageInputProps {
@@ -63,6 +73,7 @@ export function MessageInput({
   const plusMenuRef = useRef<HTMLDivElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const [isListening, setIsListening] = useState(false);
+  const [voiceError, setVoiceError] = useState(false);
   const recognitionRef = useRef<any>(null);
   const mountedRef = useRef(true);
 
@@ -151,7 +162,13 @@ export function MessageInput({
         setIsListening(false);
       }
     };
-    recognition.onerror = () => { setIsListening(false); recognitionRef.current = null; };
+    recognition.onerror = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+      // Flash the voice button red briefly on error
+      setVoiceError(true);
+      setTimeout(() => setVoiceError(false), 2000);
+    };
     recognition.onend = () => { setIsListening(false); recognitionRef.current = null; };
 
     recognitionRef.current = recognition;
@@ -291,14 +308,14 @@ export function MessageInput({
             position: 'relative',
             display: 'flex',
             flexDirection: 'column',
-            background: 'rgba(20, 20, 24, 0.6)',
-            border: isFocused ? '1px solid rgba(255,255,255,0.2)' : '1px solid rgba(255,255,255,0.06)',
+            background: 'var(--bg-panel)',
+            border: isFocused ? '1px solid var(--border-focus)' : '1px solid var(--border-subtle)',
             borderRadius: 24,
             backdropFilter: 'blur(24px)',
             WebkitBackdropFilter: 'blur(24px)',
             boxShadow: isFocused
-              ? '0 12px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.12), inset 0 1px 0 rgba(255,255,255,0.05)'
-              : '0 12px 40px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.05)',
+              ? '0 12px 40px rgba(0,0,0,0.3), 0 0 0 1px var(--border-default), inset 0 1px 0 var(--border-subtle)'
+              : '0 12px 40px rgba(0,0,0,0.3), inset 0 1px 0 var(--border-subtle)',
             transition: 'border-color 0.3s ease, box-shadow 0.3s ease',
           }}
         >
@@ -353,11 +370,11 @@ export function MessageInput({
                 aria-label="More options"
                 style={{
                   width: 36, height: 36, borderRadius: 8,
-                  background: showPlusMenu ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.06)',
-                  border: '1px solid rgba(255,255,255,0.1)',
+                  background: showPlusMenu ? 'var(--surface-3)' : 'var(--surface-2)',
+                  border: '1px solid var(--border-default)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   cursor: disabled ? 'not-allowed' : 'pointer',
-                  color: 'rgba(255,255,255,0.7)',
+                  color: 'var(--text-secondary)',
                   transition: 'all 0.15s',
                   flexShrink: 0,
                 }}
@@ -373,11 +390,11 @@ export function MessageInput({
                     bottom: 40,
                     left: 0,
                     minWidth: 200,
-                    background: 'rgba(18,18,22,0.96)',
-                    border: '1px solid rgba(255,255,255,0.1)',
+                    background: 'var(--surface-1)',
+                    border: '1px solid var(--border-default)',
                     borderRadius: 12,
                     backdropFilter: 'blur(20px)',
-                    boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+                    boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
                     padding: '6px',
                     zIndex: 50,
                   }}
@@ -391,7 +408,7 @@ export function MessageInput({
                     <PhotoIcon className="w-4 h-4 text-chat-text-secondary flex-shrink-0" />
                     Add photos & files
                   </button>
-                  <div style={{ height: 1, background: 'rgba(255,255,255,0.07)', margin: '4px 6px' }} />
+                  <div style={{ height: 1, background: 'var(--border-default)', margin: '4px 6px' }} />
                   {/* Mode options */}
                   {([
                     { mode: 'search' as ActionMode, icon: MagnifyingGlassIcon, label: 'Search', desc: 'Quick web search' },
@@ -407,10 +424,10 @@ export function MessageInput({
                       onClick={() => { setActionMode(actionMode === mode ? 'none' : mode); setShowPlusMenu(false); }}
                       className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors text-left"
                       style={{
-                        color: actionMode === mode ? '#fff' : 'rgba(255,255,255,0.75)',
+                        color: actionMode === mode ? 'var(--text-primary)' : 'var(--text-secondary)',
                         background: actionMode === mode ? MODE_COLORS[mode] : 'transparent',
                       }}
-                      onMouseEnter={e => { if (actionMode !== mode) (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.05)'; }}
+                      onMouseEnter={e => { if (actionMode !== mode) (e.currentTarget as HTMLElement).style.background = 'var(--bg-panel-hover)'; }}
                       onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = actionMode === mode ? MODE_COLORS[mode] : 'transparent'; }}
                     >
                       <Icon className="w-4 h-4 flex-shrink-0 opacity-70" />
@@ -432,14 +449,14 @@ export function MessageInput({
                   padding: '3px 10px',
                   borderRadius: 20,
                   background: MODE_COLORS[actionMode],
-                  border: '1px solid rgba(255,255,255,0.12)',
-                  color: 'rgba(255,255,255,0.85)',
+                  border: '1px solid var(--border-default)',
+                  color: 'var(--text-primary)',
                   fontSize: 12,
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
                 }}
               >
-                {MODE_LABELS[actionMode]}
+                {MODE_ICONS[actionMode]} {MODE_LABELS[actionMode]}
                 <span style={{ opacity: 0.5, marginLeft: 2 }}>×</span>
               </button>
             )}
@@ -453,9 +470,9 @@ export function MessageInput({
                 type="button"
                 onClick={() => { setShowModelMenu(p => !p); setShowPlusMenu(false); }}
                 className="flex items-center gap-1.5 text-xs text-chat-text-secondary hover:text-chat-text transition-colors"
-                style={{ padding: '4px 8px', borderRadius: 8, background: 'rgba(255,255,255,0.04)' }}
+                style={{ padding: '4px 8px', borderRadius: 8, background: 'var(--border-subtle)' }}
               >
-                <span className="max-w-[120px] truncate">{modelLabel}</span>
+                <span className="max-w-[160px] truncate">{modelLabel}</span>
                 <ChevronDownIcon className="w-3 h-3 opacity-50" />
               </button>
 
@@ -471,7 +488,7 @@ export function MessageInput({
                     type="button"
                     onClick={() => { setSelectedModel(model); setShowModelMenu(false); }}
                     className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-left transition-colors truncate"
-                    style={{ color: selectedModel === model ? '#fff' : 'rgba(255,255,255,0.65)', background: selectedModel === model ? 'rgba(255,255,255,0.08)' : 'transparent' }}
+                    style={{ color: selectedModel === model ? 'var(--text-primary)' : 'var(--text-secondary)', background: selectedModel === model ? 'var(--surface-3)' : 'transparent' }}
                   >
                     {label}
                   </button>
@@ -487,11 +504,11 @@ export function MessageInput({
                       right: 0,
                       width: 240,
                       maxHeight: 320,
-                      background: 'rgba(18,18,22,0.96)',
-                      border: '1px solid rgba(255,255,255,0.1)',
+                      background: 'var(--surface-1)',
+                      border: '1px solid var(--border-default)',
                       borderRadius: 12,
                       backdropFilter: 'blur(20px)',
-                      boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+                      boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
                       padding: '6px',
                       zIndex: 50,
                       display: 'flex',
@@ -502,11 +519,11 @@ export function MessageInput({
                       type="button"
                       onClick={() => { setSelectedModel(null); setShowModelMenu(false); }}
                       className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-left transition-colors flex-shrink-0"
-                      style={{ color: !selectedModel ? '#fff' : 'rgba(255,255,255,0.65)', background: !selectedModel ? 'rgba(255,255,255,0.08)' : 'transparent' }}
+                      style={{ color: !selectedModel ? 'var(--text-primary)' : 'var(--text-secondary)', background: !selectedModel ? 'var(--surface-3)' : 'transparent' }}
                     >
                       🤖 Auto (recommended)
                     </button>
-                    <div style={{ height: 1, background: 'rgba(255,255,255,0.07)', margin: '4px 6px', flexShrink: 0 }} />
+                    <div style={{ height: 1, background: 'var(--border-default)', margin: '4px 6px', flexShrink: 0 }} />
                     <div style={{ overflowY: 'auto', flex: 1 }}>
                       {chatgpt.length > 0 && sectionHeader('ChatGPT', 'rgba(74,222,128,0.7)')}
                       {chatgpt.map(m => renderItem(m, '🟢 ' + m.replace('chatgpt:', '')))}
@@ -529,17 +546,18 @@ export function MessageInput({
               disabled={disabled}
               aria-label={isListening ? 'Stop listening' : 'Voice input'}
               style={{
-                width: 32, height: 32, borderRadius: 8,
-                background: isListening ? 'rgba(239,68,68,0.2)' : 'transparent',
-                border: 'none',
+                width: 36, height: 36, borderRadius: 8,
+                background: isListening ? 'rgba(239,68,68,0.2)' : voiceError ? 'rgba(239,68,68,0.15)' : 'transparent',
+                border: voiceError ? '1px solid rgba(239,68,68,0.4)' : 'none',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 cursor: disabled ? 'not-allowed' : 'pointer',
-                color: isListening ? '#f87171' : 'rgba(255,255,255,0.5)',
+                color: isListening || voiceError ? '#f87171' : 'var(--text-secondary)',
                 transition: 'all 0.15s',
                 flexShrink: 0,
               }}
+              title={voiceError ? 'Microphone access denied or unavailable' : isListening ? 'Stop listening' : 'Voice input'}
             >
-              <SpeakerWaveIcon className={`w-5 h-5 ${isListening ? 'animate-pulse' : ''}`} />
+              <MicrophoneIcon className={`w-5 h-5 ${isListening ? 'animate-pulse' : ''}`} />
             </button>
 
             {/* Send / Stop */}
@@ -549,9 +567,9 @@ export function MessageInput({
                 onClick={onStop}
                 aria-label="Stop generation"
                 style={{
-                  width: 32, height: 32, borderRadius: 8,
-                  background: 'rgba(255,255,255,0.1)',
-                  border: '1px solid rgba(255,255,255,0.15)',
+                  width: 36, height: 36, borderRadius: 8,
+                  background: 'var(--surface-2)',
+                  border: '1px solid var(--border-default)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   cursor: 'pointer',
                   flexShrink: 0,
@@ -567,13 +585,13 @@ export function MessageInput({
                 disabled={!canSend}
                 aria-label="Send message"
                 style={{
-                  width: 32, height: 32, borderRadius: 8,
-                  background: canSend ? '#fff' : 'rgba(255,255,255,0.08)',
+                  width: 36, height: 36, borderRadius: 8,
+                  background: canSend ? 'var(--text-primary)' : 'var(--surface-2)',
                   border: 'none',
-                  color: canSend ? '#000' : '#555',
+                  color: canSend ? 'var(--bg-base)' : 'var(--text-tertiary)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   cursor: canSend ? 'pointer' : 'not-allowed',
-                  boxShadow: canSend ? '0 2px 8px rgba(255,255,255,0.2)' : 'none',
+                  boxShadow: canSend ? '0 2px 8px var(--border-strong)' : 'none',
                   transition: 'all 0.2s',
                   flexShrink: 0,
                 }}
@@ -585,7 +603,7 @@ export function MessageInput({
         </div>
 
         {/* Footer hint */}
-        <div className="mt-2 text-xs text-chat-text-secondary text-center font-light opacity-40">
+        <div className="mt-2 text-xs text-chat-text-secondary text-center font-light opacity-40 hidden sm:block">
           {isUploading ? 'Uploading...' : 'Enter to send · Shift+Enter for newline'}
         </div>
       </form>

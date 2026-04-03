@@ -49,11 +49,15 @@ export const useSettingsStore = create<SettingsState>()(
 // Apply theme to document
 export const applyTheme = (theme: Settings['theme']) => {
   const root = document.documentElement;
-  const isDark =
-    theme === 'dark' ||
-    (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-  root.classList.remove('dark', 'light');
-  root.classList.add(isDark ? 'dark' : 'light');
+  root.classList.remove('dark', 'light', 'system');
+  if (theme === 'system') {
+    root.classList.add('system');
+    // Also add dark/light for Tailwind dark: prefix compatibility
+    const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    root.classList.add(isDark ? 'dark' : 'light');
+  } else {
+    root.classList.add(theme);
+  }
 };
 
 // Apply font size to document

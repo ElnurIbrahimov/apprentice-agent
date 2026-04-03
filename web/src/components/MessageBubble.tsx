@@ -3,62 +3,15 @@ import ReactMarkdown from 'react-markdown';
 import type { Message, Citation } from '../types';
 import { useChatStore } from '../store/chatStore';
 import { ModelCompare } from './ModelCompare';
+import { CodeBlock } from './CodeBlock';
 import { SparklesIcon, BoltIcon } from '@heroicons/react/24/solid';
-import { ClipboardDocumentIcon, CheckIcon, ClipboardIcon, ArrowPathIcon, ShareIcon } from '@heroicons/react/24/outline';
+import { ClipboardDocumentIcon, ClipboardIcon, CheckIcon, ArrowPathIcon, ShareIcon, PencilIcon, StopIcon } from '@heroicons/react/24/outline';
 import { AttachmentList } from './AttachmentPreview';
 import { ToolTrace } from './ToolTrace';
 import { MemoryIndicator } from './MemoryIndicator';
 import { haptic } from '../utils/haptics';
-
-function CodeBlock({ language, children }: { language: string; children: string }) {
-  const [codeCopied, setCodeCopied] = useState(false);
-  const codeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => { if (codeTimeoutRef.current) clearTimeout(codeTimeoutRef.current); };
-  }, []);
-
-  const handleCodeCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(children);
-      if (codeTimeoutRef.current) clearTimeout(codeTimeoutRef.current);
-      setCodeCopied(true);
-      codeTimeoutRef.current = setTimeout(() => setCodeCopied(false), 2000);
-    } catch (e) {
-      console.warn('[Copy] Failed:', e);
-    }
-  };
-
-  return (
-    <div className="relative rounded-lg border border-white/[0.06] overflow-hidden" style={{ background: '#0d0d14' }}>
-      {/* Top bar: language badge left, copy button right */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/[0.06]">
-        <span
-          className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full"
-          style={{ background: 'rgba(139,92,246,0.25)', color: '#c4b5fd' }}
-        >
-          {language}
-        </span>
-        <button
-          onClick={handleCodeCopy}
-          aria-label="Copy code"
-          className="flex items-center gap-1 px-2 py-1 text-xs text-gray-400 hover:text-gray-200 hover:bg-white/[0.06] active:bg-white/[0.1] transition-colors rounded code-copy-btn touch-target"
-        >
-          {codeCopied ? (
-            <><CheckIcon className="w-3.5 h-3.5 text-green-400" /><span className="text-green-400">Copied</span></>
-          ) : (
-            <><ClipboardDocumentIcon className="w-3.5 h-3.5" /><span>Copy</span></>
-          )}
-        </button>
-      </div>
-      <pre className="p-4 overflow-x-auto m-0" style={{ background: '#0d0d14' }}>
-        <code className={`language-${language}`}>
-          {children}
-        </code>
-      </pre>
-    </div>
-  );
-}
+import { copyText } from '../utils/clipboard';
+import type { ArtifactType } from '../utils/artifactRenderer';
 
 /* ── Citation tooltip shown on hover of inline [N] badges ── */
 function CitationTooltip({ citation, position }: { citation: Citation; position: { x: number; y: number } }) {
@@ -73,7 +26,7 @@ function CitationTooltip({ citation, position }: { citation: Citation; position:
         left,
         top,
         width: 260,
-        background: 'rgba(15, 15, 22, 0.95)',
+        background: 'var(--surface-4)',
         border: '1px solid rgba(139, 92, 246, 0.3)',
         borderRadius: 10,
         padding: '10px 12px',
@@ -271,10 +224,12 @@ function CitationAwareMarkdown({
   content,
   citations,
   messageId,
+  onOpenArtifact,
 }: {
   content: string;
   citations: Citation[];
   messageId: string;
+  onOpenArtifact?: (code: string, type: ArtifactType) => void;
 }) {
   return (
     <ReactMarkdown
@@ -283,13 +238,13 @@ function CitationAwareMarkdown({
           const match = /language-(\w+)/.exec(className || '');
           if (!match) {
             return (
-              <code className="bg-gray-800 px-1.5 py-0.5 rounded text-sm" {...props}>
+              <code className="bg-surface-2 px-1.5 py-0.5 rounded text-sm" {...props}>
                 {children}
               </code>
             );
           }
           return (
-            <CodeBlock language={match[1]}>
+            <CodeBlock language={match[1]} onOpenArtifact={onOpenArtifact}>
               {String(children).replace(/\n$/, '')}
             </CodeBlock>
           );
@@ -343,6 +298,9 @@ interface MessageBubbleProps {
   message: Message;
   animateIn?: boolean;
   animationIndex?: number;
+  onRegenerate?: (userMessage: string, attachments?: any[]) => void;
+  onStop?: () => void;
+  onOpenArtifact?: (code: string, type: ArtifactType) => void;
 }
 
 // Action icons for proactive messages
@@ -355,14 +313,19 @@ const PROACTIVE_ICONS: Record<string, string> = {
   prepare: '📋',
 };
 
-export function MessageBubble({ message, animateIn = false, animationIndex = 0 }: MessageBubbleProps) {
+export function MessageBubble({ message, animateIn = false, animationIndex = 0, onRegenerate, onStop, onOpenArtifact }: MessageBubbleProps) {
   const isUser = message.role === 'user';
   const isStreaming = message.isStreaming;
   const isProactive = !!message.proactive;
   const [copied, setCopied] = useState(false);
   const [cursorExiting, setCursorExiting] = useState(false);
   const prevStreamingRef = useRef(isStreaming);
-  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+
+  // Edit mode state (user messages only)
+  const [isEditing, setIsEditing] = useState(false);
+  const [editText, setEditText] = useState('');
+  const editTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Long-press context menu state
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -386,13 +349,10 @@ export function MessageBubble({ message, animateIn = false, animationIndex = 0 }
   }, []);
 
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(message.content);
-      if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+    if (await copyText(message.content)) {
+      clearTimeout(copyTimeoutRef.current);
       setCopied(true);
       copyTimeoutRef.current = setTimeout(() => setCopied(false), 1500);
-    } catch (e) {
-      console.warn('[Copy] Failed:', e);
     }
   };
 
@@ -437,18 +397,27 @@ export function MessageBubble({ message, animateIn = false, animationIndex = 0 }
   }, []);
 
   const handleCtxCopy = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(message.content);
-    } catch (e) {
-      console.warn('[CtxMenu Copy] Failed:', e);
-    }
+    await copyText(message.content);
     setContextMenu(null);
   }, [message.content]);
 
   const handleCtxRegenerate = useCallback(() => {
-    console.log('[CtxMenu] Regenerate requested for message:', message.id);
     setContextMenu(null);
-  }, [message.id]);
+    if (!onRegenerate) return;
+    const store = useChatStore.getState();
+    const messages = store.messages;
+    const idx = messages.findIndex((m) => m.id === message.id);
+    if (idx < 0) return;
+    // Find the preceding user message
+    let userMsg = null;
+    for (let i = idx - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') { userMsg = messages[i]; break; }
+    }
+    if (!userMsg) return;
+    // Remove from the user message onward (sendMessage will re-add the user message)
+    store.removeMessagesFrom(userMsg.id);
+    onRegenerate(userMsg.content, userMsg.attachments);
+  }, [message.id, onRegenerate]);
 
   const handleCtxShare = useCallback(async () => {
     if (navigator.share) {
@@ -461,12 +430,7 @@ export function MessageBubble({ message, animateIn = false, animationIndex = 0 }
         }
       }
     } else {
-      // Fallback: copy to clipboard
-      try {
-        await navigator.clipboard.writeText(message.content);
-      } catch (e) {
-        console.warn('[CtxMenu Share fallback] Failed:', e);
-      }
+      await copyText(message.content);
     }
     setContextMenu(null);
   }, [message.content]);
@@ -476,26 +440,88 @@ export function MessageBubble({ message, animateIn = false, animationIndex = 0 }
   const staggerClass = animationIndex <= 4 ? `msg-stagger-${animationIndex}` : 'msg-stagger-4';
   const animClass = animateIn ? `msg-animate-in ${staggerClass}` : '';
 
+  const handleEditStart = useCallback(() => {
+    setEditText(message.content);
+    setIsEditing(true);
+    setTimeout(() => editTextareaRef.current?.focus(), 0);
+  }, [message.content]);
+
+  const handleEditCancel = useCallback(() => {
+    setIsEditing(false);
+    setEditText('');
+  }, []);
+
+  const handleEditSave = useCallback(() => {
+    const trimmed = editText.trim();
+    if (!trimmed || trimmed === message.content) {
+      handleEditCancel();
+      return;
+    }
+    // Remove this message and everything after it (sendMessage will re-add with new text)
+    const store = useChatStore.getState();
+    store.removeMessagesFrom(message.id);
+    setIsEditing(false);
+    setEditText('');
+    if (onRegenerate) onRegenerate(trimmed, message.attachments);
+  }, [editText, message.id, message.content, message.attachments, onRegenerate, handleEditCancel]);
+
   if (isUser) {
     return (
-      <div className={`py-4 px-4 md:px-8 ${animClass}`}>
-        <div className="max-w-3xl mx-auto flex justify-end">
-          <div style={{
-            background: '#fff',
-            color: '#000',
-            padding: '12px 22px',
-            borderRadius: '24px 24px 4px 24px',
-            fontSize: '1rem',
-            fontWeight: 500,
-            maxWidth: '85%',
-            lineHeight: 1.6,
-            boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
-          }}>
-            {message.attachments && message.attachments.length > 0 && (
-              <AttachmentList attachments={message.attachments} compact />
-            )}
-            <p className="whitespace-pre-wrap">{message.content}</p>
-          </div>
+      <div className={`py-4 px-4 md:px-8 group ${animClass}`}>
+        <div className="max-w-3xl mx-auto flex justify-end gap-2">
+          {/* Edit button (visible on hover) */}
+          {!isEditing && (
+            <button
+              onClick={handleEditStart}
+              className="self-center opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-lg hover:bg-white/[0.06] text-chat-text-secondary hover:text-chat-text"
+              aria-label="Edit message"
+            >
+              <PencilIcon className="w-3.5 h-3.5" />
+            </button>
+          )}
+          {isEditing ? (
+            <div className="w-full max-w-[85%]" style={{ minWidth: 200 }}>
+              <textarea
+                ref={editTextareaRef}
+                value={editText}
+                onChange={(e) => setEditText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleEditSave(); }
+                  if (e.key === 'Escape') handleEditCancel();
+                }}
+                className="w-full p-3 rounded-xl bg-surface-2 border border-chat-border text-chat-text text-sm resize-none outline-none focus:border-chat-accent"
+                rows={Math.min(editText.split('\n').length + 1, 8)}
+              />
+              <div className="flex justify-end gap-2 mt-2">
+                <button
+                  onClick={handleEditCancel}
+                  className="px-3 py-1.5 text-xs rounded-lg text-chat-text-secondary hover:text-chat-text hover:bg-white/[0.06] transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleEditSave}
+                  className="px-3 py-1.5 text-xs rounded-lg bg-chat-accent text-white hover:opacity-90 transition-opacity"
+                >
+                  Save & Resend
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="user-bubble" style={{
+              padding: '12px 22px',
+              borderRadius: '24px 24px 4px 24px',
+              fontSize: '1rem',
+              fontWeight: 500,
+              maxWidth: '85%',
+              lineHeight: 1.6,
+            }}>
+              {message.attachments && message.attachments.length > 0 && (
+                <AttachmentList attachments={message.attachments} compact />
+              )}
+              <p className="whitespace-pre-wrap">{message.content}</p>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -586,7 +612,7 @@ export function MessageBubble({ message, animateIn = false, animationIndex = 0 }
           {/* Message content with inline citation badges */}
           <div className={`prose prose-invert max-w-none text-chat-text ${isStreaming ? 'stream-container-active' : ''}`}>
             {hasCitations && !isStreaming ? (
-              <CitationAwareMarkdown content={message.content} citations={message.citations!} messageId={message.id} />
+              <CitationAwareMarkdown content={message.content} citations={message.citations!} messageId={message.id} onOpenArtifact={onOpenArtifact} />
             ) : (
               <ReactMarkdown
                 components={{
@@ -594,7 +620,7 @@ export function MessageBubble({ message, animateIn = false, animationIndex = 0 }
                     const match = /language-(\w+)/.exec(className || '');
                     if (!match) {
                       return (
-                        <code className="bg-gray-800 px-1.5 py-0.5 rounded text-sm" {...props}>
+                        <code className="bg-surface-2 px-1.5 py-0.5 rounded text-sm" {...props}>
                           {children}
                         </code>
                       );
@@ -638,27 +664,51 @@ export function MessageBubble({ message, animateIn = false, animationIndex = 0 }
             <ModelCompare
               results={message.compareResults}
               query={message.content}
-              onUseResponse={(response) => navigator.clipboard.writeText(response).catch(e => console.warn('[Copy] Failed:', e))}
+              onUseResponse={(response) => copyText(response)}
             />
           )}
 
-          {/* Footer: model + timestamp + copy */}
+          {/* Footer: model + timestamp + actions */}
           <div className="mt-2 flex items-center gap-3 text-xs text-chat-text-secondary">
             {message.model_used && !isStreaming && (
               <span className="opacity-50">{message.model_used}</span>
             )}
             <span>{new Date(message.timestamp).toLocaleTimeString()}</span>
-            {!isStreaming && (
+            {/* Stop button — visible during streaming */}
+            {isStreaming && onStop && (
               <button
-                onClick={handleCopy}
-                aria-label="Copy message"
-                className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:text-chat-text"
+                onClick={onStop}
+                className="flex items-center gap-1 px-2 py-0.5 rounded-md text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
+                aria-label="Stop generation"
               >
-                {copied
-                  ? <CheckIcon className="w-3.5 h-3.5 text-green-400" />
-                  : <ClipboardDocumentIcon className="w-3.5 h-3.5" />
-                }
+                <StopIcon className="w-3.5 h-3.5" />
+                <span>Stop</span>
               </button>
+            )}
+            {/* Actions — visible on hover when not streaming */}
+            {!isStreaming && (
+              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button
+                  onClick={handleCopy}
+                  aria-label="Copy message"
+                  className="flex items-center gap-0.5 p-0.5 rounded hover:text-chat-text"
+                >
+                  {copied
+                    ? <><CheckIcon className="w-3.5 h-3.5 text-green-400" /><span className="text-green-400">Copied</span></>
+                    : <ClipboardDocumentIcon className="w-3.5 h-3.5" />
+                  }
+                </button>
+                {onRegenerate && (
+                  <button
+                    onClick={handleCtxRegenerate}
+                    aria-label="Retry"
+                    className="p-0.5 rounded hover:text-chat-text"
+                    title="Retry"
+                  >
+                    <ArrowPathIcon className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
             )}
           </div>
         </div>

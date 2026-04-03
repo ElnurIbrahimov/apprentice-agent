@@ -325,6 +325,34 @@ export function SettingsPage() {
   const [providerStatus, setProviderStatus] = useState<Record<string, boolean>>({});
   const [activeSection, setActiveSection] = useState('providers');
 
+  // PWA install prompt
+  const [installPrompt, setInstallPrompt] = useState<any>(null);
+  const [isInstalled, setIsInstalled] = useState(false);
+
+  useEffect(() => {
+    if (window.matchMedia('(display-mode: standalone)').matches) {
+      setIsInstalled(true);
+      return;
+    }
+    const handler = (e: Event) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  const handleInstall = async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    const result = await installPrompt.userChoice;
+    if (result.outcome === 'accepted') {
+      setIsInstalled(true);
+      toast.success('App installed!');
+    }
+    setInstallPrompt(null);
+  };
+
   // Fetch provider status
   useEffect(() => {
     fetch('/api/providers').then(r => r.json()).then(data => {
@@ -374,15 +402,15 @@ export function SettingsPage() {
   ];
 
   return (
-    <div className="h-full flex">
-      {/* Sidebar navigation */}
-      <nav className="w-48 flex-shrink-0 border-r border-white/[0.06] p-4 space-y-1">
-        <h2 className="text-lg font-bold text-chat-text mb-4 px-2">Settings</h2>
+    <div className="h-full flex flex-col sm:flex-row">
+      {/* Sidebar navigation — horizontal on mobile, vertical on desktop */}
+      <nav className="sm:w-48 flex-shrink-0 border-b sm:border-b-0 sm:border-r border-white/[0.06] p-2 sm:p-4 flex sm:flex-col gap-1 overflow-x-auto sm:overflow-visible">
+        <h2 className="text-lg font-bold text-chat-text mb-4 px-2 hidden sm:block">Settings</h2>
         {sections.map(s => (
           <button
             key={s.id}
             onClick={() => setActiveSection(s.id)}
-            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm font-medium transition-all duration-150 ${
+            className={`sm:w-full whitespace-nowrap flex items-center justify-between px-3 py-2 rounded-xl text-sm font-medium transition-all duration-150 ${
               activeSection === s.id
                 ? 'bg-purple-500/15 text-purple-300 shadow-sm shadow-purple-500/5'
                 : 'text-chat-text-secondary hover:text-chat-text hover:bg-white/[0.03]'
@@ -478,6 +506,28 @@ export function SettingsPage() {
                   ))}
                 </div>
               </div>
+
+              {/* Install App */}
+              {!isInstalled && (
+                <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4">
+                  <h4 className="text-sm font-semibold text-chat-text mb-2">Install App</h4>
+                  <p className="text-xs text-chat-text-secondary mb-3">
+                    Install AURA as an app for faster access and offline support.
+                  </p>
+                  {installPrompt ? (
+                    <button
+                      onClick={handleInstall}
+                      className="px-4 py-2 rounded-xl text-sm font-medium text-white bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/30 transition-colors"
+                    >
+                      Install AURA
+                    </button>
+                  ) : (
+                    <p className="text-xs text-chat-text-tertiary">
+                      Open in a supported browser to install
+                    </p>
+                  )}
+                </div>
+              )}
             </>
           )}
 

@@ -11,6 +11,7 @@ interface ChatState {
   setMessageModelUsed: (id: string, model: string) => void;
   setCitationsForMessage: (id: string, citations: Citation[]) => void;
   appendToolTrace: (id: string, trace: ToolTrace) => void;
+  removeMessagesFrom: (id: string) => void;
   clearMessages: () => void;
 
   // Connection
@@ -147,6 +148,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
         msg.id === id ? { ...msg, toolTrace: [...(msg.toolTrace || []), trace] } : msg
       ),
     }));
+  },
+
+  removeMessagesFrom: (id) => {
+    set((state) => {
+      const idx = state.messages.findIndex((m) => m.id === id);
+      if (idx < 0) return state;
+      return { messages: state.messages.slice(0, idx) };
+    });
   },
 
   clearMessages: () => set({ messages: [] }),
