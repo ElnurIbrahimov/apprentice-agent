@@ -262,10 +262,26 @@ export function initContextEngine(store: ContextStore, ext: typeof chrome): () =
 
   scheduleIdle(applyPageContext);
 
-  // ── SPA navigation ──
-  const onPopState = () => scheduleIdle(applyPageContext);
-  window.addEventListener('popstate', onPopState);
-  cleanups.push(() => window.removeEventListener('popstate', onPopState));
+  // ── SPA navigation (popstate + pushState/replaceState) ──
+  const onNavChange = () => scheduleIdle(applyPageContext);
+  window.addEventListener('popstate', onNavChange);
+  cleanups.push(() => window.removeEventListener('popstate', onNavChange));
+
+  // Patch pushState/replaceState to detect SPA forward navigation
+  const origPushState = history.pushState.bind(history);
+  const origReplaceState = history.replaceState.bind(history);
+  history.pushState = function (...args: Parameters<typeof origPushState>) {
+    origPushState(...args);
+    onNavChange();
+  };
+  history.replaceState = function (...args: Parameters<typeof origReplaceState>) {
+    origReplaceState(...args);
+    onNavChange();
+  };
+  cleanups.push(() => {
+    history.pushState = origPushState;
+    history.replaceState = origReplaceState;
+  });
 
   // ── MutationObserver (debounced 2s) for content changes ──
   let mutationTimer: ReturnType<typeof setTimeout> | null = null;
@@ -273,7 +289,7 @@ export function initContextEngine(store: ContextStore, ext: typeof chrome): () =
     if (mutationTimer) clearTimeout(mutationTimer);
     mutationTimer = setTimeout(() => scheduleIdle(applyPageContext), 2000);
   });
-  observer.observe(document.body, { childList: true, subtree: false });
+  observer.observe(document.body, { childList: true, subtree: true });
   cleanups.push(() => {
     observer.disconnect();
     if (mutationTimer) clearTimeout(mutationTimer);
@@ -359,9 +375,9 @@ export function initContextEngine(store: ContextStore, ext: typeof chrome): () =
   try {
     const sessionStorage = (ext.storage as any).session as chrome.storage.StorageArea | undefined;
     if (sessionStorage) {
+      // Only seed from session storage if local detection hasn't set a non-general type yet
       sessionStorage.get(['contextType'], (result) => {
-        if (result?.contextType) {
-          // Seed initial type from session if available
+        if (result?.contextType && store.get().type === 'general') {
           const saved = result.contextType as PageContext;
           const palette = PALETTES[saved];
           store.update({
@@ -374,9 +390,13 @@ export function initContextEngine(store: ContextStore, ext: typeof chrome): () =
         }
       });
 
-      // Persist type changes across tabs
+      // Persist type changes across tabs (deduplicate writes)
+      let lastWrittenType: string | null = null;
       const unsub = store.subscribe((sig) => {
-        sessionStorage.set({ contextType: sig.type });
+        if (sig.type !== lastWrittenType) {
+          lastWrittenType = sig.type;
+          sessionStorage.set({ contextType: sig.type });
+        }
       });
       cleanups.push(unsub);
     }

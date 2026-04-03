@@ -162,6 +162,7 @@ export function createGhostBar(): ContentModule & GhostBarAPI {
   let imageHoverTimer: ReturnType<typeof setTimeout> | null = null;
   let dismissTimer: ReturnType<typeof setTimeout> | null = null;
   let currentHoveredImg: HTMLImageElement | null = null;
+  const cleanups: (() => void)[] = [];
 
   // ── Remove existing bar immediately (sync, no animation) ──────────────────
   function removeBarSync(): void {
@@ -182,8 +183,7 @@ export function createGhostBar(): ContentModule & GhostBarAPI {
     barType = null;
     currentRect = null;
     try {
-      const dir = bt === 'image' ? 'down' : 'up';
-      await flow(b, { direction: dir, duration: ANIM.morphDuration, easing: ANIM.morphEasing });
+      await flow(b, { direction: 'up', duration: ANIM.morphDuration, easing: ANIM.morphEasing });
     } catch {
       // animation may fail in test env — ignore
     }
@@ -439,6 +439,11 @@ export function createGhostBar(): ContentModule & GhostBarAPI {
 
     document.addEventListener('mouseover', onMouseOver, true);
     document.addEventListener('mouseout', onMouseOut, true);
+    cleanups.push(
+      () => document.removeEventListener('selectionchange', onSelectionChange),
+      () => document.removeEventListener('mouseover', onMouseOver, true),
+      () => document.removeEventListener('mouseout', onMouseOut, true),
+    );
 
     // ── Scroll tracking: reposition or hide ──────────────────────────────
     const onScroll = () => {
@@ -475,6 +480,7 @@ export function createGhostBar(): ContentModule & GhostBarAPI {
       }
     };
     window.addEventListener('scroll', onScroll, { passive: true });
+    cleanups.push(() => window.removeEventListener('scroll', onScroll));
   }
 
   // ── destroy ───────────────────────────────────────────────────────────────
@@ -482,6 +488,8 @@ export function createGhostBar(): ContentModule & GhostBarAPI {
     if (selectionTimer) clearTimeout(selectionTimer);
     if (imageHoverTimer) clearTimeout(imageHoverTimer);
     if (dismissTimer) clearTimeout(dismissTimer);
+    for (const fn of cleanups) fn();
+    cleanups.length = 0;
     removeBarSync();
   }
 

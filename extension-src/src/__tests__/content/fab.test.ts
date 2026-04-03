@@ -73,9 +73,8 @@ describe('createFab', () => {
 
     store.update({ type: 'code', icon: '<svg><text>CODE</text></svg>' });
 
-    // Wait for crossFade to complete (async)
-    await Promise.resolve();
-    await Promise.resolve();
+    // Flush microtask queue — crossFade resolves, then .then() callback runs
+    for (let i = 0; i < 5; i++) await Promise.resolve();
 
     const logoAfter = container.querySelector('.fab-logo')!.innerHTML;
     expect(logoAfter).not.toBe(logoBefore);

@@ -291,10 +291,22 @@ export function createCapture(): CaptureModule {
       const w = Math.round(rect.width);
       const h = Math.round(rect.height);
 
-      _captureTooltip.innerHTML =
-        `<span class="tag">&lt;${tag}&gt;</span>` +
-        (cls ? `<span class="cls">.${cls.split(' ').join('.')}</span>` : '') +
-        `<span class="dims">${w}x${h}</span>`;
+      // Build tooltip DOM safely (avoid innerHTML with page-supplied class names)
+      _captureTooltip.textContent = '';
+      const tagSpan = document.createElement('span');
+      tagSpan.className = 'tag';
+      tagSpan.textContent = `<${tag}>`;
+      _captureTooltip.appendChild(tagSpan);
+      if (cls) {
+        const clsSpan = document.createElement('span');
+        clsSpan.className = 'cls';
+        clsSpan.textContent = '.' + cls.split(' ').join('.');
+        _captureTooltip.appendChild(clsSpan);
+      }
+      const dimsSpan = document.createElement('span');
+      dimsSpan.className = 'dims';
+      dimsSpan.textContent = `${w}x${h}`;
+      _captureTooltip.appendChild(dimsSpan);
 
       let tooltipTop = rect.top - 30;
       if (tooltipTop < 4) tooltipTop = rect.bottom + 6;

@@ -50,13 +50,7 @@ const DEFAULT_ACTIONS: ActionDef[] = [
 
 // ── Inline styles helper ──────────────────────────────────────────────────────
 
-function injectKeyframes(id: string, css: string): void {
-  if (document.getElementById(id)) return;
-  const style = document.createElement('style');
-  style.id = id;
-  style.textContent = css;
-  document.head.appendChild(style);
-}
+// Keyframes for glow pulse are defined in styles.ts (shadow DOM stylesheet)
 
 // ── createFab ─────────────────────────────────────────────────────────────────
 
@@ -70,14 +64,12 @@ export function createFab(): ContentModule & { showDock(): void } {
 
   let _unsub: (() => void) | null = null;
   let _ext: typeof chrome | null = null;
-  let _store: ContextStore | null = null;
 
   // Drag state
   let _side: 'left' | 'right' = 'right';
   let _offset: number = 40; // % from top
   let _dragStartX = 0;
   let _dragStartY = 0;
-  let _dragPointerStartOffset = 0;
   let _isDragging = false;
   let _totalMove = 0;
 
@@ -280,7 +272,6 @@ export function createFab(): ContentModule & { showDock(): void } {
 
   function positionPopout(): void {
     if (!_popout || !_root) return;
-    const rootRect = _root.getBoundingClientRect();
     const isRight = _side === 'right';
 
     Object.assign(_popout.style, {
@@ -337,7 +328,6 @@ export function createFab(): ContentModule & { showDock(): void } {
       if ((e.target as HTMLElement).closest('.fab-close')) return;
       _dragStartX = e.clientX;
       _dragStartY = e.clientY;
-      _dragPointerStartOffset = e.clientY;
       _isDragging = false;
       _totalMove = 0;
       pill.setPointerCapture(e.pointerId);
@@ -389,12 +379,12 @@ export function createFab(): ContentModule & { showDock(): void } {
   function setupClicks(pill: HTMLElement, popout: HTMLElement): void {
     pill.addEventListener('click', (e: MouseEvent) => {
       if ((e.target as HTMLElement).closest('.fab-close')) return;
-      if (_totalMove > 10) return; // was a drag
+      if (_isDragging || _totalMove > FAB.dragThreshold) return; // was a drag
       if (!_ext) return;
       _ext.runtime.sendMessage({ type: 'OPEN_PANEL', panel: 'chat' });
     });
 
-    _closeBtn!.addEventListener('click', (e: MouseEvent) => {
+    _closeBtn?.addEventListener('click', (e: MouseEvent) => {
       e.stopPropagation();
       _hiddenOnce = true;
       if (_root) _root.style.display = 'none';
@@ -408,24 +398,41 @@ export function createFab(): ContentModule & { showDock(): void } {
     });
   }
 
+  function getSelectionText(): string {
+    const sel = window.getSelection();
+    return sel ? sel.toString().trim() : '';
+  }
+
   function dispatchAction(action: string): void {
     if (!_ext) return;
+    const url = location.href;
+    const title = document.title;
     switch (action) {
       case 'chat':
         _ext.runtime.sendMessage({ type: 'OPEN_PANEL', panel: 'chat' });
         break;
       case 'search':
-        _ext.runtime.sendMessage({ type: 'QUICK_ACTION', action: 'search', text: '', language: undefined });
+        _ext.runtime.sendMessage({ type: 'OPEN_PANEL', panel: 'search' });
         break;
       case 'page':
-        _ext.runtime.sendMessage({ type: 'OPEN_WITH_TEXT', action: 'summarize', text: '', url: location.href, title: document.title });
+        // extractMainContent is handled by page-services; send OPEN_WITH_TEXT
+        // and let sidebar request content extraction via EXTRACT_PAGE
+        _ext.runtime.sendMessage({ type: 'OPEN_PANEL', panel: 'ask' });
         break;
       case 'translate':
-        _ext.runtime.sendMessage({ type: 'QUICK_ACTION', action: 'translate', text: '' });
+        _ext.runtime.sendMessage({ type: 'OPEN_PANEL', panel: 'translate' });
         break;
-      case 'save':
-        _ext.runtime.sendMessage({ type: 'SAVE_KNOWLEDGE', text: document.title, url: location.href, title: document.title });
+      case 'save': {
+        const selText = getSelectionText();
+        const textToSave = selText || `${title}\n${url}`;
+        _ext.runtime.sendMessage(
+          { type: 'SAVE_KNOWLEDGE', text: textToSave, url, title },
+          (response: any) => {
+            // Toast is handled by coordinator if wired
+          }
+        );
         break;
+      }
     }
   }
 
@@ -449,16 +456,15 @@ export function createFab(): ContentModule & { showDock(): void } {
 
       oldLogo.parentElement?.appendChild(newLogo);
 
-      // Update innerHTML immediately so tests/DOM reflect new icon synchronously
-      oldLogo.innerHTML = newLogo.innerHTML;
-
       crossFade(oldLogo, newLogo, {
         duration: ANIM.crossFadeDuration,
         easing: 'ease',
       }).then(() => {
-        newLogo.remove();
-        oldLogo.style.opacity = '1';
-        _logo = oldLogo;
+        oldLogo.remove();
+        newLogo.style.position = '';
+        newLogo.style.inset = '';
+        newLogo.style.opacity = '1';
+        _logo = newLogo;
         _morphing = false;
       });
     }
@@ -489,15 +495,6 @@ export function createFab(): ContentModule & { showDock(): void } {
   return {
     init(container: HTMLElement, store: ContextStore, ext: typeof chrome): void {
       _ext = ext;
-      _store = store;
-
-      // Inject keyframe animation for glow pulse
-      injectKeyframes('aura-fab-keyframes', `
-        @keyframes aura-glow-pulse {
-          0%, 100% { opacity: ${FAB.glowIntensityMax}; transform: scale(1); }
-          50% { opacity: ${FAB.glowIntensityMin}; transform: scale(0.95); }
-        }
-      `);
 
       const signal = store.get();
 
@@ -549,7 +546,6 @@ export function createFab(): ContentModule & { showDock(): void } {
       _popout = null;
       _closeBtn = null;
       _ext = null;
-      _store = null;
     },
 
     showDock(): void {

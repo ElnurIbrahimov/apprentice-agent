@@ -135,7 +135,7 @@ export function init(): void {
   // ── Init context engine ────────────────────────────────────────────────────
 
   const store: ContextStore = createContextStore();
-  initContextEngine(store, ext as typeof chrome);
+  const cleanupContextEngine = initContextEngine(store, ext as typeof chrome);
 
   // Subscribe to store changes — update CSS custom properties on shadow host
   store.subscribe((signal) => {
