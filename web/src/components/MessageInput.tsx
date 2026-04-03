@@ -77,8 +77,24 @@ export function MessageInput({
   const recognitionRef = useRef<any>(null);
   const mountedRef = useRef(true);
 
-  const { selectedModel, availableModels, setSelectedModel } = useChatStore();
+  const { selectedModel, availableModels, setSelectedModel, setAvailableModels } = useChatStore();
   const { settings } = useSettingsStore();
+
+  // Fetch available models on mount
+  useEffect(() => {
+    fetch('/api/models')
+      .then(res => res.json())
+      .then(data => {
+        const all = [
+          ...(data.chatgpt_models || []),
+          ...(data.direct_api_models || []),
+          ...(data.cloud_models || []),
+          ...(data.local_models || []),
+        ];
+        if (all.length > 0) setAvailableModels(all);
+      })
+      .catch(() => {});
+  }, [setAvailableModels]);
 
   const {
     attachments,
