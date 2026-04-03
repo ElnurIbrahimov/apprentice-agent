@@ -20,6 +20,7 @@ interface ModalInternals {
   content: string;        // text or imageUrl
   isOpen: boolean;
   closing: boolean;
+  opening: boolean;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -358,6 +359,7 @@ export function createModal(): ContentModule & ModalAPI {
     content: '',
     isOpen: false,
     closing: false,
+    opening: false,
   };
 
   let store_: ContextStore | null = null;
@@ -371,10 +373,13 @@ export function createModal(): ContentModule & ModalAPI {
   };
 
   // ── open() — shared setup ──
-  async function open(contentEl: HTMLElement, originRect: DOMRect): Promise<void> {
+  async function open(contentEl: HTMLElement, originRect: DOMRect, content: string): Promise<void> {
+    if (internals.opening) return; // prevent concurrent opens
     if (internals.isOpen) await close();
 
+    internals.opening = true;
     internals.originRect = originRect;
+    internals.content = content; // set AFTER close() so it's not reset
     internals.isOpen = true;
 
     // 1. Overlay
@@ -453,6 +458,8 @@ export function createModal(): ContentModule & ModalAPI {
 
     // 10. Escape key
     document.addEventListener('keydown', onKeyDown);
+
+    internals.opening = false;
   }
 
   // ── close() ──
@@ -465,22 +472,26 @@ export function createModal(): ContentModule & ModalAPI {
     // Remove keydown listener immediately
     document.removeEventListener('keydown', onKeyDown);
 
-    // Reverse morph back toward originRect
+    // Reverse morph + fade overlay in parallel
+    const animations: Promise<void>[] = [];
     if (modal && originRect) {
       const currentRect = centeredRect();
-      await morph(modal, currentRect, originRect, {
-        duration: ANIM.morphDuration,
-        easing: ANIM.morphEasing,
-      }).catch(() => { /* ignore if already removed */ });
+      animations.push(
+        morph(modal, currentRect, originRect, {
+          duration: ANIM.morphDuration,
+          easing: ANIM.morphEasing,
+        }).catch(() => {})
+      );
     }
-
-    // Fade out overlay concurrently
     if (overlay) {
-      await dissolve(overlay, {
-        duration: ANIM.dismissDelay,
-        easing: 'ease-in',
-      }).catch(() => { /* ignore */ });
+      animations.push(
+        dissolve(overlay, {
+          duration: ANIM.morphDuration,
+          easing: 'ease-in',
+        }).catch(() => {})
+      );
     }
+    await Promise.all(animations);
 
     // Remove all DOM
     modal?.remove();
@@ -493,6 +504,7 @@ export function createModal(): ContentModule & ModalAPI {
       content: '',
       isOpen: false,
       closing: false,
+      opening: false,
     };
   }
 
@@ -508,16 +520,14 @@ export function createModal(): ContentModule & ModalAPI {
 
     // ── ModalAPI ──
     openWithText(text: string, originRect: DOMRect): void {
-      internals.content = text;
       const placeholder = getPlaceholder(store_?.get().type ?? 'general');
       const contentEl = buildTextContent(text, placeholder);
-      open(contentEl, originRect);
+      open(contentEl, originRect, text);
     },
 
     openWithImage(imageUrl: string, originRect: DOMRect): void {
-      internals.content = imageUrl;
       const contentEl = buildImageContent(imageUrl);
-      open(contentEl, originRect);
+      open(contentEl, originRect, imageUrl);
     },
 
     close,

@@ -8,7 +8,6 @@ import {
   FAB,
   FONT_STACK,
   Z_TOP,
-  Z_HIGH,
   Z_MID,
 } from '../../content/tokens';
 import type { PageContext } from '../../content/types';
@@ -59,7 +58,7 @@ describe('ANIM', () => {
   const numberKeys: (keyof typeof ANIM)[] = [
     'morphDuration', 'flowDuration', 'glowPulse', 'sequentialStagger',
     'dismissDelay', 'crossFadeDuration', 'selectionDelay',
-    'imageHoverDelay', 'imageHoverDelayFast', 'imageHoverDelaySlow',
+    'imageHoverDelay',
   ];
 
   test.each(numberKeys)('%s is a positive number', (key) => {
@@ -121,12 +120,8 @@ describe('Z-index constants', () => {
     expect(Z_TOP).toBe(2147483647);
   });
 
-  test('Z_HIGH < Z_TOP', () => {
-    expect(Z_HIGH).toBeLessThan(Z_TOP);
-  });
-
-  test('Z_MID < Z_HIGH', () => {
-    expect(Z_MID).toBeLessThan(Z_HIGH);
+  test('Z_MID < Z_TOP', () => {
+    expect(Z_MID).toBeLessThan(Z_TOP);
   });
 });
 

@@ -3,12 +3,26 @@ import type { AnimationConfig, FlowOptions } from './types';
 const FILL = 'forwards' as const;
 
 /**
+ * Commit the final frame styles and release the animation fill lock.
+ * This prevents fill:forwards from permanently overriding CSS properties.
+ */
+function commitAndCancel(anim: Animation): void {
+  try {
+    anim.commitStyles();
+  } catch {
+    // commitStyles can fail if element is disconnected — ignore
+  }
+  anim.cancel();
+}
+
+/**
  * Liquid flow — grow/shrink vertically with opacity.
  * direction='down': 0 → full height (appear).
  * direction='up':   full height → 0 (retract).
  */
 export async function flow(el: HTMLElement, opts: FlowOptions): Promise<void> {
-  const h = el.offsetHeight;
+  // Force reflow to get accurate height before animating
+  const h = el.offsetHeight || 0;
   const appear = [
     { height: '0px', opacity: 0 },
     { height: `${h}px`, opacity: 1 },
@@ -21,6 +35,7 @@ export async function flow(el: HTMLElement, opts: FlowOptions): Promise<void> {
     fill: FILL,
   });
   await anim.finished;
+  commitAndCancel(anim);
 }
 
 /**
@@ -32,6 +47,7 @@ export async function dissolve(el: HTMLElement, opts: AnimationConfig): Promise<
     { duration: opts.duration, easing: opts.easing, delay: opts.delay ?? 0, fill: FILL },
   );
   await anim.finished;
+  commitAndCancel(anim);
 }
 
 /**
@@ -43,6 +59,7 @@ export async function fadeIn(el: HTMLElement, opts: AnimationConfig): Promise<vo
     { duration: opts.duration, easing: opts.easing, delay: opts.delay ?? 0, fill: FILL },
   );
   await anim.finished;
+  commitAndCancel(anim);
 }
 
 /**
@@ -57,6 +74,8 @@ export async function crossFade(
   const outAnim = oldEl.animate([{ opacity: 1 }, { opacity: 0 }], timing);
   const inAnim = newEl.animate([{ opacity: 0 }, { opacity: 1 }], timing);
   await Promise.all([outAnim.finished, inAnim.finished]);
+  commitAndCancel(outAnim);
+  commitAndCancel(inAnim);
 }
 
 /**
@@ -83,6 +102,7 @@ export async function sequentialReveal(
     ),
   );
   await Promise.all(anims.map(a => a.finished));
+  for (const a of anims) commitAndCancel(a);
 }
 
 /**
@@ -111,4 +131,5 @@ export async function morph(
     { duration: opts.duration, easing: opts.easing, delay: opts.delay ?? 0, fill: FILL },
   );
   await anim.finished;
+  commitAndCancel(anim);
 }

@@ -1633,7 +1633,13 @@ export function initGoogleSerp(ext: typeof chrome, safeSend: (msg: any, cb?: (r:
       .replace(/"/g, '&quot;');
   }
 
-  /** Minimal markdown-to-HTML renderer for SERP answers */
+  /**
+   * Minimal markdown-to-HTML renderer for SERP answers.
+   * Security: input is escaped first, then only safe structural tags are
+   * introduced by regex. Link hrefs are constrained to https?:// by the
+   * regex pattern. Final output is sanitized to strip any unexpected tags
+   * or attributes as defense-in-depth against backend compromise.
+   */
   function serpRenderMarkdown(text: string): string {
     let html = serpEscapeHtml(text);
 
@@ -1647,9 +1653,9 @@ export function initGoogleSerp(ext: typeof chrome, safeSend: (msg: any, cb?: (r:
     // Inline code: `text`
     html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
 
-    // Links: [text](url)
+    // Links: [text](url) — href constrained to https?:// only
     html = html.replace(
-      /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
+      /\[([^\]]+)\]\((https?:\/\/[^)"]+)\)/g,
       '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'
     );
 
@@ -1669,6 +1675,9 @@ export function initGoogleSerp(ext: typeof chrome, safeSend: (msg: any, cb?: (r:
 
     // Clean empty paragraphs
     html = html.replace(/<p>\s*<\/p>/g, '');
+
+    // Defense-in-depth: strip any tags that aren't in our safe list
+    html = html.replace(/<\/?(?!(?:strong|em|code|a|li|ul|ol|p|br)\b)[^>]*>/gi, '');
 
     return html;
   }

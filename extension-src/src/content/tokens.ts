@@ -76,8 +76,6 @@ export const ANIM = {
   crossFadeDuration: 400,
   selectionDelay: 300,
   imageHoverDelay: 800,
-  imageHoverDelayFast: 500,
-  imageHoverDelaySlow: 1200,
 } as const;
 
 // ── Glassmorphism tokens ──────────────────────────────────────────────────────
@@ -114,13 +112,10 @@ export const MODAL = {
 
 export const FAB = {
   pillPadding: '6px 10px',
-  pillPaddingHover: '8px 14px',
   glowIntensityMin: 0.15,
   glowIntensityMax: 0.35,
   logoSize: 20,
-  collapseDelay: 2000,
   expandDuration: 220,
-  collapseDuration: 300,
   dragThreshold: 4,
   edgeMargin: 12,
 } as const;
@@ -132,6 +127,5 @@ export const FONT_STACK =
 
 // ── Z-index ───────────────────────────────────────────────────────────────────
 
-export const Z_TOP  = 2147483647;
-export const Z_HIGH = 2147483646;
-export const Z_MID  = 2147483645;
+export const Z_TOP = 2147483647;
+export const Z_MID = 2147483645;
