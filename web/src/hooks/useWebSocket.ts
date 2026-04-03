@@ -214,6 +214,34 @@ export function useWebSocket() {
         break;
       }
 
+      case 'hand_event': {
+        // Real-time Hand execution result — dispatch custom event for HandsDashboard
+        window.dispatchEvent(new CustomEvent('aura:hand_event', { detail: data }));
+        // Also show notable results as proactive messages
+        const handSuccess = data.success;
+        const handName = data.hand || 'unknown';
+        const handSummary = data.summary || '';
+        if (!handSuccess || (handName === 'guardian' && !handSummary.toUpperCase().includes('ALL CLEAR'))) {
+          addMessage({
+            role: 'assistant',
+            content: `**Hand '${handName}' ${handSuccess ? 'completed' : 'failed'}:**\n\n${handSummary}`,
+            proactive: { action: 'notify', trigger: `hand:${handName}` },
+          });
+        }
+        break;
+      }
+
+      case 'hand_approval_request': {
+        // Surface approval requests as urgent proactive messages
+        window.dispatchEvent(new CustomEvent('aura:hand_approval', { detail: data }));
+        addMessage({
+          role: 'assistant',
+          content: `**Approval Required:** Hand '${data.hand_name}' wants to use **${data.tool_name}**. Check the Hands dashboard to approve or deny.`,
+          proactive: { action: 'intervene', trigger: 'hand_approval' },
+        });
+        break;
+      }
+
       default:
         console.warn('[WebSocket] Unknown message type:', data.type);
     }

@@ -657,18 +657,26 @@ class OllamaBrain:
 
         if response is None:
             chain = self._get_fallback_chain(actual_model)
+            # Cumulative deadline: total fallback time capped at original timeout
+            import time as _time
+            _deadline = _time.monotonic() + timeout
             for fallback_model in chain:
                 if fallback_model == actual_model:
                     continue
+                remaining = _deadline - _time.monotonic()
+                if remaining <= 5:  # Not enough time for another attempt
+                    logger.info(f"[BRAIN] Fallback deadline reached, {len(chain)} models remaining")
+                    break
+                fb_timeout = min(int(remaining), 30)  # Cap each fallback at 30s
                 try:
                     fb_client, fb_actual = self._get_client_for_model(fallback_model)
-                    logger.info(f"[BRAIN] Tool-call fallback: {actual_model} -> {fb_actual}")
+                    logger.info(f"[BRAIN] Tool-call fallback: {actual_model} -> {fb_actual} (timeout={fb_timeout}s)")
                     fb_kwargs = {"model": fb_actual, "messages": messages, "options": llm_options}
                     if tools is not None:
                         fb_kwargs["tools"] = tools
                     response = call_with_timeout(
                         lambda kw=fb_kwargs, c=fb_client: c.chat(**kw),
-                        timeout=timeout,
+                        timeout=fb_timeout,
                         default=None,
                     )
                     if response is not None:

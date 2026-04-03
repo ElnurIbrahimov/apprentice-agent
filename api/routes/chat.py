@@ -120,6 +120,27 @@ async def broadcast_proactive_message(msg) -> None:
     await _broadcast_json(payload)
 
 
+async def broadcast_hand_event(result_dict: dict) -> None:
+    """Push a Hand execution result to all connected WebSocket clients.
+
+    Called from HandManager notification callback.
+    """
+    payload = {
+        "type": "hand_event",
+        **result_dict,
+    }
+    await _broadcast_json(payload)
+
+
+async def broadcast_hand_approval_request(request_dict: dict) -> None:
+    """Push a Hand approval request to all connected WebSocket clients."""
+    payload = {
+        "type": "hand_approval_request",
+        **request_dict,
+    }
+    await _broadcast_json(payload)
+
+
 async def process_attachments(attachments: List[dict], loop) -> str:
     """Process attachments and return context to prepend to message.
 

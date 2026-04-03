@@ -25,7 +25,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from api.routes import chat, status, upload, features, multi_agent, reasoning_tree, proactive, memory, context, conversation_starters, thinking, idle_behaviors, self_improvement, thinking_mode, tools_new, activity, multi_model, knowledge, search, pdf, transcribe, ocr, image_gen, agent_action, build as build_route, models as models_route, summarize, youtube, math as math_route, research, evolution, artifacts, feed, providers as providers_route, code as code_route, webhooks as webhooks_route, generate as generate_route, share as share_route
+from api.routes import chat, status, upload, features, multi_agent, reasoning_tree, proactive, memory, context, conversation_starters, thinking, idle_behaviors, self_improvement, thinking_mode, tools_new, activity, multi_model, knowledge, search, pdf, transcribe, ocr, image_gen, agent_action, build as build_route, models as models_route, summarize, youtube, math as math_route, research, evolution, artifacts, feed, providers as providers_route, code as code_route, webhooks as webhooks_route, generate as generate_route, share as share_route, hands as hands_route
 try:
     from api.routes import reliability as reliability_route
     _reliability_available = True
@@ -221,6 +221,36 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"[API] Self-Improvement Engine failed to start: {e}")
 
+        # Wire HandManager notification callback for WebSocket + Telegram push
+        try:
+            from aura.hands.manager import get_hand_manager
+            _hands_mgr = get_hand_manager()
+
+            _hands_loop = asyncio.get_running_loop()
+
+            def _on_hand_result(result):
+                # Broadcast to WebSocket clients
+                try:
+                    from api.routes.chat import broadcast_hand_event
+                    if not _hands_loop.is_closed():
+                        _hands_loop.call_soon_threadsafe(
+                            _hands_loop.create_task,
+                            broadcast_hand_event(result.to_dict()),
+                        )
+                except Exception as e:
+                    logger.debug(f"[API] Hand WS broadcast failed: {e}")
+                # Notify Telegram
+                try:
+                    from aura.messaging.telegram_bot import notify_hand_result
+                    notify_hand_result(result)
+                except Exception:
+                    pass
+
+            _hands_mgr.set_notify_callback(_on_hand_result)
+            logger.info("[API] HandManager notification callback wired")
+        except Exception as e:
+            logger.debug(f"[API] HandManager callback wiring failed: {e}")
+
     app.state.proactive_startup_task = asyncio.get_running_loop().create_task(_start_proactive_system())
 
     yield
@@ -413,6 +443,7 @@ app.include_router(youtube.router)
 app.include_router(math_route.router)
 app.include_router(research.router)
 app.include_router(evolution.router)
+app.include_router(hands_route.router)
 app.include_router(artifacts.router)
 app.include_router(feed.router)
 app.include_router(providers_route.router)

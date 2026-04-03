@@ -11,12 +11,26 @@ import asyncio
 import logging
 import threading
 import time
+import uuid
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from aura.hands.base import Hand, HandState, HandResult
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ApprovalRequest:
+    """A pending approval request from a Hand."""
+    request_id: str
+    hand_name: str
+    tool_name: str
+    args: dict
+    timestamp: float = field(default_factory=time.time)
+    resolved: bool = False
+    approved: bool = False
 
 
 class HandManager:
@@ -28,6 +42,14 @@ class HandManager:
         self._running = False
         self._scheduler_thread: Optional[threading.Thread] = None
         self._check_interval = 30  # seconds between schedule checks
+
+        # Notification callback (set by API/Telegram to receive results)
+        self._notify_callback: Optional[Callable[[HandResult], None]] = None
+
+        # Approval workflow
+        self._pending_approvals: dict[str, ApprovalRequest] = {}
+        self._approval_events: dict[str, threading.Event] = {}
+        self._approval_lock = threading.Lock()
 
     def register(self, hand: Hand):
         """Register a Hand with the manager."""
@@ -121,6 +143,9 @@ class HandManager:
         run_context["max_tokens"] = manifest.max_tokens
         run_context["model_preference"] = manifest.model_preference
         run_context["require_approval_for"] = manifest.require_approval_for
+        run_context["request_approval"] = lambda tool_name, args=None: self.request_approval(
+            name, tool_name, args or {}
+        )
 
         # State transition
         hand.state = HandState.RUNNING
@@ -198,6 +223,10 @@ class HandManager:
                 f"({result.iterations} iterations, {result.duration_seconds:.1f}s, "
                 f"${result.cost_usd:.4f})"
             )
+
+            # Notify listeners (API WebSocket, Telegram, etc.)
+            self._notify(result)
+
             return result
 
         except Exception as e:
@@ -302,6 +331,134 @@ class HandManager:
             self._scheduler_thread.join(timeout=5)
             self._scheduler_thread = None
         logger.info("[HandManager] Scheduler stopped")
+
+    # ====================================================================
+    # Notification callback
+    # ====================================================================
+
+    def set_notify_callback(self, callback: Callable[[HandResult], None]):
+        """Set a callback that fires when any Hand completes."""
+        self._notify_callback = callback
+
+    def _notify(self, result: HandResult):
+        """Call the notification callback if set."""
+        if self._notify_callback:
+            try:
+                self._notify_callback(result)
+            except Exception as e:
+                logger.debug(f"[HandManager] Notify callback error: {e}")
+
+    # ====================================================================
+    # Approval workflow
+    # ====================================================================
+
+    def request_approval(self, hand_name: str, tool_name: str, args: dict) -> bool:
+        """Request approval for a Hand to use a sensitive tool.
+
+        Blocks until approved/denied or timeout (5 minutes).
+        Returns True if approved, False if denied or timed out.
+        """
+        request_id = f"apr_{uuid.uuid4().hex[:8]}"
+        request = ApprovalRequest(
+            request_id=request_id,
+            hand_name=hand_name,
+            tool_name=tool_name,
+            args=args,
+        )
+        event = threading.Event()
+
+        with self._approval_lock:
+            self._pending_approvals[request_id] = request
+            self._approval_events[request_id] = event
+
+        logger.info(f"[HandManager] Approval requested: {hand_name} wants to use {tool_name}")
+
+        # Broadcast to WebSocket clients
+        try:
+            self._broadcast_approval_request(request)
+        except Exception as e:
+            logger.debug(f"[HandManager] Approval broadcast failed: {e}")
+
+        # Notify Telegram with InlineKeyboard
+        try:
+            from aura.messaging.telegram_bot import notify_hand_approval_request
+            notify_hand_approval_request({
+                "request_id": request_id,
+                "hand_name": hand_name,
+                "tool_name": tool_name,
+                "args": args,
+            })
+        except Exception as e:
+            logger.debug(f"[HandManager] Telegram approval notify failed: {e}")
+
+        # Wait for resolution (5 min timeout)
+        resolved = event.wait(timeout=300)
+
+        with self._approval_lock:
+            req = self._pending_approvals.pop(request_id, request)
+            self._approval_events.pop(request_id, None)
+
+        if not resolved:
+            logger.info(f"[HandManager] Approval timed out for {hand_name}/{tool_name}")
+            return False
+
+        logger.info(f"[HandManager] Approval {'granted' if req.approved else 'denied'} for {hand_name}/{tool_name}")
+        return req.approved
+
+    def resolve_approval(self, request_id: str, approved: bool):
+        """Resolve a pending approval request (called by API or Telegram)."""
+        with self._approval_lock:
+            request = self._pending_approvals.get(request_id)
+            event = self._approval_events.get(request_id)
+
+        if not request or not event:
+            logger.warning(f"[HandManager] Unknown approval request: {request_id}")
+            return
+
+        request.approved = approved
+        request.resolved = True
+        event.set()
+
+    def get_pending_approvals(self) -> list[dict]:
+        """Get all pending approval requests."""
+        with self._approval_lock:
+            return [
+                {
+                    "request_id": r.request_id,
+                    "hand_name": r.hand_name,
+                    "tool_name": r.tool_name,
+                    "args": r.args,
+                    "timestamp": r.timestamp,
+                    "age_seconds": round(time.time() - r.timestamp, 1),
+                }
+                for r in self._pending_approvals.values()
+                if not r.resolved
+            ]
+
+    def _broadcast_approval_request(self, request: ApprovalRequest):
+        """Broadcast an approval request to WebSocket clients."""
+        try:
+            import asyncio as _aio
+            from api.routes.chat import broadcast_hand_approval_request
+            loop = _aio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(broadcast_hand_approval_request({
+                    "request_id": request.request_id,
+                    "hand_name": request.hand_name,
+                    "tool_name": request.tool_name,
+                    "args": request.args,
+                    "timestamp": request.timestamp,
+                }))
+            else:
+                _aio.run(broadcast_hand_approval_request({
+                    "request_id": request.request_id,
+                    "hand_name": request.hand_name,
+                    "tool_name": request.tool_name,
+                    "args": request.args,
+                    "timestamp": request.timestamp,
+                }))
+        except Exception as e:
+            logger.debug(f"[HandManager] WebSocket approval broadcast failed: {e}")
 
 
 # Global singleton

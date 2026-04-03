@@ -117,6 +117,87 @@ def _run_telegram_scheduled_task(chat_id: str, task_prompt: str, is_agent_task: 
     asyncio.run_coroutine_threadsafe(_execute_and_send(), loop)
 
 
+def notify_hand_result(result) -> None:
+    """Push a Hand execution result to all authorized Telegram chats.
+
+    Called from HandManager's notify callback. Skips routine "all clear" results.
+    Only notifies on: failures, Guardian issues, or completed research with findings.
+    """
+    bot_inst = _active_bot_instance
+    loop = _active_event_loop
+    if not bot_inst or not bot_inst.bot or not loop or loop.is_closed():
+        return
+
+    # Skip routine "all clear" Guardian reports and empty Memory maintenance
+    hand_name = result.hand_name if hasattr(result, 'hand_name') else str(result.get("hand", ""))
+    success = result.success if hasattr(result, 'success') else result.get("success", True)
+    summary = result.summary if hasattr(result, 'summary') else result.get("summary", "")
+
+    if success and hand_name == "guardian" and "ALL CLEAR" in summary.upper():
+        return
+    if success and hand_name == "memory" and "no action needed" in summary.lower():
+        return
+
+    icon = "\u2705" if success else "\u274c"
+    text = f"{icon} <b>Hand '{hand_name}' completed</b>\n\n{summary[:800]}"
+
+    async def _send():
+        try:
+            # Send to all known authorized chats
+            chat_ids = list(getattr(bot_inst, '_authorized_chats', set()))
+            if not chat_ids and hasattr(bot_inst, '_admin_chat_id'):
+                chat_ids = [bot_inst._admin_chat_id]
+            for cid in chat_ids:
+                try:
+                    await bot_inst.bot.send_message(chat_id=cid, text=text, parse_mode="HTML")
+                except Exception:
+                    pass
+        except Exception as e:
+            logging.getLogger(__name__).debug(f"[Hands] Telegram notify failed: {e}")
+
+    asyncio.run_coroutine_threadsafe(_send(), loop)
+
+
+def notify_hand_approval_request(request: dict) -> None:
+    """Send a Hand approval request to Telegram with InlineKeyboard."""
+    bot_inst = _active_bot_instance
+    loop = _active_event_loop
+    if not bot_inst or not bot_inst.bot or not loop or loop.is_closed():
+        return
+
+    request_id = request.get("request_id", "unknown")
+    hand_name = request.get("hand_name", "unknown")
+    tool_name = request.get("tool_name", "unknown")
+
+    text = (
+        f"\ud83d\udd10 <b>Approval Required</b>\n\n"
+        f"Hand '<b>{hand_name}</b>' wants to use <b>{tool_name}</b>\n"
+        f"Request: {request_id}"
+    )
+
+    async def _send():
+        try:
+            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("\u2705 Approve", callback_data=f"hand_approve_{request_id}"),
+                InlineKeyboardButton("\u274c Deny", callback_data=f"hand_deny_{request_id}"),
+            ]])
+            chat_ids = list(getattr(bot_inst, '_authorized_chats', set()))
+            if not chat_ids and hasattr(bot_inst, '_admin_chat_id'):
+                chat_ids = [bot_inst._admin_chat_id]
+            for cid in chat_ids:
+                try:
+                    await bot_inst.bot.send_message(
+                        chat_id=cid, text=text, parse_mode="HTML", reply_markup=keyboard
+                    )
+                except Exception:
+                    pass
+        except Exception as e:
+            logging.getLogger(__name__).debug(f"[Hands] Telegram approval request failed: {e}")
+
+    asyncio.run_coroutine_threadsafe(_send(), loop)
+
+
 def _parse_time_expression(text: str) -> Optional[datetime]:
     """Parse natural language time expressions into an absolute datetime.
 
@@ -1035,6 +1116,10 @@ class TelegramBot(BasePlatform):
         self.app.add_handler(CommandHandler("lang", self._handle_lang))
         self.app.add_handler(CommandHandler("stickers", self._handle_stickers_cmd))
         self.app.add_handler(CommandHandler("pin", self._handle_pin))
+        self.app.add_handler(CommandHandler("hand", self._handle_hand))
+
+        # Hand approval callbacks
+        self.app.add_handler(CallbackQueryHandler(self._handle_hand_approval_callback, pattern="^hand_"))
 
         # Payment handlers
         self.app.add_handler(CallbackQueryHandler(self._handle_callback, pattern="^buy_"))
@@ -5081,6 +5166,149 @@ Status: Online and ready!"""
             await self._edit_or_send_response(placeholder, f"Fleet Results:\n\n{response}", update.effective_chat.id)
         except Exception as e:
             await self._edit_or_send_response(placeholder, f"Fleet error: {e}", update.effective_chat.id)
+
+    # =========================================================================
+    #  Autonomous Hands handlers
+    # =========================================================================
+
+    async def _handle_hand(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /hand — manage autonomous Hands."""
+        if not self._is_user_allowed(update.effective_user.id):
+            return
+
+        from aura.hands.manager import get_hand_manager
+        from aura.hands.researcher import ResearcherHand
+        from aura.hands.guardian import GuardianHand
+        from aura.hands.memory_hand import MemoryHand
+
+        manager = get_hand_manager()
+        if not manager.list_hands():
+            manager.register(ResearcherHand())
+            manager.register(GuardianHand())
+            manager.register(MemoryHand())
+
+        args = context.args or []
+        subcmd = args[0].lower() if args else "list"
+        subarg = args[1] if len(args) > 1 else ""
+
+        if subcmd in ("list", "ls"):
+            hands = manager.list_hands()
+            if not hands:
+                await update.message.reply_text("No hands registered.")
+                return
+            lines = ["<b>Autonomous Hands</b>\n"]
+            for h in hands:
+                state_icon = {"inactive": "\u26ab", "active": "\ud83d\udfe2", "running": "\ud83d\udd04", "paused": "\u23f8", "cooldown": "\u23f3", "error": "\ud83d\udd34"}.get(h["state"], "\u2753")
+                lines.append(
+                    f"{state_icon} <b>{h['name']}</b> — {h['state']}\n"
+                    f"   Runs: {h['total_runs']} | Cost: ${h['total_cost']:.4f} | Failures: {h['consecutive_failures']}"
+                )
+                if h.get("last_run"):
+                    lines.append(f"   Last: {h['last_run']}")
+            await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+        elif subcmd == "run" and subarg:
+            hand = manager.get_hand(subarg)
+            if not hand:
+                await update.message.reply_text(f"Unknown hand: {subarg}")
+                return
+
+            brain = getattr(self.aura, 'brain', None)
+            tools = getattr(self.aura, 'tools', {})
+            if not brain:
+                await update.message.reply_text("Agent brain not available.")
+                return
+
+            placeholder = await update.message.reply_text(f"\ud83e\udd16 Running hand '{subarg}'...")
+            chat_id = update.effective_chat.id
+
+            async def _run_and_report():
+                try:
+                    result = await manager.run_hand(subarg, brain, tools)
+                    status = "\u2705" if result.success else "\u274c"
+                    text = (
+                        f"{status} <b>Hand '{subarg}' completed</b>\n\n"
+                        f"{result.summary[:500]}\n\n"
+                        f"Iterations: {result.iterations} | "
+                        f"Duration: {result.duration_seconds:.1f}s | "
+                        f"Cost: ${result.cost_usd:.4f}"
+                    )
+                    if result.error:
+                        text += f"\nError: {result.error}"
+                    await self._edit_or_send_response(placeholder, text, chat_id, parse_mode="HTML")
+                except Exception as e:
+                    await self._edit_or_send_response(placeholder, f"Hand execution failed: {e}", chat_id)
+
+            asyncio.create_task(_run_and_report())
+
+        elif subcmd == "activate" and subarg:
+            if manager.activate(subarg):
+                await update.message.reply_text(f"\ud83d\udfe2 Hand '{subarg}' activated.")
+            else:
+                await update.message.reply_text(f"Unknown or already running hand: {subarg}")
+
+        elif subcmd == "deactivate" and subarg:
+            if manager.deactivate(subarg):
+                await update.message.reply_text(f"\u26ab Hand '{subarg}' deactivated.")
+            else:
+                await update.message.reply_text(f"Unknown hand: {subarg}")
+
+        elif subcmd == "status" and subarg:
+            hand = manager.get_hand(subarg)
+            if not hand:
+                await update.message.reply_text(f"Unknown hand: {subarg}")
+                return
+            stats = hand.get_stats()
+            lines = [
+                f"<b>Hand: {stats['name']}</b>",
+                f"State: {stats['state']}",
+                f"Description: {stats.get('description', 'N/A')}",
+                f"Total runs: {stats['total_runs']}",
+                f"Total cost: ${stats['total_cost']:.4f}",
+                f"Consecutive failures: {stats['consecutive_failures']}",
+                f"Model: {stats.get('model_preference', 'N/A')}",
+                f"Idle only: {stats.get('idle_only', 'N/A')}",
+                f"Drive trigger: {stats.get('trigger_on_drive', 'None')}",
+            ]
+            if stats.get("last_run"):
+                lines.append(f"Last run: {stats['last_run']}")
+            if stats.get("last_error"):
+                lines.append(f"Last error: {stats['last_error']}")
+            await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+        else:
+            await update.message.reply_text(
+                "<b>Usage:</b> /hand &lt;command&gt; [name]\n\n"
+                "/hand list — Show all hands\n"
+                "/hand run &lt;name&gt; — Run a hand now\n"
+                "/hand activate &lt;name&gt; — Activate for scheduling\n"
+                "/hand deactivate &lt;name&gt; — Deactivate\n"
+                "/hand status &lt;name&gt; — Detailed status",
+                parse_mode="HTML",
+            )
+
+    async def _handle_hand_approval_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle hand approval inline keyboard callbacks."""
+        query = update.callback_query
+        await query.answer()
+
+        data = query.data  # "hand_approve_<request_id>" or "hand_deny_<request_id>"
+        parts = data.split("_", 2)
+        if len(parts) < 3:
+            return
+
+        action = parts[1]  # "approve" or "deny"
+        request_id = parts[2]
+        approved = action == "approve"
+
+        try:
+            from aura.hands.manager import get_hand_manager
+            manager = get_hand_manager()
+            manager.resolve_approval(request_id, approved)
+            status = "\u2705 Approved" if approved else "\u274c Denied"
+            await query.edit_message_text(f"{status} (request: {request_id})")
+        except Exception as e:
+            await query.edit_message_text(f"Failed to resolve approval: {e}")
 
     # =========================================================================
     #  Payment / Premium handlers

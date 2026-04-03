@@ -1,58 +1,122 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { ChatContainer } from './components/ChatContainer';
 import { Sidebar } from './components/Sidebar';
-import { ThoughtStream } from './components/ThoughtStream';
-import { AuraPanel } from './components/AuraPanel';
-import { NeuroDreamPanel } from './components/NeuroDreamPanel';
-import { ToolsPanel } from './components/ToolsPanel';
-import { AMEMPanel } from './components/AMEMPanel';
-import { ReasoningTreePanel } from './components/ReasoningTreePanel';
 import { ToastContainer, useToastStore } from './components/Toast';
-import { ActivityTimeline } from './components/ActivityTimeline';
 import { useChatStore } from './store/chatStore';
 import { useSettingsStore, applyFontSize, applyTheme } from './store/settingsStore';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { BottomTabBar } from './components/BottomTabBar';
 import {
   Bars3Icon,
   ChatBubbleLeftRightIcon,
   ChartBarIcon,
   WrenchScrewdriverIcon,
-  CogIcon,
-  ClockIcon,
   Cog8ToothIcon,
+  CommandLineIcon,
+  MagnifyingGlassIcon,
+  XMarkIcon,
 } from '@heroicons/react/24/outline';
-import { SettingsPage } from './components/SettingsPage';
+
+// Lazy-loaded tabs (only Chat + Sidebar are eagerly loaded)
+const ThoughtStream = lazy(() => import('./components/ThoughtStream').then(m => ({ default: m.ThoughtStream })));
+const AuraPanel = lazy(() => import('./components/AuraPanel').then(m => ({ default: m.AuraPanel })));
+const NeuroDreamPanel = lazy(() => import('./components/NeuroDreamPanel').then(m => ({ default: m.NeuroDreamPanel })));
+const ToolsPanel = lazy(() => import('./components/ToolsPanel').then(m => ({ default: m.ToolsPanel })));
+const AMEMPanel = lazy(() => import('./components/AMEMPanel').then(m => ({ default: m.AMEMPanel })));
+const ReasoningTreePanel = lazy(() => import('./components/ReasoningTreePanel').then(m => ({ default: m.ReasoningTreePanel })));
+const ActivityTimeline = lazy(() => import('./components/ActivityTimeline').then(m => ({ default: m.ActivityTimeline })));
+const HandsDashboard = lazy(() => import('./components/HandsDashboard'));
+const SettingsPage = lazy(() => import('./components/SettingsPage').then(m => ({ default: m.SettingsPage })));
+const CodeInterpreter = lazy(() => import('./components/CodeInterpreter').then(m => ({ default: m.CodeInterpreter })));
+const WebCreator = lazy(() => import('./components/WebCreator').then(m => ({ default: m.WebCreator })));
+const ImageGenPanel = lazy(() => import('./components/ImageGenPanel').then(m => ({ default: m.ImageGenPanel })));
 import type { TabId } from './types';
 
 const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'chat', label: 'Chat', icon: ChatBubbleLeftRightIcon },
-  { id: 'monitoring', label: 'Monitor', icon: ChartBarIcon },
+  { id: 'create', label: 'Create', icon: CommandLineIcon },
   { id: 'tools', label: 'Tools', icon: WrenchScrewdriverIcon },
-  { id: 'advanced', label: 'Advanced', icon: CogIcon },
-  { id: 'activity', label: 'Activity', icon: ClockIcon },
+  { id: 'insights', label: 'Insights', icon: ChartBarIcon },
   { id: 'settings', label: 'Settings', icon: Cog8ToothIcon },
 ];
 
+type CreateSubTab = 'code' | 'webcreator' | 'image';
+type InsightsSubTab = 'monitor' | 'activity' | 'hands' | 'advanced';
+
+function TabSkeleton() {
+  return (
+    <div className="flex-1 flex items-center justify-center">
+      <div className="animate-pulse flex flex-col gap-3 w-64">
+        <div className="h-4 bg-surface-2 rounded w-3/4" />
+        <div className="h-4 bg-surface-2 rounded w-1/2" />
+        <div className="h-4 bg-surface-2 rounded w-5/6" />
+      </div>
+    </div>
+  );
+}
+
+function SubTabBar({ tabs, active, onChange }: { tabs: { id: string; label: string }[]; active: string; onChange: (id: string) => void }) {
+  return (
+    <div className="flex items-center gap-1 px-4 py-2 border-b border-chat-border">
+      {tabs.map((tab) => (
+        <button
+          key={tab.id}
+          onClick={() => onChange(tab.id)}
+          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+            active === tab.id
+              ? 'bg-chat-accent text-white'
+              : 'text-chat-text-secondary hover:text-chat-text hover:bg-chat-assistant'
+          }`}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function App() {
-  const { sidebarOpen, setSidebarOpen, toggleSidebar } = useChatStore();
+  const { sidebarOpen, setSidebarOpen, toggleSidebar, conversations } = useChatStore();
   const { settings } = useSettingsStore();
   const { toasts, removeToast } = useToastStore();
   const [isMobile, setIsMobile] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>('chat');
+  const [createSubTab, setCreateSubTab] = useState<CreateSubTab>('code');
+  const [insightsSubTab, setInsightsSubTab] = useState<InsightsSubTab>('monitor');
+
+  // Mobile search state
+  const [showMobileSearch, setShowMobileSearch] = useState(false);
+  const [mobileSearchQuery, setMobileSearchQuery] = useState('');
+  const filteredConversations = mobileSearchQuery
+    ? conversations.filter(c =>
+        (c.title || '').toLowerCase().includes(mobileSearchQuery.toLowerCase())
+      )
+    : conversations.slice(0, 20);
 
   // Apply font size setting
   useEffect(() => {
     applyFontSize(settings.fontSize);
   }, [settings.fontSize]);
 
-  // Apply theme setting
+  // Apply theme setting + listen for OS theme changes when set to "system"
   useEffect(() => {
     applyTheme(settings.theme);
+    if (settings.theme === 'system') {
+      const mq = window.matchMedia('(prefers-color-scheme: dark)');
+      const handler = () => applyTheme('system');
+      mq.addEventListener('change', handler);
+      return () => mq.removeEventListener('change', handler);
+    }
   }, [settings.theme]);
 
   // Keyboard shortcuts
+  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      const isInput = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable;
+
       if (e.ctrlKey && e.key === 'n') {
         e.preventDefault();
         document.dispatchEvent(new CustomEvent('aura:new-chat'));
@@ -65,10 +129,31 @@ function App() {
         e.preventDefault();
         document.dispatchEvent(new CustomEvent('aura:focus-input'));
       }
+      if (e.ctrlKey && e.key === 'b') {
+        e.preventDefault();
+        toggleSidebar();
+      }
+      if (e.ctrlKey && e.key >= '1' && e.key <= '5') {
+        e.preventDefault();
+        const idx = parseInt(e.key) - 1;
+        if (TABS[idx]) setActiveTab(TABS[idx].id);
+      }
+      if (e.ctrlKey && e.shiftKey && e.key === 'T') {
+        e.preventDefault();
+        const current = useSettingsStore.getState().settings.theme;
+        useSettingsStore.getState().updateSettings({ theme: current === 'dark' ? 'light' : 'dark' });
+      }
+      if (e.key === 'Escape') {
+        if (showMobileSearch) { setShowMobileSearch(false); setMobileSearchQuery(''); e.preventDefault(); }
+        else if (showShortcutHelp) { setShowShortcutHelp(false); e.preventDefault(); }
+      }
+      if (e.key === '?' && !isInput) {
+        setShowShortcutHelp((prev) => !prev);
+      }
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [showShortcutHelp, showMobileSearch, toggleSidebar]);
 
   // Listen for tab switch events (from Sidebar gear button, etc.)
   useEffect(() => {
@@ -97,13 +182,22 @@ function App() {
 
   const renderTabContent = () => {
     switch (activeTab) {
-      case 'monitoring':
+      case 'create':
         return (
-          <div className="h-full overflow-y-auto p-4 space-y-4">
-            <h2 className="text-xl font-semibold text-chat-text mb-4">Monitoring</h2>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <ThoughtStream />
-              <AuraPanel />
+          <div className="h-full flex flex-col">
+            <SubTabBar
+              tabs={[
+                { id: 'code', label: 'Code' },
+                { id: 'webcreator', label: 'Web Creator' },
+                { id: 'image', label: 'Image' },
+              ]}
+              active={createSubTab}
+              onChange={(id) => setCreateSubTab(id as CreateSubTab)}
+            />
+            <div className="flex-1 overflow-hidden">
+              {createSubTab === 'code' && <CodeInterpreter />}
+              {createSubTab === 'webcreator' && <WebCreator />}
+              {createSubTab === 'image' && <ImageGenPanel />}
             </div>
           </div>
         );
@@ -116,22 +210,40 @@ function App() {
           </div>
         );
 
-      case 'advanced':
+      case 'insights':
         return (
-          <div className="h-full overflow-y-auto p-4 space-y-4">
-            <h2 className="text-xl font-semibold text-chat-text mb-4">Advanced Features</h2>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <ReasoningTreePanel />
-              <NeuroDreamPanel />
-              <AMEMPanel />
+          <div className="h-full flex flex-col">
+            <SubTabBar
+              tabs={[
+                { id: 'monitor', label: 'Monitor' },
+                { id: 'activity', label: 'Activity' },
+                { id: 'hands', label: 'Hands' },
+                { id: 'advanced', label: 'Advanced' },
+              ]}
+              active={insightsSubTab}
+              onChange={(id) => setInsightsSubTab(id as InsightsSubTab)}
+            />
+            <div className="flex-1 overflow-hidden">
+              {insightsSubTab === 'monitor' && (
+                <div className="h-full overflow-y-auto p-4 space-y-4">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <ThoughtStream />
+                    <AuraPanel />
+                  </div>
+                </div>
+              )}
+              {insightsSubTab === 'activity' && <ActivityTimeline />}
+              {insightsSubTab === 'hands' && <HandsDashboard />}
+              {insightsSubTab === 'advanced' && (
+                <div className="h-full overflow-y-auto p-4 space-y-4">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <ReasoningTreePanel />
+                    <NeuroDreamPanel />
+                    <AMEMPanel />
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
-        );
-
-      case 'activity':
-        return (
-          <div className="h-full overflow-hidden">
-            <ActivityTimeline />
           </div>
         );
 
@@ -176,7 +288,7 @@ function App() {
         </ErrorBoundary>
       </aside>
 
-      {/* Mobile overlay backdrop — tap or swipe left to close */}
+      {/* Mobile overlay backdrop */}
       {isMobile && sidebarOpen && (
         <div
           className="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm lg:hidden"
@@ -199,7 +311,7 @@ function App() {
       {/* Main content */}
       <main className="flex-1 flex flex-col min-w-0">
         {/* Header with tabs */}
-        <header className="flex items-center justify-between px-4 py-2 border-b border-chat-border" style={{ background: 'rgba(3,3,3,0.7)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
+        <header className="flex items-center justify-between px-4 py-2 border-b border-chat-border" style={{ background: 'var(--bg-panel)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
           <div className="flex items-center">
             <button
               onClick={toggleSidebar}
@@ -210,8 +322,8 @@ function App() {
             <span className="ml-2 text-chat-text font-semibold lg:hidden">AURA</span>
           </div>
 
-          {/* Tab buttons */}
-          <nav className="flex items-center gap-1">
+          {/* Tab buttons — hidden on mobile (bottom bar used instead) */}
+          <nav className="hidden lg:flex items-center gap-1">
             {TABS.map((tab) => {
               const Icon = tab.icon;
               return (
@@ -231,8 +343,14 @@ function App() {
             })}
           </nav>
 
-          {/* Spacer for layout balance */}
-          <div className="w-10 lg:hidden" />
+          {/* Mobile search button */}
+          <button
+            onClick={() => setShowMobileSearch(true)}
+            className="p-2 text-chat-text-secondary hover:text-chat-text rounded-lg lg:hidden touch-target"
+            aria-label="Search conversations"
+          >
+            <MagnifyingGlassIcon className="w-5 h-5" />
+          </button>
         </header>
 
         {/* Tab content — ChatContainer is always mounted to keep WebSocket alive */}
@@ -245,13 +363,96 @@ function App() {
           {activeTab !== 'chat' && (
             <div className="h-full overflow-hidden">
               <ErrorBoundary>
-                {renderTabContent()}
+                <Suspense fallback={<TabSkeleton />}>
+                  {renderTabContent()}
+                </Suspense>
               </ErrorBoundary>
             </div>
           )}
         </div>
       </main>
     </div>
+
+    {/* Bottom tab bar for mobile */}
+    {isMobile && <BottomTabBar activeTab={activeTab} onTabChange={setActiveTab} />}
+
+    {/* Mobile search overlay */}
+    {showMobileSearch && (
+      <>
+        <div className="fixed inset-0 z-[180] bg-black/60 backdrop-blur-sm lg:hidden" onClick={() => { setShowMobileSearch(false); setMobileSearchQuery(''); }} />
+        <div className="fixed inset-x-0 top-0 z-[190] lg:hidden" style={{ background: 'var(--surface-1)', borderBottom: '1px solid var(--border-default)' }}>
+          <div className="flex items-center gap-2 px-4 py-3">
+            <MagnifyingGlassIcon className="w-5 h-5 text-chat-text-secondary flex-shrink-0" />
+            <input
+              autoFocus
+              type="text"
+              placeholder="Search conversations..."
+              value={mobileSearchQuery}
+              onChange={(e) => setMobileSearchQuery(e.target.value)}
+              className="flex-1 bg-transparent text-chat-text outline-none text-sm"
+            />
+            <button onClick={() => { setShowMobileSearch(false); setMobileSearchQuery(''); }} className="text-chat-text-secondary p-1">
+              <XMarkIcon className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="max-h-[60vh] overflow-y-auto px-2 pb-3">
+            {filteredConversations.map((conv) => (
+              <button
+                key={conv.id}
+                onClick={() => {
+                  useChatStore.getState().setCurrentConversationId(conv.id);
+                  setShowMobileSearch(false);
+                  setMobileSearchQuery('');
+                }}
+                className="w-full text-left px-3 py-2.5 rounded-lg transition-colors"
+                style={{ color: 'var(--text-primary)' }}
+                onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-panel-hover)')}
+                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+              >
+                <div className="text-sm truncate">{conv.title || 'Untitled'}</div>
+                <div className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>{new Date(conv.updated_at * 1000).toLocaleDateString()}</div>
+              </button>
+            ))}
+            {mobileSearchQuery && filteredConversations.length === 0 && (
+              <div className="text-center text-sm py-8" style={{ color: 'var(--text-secondary)' }}>No conversations found</div>
+            )}
+          </div>
+        </div>
+      </>
+    )}
+
+    {/* Keyboard shortcut help modal */}
+    {showShortcutHelp && (
+      <>
+        <div className="fixed inset-0 z-[200] bg-black/50 backdrop-blur-sm" onClick={() => setShowShortcutHelp(false)} />
+        <div className="fixed z-[210] top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[360px] max-w-[90vw] rounded-xl border border-chat-border p-5"
+          style={{ background: 'var(--surface-2)', boxShadow: '0 16px 48px rgba(0,0,0,0.4)' }}>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-semibold text-chat-text">Keyboard Shortcuts</h3>
+            <button onClick={() => setShowShortcutHelp(false)} className="text-chat-text-secondary hover:text-chat-text">
+              <span className="sr-only">Close</span>&times;
+            </button>
+          </div>
+          <div className="space-y-2 text-xs text-chat-text-secondary">
+            {[
+              ['Ctrl+1–5', 'Switch tab'],
+              ['Ctrl+B', 'Toggle sidebar'],
+              ['Ctrl+N', 'New chat'],
+              ['Ctrl+K', 'Focus input'],
+              ['Ctrl+/', 'Settings'],
+              ['Ctrl+Shift+T', 'Toggle theme'],
+              ['Escape', 'Close panel/modal'],
+              ['?', 'This help'],
+            ].map(([key, desc]) => (
+              <div key={key} className="flex justify-between">
+                <kbd className="px-1.5 py-0.5 rounded bg-surface-3 text-chat-text font-mono text-[11px]">{key}</kbd>
+                <span>{desc}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </>
+    )}
     </>
   );
 }

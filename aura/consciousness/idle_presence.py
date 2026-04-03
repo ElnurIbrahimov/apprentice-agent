@@ -121,6 +121,9 @@ class IdlePresenceEngine:
         self._last_auto_sleep_time: float = 0.0
         self._conversation_threshold = 5        # Min messages before first sleep is useful
 
+        # Agent reference (set via set_agent() for Hands integration)
+        self._agent: Any = None
+
         # Stats
         self._stats = {
             "activities_recorded": 0,
@@ -131,6 +134,11 @@ class IdlePresenceEngine:
         }
 
         logger.info("[IdlePresence] Engine initialized")
+
+    def set_agent(self, agent: Any) -> None:
+        """Set the agent reference so Hands can access brain and tools."""
+        self._agent = agent
+        logger.info("[IdlePresence] Agent reference set for Hands integration")
 
     # ====================================================================
     # NeuroDream Integration
@@ -624,10 +632,18 @@ class IdlePresenceEngine:
             except Exception as e:
                 logger.debug(f"[IdlePresence] Drive urgencies unavailable: {e}")
 
+            # Get brain and tools from agent reference
+            brain = getattr(self._agent, 'brain', None) if self._agent else None
+            tools = getattr(self._agent, 'tools', {}) if self._agent else {}
+
+            if not brain:
+                logger.debug("[IdlePresence] No brain available for Hands — skipping")
+                return
+
             # Check and run eligible hands
             triggered = manager.check_and_run(
-                brain=None,  # Will be set by the hand manager if available
-                tools={},    # Hands bring their own tool access
+                brain=brain,
+                tools=tools,
                 idle_seconds=idle_seconds,
                 drive_urgencies=drive_urgencies,
             )

@@ -783,24 +783,42 @@ class ChatSession:
     # ── Channel bridge message processing ─────────────────────────────────
 
     def _drain_channels(self) -> None:
-        """Process all pending channel messages through the agent."""
-        if not self.bridge:
+        """Process pending channel messages in a background thread (non-blocking).
+
+        Processes at most 1 message per call to avoid stalling the main loop.
+        The agent run happens in a daemon thread so the CLI stays responsive.
+        """
+        if not self.bridge or not self.bridge.has_pending():
             return
-        from .chat_loop import _display_channel_response
-        while self.bridge.has_pending():
-            ch_msg = self.bridge.get_pending_message(timeout=0)
-            if ch_msg is None:
-                break
+        # Skip if a previous channel message is still being processed
+        if getattr(self, '_channel_processing', False):
+            return
+
+        ch_msg = self.bridge.get_pending_message(timeout=0)
+        if ch_msg is None:
+            return
+
+        self._channel_processing = True
+
+        def _process():
             try:
+                from .chat_loop import _display_channel_response
                 result = self.agentic.run(ch_msg.text)
                 response_text = result.get("response", "") if result else ""
             except Exception as _e:
                 logger.debug("channel_agent_run_failed", exc_info=True)
                 response_text = f"Error processing message: {_e}"
+            try:
+                if response_text:
+                    _display_channel_response(self.console, ch_msg, response_text)
+                    self.bridge.send_response(ch_msg, response_text)
+            except Exception:
+                logger.debug("channel_response_display_failed", exc_info=True)
+            finally:
+                self._channel_processing = False
 
-            if response_text:
-                _display_channel_response(self.console, ch_msg, response_text)
-                self.bridge.send_response(ch_msg, response_text)
+        import threading
+        threading.Thread(target=_process, daemon=True, name="channel-drain").start()
 
     # ── Background task submission ────────────────────────────────────────
 

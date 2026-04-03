@@ -349,6 +349,17 @@ class AuraDaemon:
             logger.info("Agent loaded successfully (%d tools)", tools_loaded)
             self._agent_load_error = None
             self._event_bus.emit("daemon:agent_ready", {})
+
+            # Wire IdlePresenceEngine with agent reference for Hands
+            try:
+                from aura.consciousness.idle_presence import get_idle_presence_engine
+                idle = get_idle_presence_engine()
+                idle.set_agent(self._agent)
+            except Exception as e:
+                logger.debug("IdlePresence agent wiring failed: %s", e)
+
+            # Register and start Autonomous Hands
+            self._start_hands()
         except ImportError as e:
             self._agent_load_error = f"ImportError: {e}"
             logger.error("Agent load failed (missing module): %s\n%s", e, traceback.format_exc())
@@ -363,6 +374,43 @@ class AuraDaemon:
             logger.error("Agent load failed: %s\n%s", e, traceback.format_exc())
         finally:
             self._agent_ready.set()
+
+    def _start_hands(self):
+        """Register and start Autonomous Hands scheduler."""
+        try:
+            from aura.hands.manager import get_hand_manager
+            from aura.hands.researcher import ResearcherHand
+            from aura.hands.guardian import GuardianHand
+            from aura.hands.memory_hand import MemoryHand
+
+            manager = get_hand_manager()
+            if not manager.list_hands():
+                manager.register(ResearcherHand())
+                manager.register(GuardianHand())
+                manager.register(MemoryHand())
+
+            def _get_idle_seconds():
+                return time.monotonic() - self._last_activity
+
+            def _get_drive_urgencies():
+                try:
+                    from aura.consciousness.intrinsic_motivation import get_intrinsic_motivation
+                    engine = get_intrinsic_motivation()
+                    if engine:
+                        return engine.get_drives_summary()
+                except Exception:
+                    pass
+                return {}
+
+            manager.start_scheduler(
+                brain=self._agent.brain,
+                tools=getattr(self._agent, 'tools', {}),
+                get_idle_seconds=_get_idle_seconds,
+                get_drive_urgencies=_get_drive_urgencies,
+            )
+            logger.info("HandManager scheduler started with %d hands", len(manager.list_hands()))
+        except Exception as e:
+            logger.warning("HandManager startup failed: %s", e)
 
     def get_status(self) -> dict:
         """Return daemon status for health checks."""
