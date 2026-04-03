@@ -191,13 +191,27 @@ from aura.pools import llm_pool as _llm_pool_fn, bg_pool as _bg_pool_fn
 # atexit cleanup now handled by aura.pools
 
 
+_BG_FALLBACK_SEM = threading.Semaphore(8)
+
+
 def _bg_submit(fn, *args, **kwargs):
     """Submit work to the background pool, with fallback for shutdown."""
     try:
         _bg_pool_fn().submit(fn, *args, **kwargs)
     except RuntimeError:
-        # Pool shut down — run in daemon thread as last resort
-        threading.Thread(target=fn, args=args, kwargs=kwargs, daemon=True).start()
+        # Pool shut down — run in daemon thread as last resort, capped at 8
+        if not _BG_FALLBACK_SEM.acquire(blocking=False):
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "_bg_submit: fallback thread cap reached (8), dropping task %s", fn
+            )
+            return
+        def _run_and_release():
+            try:
+                fn(*args, **kwargs)
+            finally:
+                _BG_FALLBACK_SEM.release()
+        threading.Thread(target=_run_and_release, daemon=True).start()
 
 
 # --- Retry decorator for transient network/connection errors ---
@@ -497,6 +511,29 @@ class OllamaBrain:
 
         if warmup:
             self._warmup_models()
+
+        # Register cleanup on process exit
+        import atexit
+        atexit.register(self.close)
+
+    def close(self) -> None:
+        """Close HTTP clients and free connection pools."""
+        try:
+            if hasattr(self, 'client') and self.client is not None:
+                self.client._client.close()
+        except Exception:
+            pass
+        try:
+            if hasattr(self, '_cloud_client') and self._cloud_client is not None:
+                self._cloud_client._client.close()
+        except Exception:
+            pass
+        try:
+            if hasattr(self, '_chatgpt_client'):
+                self._chatgpt_client = None
+        except Exception:
+            pass
+        logger.debug("[BRAIN] HTTP clients closed")
 
     def _get_client_for_model(self, model: str) -> tuple:
         """Get the appropriate client (local, cloud, ChatGPT, or direct API) based on model name.

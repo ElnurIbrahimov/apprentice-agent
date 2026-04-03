@@ -333,6 +333,34 @@ class ChannelBridge:
             "callback_count": len(self._event_callbacks),
         }
 
+    def status(self) -> List[dict]:
+        """Return a list of per-channel status dicts for CLI display.
+
+        Each dict has keys: ``channel``, ``running``, ``pending``.
+        This is the format consumed by ``chat_session.py``'s /channels command.
+        """
+        q_size = self._message_queue.qsize()
+        return [
+            {
+                "channel": source.value,
+                "running": adapter.is_running,
+                "pending": q_size,
+            }
+            for source, adapter in self._channels.items()
+        ]
+
+    def set_on_message_callback(self, callback: Callable[[ChannelMessage], None]) -> None:
+        """Register a single on-message callback (alias for ``on_message()``).
+
+        Replaces any previously registered callbacks set via this method.
+        Used by ``chat_session.py`` to wire the CLI notification display.
+        """
+        # Remove the previous callback stored under this method if any
+        if hasattr(self, '_session_callback') and self._session_callback in self._event_callbacks:
+            self.off_message(self._session_callback)
+        self._session_callback = callback
+        self.on_message(callback)
+
     # ── Internal: background event loop ───────────────────────────────────
 
     def _run_background_loop(self) -> None:

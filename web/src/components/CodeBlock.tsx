@@ -5,6 +5,7 @@ import { executeInline } from '../utils/pyodideExecutor';
 import { detectArtifactType, type ArtifactType } from '../utils/artifactRenderer';
 import { sanitizeHtml } from '../utils/sanitize';
 import { copyText } from '../utils/clipboard';
+import { useSettingsStore } from '../store/settingsStore';
 
 const COLLAPSE_THRESHOLD = 20;
 const RUNNABLE_LANGS = new Set(['python', 'py']);
@@ -35,14 +36,16 @@ export function CodeBlock({ language, children, onOpenArtifact }: CodeBlockProps
   const lineCount = children.split('\n').length;
   const canRun = RUNNABLE_LANGS.has(language.toLowerCase());
   const artifactType = detectArtifactType(children, language);
+  const theme = useSettingsStore((s) => s.settings.theme);
 
   useEffect(() => () => { clearTimeout(copyTimer.current); }, []);
 
   useEffect(() => {
-    const isDark = !document.documentElement.classList.contains('light');
+    // Determine actual rendered theme (handle 'system' by checking OS preference)
+    const isDark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
     highlightCode(children, language, isDark ? 'dark' : 'light')
       .then(setHighlighted).catch(() => {});
-  }, [children, language]);
+  }, [children, language, theme]);
 
   const handleCopy = useCallback(async () => {
     if (await copyText(children)) {

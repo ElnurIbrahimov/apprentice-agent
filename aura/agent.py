@@ -2564,6 +2564,14 @@ IMPORTANT: If the user asks about something you are not sure about, something re
         except Exception as e:  # Catch-all: shutdown must continue even if one step fails
             results["errors"].append(f"Ollama unload: {e}")
 
+        # 2b. Close brain HTTP connection pools
+        try:
+            if hasattr(self, 'brain') and self.brain:
+                self.brain.close()
+                results["freed_resources"].append("brain_http_clients")
+        except Exception as e:  # Catch-all: shutdown must continue even if one step fails
+            results["errors"].append(f"Brain close: {e}")
+
         # 3. Close browser if open
         try:
             if "browser" in self.tools and hasattr(self.tools["browser"], 'close'):
