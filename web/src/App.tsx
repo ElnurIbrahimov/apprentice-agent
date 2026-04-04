@@ -37,6 +37,17 @@ const TranslatePanel = lazy(() => import('./components/TranslatePanel').then(m =
 const SummaryPanel = lazy(() => import('./components/SummaryPanel').then(m => ({ default: m.SummaryPanel })));
 const GrammarPanel = lazy(() => import('./components/GrammarPanel').then(m => ({ default: m.GrammarPanel })));
 const MathPanel = lazy(() => import('./components/MathPanel').then(m => ({ default: m.MathPanel })));
+const AskPanel = lazy(() => import('./components/AskPanel').then(m => ({ default: m.AskPanel })));
+const AgentPanel = lazy(() => import('./components/AgentPanel').then(m => ({ default: m.AgentPanel })));
+const PdfPanel = lazy(() => import('./components/PdfPanel').then(m => ({ default: m.PdfPanel })));
+const VoicePanel = lazy(() => import('./components/VoicePanel').then(m => ({ default: m.VoicePanel })));
+const OcrPanel = lazy(() => import('./components/OcrPanel').then(m => ({ default: m.OcrPanel })));
+const YoutubePanel = lazy(() => import('./components/YoutubePanel').then(m => ({ default: m.YoutubePanel })));
+const CapturePanel = lazy(() => import('./components/CapturePanel').then(m => ({ default: m.CapturePanel })));
+const WisebasePanel = lazy(() => import('./components/WisebasePanel').then(m => ({ default: m.WisebasePanel })));
+const SlidesPanel = lazy(() => import('./components/SlidesPanel').then(m => ({ default: m.SlidesPanel })));
+const RecordPanel = lazy(() => import('./components/RecordPanel').then(m => ({ default: m.RecordPanel })));
+
 import type { TabId } from './types';
 
 const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
@@ -49,7 +60,14 @@ const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: 
 
 type CreateSubTab = 'code' | 'webcreator' | 'image';
 type InsightsSubTab = 'monitor' | 'activity' | 'hands' | 'advanced';
-type ToolsSubTab = 'tools' | 'search' | 'research' | 'write' | 'translate' | 'summary' | 'grammar' | 'math';
+type ToolsSubTab =
+  | 'tools'
+  | 'ask' | 'search' | 'research' | 'agent'
+  | 'write' | 'translate' | 'summary' | 'grammar'
+  | 'math'
+  | 'pdf' | 'ocr' | 'capture' | 'youtube'
+  | 'voice' | 'record'
+  | 'slides' | 'wisebase';
 
 function TabSkeleton() {
   return (
@@ -217,13 +235,23 @@ function App() {
             <SubTabBar
               tabs={[
                 { id: 'tools', label: 'Tools' },
+                { id: 'ask', label: 'Ask' },
                 { id: 'search', label: 'Search' },
                 { id: 'research', label: 'Research' },
+                { id: 'agent', label: 'Agent' },
                 { id: 'write', label: 'Write' },
                 { id: 'translate', label: 'Translate' },
                 { id: 'summary', label: 'Summary' },
                 { id: 'grammar', label: 'Grammar' },
                 { id: 'math', label: 'Math' },
+                { id: 'pdf', label: 'PDF' },
+                { id: 'ocr', label: 'OCR' },
+                { id: 'capture', label: 'Capture' },
+                { id: 'youtube', label: 'YouTube' },
+                { id: 'voice', label: 'Voice' },
+                { id: 'record', label: 'Record' },
+                { id: 'slides', label: 'Slides' },
+                { id: 'wisebase', label: 'Wisebase' },
               ]}
               active={toolsSubTab}
               onChange={(id) => setToolsSubTab(id as ToolsSubTab)}
@@ -235,13 +263,23 @@ function App() {
                   <ToolsPanel />
                 </div>
               )}
+              {toolsSubTab === 'ask' && <AskPanel />}
               {toolsSubTab === 'search' && <SearchPanel />}
               {toolsSubTab === 'research' && <ResearchPanel />}
+              {toolsSubTab === 'agent' && <AgentPanel />}
               {toolsSubTab === 'write' && <WritePanel />}
               {toolsSubTab === 'translate' && <TranslatePanel />}
               {toolsSubTab === 'summary' && <SummaryPanel />}
               {toolsSubTab === 'grammar' && <GrammarPanel />}
               {toolsSubTab === 'math' && <MathPanel />}
+              {toolsSubTab === 'pdf' && <PdfPanel />}
+              {toolsSubTab === 'ocr' && <OcrPanel />}
+              {toolsSubTab === 'capture' && <CapturePanel />}
+              {toolsSubTab === 'youtube' && <YoutubePanel />}
+              {toolsSubTab === 'voice' && <VoicePanel />}
+              {toolsSubTab === 'record' && <RecordPanel />}
+              {toolsSubTab === 'slides' && <SlidesPanel />}
+              {toolsSubTab === 'wisebase' && <WisebasePanel />}
             </div>
           </div>
         );
