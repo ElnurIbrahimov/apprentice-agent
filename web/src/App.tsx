@@ -30,6 +30,13 @@ const SettingsPage = lazy(() => import('./components/SettingsPage').then(m => ({
 const CodeInterpreter = lazy(() => import('./components/CodeInterpreter').then(m => ({ default: m.CodeInterpreter })));
 const WebCreator = lazy(() => import('./components/WebCreator').then(m => ({ default: m.WebCreator })));
 const ImageGenPanel = lazy(() => import('./components/ImageGenPanel').then(m => ({ default: m.ImageGenPanel })));
+const SearchPanel = lazy(() => import('./components/SearchPanel').then(m => ({ default: m.SearchPanel })));
+const ResearchPanel = lazy(() => import('./components/ResearchPanel').then(m => ({ default: m.ResearchPanel })));
+const WritePanel = lazy(() => import('./components/WritePanel').then(m => ({ default: m.WritePanel })));
+const TranslatePanel = lazy(() => import('./components/TranslatePanel').then(m => ({ default: m.TranslatePanel })));
+const SummaryPanel = lazy(() => import('./components/SummaryPanel').then(m => ({ default: m.SummaryPanel })));
+const GrammarPanel = lazy(() => import('./components/GrammarPanel').then(m => ({ default: m.GrammarPanel })));
+const MathPanel = lazy(() => import('./components/MathPanel').then(m => ({ default: m.MathPanel })));
 import type { TabId } from './types';
 
 const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
@@ -42,6 +49,7 @@ const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: 
 
 type CreateSubTab = 'code' | 'webcreator' | 'image';
 type InsightsSubTab = 'monitor' | 'activity' | 'hands' | 'advanced';
+type ToolsSubTab = 'tools' | 'search' | 'research' | 'write' | 'translate' | 'summary' | 'grammar' | 'math';
 
 function TabSkeleton() {
   return (
@@ -83,6 +91,7 @@ function App() {
   const [activeTab, setActiveTab] = useState<TabId>('chat');
   const [createSubTab, setCreateSubTab] = useState<CreateSubTab>('code');
   const [insightsSubTab, setInsightsSubTab] = useState<InsightsSubTab>('monitor');
+  const [toolsSubTab, setToolsSubTab] = useState<ToolsSubTab>('tools');
 
   // Mobile search state
   const [showMobileSearch, setShowMobileSearch] = useState(false);
@@ -204,9 +213,36 @@ function App() {
 
       case 'tools':
         return (
-          <div className="h-full overflow-y-auto p-4">
-            <h2 className="text-xl font-semibold text-chat-text mb-4">Tools & Systems</h2>
-            <ToolsPanel />
+          <div className="h-full flex flex-col">
+            <SubTabBar
+              tabs={[
+                { id: 'tools', label: 'Tools' },
+                { id: 'search', label: 'Search' },
+                { id: 'research', label: 'Research' },
+                { id: 'write', label: 'Write' },
+                { id: 'translate', label: 'Translate' },
+                { id: 'summary', label: 'Summary' },
+                { id: 'grammar', label: 'Grammar' },
+                { id: 'math', label: 'Math' },
+              ]}
+              active={toolsSubTab}
+              onChange={(id) => setToolsSubTab(id as ToolsSubTab)}
+            />
+            <div className="flex-1 overflow-hidden">
+              {toolsSubTab === 'tools' && (
+                <div className="h-full overflow-y-auto p-4">
+                  <h2 className="text-xl font-semibold text-chat-text mb-4">Tools & Systems</h2>
+                  <ToolsPanel />
+                </div>
+              )}
+              {toolsSubTab === 'search' && <SearchPanel />}
+              {toolsSubTab === 'research' && <ResearchPanel />}
+              {toolsSubTab === 'write' && <WritePanel />}
+              {toolsSubTab === 'translate' && <TranslatePanel />}
+              {toolsSubTab === 'summary' && <SummaryPanel />}
+              {toolsSubTab === 'grammar' && <GrammarPanel />}
+              {toolsSubTab === 'math' && <MathPanel />}
+            </div>
           </div>
         );
 
