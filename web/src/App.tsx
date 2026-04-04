@@ -1,11 +1,14 @@
-import { useState, useEffect, lazy, Suspense } from 'react';
+import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { ChatContainer } from './components/ChatContainer';
 import { Sidebar } from './components/Sidebar';
 import { ToastContainer, useToastStore } from './components/Toast';
+import { CommandPalette } from './components/CommandPalette';
 import { useChatStore } from './store/chatStore';
 import { useSettingsStore, applyFontSize, applyTheme } from './store/settingsStore';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { BottomTabBar } from './components/BottomTabBar';
+import { ToolLauncher, ToolSubNav } from './components/ToolLauncher';
+import type { ToolId } from './components/ToolLauncher';
 import {
   Bars3Icon,
   ChatBubbleLeftRightIcon,
@@ -62,14 +65,7 @@ const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: 
 
 type CreateSubTab = 'code' | 'webcreator' | 'image';
 type InsightsSubTab = 'monitor' | 'activity' | 'hands' | 'advanced';
-type ToolsSubTab =
-  | 'tools'
-  | 'ask' | 'search' | 'research' | 'agent' | 'compare'
-  | 'write' | 'translate' | 'summary' | 'grammar'
-  | 'math'
-  | 'pdf' | 'ocr' | 'capture' | 'youtube'
-  | 'voice' | 'record'
-  | 'slides' | 'wisebase' | 'models';
+type ToolsSubTab = 'launcher' | 'system' | ToolId;
 
 function TabSkeleton() {
   return (
@@ -111,7 +107,19 @@ function App() {
   const [activeTab, setActiveTab] = useState<TabId>('chat');
   const [createSubTab, setCreateSubTab] = useState<CreateSubTab>('code');
   const [insightsSubTab, setInsightsSubTab] = useState<InsightsSubTab>('monitor');
-  const [toolsSubTab, setToolsSubTab] = useState<ToolsSubTab>('tools');
+  const [toolsSubTab, setToolsSubTab] = useState<ToolsSubTab>('launcher');
+
+  // Command palette state
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
+
+  const toggleTheme = useCallback(() => {
+    const current = useSettingsStore.getState().settings.theme;
+    useSettingsStore.getState().updateSettings({ theme: current === 'dark' ? 'light' : 'dark' });
+  }, []);
+
+  const newChat = useCallback(() => {
+    document.dispatchEvent(new CustomEvent('aura:new-chat'));
+  }, []);
 
   // Mobile search state
   const [showMobileSearch, setShowMobileSearch] = useState(false);
@@ -156,7 +164,7 @@ function App() {
       }
       if (e.ctrlKey && e.key === 'k') {
         e.preventDefault();
-        document.dispatchEvent(new CustomEvent('aura:focus-input'));
+        setShowCommandPalette(prev => !prev);
       }
       if (e.ctrlKey && e.key === 'b') {
         e.preventDefault();
@@ -169,11 +177,11 @@ function App() {
       }
       if (e.ctrlKey && e.shiftKey && e.key === 'T') {
         e.preventDefault();
-        const current = useSettingsStore.getState().settings.theme;
-        useSettingsStore.getState().updateSettings({ theme: current === 'dark' ? 'light' : 'dark' });
+        toggleTheme();
       }
       if (e.key === 'Escape') {
-        if (showMobileSearch) { setShowMobileSearch(false); setMobileSearchQuery(''); e.preventDefault(); }
+        if (showCommandPalette) { setShowCommandPalette(false); e.preventDefault(); }
+        else if (showMobileSearch) { setShowMobileSearch(false); setMobileSearchQuery(''); e.preventDefault(); }
         else if (showShortcutHelp) { setShowShortcutHelp(false); e.preventDefault(); }
       }
       if (e.key === '?' && !isInput) {
@@ -182,7 +190,7 @@ function App() {
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [showShortcutHelp, showMobileSearch, toggleSidebar]);
+  }, [showCommandPalette, showShortcutHelp, showMobileSearch, toggleSidebar, toggleTheme]);
 
   // Listen for tab switch events (from Sidebar gear button, etc.)
   useEffect(() => {
@@ -231,64 +239,61 @@ function App() {
           </div>
         );
 
-      case 'tools':
+      case 'tools': {
+        const showLauncher = toolsSubTab === 'launcher';
         return (
           <div className="h-full flex flex-col">
-            <SubTabBar
-              tabs={[
-                { id: 'tools', label: 'Tools' },
-                { id: 'ask', label: 'Ask' },
-                { id: 'search', label: 'Search' },
-                { id: 'research', label: 'Research' },
-                { id: 'agent', label: 'Agent' },
-                { id: 'compare', label: 'Compare' },
-                { id: 'write', label: 'Write' },
-                { id: 'translate', label: 'Translate' },
-                { id: 'summary', label: 'Summary' },
-                { id: 'grammar', label: 'Grammar' },
-                { id: 'math', label: 'Math' },
-                { id: 'pdf', label: 'PDF' },
-                { id: 'ocr', label: 'OCR' },
-                { id: 'capture', label: 'Capture' },
-                { id: 'youtube', label: 'YouTube' },
-                { id: 'voice', label: 'Voice' },
-                { id: 'record', label: 'Record' },
-                { id: 'slides', label: 'Slides' },
-                { id: 'wisebase', label: 'Wisebase' },
-                { id: 'models', label: 'Models' },
-              ]}
-              active={toolsSubTab}
-              onChange={(id) => setToolsSubTab(id as ToolsSubTab)}
-            />
+            {/* Compact sub-nav: only visible when a specific tool (or system) is active */}
+            {!showLauncher && (
+              <ToolSubNav
+                activeId={toolsSubTab === 'system' ? 'tools' : toolsSubTab as ToolId}
+                onSelect={(id) => setToolsSubTab(id === 'tools' ? 'system' : id as ToolsSubTab)}
+                onBack={() => setToolsSubTab('launcher')}
+              />
+            )}
+
             <div className="flex-1 overflow-hidden">
-              {toolsSubTab === 'tools' && (
+              {/* Launcher grid */}
+              {showLauncher && (
+                <ToolLauncher
+                  onSelect={(id) =>
+                    setToolsSubTab(id === 'tools' ? 'system' : id as ToolsSubTab)
+                  }
+                />
+              )}
+
+              {/* System Tools panel */}
+              {toolsSubTab === 'system' && (
                 <div className="h-full overflow-y-auto p-4 tab-panel-scroll">
-                  <h2 className="text-xl font-semibold text-chat-text mb-4">Tools & Systems</h2>
+                  <h2 className="text-xl font-semibold text-chat-text mb-4">Tools &amp; Systems</h2>
                   <ToolsPanel />
                 </div>
               )}
-              {toolsSubTab === 'ask' && <AskPanel />}
-              {toolsSubTab === 'search' && <SearchPanel />}
-              {toolsSubTab === 'research' && <ResearchPanel />}
-              {toolsSubTab === 'agent' && <AgentPanel />}
-              {toolsSubTab === 'compare' && <ComparePanel />}
-              {toolsSubTab === 'write' && <WritePanel />}
+
+              {/* Individual tool panels */}
+              {toolsSubTab === 'ask'       && <AskPanel />}
+              {toolsSubTab === 'search'    && <SearchPanel />}
+              {toolsSubTab === 'research'  && <ResearchPanel />}
+              {toolsSubTab === 'agent'     && <AgentPanel />}
+              {toolsSubTab === 'compare'   && <ComparePanel />}
+              {toolsSubTab === 'write'     && <WritePanel />}
               {toolsSubTab === 'translate' && <TranslatePanel />}
-              {toolsSubTab === 'summary' && <SummaryPanel />}
-              {toolsSubTab === 'grammar' && <GrammarPanel />}
-              {toolsSubTab === 'math' && <MathPanel />}
-              {toolsSubTab === 'pdf' && <PdfPanel />}
-              {toolsSubTab === 'ocr' && <OcrPanel />}
-              {toolsSubTab === 'capture' && <CapturePanel />}
-              {toolsSubTab === 'youtube' && <YoutubePanel />}
-              {toolsSubTab === 'voice' && <VoicePanel />}
-              {toolsSubTab === 'record' && <RecordPanel />}
-              {toolsSubTab === 'slides' && <SlidesPanel />}
-              {toolsSubTab === 'wisebase' && <WisebasePanel />}
-              {toolsSubTab === 'models' && <ModelsPanel />}
+              {toolsSubTab === 'summary'   && <SummaryPanel />}
+              {toolsSubTab === 'grammar'   && <GrammarPanel />}
+              {toolsSubTab === 'math'      && <MathPanel />}
+              {toolsSubTab === 'pdf'       && <PdfPanel />}
+              {toolsSubTab === 'ocr'       && <OcrPanel />}
+              {toolsSubTab === 'capture'   && <CapturePanel />}
+              {toolsSubTab === 'youtube'   && <YoutubePanel />}
+              {toolsSubTab === 'voice'     && <VoicePanel />}
+              {toolsSubTab === 'record'    && <RecordPanel />}
+              {toolsSubTab === 'slides'    && <SlidesPanel />}
+              {toolsSubTab === 'wisebase'  && <WisebasePanel />}
+              {toolsSubTab === 'models'    && <ModelsPanel />}
             </div>
           </div>
         );
+      }
 
       case 'insights':
         return (
@@ -501,6 +506,18 @@ function App() {
       </>
     )}
 
+    {/* Command palette */}
+    <CommandPalette
+      isOpen={showCommandPalette}
+      onClose={() => setShowCommandPalette(false)}
+      setActiveTab={setActiveTab}
+      setToolsSubTab={(tab) => setToolsSubTab(tab as ToolsSubTab)}
+      setCreateSubTab={setCreateSubTab}
+      toggleSidebar={toggleSidebar}
+      newChat={newChat}
+      toggleTheme={toggleTheme}
+    />
+
     {/* Keyboard shortcut help modal */}
     {showShortcutHelp && (
       <>
@@ -518,7 +535,7 @@ function App() {
               ['Ctrl+1–5', 'Switch tab'],
               ['Ctrl+B', 'Toggle sidebar'],
               ['Ctrl+N', 'New chat'],
-              ['Ctrl+K', 'Focus input'],
+              ['Ctrl+K', 'Command palette'],
               ['Ctrl+/', 'Settings'],
               ['Ctrl+Shift+T', 'Toggle theme'],
               ['Escape', 'Close panel/modal'],

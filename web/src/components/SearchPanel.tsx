@@ -6,12 +6,12 @@ import {
   XMarkIcon,
 } from '@heroicons/react/24/outline';
 
-const SEARCH_SYSTEM_PROMPT = `You are a web search assistant. When the user asks a question:
-1. Search for the most relevant and up-to-date information
-2. Provide a clear, concise summary with key facts
-3. Include sources when possible
-4. Format with headers and bullet points for readability
-5. If the topic is time-sensitive, note when information may change`;
+const SEARCH_SYSTEM_PROMPT_BASE = `You are a web search assistant. Answer the user's query using ONLY the web search results provided below. Rules:
+- Cite sources inline using [1], [2], etc. matching the result numbers
+- Be accurate and factual — only state things supported by the results
+- Use headers and bullet points for readability
+- If the results don't fully answer the query, say so clearly
+- Do NOT fabricate information or URLs`;
 
 const QUICK_SUGGESTIONS = [
   'Latest AI news today',
@@ -22,9 +22,16 @@ const QUICK_SUGGESTIONS = [
   'Space exploration milestones',
 ];
 
+interface SearchSource {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
 interface SearchEntry {
   query: string;
   result: string;
+  sources: SearchSource[];
   timestamp: number;
 }
 
@@ -113,7 +120,9 @@ function ShimmerSkeleton() {
 export function SearchPanel() {
   const [query, setQuery] = useState('');
   const [result, setResult] = useState('');
+  const [sources, setSources] = useState<SearchSource[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [isFetchingSources, setIsFetchingSources] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<SearchEntry[]>([]);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
@@ -172,20 +181,52 @@ export function SearchPanel() {
 
     setCurrentQuery(q);
     setResult('');
+    setSources([]);
     setError(null);
     setIsSearching(true);
+    setIsFetchingSources(true);
     setShowHistory(false);
 
     const controller = new AbortController();
     abortRef.current = controller;
 
     try {
+      // Step 1: Fetch real web search results
+      let fetchedSources: SearchSource[] = [];
+      try {
+        const searchRes = await fetch(`/api/search/results?q=${encodeURIComponent(q)}&limit=8`, {
+          signal: controller.signal,
+        });
+        if (searchRes.ok) {
+          const searchData = await searchRes.json();
+          fetchedSources = searchData.results || [];
+          setSources(fetchedSources);
+        }
+      } catch (e: any) {
+        if (e.name === 'AbortError') throw e;
+        // Search fetch failed — continue with empty sources, LLM will note no results
+      } finally {
+        setIsFetchingSources(false);
+      }
+
+      // Step 2: Build system prompt with real search context
+      let systemPrompt = SEARCH_SYSTEM_PROMPT_BASE;
+      if (fetchedSources.length > 0) {
+        const context = fetchedSources.map((r, i) =>
+          `[${i + 1}] ${r.title}\nURL: ${r.url}\n${r.snippet}`
+        ).join('\n\n');
+        systemPrompt += `\n\nSearch results for "${q}":\n\n${context}`;
+      } else {
+        systemPrompt += '\n\nNo web search results available. Answer from your knowledge and clearly state this.';
+      }
+
+      // Step 3: Stream LLM summarized response
       const res = await fetch('/api/generate/raw', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: q,
-          system_prompt: SEARCH_SYSTEM_PROMPT,
+          system_prompt: systemPrompt,
           history: [],
           ...(selectedModel ? { model: selectedModel } : {}),
         }),
@@ -212,18 +253,14 @@ export function SearchPanel() {
               if (data === '[DONE]') continue;
               try {
                 const parsed = JSON.parse(data);
-                const text = parsed.choices?.[0]?.delta?.content || parsed.content || parsed.chunk || '';
+                const text = parsed.content || parsed.choices?.[0]?.delta?.content || parsed.chunk || '';
                 if (text) {
                   fullResponse += text;
                   setResult(fullResponse);
                 }
               } catch {
-                fullResponse += data;
-                setResult(fullResponse);
+                // non-JSON line — skip
               }
-            } else if (line.trim() && !line.startsWith(':')) {
-              fullResponse += line;
-              setResult(fullResponse);
             }
           }
         }
@@ -235,7 +272,7 @@ export function SearchPanel() {
       // Save to history (last 10)
       if (fullResponse.trim()) {
         setHistory(prev => [
-          { query: q, result: fullResponse, timestamp: Date.now() },
+          { query: q, result: fullResponse, sources: fetchedSources, timestamp: Date.now() },
           ...prev,
         ].slice(0, 10));
       }
@@ -245,6 +282,7 @@ export function SearchPanel() {
       }
     } finally {
       setIsSearching(false);
+      setIsFetchingSources(false);
       abortRef.current = null;
     }
   }, [isSearching, selectedModel]);
@@ -263,6 +301,7 @@ export function SearchPanel() {
     setQuery(entry.query);
     setCurrentQuery(entry.query);
     setResult(entry.result);
+    setSources(entry.sources || []);
     setError(null);
     setShowHistory(false);
   };
@@ -436,7 +475,23 @@ export function SearchPanel() {
         )}
 
         {/* Loading shimmer */}
-        {isSearching && !result && <ShimmerSkeleton />}
+        {isSearching && !result && (
+          <>
+            {isFetchingSources && (
+              <div className="flex items-center gap-2 mb-3 text-xs text-chat-text-secondary">
+                <span className="inline-block w-2 h-2 rounded-full bg-chat-accent animate-pulse" />
+                Searching the web…
+              </div>
+            )}
+            {!isFetchingSources && (
+              <div className="flex items-center gap-2 mb-3 text-xs text-chat-text-secondary">
+                <span className="inline-block w-2 h-2 rounded-full bg-chat-accent animate-pulse" />
+                Summarizing results…
+              </div>
+            )}
+            <ShimmerSkeleton />
+          </>
+        )}
 
         {/* Streaming / final result */}
         {result && (
@@ -445,6 +500,34 @@ export function SearchPanel() {
             {isSearching && (
               <span className="inline-block w-1.5 h-3.5 bg-chat-accent animate-pulse ml-0.5 align-middle rounded-sm" />
             )}
+          </div>
+        )}
+
+        {/* Source cards */}
+        {sources.length > 0 && !isSearching && (
+          <div className="mt-4">
+            <p className="text-[10px] text-chat-text-secondary uppercase tracking-wide font-medium mb-2">Sources</p>
+            <div className="space-y-1.5">
+              {sources.map((src, i) => (
+                <a
+                  key={i}
+                  href={src.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-start gap-2 rounded-lg border border-chat-border bg-surface-1 px-3 py-2 hover:border-chat-accent/50 transition-colors group"
+                >
+                  <span className="flex-shrink-0 w-4 h-4 mt-0.5 text-[10px] font-bold text-chat-accent flex items-center justify-center">
+                    {i + 1}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-chat-text truncate group-hover:text-chat-accent transition-colors">
+                      {src.title || src.url}
+                    </p>
+                    <p className="text-[10px] text-chat-text-secondary truncate">{src.url}</p>
+                  </div>
+                </a>
+              ))}
+            </div>
           </div>
         )}
 

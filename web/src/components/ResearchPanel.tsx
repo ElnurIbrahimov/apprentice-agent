@@ -10,10 +10,17 @@ import {
 /* ── Types ── */
 type Depth = 'quick' | 'standard' | 'deep';
 
+interface ResearchSource {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
 interface HistoryEntry {
   topic: string;
   depth: Depth;
   report: string;
+  sources: ResearchSource[];
   timestamp: number;
 }
 
@@ -25,11 +32,11 @@ const DEPTH_OPTIONS: { value: Depth; label: string; description: string }[] = [
 ];
 
 const SYSTEM_PROMPTS: Record<Depth, string> = {
-  quick: 'Provide a brief, focused answer to this research question in 1-2 paragraphs.',
+  quick: 'Provide a brief, focused answer to this research question in 1-2 paragraphs. Cite sources using [1], [2], etc. where supported by the search results below.',
   standard:
-    'Conduct a thorough analysis of this topic. Include: overview, key findings, different perspectives, and a conclusion. Use headers and bullet points.',
+    'Conduct a thorough analysis of this topic using the search results below. Include: overview, key findings, different perspectives, and a conclusion. Use headers and bullet points. Cite sources using [1], [2], etc.',
   deep:
-    'Write a comprehensive research report on this topic. Include: executive summary, background, detailed analysis with multiple perspectives, supporting evidence, counterarguments, implications, and conclusion. Be thorough and cite reasoning.',
+    'Write a comprehensive research report on this topic using the search results below. Include: executive summary, background, detailed analysis with multiple perspectives, supporting evidence, counterarguments, implications, and conclusion. Cite sources using [1], [2], etc. throughout.',
 };
 
 /* ── Helpers ── */
@@ -47,8 +54,10 @@ export function ResearchPanel() {
   const [topic, setTopic] = useState('');
   const [depth, setDepth] = useState<Depth>('standard');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isFetchingSources, setIsFetchingSources] = useState(false);
   const [streamingReport, setStreamingReport] = useState('');
   const [finalReport, setFinalReport] = useState('');
+  const [sources, setSources] = useState<ResearchSource[]>([]);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -105,21 +114,55 @@ export function ResearchPanel() {
     if (!trimmed || isGenerating) return;
 
     setIsGenerating(true);
+    setIsFetchingSources(true);
     setError(null);
     setFinalReport('');
     setStreamingReport('');
+    setSources([]);
     setActiveHistoryIdx(null);
 
     const controller = new AbortController();
     abortRef.current = controller;
 
     try {
+      // Step 1: Fetch real web search results
+      const searchLimit = depth === 'deep' ? 10 : depth === 'standard' ? 8 : 5;
+      let fetchedSources: ResearchSource[] = [];
+      try {
+        const searchRes = await fetch(
+          `/api/search/results?q=${encodeURIComponent(trimmed)}&limit=${searchLimit}`,
+          { signal: controller.signal }
+        );
+        if (searchRes.ok) {
+          const searchData = await searchRes.json();
+          fetchedSources = searchData.results || [];
+          setSources(fetchedSources);
+        }
+      } catch (e: any) {
+        if (e.name === 'AbortError') throw e;
+        // Search failed — continue without sources
+      } finally {
+        setIsFetchingSources(false);
+      }
+
+      // Step 2: Build system prompt with real search context
+      let systemPrompt = SYSTEM_PROMPTS[depth];
+      if (fetchedSources.length > 0) {
+        const context = fetchedSources.map((r, i) =>
+          `[${i + 1}] ${r.title}\nURL: ${r.url}\n${r.snippet}`
+        ).join('\n\n');
+        systemPrompt += `\n\nSearch results for "${trimmed}":\n\n${context}`;
+      } else {
+        systemPrompt += '\n\nNo web search results were available. Use your knowledge and clearly state that no live sources were retrieved.';
+      }
+
+      // Step 3: Stream LLM report
       const res = await fetch('/api/generate/raw', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: trimmed,
-          system_prompt: SYSTEM_PROMPTS[depth],
+          system_prompt: systemPrompt,
           history: [],
           ...(selectedModel ? { model: selectedModel } : {}),
         }),
@@ -146,22 +189,14 @@ export function ResearchPanel() {
               if (data === '[DONE]') continue;
               try {
                 const parsed = JSON.parse(data);
-                const text =
-                  parsed.choices?.[0]?.delta?.content ||
-                  parsed.content ||
-                  parsed.chunk ||
-                  '';
+                const text = parsed.content || parsed.choices?.[0]?.delta?.content || parsed.chunk || '';
                 if (text) {
                   fullText += text;
                   setStreamingReport(fullText);
                 }
               } catch {
-                fullText += data;
-                setStreamingReport(fullText);
+                // non-JSON line — skip
               }
-            } else if (line.trim() && !line.startsWith(':')) {
-              fullText += line;
-              setStreamingReport(fullText);
             }
           }
         }
@@ -177,6 +212,7 @@ export function ResearchPanel() {
         topic: trimmed,
         depth,
         report: fullText,
+        sources: fetchedSources,
         timestamp: Date.now(),
       };
       setHistory((prev) => [entry, ...prev].slice(0, 5));
@@ -186,6 +222,7 @@ export function ResearchPanel() {
       }
     } finally {
       setIsGenerating(false);
+      setIsFetchingSources(false);
       abortRef.current = null;
     }
   }, [topic, depth, isGenerating, selectedModel]);
@@ -226,6 +263,7 @@ export function ResearchPanel() {
     setTopic(entry.topic);
     setDepth(entry.depth);
     setFinalReport(entry.report);
+    setSources(entry.sources || []);
     setStreamingReport('');
     setError(null);
     setActiveHistoryIdx(idx);
@@ -417,11 +455,14 @@ export function ResearchPanel() {
           <div className="text-xs text-chat-text-secondary">
             {isGenerating ? (
               <span className="flex items-center gap-2 text-purple-400">
-                <span className="shimmer-bar h-2 w-16 rounded" />
-                Researching{depth === 'deep' ? ' (deep mode)' : ''}…
+                <span className="inline-block w-2 h-2 rounded-full bg-purple-400 animate-pulse" />
+                {isFetchingSources ? 'Searching the web…' : `Researching${depth === 'deep' ? ' (deep mode)' : ''}…`}
               </span>
             ) : hasReport ? (
-              <span>{Math.round(displayReport.length / 1000)}k chars</span>
+              <span>
+                {Math.round(displayReport.length / 1000)}k chars
+                {sources.length > 0 && <span className="ml-2 opacity-60">· {sources.length} sources</span>}
+              </span>
             ) : (
               <span>Results will appear here</span>
             )}
@@ -494,6 +535,41 @@ export function ResearchPanel() {
                 )}
               </div>
               <div ref={reportEndRef} />
+
+              {/* Sources section */}
+              {sources.length > 0 && !isGenerating && (
+                <div className="mt-8 pt-6 border-t border-chat-border">
+                  <p className="text-[11px] font-medium text-chat-text-secondary uppercase tracking-wide mb-3">
+                    Sources ({sources.length})
+                  </p>
+                  <div className="space-y-2">
+                    {sources.map((src, i) => (
+                      <a
+                        key={i}
+                        href={src.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-start gap-3 rounded-lg border border-chat-border bg-surface-1 px-3 py-2.5 hover:border-chat-accent/50 transition-colors group"
+                      >
+                        <span className="flex-shrink-0 text-[10px] font-bold text-chat-accent w-4 mt-0.5">
+                          [{i + 1}]
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium text-chat-text truncate group-hover:text-chat-accent transition-colors">
+                            {src.title || src.url}
+                          </p>
+                          <p className="text-[10px] text-chat-text-secondary truncate mt-0.5">{src.url}</p>
+                          {src.snippet && (
+                            <p className="text-[11px] text-chat-text-secondary mt-1 line-clamp-2 leading-relaxed">
+                              {src.snippet}
+                            </p>
+                          )}
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

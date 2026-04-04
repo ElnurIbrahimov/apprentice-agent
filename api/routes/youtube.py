@@ -7,6 +7,7 @@ import re
 import logging
 import httpx
 from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel, Field
 
 from api.auth import require_api_key
 from api.utils import safe_error_detail
@@ -188,6 +189,54 @@ KEY POINTS:
         key_points = ["See full summary above."]
 
     return summary, key_points[:5]
+
+
+class TranscriptRequest(BaseModel):
+    video_id: str = Field(..., min_length=11, max_length=11)
+    language: str = "en"
+
+
+# pip install youtube-transcript-api (already used by /summarize above)
+@router.post("/transcript")
+async def get_transcript(request: TranscriptRequest):
+    """Fetch raw YouTube video transcript with timestamps."""
+    import asyncio
+
+    def _fetch():
+        try:
+            from youtube_transcript_api import YouTubeTranscriptApi
+        except ImportError:
+            raise HTTPException(
+                501,
+                "youtube-transcript-api not installed. Run: pip install youtube-transcript-api",
+            )
+        try:
+            transcript_list = YouTubeTranscriptApi.list_transcripts(request.video_id)
+            try:
+                transcript = transcript_list.find_transcript([request.language])
+            except Exception:
+                transcript = transcript_list.find_generated_transcript([request.language])
+            entries = transcript.fetch()
+            return {
+                "transcript": [
+                    {"text": e["text"], "start": e["start"], "duration": e["duration"]}
+                    for e in entries
+                ],
+                "language": request.language,
+                "is_generated": transcript.is_generated,
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(404, f"Transcript not available: {str(e)}")
+
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(None, _fetch)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, safe_error_detail(e, "Transcript fetch error"))
 
 
 @router.post("/summarize")

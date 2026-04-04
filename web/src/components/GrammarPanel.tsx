@@ -64,6 +64,8 @@ function splitCorrectedAndChanges(raw: string): { corrected: string; changes: st
   };
 }
 
+const DRAFT_KEY = 'aura-draft-grammar';
+
 /* ── Main Component ── */
 export function GrammarPanel() {
   const [inputText, setInputText] = useState('');
@@ -75,6 +77,7 @@ export function GrammarPanel() {
   const [error, setError] = useState<string | null>(null);
   const [copiedOutput, setCopiedOutput] = useState(false);
   const [appliedCorrections, setAppliedCorrections] = useState(false);
+  const [draftLoaded, setDraftLoaded] = useState(false);
 
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
@@ -86,6 +89,30 @@ export function GrammarPanel() {
   const { corrected, changes } = rawOutput
     ? splitCorrectedAndChanges(rawOutput)
     : { corrected: '', changes: [] };
+
+  // Load draft on mount
+  useEffect(() => {
+    try {
+      const draft = localStorage.getItem(DRAFT_KEY);
+      if (draft) {
+        const parsed = JSON.parse(draft);
+        if (parsed.inputText) setInputText(parsed.inputText);
+        if (parsed.correctedText) setRawOutput(parsed.correctedText);
+        if (parsed.checkMode) setMode(parsed.checkMode);
+        setDraftLoaded(true);
+      }
+    } catch {}
+  }, []);
+
+  // Auto-save on change
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try {
+        localStorage.setItem(DRAFT_KEY, JSON.stringify({ inputText, correctedText: rawOutput, checkMode: mode, timestamp: Date.now() }));
+      } catch {}
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [inputText, rawOutput, mode]);
 
   // Fetch models
   useEffect(() => {
@@ -285,6 +312,14 @@ export function GrammarPanel() {
           </div>
         )}
       </div>
+
+      {/* Draft recovered banner */}
+      {draftLoaded && (
+        <div className="flex items-center gap-2 px-3 py-1.5 mx-4 mt-2 bg-blue-500/10 text-blue-400 text-[10px] rounded-lg flex-shrink-0">
+          <span className="flex-1">Draft recovered</span>
+          <button onClick={() => { setDraftLoaded(false); try { localStorage.removeItem(DRAFT_KEY); } catch {} }} className="hover:text-blue-300 transition-colors">Dismiss</button>
+        </div>
+      )}
 
       {/* Mode selector */}
       <div className="px-4 py-2.5 border-b border-chat-border flex-shrink-0 flex gap-2 flex-wrap">

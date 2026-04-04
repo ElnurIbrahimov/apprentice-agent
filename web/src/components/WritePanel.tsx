@@ -18,6 +18,8 @@ function buildSystemPrompt(format: WriteFormat, tone: WriteTone): string {
   return `You are an expert writer. Write ${format} content in a ${tone} tone based on the user's description. Output ONLY the content, no meta-commentary. Write naturally and engagingly.`;
 }
 
+const DRAFT_KEY = 'aura-draft-write';
+
 /* ── Main Component ── */
 export function WritePanel() {
   const [input, setInput] = useState('');
@@ -30,10 +32,36 @@ export function WritePanel() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [draftLoaded, setDraftLoaded] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const outputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Load draft on mount
+  useEffect(() => {
+    try {
+      const draft = localStorage.getItem(DRAFT_KEY);
+      if (draft) {
+        const parsed = JSON.parse(draft);
+        if (parsed.input) setInput(parsed.input);
+        if (parsed.output) setOutput(parsed.output);
+        if (parsed.format) setFormat(parsed.format);
+        if (parsed.tone) setTone(parsed.tone);
+        setDraftLoaded(true);
+      }
+    } catch {}
+  }, []);
+
+  // Auto-save on change
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try {
+        localStorage.setItem(DRAFT_KEY, JSON.stringify({ input, output, format, tone, timestamp: Date.now() }));
+      } catch {}
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [input, output, format, tone]);
 
   // Fetch models on mount
   useEffect(() => {
@@ -167,6 +195,8 @@ export function WritePanel() {
     setOutput('');
     setInput('');
     setError(null);
+    setDraftLoaded(false);
+    try { localStorage.removeItem(DRAFT_KEY); } catch {}
   }, []);
 
   return (
@@ -176,6 +206,14 @@ export function WritePanel() {
         <h2 className="text-sm font-semibold text-chat-text">Write</h2>
         <p className="text-[10px] text-chat-text-secondary mt-0.5">Describe what you want to write, or paste text to improve</p>
       </div>
+
+      {/* Draft recovered banner */}
+      {draftLoaded && (
+        <div className="flex items-center gap-2 px-3 py-1.5 mx-4 mt-2 bg-blue-500/10 text-blue-400 text-[10px] rounded-lg flex-shrink-0">
+          <span className="flex-1">Draft recovered</span>
+          <button onClick={() => { setDraftLoaded(false); try { localStorage.removeItem(DRAFT_KEY); } catch {} }} className="hover:text-blue-300 transition-colors">Dismiss</button>
+        </div>
+      )}
 
       {/* Main layout */}
       <div className="flex flex-col md:flex-row flex-1 overflow-hidden">

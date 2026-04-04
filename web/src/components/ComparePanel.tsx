@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   PaperAirplaneIcon, StopIcon, ArrowsRightLeftIcon,
-  ClipboardDocumentIcon, CheckIcon,
+  ClipboardDocumentIcon, CheckIcon, EyeIcon, EyeSlashIcon,
 } from '@heroicons/react/24/outline';
 
 /* ── Types ── */
@@ -25,6 +25,8 @@ const PRESETS = [
   { label: 'Analysis', prompt: 'What are the 3 most important geopolitical risks the world faces in 2026? Be specific and concise.' },
   { label: 'Explain simply', prompt: 'Explain how transformers work in AI — as if I am a 12-year-old who likes video games.' },
 ];
+
+const VOTES_KEY = 'aura-compare-votes';
 
 /* ── Streaming helper ── */
 async function streamGenerate(
@@ -102,12 +104,14 @@ function ModelPane({
   models,
   onModelChange,
   state,
+  blindMode,
 }: {
   label: string;
   model: string;
   models: string[];
   onModelChange: (m: string) => void;
   state: ModelState;
+  blindMode: boolean;
 }) {
   const outputRef = useRef<HTMLDivElement>(null);
 
@@ -122,19 +126,23 @@ function ModelPane({
       {/* Pane header */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-chat-border flex-shrink-0" style={{ background: 'var(--surface-0)' }}>
         <span className="text-xs font-semibold text-chat-text-secondary uppercase tracking-wide">{label}</span>
-        <select
-          value={model}
-          onChange={e => onModelChange(e.target.value)}
-          className="flex-1 text-xs rounded-md px-2 py-1 border border-chat-border text-chat-text outline-none focus:border-chat-accent truncate"
-          style={{ background: 'var(--surface-2)' }}
-        >
-          {models.length === 0
-            ? <option value="">Loading models...</option>
-            : models.map(m => <option key={m} value={m}>{m}</option>)
-          }
-        </select>
+        {blindMode ? (
+          <span className="flex-1 text-xs text-chat-text-secondary italic px-2 py-1">Hidden</span>
+        ) : (
+          <select
+            value={model}
+            onChange={e => onModelChange(e.target.value)}
+            className="flex-1 text-xs rounded-md px-2 py-1 border border-chat-border text-chat-text outline-none focus:border-chat-accent truncate"
+            style={{ background: 'var(--surface-2)' }}
+          >
+            {models.length === 0
+              ? <option value="">Loading models...</option>
+              : models.map(m => <option key={m} value={m}>{m}</option>)
+            }
+          </select>
+        )}
         {state.elapsedMs !== null && (
-          <span className="text-[10px] text-chat-text-secondary whitespace-nowrap">{(state.elapsedMs / 1000).toFixed(1)}s</span>
+          <span className="text-[11px] font-medium text-chat-accent whitespace-nowrap">{(state.elapsedMs / 1000).toFixed(1)}s</span>
         )}
         <CopyButton text={state.output} />
       </div>
@@ -170,6 +178,9 @@ export function ComparePanel() {
   const [stateA, setStateA] = useState<ModelState>(EMPTY_MODEL_STATE);
   const [stateB, setStateB] = useState<ModelState>(EMPTY_MODEL_STATE);
   const [isRunning, setIsRunning] = useState(false);
+  const [blindMode, setBlindMode] = useState(false);
+  const [vote, setVote] = useState<'A' | 'B' | 'tie' | null>(null);
+  const [revealed, setRevealed] = useState(false);
 
   const abortA = useRef<AbortController | null>(null);
   const abortB = useRef<AbortController | null>(null);
@@ -215,6 +226,18 @@ export function ComparePanel() {
     setStateB(p => ({ ...p, streaming: false }));
   }, []);
 
+  const handleVote = useCallback((winner: 'A' | 'B' | 'tie') => {
+    setVote(winner);
+    if (blindMode) setRevealed(true);
+
+    const votes = JSON.parse(localStorage.getItem(VOTES_KEY) || '[]');
+    votes.push({
+      prompt, modelA, modelB, winner,
+      timestamp: Date.now(),
+    });
+    localStorage.setItem(VOTES_KEY, JSON.stringify(votes.slice(-50)));
+  }, [blindMode, prompt, modelA, modelB]);
+
   const handleRun = useCallback(async () => {
     if (!prompt.trim() || isRunning) return;
     if (!modelA || !modelB) return;
@@ -222,6 +245,8 @@ export function ComparePanel() {
     setStateA({ output: '', streaming: true, elapsedMs: null, error: null });
     setStateB({ output: '', streaming: true, elapsedMs: null, error: null });
     setIsRunning(true);
+    setVote(null);
+    setRevealed(false);
 
     abortA.current = new AbortController();
     abortB.current = new AbortController();
@@ -263,21 +288,37 @@ export function ComparePanel() {
     setIsRunning(false);
   }, [prompt, modelA, modelB, isRunning]);
 
+  const isGenerating = stateA.streaming || stateB.streaming;
+
   return (
     <div className="h-full flex flex-col" style={{ background: 'var(--surface-0)' }}>
       {/* Top: prompt input + controls */}
       <div className="flex-shrink-0 border-b border-chat-border px-4 py-3 space-y-3" style={{ background: 'var(--surface-0)' }}>
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-chat-text">Compare Models</h2>
-          <button
-            onClick={handleSwap}
-            title="Swap models"
-            className="flex items-center gap-1 text-xs text-chat-text-secondary hover:text-chat-text transition-colors px-2 py-1 rounded-md border border-chat-border"
-            style={{ background: 'var(--surface-2)' }}
-          >
-            <ArrowsRightLeftIcon className="w-3.5 h-3.5" />
-            Swap
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Blind mode toggle */}
+            <button
+              onClick={() => setBlindMode(v => !v)}
+              title={blindMode ? 'Blind mode ON — click to reveal' : 'Enable blind mode'}
+              className={`flex items-center gap-1 text-xs px-2 py-1 rounded-md border transition-colors ${blindMode ? 'border-purple-500 text-purple-400' : 'border-chat-border text-chat-text-secondary hover:text-chat-text'}`}
+              style={{ background: 'var(--surface-2)' }}
+            >
+              {blindMode
+                ? <EyeSlashIcon className="w-3.5 h-3.5" />
+                : <EyeIcon className="w-3.5 h-3.5" />}
+              {blindMode ? 'Blind' : 'Blind'}
+            </button>
+            <button
+              onClick={handleSwap}
+              title="Swap models"
+              className="flex items-center gap-1 text-xs text-chat-text-secondary hover:text-chat-text transition-colors px-2 py-1 rounded-md border border-chat-border"
+              style={{ background: 'var(--surface-2)' }}
+            >
+              <ArrowsRightLeftIcon className="w-3.5 h-3.5" />
+              Swap
+            </button>
+          </div>
         </div>
 
         {/* Presets */}
@@ -326,20 +367,58 @@ export function ComparePanel() {
       {/* Side-by-side panes */}
       <div className="flex-1 overflow-hidden flex flex-col md:flex-row gap-3 p-3">
         <ModelPane
-          label="Model A"
+          label={blindMode ? 'Response A' : 'Model A'}
           model={modelA}
           models={models}
           onModelChange={setModelA}
           state={stateA}
+          blindMode={blindMode}
         />
         <ModelPane
-          label="Model B"
+          label={blindMode ? 'Response B' : 'Model B'}
           model={modelB}
           models={models}
           onModelChange={setModelB}
           state={stateB}
+          blindMode={blindMode}
         />
       </div>
+
+      {/* Voting row */}
+      {!isGenerating && stateA.output && stateB.output && (
+        <div className="flex-shrink-0 border-t border-chat-border" style={{ background: 'var(--surface-0)' }}>
+          <div className="flex items-center justify-center gap-3 py-3">
+            <button
+              onClick={() => handleVote('A')}
+              className={`px-4 py-2 rounded-lg text-sm transition-colors ${vote === 'A' ? 'bg-green-600 text-white' : 'bg-surface-2 text-chat-text-secondary hover:text-chat-text'}`}
+              style={vote !== 'A' ? { background: 'var(--surface-2)' } : undefined}
+            >
+              👈 {blindMode ? 'Response A' : modelA || 'Model A'} is better
+            </button>
+            <button
+              onClick={() => handleVote('tie')}
+              className={`px-4 py-2 rounded-lg text-sm transition-colors ${vote === 'tie' ? 'bg-yellow-600 text-white' : 'bg-surface-2 text-chat-text-secondary hover:text-chat-text'}`}
+              style={vote !== 'tie' ? { background: 'var(--surface-2)' } : undefined}
+            >
+              🤝 Tie
+            </button>
+            <button
+              onClick={() => handleVote('B')}
+              className={`px-4 py-2 rounded-lg text-sm transition-colors ${vote === 'B' ? 'bg-green-600 text-white' : 'bg-surface-2 text-chat-text-secondary hover:text-chat-text'}`}
+              style={vote !== 'B' ? { background: 'var(--surface-2)' } : undefined}
+            >
+              {blindMode ? 'Response B' : modelB || 'Model B'} is better 👉
+            </button>
+          </div>
+
+          {/* Reveal after voting in blind mode */}
+          {blindMode && revealed && (
+            <div className="text-center text-xs text-chat-text-secondary pb-3">
+              Response A = <span className="text-purple-400">{modelA}</span> · Response B = <span className="text-blue-400">{modelB}</span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

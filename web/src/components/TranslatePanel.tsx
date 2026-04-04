@@ -34,6 +34,8 @@ function buildSystemPrompt(sourceLang: string, targetLang: string): string {
   return `You are a professional translator. Translate the following text from ${sourceLang} to ${targetLang}. Output ONLY the translation, no explanations or notes. Preserve the original formatting, tone, and meaning as closely as possible.`;
 }
 
+const DRAFT_KEY = 'aura-draft-translate';
+
 /* ── Component ── */
 export function TranslatePanel() {
   const [sourceText, setSourceText] = useState('');
@@ -46,9 +48,35 @@ export function TranslatePanel() {
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [showModelMenu, setShowModelMenu] = useState(false);
+  const [draftLoaded, setDraftLoaded] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
+
+  // Load draft on mount
+  useEffect(() => {
+    try {
+      const draft = localStorage.getItem(DRAFT_KEY);
+      if (draft) {
+        const parsed = JSON.parse(draft);
+        if (parsed.sourceText) setSourceText(parsed.sourceText);
+        if (parsed.translatedText) setTranslatedText(parsed.translatedText);
+        if (parsed.sourceLang) setSourceLang(parsed.sourceLang);
+        if (parsed.targetLang) setTargetLang(parsed.targetLang);
+        setDraftLoaded(true);
+      }
+    } catch {}
+  }, []);
+
+  // Auto-save on change
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try {
+        localStorage.setItem(DRAFT_KEY, JSON.stringify({ sourceText, translatedText, sourceLang, targetLang, timestamp: Date.now() }));
+      } catch {}
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [sourceText, translatedText, sourceLang, targetLang]);
 
   // Fetch available models
   useEffect(() => {
@@ -247,6 +275,14 @@ export function TranslatePanel() {
           )}
         </div>
       </div>
+
+      {/* Draft recovered banner */}
+      {draftLoaded && (
+        <div className="flex items-center gap-2 px-3 py-1.5 mx-4 mt-2 bg-blue-500/10 text-blue-400 text-[10px] rounded-lg flex-shrink-0">
+          <span className="flex-1">Draft recovered</span>
+          <button onClick={() => { setDraftLoaded(false); try { localStorage.removeItem(DRAFT_KEY); } catch {} }} className="hover:text-blue-300 transition-colors">Dismiss</button>
+        </div>
+      )}
 
       {/* Language bar */}
       <div className="flex items-center gap-2 px-4 py-2 border-b border-chat-border flex-shrink-0 bg-surface-1">

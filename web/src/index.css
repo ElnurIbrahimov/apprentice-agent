@@ -668,6 +668,31 @@ html.light .user-bubble {
 .prose em { font-style: italic; }
 
 /* =============================================
+   KATEX MATH RENDERING (dark theme overrides)
+   ============================================= */
+
+/* Block math — center it with spacing */
+.prose .math-display {
+  display: block;
+  overflow-x: auto;
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-default);
+  text-align: center;
+}
+
+/* Inline math — keep it inline */
+.prose .math-inline {
+  display: inline;
+}
+
+/* KaTeX color fix for dark backgrounds */
+.prose .katex { color: var(--text-primary); }
+.prose .katex-display { color: var(--text-primary); }
+
+/* =============================================
    TYPING CURSOR ANIMATION
    ============================================= */
 

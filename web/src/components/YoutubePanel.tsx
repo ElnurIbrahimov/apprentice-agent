@@ -5,6 +5,12 @@ import { StopIcon, ClipboardDocumentIcon, CheckIcon } from '@heroicons/react/24/
 type InputMode = 'url' | 'transcript';
 type Action = 'summarize' | 'key_moments' | 'qa' | 'study_notes';
 
+interface TranscriptEntry {
+  text: string;
+  start: number;
+  duration: number;
+}
+
 const ACTIONS: { value: Action; label: string }[] = [
   { value: 'summarize', label: 'Summarize' },
   { value: 'key_moments', label: 'Key Moments' },
@@ -14,9 +20,21 @@ const ACTIONS: { value: Action; label: string }[] = [
 
 function extractVideoId(url: string): string | null {
   const match = url.match(
-    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/
+    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/
   );
   return match ? match[1] : null;
+}
+
+function formatTimestamp(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function entriesToText(entries: TranscriptEntry[]): string {
+  return entries.map((e) => `[${formatTimestamp(e.start)}] ${e.text}`).join('\n');
 }
 
 function buildSystemPrompt(action: Action): string {
@@ -44,10 +62,13 @@ export function YoutubePanel() {
   const [inputMode, setInputMode] = useState<InputMode>('url');
   const [urlInput, setUrlInput] = useState('');
   const [transcript, setTranscript] = useState('');
+  const [transcriptEntries, setTranscriptEntries] = useState<TranscriptEntry[]>([]);
   const [action, setAction] = useState<Action>('summarize');
   const [question, setQuestion] = useState('');
   const [result, setResult] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isFetching, setIsFetching] = useState(false);
+  const [fetchError, setFetchError] = useState('');
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
 
@@ -55,9 +76,13 @@ export function YoutubePanel() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [showModelMenu, setShowModelMenu] = useState(false);
 
+  // Track current seek time from timestamp clicks
+  const [seekTime, setSeekTime] = useState<number | null>(null);
+
   const abortRef = useRef<AbortController | null>(null);
   const resultEndRef = useRef<HTMLDivElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const videoId = extractVideoId(urlInput);
 
@@ -99,6 +124,46 @@ export function YoutubePanel() {
   useEffect(() => {
     return () => { abortRef.current?.abort(); };
   }, []);
+
+  // Reset fetch error when video ID changes
+  useEffect(() => {
+    setFetchError('');
+  }, [videoId]);
+
+  // Handle timestamp seek via iframe postMessage
+  useEffect(() => {
+    if (seekTime === null || !iframeRef.current) return;
+    // YouTube's iframe API doesn't support postMessage seeking without JS API init.
+    // Reload the iframe src with start parameter as the simplest reliable approach.
+    const src = `https://www.youtube.com/embed/${videoId}?start=${Math.floor(seekTime)}&autoplay=1`;
+    iframeRef.current.src = src;
+    setSeekTime(null);
+  }, [seekTime, videoId]);
+
+  const handleFetchTranscript = useCallback(async () => {
+    if (!videoId) return;
+    setIsFetching(true);
+    setFetchError('');
+    try {
+      const res = await fetch('/api/youtube/transcript', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ video_id: videoId, language: 'en' }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setFetchError(data.detail || `Error ${res.status}`);
+        return;
+      }
+      const entries: TranscriptEntry[] = data.transcript || [];
+      setTranscriptEntries(entries);
+      setTranscript(entriesToText(entries));
+    } catch (e: any) {
+      setFetchError(`Network error: ${e.message}`);
+    } finally {
+      setIsFetching(false);
+    }
+  }, [videoId]);
 
   const handleAnalyze = useCallback(async () => {
     const content = transcript.trim();
@@ -199,6 +264,51 @@ export function YoutubePanel() {
     });
   }, [result]);
 
+  // Render transcript lines with clickable timestamps (only when entries available)
+  const transcriptDisplay = transcriptEntries.length > 0 ? (
+    <div
+      className="w-full px-3 py-2 rounded-lg text-xs font-mono overflow-y-auto resize-none"
+      style={{
+        background: 'var(--surface-1)',
+        border: '1px solid var(--border-default)',
+        color: 'var(--text-primary)',
+        maxHeight: inputMode === 'url' ? '140px' : '280px',
+        minHeight: '80px',
+      }}
+    >
+      {transcriptEntries.map((entry, i) => (
+        <div key={i} className="flex gap-2 mb-0.5 leading-relaxed">
+          <button
+            onClick={() => setSeekTime(entry.start)}
+            className="flex-shrink-0 font-mono text-[10px] px-1 rounded hover:opacity-80 transition-opacity"
+            style={{
+              color: 'var(--accent)',
+              background: 'transparent',
+              cursor: videoId ? 'pointer' : 'default',
+            }}
+            title={videoId ? `Seek to ${formatTimestamp(entry.start)}` : undefined}
+          >
+            [{formatTimestamp(entry.start)}]
+          </button>
+          <span style={{ color: 'var(--text-primary)' }}>{entry.text}</span>
+        </div>
+      ))}
+    </div>
+  ) : (
+    <textarea
+      value={transcript}
+      onChange={(e) => setTranscript(e.target.value)}
+      placeholder="Paste the video transcript here..."
+      rows={inputMode === 'url' ? 5 : 10}
+      className="w-full px-3 py-2 rounded-lg text-sm resize-none outline-none transition-colors"
+      style={{
+        background: 'var(--surface-1)',
+        border: '1px solid var(--border-default)',
+        color: 'var(--text-primary)',
+      }}
+    />
+  );
+
   return (
     <div className="flex flex-col h-full overflow-hidden bg-surface-0">
       {/* Header */}
@@ -260,10 +370,49 @@ export function YoutubePanel() {
                   }}
                 />
 
+                {/* Fetch Transcript button — shown when valid video ID */}
+                {videoId && (
+                  <button
+                    onClick={handleFetchTranscript}
+                    disabled={isFetching}
+                    className="w-full py-1.5 rounded-lg text-xs font-medium transition-opacity flex items-center justify-center gap-2"
+                    style={{
+                      background: 'var(--surface-2)',
+                      border: '1px solid var(--border-default)',
+                      color: 'var(--text-primary)',
+                      opacity: isFetching ? 0.6 : 1,
+                      cursor: isFetching ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {isFetching ? (
+                      <>
+                        <span
+                          className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin"
+                        />
+                        Fetching transcript...
+                      </>
+                    ) : (
+                      'Fetch Transcript'
+                    )}
+                  </button>
+                )}
+
+                {/* Fetch error */}
+                {fetchError && (
+                  <p
+                    className="text-xs px-3 py-2 rounded-lg"
+                    style={{ background: 'rgba(239,68,68,0.1)', color: '#f87171' }}
+                  >
+                    {fetchError}
+                    <span className="block mt-1 opacity-70">You can still paste a transcript manually below.</span>
+                  </p>
+                )}
+
                 {/* Embedded player */}
                 {videoId ? (
                   <div className="rounded-lg overflow-hidden aspect-video">
                     <iframe
+                      ref={iframeRef}
                       src={`https://www.youtube.com/embed/${videoId}`}
                       title="YouTube video player"
                       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -279,24 +428,10 @@ export function YoutubePanel() {
                     Enter a YouTube URL to preview the video
                   </div>
                 )}
-
-                {/* Transcript hint */}
-                <p
-                  className="text-[11px] leading-relaxed rounded-lg px-3 py-2"
-                  style={{
-                    background: 'var(--surface-1)',
-                    color: 'var(--text-secondary)',
-                    border: '1px solid var(--border-subtle)',
-                  }}
-                >
-                  Paste the video transcript below for analysis. You can get transcripts from
-                  YouTube's CC button (three dots → Open transcript) or third-party tools like
-                  Tactiq or YouTube Transcript.
-                </p>
               </div>
             )}
 
-            {/* Transcript textarea */}
+            {/* Transcript section */}
             <div className="space-y-1">
               <label
                 className="text-[11px] font-medium"
@@ -304,22 +439,24 @@ export function YoutubePanel() {
               >
                 Transcript
               </label>
-              <textarea
-                value={transcript}
-                onChange={(e) => setTranscript(e.target.value)}
-                placeholder="Paste the video transcript here..."
-                rows={inputMode === 'url' ? 5 : 10}
-                className="w-full px-3 py-2 rounded-lg text-sm resize-none outline-none transition-colors"
-                style={{
-                  background: 'var(--surface-1)',
-                  border: '1px solid var(--border-default)',
-                  color: 'var(--text-primary)',
-                }}
-              />
+              {transcriptDisplay}
               {transcript && (
                 <p className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>
                   {transcript.split(/\s+/).filter(Boolean).length.toLocaleString()} words
+                  {transcriptEntries.length > 0 && ' · Click timestamps to seek'}
                 </p>
+              )}
+              {transcriptEntries.length > 0 && (
+                <button
+                  onClick={() => {
+                    setTranscriptEntries([]);
+                    setTranscript('');
+                  }}
+                  className="text-[10px] underline"
+                  style={{ color: 'var(--text-secondary)', background: 'transparent' }}
+                >
+                  Clear & paste manually
+                </button>
               )}
             </div>
 

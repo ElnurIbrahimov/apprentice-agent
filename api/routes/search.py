@@ -15,9 +15,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/search", tags=["search"], dependencies=[Depends(require_api_key)])
 
 
-@router.get("")
-async def web_search(q: str = Query(..., max_length=500), limit: int = Query(5, ge=1, le=10), model: str = Query(None)):
-    """Search the web via Tavily and return answer + source cards."""
+async def _run_tavily_search(q: str, limit: int) -> dict:
+    """Run Tavily search and return raw response. Raises HTTPException on failure."""
     try:
         from tavily import TavilyClient
     except ImportError:
@@ -37,6 +36,14 @@ async def web_search(q: str = Query(..., max_length=500), limit: int = Query(5, 
         logger.error("[Search] Tavily search failed: %s", e)
         raise HTTPException(500, safe_error_detail(e, "Search failed"))
 
+    return resp
+
+
+@router.get("")
+async def web_search(q: str = Query(..., max_length=500), limit: int = Query(5, ge=1, le=10), model: str = Query(None)):
+    """Search the web via Tavily and return answer + source cards."""
+    resp = await _run_tavily_search(q, limit)
+
     return {
         "query": q,
         "answer": resp.get("answer", ""),
@@ -46,6 +53,28 @@ async def web_search(q: str = Query(..., max_length=500), limit: int = Query(5, 
                 "url": r.get("url", ""),
                 "snippet": r.get("content", "")[:200],
                 "score": r.get("score", 0),
+            }
+            for r in resp.get("results", [])
+        ],
+    }
+
+
+@router.get("/results")
+async def search_results(q: str = Query(..., max_length=500), limit: int = Query(8, ge=1, le=10)):
+    """Return raw search results for frontend panels to inject into LLM prompts.
+
+    Returns a list of result objects with title, url, and full snippet text
+    (up to 400 chars each) suitable for building a context block.
+    """
+    resp = await _run_tavily_search(q, limit)
+
+    return {
+        "query": q,
+        "results": [
+            {
+                "title": r.get("title", ""),
+                "url": r.get("url", ""),
+                "snippet": r.get("content", "")[:400],
             }
             for r in resp.get("results", [])
         ],

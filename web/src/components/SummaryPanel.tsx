@@ -59,6 +59,8 @@ function countWords(text: string): number {
   return text.trim() === '' ? 0 : text.trim().split(/\s+/).length;
 }
 
+const DRAFT_KEY = 'aura-draft-summary';
+
 /* ── Main Component ── */
 export function SummaryPanel() {
   const [inputMode, setInputMode] = useState<InputMode>('text');
@@ -70,6 +72,7 @@ export function SummaryPanel() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [draftLoaded, setDraftLoaded] = useState(false);
 
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
@@ -78,6 +81,32 @@ export function SummaryPanel() {
   const abortRef = useRef<AbortController | null>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const outputRef = useRef<HTMLDivElement>(null);
+
+  /* ── Load draft on mount ── */
+  useEffect(() => {
+    try {
+      const draft = localStorage.getItem(DRAFT_KEY);
+      if (draft) {
+        const parsed = JSON.parse(draft);
+        if (parsed.input) setInputText(parsed.input);
+        if (parsed.output) setOutput(parsed.output);
+        if (parsed.inputMode) setInputMode(parsed.inputMode);
+        if (parsed.length) setLength(parsed.length);
+        if (parsed.format) setFormat(parsed.format);
+        setDraftLoaded(true);
+      }
+    } catch {}
+  }, []);
+
+  /* ── Auto-save on change ── */
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try {
+        localStorage.setItem(DRAFT_KEY, JSON.stringify({ input: inputText, output, inputMode, length, format, timestamp: Date.now() }));
+      } catch {}
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [inputText, output, inputMode, length, format]);
 
   /* ── Fetch models ── */
   useEffect(() => {
@@ -220,6 +249,14 @@ export function SummaryPanel() {
         <h2 className="text-sm font-semibold text-chat-text">Summarizer</h2>
         <p className="text-[10px] text-chat-text-secondary mt-0.5">Paste text or enter a URL to get a summary</p>
       </div>
+
+      {/* Draft recovered banner */}
+      {draftLoaded && (
+        <div className="flex items-center gap-2 px-3 py-1.5 mx-5 mt-2 bg-blue-500/10 text-blue-400 text-[10px] rounded-lg flex-shrink-0">
+          <span className="flex-1">Draft recovered</span>
+          <button onClick={() => { setDraftLoaded(false); try { localStorage.removeItem(DRAFT_KEY); } catch {} }} className="hover:text-blue-300 transition-colors">Dismiss</button>
+        </div>
+      )}
 
       {/* Body: two-column on md+ */}
       <div className="flex flex-col md:flex-row flex-1 overflow-hidden">

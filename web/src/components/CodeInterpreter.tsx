@@ -11,6 +11,7 @@ interface Exchange {
   variables: VariableInfo[];
   phase: 'idle' | 'executing';
   executionTime?: number;
+  runMode?: 'browser' | 'server';
 }
 
 let counter = 0;
@@ -54,6 +55,11 @@ function OutputRenderer({ block }: { block: OutputBlock }) {
 
 /* ── Exchange card ── */
 function ExchangeCard({ exchange }: { exchange: Exchange }) {
+  const runBadge = exchange.runMode === 'server'
+    ? <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400">Server</span>
+    : exchange.runMode === 'browser'
+    ? <span className="text-[9px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-400">Browser</span>
+    : null;
   const [codeHtml, setCodeHtml] = useState('');
   const [showVars, setShowVars] = useState(false);
 
@@ -71,7 +77,10 @@ function ExchangeCard({ exchange }: { exchange: Exchange }) {
       {/* Code */}
       <div className="border-b border-chat-border">
         <div className="flex items-center justify-between px-3 py-1.5">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-purple-400">Python</span>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-purple-400">Python</span>
+            {runBadge}
+          </div>
           {exchange.phase === 'executing' && (
             <span className="text-[10px] text-yellow-400 animate-pulse">Running...</span>
           )}
@@ -139,6 +148,7 @@ export function CodeInterpreter() {
   const [loading, setLoading] = useState(isReady() ? '' : 'Initializing...');
   const [isExecuting, setIsExecuting] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [runMode, setRunMode] = useState<'browser' | 'server'>('browser');
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [showModelMenu, setShowModelMenu] = useState(false);
@@ -146,6 +156,7 @@ export function CodeInterpreter() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const serverSessionId = useRef<string>(`code-${Date.now().toString(36)}`);
 
   // Subscribe to global worker events (ready/loading)
   useEffect(() => {
@@ -268,7 +279,7 @@ export function CodeInterpreter() {
 
     setExchanges((prev) => [
       ...prev,
-      { id, code: trimmed, outputs: [], variables: [], phase: 'executing' },
+      { id, code: trimmed, outputs: [], variables: [], phase: 'executing', runMode: 'browser' },
     ]);
     setCode('');
 
@@ -292,8 +303,50 @@ export function CodeInterpreter() {
     });
   }, [code, workerReady]);
 
+  const handleRunServer = useCallback(async () => {
+    const trimmed = code.trim();
+    if (!trimmed) return;
+
+    setIsExecuting(true);
+    const id = newId();
+    setExchanges(prev => [...prev, { id, code: trimmed, outputs: [], variables: [], phase: 'executing', runMode: 'server' }]);
+    setCode('');
+
+    try {
+      const res = await fetch('/api/code/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: trimmed, session_id: serverSessionId.current }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        const errMsg = data.detail || `HTTP ${res.status}`;
+        setExchanges(prev => prev.map(ex =>
+          ex.id === id ? { ...ex, outputs: [{ type: 'error', ename: 'ServerError', evalue: errMsg }], phase: 'idle' } : ex
+        ));
+        return;
+      }
+
+      const outputs: OutputBlock[] = data.outputs ?? [];
+      const variables: VariableInfo[] = data.variables ?? [];
+
+      setExchanges(prev => prev.map(ex =>
+        ex.id === id ? { ...ex, outputs, variables, phase: 'idle', executionTime: data.execution_time } : ex
+      ));
+    } catch (e: any) {
+      setExchanges(prev => prev.map(ex =>
+        ex.id === id ? { ...ex, outputs: [{ type: 'error', ename: 'NetworkError', evalue: e.message }], phase: 'idle' } : ex
+      ));
+    } finally {
+      setIsExecuting(false);
+    }
+  }, [code]);
+
   const handleReset = useCallback(() => {
     resetRuntime();
+    // Also reset the server session so state doesn't bleed across resets
+    serverSessionId.current = `code-${Date.now().toString(36)}`;
     setExchanges([]);
   }, []);
 
@@ -363,13 +416,14 @@ export function CodeInterpreter() {
             onKeyDown={(e) => {
               if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                 e.preventDefault();
-                handleRun();
+                if (runMode === 'server') handleRunServer();
+                else handleRun();
               }
             }}
             placeholder="Write Python code... (Ctrl+Enter to run)"
             className="flex-1 p-3 rounded-lg bg-surface-1 border border-chat-border text-chat-text text-sm font-mono resize-none outline-none focus:border-chat-accent placeholder-chat-text-secondary/50"
             rows={3}
-            disabled={!workerReady}
+            disabled={runMode === 'browser' && !workerReady}
           />
           <div className="flex flex-col gap-1.5 self-end">
             <button
@@ -384,17 +438,36 @@ export function CodeInterpreter() {
                 <><SparklesIcon className="w-3.5 h-3.5" />Ask AI</>
               )}
             </button>
-            <button
-              onClick={handleRun}
-              disabled={!workerReady || !code.trim() || isExecuting || isGenerating}
-              className="px-3 py-2 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium transition-colors flex items-center gap-1.5"
-            >
-              {isExecuting ? (
-                <><StopIcon className="w-3.5 h-3.5" />Run...</>
-              ) : (
-                <><PlayIcon className="w-3.5 h-3.5" />Run</>
-              )}
-            </button>
+            <div className="flex items-center gap-1">
+              <div className="flex items-center gap-0.5 text-[10px] text-chat-text-secondary border border-chat-border rounded-md overflow-hidden">
+                <button
+                  onClick={() => setRunMode('browser')}
+                  className={`px-2 py-1 transition-colors ${runMode === 'browser' ? 'bg-green-600/30 text-green-400' : 'hover:text-chat-text'}`}
+                  title="Run in browser (Pyodide)"
+                >
+                  Browser
+                </button>
+                <span className="text-chat-border">|</span>
+                <button
+                  onClick={() => setRunMode('server')}
+                  className={`px-2 py-1 transition-colors ${runMode === 'server' ? 'bg-blue-600/30 text-blue-400' : 'hover:text-chat-text'}`}
+                  title="Run on server"
+                >
+                  Server
+                </button>
+              </div>
+              <button
+                onClick={runMode === 'server' ? handleRunServer : handleRun}
+                disabled={(runMode === 'browser' && (!workerReady || !code.trim())) || (runMode === 'server' && !code.trim()) || isExecuting || isGenerating}
+                className="px-3 py-2 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium transition-colors flex items-center gap-1.5"
+              >
+                {isExecuting ? (
+                  <><StopIcon className="w-3.5 h-3.5" />Run...</>
+                ) : (
+                  <><PlayIcon className="w-3.5 h-3.5" />Run</>
+                )}
+              </button>
+            </div>
           </div>
         </div>
         <div className="flex items-center justify-between mt-1.5">

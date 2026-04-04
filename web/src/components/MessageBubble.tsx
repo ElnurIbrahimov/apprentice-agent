@@ -1,5 +1,9 @@
 import { useState, useRef, useEffect, useCallback, memo } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import type { Message, Citation } from '../types';
 import { useChatStore } from '../store/chatStore';
 import { ModelCompare } from './ModelCompare';
@@ -233,6 +237,8 @@ function CitationAwareMarkdown({
 }) {
   return (
     <ReactMarkdown
+      remarkPlugins={[remarkGfm, remarkMath]}
+      rehypePlugins={[rehypeKatex]}
       components={{
         code({ className, children, ...props }) {
           const match = /language-(\w+)/.exec(className || '');
@@ -615,6 +621,8 @@ export const MessageBubble = memo(function MessageBubble({ message, animateIn = 
               <CitationAwareMarkdown content={message.content} citations={message.citations!} messageId={message.id} onOpenArtifact={onOpenArtifact} />
             ) : (
               <ReactMarkdown
+                remarkPlugins={[remarkGfm, remarkMath]}
+                rehypePlugins={[rehypeKatex]}
                 components={{
                   code({ className, children, ...props }) {
                     const match = /language-(\w+)/.exec(className || '');
