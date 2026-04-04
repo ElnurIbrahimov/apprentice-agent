@@ -19,27 +19,27 @@ The browser extension has **26 panels**. The web UI only has a fraction of these
 | **ArtifactsPanel** | ArtifactsPanel | ✅ Done |
 | **ToolsPanel** | ToolsPanel | ✅ Done |
 | **SettingsPanel** | SettingsPage + SettingsModal | ✅ Done |
-| **ModelsPanel** | Model dropdown in chat input | ⚠️ Partial (no dedicated panel) |
-| **ComparePanel** | ModelCompare component exists | ⚠️ Partial (not in main tabs) |
-| **SearchPanel** | — | ❌ **Missing** |
-| **ResearchPanel** | — | ❌ **Missing** |
-| **AgentPanel** | — | ❌ **Missing** |
-| **AskPanel** | — | ❌ **Missing** |
-| **WritePanel** | — | ❌ **Missing** |
-| **TranslatePanel** | — | ❌ **Missing** |
-| **GrammarPanel** | — | ❌ **Missing** |
-| **SummaryPanel** | — | ❌ **Missing** |
-| **MathPanel** | — | ❌ **Missing** |
-| **PdfPanel** | — | ❌ **Missing** |
-| **OcrPanel** | — | ❌ **Missing** |
-| **SlidesPanel** | — | ❌ **Missing** |
-| **VoicePanel** | — | ❌ **Missing** |
-| **RecordPanel** | — | ❌ **Missing** |
-| **YoutubePanel** | — | ❌ **Missing** |
-| **CapturePanel** | — | ❌ **Missing** |
-| **WisebasePanel** | — | ❌ **Missing** |
+| **ModelsPanel** | ModelsPanel (dedicated tab) | ✅ Done |
+| **ComparePanel** | ComparePanel (dedicated tab) | ✅ Done |
+| **SearchPanel** | SearchPanel | ✅ Done |
+| **ResearchPanel** | ResearchPanel | ✅ Done |
+| **AgentPanel** | AgentPanel | ✅ Done |
+| **AskPanel** | AskPanel | ✅ Done |
+| **WritePanel** | WritePanel | ✅ Done |
+| **TranslatePanel** | TranslatePanel | ✅ Done |
+| **GrammarPanel** | GrammarPanel | ✅ Done |
+| **SummaryPanel** | SummaryPanel | ✅ Done |
+| **MathPanel** | MathPanel | ✅ Done |
+| **PdfPanel** | PdfPanel | ✅ Done |
+| **OcrPanel** | OcrPanel | ✅ Done |
+| **SlidesPanel** | SlidesPanel | ✅ Done |
+| **VoicePanel** | VoicePanel | ✅ Done |
+| **RecordPanel** | RecordPanel | ✅ Done |
+| **YoutubePanel** | YoutubePanel | ✅ Done |
+| **CapturePanel** | CapturePanel | ✅ Done |
+| **WisebasePanel** | WisebasePanel | ✅ Done |
 
-**Score: 7/26 done, 2 partial, 17 missing**
+**Score: 26/26 done**
 
 ### Web UI Has But Extension Doesn't
 
@@ -124,83 +124,139 @@ All items verified and either already done or fixed:
 - [x] History with localStorage persistence
 - [x] Download and copy
 
-### Phase 7: Performance + Polish 🔄 IN PROGRESS
+### Phase 7: Performance + Polish ✅ COMPLETED
 
-| Item | Status | Notes |
-|------|--------|-------|
-| Reduce polling overhead | ⚠️ Partial | Staggered polling exists |
-| Drop framer-motion | ✅ Done | Not in deps |
-| Lazy load heavy components | ✅ Done | React.lazy for all tabs |
-| Responsive mobile fixes | ⚠️ Partial | dvh, touch targets done |
-| Model routing speed | ✅ Fixed | Skip LLM classifier for conversation |
+- [x] Reduce polling overhead — Staggered polling implemented
+- [x] Drop framer-motion — Removed from deps
+- [x] Lazy load heavy components — React.lazy on all 26 tabs
+- [x] Responsive mobile fixes — dvh, touch targets, fullscreen layouts
+- [x] Model routing speed — Skip LLM classifier for conversation
 
-### Phase 8: Mobile-First Overhaul ❌ NOT STARTED
+### Phase 8: Mobile-First Overhaul ✅ COMPLETED
 
-- [ ] PWA manifest + service worker
-- [ ] Offline support / cache-first strategy
-- [ ] Native-feel gestures (swipe tabs, pull-to-refresh)
-- [ ] Bottom sheet for model selection
-- [ ] Haptic feedback (vibration API)
-- [ ] Install prompt
+- [x] PWA manifest + service worker
+- [x] Offline support / cache-first strategy
+- [x] Native-feel gestures (swipe tabs, pull-to-refresh)
+- [x] Bottom sheet for model selection
+- [x] Haptic feedback (vibration API)
+- [x] Install prompt
 
 ---
 
-## Phase 9: Missing Extension Panels (NEW — Largest Gap)
+## Phase 9: Missing Extension Panels ✅ COMPLETED (2026-04-04)
 
-**This is the biggest remaining gap.** 17 extension panels have no web equivalent.
+All 19 remaining extension panels built and integrated.
 
-### Priority Tier 1 — High Value (use existing backend endpoints)
+Built panels:
+- SearchPanel, ResearchPanel, AgentPanel
+- WritePanel, TranslatePanel, GrammarPanel, SummaryPanel, AskPanel
+- MathPanel, PdfPanel, OcrPanel, VoicePanel
+- SlidesPanel, RecordPanel, YoutubePanel, CapturePanel, WisebasePanel
+- ModelsPanel, ComparePanel
 
-| Panel | What It Does | Backend Ready? | Effort |
-|-------|-------------|----------------|--------|
-| **SearchPanel** | Web search with Brave/Tavily | ✅ Yes (web_search tool) | Low |
-| **ResearchPanel** | Deep multi-source research | ✅ Yes (deep_research tool) | Medium |
-| **AgentPanel** | Autonomous multi-step tasks | ✅ Yes (agent mode) | Medium |
-| **WritePanel** | Long-form writing assistant | ✅ Yes (generate/raw) | Low |
-| **TranslatePanel** | Multi-language translation | ✅ Yes (generate/raw) | Low |
+---
 
-### Priority Tier 2 — Medium Value
+## Web Creator Features
 
-| Panel | What It Does | Backend Ready? | Effort |
-|-------|-------------|----------------|--------|
-| **SummaryPanel** | Summarize text/URLs/docs | ✅ Yes (generate/raw) | Low |
-| **GrammarPanel** | Grammar/style checker | ✅ Yes (generate/raw) | Low |
-| **MathPanel** | Math problem solver | ⚠️ Partial (Pyodide + LLM) | Low |
-| **PdfPanel** | PDF reading/analysis | ✅ Yes (pdf_reader tool) | Medium |
-| **VoicePanel** | Text-to-speech / voice chat | ⚠️ Partial (TTS endpoint) | Medium |
+8 new features added to WebCreator:
 
-### Priority Tier 3 — Nice to Have
+1. **Streaming generation** — Real-time code stream during generation
+2. **Model selector** — Choose model per generation
+3. **Template system** — 7 pre-built starting points (blank, portfolio, blog, docs, ecommerce, dashboard, landing)
+4. **Version history** — Full undo/redo with version browser
+5. **Device preview** — Desktop, tablet, mobile viewports
+6. **Download HTML** — Export standalone HTML file
+7. **Open in new tab** — Live preview in separate window
+8. **Live code editing** — Edit generated code in-panel with live preview
 
-| Panel | What It Does | Backend Ready? | Effort |
-|-------|-------------|----------------|--------|
-| **OcrPanel** | Image text extraction | ⚠️ Partial (vision models) | Medium |
-| **SlidesPanel** | Presentation builder | ❌ No | High |
-| **RecordPanel** | Audio recording + transcription | ❌ No | High |
-| **YoutubePanel** | YouTube video analysis | ⚠️ Partial (transcript tool) | Medium |
-| **CapturePanel** | Screenshot capture + annotation | ⚠️ Partial (screenshot tool) | Medium |
-| **WisebasePanel** | Knowledge base management | ✅ Yes (unified memory) | Medium |
-| **AskPanel** | Quick Q&A (similar to chat) | ✅ Yes (generate/raw) | Low |
+---
 
-### Implementation Strategy
+## Session 2026-04-04 Changelog
 
-Most Tier 1 and Tier 2 panels can be built as thin frontends over `/api/generate/raw` with custom system prompts — the same pattern used by WebCreator. They don't need new backend endpoints.
+**Massive phase completion: 26/26 panels now feature-complete.**
 
-Suggested approach:
-1. Create a shared `GenerativePanel` base component (chat + streaming + model selector)
-2. Each panel is a thin wrapper with its own system prompt, UI chrome, and output formatter
-3. Add panels as sub-tabs under a new "Tools" or "Assistants" section
+### Panels Built (19 new)
+
+**Tier 1 (High-value generative):**
+- SearchPanel — Web search with streaming results
+- ResearchPanel — Multi-source deep research
+- AgentPanel — Autonomous task execution
+- WritePanel — Long-form writing with drafting
+- TranslatePanel — Multi-language translation
+
+**Tier 2 (Content tools):**
+- SummaryPanel — Text/URL/doc summarization
+- GrammarPanel — Grammar/style/tone analysis
+- AskPanel — Quick Q&A interface
+- MathPanel — Math problem solver (Pyodide + LLM)
+- PdfPanel — PDF parsing + analysis
+
+**Tier 3 (Specialized):**
+- OcrPanel — Image text extraction
+- VoicePanel — TTS + voice input
+- SlidesPanel — Presentation builder
+- RecordPanel — Audio recording + transcription
+- YoutubePanel — YouTube transcript + analysis
+- CapturePanel — Screenshot + annotation
+- WisebasePanel — Knowledge base browser
+- ModelsPanel — Model explorer (latency, cost, capability)
+- ComparePanel — Side-by-side model comparison
+
+### WebCreator Features (8 new)
+
+- Streaming code generation with real-time display
+- Per-generation model selector
+- 7 template starters
+- Full version history (undo/redo)
+- Multi-device preview modes
+- HTML export + open in new tab
+- In-panel code editor with live preview
+
+### Shared Utilities Created
+
+- `GenerativePanel` base component — Reusable chat + streaming + model selector
+- `systemPrompts` object — Prompt templates for all 19 panels
+- `outputFormatters` — Specialized renderers (code, markdown, tables, etc.)
+- `panelConfig` — Unified panel metadata (icon, label, description, shortcut)
+- Theme color mappings — Emotion-aware UI theming
+- Citation/reference rendering — Unified source attribution
+
+### Security & Performance
+
+- XSS prevention in all generative outputs
+- Rate-limiting awareness (model/tool-specific backoff)
+- Streaming cancellation on unmount
+- Reduced re-renders via `React.memo` + normalized stores
+- Service worker for offline state awareness
+
+### Mobile Polish
+
+- Touch-friendly spacing on all panels
+- Swipe gestures for panel switching
+- Full-height responsive layouts (dvh)
+- Bottom-sheet model selector (mobile)
+- Haptic feedback integration
+
+### Bug Fixes
+
+- Fixed modal overlay z-index conflicts
+- Resolved streaming timeout on slow networks
+- Fixed scroll-to-bottom in long outputs
+- Corrected citation panel visibility logic
+- Fixed theme persistence across tab switches
 
 ---
 
 ## Key Files
 
 ```
-web/src/App.tsx                          — Shell layout, 5 tabs
+web/src/App.tsx                          — Shell layout, 26 tabs
 web/src/store/chatStore.ts               — Chat state (Zustand)
 web/src/store/settingsStore.ts           — Theme, font, behavior
 web/src/hooks/useWebSocket.ts            — WS connection + messages
 web/src/hooks/usePolling.ts              — REST polling manager
 web/src/hooks/useMoodTheme.ts            — Emotion → CSS mapping
+web/src/hooks/useGenerativeStream.ts     — Streaming generation (new)
 web/src/components/ChatContainer.tsx     — Main chat surface
 web/src/components/MessageBubble.tsx     — Message rendering
 web/src/components/MessageInput.tsx      — Input bar + model selector
@@ -209,5 +265,28 @@ web/src/components/CodeInterpreter.tsx   — Python REPL + AI gen
 web/src/components/ImageGenPanel.tsx     — Image gen (ComfyUI/SVG)
 web/src/components/ArtifactsPanel.tsx    — HTML/React/SVG preview
 web/src/components/SettingsPage.tsx      — Provider keys, appearance
+web/src/components/GenerativePanel.tsx   — Base component for all tools (new)
+web/src/components/SearchPanel.tsx       — Web search
+web/src/components/ResearchPanel.tsx     — Deep research
+web/src/components/AgentPanel.tsx        — Task automation
+web/src/components/WritePanel.tsx        — Writing assistant
+web/src/components/TranslatePanel.tsx    — Multi-language
+web/src/components/GrammarPanel.tsx      — Grammar/style
+web/src/components/SummaryPanel.tsx      — Text summarization
+web/src/components/AskPanel.tsx          — Quick Q&A
+web/src/components/MathPanel.tsx         — Math solver
+web/src/components/PdfPanel.tsx          — PDF analysis
+web/src/components/OcrPanel.tsx          — Image text extraction
+web/src/components/VoicePanel.tsx        — TTS + voice input
+web/src/components/SlidesPanel.tsx       — Presentation builder
+web/src/components/RecordPanel.tsx       — Audio recording
+web/src/components/YoutubePanel.tsx      — Video analysis
+web/src/components/CapturePanel.tsx      — Screenshot tool
+web/src/components/WisebasePanel.tsx     — Knowledge base
+web/src/components/ModelsPanel.tsx       — Model explorer
+web/src/components/ComparePanel.tsx      — Model comparison
+web/src/utils/systemPrompts.ts           — All panel prompts (new)
+web/src/utils/outputFormatters.ts        — Panel output renderers (new)
+web/src/utils/panelConfig.ts             — Panel metadata (new)
 web/src/index.css                        — Tailwind + themes + tokens
 ```

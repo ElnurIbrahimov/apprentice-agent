@@ -578,25 +578,28 @@ Rules:
 
   const EDIT_MODE_SCRIPT = `<script>(function(){
   let editing=null;
+  function stopEditing(){
+    if(!editing)return;
+    editing.contentEditable='false';
+    editing.style.outline='';
+    window.parent.postMessage({type:'htmlUpdated',html:document.documentElement.outerHTML},'*');
+    editing=null;
+  }
   document.addEventListener('dblclick',function(e){
     var el=e.target;
     if(['P','H1','H2','H3','H4','H5','H6','SPAN','A','LI','TD','TH','BUTTON','LABEL','FIGCAPTION'].includes(el.tagName)){
-      if(editing){editing.contentEditable='false';editing.style.outline='';}
+      if(editing)stopEditing();
       editing=el;
       el.contentEditable='true';
       el.style.outline='2px solid #7c3aed';
       el.style.outlineOffset='2px';
       el.focus();
+      el.addEventListener('blur',function onBlur(){
+        el.removeEventListener('blur',onBlur);
+        stopEditing();
+      });
     }
   });
-  document.addEventListener('blur',function(e){
-    if(editing&&e.target===editing){
-      editing.contentEditable='false';
-      editing.style.outline='';
-      window.parent.postMessage({type:'htmlUpdated',html:document.documentElement.outerHTML},'*');
-      editing=null;
-    }
-  },true);
   document.addEventListener('keydown',function(e){
     if(e.key==='Escape'&&editing){editing.contentEditable='false';editing.style.outline='';editing=null;}
     if(e.key==='Enter'&&editing&&!e.shiftKey){e.preventDefault();editing.blur();}

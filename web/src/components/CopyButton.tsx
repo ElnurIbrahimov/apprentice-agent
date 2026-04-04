@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { ClipboardDocumentIcon, ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline';
 
 interface CopyButtonProps {
@@ -10,12 +10,33 @@ interface CopyButtonProps {
 
 export function CopyButton({ text, className, feedbackDuration = 1500 }: CopyButtonProps) {
   const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => {
+    return () => { clearTimeout(timerRef.current); };
+  }, []);
 
   const handleCopy = useCallback(() => {
     if (!text) return;
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
-      setTimeout(() => setCopied(false), feedbackDuration);
+      clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => setCopied(false), feedbackDuration);
+    }).catch(() => {
+      // Fallback for insecure contexts
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        setCopied(true);
+        clearTimeout(timerRef.current);
+        timerRef.current = setTimeout(() => setCopied(false), feedbackDuration);
+      } catch { /* ignore */ }
     });
   }, [text, feedbackDuration]);
 

@@ -229,3 +229,25 @@ async def set_models_bulk(body: ModelsBulkPatch):
             continue
         results[role] = Config.set_model(role, model)
     return {"results": results, "skipped_invalid_roles": skipped, "ok": all(results.values()) if results else False}
+
+
+@router.get("/roles")
+async def get_model_roles():
+    """Return current role→model assignments for the UI."""
+    from aura.config import Config
+    all_models = Config.get_all_models()
+    return all_models
+
+
+class DefaultModelBody(BaseModel):
+    model: str = Field(..., max_length=200)
+
+
+@router.post("/default")
+async def set_default_model(body: DefaultModelBody):
+    """Set the default (fast) model."""
+    from aura.config import Config
+    ok = Config.set_model("fast", body.model)
+    if not ok:
+        raise HTTPException(500, "Failed to set default model")
+    return {"model": body.model, "role": "fast", "ok": True}

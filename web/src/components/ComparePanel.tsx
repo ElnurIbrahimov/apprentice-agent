@@ -205,7 +205,6 @@ export function ComparePanel() {
     const b = modelB;
     setModelA(b);
     setModelB(a);
-    setModelB(modelA);
   }, [modelA, modelB]);
 
   const handleStop = useCallback(() => {

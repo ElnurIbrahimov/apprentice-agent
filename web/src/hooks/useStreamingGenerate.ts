@@ -58,6 +58,7 @@ export function useStreamingGenerate(): UseStreamingGenerateReturn {
           const decoder = new TextDecoder();
 
           while (true) {
+            if (controller.signal.aborted) break;
             const { done, value } = await reader.read();
             if (done) break;
             const chunk = decoder.decode(value, { stream: true });

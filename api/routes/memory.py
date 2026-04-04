@@ -298,6 +298,54 @@ async def clear_recalls(session_id: str = Query(default="default")):
 
 
 # ============================================================================
+# Web UI Memory Endpoints (for WisebasePanel)
+# ============================================================================
+
+@router.get("/recent")
+async def get_recent_memories(limit: int = Query(default=20, le=100)):
+    """Return recent memories from unified memory store."""
+    try:
+        from aura.memory.unified_memory import get_unified_memory
+        um = get_unified_memory()
+        memories = um.retrieve("", limit=limit)
+        return {"memories": [{"content": m.get("content", ""), "timestamp": m.get("timestamp", ""), "category": m.get("category", "general"), "relevance": m.get("relevance", 0)} for m in (memories if memories else [])]}
+    except Exception as e:
+        logger.debug(f"[Memory] recent endpoint: {e}")
+        return {"memories": []}
+
+
+@router.get("/search")
+async def search_memories(q: str = Query(..., min_length=1, max_length=500)):
+    """Search memories by query text."""
+    try:
+        from aura.memory.unified_memory import get_unified_memory
+        um = get_unified_memory()
+        results = um.retrieve(q, limit=20)
+        return {"results": [{"content": m.get("content", ""), "timestamp": m.get("timestamp", ""), "category": m.get("category", "general"), "relevance": m.get("relevance", 0)} for m in (results if results else [])]}
+    except Exception as e:
+        logger.debug(f"[Memory] search endpoint: {e}")
+        return {"results": []}
+
+
+class AddMemoryBody(BaseModel):
+    content: str
+    category: str = "general"
+
+
+@router.post("/add")
+async def add_memory(body: AddMemoryBody):
+    """Store a new memory entry."""
+    try:
+        from aura.memory.unified_memory import get_unified_memory
+        um = get_unified_memory()
+        um.store_gated(body.content, category=body.category)
+        return {"ok": True, "message": "Memory stored"}
+    except Exception as e:
+        logger.warning(f"[Memory] add endpoint failed: {e}")
+        return {"ok": False, "message": str(e)}
+
+
+# ============================================================================
 # Integration Helper for Agent
 # ============================================================================
 
