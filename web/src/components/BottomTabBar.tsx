@@ -43,8 +43,8 @@ export function BottomTabBar({ activeTab, onTabChange }: BottomTabBarProps) {
     <nav
       className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around border-t border-chat-border lg:hidden"
       style={{
-        height: 56,
         paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+        minHeight: 56,
         background: 'var(--surface-1)',
         backdropFilter: 'blur(16px)',
         WebkitBackdropFilter: 'blur(16px)',
@@ -60,9 +60,10 @@ export function BottomTabBar({ activeTab, onTabChange }: BottomTabBarProps) {
               haptic(10);
               onTabChange(tab.id);
             }}
-            className={`flex flex-col items-center justify-center gap-0.5 flex-1 h-full transition-colors ${
+            className={`flex flex-col items-center justify-center gap-0.5 flex-1 transition-colors ${
               isActive ? 'text-chat-accent' : 'text-chat-text-secondary'
             }`}
+            style={{ minHeight: 44 }}
             aria-label={tab.label}
           >
             <Icon className="w-5 h-5" />

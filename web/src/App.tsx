@@ -39,6 +39,8 @@ const GrammarPanel = lazy(() => import('./components/GrammarPanel').then(m => ({
 const MathPanel = lazy(() => import('./components/MathPanel').then(m => ({ default: m.MathPanel })));
 const AskPanel = lazy(() => import('./components/AskPanel').then(m => ({ default: m.AskPanel })));
 const AgentPanel = lazy(() => import('./components/AgentPanel').then(m => ({ default: m.AgentPanel })));
+const ComparePanel = lazy(() => import('./components/ComparePanel').then(m => ({ default: m.ComparePanel })));
+const ModelsPanel = lazy(() => import('./components/ModelsPanel').then(m => ({ default: m.ModelsPanel })));
 const PdfPanel = lazy(() => import('./components/PdfPanel').then(m => ({ default: m.PdfPanel })));
 const VoicePanel = lazy(() => import('./components/VoicePanel').then(m => ({ default: m.VoicePanel })));
 const OcrPanel = lazy(() => import('./components/OcrPanel').then(m => ({ default: m.OcrPanel })));
@@ -62,12 +64,12 @@ type CreateSubTab = 'code' | 'webcreator' | 'image';
 type InsightsSubTab = 'monitor' | 'activity' | 'hands' | 'advanced';
 type ToolsSubTab =
   | 'tools'
-  | 'ask' | 'search' | 'research' | 'agent'
+  | 'ask' | 'search' | 'research' | 'agent' | 'compare'
   | 'write' | 'translate' | 'summary' | 'grammar'
   | 'math'
   | 'pdf' | 'ocr' | 'capture' | 'youtube'
   | 'voice' | 'record'
-  | 'slides' | 'wisebase';
+  | 'slides' | 'wisebase' | 'models';
 
 function TabSkeleton() {
   return (
@@ -83,12 +85,12 @@ function TabSkeleton() {
 
 function SubTabBar({ tabs, active, onChange }: { tabs: { id: string; label: string }[]; active: string; onChange: (id: string) => void }) {
   return (
-    <div className="flex items-center gap-1 px-4 py-2 border-b border-chat-border">
+    <div className="flex items-center gap-1 px-4 py-2 border-b border-chat-border overflow-x-auto scrollbar-hide">
       {tabs.map((tab) => (
         <button
           key={tab.id}
           onClick={() => onChange(tab.id)}
-          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+          className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-colors ${
             active === tab.id
               ? 'bg-chat-accent text-white'
               : 'text-chat-text-secondary hover:text-chat-text hover:bg-chat-assistant'
@@ -239,6 +241,7 @@ function App() {
                 { id: 'search', label: 'Search' },
                 { id: 'research', label: 'Research' },
                 { id: 'agent', label: 'Agent' },
+                { id: 'compare', label: 'Compare' },
                 { id: 'write', label: 'Write' },
                 { id: 'translate', label: 'Translate' },
                 { id: 'summary', label: 'Summary' },
@@ -252,13 +255,14 @@ function App() {
                 { id: 'record', label: 'Record' },
                 { id: 'slides', label: 'Slides' },
                 { id: 'wisebase', label: 'Wisebase' },
+                { id: 'models', label: 'Models' },
               ]}
               active={toolsSubTab}
               onChange={(id) => setToolsSubTab(id as ToolsSubTab)}
             />
             <div className="flex-1 overflow-hidden">
               {toolsSubTab === 'tools' && (
-                <div className="h-full overflow-y-auto p-4">
+                <div className="h-full overflow-y-auto p-4 tab-panel-scroll">
                   <h2 className="text-xl font-semibold text-chat-text mb-4">Tools & Systems</h2>
                   <ToolsPanel />
                 </div>
@@ -267,6 +271,7 @@ function App() {
               {toolsSubTab === 'search' && <SearchPanel />}
               {toolsSubTab === 'research' && <ResearchPanel />}
               {toolsSubTab === 'agent' && <AgentPanel />}
+              {toolsSubTab === 'compare' && <ComparePanel />}
               {toolsSubTab === 'write' && <WritePanel />}
               {toolsSubTab === 'translate' && <TranslatePanel />}
               {toolsSubTab === 'summary' && <SummaryPanel />}
@@ -280,6 +285,7 @@ function App() {
               {toolsSubTab === 'record' && <RecordPanel />}
               {toolsSubTab === 'slides' && <SlidesPanel />}
               {toolsSubTab === 'wisebase' && <WisebasePanel />}
+              {toolsSubTab === 'models' && <ModelsPanel />}
             </div>
           </div>
         );
@@ -299,7 +305,7 @@ function App() {
             />
             <div className="flex-1 overflow-hidden">
               {insightsSubTab === 'monitor' && (
-                <div className="h-full overflow-y-auto p-4 space-y-4">
+                <div className="h-full overflow-y-auto p-4 space-y-4 tab-panel-scroll">
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     <ThoughtStream />
                     <AuraPanel />
@@ -309,7 +315,7 @@ function App() {
               {insightsSubTab === 'activity' && <ActivityTimeline />}
               {insightsSubTab === 'hands' && <HandsDashboard />}
               {insightsSubTab === 'advanced' && (
-                <div className="h-full overflow-y-auto p-4 space-y-4">
+                <div className="h-full overflow-y-auto p-4 space-y-4 tab-panel-scroll">
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     <ReasoningTreePanel />
                     <NeuroDreamPanel />

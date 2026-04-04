@@ -1699,3 +1699,19 @@ html.light .proactive-card {
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
+
+/* =============================================
+   SUB-TAB BAR MOBILE POLISH
+   ============================================= */
+
+/* Smooth momentum scrolling on touch for sub-tab bar */
+.overflow-x-auto {
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 1023px) {
+  /* Non-chat tab panels: add bottom padding so content isn't hidden behind BottomTabBar */
+  .tab-panel-scroll {
+    padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px) + 0.5rem);
+  }
+}

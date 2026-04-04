@@ -24,6 +24,36 @@ export default defineConfig({
         main: resolve(__dirname, 'index.html'),
         miniapp: resolve(__dirname, 'miniapp.html'),
       },
+      output: {
+        manualChunks(id) {
+          // shiki is large (~400KB+) — isolate it so the main bundle stays small
+          if (id.includes('node_modules/shiki') || id.includes('node_modules/@shikijs')) {
+            return 'shiki';
+          }
+          // markdown pipeline (react-markdown + micromark + hast/remark/unified)
+          if (
+            id.includes('node_modules/react-markdown') ||
+            id.includes('node_modules/remark') ||
+            id.includes('node_modules/rehype') ||
+            id.includes('node_modules/unified') ||
+            id.includes('node_modules/micromark') ||
+            id.includes('node_modules/mdast') ||
+            id.includes('node_modules/hast') ||
+            id.includes('node_modules/vfile') ||
+            id.includes('node_modules/unist')
+          ) {
+            return 'markdown';
+          }
+          // heroicons tree-shakes well but still adds up — keep with other ui deps
+          if (id.includes('node_modules/@heroicons')) {
+            return 'icons';
+          }
+          // react core
+          if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) {
+            return 'react';
+          }
+        },
+      },
     },
   },
 })

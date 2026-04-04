@@ -293,12 +293,12 @@ export function ChatContainer() {
     return () => clearTimeout(timer);
   }, [error, setError, settings.soundEnabled]);
 
-  const handleSend = async (message: string, attachments?: FileAttachment[], actionMode?: string | null) => {
+  const handleSend = useCallback(async (message: string, attachments?: FileAttachment[], actionMode?: string | null) => {
     clearSuggestions();
     clearResearchProgress();
     setThinkingHistory(null);
     setThinkingExpanded(false);
-    initialMessageCountRef.current = messages.length;
+    initialMessageCountRef.current = useChatStore.getState().messages.length;
     if (actionMode === 'compare') {
       // Route through REST /api/compare instead of WebSocket
       const store = useChatStore.getState();
@@ -340,7 +340,8 @@ export function ChatContainer() {
     }
     // Pass actionMode for auto-model selection (null = use user's selected model)
     sendMessage(message, attachments, undefined, actionMode);
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clearSuggestions, clearResearchProgress, sendMessage]);
 
   const isDisabled = isLoading || connectionStatus !== 'connected';
   const hasCitationsInConversation = messages.some(m => m.citations && m.citations.length > 0);
@@ -557,7 +558,7 @@ export function ChatContainer() {
                   message={message}
                   animateIn={isNew}
                   animationIndex={animIndex}
-                  onRegenerate={(text, attachments) => handleSend(text, attachments)}
+                  onRegenerate={handleSend}
                   onStop={message.isStreaming ? stopGeneration : undefined}
                   onOpenArtifact={handleOpenArtifact}
                 />

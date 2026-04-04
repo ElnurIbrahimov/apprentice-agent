@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { Message, Citation } from '../types';
 import { useChatStore } from '../store/chatStore';
@@ -313,7 +313,7 @@ const PROACTIVE_ICONS: Record<string, string> = {
   prepare: '📋',
 };
 
-export function MessageBubble({ message, animateIn = false, animationIndex = 0, onRegenerate, onStop, onOpenArtifact }: MessageBubbleProps) {
+export const MessageBubble = memo(function MessageBubble({ message, animateIn = false, animationIndex = 0, onRegenerate, onStop, onOpenArtifact }: MessageBubbleProps) {
   const isUser = message.role === 'user';
   const isStreaming = message.isStreaming;
   const isProactive = !!message.proactive;
@@ -715,4 +715,4 @@ export function MessageBubble({ message, animateIn = false, animationIndex = 0, 
       </div>
     </div>
   );
-}
+});
