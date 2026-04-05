@@ -261,6 +261,21 @@ export function WebCreator({ creatorMode: _mode = 'web', customTemplates, custom
   const [customColors, setCustomColors] = useState({ primary: '#7c3aed', secondary: '#a78bfa', accent: '#c4b5fd', bg: '#0f0a1a' });
   const [selectedElement, setSelectedElement] = useState<string | null>(null);
   const [collapsedCategories, setCollapsedCategories] = useState<Record<string, boolean>>({});
+  // ─── New features state ───
+  const [publishUrl, setPublishUrl] = useState<string | null>(null);
+  const [isPublishing, setIsPublishing] = useState(false);
+  const [designReview, setDesignReview] = useState<string | null>(null);
+  const [isReviewing, setIsReviewing] = useState(false);
+  const [showBrandKit, setShowBrandKit] = useState(false);
+  const [brandName, setBrandName] = useState(() => localStorage.getItem('aura-brand-name') || '');
+  const [brandPrefs, setBrandPrefs] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('aura-brand-prefs') || '{}'); } catch { return {}; }
+  });
+  const [pages, setPages] = useState<{ name: string; html: string }[]>([]);
+  const [activePageIndex, setActivePageIndex] = useState(0);
+  const [showInspector, setShowInspector] = useState(false);
+  const [inspectorData, setInspectorData] = useState<{ tag: string; text: string; styles: Record<string, string> } | null>(null);
+
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const codeEndRef = useRef<HTMLPreElement>(null);
@@ -365,7 +380,12 @@ export function WebCreator({ creatorMode: _mode = 'web', customTemplates, custom
       return next;
     });
     setCurrentHtml(html);
-  }, []);
+    // Initialize pages if first generation
+    if (pages.length === 0) {
+      setPages([{ name: 'index.html', html }]);
+      setActivePageIndex(0);
+    }
+  }, [pages.length]);
 
   // Listen for live text edits from the preview iframe
   useEffect(() => {
@@ -430,8 +450,8 @@ Rules:
     // Build context with current HTML if editing
     const basePrompt = capturedImageData ? IMAGE_SYSTEM_PROMPT : (customSystemPrompt || getSystemPrompt(useTailwind));
     const systemCtx = currentHtml
-      ? `${basePrompt}${colorInstruction}\n\nCurrent page HTML:\n${currentHtml}`
-      : `${basePrompt}${colorInstruction}`;
+      ? `${basePrompt}${colorInstruction}${brandInstruction}\n\nCurrent page HTML:\n${currentHtml}`
+      : `${basePrompt}${colorInstruction}${brandInstruction}`;
 
     // Build history from prior chat messages
     const history = chatMessages.map((m) => ({ role: m.role, content: m.content }));
@@ -657,6 +677,122 @@ Rules:
       setIsExporting(false);
     }
   }, [currentHtml, isExporting, selectedModel]);
+
+  // ─── ONE-CLICK PUBLISH ───
+  const handlePublish = useCallback(async () => {
+    if (!currentHtml || isPublishing) return;
+    setIsPublishing(true);
+    setPublishUrl(null);
+    try {
+      const res = await fetch('/api/share', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_name: 'AURA Creation',
+          files: { 'index.html': currentHtml },
+          entry_point: 'index.html',
+          expires_days: 7,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPublishUrl(data.url);
+      }
+    } catch { /* silent */ }
+    setIsPublishing(false);
+  }, [currentHtml, isPublishing]);
+
+  // ─── AI DESIGN REVIEW ───
+  const handleDesignReview = useCallback(async () => {
+    if (!currentHtml || isReviewing) return;
+    setIsReviewing(true);
+    setDesignReview(null);
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: `Review this HTML page for design quality issues. Check for: 1) Color contrast (WCAG AA), 2) Mobile responsiveness, 3) Typography hierarchy, 4) Spacing consistency, 5) Missing accessibility attributes. For each issue found, give a one-line description and a severity (critical/warning/info). Be concise — max 6 issues. Format each as: [severity] issue description\n\nHTML:\n${currentHtml.slice(0, 8000)}`,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setDesignReview(data.response || 'No issues found.');
+      }
+    } catch { /* silent */ }
+    setIsReviewing(false);
+  }, [currentHtml, isReviewing]);
+
+  // ─── BRAND KIT ───
+  const saveBrandKit = useCallback(() => {
+    if (!brandName.trim()) return;
+    // Extract colors from current HTML
+    const colorMatches = currentHtml.match(/#[0-9a-fA-F]{6}/g) || [];
+    const uniqueColors = [...new Set(colorMatches)].slice(0, 6);
+    const fontMatch = currentHtml.match(/font-family:\s*['"]?([^'";,]+)/);
+    const prefs = {
+      colors: uniqueColors,
+      font: fontMatch?.[1]?.trim() || 'system-ui',
+      savedAt: Date.now(),
+    };
+    setBrandPrefs(prefs);
+    localStorage.setItem('aura-brand-name', brandName);
+    localStorage.setItem('aura-brand-prefs', JSON.stringify(prefs));
+    setShowBrandKit(false);
+  }, [brandName, currentHtml]);
+
+  const clearBrandKit = useCallback(() => {
+    setBrandName('');
+    setBrandPrefs({});
+    localStorage.removeItem('aura-brand-name');
+    localStorage.removeItem('aura-brand-prefs');
+  }, []);
+
+  // Inject brand into system prompt
+  const brandInstruction = brandName && brandPrefs.colors?.length
+    ? `\n\nUser's brand "${brandName}": use these colors: ${brandPrefs.colors.join(', ')}. Font: ${brandPrefs.font}.`
+    : '';
+
+  // ─── MULTI-PAGE ───
+  const addPage = useCallback(() => {
+    if (currentHtml) {
+      // Save current page
+      const updated = [...pages];
+      updated[activePageIndex] = { name: pages[activePageIndex]?.name || 'index.html', html: currentHtml };
+      // Add new blank page
+      const newName = `page-${updated.length + 1}.html`;
+      updated.push({ name: newName, html: '' });
+      setPages(updated);
+      setActivePageIndex(updated.length - 1);
+      setCurrentHtml('');
+      setShowTemplates(true);
+    }
+  }, [currentHtml, pages, activePageIndex]);
+
+  const switchPage = useCallback((index: number) => {
+    // Save current page first
+    const updated = [...pages];
+    updated[activePageIndex] = { name: pages[activePageIndex]?.name || 'index.html', html: currentHtml };
+    setPages(updated);
+    setActivePageIndex(index);
+    setCurrentHtml(updated[index]?.html || '');
+    if (!updated[index]?.html) setShowTemplates(true);
+  }, [pages, activePageIndex, currentHtml]);
+
+  // ─── ELEMENT INSPECTOR (from iframe messages) ───
+  useEffect(() => {
+    const handler = (e: MessageEvent) => {
+      if (e.data?.type === 'elementSelected' && showInspector) {
+        setInspectorData({
+          tag: e.data.tag || 'div',
+          text: e.data.text || '',
+          styles: {},
+        });
+      }
+    };
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, [showInspector]);
 
   const CLICK_TO_EDIT_SCRIPT = `<script>(function() {
   var highlighted = null;
@@ -1134,6 +1270,72 @@ Rules:
             </div>
           )}
 
+          {/* ─── PUBLISH BUTTON ─── */}
+          <button
+            onClick={handlePublish}
+            disabled={!currentHtml || isPublishing}
+            className="flex items-center gap-1 px-2.5 py-1 text-[10px] rounded-lg font-medium disabled:opacity-30 transition-all active:scale-95"
+            style={{ background: publishUrl ? 'rgba(52,211,153,0.2)' : 'rgba(124,58,237,0.2)', color: publishUrl ? '#34d399' : '#a78bfa' }}
+            title="Publish to live URL"
+          >
+            {isPublishing ? '...' : publishUrl ? '✓ Live' : '🚀 Publish'}
+          </button>
+          {publishUrl && (
+            <button
+              onClick={() => { navigator.clipboard?.writeText(window.location.origin + publishUrl); }}
+              className="text-[9px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-400 hover:bg-green-500/20 transition-colors truncate max-w-[100px]"
+              title={publishUrl}
+            >
+              📋 Copy URL
+            </button>
+          )}
+
+          {/* ─── DESIGN REVIEW ─── */}
+          <button
+            onClick={handleDesignReview}
+            disabled={!currentHtml || isReviewing}
+            className="flex items-center gap-1 px-2 py-1 text-[10px] rounded-lg text-chat-text-secondary hover:text-chat-text disabled:opacity-30 transition-colors"
+            title="AI design critique"
+          >
+            {isReviewing ? '⏳' : '🔍'} Review
+          </button>
+
+          {/* ─── BRAND KIT ─── */}
+          <button
+            onClick={() => setShowBrandKit(b => !b)}
+            className={`flex items-center gap-1 px-2 py-1 text-[10px] rounded-lg transition-colors ${brandName ? 'text-purple-400 bg-purple-500/10' : 'text-chat-text-secondary hover:text-chat-text'}`}
+            title={brandName ? `Brand: ${brandName}` : 'Save brand kit'}
+          >
+            🎨 {brandName || 'Brand'}
+          </button>
+
+          {/* ─── INSPECTOR ─── */}
+          <button
+            onClick={() => setShowInspector(i => !i)}
+            disabled={!currentHtml}
+            className={`px-2 py-1 text-[10px] rounded-lg transition-colors disabled:opacity-30 ${showInspector ? 'bg-blue-500/20 text-blue-400' : 'text-chat-text-secondary hover:text-chat-text'}`}
+            title="Element inspector"
+          >
+            🔧
+          </button>
+
+          {/* ─── PAGES ─── */}
+          {pages.length > 1 && (
+            <span className="text-[9px] text-chat-text-tertiary">
+              p{activePageIndex + 1}/{pages.length}
+            </span>
+          )}
+          <button
+            onClick={addPage}
+            disabled={!currentHtml}
+            className="px-2 py-1 text-[10px] rounded-lg text-chat-text-secondary hover:text-chat-text disabled:opacity-30 transition-colors"
+            title="Add new page"
+          >
+            📄+
+          </button>
+
+          <div className="w-px h-4 bg-chat-border/30 mx-1" />
+
           {/* Actions */}
           <button
             onClick={handleDownload}
@@ -1170,6 +1372,127 @@ Rules:
             )}
           </div>
         </div>
+
+        {/* Design Review Panel */}
+        {designReview && (
+          <div className="px-3 py-2 border-b border-chat-border text-xs animate-fade-in" style={{ background: 'var(--surface-1)' }}>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="font-semibold text-chat-text">🔍 Design Review</span>
+              <button onClick={() => setDesignReview(null)} className="text-chat-text-tertiary hover:text-chat-text text-xs">✕</button>
+            </div>
+            <div className="space-y-1 text-chat-text-secondary whitespace-pre-line leading-relaxed">
+              {designReview.split('\n').filter(Boolean).map((line, i) => {
+                const isCritical = line.toLowerCase().includes('[critical]');
+                const isWarning = line.toLowerCase().includes('[warning]');
+                return (
+                  <div key={i} className={`flex items-start gap-1.5 ${isCritical ? 'text-red-400' : isWarning ? 'text-amber-400' : 'text-chat-text-secondary'}`}>
+                    <span className="flex-shrink-0 mt-0.5">{isCritical ? '🔴' : isWarning ? '🟡' : '🔵'}</span>
+                    <span>{line.replace(/\[(critical|warning|info)\]\s*/i, '')}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Brand Kit Modal */}
+        {showBrandKit && (
+          <div className="px-3 py-3 border-b border-chat-border animate-fade-in" style={{ background: 'var(--surface-1)' }}>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-chat-text">🎨 Brand Kit</span>
+              <button onClick={() => setShowBrandKit(false)} className="text-chat-text-tertiary hover:text-chat-text text-xs">✕</button>
+            </div>
+            <input
+              value={brandName}
+              onChange={e => setBrandName(e.target.value)}
+              placeholder="Brand name..."
+              className="w-full px-2.5 py-1.5 rounded-lg text-xs bg-transparent border border-chat-border text-chat-text mb-2"
+            />
+            {brandPrefs.colors?.length > 0 && (
+              <div className="flex items-center gap-1.5 mb-2">
+                <span className="text-[10px] text-chat-text-secondary">Saved:</span>
+                {brandPrefs.colors.map((c: string, i: number) => (
+                  <span key={i} className="w-4 h-4 rounded-full border border-white/20" style={{ background: c }} title={c} />
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={saveBrandKit}
+                disabled={!brandName.trim() || !currentHtml}
+                className="px-3 py-1.5 text-[10px] rounded-lg font-medium disabled:opacity-30 transition-all"
+                style={{ background: 'rgba(124,58,237,0.2)', color: '#a78bfa' }}
+              >
+                Save from Current Page
+              </button>
+              {brandName && (
+                <button onClick={clearBrandKit} className="px-3 py-1.5 text-[10px] rounded-lg text-red-400 hover:bg-red-500/10 transition-colors">
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Pages bar */}
+        {pages.length > 1 && (
+          <div className="flex items-center gap-1 px-3 py-1.5 border-b border-chat-border overflow-x-auto scrollbar-hide" style={{ background: 'var(--surface-2)' }}>
+            {pages.map((page, i) => (
+              <button
+                key={i}
+                onClick={() => switchPage(i)}
+                className={`px-2 py-1 text-[10px] rounded-lg transition-colors flex-shrink-0 ${i === activePageIndex ? 'bg-chat-accent text-white' : 'text-chat-text-secondary hover:text-chat-text'}`}
+              >
+                {page.name}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Inspector sidebar */}
+        {showInspector && inspectorData && (
+          <div className="px-3 py-2 border-b border-chat-border animate-fade-in" style={{ background: 'var(--surface-1)' }}>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-semibold text-chat-text">🔧 Inspector: &lt;{inspectorData.tag}&gt;</span>
+              <button onClick={() => { setShowInspector(false); setInspectorData(null); }} className="text-chat-text-tertiary hover:text-chat-text text-xs">✕</button>
+            </div>
+            {inspectorData.text && (
+              <div className="text-[10px] text-chat-text-secondary mb-1.5 truncate">"{inspectorData.text}"</div>
+            )}
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                onClick={() => setInput(`Change the ${inspectorData.tag} "${inspectorData.text}" to have a different color`)}
+                className="px-2 py-1 text-[9px] rounded bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 transition-colors"
+              >
+                🎨 Color
+              </button>
+              <button
+                onClick={() => setInput(`Make the ${inspectorData.tag} "${inspectorData.text}" larger`)}
+                className="px-2 py-1 text-[9px] rounded bg-green-500/15 text-green-400 hover:bg-green-500/25 transition-colors"
+              >
+                ↕ Size
+              </button>
+              <button
+                onClick={() => setInput(`Add more padding/spacing to the ${inspectorData.tag} "${inspectorData.text}"`)}
+                className="px-2 py-1 text-[9px] rounded bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 transition-colors"
+              >
+                ⬜ Spacing
+              </button>
+              <button
+                onClick={() => setInput(`Remove the ${inspectorData.tag} element that contains "${inspectorData.text}"`)}
+                className="px-2 py-1 text-[9px] rounded bg-red-500/15 text-red-400 hover:bg-red-500/25 transition-colors"
+              >
+                🗑 Delete
+              </button>
+              <button
+                onClick={() => setInput(`Duplicate the ${inspectorData.tag} "${inspectorData.text}" section`)}
+                className="px-2 py-1 text-[9px] rounded bg-purple-500/15 text-purple-400 hover:bg-purple-500/25 transition-colors"
+              >
+                📋 Duplicate
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Preview area */}
         <div className={`flex-1 overflow-hidden flex ${viewMode === 'split' ? 'flex-row' : 'flex-col'}`}>
