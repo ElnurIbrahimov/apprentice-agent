@@ -702,36 +702,48 @@ class AgentCoreMixin:
 
     async def _edit_or_send_response(self, placeholder, chat_id: str, text: str,
                                      update: Update, reply_markup=None):
-        """Edit the placeholder message with the response, splitting if > 4096 chars."""
+        """Edit the placeholder message with the response, splitting if > 4096 chars.
+
+        Converts markdown to Telegram MarkdownV2 for proper formatting (bold, italic,
+        code blocks, links). Falls back to plain text if formatting fails.
+        """
+        from telegram.constants import ParseMode
+        from aura.messaging.telegram_formatting import format_telegram_response
+
         if not text:
             text = "I processed your request but have nothing to report."
 
-        MAX_LEN = 4096
         text = text.strip()
 
-        if len(text) <= MAX_LEN:
-            try:
-                await placeholder.edit_text(text, reply_markup=reply_markup)
-            except Exception as e:
-                logger.warning(f"Could not edit placeholder: {e}")
-                try:
-                    await self.bot.send_message(chat_id=chat_id, text=text,
-                                                reply_markup=reply_markup)
-                except Exception:
-                    pass
-        else:
-            chunks = self._split_message(text, MAX_LEN)
-            for i, chunk in enumerate(chunks):
+        # Convert markdown → MarkdownV2 and split into chunks
+        try:
+            chunks = format_telegram_response(text)
+        except Exception:
+            # Fallback: send as plain text if formatting fails
+            chunks = self._split_message(text, 4096)
+
+        for i, chunk in enumerate(chunks):
+            markup = reply_markup if i == len(chunks) - 1 else None
+            # Try MarkdownV2 first, fall back to plain text
+            sent = False
+            for parse_mode in (ParseMode.MARKDOWN_V2, None):
                 try:
                     if i == 0:
-                        await placeholder.edit_text(chunk)
+                        await placeholder.edit_text(
+                            chunk, parse_mode=parse_mode, reply_markup=markup)
                     else:
-                        # Attach reply_markup to the last chunk only
-                        markup = reply_markup if i == len(chunks) - 1 else None
-                        await self.bot.send_message(chat_id=chat_id, text=chunk,
-                                                    reply_markup=markup)
+                        await self.bot.send_message(
+                            chat_id=chat_id, text=chunk,
+                            parse_mode=parse_mode, reply_markup=markup)
+                    sent = True
+                    break
                 except Exception as e:
+                    if parse_mode is not None:
+                        logger.debug(f"MarkdownV2 failed, falling back to plain: {e}")
+                        continue
                     logger.warning(f"Error sending chunk {i}: {e}")
+            if not sent:
+                logger.warning(f"Failed to send chunk {i} in any format")
 
     @staticmethod
     def _split_message(text: str, max_len: int = 4096) -> list:

@@ -160,8 +160,7 @@ class ResearchMixin:
             except Exception:
                 pass
 
-            for chunk in self._split_message(report):
-                await update.message.reply_text(chunk)
+            await self._send_formatted(update, report)
 
         except ImportError:
             await status_msg.edit_text(
@@ -223,8 +222,7 @@ class ResearchMixin:
                 lines.append("")
 
             search_msg = "\n".join(lines)
-            for chunk in self._split_message(search_msg):
-                await update.message.reply_text(chunk)
+            await self._send_formatted(update, search_msg)
 
         except ImportError:
             await update.message.reply_text("Web search tool is not available.")
@@ -327,8 +325,7 @@ class ResearchMixin:
             except Exception:
                 pass
 
-            for chunk in self._split_message(final):
-                await update.message.reply_text(chunk)
+            await self._send_formatted(update, final)
 
         except Exception as e:
             logger.error(f"Summarize command error: {e}", exc_info=True)

@@ -457,6 +457,33 @@ class TelegramBot(
         """Check if user is an admin"""
         return str(user_id) in self.admin_users
 
+    async def _send_formatted(self, update_or_msg, text: str, **kwargs):
+        """Send text with MarkdownV2 formatting, falling back to plain text.
+
+        Works with both Update objects and Message objects (for reply_text).
+        Handles splitting long messages into chunks.
+        """
+        from telegram.constants import ParseMode
+        from aura.messaging.telegram_formatting import format_telegram_response
+
+        msg = update_or_msg
+        if hasattr(msg, 'message'):
+            msg = msg.message
+
+        try:
+            chunks = format_telegram_response(text)
+        except Exception:
+            chunks = [text] if len(text) <= 4096 else self._split_message(text, 4096)
+
+        for chunk in chunks:
+            for parse_mode in (ParseMode.MARKDOWN_V2, None):
+                try:
+                    await msg.reply_text(chunk, parse_mode=parse_mode, **kwargs)
+                    break
+                except Exception:
+                    if parse_mode is None:
+                        logger.warning(f"Failed to send formatted chunk ({len(chunk)} chars)")
+
     async def start(self):
         """Start the Telegram bot"""
 
