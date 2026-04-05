@@ -66,6 +66,9 @@ const CapturePanel = lazy(() => import('./components/CapturePanel').then(m => ({
 const WisebasePanel = lazy(() => import('./components/WisebasePanel').then(m => ({ default: m.WisebasePanel })));
 const SlidesPanel = lazy(() => import('./components/SlidesPanel').then(m => ({ default: m.SlidesPanel })));
 const RecordPanel = lazy(() => import('./components/RecordPanel').then(m => ({ default: m.RecordPanel })));
+const AppCreator = lazy(() => import('./components/AppCreator').then(m => ({ default: m.AppCreator })));
+const GameCreator = lazy(() => import('./components/GameCreator').then(m => ({ default: m.GameCreator })));
+const DashboardCreator = lazy(() => import('./components/DashboardCreator').then(m => ({ default: m.DashboardCreator })));
 
 import type { TabId } from './types';
 
@@ -77,7 +80,7 @@ const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: 
   { id: 'settings', label: 'Settings', icon: Cog8ToothIcon },
 ];
 
-type CreateSubTab = 'code' | 'webcreator' | 'image';
+type CreateSubTab = 'code' | 'webcreator' | 'app' | 'game' | 'dashboard' | 'slides' | 'image';
 type InsightsSubTab = 'monitor' | 'feed' | 'world' | 'briefing' | 'dreams' | 'evolution' | 'activity' | 'memory' | 'knowledge' | 'hands' | 'queue' | 'advanced';
 type ToolsSubTab = 'launcher' | 'system' | ToolId;
 
@@ -273,7 +276,11 @@ function MainApp() {
             <SubTabBar
               tabs={[
                 { id: 'code', label: 'Code' },
-                { id: 'webcreator', label: 'Web Creator' },
+                { id: 'webcreator', label: 'Website' },
+                { id: 'app', label: 'App' },
+                { id: 'game', label: 'Game' },
+                { id: 'dashboard', label: 'Dashboard' },
+                { id: 'slides', label: 'Slides' },
                 { id: 'image', label: 'Image' },
               ]}
               active={createSubTab}
@@ -282,6 +289,10 @@ function MainApp() {
             <div className="flex-1 overflow-hidden">
               {createSubTab === 'code' && <CodeInterpreter />}
               {createSubTab === 'webcreator' && <WebCreator />}
+              {createSubTab === 'app' && <AppCreator />}
+              {createSubTab === 'game' && <GameCreator />}
+              {createSubTab === 'dashboard' && <DashboardCreator />}
+              {createSubTab === 'slides' && <SlidesPanel />}
               {createSubTab === 'image' && <ImageGenPanel />}
             </div>
           </div>

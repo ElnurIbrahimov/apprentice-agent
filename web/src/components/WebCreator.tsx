@@ -59,6 +59,13 @@ const TEMPLATE_CATEGORIES = [
       { label: 'Agency', icon: '🏢', desc: 'Full-screen hero, case studies, portfolio', prompt: 'Create a creative agency website with full-screen hero video placeholder, services grid, case studies gallery, client logos, team carousel, and contact form. Sleek dark theme.' },
       { label: 'Restaurant', icon: '🍽️', desc: 'Menu, reservations, reviews', prompt: 'Create a restaurant website with hero image, menu sections (appetizers, mains, desserts, drinks) with prices, reservation form, location map placeholder, reviews, and footer with hours.' },
       { label: 'Real Estate', icon: '🏠', desc: 'Property search, listings, agent', prompt: 'Create a real estate listing page with property search bar, featured listings grid (6 cards with images, price, beds/baths), neighborhood guide, agent profile, and contact form.' },
+      { label: 'Law Firm', icon: '⚖️', desc: 'Practice areas, attorneys, consultations', prompt: 'Create a law firm website with hero, practice area cards (6), attorney profiles with headshots, case results counter, client testimonials, consultation booking form, and footer with office locations.' },
+      { label: 'Consulting', icon: '📈', desc: 'Services, methodology, results', prompt: 'Create a consulting firm website with hero, services overview (6 cards), methodology/process steps, case studies with metrics, team carousel, trust badges (clients served, years), and contact CTA.' },
+      { label: 'Dental Clinic', icon: '🦷', desc: 'Services, doctors, booking', prompt: 'Create a dental clinic website with hero, services grid (cleanings, implants, orthodontics, whitening, etc.), doctor profiles, before/after gallery, patient reviews, insurance accepted section, and appointment booking form.' },
+      { label: 'Gym & Fitness', icon: '💪', desc: 'Classes, trainers, membership', prompt: 'Create a gym website with hero (bold action shot), class schedule grid, trainer profiles with specialties, membership tier cards (3), facilities gallery, transformation stories, and free trial CTA.' },
+      { label: 'Hotel', icon: '🏨', desc: 'Rooms, amenities, booking', prompt: 'Create a luxury hotel website with full-screen hero, room category cards with prices, amenities grid with icons, photo gallery, guest reviews, location/map section, and booking date picker CTA.' },
+      { label: 'Car Dealership', icon: '🚗', desc: 'Inventory, financing, trade-in', prompt: 'Create a car dealership website with hero, inventory search (make/model/year/price filters), featured vehicles grid (8 cards), financing calculator, trade-in value form, dealership info, and test drive booking.' },
+      { label: 'Construction', icon: '🏗️', desc: 'Projects, services, estimates', prompt: 'Create a construction company website with hero, services (residential, commercial, renovation), project gallery with before/after slider, team section, safety certifications, free estimate form, and testimonials.' },
     ]
   },
   {
@@ -69,6 +76,11 @@ const TEMPLATE_CATEGORIES = [
       { label: 'Blog', icon: '📝', desc: 'Featured post, grid, sidebar', prompt: 'Create a blog homepage with header/nav, featured post hero, 6 post cards in a grid, sidebar with categories and newsletter signup, pagination, and footer.' },
       { label: 'Wedding', icon: '💒', desc: 'Timeline, RSVP, gallery', prompt: 'Create an elegant wedding website with hero (couple names + date), our story timeline, event details, RSVP form, photo gallery, gift registry link, and accommodation info. Romantic soft palette.' },
       { label: 'Link Tree', icon: '🔗', desc: 'Profile, links, social icons', prompt: 'Create a link-in-bio page with profile photo circle, name, bio, 8 stylish link buttons with icons, social media icons at bottom. Gradient background with glassmorphism cards.' },
+      { label: 'Photography', icon: '📷', desc: 'Masonry gallery, lightbox, contact', prompt: 'Create a photography portfolio with full-width hero image, masonry photo gallery with lightbox modal on click, category filter tabs (portraits, landscape, street, events), about section, and booking form.' },
+      { label: 'Music Artist', icon: '🎵', desc: 'Bio, discography, tour dates', prompt: 'Create a music artist website with dark cinematic hero, latest release section with album art and streaming links, discography grid, tour dates table, music video embeds, merch store preview, and newsletter signup.' },
+      { label: 'Freelancer', icon: '💻', desc: 'Services, rates, testimonials', prompt: 'Create a freelancer website with hero (name + title + CTA), services offered with pricing (hourly/project), project portfolio grid, client testimonials carousel, process steps, availability calendar placeholder, and contact form.' },
+      { label: 'Author/Writer', icon: '📚', desc: 'Books, bio, blog, events', prompt: 'Create an author website with hero featuring latest book cover, books grid with buy links, author bio with photo, upcoming events/signings, blog feed, newsletter signup, and press kit download.' },
+      { label: 'Podcast', icon: '🎙️', desc: 'Episodes, subscribe, guests', prompt: 'Create a podcast website with hero (podcast art + subscribe buttons for Apple/Spotify/Google), latest episodes list with play buttons, guest profiles, about the hosts, transcript previews, and sponsor section.' },
     ]
   },
   {
@@ -79,6 +91,13 @@ const TEMPLATE_CATEGORIES = [
       { label: 'Login', icon: '🔐', desc: 'Split layout, social login', prompt: 'Create a login page with split layout: left side gradient with branding/testimonial, right side centered form with email/password inputs, social login buttons (Google, GitHub, Apple), forgot password link.' },
       { label: 'Mobile App', icon: '📱', desc: 'Phone mockup, features, badges', prompt: 'Create a mobile app landing page with phone mockup hero, app store badges, feature sections with phone screenshots, user reviews, download stats counter, and footer.' },
       { label: '404 Page', icon: '🔍', desc: 'Animated 404, search, links', prompt: 'Create a creative 404 page with large animated "404" text, witty message, search bar, popular links, and "Go Home" button. Add floating animated geometric shapes.' },
+      { label: 'Signup Flow', icon: '✨', desc: 'Multi-step, progress, validation', prompt: 'Create a multi-step signup form with progress bar (4 steps: Account, Profile, Preferences, Confirm), animated transitions between steps, inline validation, password strength meter, and success confetti animation.' },
+      { label: 'Settings Page', icon: '⚙️', desc: 'Sections, toggles, forms', prompt: 'Create an app settings page with sidebar categories (Profile, Notifications, Security, Billing, Integrations), toggle switches, input fields, avatar upload, connected accounts, danger zone with delete account. Dark theme.' },
+      { label: 'Onboarding', icon: '👋', desc: 'Welcome slides, feature tour', prompt: 'Create a 5-step app onboarding flow with large illustrations (use CSS art), feature descriptions, dot pagination, skip button, animated transitions between slides, and "Get Started" final CTA.' },
+      { label: 'Changelog', icon: '📋', desc: 'Version history, badges, filters', prompt: 'Create a changelog/release notes page with version badges (major/minor/patch colors), date headers, categorized changes (New, Improved, Fixed, Removed), search/filter bar, and "Subscribe to updates" CTA.' },
+      { label: 'Documentation', icon: '📖', desc: 'Sidebar nav, code blocks, search', prompt: 'Create a documentation page with sidebar table of contents, search bar, breadcrumbs, markdown-style content with code blocks (syntax highlighted), copy buttons, info/warning callout boxes, and prev/next navigation.' },
+      { label: 'API Reference', icon: '🔌', desc: 'Endpoints, params, examples', prompt: 'Create an API reference page with sidebar endpoint list, HTTP method badges (GET green, POST blue, PUT orange, DELETE red), parameter tables, request/response code examples, and "Try it" button placeholder.' },
+      { label: 'Status Page', icon: '🟢', desc: 'Uptime, incidents, metrics', prompt: 'Create a system status page with overall status banner (All Systems Operational), service list with uptime bars (90 days), incident history timeline, subscribe to updates form, and uptime percentage badges.' },
     ]
   },
   {
@@ -87,14 +106,92 @@ const TEMPLATE_CATEGORIES = [
       { label: 'Product Page', icon: '🛍️', desc: 'Gallery, details, reviews', prompt: 'Create a product detail page with image gallery (main + thumbnails), product title, price, color/size selectors, add-to-cart button, description tabs, reviews section, and related products.' },
       { label: 'Store Front', icon: '🏪', desc: 'Banner, categories, products', prompt: 'Create an e-commerce homepage with hero banner, category cards, featured products grid (8 items with image/name/price/rating), deals section with countdown timer, and newsletter signup.' },
       { label: 'Checkout', icon: '💳', desc: 'Cart, shipping, payment', prompt: 'Create a checkout page with order summary sidebar, shipping form, payment form with card input, express checkout buttons (Apple Pay, Google Pay), promo code input, and order total breakdown.' },
+      { label: 'Product Compare', icon: '⚖️', desc: 'Side-by-side, specs, ratings', prompt: 'Create a product comparison page with 3 products side-by-side, spec rows (processor, RAM, storage, camera), star ratings, price comparison, pros/cons lists, and "Best For" badges.' },
+      { label: 'Flash Sale', icon: '⚡', desc: 'Countdown, deals, urgency', prompt: 'Create a flash sale page with large countdown timer, deal cards (original price crossed out, sale price, % off badge, stock remaining bar), category tabs, and "sold out" overlay on expired items.' },
+      { label: 'Digital Products', icon: '📦', desc: 'Downloads, licenses, previews', prompt: 'Create a digital product store for selling templates/fonts/icons. Product cards with preview thumbnails, format badges (PSD/AI/Figma), license selector (personal/commercial), instant download CTA, and bundle deals.' },
+      { label: 'Subscription Box', icon: '📦', desc: 'Plans, what\'s included, reviews', prompt: 'Create a subscription box landing page with hero showing unboxed products, plan tiers (monthly/quarterly/annual), past boxes gallery, unboxing video placeholder, subscriber count, reviews, and gift option.' },
+      { label: 'Food Delivery', icon: '🍕', desc: 'Menu, cart, delivery tracker', prompt: 'Create a food delivery app UI with restaurant header, menu categories (horizontal scroll), food items with photos/prices/add buttons, floating cart summary, delivery address input, and order tracking progress bar.' },
     ]
   },
   {
-    category: 'Creative',
+    category: 'Creative & Media',
     templates: [
       { label: 'Coming Soon', icon: '⏳', desc: 'Countdown, email signup', prompt: 'Create a coming soon page with animated countdown timer, email signup form, progress bar, social links, and a mesmerizing animated gradient background.' },
       { label: 'Event', icon: '🎪', desc: 'Speakers, schedule, tickets', prompt: 'Create an event/conference landing page with hero with date/location, speaker cards (6), schedule/agenda timeline, ticket tiers, venue map placeholder, sponsors grid, and FAQ.' },
       { label: 'Newsletter', icon: '📬', desc: 'Header, articles, CTA', prompt: 'Create an email newsletter template (HTML email compatible) with header logo, hero image, main article, 3 story cards, CTA button, social icons footer. 600px max-width, table-based layout.' },
+      { label: 'Video Landing', icon: '🎬', desc: 'Hero video, chapters, subscribe', prompt: 'Create a video course landing page with hero video player (16:9 placeholder), course outline with chapter list, instructor bio, student count + rating, pricing with guarantee badge, and FAQ accordion.' },
+      { label: 'NFT Gallery', icon: '🖼️', desc: 'Collection, bids, wallet', prompt: 'Create an NFT marketplace page with featured collection hero, NFT grid (12 cards with image, name, creator, price in ETH, bid button), filter sidebar (category, price range, status), and wallet connect button.' },
+      { label: 'Magazine', icon: '📰', desc: 'Editorial layout, columns, hero', prompt: 'Create a digital magazine homepage with large editorial hero article, 2-column article grid, breaking news ticker, category tabs, trending sidebar, subscribe CTA, and author bylines with avatars.' },
+      { label: 'Film/Movie', icon: '🎥', desc: 'Trailer, cast, reviews, showtimes', prompt: 'Create a movie promotional page with cinematic hero (title over backdrop), trailer embed, cast carousel with role names, critic scores (Rotten Tomatoes style), review quotes, showtime selector, and ticket CTA.' },
+      { label: 'Art Exhibition', icon: '🎨', desc: 'Gallery, artist, dates, tickets', prompt: 'Create an art exhibition page with full-bleed hero artwork, exhibition details (dates, location, hours), artwork grid with titles and medium, artist statement, audio guide mention, and ticket booking.' },
+    ]
+  },
+  {
+    category: 'Education & Non-Profit',
+    templates: [
+      { label: 'Online Course', icon: '🎓', desc: 'Curriculum, instructor, enroll', prompt: 'Create an online course page with hero (title + instructor), course stats (duration, lessons, level), curriculum accordion, instructor bio, student reviews, certificate preview, pricing, and enroll CTA.' },
+      { label: 'School/University', icon: '🏫', desc: 'Programs, campus, admissions', prompt: 'Create a university homepage with hero, program cards (8), campus life photo grid, upcoming events, news feed, admissions timeline, virtual tour CTA, and application deadline counter.' },
+      { label: 'Non-Profit', icon: '🌍', desc: 'Mission, impact, donate', prompt: 'Create a non-profit website with hero (mission statement), impact stats (lives changed, donations, volunteers), programs section, stories of impact carousel, donation form with preset amounts ($25/$50/$100/custom), volunteer signup, and partner logos.' },
+      { label: 'Church', icon: '⛪', desc: 'Services, sermons, community', prompt: 'Create a church website with hero (welcome message), service times, recent sermons list with audio/video, upcoming events, community groups, online giving button, location with map, and prayer request form.' },
+      { label: 'Tutoring', icon: '📝', desc: 'Subjects, tutors, booking', prompt: 'Create a tutoring service website with hero, subject cards (Math, Science, English, SAT Prep, etc.), tutor profiles with ratings and hourly rates, how-it-works steps, free trial lesson CTA, and parent testimonials.' },
+      { label: 'Conference', icon: '🎤', desc: 'Speakers, agenda, sponsors', prompt: 'Create a tech conference website with hero (name, date, location, ticket CTA), keynote speaker section, 2-day agenda with track tabs, sponsor tiers (platinum/gold/silver), venue info, early bird pricing, and live stream option.' },
+    ]
+  },
+  {
+    category: 'Technology',
+    templates: [
+      { label: 'Developer Portfolio', icon: '👨‍💻', desc: 'GitHub, projects, tech stack', prompt: 'Create a developer portfolio with terminal-style hero (typing animation), GitHub stats cards, project showcase (6 repos with stars/forks/language), tech stack icons grid, blog posts, open source contributions timeline, and contact form. Dark hacker theme.' },
+      { label: 'AI/ML Product', icon: '🤖', desc: 'Demo, features, integrations', prompt: 'Create an AI product landing page with hero (animated neural network visualization in CSS), live demo section, feature comparison (vs competitors), integration logos, API code snippet, pricing, and enterprise CTA.' },
+      { label: 'Open Source', icon: '🔓', desc: 'README, contributors, stars', prompt: 'Create an open source project page with hero (project name + description + GitHub badges), quick start code block, feature list, contributor avatars grid, star history chart placeholder, sponsor tiers, and "Star on GitHub" CTA.' },
+      { label: 'CLI Tool', icon: '⌨️', desc: 'Install, commands, examples', prompt: 'Create a CLI tool documentation site with hero (terminal screenshot), one-line install command with copy button, command reference table, usage examples with syntax highlighting, comparison table, and GitHub link. Monospace dark theme.' },
+      { label: 'Browser Extension', icon: '🧩', desc: 'Features, screenshots, install', prompt: 'Create a browser extension landing page with hero (browser mockup with extension), feature cards (6), screenshot carousel, browser compatibility badges (Chrome/Firefox/Edge/Safari), reviews, and "Add to Chrome" CTA button.' },
+      { label: 'API Service', icon: '🔗', desc: 'Endpoints, pricing, docs', prompt: 'Create an API service landing page with hero, code example (curl request + JSON response), pricing tiers based on API calls, uptime guarantee badge, documentation preview, SDKs available (Python/Node/Go/Ruby icons), and API key signup form.' },
+      { label: 'DevOps Dashboard', icon: '🖥️', desc: 'Pipelines, deploys, monitoring', prompt: 'Create a DevOps dashboard with sidebar, deployment pipeline visualization (build→test→staging→production stages), server metrics cards (CPU, RAM, Disk), recent deployments log, alert notifications, and uptime graphs. Dark theme.' },
+      { label: 'Crypto/Web3', icon: '₿', desc: 'Wallet, tokens, swap', prompt: 'Create a DeFi/crypto dashboard with wallet connect button, token balances list, price charts (candlestick placeholder), swap interface (from/to tokens), transaction history, gas tracker, and portfolio allocation donut chart. Dark cyber theme.' },
+    ]
+  },
+  {
+    category: 'Social & Community',
+    templates: [
+      { label: 'Social Profile', icon: '👥', desc: 'Posts, followers, media grid', prompt: 'Create a social media profile page with cover photo, profile pic, bio, stats (posts/followers/following), tab bar (Posts/Media/Likes), post feed with like/comment/share buttons, and suggested users sidebar.' },
+      { label: 'Forum', icon: '💬', desc: 'Categories, threads, users', prompt: 'Create a forum/community page with category cards (General, Help, Showcase, Off-Topic), latest threads list with avatars/replies/views, pinned announcements, search bar, user leaderboard sidebar, and new thread button.' },
+      { label: 'Discord Server', icon: '🎮', desc: 'Channels, roles, invite', prompt: 'Create a Discord server landing page with hero (server name + member count), channel preview list, role cards with colors, rules section, featured community content, server stats, and "Join Server" CTA with copy-invite button.' },
+      { label: 'Dating Profile', icon: '❤️', desc: 'Photos, bio, interests, match', prompt: 'Create a dating app profile page with photo carousel (5 photos), name/age/location, bio text, interest tags, prompts with answers ("My ideal weekend is..."), Spotify top artists, Instagram grid preview, and like/pass buttons.' },
+      { label: 'Community Hub', icon: '🏘️', desc: 'Events, members, discussions', prompt: 'Create a community platform homepage with hero, upcoming events grid, member spotlight cards, discussion categories, resource library, community guidelines, and join/apply CTA. Warm welcoming design.' },
+    ]
+  },
+  {
+    category: 'Health & Wellness',
+    templates: [
+      { label: 'Medical Practice', icon: '🏥', desc: 'Doctors, services, appointments', prompt: 'Create a medical practice website with hero, services list (cardiology, dermatology, pediatrics, etc.), doctor profiles with credentials, patient portal login, insurance accepted logos, appointment booking form, and emergency contact info.' },
+      { label: 'Fitness App', icon: '🏃', desc: 'Workouts, progress, nutrition', prompt: 'Create a fitness app landing page with hero (before/after transformation), workout plan preview, progress tracking charts, meal planning section, trainer video previews, app store badges, and free trial CTA.' },
+      { label: 'Mental Health', icon: '🧘', desc: 'Therapy, resources, crisis line', prompt: 'Create a mental health support website with calming hero, therapy services (individual, couples, group), therapist profiles, resource library, self-assessment quiz CTA, crisis helpline banner, and appointment scheduler. Soft blue/green palette.' },
+      { label: 'Spa & Wellness', icon: '🧖', desc: 'Treatments, packages, booking', prompt: 'Create a luxury spa website with full-bleed hero, treatment menu with prices, package deals (couples, full-day, weekend), gallery of facilities, client reviews, gift card purchase, and online booking. Elegant serif typography, earth tones.' },
+      { label: 'Pharmacy', icon: '💊', desc: 'Products, prescriptions, delivery', prompt: 'Create an online pharmacy with hero, product categories (vitamins, personal care, prescriptions, baby care), featured products grid, prescription upload form, delivery info, health blog, and loyalty program section.' },
+    ]
+  },
+  {
+    category: 'Interactive & Fun',
+    templates: [
+      { label: 'Quiz/Survey', icon: '❓', desc: 'Questions, progress, results', prompt: 'Create an interactive quiz page with title, progress bar, question card with 4 answer options (highlight on select), next/back buttons, animated transitions between questions, timer, and results page with score, share buttons, and retry.' },
+      { label: 'Calculator', icon: '🔢', desc: 'Inputs, formula, results', prompt: 'Create an interactive calculator app (like a mortgage or BMI calculator) with labeled inputs, sliders for ranges, real-time calculation display, results card with breakdown chart, comparison table, and share/print results buttons.' },
+      { label: 'Recipe', icon: '🍳', desc: 'Ingredients, steps, nutrition', prompt: 'Create a recipe page with hero photo, recipe title/rating/time, ingredient checklist with servings adjuster, step-by-step instructions with photos, nutrition facts table, print recipe button, and related recipes carousel.' },
+      { label: 'Timeline', icon: '📅', desc: 'Milestones, dates, progress', prompt: 'Create a vertical timeline page showing a company or project history. Each milestone has: date, title, description, icon. Alternating left/right layout, connecting line with dots, scroll-triggered fade-in animations.' },
+      { label: 'Weather App', icon: '🌤️', desc: 'Current, forecast, location', prompt: 'Create a weather app UI with current weather card (temp, icon, condition, location), hourly forecast horizontal scroll, 7-day forecast list, weather details (humidity, wind, UV, pressure), sunrise/sunset times, and search location bar.' },
+      { label: 'Music Player', icon: '🎶', desc: 'Now playing, playlist, controls', prompt: 'Create a music player UI with album art (large), song title/artist, progress bar with timestamps, playback controls (prev/play-pause/next, shuffle, repeat), volume slider, queue/playlist sidebar, and lyrics panel.' },
+      { label: 'Chat UI', icon: '💬', desc: 'Messages, contacts, typing', prompt: 'Create a messaging app UI with contacts sidebar (avatars, last message, unread badge), chat area with message bubbles (sent/received, timestamps, read receipts), typing indicator, message input with emoji picker, and attachment button.' },
+      { label: 'File Manager', icon: '📁', desc: 'Folders, files, upload', prompt: 'Create a file manager/cloud storage UI with breadcrumb navigation, grid/list view toggle, files and folders with icons, file details panel (size, modified, sharing), upload dropzone, search bar, and storage usage indicator.' },
+    ]
+  },
+  {
+    category: 'Landing Pages',
+    templates: [
+      { label: 'Waitlist', icon: '📋', desc: 'Teaser, signup, referral', prompt: 'Create a waitlist landing page with bold headline, product teaser (3 feature previews), email signup with referral counter ("You are #1,234 in line"), social proof ticker, and animated background particles.' },
+      { label: 'Product Hunt', icon: '🏆', desc: 'Launch day, upvotes, demo', prompt: 'Create a Product Hunt style launch page with product hero, demo video embed, feature list with icons, founder story, upvote counter, press mentions, and early adopter pricing with countdown.' },
+      { label: 'Newsletter Landing', icon: '✉️', desc: 'Value prop, past issues, subscribe', prompt: 'Create a newsletter landing page with bold headline, value proposition bullets, past issue previews (3 cards), subscriber count badge, testimonial quotes, email input with subscribe button, and "free forever" badge.' },
+      { label: 'Lead Magnet', icon: '🧲', desc: 'Free resource, preview, download', prompt: 'Create a lead magnet landing page with hero (ebook/guide cover mockup), chapter preview list, what you\'ll learn bullets, author credentials, social proof (downloads count), email gate form, and bonus content mention.' },
+      { label: 'Comparison', icon: '🔄', desc: 'Us vs them, feature table, switch', prompt: 'Create a comparison landing page ("Why switch from X to us") with hero, side-by-side feature comparison table with checkmarks/crosses, pricing comparison, migration guide steps, customer switch stories, and "Switch Now" CTA.' },
+      { label: 'Black Friday', icon: '🏷️', desc: 'Deals, countdown, urgency', prompt: 'Create a Black Friday/Cyber Monday deals page with huge countdown timer, deals grid (original/sale price, % off badges), category filter, "Almost Gone" urgency indicators, early access email signup, and terms & conditions.' },
     ]
   },
 ];
@@ -129,7 +226,13 @@ Rules:
   : SYSTEM_PROMPT;
 
 /* ── Main Component ── */
-export function WebCreator() {
+interface WebCreatorProps {
+  creatorMode?: 'web' | 'app' | 'game' | 'dashboard';
+  customTemplates?: typeof TEMPLATE_CATEGORIES;
+  customSystemPrompt?: string;
+}
+
+export function WebCreator({ creatorMode: _mode = 'web', customTemplates, customSystemPrompt }: WebCreatorProps = {}) {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -325,7 +428,7 @@ Rules:
       : '';
 
     // Build context with current HTML if editing
-    const basePrompt = capturedImageData ? IMAGE_SYSTEM_PROMPT : getSystemPrompt(useTailwind);
+    const basePrompt = capturedImageData ? IMAGE_SYSTEM_PROMPT : (customSystemPrompt || getSystemPrompt(useTailwind));
     const systemCtx = currentHtml
       ? `${basePrompt}${colorInstruction}\n\nCurrent page HTML:\n${currentHtml}`
       : `${basePrompt}${colorInstruction}`;
@@ -667,7 +770,7 @@ Rules:
           {showTemplates && chatMessages.length === 0 && (
             <div className="space-y-2">
               <p className="text-xs text-chat-text-secondary mb-3">Start with a template or describe what you want:</p>
-              {TEMPLATE_CATEGORIES.map((cat) => {
+              {(customTemplates || TEMPLATE_CATEGORIES).map((cat) => {
                 const isCollapsed = collapsedCategories[cat.category];
                 return (
                   <div key={cat.category} className="mb-1">
