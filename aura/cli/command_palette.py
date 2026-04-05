@@ -11,9 +11,9 @@ from typing import Any, Optional, List, Dict
 @dataclass
 class PaletteItem:
     label: str
-    description: str = ""
-    category: str = "command"  # command, file, session, model
     action: str = ""  # returned on selection (defaults to label)
+    category: str = "command"  # command, file, session, model
+    description: str = ""
     def __post_init__(self) -> None:
         if not self.action:
             self.action = self.label
