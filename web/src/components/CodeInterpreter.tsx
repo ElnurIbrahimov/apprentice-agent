@@ -420,7 +420,7 @@ export function CodeInterpreter() {
       {/* Exchanges */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
         {exchanges.length === 0 && workerReady && (
-          <div className="text-center text-chat-text-secondary text-sm py-12">
+          <div className="text-center text-chat-text-secondary text-sm py-8">
             <p className="mb-4">Write Python code below and press Run.</p>
             <div className="flex flex-wrap justify-center gap-2">
               {[
@@ -432,7 +432,7 @@ export function CodeInterpreter() {
                 <button
                   key={q.label}
                   onClick={() => { setCode(q.code); textareaRef.current?.focus(); }}
-                  className="px-3 py-1.5 text-xs rounded-full border border-chat-border hover:border-purple-500/30 hover:text-chat-text transition-colors"
+                  className="px-3 py-1.5 text-xs rounded-full bg-surface-2 hover:bg-surface-3 border border-chat-border hover:border-purple-500/30 transition-colors"
                 >
                   {q.label}
                 </button>
@@ -442,7 +442,7 @@ export function CodeInterpreter() {
         )}
 
         {!workerReady && (
-          <div className="text-center text-chat-text-secondary text-sm py-12">
+          <div className="text-center text-chat-text-secondary text-sm py-8">
             <div className="shimmer-bar h-3 w-48 mx-auto mb-3" />
             <p>{loading || 'Initializing Python runtime...'}</p>
           </div>
@@ -460,6 +460,11 @@ export function CodeInterpreter() {
             ref={textareaRef}
             value={code}
             onChange={(e) => setCode(e.target.value)}
+            onInput={(e) => {
+              const el = e.currentTarget;
+              el.style.height = 'auto';
+              el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+            }}
             onKeyDown={(e) => {
               if (e.key === 'Tab') {
                 e.preventDefault();
@@ -477,7 +482,7 @@ export function CodeInterpreter() {
             }}
             placeholder="Write Python code... (Ctrl+Enter to run)"
             className="flex-1 p-3 rounded-lg bg-surface-1 border border-chat-border text-chat-text text-sm font-mono resize-none outline-none focus:border-chat-accent placeholder-chat-text-secondary/50"
-            rows={3}
+            style={{ minHeight: 52, maxHeight: 200, overflow: 'auto' }}
             disabled={runMode === 'browser' && !workerReady}
           />
           <div className="flex flex-col gap-1.5 self-end">
@@ -531,11 +536,11 @@ export function CodeInterpreter() {
             <button
               type="button"
               onClick={() => setShowModelMenu(p => !p)}
-              className="flex items-center gap-1 text-[10px] text-chat-text-secondary hover:text-chat-text transition-colors px-2 py-1 rounded-md"
+              className="flex items-center gap-1 text-xs text-chat-text-secondary hover:text-chat-text transition-colors px-2 py-1 rounded-md"
               style={{ background: 'var(--border-subtle)' }}
             >
               <span className="max-w-[140px] truncate">{selectedModel ? selectedModel.split('/').pop() : 'Auto'}</span>
-              <ChevronDownIcon className="w-2.5 h-2.5 opacity-50" />
+              <ChevronDownIcon className="w-3 h-3 opacity-70" />
             </button>
             {showModelMenu && availableModels.length > 0 && (
               <div style={{ position: 'absolute', bottom: 28, left: 0, width: 220, maxHeight: 280, background: 'var(--surface-1)', border: '1px solid var(--border-default)', borderRadius: 10, overflow: 'hidden', zIndex: 50 }}>

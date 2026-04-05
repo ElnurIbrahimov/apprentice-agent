@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { MagnifyingGlassIcon, ArrowLeftIcon, WrenchScrewdriverIcon } from '@heroicons/react/24/outline';
 
 export type ToolId =
@@ -25,45 +25,45 @@ const TOOL_GROUPS: ToolGroup[] = [
   {
     label: 'AI Tools',
     tools: [
-      { id: 'ask',      label: 'Ask',      icon: '💬', bg: 'bg-blue-500/15',    desc: 'Quick Q&A' },
-      { id: 'search',   label: 'Search',   icon: '🔍', bg: 'bg-cyan-500/15',    desc: 'Web search' },
-      { id: 'research', label: 'Research', icon: '🔬', bg: 'bg-violet-500/15',  desc: 'Deep analysis' },
-      { id: 'agent',    label: 'Agent',    icon: '🤖', bg: 'bg-emerald-500/15', desc: 'Autonomous tasks' },
-      { id: 'compare',  label: 'Compare',  icon: '⚖️', bg: 'bg-amber-500/15',   desc: 'Model comparison' },
+      { id: 'ask',      label: 'Ask',      icon: '💬', bg: 'bg-blue-500/20',    desc: 'Ask anything — instant answers' },
+      { id: 'search',   label: 'Search',   icon: '🔍', bg: 'bg-cyan-500/20',    desc: 'Search the web with live results' },
+      { id: 'research', label: 'Research', icon: '🔬', bg: 'bg-violet-500/20',  desc: 'Multi-source research with citations' },
+      { id: 'agent',    label: 'Agent',    icon: '🤖', bg: 'bg-emerald-500/20', desc: 'Autonomous multi-step task execution' },
+      { id: 'compare',  label: 'Compare',  icon: '⚖️', bg: 'bg-amber-500/20',   desc: 'Compare AI models side by side' },
     ],
   },
   {
     label: 'Writing',
     tools: [
-      { id: 'write',     label: 'Write',     icon: '✏️', bg: 'bg-orange-500/15',  desc: 'Content creation' },
-      { id: 'translate', label: 'Translate', icon: '🌐', bg: 'bg-sky-500/15',     desc: 'Multi-language' },
-      { id: 'summary',   label: 'Summary',   icon: '📋', bg: 'bg-teal-500/15',    desc: 'Summarize text' },
-      { id: 'grammar',   label: 'Grammar',   icon: '📝', bg: 'bg-green-500/15',   desc: 'Grammar check' },
+      { id: 'write',     label: 'Write',     icon: '✏️', bg: 'bg-orange-500/20',  desc: 'Draft articles, emails, and documents' },
+      { id: 'translate', label: 'Translate', icon: '🌐', bg: 'bg-sky-500/20',     desc: 'Translate text between languages' },
+      { id: 'summary',   label: 'Summary',   icon: '📋', bg: 'bg-teal-500/20',    desc: 'Condense long text into key points' },
+      { id: 'grammar',   label: 'Grammar',   icon: '📝', bg: 'bg-green-500/20',   desc: 'Check and fix grammar issues' },
     ],
   },
   {
     label: 'Media',
     tools: [
-      { id: 'pdf',     label: 'PDF',     icon: '📄', bg: 'bg-red-500/15',     desc: 'PDF analysis' },
-      { id: 'ocr',     label: 'OCR',     icon: '🔎', bg: 'bg-indigo-500/15',  desc: 'Image text' },
-      { id: 'capture', label: 'Capture', icon: '📸', bg: 'bg-fuchsia-500/15', desc: 'Screenshot analysis' },
-      { id: 'youtube', label: 'YouTube', icon: '▶️', bg: 'bg-rose-500/15',    desc: 'Video analysis' },
+      { id: 'pdf',     label: 'PDF',     icon: '📄', bg: 'bg-red-500/20',     desc: 'Extract and analyze PDF content' },
+      { id: 'ocr',     label: 'OCR',     icon: '🔎', bg: 'bg-indigo-500/20',  desc: 'Extract text from images' },
+      { id: 'capture', label: 'Capture', icon: '📸', bg: 'bg-fuchsia-500/20', desc: 'Analyze screenshots and visuals' },
+      { id: 'youtube', label: 'YouTube', icon: '▶️', bg: 'bg-rose-500/20',    desc: 'Analyze and summarize videos' },
     ],
   },
   {
     label: 'Audio',
     tools: [
-      { id: 'voice',  label: 'Voice',  icon: '🔊', bg: 'bg-purple-500/15',  desc: 'Text to speech' },
-      { id: 'record', label: 'Record', icon: '🎙️', bg: 'bg-pink-500/15',    desc: 'Audio recording' },
+      { id: 'voice',  label: 'Voice',  icon: '🔊', bg: 'bg-purple-500/20',  desc: 'Convert text to spoken audio' },
+      { id: 'record', label: 'Record', icon: '🎙️', bg: 'bg-pink-500/20',    desc: 'Record and transcribe audio' },
     ],
   },
   {
     label: 'Productivity',
     tools: [
-      { id: 'math',     label: 'Math',     icon: '🧮', bg: 'bg-blue-500/15',   desc: 'Math solver' },
-      { id: 'slides',   label: 'Slides',   icon: '📊', bg: 'bg-amber-500/15',  desc: 'Presentations' },
-      { id: 'wisebase', label: 'Wisebase', icon: '📚', bg: 'bg-violet-500/15', desc: 'Knowledge base' },
-      { id: 'models',   label: 'Models',   icon: '⚙️', bg: 'bg-slate-500/15',  desc: 'Model manager' },
+      { id: 'math',     label: 'Math',     icon: '🧮', bg: 'bg-blue-500/20',   desc: 'Solve equations with LaTeX rendering' },
+      { id: 'slides',   label: 'Slides',   icon: '📊', bg: 'bg-amber-500/20',  desc: 'Generate presentation slides' },
+      { id: 'wisebase', label: 'Wisebase', icon: '📚', bg: 'bg-violet-500/20', desc: 'Search and manage knowledge' },
+      { id: 'models',   label: 'Models',   icon: '⚙️', bg: 'bg-slate-500/20',  desc: 'Configure and manage AI models' },
     ],
   },
 ];
@@ -71,12 +71,44 @@ const TOOL_GROUPS: ToolGroup[] = [
 // Flat list of all tools for search
 const ALL_TOOLS: Tool[] = TOOL_GROUPS.flatMap((g) => g.tools);
 
+const RECENT_KEY = 'aura-recent-tools';
+const RECENT_MAX = 8;
+const RECENT_DISPLAY = 4;
+
+function getRecentTools(): ToolId[] {
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    return raw ? (JSON.parse(raw) as ToolId[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRecentTool(id: ToolId): void {
+  try {
+    const prev = getRecentTools().filter((t) => t !== id);
+    const next = [id, ...prev].slice(0, RECENT_MAX);
+    localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+  } catch {
+    // ignore storage errors
+  }
+}
+
 interface ToolLauncherProps {
   onSelect: (id: ToolId | 'tools') => void;
 }
 
 export function ToolLauncher({ onSelect }: ToolLauncherProps) {
   const [query, setQuery] = useState('');
+  const [recentIds, setRecentIds] = useState<ToolId[]>(() => getRecentTools());
+
+  const handleSelect = useCallback((id: ToolId | 'tools') => {
+    if (id !== 'tools') {
+      saveRecentTool(id);
+      setRecentIds(getRecentTools());
+    }
+    onSelect(id);
+  }, [onSelect]);
 
   const filtered = useMemo(() => {
     if (!query.trim()) return null;
@@ -85,6 +117,11 @@ export function ToolLauncher({ onSelect }: ToolLauncherProps) {
       (t) => t.label.toLowerCase().includes(q) || t.desc.toLowerCase().includes(q),
     );
   }, [query]);
+
+  const recentTools = useMemo(
+    () => recentIds.slice(0, RECENT_DISPLAY).map((id) => ALL_TOOLS.find((t) => t.id === id)).filter(Boolean) as Tool[],
+    [recentIds],
+  );
 
   return (
     <div className="h-full overflow-y-auto tab-panel-scroll" style={{ background: 'var(--bg-base)' }}>
@@ -118,6 +155,20 @@ export function ToolLauncher({ onSelect }: ToolLauncherProps) {
           )}
         </div>
 
+        {/* Recently Used section */}
+        {!filtered && recentTools.length > 0 && (
+          <div className="mb-8">
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-chat-text-secondary border-b border-chat-border/30 pb-2 mb-3">
+              Recent
+            </h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+              {recentTools.map((tool) => (
+                <ToolCard key={tool.id} tool={tool} onSelect={handleSelect} />
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* System Tools special card */}
         {!filtered && (
           <button
@@ -125,9 +176,9 @@ export function ToolLauncher({ onSelect }: ToolLauncherProps) {
             className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-chat-border mb-6 hover:border-chat-accent transition-colors group text-left"
             style={{ background: 'var(--surface-2)' }}
           >
-            <span className="flex items-center justify-center w-10 h-10 rounded-lg shrink-0"
-              style={{ background: 'var(--surface-3)' }}>
-              <WrenchScrewdriverIcon className="w-5 h-5 text-chat-accent" />
+            <span className="flex items-center justify-center w-10 h-10 rounded-lg shrink-0 bg-amber-500/15"
+              style={{ background: undefined }}>
+              <WrenchScrewdriverIcon className="w-5 h-5 text-amber-400" />
             </span>
             <div>
               <div className="text-sm font-semibold text-chat-text group-hover:text-chat-accent transition-colors">System Tools</div>
@@ -141,9 +192,9 @@ export function ToolLauncher({ onSelect }: ToolLauncherProps) {
           filtered.length === 0 ? (
             <p className="text-center text-sm text-chat-text-secondary py-8">No tools match "{query}"</p>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
               {filtered.map((tool) => (
-                <ToolCard key={tool.id} tool={tool} onSelect={onSelect} />
+                <ToolCard key={tool.id} tool={tool} onSelect={handleSelect} />
               ))}
             </div>
           )
@@ -152,12 +203,12 @@ export function ToolLauncher({ onSelect }: ToolLauncherProps) {
         {/* Grouped tool grid */}
         {!filtered && TOOL_GROUPS.map((group) => (
           <div key={group.label} className="mb-8">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-chat-text-secondary mb-3">
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-chat-text-secondary border-b border-chat-border/30 pb-2 mb-3">
               {group.label}
             </h3>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
               {group.tools.map((tool) => (
-                <ToolCard key={tool.id} tool={tool} onSelect={onSelect} />
+                <ToolCard key={tool.id} tool={tool} onSelect={handleSelect} />
               ))}
             </div>
           </div>
@@ -171,7 +222,7 @@ function ToolCard({ tool, onSelect }: { tool: Tool; onSelect: (id: ToolId | 'too
   return (
     <button
       onClick={() => onSelect(tool.id)}
-      className="flex flex-col items-start gap-3 p-4 rounded-xl border border-chat-border hover:border-chat-accent/50 transition-all group text-left hover:shadow-lg hover:shadow-chat-accent/5"
+      className="card-hover flex flex-col items-start gap-3 p-4 rounded-xl border border-chat-border hover:border-chat-accent/50 transition-all group text-left hover:shadow-lg hover:shadow-chat-accent/5"
       style={{ background: 'var(--surface-2)' }}
     >
       <span className={`flex items-center justify-center w-10 h-10 rounded-lg text-xl ${tool.bg}`}>

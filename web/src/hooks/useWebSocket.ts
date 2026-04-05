@@ -242,6 +242,18 @@ export function useWebSocket() {
         break;
       }
 
+      case 'conv_sync': {
+        // Extension or another surface created/updated/deleted a conversation
+        window.dispatchEvent(new CustomEvent('aura:conv-sync', { detail: data }));
+        break;
+      }
+
+      case 'action_trace': {
+        // Live Hand execution step — dispatch for HandsDashboard
+        window.dispatchEvent(new CustomEvent('aura:action_trace', { detail: data }));
+        break;
+      }
+
       default:
         console.warn('[WebSocket] Unknown message type:', data.type);
     }

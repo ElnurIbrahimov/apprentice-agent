@@ -10,6 +10,7 @@ import {
   ClockIcon,
   CheckCircleIcon,
 } from '@heroicons/react/24/outline';
+import { BookOpenIcon as BookOpenOutlineIcon } from '@heroicons/react/24/outline';
 
 /* ── Types ── */
 type Tab = 'browse' | 'ask' | 'add';
@@ -477,16 +478,10 @@ export function WisebasePanel() {
 
             {/* Empty state */}
             {!memoriesLoading && !memoriesError && displayList.length === 0 && (
-              <div className="flex flex-col items-center justify-center py-12 text-chat-text-secondary text-center">
-                <BookOpenIcon className="w-8 h-8 mb-2 opacity-30" />
-                <p className="text-sm">
-                  {hasSearched ? 'No matching memories found' : 'No memories stored yet'}
-                </p>
-                {!hasSearched && (
-                  <p className="text-xs mt-1 opacity-60">
-                    Add knowledge using the "+ Add" tab
-                  </p>
-                )}
+              <div className="empty-state">
+                <BookOpenIcon className="empty-state-icon" />
+                <p className="empty-state-title">No knowledge stored yet</p>
+                <p className="empty-state-desc">Add facts, notes, or documents to build your knowledge base</p>
               </div>
             )}
 

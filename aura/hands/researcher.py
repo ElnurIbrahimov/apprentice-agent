@@ -8,6 +8,7 @@ Runs on schedule (or when curiosity drive is high), picks topics from:
 Produces: memory entries, KG updates, research summaries.
 """
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -59,9 +60,19 @@ class ResearcherHand(Hand):
         iterations = 0
         artifacts = []
         topic = None
+        step_cb = context.get("step_callback")
+
+        # Capture token state at start
+        start_tokens = (
+            getattr(brain, '_session_input_tokens', 0) +
+            getattr(brain, '_session_output_tokens', 0)
+        )
+        start_cost = getattr(brain, '_session_cost_usd', 0.0)
 
         try:
             # Step 1: Pick a research topic
+            if step_cb:
+                await step_cb(1, "Selecting research topic...")
             topic = await self._pick_topic(brain, context)
             if not topic:
                 return HandResult(
@@ -73,7 +84,9 @@ class ResearcherHand(Hand):
 
             logger.info(f"[Researcher] Researching: {topic}")
 
-            # Step 2: Research the topic using available tools
+            # Step 2: Query memory for prior knowledge
+            if step_cb:
+                await step_cb(2, "Querying memory for prior knowledge...")
             findings = []
             search_tool = tools.get("web_search") or tools.get("brave_search")
 
@@ -91,7 +104,9 @@ class ResearcherHand(Hand):
             except Exception as e:
                 logger.debug(f"[Researcher] Memory lookup failed: {e}")
 
-            # Web search for new information
+            # Step 3: Search the web for new information
+            if step_cb:
+                await step_cb(3, "Searching the web...")
             if search_tool:
                 try:
                     results = search_tool.execute(query=topic, num_results=5) if hasattr(search_tool, 'execute') else ""
@@ -108,9 +123,13 @@ class ResearcherHand(Hand):
                     summary=f"Could not find information on: {topic}",
                     iterations=iterations,
                     error="No search tools available or all searches failed",
+                    tokens_used=0,
+                    cost_usd=0.0,
                 )
 
-            # Step 3: Synthesize findings via LLM
+            # Step 4: Synthesize findings via LLM
+            if step_cb:
+                await step_cb(4, "Synthesizing findings...")
             synthesis_prompt = (
                 f"Research topic: {topic}\n\n"
                 f"Findings:\n" + "\n---\n".join(
@@ -121,10 +140,12 @@ class ResearcherHand(Hand):
                 "Format: one paragraph summary + key facts as bullet points."
             )
 
-            response = brain.think(
-                synthesis_prompt,
-                system=self.get_system_prompt(),
-                model=None,  # Use default for model_preference
+            response = await asyncio.to_thread(
+                lambda: brain.think(
+                    synthesis_prompt,
+                    system_prompt=self.get_system_prompt(),
+                    model_override=None,
+                )
             )
             iterations += 1
 
@@ -137,9 +158,27 @@ class ResearcherHand(Hand):
                     "sources": [f["source"] for f in findings],
                 })
 
-                # Step 4: Store in memory (if memory write tools available)
-                # This happens through the normal tool system
+                # Store in memory
+                try:
+                    from aura.memory.unified_memory import get_unified_memory
+                    um = get_unified_memory()
+                    um.add(
+                        content=f"Research finding on '{topic}': {summary}",
+                        metadata={"type": "research_finding", "topic": topic, "hand": "researcher"},
+                    )
+                except Exception as e:
+                    logger.debug(f"[ResearcherHand] Failed to save finding to memory: {e}")
+
                 logger.info(f"[Researcher] Completed research on: {topic}")
+
+                # Compute tokens and cost delta
+                end_tokens = (
+                    getattr(brain, '_session_input_tokens', 0) +
+                    getattr(brain, '_session_output_tokens', 0)
+                )
+                end_cost = getattr(brain, '_session_cost_usd', 0.0)
+                tokens_used = end_tokens - start_tokens
+                cost_used = end_cost - start_cost
 
                 return HandResult(
                     hand_name="researcher",
@@ -148,7 +187,18 @@ class ResearcherHand(Hand):
                     iterations=iterations,
                     artifacts=artifacts,
                     duration_seconds=time.time() - start,
+                    tokens_used=tokens_used,
+                    cost_usd=cost_used,
                 )
+
+            # Compute tokens and cost delta
+            end_tokens = (
+                getattr(brain, '_session_input_tokens', 0) +
+                getattr(brain, '_session_output_tokens', 0)
+            )
+            end_cost = getattr(brain, '_session_cost_usd', 0.0)
+            tokens_used = end_tokens - start_tokens
+            cost_used = end_cost - start_cost
 
             return HandResult(
                 hand_name="researcher",
@@ -156,9 +206,20 @@ class ResearcherHand(Hand):
                 summary=f"LLM synthesis failed for topic: {topic}",
                 iterations=iterations,
                 error="Brain returned empty response",
+                tokens_used=tokens_used,
+                cost_usd=cost_used,
             )
 
         except Exception as e:
+            # Compute tokens and cost delta even on error
+            end_tokens = (
+                getattr(brain, '_session_input_tokens', 0) +
+                getattr(brain, '_session_output_tokens', 0)
+            )
+            end_cost = getattr(brain, '_session_cost_usd', 0.0)
+            tokens_used = end_tokens - start_tokens
+            cost_used = end_cost - start_cost
+
             return HandResult(
                 hand_name="researcher",
                 success=False,
@@ -166,6 +227,8 @@ class ResearcherHand(Hand):
                 iterations=iterations,
                 error=str(e),
                 duration_seconds=time.time() - start,
+                tokens_used=tokens_used,
+                cost_usd=cost_used,
             )
 
     async def _pick_topic(self, brain: Any, context: dict) -> str | None:

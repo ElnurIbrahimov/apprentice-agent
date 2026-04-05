@@ -54,47 +54,47 @@ const TEMPLATE_CATEGORIES = [
   {
     category: 'Business',
     templates: [
-      { label: 'SaaS Landing', icon: '🚀', prompt: 'Create a modern SaaS landing page with hero section, features grid (3 cards with icons), testimonials carousel, pricing table (3 tiers), FAQ accordion, and footer. Professional purple/blue gradient theme.' },
-      { label: 'Startup', icon: '💡', prompt: 'Create a startup landing page with a bold hero with animated gradient text, problem/solution section, how-it-works steps, team section with photo placeholders, investor logos bar, and CTA section.' },
-      { label: 'Agency', icon: '🏢', prompt: 'Create a creative agency website with full-screen hero video placeholder, services grid, case studies gallery, client logos, team carousel, and contact form. Sleek dark theme.' },
-      { label: 'Restaurant', icon: '🍽️', prompt: 'Create a restaurant website with hero image, menu sections (appetizers, mains, desserts, drinks) with prices, reservation form, location map placeholder, reviews, and footer with hours.' },
-      { label: 'Real Estate', icon: '🏠', prompt: 'Create a real estate listing page with property search bar, featured listings grid (6 cards with images, price, beds/baths), neighborhood guide, agent profile, and contact form.' },
+      { label: 'SaaS Landing', icon: '🚀', desc: 'Hero, features, pricing, testimonials', prompt: 'Create a modern SaaS landing page with hero section, features grid (3 cards with icons), testimonials carousel, pricing table (3 tiers), FAQ accordion, and footer. Professional purple/blue gradient theme.' },
+      { label: 'Startup', icon: '💡', desc: 'Bold hero, problem/solution, team', prompt: 'Create a startup landing page with a bold hero with animated gradient text, problem/solution section, how-it-works steps, team section with photo placeholders, investor logos bar, and CTA section.' },
+      { label: 'Agency', icon: '🏢', desc: 'Full-screen hero, case studies, portfolio', prompt: 'Create a creative agency website with full-screen hero video placeholder, services grid, case studies gallery, client logos, team carousel, and contact form. Sleek dark theme.' },
+      { label: 'Restaurant', icon: '🍽️', desc: 'Menu, reservations, reviews', prompt: 'Create a restaurant website with hero image, menu sections (appetizers, mains, desserts, drinks) with prices, reservation form, location map placeholder, reviews, and footer with hours.' },
+      { label: 'Real Estate', icon: '🏠', desc: 'Property search, listings, agent', prompt: 'Create a real estate listing page with property search bar, featured listings grid (6 cards with images, price, beds/baths), neighborhood guide, agent profile, and contact form.' },
     ]
   },
   {
     category: 'Personal',
     templates: [
-      { label: 'Portfolio', icon: '👤', prompt: 'Create a personal portfolio with hero section, about me, project gallery (6 cards with hover effects), skills progress bars, timeline/experience, testimonials, and contact form. Dark minimal theme.' },
-      { label: 'Resume/CV', icon: '📄', prompt: 'Create a single-page resume/CV with header (name, title, contact), professional summary, work experience timeline, education, skills bar chart, certifications, and languages. Clean printable design.' },
-      { label: 'Blog', icon: '📝', prompt: 'Create a blog homepage with header/nav, featured post hero, 6 post cards in a grid, sidebar with categories and newsletter signup, pagination, and footer.' },
-      { label: 'Wedding', icon: '💒', prompt: 'Create an elegant wedding website with hero (couple names + date), our story timeline, event details, RSVP form, photo gallery, gift registry link, and accommodation info. Romantic soft palette.' },
-      { label: 'Link Tree', icon: '🔗', prompt: 'Create a link-in-bio page with profile photo circle, name, bio, 8 stylish link buttons with icons, social media icons at bottom. Gradient background with glassmorphism cards.' },
+      { label: 'Portfolio', icon: '👤', desc: 'Projects, skills, about, contact', prompt: 'Create a personal portfolio with hero section, about me, project gallery (6 cards with hover effects), skills progress bars, timeline/experience, testimonials, and contact form. Dark minimal theme.' },
+      { label: 'Resume/CV', icon: '📄', desc: 'Experience, education, skills', prompt: 'Create a single-page resume/CV with header (name, title, contact), professional summary, work experience timeline, education, skills bar chart, certifications, and languages. Clean printable design.' },
+      { label: 'Blog', icon: '📝', desc: 'Featured post, grid, sidebar', prompt: 'Create a blog homepage with header/nav, featured post hero, 6 post cards in a grid, sidebar with categories and newsletter signup, pagination, and footer.' },
+      { label: 'Wedding', icon: '💒', desc: 'Timeline, RSVP, gallery', prompt: 'Create an elegant wedding website with hero (couple names + date), our story timeline, event details, RSVP form, photo gallery, gift registry link, and accommodation info. Romantic soft palette.' },
+      { label: 'Link Tree', icon: '🔗', desc: 'Profile, links, social icons', prompt: 'Create a link-in-bio page with profile photo circle, name, bio, 8 stylish link buttons with icons, social media icons at bottom. Gradient background with glassmorphism cards.' },
     ]
   },
   {
     category: 'App & Product',
     templates: [
-      { label: 'Dashboard', icon: '📊', prompt: 'Create an analytics dashboard with sidebar nav, top stats row (4 KPI cards), large area chart, data table with sorting, donut chart, and activity feed. Dark theme with purple accents.' },
-      { label: 'Pricing', icon: '💎', prompt: 'Create a pricing page with monthly/annual toggle, 3 tier cards (Basic/Pro/Enterprise, middle highlighted), feature comparison table, FAQ section, and money-back guarantee badge.' },
-      { label: 'Login', icon: '🔐', prompt: 'Create a login page with split layout: left side gradient with branding/testimonial, right side centered form with email/password inputs, social login buttons (Google, GitHub, Apple), forgot password link.' },
-      { label: 'Mobile App', icon: '📱', prompt: 'Create a mobile app landing page with phone mockup hero, app store badges, feature sections with phone screenshots, user reviews, download stats counter, and footer.' },
-      { label: '404 Page', icon: '🔍', prompt: 'Create a creative 404 page with large animated "404" text, witty message, search bar, popular links, and "Go Home" button. Add floating animated geometric shapes.' },
+      { label: 'Dashboard', icon: '📊', desc: 'Stats, charts, data table', prompt: 'Create an analytics dashboard with sidebar nav, top stats row (4 KPI cards), large area chart, data table with sorting, donut chart, and activity feed. Dark theme with purple accents.' },
+      { label: 'Pricing', icon: '💎', desc: 'Tier cards, comparison, FAQ', prompt: 'Create a pricing page with monthly/annual toggle, 3 tier cards (Basic/Pro/Enterprise, middle highlighted), feature comparison table, FAQ section, and money-back guarantee badge.' },
+      { label: 'Login', icon: '🔐', desc: 'Split layout, social login', prompt: 'Create a login page with split layout: left side gradient with branding/testimonial, right side centered form with email/password inputs, social login buttons (Google, GitHub, Apple), forgot password link.' },
+      { label: 'Mobile App', icon: '📱', desc: 'Phone mockup, features, badges', prompt: 'Create a mobile app landing page with phone mockup hero, app store badges, feature sections with phone screenshots, user reviews, download stats counter, and footer.' },
+      { label: '404 Page', icon: '🔍', desc: 'Animated 404, search, links', prompt: 'Create a creative 404 page with large animated "404" text, witty message, search bar, popular links, and "Go Home" button. Add floating animated geometric shapes.' },
     ]
   },
   {
     category: 'E-commerce',
     templates: [
-      { label: 'Product Page', icon: '🛍️', prompt: 'Create a product detail page with image gallery (main + thumbnails), product title, price, color/size selectors, add-to-cart button, description tabs, reviews section, and related products.' },
-      { label: 'Store Front', icon: '🏪', prompt: 'Create an e-commerce homepage with hero banner, category cards, featured products grid (8 items with image/name/price/rating), deals section with countdown timer, and newsletter signup.' },
-      { label: 'Checkout', icon: '💳', prompt: 'Create a checkout page with order summary sidebar, shipping form, payment form with card input, express checkout buttons (Apple Pay, Google Pay), promo code input, and order total breakdown.' },
+      { label: 'Product Page', icon: '🛍️', desc: 'Gallery, details, reviews', prompt: 'Create a product detail page with image gallery (main + thumbnails), product title, price, color/size selectors, add-to-cart button, description tabs, reviews section, and related products.' },
+      { label: 'Store Front', icon: '🏪', desc: 'Banner, categories, products', prompt: 'Create an e-commerce homepage with hero banner, category cards, featured products grid (8 items with image/name/price/rating), deals section with countdown timer, and newsletter signup.' },
+      { label: 'Checkout', icon: '💳', desc: 'Cart, shipping, payment', prompt: 'Create a checkout page with order summary sidebar, shipping form, payment form with card input, express checkout buttons (Apple Pay, Google Pay), promo code input, and order total breakdown.' },
     ]
   },
   {
     category: 'Creative',
     templates: [
-      { label: 'Coming Soon', icon: '⏳', prompt: 'Create a coming soon page with animated countdown timer, email signup form, progress bar, social links, and a mesmerizing animated gradient background.' },
-      { label: 'Event', icon: '🎪', prompt: 'Create an event/conference landing page with hero with date/location, speaker cards (6), schedule/agenda timeline, ticket tiers, venue map placeholder, sponsors grid, and FAQ.' },
-      { label: 'Newsletter', icon: '📬', prompt: 'Create an email newsletter template (HTML email compatible) with header logo, hero image, main article, 3 story cards, CTA button, social icons footer. 600px max-width, table-based layout.' },
+      { label: 'Coming Soon', icon: '⏳', desc: 'Countdown, email signup', prompt: 'Create a coming soon page with animated countdown timer, email signup form, progress bar, social links, and a mesmerizing animated gradient background.' },
+      { label: 'Event', icon: '🎪', desc: 'Speakers, schedule, tickets', prompt: 'Create an event/conference landing page with hero with date/location, speaker cards (6), schedule/agenda timeline, ticket tiers, venue map placeholder, sponsors grid, and FAQ.' },
+      { label: 'Newsletter', icon: '📬', desc: 'Header, articles, CTA', prompt: 'Create an email newsletter template (HTML email compatible) with header logo, hero image, main article, 3 story cards, CTA button, social icons footer. 600px max-width, table-based layout.' },
     ]
   },
 ];
@@ -691,10 +691,13 @@ Rules:
                           <button
                             key={t.label}
                             onClick={() => handleSend(t.prompt)}
-                            className="flex items-center gap-2 px-2.5 py-2 rounded-lg border border-chat-border hover:border-purple-500/40 hover:bg-purple-500/5 text-left transition-all group bg-surface-1"
+                            className="flex flex-col items-start gap-1 px-2.5 py-2 rounded-lg border border-chat-border hover:border-purple-500/40 hover:bg-purple-500/5 text-left transition-all group bg-surface-1"
                           >
-                            <span className="flex items-center justify-center w-7 h-7 rounded-md bg-purple-500/10 text-sm flex-shrink-0">{t.icon}</span>
-                            <span className="text-[11px] font-medium text-chat-text group-hover:text-white transition-colors leading-tight">{t.label}</span>
+                            <div className="flex items-center gap-2 w-full">
+                              <span className="flex items-center justify-center w-7 h-7 rounded-md bg-purple-500/10 text-sm flex-shrink-0">{t.icon}</span>
+                              <span className="text-[11px] font-medium text-chat-text group-hover:text-white transition-colors leading-tight flex-1">{t.label}</span>
+                            </div>
+                            <span className="text-[10px] text-chat-text-secondary/50 leading-tight">{t.desc}</span>
                           </button>
                         ))}
                       </div>
@@ -714,7 +717,7 @@ Rules:
                       onClick={() => setColorPalette(colorPalette?.name === p.name ? null : p)}
                       className="relative flex items-center justify-center transition-all"
                       style={{
-                        width: 22, height: 22, borderRadius: '50%',
+                        width: 28, height: 28, borderRadius: '50%',
                         background: p.name === 'Custom' ? 'conic-gradient(#7c3aed, #3b82f6, #10b981, #ef4444, #ec4899, #7c3aed)' : p.primary,
                         boxShadow: colorPalette?.name === p.name ? `0 0 0 2px var(--surface-0), 0 0 0 4px ${p.primary || '#7c3aed'}` : 'none',
                         border: colorPalette?.name === p.name ? 'none' : '1px solid rgba(255,255,255,0.1)',
@@ -726,6 +729,7 @@ Rules:
                     </button>
                   ))}
                 </div>
+                {colorPalette && <span className="text-[10px] text-chat-text-secondary mt-1">{colorPalette.name}</span>}
                 {/* Custom color inputs */}
                 {colorPalette?.name === 'Custom' && (
                   <div className="mt-2 grid grid-cols-2 gap-1.5">
@@ -850,8 +854,8 @@ Rules:
                 }
               }}
               placeholder={imagePreview ? 'Add instructions (optional)...' : currentHtml ? 'Describe changes or click an element...' : 'Describe your website...'}
-              className="flex-1 p-2.5 rounded-lg bg-surface-1 border border-chat-border text-chat-text text-sm resize-none outline-none focus:border-chat-accent placeholder-chat-text-secondary/50"
-              rows={2}
+              className="flex-1 p-2.5 rounded-lg bg-surface-1 border border-chat-border text-chat-text text-sm resize-none outline-none focus:border-chat-accent placeholder-chat-text-secondary/70"
+              rows={3}
               disabled={isGenerating}
             />
             <button
@@ -1084,11 +1088,21 @@ Rules:
                   />
                 </div>
               ) : (
-                <div className="flex items-center justify-center h-full text-chat-text-secondary text-sm">
+                <div className="flex items-center justify-center h-full">
                   <div className="text-center">
-                    <p className="text-2xl mb-2">🌐</p>
-                    <p>Your website will appear here</p>
-                    <p className="text-[10px] mt-1">Pick a template or describe what you want</p>
+                    <div className="empty-state mb-4">
+                      <svg className="w-16 h-16 mx-auto text-chat-text-secondary/30 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5.36-5.364l.707-.707M5.05 12H4m3.979-7.364l.707.707" />
+                      </svg>
+                    </div>
+                    <p className="text-sm text-chat-text font-medium mb-1">Your website will appear here</p>
+                    <p className="text-[10px] text-chat-text-secondary mb-4">Pick a template or describe what you want to build</p>
+                    <button
+                      onClick={() => textareaRef.current?.focus()}
+                      className="px-3 py-1.5 text-xs rounded-lg bg-purple-600 hover:bg-purple-700 text-white transition-colors"
+                    >
+                      Get Started
+                    </button>
                   </div>
                 </div>
               )}

@@ -9,6 +9,7 @@ Compares current content with previous snapshots stored in UnifiedMemory.
 Reports changes as diffs via LLM summarization.
 """
 
+import asyncio
 import hashlib
 import logging
 import time
@@ -61,9 +62,19 @@ class CollectorHand(Hand):
         iterations = 0
         artifacts = []
         changes_found = []
+        step_cb = context.get("step_callback")
+
+        # Capture token state at start
+        start_tokens = (
+            getattr(brain, '_session_input_tokens', 0) +
+            getattr(brain, '_session_output_tokens', 0)
+        )
+        start_cost = getattr(brain, '_session_cost_usd', 0.0)
 
         try:
-            # Step 1: Get watch targets
+            # Step 1: Find watch targets
+            if step_cb:
+                await step_cb(1, "Finding watch targets...")
             targets = self._get_watch_targets(context)
             if not targets:
                 return HandResult(
@@ -71,16 +82,22 @@ class CollectorHand(Hand):
                     success=True,
                     summary="No watch targets configured. Add targets via KG or world model.",
                     iterations=0,
+                    tokens_used=0,
+                    cost_usd=0.0,
+                    duration_seconds=time.time() - start,
                 )
 
             logger.info(f"[Collector] Monitoring {len(targets)} targets")
             search_tool = tools.get("web_search") or tools.get("brave_search")
 
-            # Step 2: Check each target (max 3)
+            # Step 2: Fetch each target (max 3)
             for target in targets[:3]:
                 target_url = target.get("url") or target.get("topic", "")
                 if not target_url:
                     continue
+
+                if step_cb:
+                    await step_cb(2, f"Fetching target: {target_url}...")
 
                 iterations += 1
 
@@ -110,6 +127,8 @@ class CollectorHand(Hand):
                     continue
 
                 # Step 3: Compare with previous snapshot
+                if step_cb:
+                    await step_cb(3, "Comparing snapshots...")
                 current_hash = hashlib.sha256(current_content.encode()).hexdigest()[:16]
                 prev_snapshot = self._get_snapshot(target_url)
 
@@ -118,6 +137,8 @@ class CollectorHand(Hand):
                     continue
 
                 # Content changed — generate diff summary
+                if step_cb:
+                    await step_cb(4, "Generating diff summaries...")
                 if prev_snapshot and brain:
                     diff_prompt = (
                         f"Compare these two versions of content from '{target_url}':\n\n"
@@ -126,7 +147,9 @@ class CollectorHand(Hand):
                         "Summarize the key changes in 2-3 sentences. Ignore formatting noise."
                     )
                     try:
-                        response = brain.think(diff_prompt, system=self.get_system_prompt())
+                        response = await asyncio.to_thread(
+                            lambda: brain.think(diff_prompt, system_prompt=self.get_system_prompt())
+                        )
                         diff_summary = str(response)[:500] if response else "Content changed (no summary available)"
                         iterations += 1
                     except Exception:
@@ -148,7 +171,7 @@ class CollectorHand(Hand):
                     "prev_hash": prev_snapshot.get("hash") if prev_snapshot else None,
                 })
 
-                # Step 4: Store updated snapshot
+                # Store updated snapshot
                 self._store_snapshot(target_url, current_content, current_hash)
 
             # Build summary
@@ -158,6 +181,15 @@ class CollectorHand(Hand):
             else:
                 summary = f"Monitored {len(targets[:3])} targets — no changes detected."
 
+            # Compute tokens and cost delta
+            end_tokens = (
+                getattr(brain, '_session_input_tokens', 0) +
+                getattr(brain, '_session_output_tokens', 0)
+            )
+            end_cost = getattr(brain, '_session_cost_usd', 0.0)
+            tokens_used = end_tokens - start_tokens
+            cost_used = end_cost - start_cost
+
             return HandResult(
                 hand_name="collector",
                 success=True,
@@ -165,9 +197,20 @@ class CollectorHand(Hand):
                 iterations=iterations,
                 artifacts=artifacts,
                 duration_seconds=time.time() - start,
+                tokens_used=tokens_used,
+                cost_usd=cost_used,
             )
 
         except Exception as e:
+            # Compute tokens and cost delta even on error
+            end_tokens = (
+                getattr(brain, '_session_input_tokens', 0) +
+                getattr(brain, '_session_output_tokens', 0)
+            )
+            end_cost = getattr(brain, '_session_cost_usd', 0.0)
+            tokens_used = end_tokens - start_tokens
+            cost_used = end_cost - start_cost
+
             return HandResult(
                 hand_name="collector",
                 success=False,
@@ -175,6 +218,8 @@ class CollectorHand(Hand):
                 iterations=iterations,
                 error=str(e),
                 duration_seconds=time.time() - start,
+                tokens_used=tokens_used,
+                cost_usd=cost_used,
             )
 
     def _get_watch_targets(self, context: dict) -> list[dict]:

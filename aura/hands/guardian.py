@@ -55,8 +55,11 @@ class GuardianHand(Hand):
         findings = []
         issues = []
         iterations = 0
+        step_cb = context.get("step_callback")
 
         # Check 1: Audit chain integrity
+        if step_cb:
+            await step_cb(1, "Verifying audit chain integrity...")
         try:
             from aura.security.audit_chain import get_audit_chain
             chain = get_audit_chain()
@@ -72,6 +75,8 @@ class GuardianHand(Hand):
             findings.append(f"Audit chain: could not verify ({e})")
 
         # Check 2: Scan recent memory for leaked secrets
+        if step_cb:
+            await step_cb(2, "Scanning for leaked secrets...")
         try:
             from aura.security.taint_tracker import scan_for_secrets
             # Check monologue logs for leaked secrets
@@ -105,7 +110,9 @@ class GuardianHand(Hand):
         except Exception as e:
             findings.append(f"Secret scan: could not run ({e})")
 
-        # Check 3: Resource usage trends
+        # Check 3: Hand health (resource usage trends)
+        if step_cb:
+            await step_cb(3, "Checking hand health...")
         try:
             from aura.hands.manager import get_hand_manager
             manager = get_hand_manager()
@@ -141,6 +148,8 @@ class GuardianHand(Hand):
             findings.append(f"Taint stats: could not check ({e})")
 
         # Check 4: Knowledge graph contradictions
+        if step_cb:
+            await step_cb(4, "Reviewing knowledge graph contradictions...")
         try:
             from aura.memory.kg_contradiction import get_contradictions
             contradictions = get_contradictions(limit=10)

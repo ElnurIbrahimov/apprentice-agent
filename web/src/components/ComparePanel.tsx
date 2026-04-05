@@ -286,7 +286,9 @@ function ModelPane({
             Generating…
           </div>
         ) : (
-          <p className="text-chat-text-secondary text-xs">Response will appear here</p>
+          <div className="empty-state">
+            <p className="empty-state-desc">Response will appear here</p>
+          </div>
         )}
         {state.streaming && state.output && (
           <span className="inline-block w-1.5 h-3 bg-chat-accent animate-pulse rounded-sm ml-0.5 align-middle" />

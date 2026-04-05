@@ -255,6 +255,21 @@ export function createGhostBar(): ContentModule & GhostBarAPI {
     });
   }
 
+  // ── Selection type detection ──────────────────────────────────────────────
+  function detectSelectionType(text: string): 'code' | 'url' | 'email' | 'text' {
+    const t = text.trim();
+    if (/^(https?:\/\/|www\.)\S+$/.test(t)) return 'url';
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t)) return 'email';
+    const codeScore = [
+      /[{}\[\]();]/.test(t),
+      /\b(function|const|let|var|def|class|import|return|if|for|while)\b/.test(t),
+      /=>|->|::/.test(t),
+      /^\s{2,}/m.test(t),
+    ].filter(Boolean).length;
+    if (codeScore >= 2) return 'code';
+    return 'text';
+  }
+
   // ── showTextBar ───────────────────────────────────────────────────────────
   function showTextBar(selectionRect: DOMRect, text: string): void {
     if (!storeRef) return;
@@ -274,8 +289,18 @@ export function createGhostBar(): ContentModule & GhostBarAPI {
     const top = selectionRect.bottom;
     applyBarStyle(barEl, selectionRect, top, GHOST_BAR.height, GLASS.bg);
 
-    // Determine actions — up to maxActionsPerRow, last slot reserved for 'more'
-    const actions = signal.actions.slice(0, GHOST_BAR.maxActionsPerRow - 1);
+    // Smart action detection based on selected content
+    const selType = detectSelectionType(text);
+    const SMART_ACTIONS: Record<string, string[]> = {
+      code:  ['explain', 'ask', 'copy'],
+      url:   ['ask', 'summarize', 'copy'],
+      email: ['ask', 'copy'],
+      text:  [],
+    };
+    const baseActions = SMART_ACTIONS[selType].length
+      ? SMART_ACTIONS[selType]
+      : signal.actions;
+    const actions = baseActions.slice(0, GHOST_BAR.maxActionsPerRow - 1);
 
     for (const action of actions) {
       barEl.appendChild(makeActionButton(action));

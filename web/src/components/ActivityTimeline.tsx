@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ChevronDownIcon } from '@heroicons/react/24/outline';
+import { ChevronDownIcon, ClockIcon } from '@heroicons/react/24/outline';
 import { usePolling } from '../hooks/usePolling';
 import type { ActivityEvent } from '../types';
 
@@ -247,9 +247,10 @@ export function ActivityTimeline() {
       {/* Event list */}
       <div className="flex-1 overflow-y-auto px-3 py-2 space-y-0.5">
         {events.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-32 text-chat-text-secondary/40">
-            <p className="text-sm">No activity yet</p>
-            <p className="text-xs mt-1">Events will appear as AURA acts</p>
+          <div className="empty-state">
+            <ClockIcon className="empty-state-icon" />
+            <p className="empty-state-title">No activity yet</p>
+            <p className="empty-state-desc">Events will appear as AURA processes tasks</p>
           </div>
         ) : (
           <>

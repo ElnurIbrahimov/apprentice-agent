@@ -3,9 +3,9 @@ import {
   SparklesIcon as SparklesOutline,
   ArrowDownTrayIcon, ClipboardDocumentIcon, CheckIcon,
   TrashIcon, MagnifyingGlassIcon, ChevronDownIcon, ChevronUpIcon,
-  ArrowPathIcon,
+  ArrowPathIcon, SparklesIcon,
 } from '@heroicons/react/24/outline';
-import { SparklesIcon } from '@heroicons/react/24/solid';
+import { SparklesIcon as SparklesSolid } from '@heroicons/react/24/solid';
 import { copyImage } from '../utils/clipboard';
 
 /* ── Types ── */
@@ -290,7 +290,7 @@ export function ImageGenPanel() {
       <div className="flex flex-col md:w-[360px] md:min-w-[280px] md:border-r border-b md:border-b-0 border-chat-border flex-shrink-0 max-md:max-h-[50vh] max-md:overflow-y-auto bg-surface-0">
         <div className="px-4 py-3 border-b border-chat-border flex-shrink-0">
           <h2 className="text-sm font-semibold text-chat-text flex items-center gap-2">
-            <SparklesIcon className="w-4 h-4 text-purple-400" />
+            <SparklesSolid className="w-4 h-4 text-purple-400" />
             Image Generation
           </h2>
         </div>
@@ -493,10 +493,10 @@ export function ImageGenPanel() {
             </div>
           </div>
         ) : (
-          <div className="text-center text-chat-text-secondary">
-            <div className="text-4xl mb-3">🎨</div>
-            <p className="text-sm">Generated images will appear here</p>
-            <p className="text-[10px] mt-1">Enter a prompt and click Generate</p>
+          <div className="empty-state">
+            <SparklesIcon className="empty-state-icon" />
+            <p className="empty-state-title">No images generated yet</p>
+            <p className="empty-state-desc">Describe what you want to see and click Generate</p>
           </div>
         )}
       </div>

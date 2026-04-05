@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { usePolling } from '../hooks/usePolling';
-import type { HandStats, HandHistoryEntry, ApprovalRequest } from '../types';
+import type { HandStats, HandHistoryEntry, ApprovalRequest, HandTemplate } from '../types';
 
 // ── State config ────────────────────────────────────────────────────────────
 
@@ -27,9 +27,10 @@ function formatRelTime(isoOrTs: string | number | null): string {
 
 // ── HandCard ────────────────────────────────────────────────────────────────
 
-function HandCard({ hand, onAction }: {
+function HandCard({ hand, onAction, onDeleteHand }: {
   hand: HandStats;
   onAction: (name: string, action: string) => void;
+  onDeleteHand: (name: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [handHistory, setHandHistory] = useState<HandHistoryEntry[]>([]);
@@ -105,6 +106,12 @@ function HandCard({ hand, onAction }: {
             >
               Run Now
             </button>
+            {hand.is_custom && (
+              <button onClick={() => onDeleteHand(hand.name)}
+                className="px-3 py-1 text-[11px] rounded bg-red-500/20 text-red-300 hover:bg-red-500/30">
+                Delete
+              </button>
+            )}
             {hand.state === 'inactive' || hand.state === 'cooldown' ? (
               <button
                 onClick={() => onAction(hand.name, 'activate')}
@@ -187,6 +194,14 @@ export default function HandsDashboard() {
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
   const [history, setHistory] = useState<HandHistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createDesc, setCreateDesc] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [templates, setTemplates] = useState<HandTemplate[]>([]);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [templateVars, setTemplateVars] = useState<Record<string, string>>({});
+  const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
 
   const fetchAll = useCallback(async () => {
     try {
@@ -231,6 +246,58 @@ export default function HandsDashboard() {
     }
   }, [fetchAll]);
 
+  const handleCreate = async () => {
+    setCreating(true); setCreateError(null);
+    try {
+      const res = await fetch('/api/hands/create', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ description: createDesc }),
+      });
+      if (res.ok) { setShowCreateModal(false); setCreateDesc(''); fetchAll(); }
+      else { const d = await res.json(); setCreateError(d.detail || 'Failed'); }
+    } catch { setCreateError('Network error'); }
+    finally { setCreating(false); }
+  };
+
+  const handleFromTemplate = async (name: string) => {
+    try {
+      const res = await fetch('/api/hands/from-template', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ template_name: name, variables: templateVars }),
+      });
+      if (res.ok) { setShowTemplates(false); setSelectedTemplate(null); setTemplateVars({}); fetchAll(); }
+    } catch {}
+  };
+
+  const handleDeleteHand = async (name: string) => {
+    if (!confirm(`Delete hand "${name}"?`)) return;
+    await fetch(`/api/hands/${name}`, { method: 'DELETE' });
+    fetchAll();
+  };
+
+  const fetchTemplates = async () => {
+    try {
+      const res = await fetch('/api/hands/templates');
+      if (res.ok) { const d = await res.json(); setTemplates(d.templates || []); }
+    } catch {}
+  };
+
+  // Live action trace from WebSocket
+  const [liveTrace, setLiveTrace] = useState<Array<{ hand: string; step: number; description: string; timestamp: number }>>([]);
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      setLiveTrace(prev => [...prev.slice(-19), { hand: d.hand, step: d.step, description: d.description, timestamp: d.timestamp }]);
+    };
+    const clearHandler = () => setLiveTrace([]);
+    document.addEventListener('aura:action_trace', handler);
+    document.addEventListener('aura:hand_event', clearHandler);
+    return () => {
+      document.removeEventListener('aura:action_trace', handler);
+      document.removeEventListener('aura:hand_event', clearHandler);
+    };
+  }, []);
+
   if (loading) {
     return (
       <div className="h-full flex items-center justify-center">
@@ -247,6 +314,18 @@ export default function HandsDashboard() {
         <span className="text-[10px] text-chat-text-secondary/40">
           {hands.length} registered · {hands.filter(h => h.state === 'active' || h.state === 'running').length} active
         </span>
+      </div>
+
+      {/* Create / Template buttons */}
+      <div className="flex gap-2">
+        <button onClick={() => { fetchTemplates(); setShowTemplates(true); }}
+          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs bg-chat-accent text-white hover:opacity-90">
+          Templates
+        </button>
+        <button onClick={() => setShowCreateModal(true)}
+          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs border border-chat-border text-chat-text-secondary hover:text-chat-text">
+          + Custom
+        </button>
       </div>
 
       {/* Stats summary */}
@@ -274,6 +353,23 @@ export default function HandsDashboard() {
         );
       })()}
 
+      {/* Live execution trace */}
+      {liveTrace.length > 0 && (
+        <div className="rounded-lg border border-blue-500/20 bg-blue-500/5 p-3">
+          <p className="text-[11px] text-blue-400/80 font-medium mb-2">Live Trace</p>
+          <div className="space-y-1 max-h-32 overflow-y-auto">
+            {liveTrace.map((t, i) => (
+              <div key={i} className="flex items-center gap-2 text-[11px] text-chat-text-secondary/70">
+                <span className="text-blue-400/50 font-mono w-4 text-right">{t.step}</span>
+                <span className="text-chat-text-secondary capitalize">{t.hand}</span>
+                <span className="text-chat-text-secondary/30">—</span>
+                <span className="truncate">{t.description}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Approval Queue */}
       {approvals.length > 0 && (
         <div className="space-y-2">
@@ -294,7 +390,7 @@ export default function HandsDashboard() {
           </div>
         ) : (
           hands.map(hand => (
-            <HandCard key={hand.name} hand={hand} onAction={handleAction} />
+            <HandCard key={hand.name} hand={hand} onAction={handleAction} onDeleteHand={handleDeleteHand} />
           ))
         )}
       </div>
@@ -325,6 +421,77 @@ export default function HandsDashboard() {
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* Create Custom Hand Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-xl p-6 border border-chat-border" style={{background: 'var(--surface-1)'}}>
+            <h3 className="text-sm font-semibold text-chat-text mb-3">Create Custom Hand</h3>
+            <textarea value={createDesc} onChange={e => setCreateDesc(e.target.value)}
+              placeholder="e.g. Monitor Hacker News for AI papers and summarize them daily"
+              className="w-full p-3 rounded-lg border border-chat-border text-sm text-chat-text resize-none h-24 outline-none focus:border-chat-accent text-[16px] sm:text-sm"
+              style={{background: 'var(--surface-2)'}} />
+            {createError && <p className="text-xs text-red-400 mt-2">{createError}</p>}
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setShowCreateModal(false)} className="px-4 py-2 text-xs text-chat-text-secondary">Cancel</button>
+              <button onClick={handleCreate} disabled={!createDesc.trim() || creating}
+                className="px-4 py-2 text-xs rounded-lg bg-chat-accent text-white disabled:opacity-40">
+                {creating ? 'Creating...' : 'Create Hand'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Template Picker Modal */}
+      {showTemplates && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-xl p-6 border border-chat-border" style={{background: 'var(--surface-1)'}}>
+            <h3 className="text-sm font-semibold text-chat-text mb-3">Hand Templates</h3>
+            {templates.length === 0 ? (
+              <p className="text-xs text-chat-text-secondary/60 py-4 text-center">No templates available.</p>
+            ) : (
+              <div className="grid grid-cols-1 gap-2 max-h-72 overflow-y-auto mb-4">
+                {templates.map(t => (
+                  <button
+                    key={t.name}
+                    onClick={() => setSelectedTemplate(selectedTemplate === t.name ? null : t.name)}
+                    className={`text-left rounded-lg border px-4 py-3 transition-colors ${selectedTemplate === t.name ? 'border-chat-accent bg-chat-accent/10' : 'border-chat-border/30 hover:border-chat-border'}`}
+                  >
+                    <p className="text-xs font-medium text-chat-text capitalize">{t.name}</p>
+                    <p className="text-[11px] text-chat-text-secondary/60 mt-0.5">{t.description}</p>
+                    {t.trigger_on_drive && (
+                      <p className="text-[10px] text-chat-text-secondary/40 mt-1">Drive: {t.trigger_on_drive}</p>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+            {selectedTemplate && (
+              <div className="mb-4">
+                <p className="text-[11px] text-chat-text-secondary/60 mb-2">Variables (optional)</p>
+                <input
+                  type="text"
+                  placeholder="key=value, e.g. topic=AI safety"
+                  value={templateVars['__raw'] || ''}
+                  onChange={e => setTemplateVars({ __raw: e.target.value })}
+                  className="w-full p-2 rounded-lg border border-chat-border text-xs text-chat-text outline-none focus:border-chat-accent"
+                  style={{background: 'var(--surface-2)'}}
+                />
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <button onClick={() => { setShowTemplates(false); setSelectedTemplate(null); setTemplateVars({}); }}
+                className="px-4 py-2 text-xs text-chat-text-secondary">Cancel</button>
+              <button onClick={() => selectedTemplate && handleFromTemplate(selectedTemplate)}
+                disabled={!selectedTemplate}
+                className="px-4 py-2 text-xs rounded-lg bg-chat-accent text-white disabled:opacity-40">
+                Use Template
+              </button>
+            </div>
           </div>
         </div>
       )}

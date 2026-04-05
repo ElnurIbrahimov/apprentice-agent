@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { XMarkIcon } from '@heroicons/react/24/outline';
 import ReactMarkdown from 'react-markdown';
+import { haptic } from '../utils/haptics';
 
 const ACTION_COLORS: Record<string, string> = {
   notify: '#3b82f6',    // blue
@@ -36,6 +37,10 @@ export function ProactiveCard({ action, content, trigger, onDismiss, onAction }:
   const startTimeRef = useRef(Date.now());
   const rafRef = useRef<number>(0);
 
+  // Swipe-to-dismiss
+  const [swipeX, setSwipeX] = useState(0);
+  const swipeStartRef = useRef(0);
+
   const accentColor = ACTION_COLORS[action] || '#8b5cf6';
   const icon = ACTION_ICONS[action] || '💭';
 
@@ -44,9 +49,13 @@ export function ProactiveCard({ action, content, trigger, onDismiss, onAction }:
   onDismissRef.current = onDismiss;
 
   const handleDismiss = useCallback(() => {
+    haptic(10);
     setExiting(true);
     dismissTimerRef.current = setTimeout(() => onDismissRef.current(), 300);
   }, []);
+
+  // Haptic on mount
+  useEffect(() => { haptic(25); }, []);
 
   // Cleanup timers on unmount
   useEffect(() => {
@@ -78,7 +87,15 @@ export function ProactiveCard({ action, content, trigger, onDismiss, onAction }:
   return (
     <div
       className={`proactive-card ${exiting ? 'proactive-card-exit' : ''}`}
-      style={{ '--accent': accentColor } as React.CSSProperties}
+      style={{
+        '--accent': accentColor,
+        transform: swipeX ? `translateX(${swipeX}px)` : undefined,
+        transition: swipeX ? 'none' : 'transform 0.2s ease, opacity 0.3s ease',
+        opacity: swipeX ? 1 - Math.abs(swipeX) / 120 : undefined,
+      } as React.CSSProperties}
+      onTouchStart={(e) => { swipeStartRef.current = e.touches[0].clientX; }}
+      onTouchMove={(e) => { setSwipeX(e.touches[0].clientX - swipeStartRef.current); }}
+      onTouchEnd={() => { if (Math.abs(swipeX) > 60) handleDismiss(); else setSwipeX(0); }}
     >
       {/* Left accent stripe */}
       <div

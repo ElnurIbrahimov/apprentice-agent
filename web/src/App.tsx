@@ -29,6 +29,7 @@ const AMEMPanel = lazy(() => import('./components/AMEMPanel').then(m => ({ defau
 const ReasoningTreePanel = lazy(() => import('./components/ReasoningTreePanel').then(m => ({ default: m.ReasoningTreePanel })));
 const ActivityTimeline = lazy(() => import('./components/ActivityTimeline').then(m => ({ default: m.ActivityTimeline })));
 const HandsDashboard = lazy(() => import('./components/HandsDashboard'));
+const TaskQueuePanel = lazy(() => import('./components/TaskQueuePanel').then(m => ({ default: m.TaskQueuePanel })));
 const SettingsPage = lazy(() => import('./components/SettingsPage').then(m => ({ default: m.SettingsPage })));
 const CodeInterpreter = lazy(() => import('./components/CodeInterpreter').then(m => ({ default: m.CodeInterpreter })));
 const WebCreator = lazy(() => import('./components/WebCreator').then(m => ({ default: m.WebCreator })));
@@ -64,7 +65,7 @@ const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: 
 ];
 
 type CreateSubTab = 'code' | 'webcreator' | 'image';
-type InsightsSubTab = 'monitor' | 'activity' | 'hands' | 'advanced';
+type InsightsSubTab = 'monitor' | 'activity' | 'hands' | 'queue' | 'advanced';
 type ToolsSubTab = 'launcher' | 'system' | ToolId;
 
 function TabSkeleton() {
@@ -100,7 +101,7 @@ function SubTabBar({ tabs, active, onChange }: { tabs: { id: string; label: stri
 }
 
 function App() {
-  const { sidebarOpen, setSidebarOpen, toggleSidebar, conversations } = useChatStore();
+  const { sidebarOpen, setSidebarOpen, toggleSidebar, conversations, connectionStatus } = useChatStore();
   const { settings } = useSettingsStore();
   const { toasts, removeToast } = useToastStore();
   const [isMobile, setIsMobile] = useState(false);
@@ -303,6 +304,7 @@ function App() {
                 { id: 'monitor', label: 'Monitor' },
                 { id: 'activity', label: 'Activity' },
                 { id: 'hands', label: 'Hands' },
+                { id: 'queue', label: 'Queue' },
                 { id: 'advanced', label: 'Advanced' },
               ]}
               active={insightsSubTab}
@@ -319,6 +321,7 @@ function App() {
               )}
               {insightsSubTab === 'activity' && <ActivityTimeline />}
               {insightsSubTab === 'hands' && <HandsDashboard />}
+              {insightsSubTab === 'queue' && <TaskQueuePanel />}
               {insightsSubTab === 'advanced' && (
                 <div className="h-full overflow-y-auto p-4 space-y-4 tab-panel-scroll">
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -358,6 +361,33 @@ function App() {
     <div className="app-shell">
       {/* Toast notifications */}
       <ToastContainer toasts={toasts} onDismiss={removeToast} />
+
+      {/* Offline indicator banner */}
+      {connectionStatus !== 'connected' && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`fixed top-0 inset-x-0 z-[60] py-1.5 text-center text-xs font-medium transition-all duration-300 ${
+            connectionStatus === 'connecting'
+              ? 'bg-yellow-500/90 text-black'
+              : 'bg-red-600/90 text-white'
+          }`}
+        >
+          {connectionStatus === 'connecting' ? (
+            <span className="flex items-center justify-center gap-1">
+              Reconnecting
+              <span className="inline-flex gap-0.5">
+                <span className="animate-bounce" style={{ animationDelay: '0ms' }}>.</span>
+                <span className="animate-bounce" style={{ animationDelay: '150ms' }}>.</span>
+                <span className="animate-bounce" style={{ animationDelay: '300ms' }}>.</span>
+              </span>
+            </span>
+          ) : (
+            'Connection lost'
+          )}
+        </div>
+      )}
+
       {/* Sidebar - Desktop: fixed, Mobile: overlay */}
       <aside
         className={`

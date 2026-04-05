@@ -51,6 +51,18 @@ class HandManager:
         self._approval_events: dict[str, threading.Event] = {}
         self._approval_lock = threading.Lock()
 
+        # Event loop reference for thread-safe broadcast (set by API at startup)
+        self._approval_loop: Optional[asyncio.AbstractEventLoop] = None
+
+        # Hand-to-hand trigger support
+        self._event_bus = None
+        self._pending_triggers: dict[str, dict] = {}
+        self._triggers_lock = threading.Lock()
+
+        # Mid-execution command support
+        self._pending_commands: dict[str, dict] = {}
+        self._commands_lock = threading.Lock()
+
     def register(self, hand: Hand):
         """Register a Hand with the manager."""
         with self._lock:
@@ -151,6 +163,17 @@ class HandManager:
             name, tool_name, args or {}
         )
 
+        async def _step_cb(step: int, description: str):
+            try:
+                from api.routes.chat import broadcast_action_trace
+                loop = asyncio.get_running_loop()
+                loop.create_task(broadcast_action_trace(name, step, description))
+            except Exception:
+                pass
+
+        run_context["step_callback"] = _step_cb
+        run_context["check_command"] = lambda: self.check_command(name)
+
         # State transition
         hand.state = HandState.RUNNING
         start_time = time.time()
@@ -231,6 +254,20 @@ class HandManager:
             # Notify listeners (API WebSocket, Telegram, etc.)
             self._notify(result)
 
+            # Publish hand_completed event for hand-to-hand triggers
+            if self._event_bus is not None:
+                try:
+                    self._event_bus.publish("hand_completed", {
+                        "hand_name": name,
+                        "success": result.success,
+                        "result": result,
+                    })
+                except Exception as e:
+                    logger.debug(f"[HandManager] Event bus publish failed: {e}")
+
+            # Queue hand-to-hand triggered hands
+            self._on_hand_event(name, result.success)
+
             return result
 
         except Exception as e:
@@ -277,8 +314,16 @@ class HandManager:
         """
         # Find eligible Hands
         eligible = []
+        with self._triggers_lock:
+            pending_trigger_names = set(self._pending_triggers.keys())
         with self._lock:
             for hand in self._hands.values():
+                # Hand-to-hand triggers have highest priority (200)
+                if hand.name in pending_trigger_names and hand.state in (
+                    HandState.ACTIVE, HandState.COOLDOWN
+                ):
+                    eligible.append((200, hand))
+                    continue
                 if hand.can_run(idle_seconds, drive_urgencies):
                     # Priority: drive-triggered > scheduled > cooldown
                     priority = 0
@@ -297,7 +342,17 @@ class HandManager:
         eligible.sort(key=lambda x: x[0], reverse=True)
         _, chosen = eligible[0]
 
-        logger.info(f"[HandManager] Triggering hand: {chosen.name} (idle={idle_seconds:.0f}s)")
+        # Consume pending trigger if this was a hand-to-hand trigger
+        with self._triggers_lock:
+            trigger_info = self._pending_triggers.pop(chosen.name, None)
+
+        if trigger_info:
+            logger.info(
+                f"[HandManager] Triggering hand: {chosen.name} "
+                f"(hand-to-hand trigger from {trigger_info['triggered_by']})"
+            )
+        else:
+            logger.info(f"[HandManager] Triggering hand: {chosen.name} (idle={idle_seconds:.0f}s)")
 
         # Run in a dedicated event loop on a background thread to avoid blocking
         def _run_async():
@@ -346,6 +401,21 @@ class HandManager:
         logger.info("[HandManager] Scheduler stopped")
 
     # ====================================================================
+    # Event loop management (for thread-safe async operations)
+    # ====================================================================
+
+    def set_event_loop(self, loop: asyncio.AbstractEventLoop):
+        """Set the event loop reference for thread-safe broadcast operations.
+
+        Called by API at startup to enable approval request broadcasting from threads.
+        """
+        self._approval_loop = loop
+
+    def set_event_bus(self, bus):
+        """Set the event bus for publishing hand_completed events (hand-to-hand triggers)."""
+        self._event_bus = bus
+
+    # ====================================================================
     # Notification callback
     # ====================================================================
 
@@ -360,6 +430,35 @@ class HandManager:
                 self._notify_callback(result)
             except Exception as e:
                 logger.debug(f"[HandManager] Notify callback error: {e}")
+
+        # Broadcast proactive card for notable findings
+        if result.success and result.summary and len(result.summary) > 50:
+            try:
+                self._broadcast_finding_card(result)
+            except Exception as e:
+                logger.debug(f"[HandManager] Finding card broadcast failed: {e}")
+
+    def _broadcast_finding_card(self, result: HandResult):
+        """Broadcast a proactive card for notable hand findings."""
+        if not self._approval_loop or self._approval_loop.is_closed():
+            return
+        try:
+            from api.routes.chat import _broadcast_json
+            import time as _time
+            payload = {
+                "type": "proactive",
+                "content": f"**{result.hand_name}** found something:\n\n{result.summary[:300]}",
+                "action": "notify",
+                "priority": "MEDIUM",
+                "timestamp": _time.time(),
+                "metadata": {"source": "hand", "hand_name": result.hand_name},
+            }
+            self._approval_loop.call_soon_threadsafe(
+                self._approval_loop.create_task,
+                _broadcast_json(payload),
+            )
+        except Exception as e:
+            logger.debug(f"[HandManager] Proactive card broadcast failed: {e}")
 
     # ====================================================================
     # Approval workflow
@@ -449,29 +548,105 @@ class HandManager:
             ]
 
     def _broadcast_approval_request(self, request: ApprovalRequest):
-        """Broadcast an approval request to WebSocket clients."""
+        """Broadcast an approval request to WebSocket clients.
+
+        Uses thread-safe event loop scheduling. Requires set_event_loop() to be called
+        at API startup (in main.py lifespan handler).
+        """
+        if not self._approval_loop or self._approval_loop.is_closed():
+            logger.debug("[HandManager] Event loop not available for approval broadcast (API not started)")
+            return
+
         try:
-            import asyncio as _aio
             from api.routes.chat import broadcast_hand_approval_request
-            loop = _aio.get_event_loop()
-            if loop.is_running():
-                loop.create_task(broadcast_hand_approval_request({
-                    "request_id": request.request_id,
-                    "hand_name": request.hand_name,
-                    "tool_name": request.tool_name,
-                    "args": request.args,
-                    "timestamp": request.timestamp,
-                }))
-            else:
-                _aio.run(broadcast_hand_approval_request({
-                    "request_id": request.request_id,
-                    "hand_name": request.hand_name,
-                    "tool_name": request.tool_name,
-                    "args": request.args,
-                    "timestamp": request.timestamp,
-                }))
+
+            payload = {
+                "request_id": request.request_id,
+                "hand_name": request.hand_name,
+                "tool_name": request.tool_name,
+                "args": request.args,
+                "timestamp": request.timestamp,
+            }
+
+            # Schedule the broadcast coroutine on the main event loop from this thread
+            self._approval_loop.call_soon_threadsafe(
+                self._approval_loop.create_task,
+                broadcast_hand_approval_request(payload),
+            )
         except Exception as e:
             logger.debug(f"[HandManager] WebSocket approval broadcast failed: {e}")
+
+    # ====================================================================
+    # Hand-to-hand trigger support
+    # ====================================================================
+
+    def _on_hand_event(self, completed_hand_name: str, success: bool):
+        """Queue hands that are triggered by the completion of another hand."""
+        with self._lock:
+            for hand in self._hands.values():
+                if hand.manifest.trigger_on_hand != completed_hand_name:
+                    continue
+                filter_val = hand.manifest.trigger_on_hand_filter
+                if filter_val == "success" and not success:
+                    continue
+                if filter_val == "failure" and success:
+                    continue
+                with self._triggers_lock:
+                    self._pending_triggers[hand.name] = {
+                        "triggered_by": completed_hand_name,
+                        "success": success,
+                        "queued_at": time.time(),
+                    }
+                logger.info(
+                    f"[HandManager] Queued trigger: {hand.name} "
+                    f"(triggered by {completed_hand_name}, success={success})"
+                )
+
+    # ====================================================================
+    # Adaptive scheduling
+    # ====================================================================
+
+    def record_finding_referenced(self, hand_name: str):
+        """Signal that a hand's finding was referenced/useful — adjust adaptive interval."""
+        with self._lock:
+            hand = self._hands.get(hand_name)
+            if hand:
+                hand._adaptive_referenced_count += 1
+                # More references → run more often (reduce multiplier, floor 0.5)
+                hand._adaptive_interval_multiplier = max(
+                    0.5,
+                    hand._adaptive_interval_multiplier * 0.9,
+                )
+                logger.debug(
+                    f"[HandManager] {hand_name} referenced — "
+                    f"adaptive_multiplier={hand._adaptive_interval_multiplier:.2f}"
+                )
+
+    # ====================================================================
+    # Mid-execution command support
+    # ====================================================================
+
+    def send_command(self, hand_name: str, command: str, new_goal: Optional[str] = None):
+        """Send a mid-execution command to a running hand (e.g., 'stop', 'pivot').
+
+        The hand reads this via check_command() in its run_context.
+        """
+        with self._commands_lock:
+            self._pending_commands[hand_name] = {
+                "command": command,
+                "new_goal": new_goal,
+                "sent_at": time.time(),
+            }
+        logger.info(f"[HandManager] Command sent to {hand_name}: {command}")
+
+    def check_command(self, hand_name: str) -> Optional[dict]:
+        """Check for a pending command for this hand and consume it (one-shot).
+
+        Called from inside run_context['check_command'] during hand execution.
+        Returns the command dict or None.
+        """
+        with self._commands_lock:
+            return self._pending_commands.pop(hand_name, None)
 
 
 # Global singleton

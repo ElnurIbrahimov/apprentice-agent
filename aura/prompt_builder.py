@@ -489,6 +489,18 @@ class SystemPromptBuilder:
                 for m in um_results:
                     ts = m.metadata.get("created_at", "")[:10] if m.metadata.get("created_at") else ""
                     memory_section += f"- [{ts}] {m.content[:120]}\n"
+
+            # Track hand finding references for adaptive scheduling
+            try:
+                from aura.hands.manager import get_hand_manager
+                mgr = get_hand_manager()
+                for m in um_results:
+                    hand_name = m.metadata.get("hand") if hasattr(m, 'metadata') and m.metadata else None
+                    if hand_name:
+                        mgr.record_finding_referenced(hand_name)
+            except Exception:
+                pass
+
             self._episodic_cache = memory_section
             self._episodic_cache_ts = _now
             self._episodic_cache_prompt = prompt

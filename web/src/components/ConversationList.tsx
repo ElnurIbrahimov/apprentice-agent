@@ -66,6 +66,13 @@ export function ConversationList() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const confirmDeleteTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Swipe-to-delete state
+  const [swipingId, setSwipingId] = useState<string | null>(null);
+  const [swipeDelta, setSwipeDelta] = useState(0);
+  const swipeStartRef = useRef<{ x: number; y: number; id: string } | null>(null);
+  const SWIPE_THRESHOLD = 80;
+  const SWIPE_DELETE = 160;
   const [editTitle, setEditTitle] = useState('');
   const [contextMenuId, setContextMenuId] = useState<string | null>(null);
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
@@ -130,6 +137,20 @@ export function ConversationList() {
     document.addEventListener('aura:new-chat', handler);
     return () => document.removeEventListener('aura:new-chat', handler);
   }, []);
+
+  // Extension ↔ Web UI conversation sync
+  const syncDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const handler = () => {
+      if (syncDebounceRef.current) clearTimeout(syncDebounceRef.current);
+      syncDebounceRef.current = setTimeout(fetchConversations, 300);
+    };
+    document.addEventListener('aura:conv-sync', handler);
+    return () => {
+      document.removeEventListener('aura:conv-sync', handler);
+      if (syncDebounceRef.current) clearTimeout(syncDebounceRef.current);
+    };
+  }, [fetchConversations]);
 
   // Message-level search with 300ms debounce
   useEffect(() => {
@@ -370,11 +391,44 @@ export function ConversationList() {
                 {items.map((conv) => (
                   <div
                     key={conv.id}
+                    className="relative overflow-hidden rounded-lg"
+                    onTouchStart={(e) => {
+                      if (window.innerWidth >= 640) return;
+                      swipeStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, id: conv.id };
+                    }}
+                    onTouchMove={(e) => {
+                      const s = swipeStartRef.current;
+                      if (!s || s.id !== conv.id) return;
+                      const dx = s.x - e.touches[0].clientX;
+                      const dy = Math.abs(e.touches[0].clientY - s.y);
+                      if (dy > 30) { swipeStartRef.current = null; return; }
+                      if (dx > 10) { setSwipingId(conv.id); setSwipeDelta(Math.min(dx, SWIPE_DELETE + 20)); }
+                    }}
+                    onTouchEnd={() => {
+                      if (swipingId === conv.id && swipeDelta >= SWIPE_DELETE) {
+                        handleDelete(conv.id);
+                      }
+                      swipeStartRef.current = null;
+                      setSwipingId(null);
+                      setSwipeDelta(0);
+                    }}
+                  >
+                    {/* Delete backdrop */}
+                    {swipingId === conv.id && (
+                      <div className="absolute inset-y-0 right-0 w-20 flex items-center justify-center bg-red-600/80 rounded-r-lg">
+                        <TrashIcon className="w-4 h-4 text-white" />
+                      </div>
+                    )}
+                  <div
                     onClick={() => handleSwitch(conv.id)}
                     onContextMenu={(e) => handleContextMenu(e, conv.id)}
                     role="button"
                     tabIndex={0}
-                    className={`group flex items-center gap-2 px-2.5 py-3 rounded-lg cursor-pointer transition-all duration-150 ${
+                    style={{
+                      transform: swipingId === conv.id ? `translateX(-${Math.min(swipeDelta, SWIPE_THRESHOLD)}px)` : 'translateX(0)',
+                      transition: swipingId === conv.id ? 'none' : 'transform 0.2s ease',
+                    }}
+                    className={`group flex items-center gap-2 px-2.5 py-3 cursor-pointer transition-colors duration-150 ${
                       conv.id === currentConversationId
                         ? 'bg-purple-600/20 border border-purple-500/30'
                         : 'hover:bg-chat-assistant/30 border border-transparent'
@@ -453,6 +507,7 @@ export function ConversationList() {
                         </button>
                       </div>
                     )}
+                  </div>
                   </div>
                 ))}
               </div>

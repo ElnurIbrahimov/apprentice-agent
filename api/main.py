@@ -226,6 +226,9 @@ async def lifespan(app: FastAPI):
 
             _hands_loop = asyncio.get_running_loop()
 
+            # Set the event loop reference for thread-safe approval request broadcasting
+            _hands_mgr.set_event_loop(_hands_loop)
+
             def _on_hand_result(result):
                 # Broadcast to WebSocket clients
                 try:
@@ -245,7 +248,15 @@ async def lifespan(app: FastAPI):
                     pass
 
             _hands_mgr.set_notify_callback(_on_hand_result)
-            logger.info("[API] HandManager notification callback wired")
+            logger.info("[API] HandManager notification callback wired (with approval loop)")
+
+            # Wire event bus for hand-to-hand triggers
+            try:
+                if hasattr(daemon, 'event_bus') and daemon.event_bus:
+                    _hands_mgr.set_event_bus(daemon.event_bus)
+                    logger.info("[API] HandManager event bus wired")
+            except Exception as e:
+                logger.debug(f"[API] Hand event bus wiring failed: {e}")
         except Exception as e:
             logger.debug(f"[API] HandManager callback wiring failed: {e}")
 

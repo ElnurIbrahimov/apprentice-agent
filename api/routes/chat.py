@@ -132,6 +132,19 @@ async def broadcast_hand_event(result_dict: dict) -> None:
     await _broadcast_json(payload)
 
 
+async def broadcast_action_trace(hand_name: str, step: int, description: str) -> None:
+    """Push a live step update during Hand execution."""
+    import time as _time
+    payload = {
+        "type": "action_trace",
+        "hand": hand_name,
+        "step": step,
+        "description": description,
+        "timestamp": _time.time(),
+    }
+    await _broadcast_json(payload)
+
+
 async def broadcast_hand_approval_request(request_dict: dict) -> None:
     """Push a Hand approval request to all connected WebSocket clients."""
     payload = {
@@ -783,6 +796,20 @@ async def websocket_chat(websocket: WebSocket):
                 logger.info("[WebSocket] Stop requested by client")
                 stop_generation.set()
                 await websocket.send_json({"type": "stopped"})
+                continue
+
+            # Handle hand command (stop/redirect)
+            if isinstance(msg, dict) and msg.get("type") == "hand_command":
+                hand_name = msg.get("hand", "")
+                command = msg.get("command", "")
+                new_goal = msg.get("new_goal")
+                if command in ("stop", "redirect") and hand_name:
+                    try:
+                        from aura.hands.manager import get_hand_manager
+                        get_hand_manager().send_command(hand_name, command, new_goal)
+                        await websocket.send_json({"type": "hand_command_ack", "hand": hand_name, "command": command})
+                    except Exception as e:
+                        await websocket.send_json({"type": "error", "error": str(e)})
                 continue
 
             # Clear stop flag for new messages

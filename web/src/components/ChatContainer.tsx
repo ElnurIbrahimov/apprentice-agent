@@ -182,6 +182,12 @@ export function ChatContainer() {
   const drawerActiveRef = useRef(false); // whether this swipe is a drawer gesture
   const drawerTranslateXRef = useRef(-DRAWER_WIDTH);
 
+  // Pull-to-refresh state
+  const [pullDelta, setPullDelta] = useState(0);
+  const [pullRefreshing, setPullRefreshing] = useState(false);
+  const pullStartRef = useRef<{ y: number; active: boolean } | null>(null);
+  const PULL_THRESHOLD = 60;
+
   const handleDrawerTouchStart = useCallback((e: React.TouchEvent) => {
     if (window.innerWidth >= 768) return;
     const touchX = e.touches[0].clientX;
@@ -191,10 +197,22 @@ export function ChatContainer() {
       drawerActiveRef.current = true;
       setDrawerDragging(true);
       setEdgeHintActive(true);
+    } else if (scrollContainerRef.current?.scrollTop === 0) {
+      // Pull-to-refresh: only when at scroll top and not in edge zone
+      pullStartRef.current = { y: e.touches[0].clientY, active: true };
     }
   }, [drawerOpen]);
 
   const handleDrawerTouchMove = useCallback((e: React.TouchEvent) => {
+    // Pull-to-refresh handling
+    const pull = pullStartRef.current;
+    if (pull?.active && !drawerActiveRef.current) {
+      const dy = e.touches[0].clientY - pull.y;
+      if (dy < 0) { pull.active = false; }
+      else if (dy > 10) {
+        setPullDelta(Math.min(dy * 0.4, 80));
+      }
+    }
     if (!drawerActiveRef.current) return;
     const deltaX = e.touches[0].clientX - drawerTouchStartXRef.current;
     const deltaY = Math.abs(e.touches[0].clientY - drawerTouchStartYRef.current);
@@ -212,6 +230,17 @@ export function ChatContainer() {
   }, []);
 
   const handleDrawerTouchEnd = useCallback(() => {
+    // Pull-to-refresh release
+    if (pullStartRef.current?.active && pullDelta >= PULL_THRESHOLD) {
+      setPullRefreshing(true);
+      setPullDelta(0);
+      reconnect();
+      setTimeout(() => setPullRefreshing(false), 1500);
+    } else {
+      setPullDelta(0);
+    }
+    pullStartRef.current = null;
+
     if (!drawerActiveRef.current) return;
     drawerActiveRef.current = false;
     setDrawerDragging(false);
@@ -486,6 +515,15 @@ export function ChatContainer() {
         onTouchEnd={handleDrawerTouchEnd}
         style={{ viewTransitionName: 'chat-messages', WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain' } as React.CSSProperties}
         className="flex-1 overflow-y-auto relative messages-scroll">
+        {/* Pull-to-refresh indicator */}
+        {(pullDelta > 0 || pullRefreshing) && (
+          <div
+            className="flex justify-center items-center transition-all duration-200"
+            style={{ height: pullRefreshing ? 40 : Math.min(pullDelta * 0.6, 36), opacity: pullRefreshing ? 1 : pullDelta / PULL_THRESHOLD }}
+          >
+            <div className={`w-5 h-5 rounded-full border-2 border-purple-400/40 border-t-purple-400 ${pullRefreshing ? 'animate-spin' : ''}`} />
+          </div>
+        )}
         {isSwitchingConversation && messages.length === 0 ? (
           <div className="animate-pulse space-y-4 p-4">
             {[1, 2, 3].map(i => (

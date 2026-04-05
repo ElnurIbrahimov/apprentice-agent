@@ -336,7 +336,7 @@ body {
   filter: blur(120px);
   border-radius: 50%;
   animation: float 20s infinite ease-in-out alternate;
-  opacity: 0.55;
+  opacity: 0.38;
 }
 
 .blob-1 { top: -10%; left: -10%; width: 50vw; height: 50vw; background: var(--mood-mesh-1); animation-delay: 0s; transition: background 2s ease; }
@@ -402,7 +402,7 @@ html.light .grain { opacity: 0.02; }
   background: rgba(10, 10, 12, 0.55);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid var(--border-light);
+  border: 1px solid var(--border-strong);
   border-top: 2px solid var(--mood-accent, transparent);
   transition: border-top-color 2s ease;
 }
@@ -411,6 +411,14 @@ html.light .grain { opacity: 0.02; }
   background: rgba(32, 33, 35, 0.6);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
+}
+
+.card-hover {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.card-hover:hover {
+  transform: scale(1.02);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
 }
 
 /* =============================================
@@ -469,6 +477,33 @@ html.light .grain { opacity: 0.02; }
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 3rem 1rem;
+  text-align: center;
+}
+.empty-state-icon {
+  width: 2.5rem;
+  height: 2.5rem;
+  opacity: 0.2;
+  color: var(--text-secondary);
+}
+.empty-state-title {
+  font-size: 0.875rem;
+  color: var(--chat-text);
+  font-weight: 500;
+}
+.empty-state-desc {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  max-width: 20rem;
+  line-height: 1.5;
 }
 
 /* =============================================

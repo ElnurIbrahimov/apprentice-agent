@@ -352,6 +352,15 @@ export interface HybridResult {
 
 // ── Hands ──
 
+export interface HandTemplate {
+  name: string;
+  description: string;
+  goal: string;
+  interval_minutes: number;
+  trigger_on_drive: string | null;
+  search_queries?: string[];
+}
+
 export interface HandStats {
   name: string;
   description: string;
@@ -366,6 +375,9 @@ export interface HandStats {
   model_preference: string;
   idle_only: boolean;
   trigger_on_drive: string;
+  is_custom?: boolean;
+  goal?: string;
+  adaptive_multiplier?: number;
 }
 
 export interface HandHistoryEntry {

@@ -59,6 +59,8 @@ class HandManifest:
     # Triggers (beyond schedule)
     trigger_on_drive: Optional[str] = None   # Intrinsic motivation drive (curiosity, competence, social, coherence)
     trigger_drive_threshold: float = 0.7     # Minimum drive urgency to trigger
+    trigger_on_hand: Optional[str] = None  # Run when this hand completes
+    trigger_on_hand_filter: Optional[str] = None  # "success" or "failure" or None (any)
 
 
 @dataclass
@@ -104,6 +106,9 @@ class Hand(ABC):
         self._total_cost: float = 0.0
         self._consecutive_failures: int = 0
         self._last_error: Optional[str] = None
+        self._adaptive_interval_multiplier: float = 1.0
+        self._adaptive_run_count: int = 0
+        self._adaptive_referenced_count: int = 0
 
     @abstractmethod
     def get_manifest(self) -> HandManifest:
@@ -168,7 +173,7 @@ class Hand(ABC):
         # Check cooldown (don't run too frequently)
         if self._last_run > 0:
             elapsed = time.time() - self._last_run
-            min_interval = (self.manifest.interval_minutes or 60) * 60
+            min_interval = (self.manifest.interval_minutes or 60) * 60 * self._adaptive_interval_multiplier
             if elapsed < min_interval:
                 return False
 
@@ -184,6 +189,7 @@ class Hand(ABC):
         """Update stats after a run."""
         self._last_run = time.time()
         self._total_runs += 1
+        self._adaptive_run_count += 1
         self._total_tokens += result.tokens_used
         self._total_cost += result.cost_usd
 
@@ -210,4 +216,5 @@ class Hand(ABC):
             "model_preference": self.manifest.model_preference,
             "idle_only": self.manifest.idle_only,
             "trigger_on_drive": self.manifest.trigger_on_drive,
+            "adaptive_multiplier": round(self._adaptive_interval_multiplier, 2),
         }

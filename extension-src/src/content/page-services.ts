@@ -2304,6 +2304,17 @@ export function setupMessageListener(ext: typeof chrome, handlers: MessageHandle
         return false;
       }
 
+      if (msg.type === 'FILL_FORM') {
+        const fields = msg.fields as Array<{ selector: string; value: string }>;
+        let filled = 0;
+        for (const field of fields || []) {
+          const result = handlers.execAction({ action: 'type', selector: field.selector, text: field.value });
+          if (result.ok) filled++;
+        }
+        sendResponse({ ok: true, filled, total: fields?.length || 0 });
+        return false;
+      }
+
       if (msg.type === 'SHOW_OCR_OVERLAY') {
         handlers.showOcrOverlay(msg.dataUrl, sendResponse);
         return true; // async

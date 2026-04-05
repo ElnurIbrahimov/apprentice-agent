@@ -5,7 +5,6 @@ import { AuraBreathingAvatar, AuraStatusLine } from './AuraBreathingAvatar';
 import { ConversationList } from './ConversationList';
 import {
   XMarkIcon,
-  Cog6ToothIcon,
   PlusIcon,
 } from '@heroicons/react/24/outline';
 import pkg from '../../package.json';
@@ -48,8 +47,7 @@ export function Sidebar({ onClose }: SidebarProps) {
               />
             </div>
             <div>
-              <span className="text-chat-text font-bold text-lg">AURA</span>
-              <div className="text-xs text-chat-text-secondary">v{pkg.version}</div>
+              <span className="text-chat-text font-bold text-lg" title={`AURA v${pkg.version}`}>AURA</span>
               <AuraStatusLine
                 status={isLoading ? 'Thinking...' : null}
                 isVisible={connectionStatus === 'connected'}
@@ -59,7 +57,7 @@ export function Sidebar({ onClose }: SidebarProps) {
           <div className="flex items-center gap-1">
             <button
               onClick={() => document.dispatchEvent(new CustomEvent('aura:new-chat'))}
-              className="p-2 text-chat-text-secondary hover:text-chat-text hover:bg-chat-assistant/50 rounded-lg transition-all duration-200"
+              className="p-2 text-chat-text-secondary hover:text-chat-text hover:bg-chat-assistant/50 rounded-lg transition-all duration-200 bg-chat-accent/10"
               aria-label="New Chat"
               title="New Chat"
             >
@@ -79,20 +77,6 @@ export function Sidebar({ onClose }: SidebarProps) {
         {/* Conversation list — main body */}
         <div className="flex-1 overflow-y-auto px-4 pt-2 pb-2">
           <ConversationList />
-        </div>
-
-        {/* Footer actions */}
-        <div className="p-4 border-t border-chat-border/50">
-          <button
-            onClick={() => {
-              // Navigate to Settings tab instead of opening modal
-              document.dispatchEvent(new CustomEvent('aura:switch-tab', { detail: 'settings' }));
-            }}
-            className="w-full flex items-center gap-3 px-4 py-3 text-sm text-chat-text-secondary hover:text-chat-text hover:bg-chat-assistant/50 rounded-xl transition-all duration-200 group"
-          >
-            <Cog6ToothIcon className="w-5 h-5 transition-transform duration-200 group-hover:rotate-90" />
-            <span>Settings</span>
-          </button>
         </div>
       </div>
     </>

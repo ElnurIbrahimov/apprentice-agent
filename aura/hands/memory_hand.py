@@ -10,6 +10,7 @@ Runs during idle to:
 Works with NeuroDream during sleep phases but also runs independently.
 """
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -56,8 +57,21 @@ class MemoryHand(Hand):
         iterations = 0
         artifacts = []
         actions_taken = []
+        tasks_completed = 0
+        tasks_failed = 0
+        errors = []
+        step_cb = context.get("step_callback")
+
+        # Capture token state at start
+        start_tokens = (
+            getattr(brain, '_session_input_tokens', 0) +
+            getattr(brain, '_session_output_tokens', 0)
+        )
+        start_cost = getattr(brain, '_session_cost_usd', 0.0)
 
         # Task 1: Memory deduplication
+        if step_cb:
+            await step_cb(1, "Deduplicating memories...")
         try:
             from aura.memory.write_gate import get_write_gate
             gate = get_write_gate()
@@ -67,11 +81,16 @@ class MemoryHand(Hand):
                     actions_taken.append(f"Deduplicated {dedup_count} memory entries")
                     artifacts.append({"type": "dedup", "count": dedup_count})
             iterations += 1
+            tasks_completed += 1
         except Exception as e:
-            logger.debug(f"[MemoryHand] Dedup failed: {e}")
+            tasks_failed += 1
+            errors.append(f"Dedup failed: {e}")
+            logger.warning(f"[MemoryHand] Dedup failed: {e}")
 
         # Task 2: Memory consolidation via DreamConsolidator
         # (aura_episodic_memory package removed — redirected to DreamConsolidator)
+        if step_cb:
+            await step_cb(2, "Running dream consolidation...")
         try:
             from aura.dream import get_dream_consolidator
             consolidator = get_dream_consolidator()
@@ -81,10 +100,15 @@ class MemoryHand(Hand):
                 actions_taken.append(f"Consolidated {consolidated} memory clusters")
                 artifacts.append({"type": "consolidation", "count": consolidated})
             iterations += 1
+            tasks_completed += 1
         except Exception as e:
-            logger.debug(f"[MemoryHand] Memory consolidation failed: {e}")
+            tasks_failed += 1
+            errors.append(f"Memory consolidation failed: {e}")
+            logger.warning(f"[MemoryHand] Memory consolidation failed: {e}")
 
         # Task 3: KG stale node pruning
+        if step_cb:
+            await step_cb(3, "Pruning stale knowledge graph nodes...")
         try:
             from aura.memory.kg_contradiction import prune_stale_nodes
             pruned = prune_stale_nodes(max_age_days=90, min_confidence=0.2)
@@ -92,10 +116,15 @@ class MemoryHand(Hand):
                 actions_taken.append(f"Pruned {pruned} stale KG nodes")
                 artifacts.append({"type": "kg_prune", "count": pruned})
             iterations += 1
+            tasks_completed += 1
         except Exception as e:
-            logger.debug(f"[MemoryHand] KG pruning failed: {e}")
+            tasks_failed += 1
+            errors.append(f"KG pruning failed: {e}")
+            logger.warning(f"[MemoryHand] KG pruning failed: {e}")
 
         # Task 4: Contradiction resolution (uses LLM)
+        if step_cb:
+            await step_cb(4, "Resolving contradictions...")
         try:
             from aura.memory.kg_contradiction import get_contradictions
             contradictions = get_contradictions(limit=3)
@@ -109,15 +138,20 @@ class MemoryHand(Hand):
                             f"Which is more likely correct? Respond with just 'A' or 'B' "
                             f"and a one-sentence reason."
                         )
-                        response = brain.think(resolution_prompt, system=self.get_system_prompt())
+                        response = await asyncio.to_thread(
+                            lambda: brain.think(resolution_prompt, system_prompt=self.get_system_prompt())
+                        )
                         if response:
                             actions_taken.append(f"Resolved contradiction: {str(c.get('fact_a', ''))[:50]}")
                             artifacts.append({"type": "contradiction_resolved", "resolution": str(response)[:200]})
                         iterations += 1
                     except Exception:
                         pass
+            tasks_completed += 1
         except Exception as e:
-            logger.debug(f"[MemoryHand] Contradiction resolution failed: {e}")
+            tasks_failed += 1
+            errors.append(f"Contradiction resolution failed: {e}")
+            logger.warning(f"[MemoryHand] Contradiction resolution failed: {e}")
 
         # Build summary
         if actions_taken:
@@ -125,11 +159,26 @@ class MemoryHand(Hand):
         else:
             summary = "Memory maintenance: all systems healthy, no action needed."
 
+        # Append error info if any failures occurred
+        if errors:
+            summary += f" [{tasks_completed} succeeded, {tasks_failed} failed: {'; '.join(errors)}]"
+
+        # Compute tokens and cost delta
+        end_tokens = (
+            getattr(brain, '_session_input_tokens', 0) +
+            getattr(brain, '_session_output_tokens', 0)
+        )
+        end_cost = getattr(brain, '_session_cost_usd', 0.0)
+        tokens_used = end_tokens - start_tokens
+        cost_used = end_cost - start_cost
+
         return HandResult(
             hand_name="memory",
-            success=True,
+            success=tasks_completed > 0,
             summary=summary,
             iterations=iterations,
             artifacts=artifacts,
             duration_seconds=time.time() - start,
+            tokens_used=tokens_used,
+            cost_usd=cost_used,
         )
