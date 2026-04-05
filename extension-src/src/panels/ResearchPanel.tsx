@@ -1409,10 +1409,22 @@ export default function ResearchPanel() {
                               overflow: 'hidden',
                               textOverflow: 'ellipsis',
                               whiteSpace: 'nowrap',
-                              marginTop: 1,
+                              marginTop: 2,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 4,
                             }}
                           >
-                            {s.url}
+                            {s.domain && (
+                              <img
+                                src={`https://www.google.com/s2/favicons?domain=${s.domain}&sz=16`}
+                                alt=""
+                                style={{ width: 12, height: 12, borderRadius: 2, flexShrink: 0 }}
+                                loading="lazy"
+                                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                              />
+                            )}
+                            <span style={{ fontWeight: 500, color: 'var(--mu)' }}>{s.domain || ''}</span>
                           </div>
                         )}
                         {s.snippet && (

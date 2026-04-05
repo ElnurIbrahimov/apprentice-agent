@@ -150,48 +150,72 @@ function buildRuntimeDiagnostics(message: string, line?: number): CodeEditorDiag
 
 /* ─── Constants ─── */
 const TEMPLATES: Template[] = [
-  {
-    label: 'Landing Page',
-    icon: <Globe size={16} />,
-    prompt: 'Create a modern SaaS landing page with a hero section featuring a bold headline, subtitle, and CTA button. Include sections for features (3 cards with icons), testimonials, pricing tiers, and a footer with links. Use a gradient purple/blue color scheme.',
-    color: '#7c3aed',
-  },
-  {
-    label: 'Portfolio',
-    icon: <User size={16} />,
-    prompt: 'Create a personal portfolio website with a hero section with name and role, an about section, a project gallery with 4 cards (image placeholder, title, description), a skills section with progress bars, and a contact form. Use a dark minimal theme with accent colors.',
-    color: '#06b6d4',
-  },
-  {
-    label: 'Blog',
-    icon: <Layout size={16} />,
-    prompt: 'Create a blog homepage with a header/nav, a featured post hero with large image placeholder, a grid of 6 blog post cards (thumbnail, date, title, excerpt, read more link), sidebar with categories and recent posts, and a newsletter signup. Use clean typography.',
-    color: '#10b981',
-  },
-  {
-    label: 'Dashboard',
-    icon: <Monitor size={16} />,
-    prompt: 'Create an analytics dashboard with a sidebar nav, top stats row (4 metric cards with icons and numbers), a large area chart placeholder, a table of recent transactions (5 rows), and a donut chart. Use a dark theme with card-based layout and subtle shadows.',
-    color: '#f59e0b',
-  },
-  {
-    label: 'Login Page',
-    icon: <User size={16} />,
-    prompt: 'Create a beautiful login page with a split layout — left side has a gradient background with branding/illustration, right side has a centered login form with email, password fields, "Remember me" checkbox, login button, "Forgot password?" link, and "Sign up" link. Add social login buttons (Google, GitHub).',
-    color: '#ec4899',
-  },
-  {
-    label: 'Pricing Page',
-    icon: <Sparkles size={16} />,
-    prompt: 'Create a pricing page with 3 tiers (Basic, Pro, Enterprise) in a card layout. The middle card should be highlighted/recommended. Each card has plan name, price, feature list with checkmarks, and a CTA button. Include a monthly/annual toggle switch and an FAQ section below. Use a clean modern style.',
-    color: '#8b5cf6',
-  },
-  {
-    label: '404 Page',
-    icon: <RotateCcw size={16} />,
-    prompt: 'Create a creative 404 error page with a large "404" display using CSS art or animation, a witty message like "Oops! This page got lost in space", a search bar, a "Go Home" button, and some floating animated elements. Make it fun and memorable with smooth CSS animations.',
-    color: '#ef4444',
-  },
+  // ─── Business ───
+  { label: 'SaaS Landing', icon: <Globe size={16} />, prompt: 'Create a modern SaaS landing page with hero section, features grid (3 cards with icons), testimonials carousel, pricing table (3 tiers), FAQ accordion, and footer. Professional purple/blue gradient theme.', color: '#7c3aed' },
+  { label: 'Startup', icon: <Sparkles size={16} />, prompt: 'Create a startup landing page with bold hero with animated gradient text, problem/solution section, how-it-works steps, team section with photo placeholders, investor logos bar, and CTA section.', color: '#6366f1' },
+  { label: 'Agency', icon: <Layout size={16} />, prompt: 'Create a creative agency website with full-screen hero video placeholder, services grid, case studies gallery, client logos, team carousel, and contact form. Sleek dark theme.', color: '#8b5cf6' },
+  { label: 'Restaurant', icon: <Globe size={16} />, prompt: 'Create a restaurant website with hero image, menu sections (appetizers, mains, desserts, drinks) with prices, reservation form, location map placeholder, reviews, and footer with hours.', color: '#f59e0b' },
+  { label: 'Real Estate', icon: <Monitor size={16} />, prompt: 'Create a real estate listing page with property search bar, featured listings grid (6 cards with images, price, beds/baths), neighborhood guide, agent profile, and contact form.', color: '#10b981' },
+  { label: 'Law Firm', icon: <Layout size={16} />, prompt: 'Create a law firm website with hero, practice area cards (6), attorney profiles with headshots, case results counter, client testimonials, consultation booking form, and footer with office locations.', color: '#1e40af' },
+  { label: 'Consulting', icon: <Monitor size={16} />, prompt: 'Create a consulting firm website with hero, services overview (6 cards), methodology/process steps, case studies with metrics, team carousel, trust badges, and contact CTA.', color: '#0f766e' },
+  { label: 'Gym & Fitness', icon: <User size={16} />, prompt: 'Create a gym website with hero, class schedule grid, trainer profiles with specialties, membership tier cards (3), facilities gallery, transformation stories, and free trial CTA.', color: '#dc2626' },
+  { label: 'Hotel', icon: <Globe size={16} />, prompt: 'Create a luxury hotel website with full-screen hero, room category cards with prices, amenities grid with icons, photo gallery, guest reviews, location section, and booking date picker CTA.', color: '#b45309' },
+  // ─── Personal ───
+  { label: 'Portfolio', icon: <User size={16} />, prompt: 'Create a personal portfolio with hero section, about me, project gallery (6 cards with hover effects), skills progress bars, timeline/experience, testimonials, and contact form. Dark minimal theme.', color: '#06b6d4' },
+  { label: 'Resume/CV', icon: <Layout size={16} />, prompt: 'Create a single-page resume/CV with header (name, title, contact), professional summary, work experience timeline, education, skills bar chart, certifications, and languages. Clean printable design.', color: '#64748b' },
+  { label: 'Blog', icon: <Layout size={16} />, prompt: 'Create a blog homepage with header/nav, featured post hero, 6 post cards in a grid, sidebar with categories and newsletter signup, pagination, and footer.', color: '#10b981' },
+  { label: 'Photography', icon: <Monitor size={16} />, prompt: 'Create a photography portfolio with full-width hero image, masonry photo gallery with lightbox modal on click, category filter tabs, about section, and booking form.', color: '#a855f7' },
+  { label: 'Podcast', icon: <Globe size={16} />, prompt: 'Create a podcast website with hero (podcast art + subscribe buttons for Apple/Spotify/Google), latest episodes list with play buttons, guest profiles, about the hosts, and sponsor section.', color: '#e11d48' },
+  { label: 'Link Tree', icon: <Globe size={16} />, prompt: 'Create a link-in-bio page with profile photo circle, name, bio, 8 stylish link buttons with icons, social media icons at bottom. Gradient background with glassmorphism cards.', color: '#8b5cf6' },
+  { label: 'Wedding', icon: <Sparkles size={16} />, prompt: 'Create an elegant wedding website with hero (couple names + date), our story timeline, event details, RSVP form, photo gallery, gift registry link, and accommodation info. Romantic soft palette.', color: '#f472b6' },
+  // ─── App & Product ───
+  { label: 'Dashboard', icon: <Monitor size={16} />, prompt: 'Create an analytics dashboard with sidebar nav, top stats row (4 KPI cards), large area chart, data table with sorting, donut chart, and activity feed. Dark theme with purple accents.', color: '#f59e0b' },
+  { label: 'Pricing', icon: <Sparkles size={16} />, prompt: 'Create a pricing page with monthly/annual toggle, 3 tier cards (Basic/Pro/Enterprise, middle highlighted), feature comparison table, FAQ section, and money-back guarantee badge.', color: '#8b5cf6' },
+  { label: 'Login', icon: <User size={16} />, prompt: 'Create a login page with split layout: left side gradient with branding/testimonial, right side centered form with email/password inputs, social login buttons (Google, GitHub, Apple), forgot password link.', color: '#ec4899' },
+  { label: 'Mobile App', icon: <Smartphone size={16} />, prompt: 'Create a mobile app landing page with phone mockup hero, app store badges, feature sections with phone screenshots, user reviews, download stats counter, and footer.', color: '#06b6d4' },
+  { label: '404 Page', icon: <RotateCcw size={16} />, prompt: 'Create a creative 404 page with large animated "404" text, witty message, search bar, popular links, and "Go Home" button. Add floating animated geometric shapes.', color: '#ef4444' },
+  { label: 'Signup Flow', icon: <User size={16} />, prompt: 'Create a multi-step signup form with progress bar (4 steps), animated transitions between steps, inline validation, password strength meter, and success confetti animation.', color: '#10b981' },
+  { label: 'Settings Page', icon: <Monitor size={16} />, prompt: 'Create an app settings page with sidebar categories (Profile, Notifications, Security, Billing), toggle switches, input fields, avatar upload, connected accounts, and danger zone. Dark theme.', color: '#64748b' },
+  { label: 'Documentation', icon: <Layout size={16} />, prompt: 'Create a documentation page with sidebar table of contents, search bar, breadcrumbs, markdown-style content with code blocks, copy buttons, info/warning callout boxes, and prev/next navigation.', color: '#3b82f6' },
+  { label: 'API Reference', icon: <Code2 size={16} />, prompt: 'Create an API reference page with sidebar endpoint list, HTTP method badges (GET green, POST blue, PUT orange, DELETE red), parameter tables, request/response code examples.', color: '#0ea5e9' },
+  { label: 'Status Page', icon: <Monitor size={16} />, prompt: 'Create a system status page with overall status banner, service list with uptime bars (90 days), incident history timeline, subscribe to updates form, and uptime percentage badges.', color: '#22c55e' },
+  // ─── E-commerce ───
+  { label: 'Product Page', icon: <Globe size={16} />, prompt: 'Create a product detail page with image gallery (main + thumbnails), product title, price, color/size selectors, add-to-cart button, description tabs, reviews section, and related products.', color: '#f59e0b' },
+  { label: 'Store Front', icon: <Globe size={16} />, prompt: 'Create an e-commerce homepage with hero banner, category cards, featured products grid (8 items with image/name/price/rating), deals section with countdown timer, and newsletter signup.', color: '#10b981' },
+  { label: 'Checkout', icon: <Monitor size={16} />, prompt: 'Create a checkout page with order summary sidebar, shipping form, payment form with card input, express checkout buttons (Apple Pay, Google Pay), promo code input, and order total breakdown.', color: '#6366f1' },
+  { label: 'Food Delivery', icon: <Globe size={16} />, prompt: 'Create a food delivery app UI with restaurant header, menu categories (horizontal scroll), food items with photos/prices/add buttons, floating cart summary, delivery address input, and order tracking progress bar.', color: '#ef4444' },
+  // ─── Creative & Media ───
+  { label: 'Coming Soon', icon: <Sparkles size={16} />, prompt: 'Create a coming soon page with animated countdown timer, email signup form, progress bar, social links, and a mesmerizing animated gradient background.', color: '#a855f7' },
+  { label: 'Event', icon: <Globe size={16} />, prompt: 'Create an event/conference landing page with hero with date/location, speaker cards (6), schedule/agenda timeline, ticket tiers, venue map placeholder, sponsors grid, and FAQ.', color: '#06b6d4' },
+  { label: 'Newsletter', icon: <Layout size={16} />, prompt: 'Create an email newsletter template (HTML email compatible) with header logo, hero image, main article, 3 story cards, CTA button, social icons footer. 600px max-width, table-based layout.', color: '#f97316' },
+  { label: 'Magazine', icon: <Layout size={16} />, prompt: 'Create a digital magazine homepage with large editorial hero article, 2-column article grid, breaking news ticker, category tabs, trending sidebar, subscribe CTA, and author bylines with avatars.', color: '#1e40af' },
+  // ─── Technology ───
+  { label: 'Dev Portfolio', icon: <Code2 size={16} />, prompt: 'Create a developer portfolio with terminal-style hero (typing animation), GitHub stats cards, project showcase (6 repos with stars/forks/language), tech stack icons grid, blog posts, and contact form. Dark hacker theme.', color: '#22c55e' },
+  { label: 'AI Product', icon: <Sparkles size={16} />, prompt: 'Create an AI product landing page with hero (animated neural network visualization in CSS), live demo section, feature comparison, integration logos, API code snippet, pricing, and enterprise CTA.', color: '#7c3aed' },
+  { label: 'Open Source', icon: <Code2 size={16} />, prompt: 'Create an open source project page with hero (project name + description + GitHub badges), quick start code block, feature list, contributor avatars grid, and "Star on GitHub" CTA. Dark theme.', color: '#64748b' },
+  { label: 'CLI Tool', icon: <Code2 size={16} />, prompt: 'Create a CLI tool documentation site with hero (terminal screenshot), one-line install command with copy button, command reference table, usage examples with syntax highlighting, and GitHub link. Monospace dark theme.', color: '#10b981' },
+  { label: 'Crypto/Web3', icon: <Monitor size={16} />, prompt: 'Create a DeFi/crypto dashboard with wallet connect button, token balances list, price charts placeholder, swap interface (from/to tokens), transaction history, and portfolio allocation donut chart. Dark cyber theme.', color: '#f59e0b' },
+  // ─── Interactive & Fun ───
+  { label: 'Quiz/Survey', icon: <Sparkles size={16} />, prompt: 'Create an interactive quiz page with progress bar, question card with 4 answer options (highlight on select), next/back buttons, animated transitions, timer, and results page with score and share buttons.', color: '#ec4899' },
+  { label: 'Calculator', icon: <Monitor size={16} />, prompt: 'Create an interactive calculator app (mortgage or BMI calculator) with labeled inputs, sliders for ranges, real-time calculation display, results card with breakdown, and share/print buttons.', color: '#0ea5e9' },
+  { label: 'Recipe', icon: <Globe size={16} />, prompt: 'Create a recipe page with hero photo, recipe title/rating/time, ingredient checklist with servings adjuster, step-by-step instructions with photos, nutrition facts table, print recipe button, and related recipes carousel.', color: '#f97316' },
+  { label: 'Weather App', icon: <Globe size={16} />, prompt: 'Create a weather app UI with current weather card (temp, icon, condition, location), hourly forecast horizontal scroll, 7-day forecast list, weather details (humidity, wind, UV, pressure), and search location bar.', color: '#3b82f6' },
+  { label: 'Music Player', icon: <Sparkles size={16} />, prompt: 'Create a music player UI with album art (large), song title/artist, progress bar with timestamps, playback controls, volume slider, queue/playlist sidebar, and lyrics panel.', color: '#8b5cf6' },
+  { label: 'Chat UI', icon: <User size={16} />, prompt: 'Create a messaging app UI with contacts sidebar (avatars, last message, unread badge), chat area with message bubbles, typing indicator, message input with emoji picker, and attachment button.', color: '#06b6d4' },
+  // ─── Landing Pages ───
+  { label: 'Waitlist', icon: <Sparkles size={16} />, prompt: 'Create a waitlist landing page with bold headline, product teaser (3 feature previews), email signup with referral counter, social proof ticker, and animated background particles.', color: '#a855f7' },
+  { label: 'Product Hunt', icon: <Sparkles size={16} />, prompt: 'Create a Product Hunt style launch page with product hero, demo video embed, feature list with icons, founder story, upvote counter, press mentions, and early adopter pricing.', color: '#f97316' },
+  { label: 'Comparison', icon: <Layout size={16} />, prompt: 'Create a comparison landing page ("Why switch from X to us") with hero, side-by-side feature comparison table with checkmarks/crosses, pricing comparison, migration guide steps, and "Switch Now" CTA.', color: '#10b981' },
+  { label: 'Black Friday', icon: <Sparkles size={16} />, prompt: 'Create a Black Friday deals page with huge countdown timer, deals grid (original/sale price, % off badges), category filter, "Almost Gone" urgency indicators, early access email signup.', color: '#dc2626' },
+  // ─── Education ───
+  { label: 'Online Course', icon: <Layout size={16} />, prompt: 'Create an online course page with hero (title + instructor), course stats (duration, lessons, level), curriculum accordion, instructor bio, student reviews, certificate preview, and enroll CTA.', color: '#8b5cf6' },
+  { label: 'Non-Profit', icon: <Globe size={16} />, prompt: 'Create a non-profit website with hero (mission statement), impact stats, programs section, stories of impact carousel, donation form with preset amounts, volunteer signup, and partner logos.', color: '#059669' },
+  // ─── Health ───
+  { label: 'Medical Practice', icon: <User size={16} />, prompt: 'Create a medical practice website with hero, services list, doctor profiles with credentials, patient portal login, insurance accepted logos, appointment booking form, and emergency contact info.', color: '#0ea5e9' },
+  { label: 'Fitness App', icon: <User size={16} />, prompt: 'Create a fitness app landing page with hero (before/after transformation), workout plan preview, progress tracking charts, meal planning section, app store badges, and free trial CTA.', color: '#ef4444' },
+  // ─── Social ───
+  { label: 'Social Profile', icon: <User size={16} />, prompt: 'Create a social media profile page with cover photo, profile pic, bio, stats (posts/followers/following), tab bar (Posts/Media/Likes), post feed with like/comment/share buttons, and suggested users sidebar.', color: '#3b82f6' },
+  { label: 'Forum', icon: <Layout size={16} />, prompt: 'Create a forum/community page with category cards, latest threads list with avatars/replies/views, pinned announcements, search bar, user leaderboard sidebar, and new thread button.', color: '#f59e0b' },
 ];
 
 const SYSTEM_PROMPT = `You are an expert web designer and developer. Generate a complete, beautiful HTML page with inline CSS and JavaScript.
