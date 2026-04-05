@@ -65,7 +65,7 @@ export function WorldModelPanel() {
 
   const fetchData = useCallback(async () => {
     try {
-      const res = await fetch('/api/features/knowledge-graph');
+      const res = await fetch('/api/knowledge-graph');
       if (!res.ok) { setError('Could not load knowledge graph'); setLoading(false); return; }
       const data = await res.json();
       const nodes: KGNode[] = data.nodes || [];

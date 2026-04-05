@@ -154,7 +154,7 @@ function mapAMEMNotes(notes: unknown[]): UnifiedMemoryEntry[] {
 
 async function fetchKnowledge(): Promise<UnifiedMemoryEntry[]> {
   try {
-    const res = await fetch('/api/features/knowledge-graph');
+    const res = await fetch('/api/knowledge-graph');
     if (!res.ok) return [];
     const data = await res.json();
     const nodes: unknown[] = data.nodes ?? [];

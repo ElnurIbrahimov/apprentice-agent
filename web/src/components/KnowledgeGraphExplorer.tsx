@@ -243,7 +243,7 @@ export function KnowledgeGraphExplorer() {
     try {
       setLoading(true);
       setError(null);
-      const res = await fetch('/api/features/knowledge-graph');
+      const res = await fetch('/api/knowledge-graph');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setRawData(data);
