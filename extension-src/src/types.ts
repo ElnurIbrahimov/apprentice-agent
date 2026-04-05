@@ -84,6 +84,7 @@ export type PanelId =
   | 'capture'
   | 'agent'
   | 'slides'
+  | 'aura-status'
   | 'models'
   | 'settings';
 

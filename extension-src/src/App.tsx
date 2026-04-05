@@ -33,6 +33,7 @@ const ComparePanel = React.lazy(() => import('./panels/ComparePanel'));
 const CapturePanel = React.lazy(() => import('./panels/CapturePanel'));
 const AgentPanel = React.lazy(() => import('./panels/AgentPanel'));
 const SlidesPanel = React.lazy(() => import('./panels/SlidesPanel'));
+const AuraStatusPanel = React.lazy(() => import('./panels/AuraStatusPanel'));
 const ModelsPanel = React.lazy(() => import('./panels/ModelsPanel'));
 const SettingsPanel = React.lazy(() => import('./panels/SettingsPanel'));
 
@@ -69,6 +70,7 @@ const PANEL_ENTRIES: { id: PanelId; Component: React.ComponentType }[] = [
   { id: 'capture', Component: CapturePanel },
   { id: 'agent', Component: AgentPanel },
   { id: 'slides', Component: SlidesPanel },
+  { id: 'aura-status', Component: AuraStatusPanel },
   { id: 'models', Component: ModelsPanel },
   { id: 'settings', Component: SettingsPanel },
 ];

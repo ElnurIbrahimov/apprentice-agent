@@ -6,7 +6,7 @@ import {
   Database, Zap, FileText, Wrench, File, Mic, Radio,
   Camera, Youtube, FlaskConical, Calculator, Terminal, Code2,
   Image, BarChart2, Bot, Cpu, Settings, Crosshair,
-  Presentation, Globe,
+  Presentation, Globe, Brain,
 } from 'lucide-react';
 import { useStore } from '../store';
 import type { PanelId } from '../types';
@@ -79,6 +79,14 @@ const CATEGORIES: CategoryTab[] = [
       { id: 'voice', label: 'Voice', Icon: Mic },
       { id: 'record', label: 'Record', Icon: Radio },
       { id: 'agent', label: 'Agent', Icon: Bot },
+    ],
+  },
+  {
+    key: 'aura',
+    label: 'Aura',
+    Icon: Brain,
+    panels: [
+      { id: 'aura-status', label: 'Mind', Icon: Brain },
     ],
   },
   {
