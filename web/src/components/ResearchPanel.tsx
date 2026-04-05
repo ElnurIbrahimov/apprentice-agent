@@ -9,6 +9,8 @@ import {
   CheckIcon,
   ArrowDownTrayIcon,
 } from '@heroicons/react/24/outline';
+import { useChatStore } from '../store/chatStore';
+import { SendToMenu } from './SendToMenu';
 
 /* ── Types ── */
 type Depth = 'quick' | 'standard' | 'deep';
@@ -100,6 +102,15 @@ export function ResearchPanel() {
   const abortRef = useRef<AbortController | null>(null);
   const reportEndRef = useRef<HTMLDivElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
+
+  // Prefill from tool suggestion
+  useEffect(() => {
+    const prefill = useChatStore.getState().toolPrefill;
+    if (prefill?.toolId === 'research') {
+      setTopic(prefill.query);
+      useChatStore.getState().clearToolPrefill();
+    }
+  }, []);
 
   // Fetch models
   useEffect(() => {
@@ -549,6 +560,7 @@ export function ResearchPanel() {
               Download
             </button>
           )}
+          {hasReport && <SendToMenu content={displayReport} sourceToolId="research" />}
         </div>
 
         {/* Report content */}

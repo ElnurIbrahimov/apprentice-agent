@@ -34,6 +34,7 @@ every adapter inside that loop.  Messages flow through a thread-safe
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import queue
 import threading
@@ -152,10 +153,19 @@ class ChannelBridge:
         # Stop adapters
         for source, adapter in self._channels.items():
             try:
-                adapter.stop()
-                logger.info("Stopped channel: %s", source.value)
+                result = adapter.stop()
+                if inspect.isawaitable(result):
+                    try:
+                        loop = asyncio.get_event_loop()
+                        if loop.is_running():
+                            loop.create_task(result)
+                        else:
+                            asyncio.run(result)
+                    except RuntimeError:
+                        asyncio.run(result)
+                logger.info("Stopped channel: %s", source.value if hasattr(source, 'value') else source)
             except Exception as e:
-                logger.warning("Error stopping %s: %s", source.value, e)
+                logger.warning("Error stopping %s: %s", source, e)
 
         # Shut down the background event loop
         if self._loop and not self._loop.is_closed():

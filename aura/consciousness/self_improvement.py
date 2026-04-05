@@ -2,7 +2,7 @@
 Self-Improvement Engine
 =======================
 
-# TODO: Consider delegating to MetacognitiveEngine to reduce duplication
+# DONE: Delegating to MetacognitiveEngine in record_chat_outcome()
 # (self_improvement.py and metacognition.py share capability scoring,
 #  strategy selection, and domain classification logic)
 

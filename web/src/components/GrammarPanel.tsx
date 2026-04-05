@@ -6,6 +6,8 @@ import {
   ArrowsRightLeftIcon,
   DocumentCheckIcon,
 } from '@heroicons/react/24/outline';
+import { useChatStore } from '../store/chatStore';
+import { SendToMenu } from './SendToMenu';
 
 /* ── Types ── */
 type CheckMode = 'grammar' | 'style' | 'rewrite';
@@ -89,6 +91,15 @@ export function GrammarPanel() {
   const { corrected, changes } = rawOutput
     ? splitCorrectedAndChanges(rawOutput)
     : { corrected: '', changes: [] };
+
+  // Prefill from tool suggestion
+  useEffect(() => {
+    const prefill = useChatStore.getState().toolPrefill;
+    if (prefill?.toolId === 'grammar') {
+      setInputText(prefill.query);
+      useChatStore.getState().clearToolPrefill();
+    }
+  }, []);
 
   // Load draft on mount
   useEffect(() => {
@@ -461,6 +472,7 @@ export function GrammarPanel() {
                     <><ClipboardDocumentIcon className="w-3.5 h-3.5" /> Copy</>
                   )}
                 </button>
+                <SendToMenu content={corrected} sourceToolId="grammar" />
               </div>
             )}
           </div>

@@ -210,14 +210,15 @@ class ConversationManager:
 
     def switch_conversation(self, conversation_id: str, surface: str = "web") -> bool:
         """Switch to a conversation from a specific surface."""
-        success = self.brain.switch_conversation(conversation_id)
-        if success:
-            self._broadcast(ConversationEvent(
-                event_type="conversation_switched",
-                conversation_id=conversation_id,
-                surface=surface,
-            ))
-        return success
+        with self._rw_lock:
+            success = self.brain.switch_conversation(conversation_id)
+            if success:
+                self._broadcast(ConversationEvent(
+                    event_type="conversation_switched",
+                    conversation_id=conversation_id,
+                    surface=surface,
+                ))
+            return success
 
     def delete_conversation(self, conversation_id: str) -> bool:
         """Delete a conversation."""

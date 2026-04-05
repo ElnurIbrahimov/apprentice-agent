@@ -237,7 +237,7 @@ class ActivityLog:
             ).fetchall()
 
             if format == "json":
-                return json.dumps([dict(r) for r in rows], indent=2)
+                return json.dumps([dict(r) for r in rows], indent=2, default=str)
             else:  # markdown
                 lines = [f"# Session: {session_id}", ""]
                 for r in rows:

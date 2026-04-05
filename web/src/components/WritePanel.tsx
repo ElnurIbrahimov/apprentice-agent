@@ -6,6 +6,8 @@ import {
   StopIcon,
   PaperAirplaneIcon,
 } from '@heroicons/react/24/outline';
+import { useChatStore } from '../store/chatStore';
+import { SendToMenu } from './SendToMenu';
 
 /* ── Types ── */
 type WriteFormat = 'Essay' | 'Email' | 'Blog Post' | 'Report' | 'Story' | 'Social Post' | 'Letter';
@@ -37,6 +39,15 @@ export function WritePanel() {
   const abortRef = useRef<AbortController | null>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const outputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Prefill from tool suggestion
+  useEffect(() => {
+    const prefill = useChatStore.getState().toolPrefill;
+    if (prefill?.toolId === 'write') {
+      setInput(prefill.query);
+      useChatStore.getState().clearToolPrefill();
+    }
+  }, []);
 
   // Load draft on mount
   useEffect(() => {
@@ -419,6 +430,7 @@ export function WritePanel() {
             >
               <ArrowDownTrayIcon className="w-4 h-4" />
             </button>
+            <SendToMenu content={output} sourceToolId="write" />
             <button
               onClick={handleClear}
               disabled={!output && !input}

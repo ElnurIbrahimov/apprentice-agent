@@ -1,8 +1,9 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
-import { PlayIcon, StopIcon, ArrowPathIcon, ChevronDownIcon, ChevronUpIcon, SparklesIcon, XMarkIcon, ClipboardDocumentIcon, ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { PlayIcon, StopIcon, ArrowPathIcon, ChevronDownIcon, ChevronUpIcon, SparklesIcon, XMarkIcon, ClipboardDocumentIcon, ClipboardDocumentCheckIcon, TrashIcon, ArrowUpIcon, ArrowDownIcon } from '@heroicons/react/24/outline';
 import { highlightCode } from '../utils/codeHighlighter';
 import { sanitizeHtml } from '../utils/sanitize';
 import { execute, resetRuntime, subscribe, isReady, type OutputBlock, type VariableInfo } from '../utils/pyodideExecutor';
+import { executeJS } from '../utils/jsExecutor';
 
 interface Exchange {
   id: string;
@@ -12,10 +13,15 @@ interface Exchange {
   phase: 'idle' | 'executing';
   executionTime?: number;
   runMode?: 'browser' | 'server';
+  language: 'python' | 'javascript';
+  executionOrder?: number;
 }
 
 let counter = 0;
 function newId() { return `ex-${Date.now()}-${++counter}`; }
+
+// Module-level execution order counter
+let _execOrderCounter = 0;
 
 /* ── Output renderer ── */
 function OutputRenderer({ block }: { block: OutputBlock }) {
@@ -53,8 +59,29 @@ function OutputRenderer({ block }: { block: OutputBlock }) {
   return null;
 }
 
+/* ── Insert cell button ── */
+function InsertCellButton({ onClick }: { onClick: () => void }) {
+  return (
+    <div className="flex justify-center py-1 group">
+      <button onClick={onClick} className="w-6 h-6 rounded-full border border-chat-border/30 text-chat-text-secondary/30 hover:border-purple-500/50 hover:text-purple-400 flex items-center justify-center text-xs transition-colors opacity-0 group-hover:opacity-100">+</button>
+    </div>
+  );
+}
+
 /* ── Exchange card ── */
-function ExchangeCard({ exchange, onRerun }: { exchange: Exchange; onRerun: (code: string) => void }) {
+function ExchangeCard({
+  exchange,
+  onRerun,
+  onDelete,
+  onMoveUp,
+  onMoveDown,
+}: {
+  exchange: Exchange;
+  onRerun: (code: string) => void;
+  onDelete: (id: string) => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+}) {
   const [codeCopied, setCodeCopied] = useState(false);
   const runBadge = exchange.runMode === 'server'
     ? <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400">Server</span>
@@ -64,14 +91,17 @@ function ExchangeCard({ exchange, onRerun }: { exchange: Exchange; onRerun: (cod
   const [codeHtml, setCodeHtml] = useState('');
   const [showVars, setShowVars] = useState(false);
 
+  const langLabel = exchange.language === 'javascript' ? 'JavaScript' : 'Python';
+  const langColor = exchange.language === 'javascript' ? 'text-yellow-400' : 'text-purple-400';
+
   useEffect(() => {
     if (exchange.code) {
       const isDark = !document.documentElement.classList.contains('light');
-      highlightCode(exchange.code, 'python', isDark ? 'dark' : 'light')
+      highlightCode(exchange.code, exchange.language === 'javascript' ? 'javascript' : 'python', isDark ? 'dark' : 'light')
         .then(setCodeHtml)
         .catch(() => {});
     }
-  }, [exchange.code]);
+  }, [exchange.code, exchange.language]);
 
   return (
     <div className="border border-chat-border rounded-lg overflow-hidden bg-surface-1">
@@ -79,7 +109,10 @@ function ExchangeCard({ exchange, onRerun }: { exchange: Exchange; onRerun: (cod
       <div className="border-b border-chat-border">
         <div className="flex items-center justify-between px-3 py-1.5">
           <div className="flex items-center gap-2">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-purple-400">Python</span>
+            {exchange.executionOrder != null && (
+              <span className="text-[9px] font-mono text-chat-text-secondary/60 select-none">[{exchange.executionOrder}]</span>
+            )}
+            <span className={`text-[10px] font-semibold uppercase tracking-wider ${langColor}`}>{langLabel}</span>
             {runBadge}
           </div>
           <div className="flex items-center gap-1.5">
@@ -111,6 +144,27 @@ function ExchangeCard({ exchange, onRerun }: { exchange: Exchange; onRerun: (cod
                     ? <ClipboardDocumentCheckIcon className="w-3.5 h-3.5 text-green-400" />
                     : <ClipboardDocumentIcon className="w-3.5 h-3.5" />
                   }
+                </button>
+                <button
+                  onClick={onMoveUp}
+                  className="p-0.5 rounded text-chat-text-secondary hover:text-chat-text transition-colors"
+                  title="Move cell up"
+                >
+                  <ArrowUpIcon className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={onMoveDown}
+                  className="p-0.5 rounded text-chat-text-secondary hover:text-chat-text transition-colors"
+                  title="Move cell down"
+                >
+                  <ArrowDownIcon className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => onDelete(exchange.id)}
+                  className="p-0.5 rounded text-chat-text-secondary hover:text-red-400 transition-colors"
+                  title="Delete cell"
+                >
+                  <TrashIcon className="w-3.5 h-3.5" />
                 </button>
               </>
             )}
@@ -177,6 +231,7 @@ export function CodeInterpreter() {
   const [isExecuting, setIsExecuting] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [runMode, setRunMode] = useState<'browser' | 'server'>('browser');
+  const [defaultLang, setDefaultLang] = useState<'python' | 'javascript'>('python');
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [showModelMenu, setShowModelMenu] = useState(false);
@@ -299,14 +354,38 @@ export function CodeInterpreter() {
 
   const handleRun = useCallback(() => {
     const trimmed = code.trim();
-    if (!trimmed || !workerReady) return;
+    if (!trimmed || (defaultLang === 'python' && !workerReady)) return;
 
     const id = newId();
+    const execOrder = ++_execOrderCounter;
     setIsExecuting(true);
+
+    if (defaultLang === 'javascript') {
+      setExchanges((prev) => [
+        ...prev.slice(-49),
+        { id, code: trimmed, outputs: [], variables: [], phase: 'executing', runMode: 'browser', language: 'javascript', executionOrder: execOrder },
+      ]);
+      setCode('');
+
+      executeJS(trimmed, {
+        onOutput: (block) => {
+          setExchanges((prev) =>
+            prev.map((ex) => ex.id === id ? { ...ex, outputs: [...ex.outputs, block] } : ex)
+          );
+        },
+        onDone: (_success, executionTime) => {
+          setExchanges((prev) =>
+            prev.map((ex) => ex.id === id ? { ...ex, phase: 'idle', executionTime } : ex)
+          );
+          setIsExecuting(false);
+        },
+      });
+      return;
+    }
 
     setExchanges((prev) => [
       ...prev.slice(-49),
-      { id, code: trimmed, outputs: [], variables: [], phase: 'executing', runMode: 'browser' },
+      { id, code: trimmed, outputs: [], variables: [], phase: 'executing', runMode: 'browser', language: 'python', executionOrder: execOrder },
     ]);
     setCode('');
 
@@ -328,15 +407,16 @@ export function CodeInterpreter() {
         setIsExecuting(false);
       },
     });
-  }, [code, workerReady]);
+  }, [code, workerReady, defaultLang]);
 
   const handleRunServer = useCallback(async () => {
     const trimmed = code.trim();
     if (!trimmed) return;
 
+    const execOrder = ++_execOrderCounter;
     setIsExecuting(true);
     const id = newId();
-    setExchanges(prev => [...prev.slice(-49), { id, code: trimmed, outputs: [], variables: [], phase: 'executing', runMode: 'server' }]);
+    setExchanges(prev => [...prev.slice(-49), { id, code: trimmed, outputs: [], variables: [], phase: 'executing', runMode: 'server', language: 'python', executionOrder: execOrder }]);
     setCode('');
 
     try {
@@ -386,6 +466,31 @@ export function CodeInterpreter() {
     textareaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, []);
 
+  const insertCellAt = useCallback((index: number) => {
+    const id = `ex-${Date.now()}-${exchanges.length}`;
+    setExchanges(prev => {
+      const next = [...prev];
+      next.splice(index, 0, { id, code: '', outputs: [], variables: [], phase: 'idle' as const, language: defaultLang });
+      return next;
+    });
+  }, [defaultLang, exchanges.length]);
+
+  const deleteCell = useCallback((id: string) => {
+    setExchanges(prev => prev.filter(e => e.id !== id));
+  }, []);
+
+  const moveCell = useCallback((id: string, direction: 'up' | 'down') => {
+    setExchanges(prev => {
+      const idx = prev.findIndex(e => e.id === id);
+      if (idx < 0) return prev;
+      const target = direction === 'up' ? idx - 1 : idx + 1;
+      if (target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      [next[idx], next[target]] = [next[target], next[idx]];
+      return next;
+    });
+  }, []);
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -418,7 +523,7 @@ export function CodeInterpreter() {
       </div>
 
       {/* Exchanges */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4">
         {exchanges.length === 0 && workerReady && (
           <div className="text-center text-chat-text-secondary text-sm py-8">
             <p className="mb-4">Write Python code below and press Run.</p>
@@ -448,43 +553,67 @@ export function CodeInterpreter() {
           </div>
         )}
 
-        {exchanges.map((ex) => (
-          <ExchangeCard key={ex.id} exchange={ex} onRerun={handleRerun} />
+        <InsertCellButton onClick={() => insertCellAt(0)} />
+        {exchanges.map((ex, i) => (
+          <React.Fragment key={ex.id}>
+            <div className="mb-4">
+              <ExchangeCard
+                exchange={ex}
+                onRerun={handleRerun}
+                onDelete={deleteCell}
+                onMoveUp={() => moveCell(ex.id, 'up')}
+                onMoveDown={() => moveCell(ex.id, 'down')}
+              />
+            </div>
+            <InsertCellButton onClick={() => insertCellAt(i + 1)} />
+          </React.Fragment>
         ))}
       </div>
 
       {/* Input */}
       <div className="border-t border-chat-border p-3 flex-shrink-0">
         <div className="flex gap-2">
-          <textarea
-            ref={textareaRef}
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            onInput={(e) => {
-              const el = e.currentTarget;
-              el.style.height = 'auto';
-              el.style.height = Math.min(el.scrollHeight, 200) + 'px';
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Tab') {
-                e.preventDefault();
-                const ta = e.currentTarget;
-                const start = ta.selectionStart;
-                const end = ta.selectionEnd;
-                setCode(code.slice(0, start) + '    ' + code.slice(end));
-                requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = start + 4; });
-              }
-              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                e.preventDefault();
-                if (runMode === 'server') handleRunServer();
-                else handleRun();
-              }
-            }}
-            placeholder="Write Python code... (Ctrl+Enter to run)"
-            className="flex-1 p-3 rounded-lg bg-surface-1 border border-chat-border text-chat-text text-sm font-mono resize-none outline-none focus:border-chat-accent placeholder-chat-text-secondary/50"
-            style={{ minHeight: 52, maxHeight: 200, overflow: 'auto' }}
-            disabled={runMode === 'browser' && !workerReady}
-          />
+          <div className="flex-1 flex flex-col">
+            <div className="flex gap-1 mb-1.5">
+              <button
+                onClick={() => setDefaultLang('python')}
+                className={`text-[10px] px-2 py-0.5 rounded ${defaultLang === 'python' ? 'bg-green-600/30 text-green-400' : 'text-chat-text-secondary'}`}
+              >Python</button>
+              <button
+                onClick={() => setDefaultLang('javascript')}
+                className={`text-[10px] px-2 py-0.5 rounded ${defaultLang === 'javascript' ? 'bg-yellow-600/30 text-yellow-400' : 'text-chat-text-secondary'}`}
+              >JavaScript</button>
+            </div>
+            <textarea
+              ref={textareaRef}
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              onInput={(e) => {
+                const el = e.currentTarget;
+                el.style.height = 'auto';
+                el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Tab') {
+                  e.preventDefault();
+                  const ta = e.currentTarget;
+                  const start = ta.selectionStart;
+                  const end = ta.selectionEnd;
+                  setCode(code.slice(0, start) + '    ' + code.slice(end));
+                  requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = start + 4; });
+                }
+                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                  e.preventDefault();
+                  if (runMode === 'server') handleRunServer();
+                  else handleRun();
+                }
+              }}
+              placeholder={`Write ${defaultLang === 'javascript' ? 'JavaScript' : 'Python'} code... (Ctrl+Enter to run)`}
+              className="p-3 rounded-lg bg-surface-1 border border-chat-border text-chat-text text-sm font-mono resize-none outline-none focus:border-chat-accent placeholder-chat-text-secondary/50 w-full"
+              style={{ minHeight: 52, maxHeight: 200, overflow: 'auto' }}
+              disabled={runMode === 'browser' && defaultLang === 'python' && !workerReady}
+            />
+          </div>
           <div className="flex flex-col gap-1.5 self-end">
             <button
               onClick={handleAskAI}
@@ -518,7 +647,7 @@ export function CodeInterpreter() {
               </div>
               <button
                 onClick={runMode === 'server' ? handleRunServer : handleRun}
-                disabled={(runMode === 'browser' && (!workerReady || !code.trim())) || (runMode === 'server' && !code.trim()) || isExecuting || isGenerating}
+                disabled={(runMode === 'browser' && defaultLang === 'python' && (!workerReady || !code.trim())) || (runMode === 'server' && !code.trim()) || (defaultLang === 'javascript' && !code.trim()) || isExecuting || isGenerating}
                 className="px-3 py-2 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium transition-colors flex items-center gap-1.5"
               >
                 {isExecuting ? (

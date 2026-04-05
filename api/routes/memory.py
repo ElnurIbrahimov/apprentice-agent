@@ -4,6 +4,7 @@ import asyncio
 import functools
 import logging
 import threading
+import time
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from collections import deque
@@ -134,6 +135,7 @@ class MemoryRecallTracker:
 
 # Per-session tracker instances
 _trackers: dict[str, MemoryRecallTracker] = {}
+_tracker_access: dict[str, float] = {}
 _tracker_lock = threading.Lock()
 
 
@@ -145,11 +147,13 @@ def _get_tracker(session_id: str) -> MemoryRecallTracker:
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Invalid session_id format")
     with _tracker_lock:
+        _tracker_access[session_id] = time.time()
         if session_id not in _trackers:
-            # Evict oldest if at capacity
+            # Evict LRU if at capacity
             if len(_trackers) >= _MAX_TRACKERS:
-                oldest_key = next(iter(_trackers))
-                del _trackers[oldest_key]
+                lru_key = min(_tracker_access, key=_tracker_access.get)
+                _trackers.pop(lru_key, None)
+                _tracker_access.pop(lru_key, None)
             _trackers[session_id] = MemoryRecallTracker()
         return _trackers[session_id]
 

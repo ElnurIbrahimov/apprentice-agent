@@ -20,9 +20,10 @@ const MOBILE_TABS: { id: TabId; icon: React.ComponentType<{ className?: string }
 interface BottomTabBarProps {
   activeTab: TabId;
   onTabChange: (tab: TabId) => void;
+  badges?: Partial<Record<TabId, number>>;
 }
 
-export function BottomTabBar({ activeTab, onTabChange }: BottomTabBarProps) {
+export function BottomTabBar({ activeTab, onTabChange, badges }: BottomTabBarProps) {
   // Hide when virtual keyboard is open (viewport shrinks significantly)
   const [hidden, setHidden] = useState(false);
 
@@ -58,16 +59,27 @@ export function BottomTabBar({ activeTab, onTabChange }: BottomTabBarProps) {
             key={tab.id}
             onClick={() => {
               haptic(10);
+              if (isActive && tab.id === 'chat') {
+                document.dispatchEvent(new CustomEvent('aura:scroll-to-top'));
+              }
               onTabChange(tab.id);
             }}
-            className={`flex flex-col items-center justify-center gap-0.5 flex-1 transition-colors ${
+            className={`relative flex flex-col items-center justify-center gap-0.5 flex-1 transition-colors ${
               isActive ? 'text-chat-accent' : 'text-chat-text-secondary'
             }`}
             style={{ minHeight: 44 }}
             aria-label={tab.label}
           >
-            <Icon className={`w-5 h-5 ${isActive ? '' : 'opacity-70'}`} />
+            <div className="relative">
+              <Icon className={`w-5 h-5 ${isActive ? '' : 'opacity-70'}`} />
+              {badges?.[tab.id] ? (
+                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500" />
+              ) : null}
+            </div>
             <span className={`text-[10px] font-medium ${isActive ? '' : 'text-chat-text-tertiary'}`}>{tab.label}</span>
+            {isActive && (
+              <span className="absolute -bottom-0.5 w-4 h-1 rounded-full bg-chat-accent" />
+            )}
           </button>
         );
       })}

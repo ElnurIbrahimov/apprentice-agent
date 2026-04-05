@@ -63,6 +63,16 @@ function markdownToHtml(md: string): string {
   return `<p>${html}</p>`;
 }
 
+const RESIZE_SCRIPT = `<script>
+(function(){
+  function notifyHeight(){
+    try{parent.postMessage({type:'artifact-resize',height:document.documentElement.scrollHeight},'*')}catch(e){}
+  }
+  window.addEventListener('load',notifyHeight);
+  if(window.ResizeObserver){new ResizeObserver(notifyHeight).observe(document.body)}
+})();
+<\/script>`;
+
 const ERROR_SCRIPT = `<script>
 window.onerror = function(msg, src, line, col, err) {
   parent.postMessage({ type: 'artifact-error', msg: String(msg), line: line, col: col, stack: err ? err.stack : '' }, '*');
@@ -88,9 +98,9 @@ export function buildSrcdoc(type: ArtifactType, code: string): string {
 
   if (type === 'html') {
     if (code.includes('</head>')) {
-      return code.replace('</head>', tailwindCdn + ERROR_SCRIPT + '</head>');
+      return code.replace('</head>', tailwindCdn + ERROR_SCRIPT + RESIZE_SCRIPT + '</head>');
     }
-    return tailwindCdn + ERROR_SCRIPT + code;
+    return tailwindCdn + ERROR_SCRIPT + RESIZE_SCRIPT + code;
   }
 
   if (type === 'svg') {
@@ -123,17 +133,17 @@ export function buildSrcdoc(type: ArtifactType, code: string): string {
           ...dynamicImports,
         },
       };
-      return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${ERROR_SCRIPT}${tailwindCdn}<script type="importmap">${JSON.stringify(importMap)}<\/script><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui,-apple-system,sans-serif;background:#0a0a0f;color:#e8e6f0;min-height:100vh}#root{padding:16px;min-height:100vh}</style></head><body><div id="root"></div><script type="module">${code}<\/script></body></html>`;
+      return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${ERROR_SCRIPT}${RESIZE_SCRIPT}${tailwindCdn}<script type="importmap">${JSON.stringify(importMap)}<\/script><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui,-apple-system,sans-serif;background:#0a0a0f;color:#e8e6f0;min-height:100vh}#root{padding:16px;min-height:100vh}</style></head><body><div id="root"></div><script type="module">${code}<\/script></body></html>`;
     }
-    return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><script src="https://unpkg.com/react@18/umd/react.production.min.js"><\/script><script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"><\/script>${tailwindCdn}<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui,-apple-system,sans-serif;background:#0a0a0f;color:#e8e6f0;min-height:100vh}#root{padding:16px;min-height:100vh}</style>${ERROR_SCRIPT}</head><body><div id="root"></div><script>try{${code}}catch(e){parent.postMessage({type:'artifact-error',msg:e.message,line:0,stack:e.stack},'*');}<\/script></body></html>`;
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><script src="https://unpkg.com/react@18/umd/react.production.min.js"><\/script><script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"><\/script>${tailwindCdn}<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui,-apple-system,sans-serif;background:#0a0a0f;color:#e8e6f0;min-height:100vh}#root{padding:16px;min-height:100vh}</style>${ERROR_SCRIPT}${RESIZE_SCRIPT}</head><body><div id="root"></div><script>try{${code}}catch(e){parent.postMessage({type:'artifact-error',msg:e.message,line:0,stack:e.stack},'*');}<\/script></body></html>`;
   }
 
   if (type === 'mermaid') {
-    return `<!DOCTYPE html><html><head><meta charset="utf-8"><script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"><\/script><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui;background:#0a0a0f;color:#e8e6f0;min-height:100vh}.mermaid{display:flex;justify-content:center;padding:24px}.mermaid svg{max-width:100%}</style>${ERROR_SCRIPT}</head><body><pre class="mermaid">${escHtml(code)}</pre><script>mermaid.initialize({startOnLoad:true,theme:'dark',themeVariables:{primaryColor:'#7c3aed',primaryTextColor:'#e8e6f0',primaryBorderColor:'#5b21b6',lineColor:'#6d28d9',secondaryColor:'#1e1b4b',tertiaryColor:'#0f0a2e'}});<\/script></body></html>`;
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"><\/script><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui;background:#0a0a0f;color:#e8e6f0;min-height:100vh}.mermaid{display:flex;justify-content:center;padding:24px}.mermaid svg{max-width:100%}</style>${ERROR_SCRIPT}${RESIZE_SCRIPT}</head><body><pre class="mermaid">${escHtml(code)}</pre><script>mermaid.initialize({startOnLoad:true,theme:'dark',themeVariables:{primaryColor:'#7c3aed',primaryTextColor:'#e8e6f0',primaryBorderColor:'#5b21b6',lineColor:'#6d28d9',secondaryColor:'#1e1b4b',tertiaryColor:'#0f0a2e'}});<\/script></body></html>`;
   }
 
   if (type === 'chart') {
-    return `<!DOCTYPE html><html><head><meta charset="utf-8"><script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"><\/script><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui;background:#0a0a0f;color:#e8e6f0;min-height:100vh;padding:16px}canvas{max-width:100%;height:auto}</style>${ERROR_SCRIPT}</head><body><div id="root"><canvas id="chart"></canvas></div><script>try{${code}}catch(e){parent.postMessage({type:'artifact-error',msg:e.message,line:0,stack:e.stack},'*');}<\/script></body></html>`;
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"><\/script><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui;background:#0a0a0f;color:#e8e6f0;min-height:100vh;padding:16px}canvas{max-width:100%;height:auto}</style>${ERROR_SCRIPT}${RESIZE_SCRIPT}</head><body><div id="root"><canvas id="chart"></canvas></div><script>try{${code}}catch(e){parent.postMessage({type:'artifact-error',msg:e.message,line:0,stack:e.stack},'*');}<\/script></body></html>`;
   }
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><pre>${escHtml(code)}</pre></body></html>`;

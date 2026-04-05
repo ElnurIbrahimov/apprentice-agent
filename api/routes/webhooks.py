@@ -86,6 +86,29 @@ def _verify_github_signature(payload_body: bytes, signature_header: str) -> bool
     return hmac.compare_digest(expected, signature_header)
 
 
+def _verify_gitlab_token(token: str) -> bool:
+    """Verify GitLab webhook token using GITLAB_WEBHOOK_TOKEN."""
+    secret = os.environ.get("GITLAB_WEBHOOK_TOKEN", "")
+    if not secret:
+        return False
+    return hmac.compare_digest(secret, token)
+
+
+def _verify_webhook_signature(headers: dict, payload_body: bytes) -> bool:
+    """Verify webhook signature from any supported source."""
+    # GitHub
+    gh_sig = headers.get("x-hub-signature-256", "")
+    if gh_sig:
+        return _verify_github_signature(payload_body, gh_sig)
+    # GitLab
+    gl_token = headers.get("x-gitlab-token", "")
+    if gl_token:
+        return _verify_gitlab_token(gl_token)
+    # No recognized signature — reject
+    logger.warning("[Webhooks] No recognized signature header — rejecting unsigned webhook")
+    return False
+
+
 async def _notify_surfaces(text: str, channel: str = "all"):
     """Send a notification to bound surfaces via ConversationManager + Telegram."""
     # Try Telegram direct push
@@ -193,9 +216,10 @@ async def github_webhook(
     """
     body = await request.body()
 
-    # Verify signature
-    if not _verify_github_signature(body, x_hub_signature_256):
-        logger.warning("[Webhooks] GitHub signature verification failed")
+    # Verify signature using dispatcher
+    headers = {"x-hub-signature-256": x_hub_signature_256}
+    if not _verify_webhook_signature(headers, body):
+        logger.warning("[Webhooks] Webhook signature verification failed")
         raise HTTPException(status_code=401, detail="Invalid signature")
 
     try:

@@ -6,6 +6,8 @@ import {
   DocumentTextIcon,
   LinkIcon,
 } from '@heroicons/react/24/outline';
+import { useChatStore } from '../store/chatStore';
+import { SendToMenu } from './SendToMenu';
 
 /* ── Types ── */
 type InputMode = 'text' | 'url';
@@ -81,6 +83,15 @@ export function SummaryPanel() {
   const abortRef = useRef<AbortController | null>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const outputRef = useRef<HTMLDivElement>(null);
+
+  /* ── Prefill from tool suggestion ── */
+  useEffect(() => {
+    const prefill = useChatStore.getState().toolPrefill;
+    if (prefill?.toolId === 'summary') {
+      setInputText(prefill.query);
+      useChatStore.getState().clearToolPrefill();
+    }
+  }, []);
 
   /* ── Load draft on mount ── */
   useEffect(() => {
@@ -429,6 +440,7 @@ export function SummaryPanel() {
                   </>
                 )}
               </button>
+              <SendToMenu content={output} sourceToolId="summary" />
             </div>
           </div>
 

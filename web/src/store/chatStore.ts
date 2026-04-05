@@ -78,6 +78,13 @@ interface ChatState {
   setHoveredCitation: (hovered: { id: number; messageId: string } | null) => void;
   activeCitationRef: { id: number; messageId: string } | null;
   setActiveCitationRef: (ref: { id: number; messageId: string } | null) => void;
+
+  // Tool suggestions / prefill
+  toolSuggestion: { toolId: string; label: string; reason: string } | null;
+  setToolSuggestion: (s: { toolId: string; label: string; reason: string } | null) => void;
+  toolPrefill: { toolId: string; query: string } | null;
+  setToolPrefill: (p: { toolId: string; query: string } | null) => void;
+  clearToolPrefill: () => void;
 }
 
 const generateId = () => `msg_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
@@ -234,4 +241,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setHoveredCitation: (hovered) => set({ hoveredCitation: hovered }),
   activeCitationRef: null,
   setActiveCitationRef: (ref) => set({ activeCitationRef: ref }),
+
+  // Tool suggestions / prefill
+  toolSuggestion: null,
+  setToolSuggestion: (s) => set({ toolSuggestion: s }),
+  toolPrefill: null,
+  setToolPrefill: (p) => set({ toolPrefill: p }),
+  clearToolPrefill: () => set({ toolPrefill: null }),
 }));

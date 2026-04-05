@@ -458,7 +458,7 @@
 }
 
 .fab-pill.hover {
-  padding: ${FAB.pillPaddingHover};
+  padding: ${FAB.pillPadding};
 }
 
 .fab-pill.dragging {
@@ -1509,6 +1509,19 @@ ${url}`;
         handleActionClick(action);
       });
     }
+    function detectSelectionType(text) {
+      const t = text.trim();
+      if (/^(https?:\/\/|www\.)\S+$/.test(t)) return "url";
+      if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t)) return "email";
+      const codeScore = [
+        /[{}\[\]();]/.test(t),
+        /\b(function|const|let|var|def|class|import|return|if|for|while)\b/.test(t),
+        /=>|->|::/.test(t),
+        /^\s{2,}/m.test(t)
+      ].filter(Boolean).length;
+      if (codeScore >= 2) return "code";
+      return "text";
+    }
     function showTextBar(selectionRect, text) {
       if (!storeRef) return;
       const signal = storeRef.get();
@@ -1522,7 +1535,15 @@ ${url}`;
       barEl.className = "ghost-bar ghost-bar-text";
       const top = selectionRect.bottom;
       applyBarStyle(barEl, selectionRect, top, GHOST_BAR.height, GLASS.bg);
-      const actions = signal.actions.slice(0, GHOST_BAR.maxActionsPerRow - 1);
+      const selType = detectSelectionType(text);
+      const SMART_ACTIONS = {
+        code: ["explain", "ask", "copy"],
+        url: ["ask", "summarize", "copy"],
+        email: ["ask", "copy"],
+        text: []
+      };
+      const baseActions = SMART_ACTIONS[selType].length ? SMART_ACTIONS[selType] : signal.actions;
+      const actions = baseActions.slice(0, GHOST_BAR.maxActionsPerRow - 1);
       for (const action of actions) {
         barEl.appendChild(makeActionButton(action));
       }
@@ -5682,6 +5703,16 @@ I have a follow-up question: `,
         }
         if (msg.type === "EXEC_ACTION") {
           sendResponse(handlers.execAction(msg.action));
+          return false;
+        }
+        if (msg.type === "FILL_FORM") {
+          const fields = msg.fields;
+          let filled = 0;
+          for (const field of fields || []) {
+            const result = handlers.execAction({ action: "type", selector: field.selector, text: field.value });
+            if (result.ok) filled++;
+          }
+          sendResponse({ ok: true, filled, total: (fields == null ? void 0 : fields.length) || 0 });
           return false;
         }
         if (msg.type === "SHOW_OCR_OVERLAY") {

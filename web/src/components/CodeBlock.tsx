@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { ClipboardDocumentIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon, PlayIcon, EyeIcon } from '@heroicons/react/24/outline';
 import { highlightCode } from '../utils/codeHighlighter';
 import { executeInline } from '../utils/pyodideExecutor';
-import { detectArtifactType, type ArtifactType } from '../utils/artifactRenderer';
+import { detectArtifactType, buildSrcdoc, type ArtifactType } from '../utils/artifactRenderer';
 import { sanitizeHtml } from '../utils/sanitize';
 import { copyText } from '../utils/clipboard';
 import { useSettingsStore } from '../store/settingsStore';
@@ -32,6 +32,9 @@ export function CodeBlock({ language, children, onOpenArtifact }: CodeBlockProps
   const [collapsed, setCollapsed] = useState(() => children.split('\n').length > COLLAPSE_THRESHOLD);
   const [runOutputs, setRunOutputs] = useState<InlineOutput[]>([]);
   const [isRunning, setIsRunning] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewHeight, setPreviewHeight] = useState(300);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout>>();
   const lineCount = children.split('\n').length;
   const canRun = RUNNABLE_LANGS.has(language.toLowerCase());
@@ -46,6 +49,17 @@ export function CodeBlock({ language, children, onOpenArtifact }: CodeBlockProps
     highlightCode(children, language, isDark ? 'dark' : 'light')
       .then(setHighlighted).catch(() => {});
   }, [children, language, theme]);
+
+  useEffect(() => {
+    if (!showPreview) return;
+    const handler = (e: MessageEvent) => {
+      if (e.data?.type === 'artifact-resize' && e.source === iframeRef.current?.contentWindow) {
+        setPreviewHeight(Math.min(e.data.height + 10, 500));
+      }
+    };
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, [showPreview]);
 
   const handleCopy = useCallback(async () => {
     if (await copyText(children)) {
@@ -103,18 +117,39 @@ export function CodeBlock({ language, children, onOpenArtifact }: CodeBlockProps
         </div>
       </div>
 
-      {/* Code content */}
-      <div className="overflow-x-auto transition-[max-height] duration-300"
-        style={{ maxHeight: collapsed ? '240px' : 'none', overflow: collapsed ? 'hidden' : 'auto' }}>
-        {highlighted ? (
-          <div dangerouslySetInnerHTML={{ __html: highlighted }}
-            className="shiki-block p-4 m-0 text-sm [&_pre]:!bg-transparent [&_pre]:!m-0 [&_pre]:!p-0 [&_code]:!bg-transparent" />
-        ) : (
-          <pre className="p-4 overflow-x-auto m-0 text-sm bg-surface-1">
-            <code className={`language-${language}`}>{children}</code>
-          </pre>
-        )}
-      </div>
+      {/* Preview tabs */}
+      {artifactType && (
+        <div className="flex gap-1 px-3 py-1 border-b border-chat-border">
+          <button onClick={() => setShowPreview(false)} className={`text-[10px] px-2 py-0.5 rounded ${!showPreview ? 'bg-chat-accent text-white' : 'text-chat-text-secondary'}`}>Code</button>
+          <button onClick={() => setShowPreview(true)} className={`text-[10px] px-2 py-0.5 rounded ${showPreview ? 'bg-chat-accent text-white' : 'text-chat-text-secondary'}`}>Preview</button>
+        </div>
+      )}
+
+      {/* Code content or inline preview */}
+      {showPreview && artifactType ? (
+        <div className="p-2">
+          <iframe
+            ref={iframeRef}
+            srcDoc={buildSrcdoc(artifactType, children)}
+            sandbox="allow-scripts"
+            className="w-full border-none rounded"
+            style={{ height: previewHeight }}
+            title="Inline preview"
+          />
+        </div>
+      ) : (
+        <div className="overflow-x-auto transition-[max-height] duration-300"
+          style={{ maxHeight: collapsed ? '240px' : 'none', overflow: collapsed ? 'hidden' : 'auto' }}>
+          {highlighted ? (
+            <div dangerouslySetInnerHTML={{ __html: highlighted }}
+              className="shiki-block p-4 m-0 text-sm [&_pre]:!bg-transparent [&_pre]:!m-0 [&_pre]:!p-0 [&_code]:!bg-transparent" />
+          ) : (
+            <pre className="p-4 overflow-x-auto m-0 text-sm bg-surface-1">
+              <code className={`language-${language}`}>{children}</code>
+            </pre>
+          )}
+        </div>
+      )}
 
       {collapsed && lineCount > COLLAPSE_THRESHOLD && (
         <div className="absolute bottom-0 left-0 right-0 h-12 pointer-events-none"

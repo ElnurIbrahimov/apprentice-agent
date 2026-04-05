@@ -6,6 +6,8 @@ import {
   StopIcon,
   LanguageIcon,
 } from '@heroicons/react/24/outline';
+import { useChatStore } from '../store/chatStore';
+import { SendToMenu } from './SendToMenu';
 
 /* ── Constants ── */
 const LANGUAGES = [
@@ -52,6 +54,15 @@ export function TranslatePanel() {
 
   const abortRef = useRef<AbortController | null>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
+
+  // Prefill from tool suggestion
+  useEffect(() => {
+    const prefill = useChatStore.getState().toolPrefill;
+    if (prefill?.toolId === 'translate') {
+      setSourceText(prefill.query);
+      useChatStore.getState().clearToolPrefill();
+    }
+  }, []);
 
   // Load draft on mount
   useEffect(() => {
@@ -394,24 +405,27 @@ export function TranslatePanel() {
             <span className="text-[10px] text-chat-text-secondary tabular-nums">
               {translatedText.length.toLocaleString()} chars
             </span>
-            <button
-              onClick={handleCopy}
-              disabled={!translatedText}
-              title="Copy translation"
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] text-chat-text-secondary hover:text-chat-text hover:bg-surface-3 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
-            >
-              {copied ? (
-                <>
-                  <CheckIcon className="w-3 h-3 text-green-400" />
-                  <span className="text-green-400">Copied</span>
-                </>
-              ) : (
-                <>
-                  <ClipboardDocumentIcon className="w-3 h-3" />
-                  Copy
-                </>
-              )}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleCopy}
+                disabled={!translatedText}
+                title="Copy translation"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] text-chat-text-secondary hover:text-chat-text hover:bg-surface-3 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+              >
+                {copied ? (
+                  <>
+                    <CheckIcon className="w-3 h-3 text-green-400" />
+                    <span className="text-green-400">Copied</span>
+                  </>
+                ) : (
+                  <>
+                    <ClipboardDocumentIcon className="w-3 h-3" />
+                    Copy
+                  </>
+                )}
+              </button>
+              <SendToMenu content={translatedText} sourceToolId="translate" />
+            </div>
           </div>
         </div>
       </div>

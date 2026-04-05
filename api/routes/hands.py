@@ -27,6 +27,7 @@ def _get_manager():
     from aura.hands.guardian import GuardianHand
     from aura.hands.memory_hand import MemoryHand
     from aura.hands.collector import CollectorHand
+    from aura.hands.morning_briefing import MorningBriefingHand
     from aura.hands.dynamic_hand import DynamicHand
     from aura.hands.custom_store import get_custom_hand_store
 
@@ -37,6 +38,7 @@ def _get_manager():
         manager.register(GuardianHand())
         manager.register(MemoryHand())
         manager.register(CollectorHand())
+        manager.register(MorningBriefingHand())
         # Restore custom hands persisted from previous sessions
         store = get_custom_hand_store()
         for config in store.load_all():
