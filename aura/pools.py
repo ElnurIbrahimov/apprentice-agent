@@ -33,15 +33,19 @@ _tool_pool: Optional[ThreadPoolExecutor] = None
 
 
 def llm_pool() -> ThreadPoolExecutor:
-    """Pool for all LLM/Ollama calls. 12 workers."""
+    """Pool for all LLM/Ollama calls. 4 workers.
+
+    Kept low to avoid overwhelming Ollama Pro's 3-concurrent-model limit.
+    More workers just queue behind each other and waste threads.
+    """
     global _llm_pool
     if _llm_pool is None:
         with _lock:
             if _llm_pool is None:
                 _llm_pool = ThreadPoolExecutor(
-                    max_workers=12, thread_name_prefix="llm_worker"
+                    max_workers=4, thread_name_prefix="llm_worker"
                 )
-                logger.debug("[pools] LLM pool created (12 workers)")
+                logger.debug("[pools] LLM pool created (4 workers)")
     return _llm_pool
 
 

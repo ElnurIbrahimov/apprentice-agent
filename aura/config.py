@@ -221,7 +221,8 @@ class Config:
             ("longctx", cls.MODEL_LONGCTX, cls.MODEL_LONGCTX_CHAIN),
         ]
         results = {}
-        with ThreadPoolExecutor(max_workers=6) as pool:
+        # Cap at 3 workers to respect Ollama Pro's 3-concurrent-model limit
+        with ThreadPoolExecutor(max_workers=3) as pool:
             futures = {
                 pool.submit(get_best_available_model, preferred, fallbacks, role): role
                 for role, preferred, fallbacks in roles
