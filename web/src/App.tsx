@@ -22,7 +22,16 @@ import {
   XMarkIcon,
 } from '@heroicons/react/24/outline';
 
-// Lazy-loaded tabs (only Chat + Sidebar are eagerly loaded)
+// ─── Eager imports: lightweight panels that users switch between frequently ───
+// These are small (<15KB each) and load instantly instead of showing a skeleton.
+import { ConsciousnessPanel } from './components/ConsciousnessPanel';
+import { InsightsFeed } from './components/InsightsFeed';
+import { WorldModelPanel } from './components/WorldModelPanel';
+import { MorningBriefingCard } from './components/MorningBriefingCard';
+import { DreamInsightsPanel } from './components/DreamInsightsPanel';
+import { EvolutionTracker } from './components/EvolutionTracker';
+
+// ─── Lazy-loaded: heavier panels that benefit from code-splitting ───
 const ThoughtStream = lazy(() => import('./components/ThoughtStream').then(m => ({ default: m.ThoughtStream })));
 const AuraPanel = lazy(() => import('./components/AuraPanel').then(m => ({ default: m.AuraPanel })));
 const NeuroDreamPanel = lazy(() => import('./components/NeuroDreamPanel').then(m => ({ default: m.NeuroDreamPanel })));
@@ -57,12 +66,6 @@ const CapturePanel = lazy(() => import('./components/CapturePanel').then(m => ({
 const WisebasePanel = lazy(() => import('./components/WisebasePanel').then(m => ({ default: m.WisebasePanel })));
 const SlidesPanel = lazy(() => import('./components/SlidesPanel').then(m => ({ default: m.SlidesPanel })));
 const RecordPanel = lazy(() => import('./components/RecordPanel').then(m => ({ default: m.RecordPanel })));
-const ConsciousnessPanel = lazy(() => import('./components/ConsciousnessPanel').then(m => ({ default: m.ConsciousnessPanel })));
-const InsightsFeed = lazy(() => import('./components/InsightsFeed').then(m => ({ default: m.InsightsFeed })));
-const WorldModelPanel = lazy(() => import('./components/WorldModelPanel').then(m => ({ default: m.WorldModelPanel })));
-const MorningBriefingCard = lazy(() => import('./components/MorningBriefingCard').then(m => ({ default: m.MorningBriefingCard })));
-const DreamInsightsPanel = lazy(() => import('./components/DreamInsightsPanel').then(m => ({ default: m.DreamInsightsPanel })));
-const EvolutionTracker = lazy(() => import('./components/EvolutionTracker').then(m => ({ default: m.EvolutionTracker })));
 
 import type { TabId } from './types';
 
@@ -80,12 +83,8 @@ type ToolsSubTab = 'launcher' | 'system' | ToolId;
 
 function TabSkeleton() {
   return (
-    <div className="flex-1 flex items-center justify-center">
-      <div className="animate-pulse flex flex-col gap-3 w-64">
-        <div className="h-4 bg-surface-2 rounded w-3/4" />
-        <div className="h-4 bg-surface-2 rounded w-1/2" />
-        <div className="h-4 bg-surface-2 rounded w-5/6" />
-      </div>
+    <div className="flex-1 flex items-center justify-center opacity-30">
+      <div className="w-5 h-5 rounded-full border-2 border-chat-accent/40 border-t-chat-accent animate-spin" />
     </div>
   );
 }
@@ -123,6 +122,27 @@ function MainApp() {
 
   // Command palette state
   const [showCommandPalette, setShowCommandPalette] = useState(false);
+
+  // Prefetch all lazy chunks after initial render so tab switches are instant
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      // Trigger imports in background — browser caches the chunks
+      import('./components/ThoughtStream');
+      import('./components/AuraPanel');
+      import('./components/ActivityTimeline');
+      import('./components/MemoryTimeline');
+      import('./components/KnowledgeGraphExplorer');
+      import('./components/HandsDashboard');
+      import('./components/TaskQueuePanel');
+      import('./components/SettingsPage');
+      import('./components/ToolsPanel');
+      import('./components/ToolLauncher');
+      import('./components/ReasoningTreePanel');
+      import('./components/NeuroDreamPanel');
+      import('./components/AMEMPanel');
+    }, 2000); // Wait 2s after mount so initial render isn't blocked
+    return () => clearTimeout(timer);
+  }, []);
 
   const toggleTheme = useCallback(() => {
     const current = useSettingsStore.getState().settings.theme;
