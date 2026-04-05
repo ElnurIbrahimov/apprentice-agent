@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, KeyboardEvent, FormEvent, DragEvent, Clipb
 import {
   PlusIcon, MicrophoneIcon, ChevronDownIcon,
   PhotoIcon, MagnifyingGlassIcon, BeakerIcon, CpuChipIcon, UserGroupIcon, ScaleIcon, GlobeAltIcon,
-  PaperAirplaneIcon,
+  PaperAirplaneIcon, StopCircleIcon,
 } from '@heroicons/react/24/outline';
 import { AttachmentList } from './AttachmentPreview';
 import { useFileUpload, isSupported } from '../hooks/useFileUpload';
@@ -10,6 +10,7 @@ import { useChatStore } from '../store/chatStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { haptic } from '../utils/haptics';
 import { sounds } from '../utils/sounds';
+import { toast } from './Toast';
 import type { FileAttachment } from '../types';
 
 // Action modes
@@ -72,9 +73,12 @@ export function MessageInput({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const plusMenuRef = useRef<HTMLDivElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
-  const [isListening, setIsListening] = useState(false);
-  const [voiceError, setVoiceError] = useState(false);
-  const recognitionRef = useRef<any>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(true);
 
   const { selectedModel, availableModels, setSelectedModel, setAvailableModels } = useChatStore();
@@ -152,48 +156,104 @@ export function MessageInput({
     };
   }, []);
 
-  // Cleanup speech recognition on unmount
+  // Cleanup on unmount
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      recognitionRef.current?.abort();
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      mediaRecorderRef.current?.stop();
     };
   }, []);
 
-  const handleVoiceToggle = () => {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) return;
+  const stopRecording = () => {
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    mediaRecorderRef.current?.stop();
+  };
 
-    if (isListening && recognitionRef.current) {
-      recognitionRef.current.stop();
-      setIsListening(false);
+  const handleMicClick = async () => {
+    if (isRecording) {
+      stopRecording();
       return;
     }
 
-    const recognition = new SR();
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.lang = navigator.language || 'en-US';
-    recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
-      if (mountedRef.current) {
-        setMessage(prev => prev ? `${prev} ${transcript}` : transcript);
-        setIsListening(false);
+    if (isTranscribing) return;
+
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      toast.error('Microphone access denied', 'Allow microphone access in your browser settings.');
+      return;
+    }
+
+    audioChunksRef.current = [];
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg';
+    const recorder = new MediaRecorder(stream, { mimeType });
+
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) audioChunksRef.current.push(e.data);
+    };
+
+    recorder.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop());
+      setIsRecording(false);
+      setRecordingSeconds(0);
+
+      if (!mountedRef.current) return;
+
+      const blob = new Blob(audioChunksRef.current, { type: mimeType });
+      if (blob.size < 1000) {
+        toast.warning('No speech detected', 'Try speaking closer to your microphone.');
+        return;
+      }
+
+      setIsTranscribing(true);
+      try {
+        const ext = mimeType === 'audio/webm' ? 'webm' : 'ogg';
+        const formData = new FormData();
+        formData.append('file', blob, `recording.${ext}`);
+
+        const res = await fetch('/api/transcribe', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        const transcript = (data.text || '').trim();
+
+        if (!transcript) {
+          toast.warning('No speech detected', 'Try again and speak clearly.');
+          return;
+        }
+
+        if (mountedRef.current) {
+          setMessage(prev => prev ? `${prev} ${transcript}` : transcript);
+          textareaRef.current?.focus();
+        }
+      } catch (err: any) {
+        toast.error('Transcription failed', err?.message || 'Please try again.');
+      } finally {
+        if (mountedRef.current) setIsTranscribing(false);
       }
     };
-    recognition.onerror = () => {
-      setIsListening(false);
-      recognitionRef.current = null;
-      // Flash the voice button red briefly on error
-      setVoiceError(true);
-      setTimeout(() => setVoiceError(false), 2000);
-    };
-    recognition.onend = () => { setIsListening(false); recognitionRef.current = null; };
 
-    recognitionRef.current = recognition;
-    recognition.start();
-    setIsListening(true);
+    mediaRecorderRef.current = recorder;
+    recorder.start(250);
+    setIsRecording(true);
+    setRecordingSeconds(0);
+
+    recordingTimerRef.current = setInterval(() => {
+      setRecordingSeconds(s => s + 1);
+    }, 1000);
   };
 
   const handleSubmit = (e: FormEvent) => {
@@ -410,6 +470,8 @@ export function MessageInput({
                     bottom: 40,
                     left: 0,
                     minWidth: 200,
+                    maxHeight: 'calc(100vh - 120px)',
+                    overflowY: 'auto',
                     background: 'var(--surface-1)',
                     border: '1px solid var(--border-default)',
                     borderRadius: 12,
@@ -466,7 +528,7 @@ export function MessageInput({
                 onClick={() => setActionMode('none')}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 4,
-                  padding: '3px 10px',
+                  padding: '6px 12px',
                   borderRadius: 20,
                   background: MODE_COLORS[actionMode],
                   border: '1px solid var(--border-default)',
@@ -477,7 +539,7 @@ export function MessageInput({
                 }}
               >
                 {MODE_ICONS[actionMode]} {MODE_LABELS[actionMode]}
-                <span style={{ opacity: 0.5, marginLeft: 2 }}>×</span>
+                <span style={{ opacity: 0.5, marginLeft: 4, padding: '2px 4px' }}>×</span>
               </button>
             )}
 
@@ -561,25 +623,60 @@ export function MessageInput({
             </div>
 
             {/* Voice button */}
-            <button
-              type="button"
-              onClick={handleVoiceToggle}
-              disabled={disabled}
-              aria-label={isListening ? 'Stop listening' : 'Voice input'}
-              style={{
-                width: 40, height: 40, borderRadius: 10,
-                background: isListening ? 'rgba(239,68,68,0.2)' : voiceError ? 'rgba(239,68,68,0.15)' : 'transparent',
-                border: voiceError ? '1px solid rgba(239,68,68,0.4)' : 'none',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                cursor: disabled ? 'not-allowed' : 'pointer',
-                color: isListening || voiceError ? '#f87171' : 'var(--text-secondary)',
-                transition: 'all 0.15s',
-                flexShrink: 0,
-              }}
-              title={voiceError ? 'Microphone access denied or unavailable' : isListening ? 'Stop listening' : 'Voice input'}
-            >
-              <MicrophoneIcon className={`w-5 h-5 ${isListening ? 'animate-pulse' : ''}`} />
-            </button>
+            <div className="relative flex items-center" style={{ flexShrink: 0 }}>
+              {isRecording && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    right: 44,
+                    fontSize: 11,
+                    fontVariantNumeric: 'tabular-nums',
+                    color: '#f87171',
+                    whiteSpace: 'nowrap',
+                    pointerEvents: 'none',
+                  }}
+                >
+                  {Math.floor(recordingSeconds / 60)}:{String(recordingSeconds % 60).padStart(2, '0')}
+                </span>
+              )}
+              {isRecording && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    inset: -4,
+                    borderRadius: 14,
+                    border: '2px solid rgba(239,68,68,0.5)',
+                    animation: 'mic-pulse 1.2s ease-out infinite',
+                    pointerEvents: 'none',
+                  }}
+                />
+              )}
+              <button
+                type="button"
+                onClick={handleMicClick}
+                disabled={disabled}
+                aria-label={isRecording ? 'Stop recording' : isTranscribing ? 'Transcribing…' : 'Voice input'}
+                style={{
+                  width: 40, height: 40, borderRadius: 10,
+                  background: isRecording ? 'rgba(239,68,68,0.2)' : isTranscribing ? 'rgba(124,58,237,0.2)' : 'transparent',
+                  border: 'none',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: (disabled || isTranscribing) ? 'not-allowed' : 'pointer',
+                  color: isRecording ? '#f87171' : isTranscribing ? '#a78bfa' : 'var(--text-secondary)',
+                  transition: 'all 0.15s',
+                  position: 'relative',
+                }}
+                title={isRecording ? 'Stop recording' : isTranscribing ? 'Transcribing…' : 'Voice input'}
+              >
+                {isRecording ? (
+                  <StopCircleIcon className="w-5 h-5" />
+                ) : isTranscribing ? (
+                  <MicrophoneIcon className="w-5 h-5 animate-pulse" />
+                ) : (
+                  <MicrophoneIcon className="w-5 h-5" />
+                )}
+              </button>
+            </div>
 
             {/* Send / Stop */}
             {isLoading && onStop ? (

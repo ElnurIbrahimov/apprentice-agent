@@ -5,6 +5,7 @@ import {
   KeyIcon, TrashIcon,
 } from '@heroicons/react/24/outline';
 import { useSettingsStore } from '../store/settingsStore';
+import type { ColorPreset } from '../store/settingsStore';
 import { toast } from './Toast';
 
 // ─── Provider Definitions ────────────────────────────────────────────────────
@@ -89,6 +90,21 @@ const FONT_SIZES = [
   { value: 'small' as const, label: 'Small' },
   { value: 'medium' as const, label: 'Medium' },
   { value: 'large' as const, label: 'Large' },
+];
+
+const COLOR_PRESETS: {
+  value: ColorPreset;
+  label: string;
+  swatch: string;       // tailwind bg class or inline style color used in the preview dot
+  swatchB: string;      // second color for two-tone gradient
+  description: string;
+}[] = [
+  { value: 'aura',    label: 'Aura',        swatch: '#8b5cf6', swatchB: '#3b82f6', description: 'Purple / violet' },
+  { value: 'ocean',   label: 'Ocean',       swatch: '#0ea5e9', swatchB: '#06b6d4', description: 'Blue / teal' },
+  { value: 'forest',  label: 'Forest',      swatch: '#10b981', swatchB: '#34d399', description: 'Green / emerald' },
+  { value: 'sunset',  label: 'Sunset',      swatch: '#f97316', swatchB: '#fbbf24', description: 'Orange / amber' },
+  { value: 'rose',    label: 'Rose',        swatch: '#f43f5e', swatchB: '#fb7185', description: 'Pink / rose' },
+  { value: 'mono',    label: 'Mono',        swatch: '#71717a', swatchB: '#a1a1aa', description: 'Gray / neutral' },
 ];
 
 // ─── Subcomponents ───────────────────────────────────────────────────────────
@@ -484,6 +500,45 @@ export function SettingsPage() {
                       {t.label}
                     </button>
                   ))}
+                </div>
+              </div>
+
+              {/* Color Preset */}
+              <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4">
+                <h4 className="text-sm font-semibold text-chat-text mb-1">Color Preset</h4>
+                <p className="text-[11px] text-chat-text-secondary/50 mb-4">Accent color across the entire app.</p>
+                <div className="grid grid-cols-3 gap-2.5">
+                  {COLOR_PRESETS.map(preset => {
+                    const active = (settings.colorPreset ?? 'aura') === preset.value;
+                    return (
+                      <button
+                        key={preset.value}
+                        onClick={() => updateSettings({ colorPreset: preset.value })}
+                        className={`relative flex flex-col items-center gap-2 px-2 py-3 rounded-xl border transition-all duration-200 ${
+                          active
+                            ? 'border-white/20 bg-white/[0.06] shadow-sm'
+                            : 'border-transparent bg-white/[0.02] hover:bg-white/[0.04] hover:border-white/[0.08]'
+                        }`}
+                      >
+                        {/* Swatch */}
+                        <div
+                          className="w-8 h-8 rounded-full flex-shrink-0 shadow-md"
+                          style={{
+                            background: `linear-gradient(135deg, ${preset.swatch} 0%, ${preset.swatchB} 100%)`,
+                            boxShadow: active ? `0 0 12px ${preset.swatch}80` : undefined,
+                          }}
+                        />
+                        <span className={`text-[11px] font-medium leading-tight ${active ? 'text-chat-text' : 'text-chat-text-secondary'}`}>
+                          {preset.label}
+                        </span>
+                        {active && (
+                          <span className="absolute top-1.5 right-1.5 w-3.5 h-3.5 rounded-full bg-white/20 flex items-center justify-center">
+                            <CheckIcon className="w-2.5 h-2.5 text-white" />
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 

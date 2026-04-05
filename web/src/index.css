@@ -260,6 +260,183 @@ html.light {
   }
 }
 
+/* =============================================
+   COLOR PRESETS
+   Applied as html.preset-* on top of dark/light theme.
+   Only accent/glow/surface-tint tokens are overridden here.
+   ============================================= */
+
+/* Ocean — blue/teal */
+html.preset-ocean {
+  --accent-purple: #0ea5e9;
+  --chat-accent: #0284c7;
+  --chat-accent-hover: #0369a1;
+  --glow-purple: rgba(14, 165, 233, 0.4);
+  --glow-purple-strong: rgba(14, 165, 233, 0.6);
+  --ai-thinking: rgba(14, 165, 233, 0.15);
+  --mood-accent: #0ea5e9;
+  --mood-glow: rgba(14, 165, 233, 0.4);
+  --mood-mesh-1: #001e3c;
+  --user-bubble-shadow: 0 4px 20px rgba(2, 132, 199, 0.25);
+}
+html.preset-ocean.light {
+  --accent-purple: #0284c7;
+  --chat-accent: #0369a1;
+  --chat-accent-hover: #075985;
+  --glow-purple: rgba(2, 132, 199, 0.15);
+  --glow-purple-strong: rgba(2, 132, 199, 0.25);
+  --mood-mesh-1: #dbeafe;
+  --user-bubble-bg: #0284c7;
+  --user-bubble-shadow: 0 4px 20px rgba(2, 132, 199, 0.2);
+}
+
+/* Forest — green/emerald */
+html.preset-forest {
+  --accent-purple: #10b981;
+  --chat-accent: #059669;
+  --chat-accent-hover: #047857;
+  --glow-purple: rgba(16, 185, 129, 0.4);
+  --glow-purple-strong: rgba(16, 185, 129, 0.6);
+  --ai-thinking: rgba(16, 185, 129, 0.15);
+  --mood-accent: #10b981;
+  --mood-glow: rgba(16, 185, 129, 0.4);
+  --mood-mesh-1: #002a1a;
+  --user-bubble-shadow: 0 4px 20px rgba(5, 150, 105, 0.25);
+}
+html.preset-forest.light {
+  --accent-purple: #059669;
+  --chat-accent: #047857;
+  --chat-accent-hover: #065f46;
+  --glow-purple: rgba(5, 150, 105, 0.15);
+  --glow-purple-strong: rgba(5, 150, 105, 0.25);
+  --mood-mesh-1: #d1fae5;
+  --user-bubble-bg: #059669;
+  --user-bubble-shadow: 0 4px 20px rgba(5, 150, 105, 0.2);
+}
+
+/* Sunset — orange/amber */
+html.preset-sunset {
+  --accent-purple: #f97316;
+  --chat-accent: #ea580c;
+  --chat-accent-hover: #c2410c;
+  --glow-purple: rgba(249, 115, 22, 0.4);
+  --glow-purple-strong: rgba(249, 115, 22, 0.6);
+  --ai-thinking: rgba(249, 115, 22, 0.15);
+  --mood-accent: #f97316;
+  --mood-glow: rgba(249, 115, 22, 0.4);
+  --mood-mesh-1: #2d1200;
+  --user-bubble-shadow: 0 4px 20px rgba(234, 88, 12, 0.25);
+}
+html.preset-sunset.light {
+  --accent-purple: #ea580c;
+  --chat-accent: #c2410c;
+  --chat-accent-hover: #9a3412;
+  --glow-purple: rgba(234, 88, 12, 0.15);
+  --glow-purple-strong: rgba(234, 88, 12, 0.25);
+  --mood-mesh-1: #ffedd5;
+  --user-bubble-bg: #ea580c;
+  --user-bubble-shadow: 0 4px 20px rgba(234, 88, 12, 0.2);
+}
+
+/* Rose — pink/rose */
+html.preset-rose {
+  --accent-purple: #f43f5e;
+  --chat-accent: #e11d48;
+  --chat-accent-hover: #be123c;
+  --glow-purple: rgba(244, 63, 94, 0.4);
+  --glow-purple-strong: rgba(244, 63, 94, 0.6);
+  --ai-thinking: rgba(244, 63, 94, 0.15);
+  --mood-accent: #f43f5e;
+  --mood-glow: rgba(244, 63, 94, 0.4);
+  --mood-mesh-1: #2d0014;
+  --user-bubble-shadow: 0 4px 20px rgba(225, 29, 72, 0.25);
+}
+html.preset-rose.light {
+  --accent-purple: #e11d48;
+  --chat-accent: #be123c;
+  --chat-accent-hover: #9f1239;
+  --glow-purple: rgba(225, 29, 72, 0.15);
+  --glow-purple-strong: rgba(225, 29, 72, 0.25);
+  --mood-mesh-1: #ffe4e6;
+  --user-bubble-bg: #e11d48;
+  --user-bubble-shadow: 0 4px 20px rgba(225, 29, 72, 0.2);
+}
+
+/* Monochrome — gray/white, no color accent */
+html.preset-mono {
+  --accent-purple: #a1a1aa;
+  --chat-accent: #71717a;
+  --chat-accent-hover: #52525b;
+  --glow-purple: rgba(161, 161, 170, 0.3);
+  --glow-purple-strong: rgba(161, 161, 170, 0.45);
+  --ai-thinking: rgba(161, 161, 170, 0.12);
+  --mood-accent: #a1a1aa;
+  --mood-glow: rgba(161, 161, 170, 0.3);
+  --mood-mesh-1: #0a0a0a;
+  --user-bubble-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+}
+html.preset-mono.light {
+  --accent-purple: #52525b;
+  --chat-accent: #3f3f46;
+  --chat-accent-hover: #27272a;
+  --glow-purple: rgba(82, 82, 91, 0.12);
+  --glow-purple-strong: rgba(82, 82, 91, 0.2);
+  --mood-mesh-1: #f4f4f5;
+  --user-bubble-bg: #3f3f46;
+  --user-bubble-text: #fff;
+  --user-bubble-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+}
+
+/* system preference variants for presets */
+@media (prefers-color-scheme: light) {
+  html.preset-ocean.system {
+    --accent-purple: #0284c7;
+    --chat-accent: #0369a1;
+    --chat-accent-hover: #075985;
+    --glow-purple: rgba(2, 132, 199, 0.15);
+    --mood-mesh-1: #dbeafe;
+    --user-bubble-bg: #0284c7;
+    --user-bubble-shadow: 0 4px 20px rgba(2, 132, 199, 0.2);
+  }
+  html.preset-forest.system {
+    --accent-purple: #059669;
+    --chat-accent: #047857;
+    --chat-accent-hover: #065f46;
+    --glow-purple: rgba(5, 150, 105, 0.15);
+    --mood-mesh-1: #d1fae5;
+    --user-bubble-bg: #059669;
+    --user-bubble-shadow: 0 4px 20px rgba(5, 150, 105, 0.2);
+  }
+  html.preset-sunset.system {
+    --accent-purple: #ea580c;
+    --chat-accent: #c2410c;
+    --chat-accent-hover: #9a3412;
+    --glow-purple: rgba(234, 88, 12, 0.15);
+    --mood-mesh-1: #ffedd5;
+    --user-bubble-bg: #ea580c;
+    --user-bubble-shadow: 0 4px 20px rgba(234, 88, 12, 0.2);
+  }
+  html.preset-rose.system {
+    --accent-purple: #e11d48;
+    --chat-accent: #be123c;
+    --chat-accent-hover: #9f1239;
+    --glow-purple: rgba(225, 29, 72, 0.15);
+    --mood-mesh-1: #ffe4e6;
+    --user-bubble-bg: #e11d48;
+    --user-bubble-shadow: 0 4px 20px rgba(225, 29, 72, 0.2);
+  }
+  html.preset-mono.system {
+    --accent-purple: #52525b;
+    --chat-accent: #3f3f46;
+    --chat-accent-hover: #27272a;
+    --glow-purple: rgba(82, 82, 91, 0.12);
+    --mood-mesh-1: #f4f4f5;
+    --user-bubble-bg: #3f3f46;
+    --user-bubble-text: #fff;
+    --user-bubble-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+  }
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -366,6 +543,15 @@ html.light .grain { opacity: 0.02; }
   100% { transform: translate(0, -5%) scale(1.05); }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .mesh-blob {
+    animation: none !important;
+  }
+  .animate-pulse, .animate-bounce, .animate-spin, .animate-ping {
+    animation: none !important;
+  }
+}
+
 .grain {
   position: fixed;
   top: 0; left: 0; width: 100%; height: 100%;
@@ -419,6 +605,15 @@ html.light .grain { opacity: 0.02; }
 .card-hover:hover {
   transform: scale(1.02);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+.tab-content-enter {
+  animation: tab-fade-in 0.15s ease;
+}
+
+@keyframes tab-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* =============================================
@@ -1482,6 +1677,16 @@ html.light .grain { opacity: 0.02; }
   }
 }
 
+/* Landscape phone fixes */
+@media (orientation: landscape) and (max-height: 500px) {
+  .input-safe-area {
+    padding-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px)) !important;
+  }
+  .messages-scroll {
+    padding-bottom: 0.5rem;
+  }
+}
+
 /* =============================================
    DREAM JOURNAL
    ============================================= */
@@ -1783,4 +1988,13 @@ html.light .proactive-card {
   .tab-panel-scroll {
     padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px) + 0.5rem);
   }
+}
+
+/* =============================================
+   MIC RECORDING PULSE ANIMATION
+   ============================================= */
+@keyframes mic-pulse {
+  0%   { opacity: 0.8; transform: scale(1); }
+  70%  { opacity: 0;   transform: scale(1.5); }
+  100% { opacity: 0;   transform: scale(1.5); }
 }

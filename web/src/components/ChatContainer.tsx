@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { useChatStore } from '../store/chatStore';
+import { detectToolSuggestion } from '../utils/detectToolSuggestion';
 import { useSettingsStore } from '../store/settingsStore';
 import { MessageBubble } from './MessageBubble';
 import { MessageInput } from './MessageInput';
@@ -15,7 +16,7 @@ import { ResearchProgress } from './ResearchProgress';
 import { CitationsPanel } from './CitationsPanel';
 import { ArtifactsPanel } from './ArtifactsPanel';
 import { ConversationList } from './ConversationList';
-import { exportAsMarkdown, exportAsJSON, downloadExport } from '../utils/exportConversation';
+import { exportAsMarkdown, exportAsJSON, exportAsHTML, downloadExport } from '../utils/exportConversation';
 import { copyText } from '../utils/clipboard';
 import { toast } from './Toast';
 import type { ArtifactType } from '../utils/artifactRenderer';
@@ -31,6 +32,7 @@ import {
   ArrowDownTrayIcon,
   DocumentTextIcon,
   CodeBracketIcon,
+  LinkIcon,
 } from '@heroicons/react/24/outline';
 
 // Swipe drawer constants
@@ -110,7 +112,7 @@ const FOLLOW_UP_SETS = [
 
 export function ChatContainer() {
   useMoodTheme();
-  const { messages, isLoading, error, setError, connectionStatus, toolStatus, isSwitchingConversation, suggestions, setSuggestions, clearSuggestions, fleetData, clearFleetData, clearResearchProgress, citationsPanelOpen, toggleCitationsPanel } = useChatStore();
+  const { messages, isLoading, error, setError, connectionStatus, toolStatus, isSwitchingConversation, suggestions, setSuggestions, clearSuggestions, fleetData, clearFleetData, clearResearchProgress, citationsPanelOpen, toggleCitationsPanel, toolSuggestion } = useChatStore();
   const { sendMessage, stopGeneration, connect: reconnect } = useWebSocket();
   const { settings } = useSettingsStore();
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -162,6 +164,13 @@ export function ChatContainer() {
     setExportMenuOpen(false);
   }, [messages]);
 
+  const handleExportHTML = useCallback(() => {
+    const html = exportAsHTML(messages);
+    downloadExport(html, `aura-chat-${Date.now()}.html`, 'text/html');
+    toast.success('Exported as HTML');
+    setExportMenuOpen(false);
+  }, [messages]);
+
   const [copyFeedback, setCopyFeedback] = useState(false);
   const handleCopyConversation = useCallback(async () => {
     const md = exportAsMarkdown(messages);
@@ -171,6 +180,53 @@ export function ChatContainer() {
     }
     setExportMenuOpen(false);
   }, [messages]);
+
+  // --- Share link ---
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [shareLoading, setShareLoading] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
+
+  const handleShareLink = useCallback(async () => {
+    setExportMenuOpen(false);
+    setShareUrl(null);
+    setShareCopied(false);
+    setShareModalOpen(true);
+    setShareLoading(true);
+    try {
+      const html = exportAsHTML(messages);
+      const res = await fetch('/api/share', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_name: 'Aura Conversation',
+          files: { 'index.html': html },
+          entry_point: 'index.html',
+          expires_days: 7,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      const url = data.url.startsWith('http') ? data.url : `${window.location.origin}${data.url}`;
+      setShareUrl(url);
+    } catch (e) {
+      setShareModalOpen(false);
+      toast.error('Share failed', e instanceof Error ? e.message : 'Unknown error');
+    } finally {
+      setShareLoading(false);
+    }
+  }, [messages]);
+
+  const handleCopyShareUrl = useCallback(async () => {
+    if (!shareUrl) return;
+    if (await copyText(shareUrl)) {
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2000);
+    }
+  }, [shareUrl]);
 
   // --- Swipe drawer state ---
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -189,7 +245,7 @@ export function ChatContainer() {
   const PULL_THRESHOLD = 60;
 
   const handleDrawerTouchStart = useCallback((e: React.TouchEvent) => {
-    if (window.innerWidth >= 768) return;
+    if (window.innerWidth >= 1024) return;
     const touchX = e.touches[0].clientX;
     if (touchX <= EDGE_ZONE && !drawerOpen) {
       drawerTouchStartXRef.current = touchX;
@@ -232,6 +288,7 @@ export function ChatContainer() {
   const handleDrawerTouchEnd = useCallback(() => {
     // Pull-to-refresh release
     if (pullStartRef.current?.active && pullDelta >= PULL_THRESHOLD) {
+      haptic(25); // haptic on pull-to-refresh trigger
       setPullRefreshing(true);
       setPullDelta(0);
       reconnect();
@@ -292,6 +349,15 @@ export function ChatContainer() {
     setIsUserScrolledUp(distFromBottom > 80);
   }, []);
 
+  // Scroll to top when Chat tab is re-tapped
+  useEffect(() => {
+    const handler = () => {
+      scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+    document.addEventListener('aura:scroll-to-top', handler);
+    return () => document.removeEventListener('aura:scroll-to-top', handler);
+  }, []);
+
   // Smart auto-scroll: only scroll if user is already at bottom and autoScroll is enabled
   useEffect(() => {
     if (settings.autoScroll && !isUserScrolledUp) {
@@ -316,6 +382,17 @@ export function ChatContainer() {
     }
     prevIsLoadingRef.current = isLoading;
   }, [isLoading, messages.length, setSuggestions, settings.soundEnabled]);
+
+  // After a response is complete, suggest a tool
+  useEffect(() => {
+    if (!isLoading && messages.length > 0) {
+      const lastUser = [...messages].reverse().find(m => m.role === 'user');
+      if (lastUser) {
+        const suggestion = detectToolSuggestion(lastUser.content);
+        useChatStore.getState().setToolSuggestion(suggestion);
+      }
+    }
+  }, [isLoading, messages.length]);
 
   // Auto-dismiss error after 10 seconds + haptic/sound on error
   useEffect(() => {
@@ -412,7 +489,7 @@ export function ChatContainer() {
             {exportMenuOpen && (
               <>
                 <div className="fixed inset-0 z-[40]" onClick={() => setExportMenuOpen(false)} />
-                <div className="absolute right-0 top-full mt-1 z-[50] ctx-menu min-w-[180px]">
+                <div className="absolute right-0 top-full mt-1 z-[50] ctx-menu min-w-[190px]">
                   <button className="ctx-menu-item w-full" onClick={handleExportMarkdown}>
                     <DocumentTextIcon className="w-4 h-4" />
                     Export as Markdown
@@ -421,9 +498,18 @@ export function ChatContainer() {
                     <CodeBracketIcon className="w-4 h-4" />
                     Export as JSON
                   </button>
+                  <button className="ctx-menu-item w-full" onClick={handleExportHTML}>
+                    <GlobeAltIcon className="w-4 h-4" />
+                    Export as HTML
+                  </button>
                   <button className="ctx-menu-item w-full" onClick={handleCopyConversation}>
                     <ArrowDownTrayIcon className="w-4 h-4" />
                     {copyFeedback ? 'Copied!' : 'Copy to Clipboard'}
+                  </button>
+                  <div className="border-t border-white/[0.06] my-1" />
+                  <button className="ctx-menu-item w-full" onClick={handleShareLink}>
+                    <LinkIcon className="w-4 h-4" />
+                    Share Link
                   </button>
                 </div>
               </>
@@ -611,7 +697,7 @@ export function ChatContainer() {
               setIsUserScrolledUp(false);
               messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
             }}
-            className="absolute bottom-24 right-6 z-10 p-2 bg-chat-accent hover:brightness-110 text-white rounded-full shadow-lg transition-all"
+            className="absolute bottom-32 right-6 z-10 p-2 bg-chat-accent hover:brightness-110 text-white rounded-full shadow-lg transition-all"
             aria-label="Scroll to bottom"
           >
             <ChevronDownIcon className="w-5 h-5" />
@@ -724,6 +810,24 @@ export function ChatContainer() {
         </div>
       )}
 
+      {/* Tool suggestion chip */}
+      {toolSuggestion && !isLoading && (
+        <div className="flex justify-center py-2 animate-fade-in">
+          <button
+            onClick={() => {
+              const lastUser = [...messages].reverse().find(m => m.role === 'user');
+              useChatStore.getState().setToolPrefill({ toolId: toolSuggestion.toolId, query: lastUser?.content || '' });
+              document.dispatchEvent(new CustomEvent('aura:tool-open', { detail: { toolId: toolSuggestion.toolId } }));
+              useChatStore.getState().setToolSuggestion(null);
+            }}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs border border-purple-500/30 text-purple-300 hover:bg-purple-500/10 transition-colors"
+          >
+            <span className="text-[10px]">💡</span>
+            {toolSuggestion.reason} → <span className="font-medium">{toolSuggestion.label}</span>
+          </button>
+        </div>
+      )}
+
       {/* Input area */}
       <MessageInput
         onSend={handleSend}
@@ -744,7 +848,7 @@ export function ChatContainer() {
       {hasCitationsInConversation && (
         <button
           onClick={toggleCitationsPanel}
-          className="fixed bottom-36 right-6 z-20 flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-medium transition-all duration-200"
+          className="fixed bottom-44 right-6 z-20 flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-medium transition-all duration-200"
           style={{
             background: citationsPanelOpen
               ? 'rgba(139, 92, 246, 0.3)'
@@ -764,6 +868,62 @@ export function ChatContainer() {
         </button>
       )}
     </div>
+
+    {/* Share link modal */}
+    {shareModalOpen && (
+      <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShareModalOpen(false)} />
+        <div
+          className="relative w-full max-w-sm rounded-xl shadow-2xl animate-slide-up-fade"
+          style={{ background: 'var(--surface-1)', border: '1px solid rgba(255,255,255,0.08)' }}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
+            <div className="flex items-center gap-2">
+              <LinkIcon className="w-4 h-4 text-purple-400" />
+              <span className="text-sm font-medium text-chat-text">Share Conversation</span>
+            </div>
+            <button
+              onClick={() => setShareModalOpen(false)}
+              className="p-1 rounded-md text-chat-text-secondary hover:text-chat-text hover:bg-white/[0.06] transition-colors"
+            >
+              <XMarkIcon className="w-4 h-4" />
+            </button>
+          </div>
+          {/* Body */}
+          <div className="px-5 py-5">
+            {shareLoading ? (
+              <div className="flex flex-col items-center gap-3 py-4">
+                <div className="w-6 h-6 rounded-full border-2 border-purple-400/40 border-t-purple-400 animate-spin" />
+                <span className="text-sm text-chat-text-secondary">Generating share link…</span>
+              </div>
+            ) : shareUrl ? (
+              <>
+                <p className="text-xs text-chat-text-secondary mb-3">
+                  Anyone with this link can view the conversation for 7 days.
+                </p>
+                <div className="flex items-center gap-2 p-2.5 rounded-lg bg-surface-2 border border-white/[0.06]">
+                  <span className="flex-1 text-xs text-chat-text truncate select-all">{shareUrl}</span>
+                  <button
+                    onClick={handleCopyShareUrl}
+                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
+                    style={{
+                      background: shareCopied ? 'rgba(74,222,128,0.15)' : 'rgba(139,92,246,0.25)',
+                      color: shareCopied ? '#4ade80' : '#c4b5fd',
+                    }}
+                  >
+                    {shareCopied ? 'Copied!' : 'Copy'}
+                  </button>
+                </div>
+                <p className="text-[10px] text-chat-text-secondary/50 mt-2">
+                  Expires in 7 days. No sign-in required to view.
+                </p>
+              </>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    )}
 
     {/* Citations panel (right sidebar) */}
     <CitationsPanel />

@@ -1,12 +1,15 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
+export type ColorPreset = 'aura' | 'ocean' | 'forest' | 'sunset' | 'rose' | 'mono';
+
 export interface Settings {
   theme: 'dark' | 'light' | 'system';
   fontSize: 'small' | 'medium' | 'large';
   showThinking: boolean;
   autoScroll: boolean;
   soundEnabled: boolean;
+  colorPreset: ColorPreset;
 }
 
 interface SettingsState {
@@ -21,6 +24,7 @@ const defaultSettings: Settings = {
   showThinking: true,
   autoScroll: true,
   soundEnabled: false,
+  colorPreset: 'aura',
 };
 
 // Map font size to CSS class
@@ -65,4 +69,13 @@ export const applyFontSize = (fontSize: Settings['fontSize']) => {
   const root = document.documentElement;
   root.classList.remove('text-sm', 'text-base', 'text-lg');
   root.classList.add(fontSizeClasses[fontSize]);
+};
+
+// Apply color preset to document
+export const applyColorPreset = (preset: ColorPreset) => {
+  const root = document.documentElement;
+  root.classList.remove('preset-aura', 'preset-ocean', 'preset-forest', 'preset-sunset', 'preset-rose', 'preset-mono');
+  if (preset !== 'aura') {
+    root.classList.add(`preset-${preset}`);
+  }
 };
