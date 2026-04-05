@@ -21,6 +21,7 @@ class PaletteItem:
 # ── Frecency tracking ───────────────────────────────────────────────────
 
 _usage_data: Dict[str, tuple[int, float]] = {}  # action -> (count, last_used_time)
+_usage_counts: Dict[str, tuple[int, float]] = _usage_data  # alias for tests
 
 def record_usage(action: str) -> None:
     count, _ = _usage_data.get(action, (0, 0.0))
@@ -68,6 +69,12 @@ def _fuzzy_score(query: str, item: PaletteItem) -> int:
     if qi == len(q):
         return 5
     return 0
+
+def _fuzzy_match(query: str, item: PaletteItem) -> bool:
+    """Return True if query matches item (substring in label or description)."""
+    if not query:
+        return True
+    return _fuzzy_score(query, item) > 0
 
 def _sort_items(items: List[PaletteItem], query: str = "") -> List[PaletteItem]:
     if query:
