@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useChatStore } from '../store/chatStore';
 import { toast } from './Toast';
+import { haptic } from '../utils/haptics';
 import type { Conversation } from '../types';
 import {
   PlusIcon,
@@ -16,6 +17,22 @@ import {
 } from '@heroicons/react/24/outline';
 
 const API_BASE = '/api/chat';
+
+/** Highlight query match inside text — returns spans with the match bolded */
+function HighlightedText({ text, query }: { text: string; query: string }) {
+  if (!query || query.length < 2) return <>{text}</>;
+  const idx = text.toLowerCase().indexOf(query.toLowerCase());
+  if (idx === -1) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark className="bg-purple-500/30 text-purple-200 rounded-sm px-0.5 not-italic">
+        {text.slice(idx, idx + query.length)}
+      </mark>
+      {text.slice(idx + query.length)}
+    </>
+  );
+}
 
 /** Group conversations by date */
 function groupByDate(conversations: Conversation[]): Record<string, Conversation[]> {
@@ -55,6 +72,7 @@ export function ConversationList() {
 
   const [collapsed, setCollapsed] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
   const [msgSearchResults, setMsgSearchResults] = useState<Array<{
     conversation_id: string;
     conversation_title: string;
@@ -62,10 +80,15 @@ export function ConversationList() {
     snippet: string;
     timestamp: number;
   }>>([]);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const confirmDeleteTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Long-press state
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [longPressId, setLongPressId] = useState<string | null>(null);
 
   // Swipe-to-delete state
   const [swipingId, setSwipingId] = useState<string | null>(null);
@@ -152,11 +175,12 @@ export function ConversationList() {
     };
   }, [fetchConversations]);
 
-  // Message-level search with 300ms debounce
+  // Message-level search with 400ms debounce
   useEffect(() => {
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     if (searchQuery.length >= 2) {
       searchDebounceRef.current = setTimeout(async () => {
+        setIsSearching(true);
         try {
           const res = await fetch(`${API_BASE}/conversations/search?q=${encodeURIComponent(searchQuery)}`);
           if (res.ok) {
@@ -165,13 +189,35 @@ export function ConversationList() {
           }
         } catch {
           setMsgSearchResults([]);
+        } finally {
+          setIsSearching(false);
         }
-      }, 300);
+      }, 400);
     } else {
       setMsgSearchResults([]);
+      setIsSearching(false);
     }
     return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current); };
   }, [searchQuery]);
+
+  // Keyboard shortcut: Ctrl+F or / to focus search
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      const isEditable = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable;
+      if ((e.key === '/' && !isEditable) || (e.key === 'f' && e.ctrlKey)) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+      if (e.key === 'Escape' && document.activeElement === searchInputRef.current) {
+        setSearchQuery('');
+        searchInputRef.current?.blur();
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, []);
 
   // Clear delete-confirm timeout on unmount to prevent setState on unmounted component
   useEffect(() => {
@@ -351,21 +397,29 @@ export function ConversationList() {
       {/* Conversation search */}
       <div className="relative mb-2">
         <input
+          ref={searchInputRef}
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search..."
-          className="w-full px-3 py-2 pl-8 text-[16px] sm:text-xs bg-chat-input border border-chat-border/50 rounded-lg text-chat-text placeholder-chat-text-secondary/50 outline-none focus:border-purple-500/50 transition-colors"
+          placeholder="Search… (Ctrl+F)"
+          aria-label="Search conversations"
+          className="w-full px-3 py-2 pl-8 pr-16 text-[16px] sm:text-xs bg-chat-input border border-chat-border/50 rounded-lg text-chat-text placeholder-chat-text-secondary/40 outline-none focus:border-purple-500/50 transition-colors"
         />
         <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-chat-text-secondary/50 pointer-events-none" />
-        {searchQuery && (
-          <button
-            onClick={() => setSearchQuery('')}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-chat-text-secondary/50 hover:text-chat-text"
-          >
-            <XMarkIcon className="w-4 h-4" />
-          </button>
-        )}
+        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+          {isSearching && (
+            <span className="text-[10px] text-purple-400/70 animate-pulse">Searching…</span>
+          )}
+          {searchQuery && !isSearching && (
+            <button
+              onClick={() => { setSearchQuery(''); searchInputRef.current?.focus(); }}
+              className="text-chat-text-secondary/50 hover:text-chat-text"
+              aria-label="Clear search"
+            >
+              <XMarkIcon className="w-4 h-4" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Collapse toggle */}
@@ -379,7 +433,7 @@ export function ConversationList() {
 
       {/* Conversation list */}
       {!collapsed && (
-        <div className="max-h-[280px] overflow-y-auto space-y-0.5 pr-1 scrollbar-thin scrollbar-thumb-chat-border scrollbar-track-transparent">
+        <div className="flex-1 overflow-y-auto space-y-0.5 pr-1 scrollbar-thin scrollbar-thumb-chat-border scrollbar-track-transparent">
           {groupOrder.map((group) => {
             const items = grouped[group];
             if (!items || items.length === 0) return null;
@@ -395,6 +449,11 @@ export function ConversationList() {
                     onTouchStart={(e) => {
                       if (window.innerWidth >= 640) return;
                       swipeStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, id: conv.id };
+                      // Long press detection
+                      longPressTimer.current = setTimeout(() => {
+                        setLongPressId(conv.id);
+                        haptic(25);
+                      }, 500);
                     }}
                     onTouchMove={(e) => {
                       const s = swipeStartRef.current;
@@ -403,6 +462,8 @@ export function ConversationList() {
                       const dy = Math.abs(e.touches[0].clientY - s.y);
                       if (dy > 30) { swipeStartRef.current = null; return; }
                       if (dx > 10) { setSwipingId(conv.id); setSwipeDelta(Math.min(dx, SWIPE_DELETE + 20)); }
+                      // Cancel long press on any movement
+                      if (longPressTimer.current) clearTimeout(longPressTimer.current);
                     }}
                     onTouchEnd={() => {
                       if (swipingId === conv.id && swipeDelta >= SWIPE_DELETE) {
@@ -411,12 +472,32 @@ export function ConversationList() {
                       swipeStartRef.current = null;
                       setSwipingId(null);
                       setSwipeDelta(0);
+                      if (longPressTimer.current) clearTimeout(longPressTimer.current);
                     }}
                   >
                     {/* Delete backdrop */}
                     {swipingId === conv.id && (
                       <div className="absolute inset-y-0 right-0 w-20 flex items-center justify-center bg-red-600/80 rounded-r-lg">
                         <TrashIcon className="w-4 h-4 text-white" />
+                      </div>
+                    )}
+                    {/* Long-press action sheet */}
+                    {longPressId === conv.id && (
+                      <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:hidden"
+                        onClick={() => setLongPressId(null)}>
+                        <div className="w-full max-w-sm mb-2 mx-2 rounded-xl overflow-hidden"
+                          style={{ background: 'var(--surface-1)' }}
+                          onClick={e => e.stopPropagation()}>
+                          <div className="px-4 py-3 border-b border-chat-border text-xs text-chat-text-secondary truncate">
+                            {conv.title}
+                          </div>
+                          <button onClick={() => { handleRenameStart(conv.id, conv.title); setLongPressId(null); }}
+                            className="w-full px-4 py-3 text-sm text-chat-text text-left hover:bg-white/5">Rename</button>
+                          <button onClick={(e) => { handleDeleteClick(e as any, conv.id); setLongPressId(null); }}
+                            className="w-full px-4 py-3 text-sm text-red-400 text-left hover:bg-white/5">Delete</button>
+                          <button onClick={() => setLongPressId(null)}
+                            className="w-full px-4 py-3 text-sm text-chat-text-secondary text-left border-t border-chat-border">Cancel</button>
+                        </div>
                       </div>
                     )}
                   <div
@@ -513,34 +594,46 @@ export function ConversationList() {
               </div>
             );
           })}
-          {filtered.length === 0 && (
+          {filtered.length === 0 && !searchQuery && (
             <div className="text-center py-6 text-chat-text-secondary/60 text-xs">
-              {searchQuery ? 'No conversations match your search' : 'No conversations yet'}
+              No conversations yet
             </div>
           )}
         </div>
       )}
 
       {/* Message search results */}
-      {msgSearchResults.length > 0 && (
+      {searchQuery.length >= 2 && !isSearching && (
         <div className="mt-2">
-          <div className="px-2 py-1 text-[10px] text-chat-text-secondary/60 uppercase tracking-wider font-medium">
-            Messages ({msgSearchResults.length})
-          </div>
-          <div className="space-y-0.5 max-h-[150px] overflow-y-auto pr-1">
-            {msgSearchResults.map((result, idx) => (
-              <div
-                key={idx}
-                onClick={() => handleSwitch(result.conversation_id)}
-                className="px-2.5 py-2 rounded-lg cursor-pointer hover:bg-chat-assistant/30 transition-all"
-              >
-                <div className="text-[10px] text-purple-400/70 truncate mb-0.5">{result.conversation_title}</div>
-                <div className="text-xs text-chat-text-secondary/70 line-clamp-2 italic">
-                  {result.snippet}
-                </div>
+          {msgSearchResults.length > 0 ? (
+            <>
+              <div className="px-2 py-1 text-[10px] text-chat-text-secondary/60 uppercase tracking-wider font-medium">
+                Messages ({msgSearchResults.length})
               </div>
-            ))}
-          </div>
+              <div className="space-y-0.5 max-h-[150px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-chat-border scrollbar-track-transparent">
+                {msgSearchResults.map((result, idx) => (
+                  <div
+                    key={idx}
+                    onClick={() => handleSwitch(result.conversation_id)}
+                    className="px-2.5 py-2 rounded-lg cursor-pointer hover:bg-chat-assistant/30 transition-all"
+                  >
+                    <div className="text-[10px] text-purple-400/70 truncate mb-0.5">
+                      <HighlightedText text={result.conversation_title} query={searchQuery} />
+                    </div>
+                    <div className="text-xs text-chat-text-secondary/70 line-clamp-2 italic">
+                      <HighlightedText text={result.snippet} query={searchQuery} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            filtered.length === 0 && (
+              <div className="text-center py-3 text-chat-text-secondary/50 text-xs">
+                No conversations found
+              </div>
+            )
+          )}
         </div>
       )}
 

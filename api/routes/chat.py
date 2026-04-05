@@ -653,6 +653,18 @@ async def save_conversation_to_memory(conversation_id: str):
 # Cross-Surface Sync Endpoints (Phase 2)
 # =========================================================================
 
+@router.post("/messages/feedback")
+async def submit_message_feedback(request: dict):
+    """Submit thumbs up/down feedback on an assistant message."""
+    message_id = request.get("message_id", "")
+    conversation_id = request.get("conversation_id", "")
+    rating = request.get("rating", "")  # "positive" or "negative"
+    if rating not in ("positive", "negative"):
+        raise HTTPException(status_code=400, detail="rating must be 'positive' or 'negative'")
+    logger.info(f"[MessageFeedback] msg={message_id} conv={conversation_id} rating={rating}")
+    return {"success": True, "message_id": message_id, "rating": rating}
+
+
 @router.get("/sync/status")
 async def get_sync_status():
     """Get ConversationManager sync status."""

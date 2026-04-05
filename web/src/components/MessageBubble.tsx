@@ -9,7 +9,7 @@ import { useChatStore } from '../store/chatStore';
 import { ModelCompare } from './ModelCompare';
 import { CodeBlock } from './CodeBlock';
 import { SparklesIcon, BoltIcon } from '@heroicons/react/24/solid';
-import { ClipboardDocumentIcon, ClipboardIcon, CheckIcon, ArrowPathIcon, ShareIcon, PencilIcon, StopIcon } from '@heroicons/react/24/outline';
+import { ClipboardDocumentIcon, ClipboardIcon, CheckIcon, ArrowPathIcon, ShareIcon, PencilIcon, StopIcon, HandThumbUpIcon, HandThumbDownIcon } from '@heroicons/react/24/outline';
 import { AttachmentList } from './AttachmentPreview';
 import { ToolTrace } from './ToolTrace';
 import { MemoryIndicator } from './MemoryIndicator';
@@ -324,9 +324,42 @@ export const MessageBubble = memo(function MessageBubble({ message, animateIn = 
   const isStreaming = message.isStreaming;
   const isProactive = !!message.proactive;
   const [copied, setCopied] = useState(false);
+  const [reaction, setReaction] = useState<'positive' | 'negative' | null>(null);
   const [cursorExiting, setCursorExiting] = useState(false);
   const prevStreamingRef = useRef(isStreaming);
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+
+  // Debounced display content — throttle ReactMarkdown re-parses to 80ms during streaming
+  // to avoid rendering partial tokens like `**bo` before `ld**` arrives.
+  const [displayContent, setDisplayContent] = useState(message.content);
+  const pendingContentRef = useRef(message.content);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!isStreaming) {
+      // Streaming ended — flush immediately with final content
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+      setDisplayContent(message.content);
+      return;
+    }
+    // During streaming: schedule a flush if not already pending
+    pendingContentRef.current = message.content;
+    if (!debounceTimerRef.current) {
+      debounceTimerRef.current = setTimeout(() => {
+        debounceTimerRef.current = null;
+        setDisplayContent(pendingContentRef.current);
+      }, 80);
+    }
+  }, [message.content, isStreaming]);
+
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    };
+  }, []);
 
   // Edit mode state (user messages only)
   const [isEditing, setIsEditing] = useState(false);
@@ -361,6 +394,26 @@ export const MessageBubble = memo(function MessageBubble({ message, animateIn = 
       copyTimeoutRef.current = setTimeout(() => setCopied(false), 1500);
     }
   };
+
+  const handleReaction = useCallback(async (rating: 'positive' | 'negative') => {
+    const next = reaction === rating ? null : rating;
+    setReaction(next);
+    if (!next) return;
+    try {
+      const store = useChatStore.getState();
+      await fetch('/api/chat/messages/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message_id: message.id,
+          conversation_id: store.currentConversationId ?? '',
+          rating: next,
+        }),
+      });
+    } catch {
+      // best-effort, don't surface errors to user
+    }
+  }, [reaction, message.id]);
 
   // Clean up long-press timer on unmount
   useEffect(() => {
@@ -618,7 +671,7 @@ export const MessageBubble = memo(function MessageBubble({ message, animateIn = 
           {/* Message content with inline citation badges */}
           <div className={`prose prose-invert max-w-none text-chat-text ${isStreaming ? 'stream-container-active' : ''}`}>
             {hasCitations && !isStreaming ? (
-              <CitationAwareMarkdown content={message.content} citations={message.citations!} messageId={message.id} onOpenArtifact={onOpenArtifact} />
+              <CitationAwareMarkdown content={displayContent} citations={message.citations!} messageId={message.id} onOpenArtifact={onOpenArtifact} />
             ) : (
               <ReactMarkdown
                 remarkPlugins={[remarkGfm, remarkMath]}
@@ -634,7 +687,7 @@ export const MessageBubble = memo(function MessageBubble({ message, animateIn = 
                       );
                     }
                     return (
-                      <CodeBlock language={match[1]}>
+                      <CodeBlock language={match[1]} onOpenArtifact={onOpenArtifact}>
                         {String(children).replace(/\n$/, '')}
                       </CodeBlock>
                     );
@@ -649,7 +702,7 @@ export const MessageBubble = memo(function MessageBubble({ message, animateIn = 
                   },
                 }}
               >
-                {message.content}
+                {displayContent}
               </ReactMarkdown>
             )}
             {(isStreaming || cursorExiting) && (
@@ -716,6 +769,23 @@ export const MessageBubble = memo(function MessageBubble({ message, animateIn = 
                     <ArrowPathIcon className="w-4 h-4" />
                   </button>
                 )}
+                <span className="w-px h-3 bg-white/10 mx-0.5" />
+                <button
+                  onClick={() => handleReaction('positive')}
+                  aria-label="Helpful"
+                  title="Helpful"
+                  className={`p-1.5 rounded transition-colors ${reaction === 'positive' ? 'text-green-400 hover:text-green-300' : 'hover:text-chat-text'}`}
+                >
+                  <HandThumbUpIcon className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => handleReaction('negative')}
+                  aria-label="Not helpful"
+                  title="Not helpful"
+                  className={`p-1.5 rounded transition-colors ${reaction === 'negative' ? 'text-red-400 hover:text-red-300' : 'hover:text-chat-text'}`}
+                >
+                  <HandThumbDownIcon className="w-4 h-4" />
+                </button>
               </div>
             )}
           </div>
