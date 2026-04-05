@@ -9,9 +9,9 @@ This module contains:
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 import os
+import secrets
 import time as _time
 from collections import defaultdict
 from datetime import datetime
@@ -633,9 +633,15 @@ class TelegramBot(
         webhook_port = int(os.environ.get("TELEGRAM_WEBHOOK_PORT", "8443"))
 
         if webhook_url:
-            # Generate a secret token if none provided
+            # Generate a cryptographically random secret if none provided.
+            # Previously this was derived from the bot token, meaning a
+            # compromised token would also compromise the webhook secret.
             if not webhook_secret:
-                webhook_secret = hashlib.sha256(self.token.encode()).hexdigest()[:32]
+                webhook_secret = secrets.token_hex(32)
+                logger.warning(
+                    "[TelegramBot] No TELEGRAM_WEBHOOK_SECRET set — generated random secret. "
+                    "Set it in .env for persistence across restarts."
+                )
 
             await self.app.bot.set_webhook(
                 url=webhook_url,

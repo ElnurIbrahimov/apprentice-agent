@@ -44,6 +44,8 @@ def _float32_to_blob(vec: np.ndarray) -> bytes:
 
 def _blob_to_float32(blob: bytes) -> np.ndarray:
     """Decode a binary BLOB back to a numpy float32 array."""
+    if len(blob) % 4 != 0:
+        raise ValueError(f"Embedding blob size {len(blob)} is not a multiple of 4 bytes")
     return np.frombuffer(blob, dtype=np.float32).copy()
 
 
@@ -388,27 +390,25 @@ class MemoryStore:
         emb_idx = _COLUMNS.index("embedding")
         scored: List[Tuple[MemoryRecord, float]] = []
 
-        # Use chunked iteration to avoid loading all BLOBs into RAM at once
+        # Fetch all rows under lock to prevent cursor race conditions.
+        # The cursor must not be used after the lock is released because
+        # concurrent writes could invalidate it.
         with self._lock:
             cursor = self._get_conn().execute(sql, params)
+            all_rows = cursor.fetchall()
 
-        _CHUNK_SIZE = 200
-        while True:
-            rows = cursor.fetchmany(_CHUNK_SIZE)
-            if not rows:
-                break
-            for row in rows:
-                emb_blob = row[emb_idx]
-                if not emb_blob:
-                    continue
-                vec = _blob_to_float32(emb_blob)
-                if vec.shape != q.shape:
-                    continue
-                vec_norm = np.linalg.norm(vec)
-                if vec_norm < 1e-8:
-                    continue
-                sim = float(np.dot(q_unit, vec / vec_norm))
-                scored.append((self._row_to_record(row), sim))
+        for row in all_rows:
+            emb_blob = row[emb_idx]
+            if not emb_blob:
+                continue
+            vec = _blob_to_float32(emb_blob)
+            if vec.shape != q.shape:
+                continue
+            vec_norm = np.linalg.norm(vec)
+            if vec_norm < 1e-8:
+                continue
+            sim = float(np.dot(q_unit, vec / vec_norm))
+            scored.append((self._row_to_record(row), sim))
 
         scored.sort(key=lambda x: x[1], reverse=True)
         return scored[:k]
@@ -584,27 +584,27 @@ class MemoryStore:
                  WHERE lifecycle_state IN ('candidate', 'stable', 'summary')
                  AND strength > 0.01"""
 
+        # Hold lock for the entire read-compute-write cycle to prevent
+        # TOCTOU races where concurrent modifications between the read
+        # and write phases could be overwritten with stale values.
         with self._lock:
             conn = self._get_conn()
             rows = conn.execute(sql).fetchall()
 
-        if not rows:
-            return 0
+            if not rows:
+                return 0
 
-        # Compute updates outside lock — pure math, no DB access
-        updates: List[Tuple[float, str, str, str]] = []
-        for mem_id, strength, decay_rate, last_accessed in rows:
-            try:
-                la_ts = datetime.fromisoformat(last_accessed).timestamp()
-            except (ValueError, TypeError):
-                la_ts = now_ts
-            hours = max(0, (now_ts - la_ts) / 3600)
-            new_strength = strength * math.exp(-decay_rate * hours)
-            new_strength = max(0.0, min(1.0, new_strength))
-            updates.append((new_strength, now, now, mem_id))
+            updates: List[Tuple[float, str, str, str]] = []
+            for mem_id, strength, decay_rate, last_accessed in rows:
+                try:
+                    la_ts = datetime.fromisoformat(last_accessed).timestamp()
+                except (ValueError, TypeError):
+                    la_ts = now_ts
+                hours = max(0, (now_ts - la_ts) / 3600)
+                new_strength = strength * math.exp(-decay_rate * hours)
+                new_strength = max(0.0, min(1.0, new_strength))
+                updates.append((new_strength, now, now, mem_id))
 
-        with self._lock:
-            conn = self._get_conn()
             try:
                 conn.executemany(
                     "UPDATE memories SET strength=?, last_accessed=?, updated_at=? WHERE id=?",

@@ -80,8 +80,14 @@ class AgenticSession:
             self._save_counter += 1
         except Exception as e:
             logger.error(f"[Session] Save failed: {e}")
-            if tmp.exists():
-                tmp.unlink()
+            # Keep _dirty=True so next save() call retries instead of
+            # silently skipping all future saves.
+            self._dirty = True
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except OSError:
+                pass
 
     def load(self, session_id: str) -> list[dict]:
         """Load session from disk. Returns messages list."""

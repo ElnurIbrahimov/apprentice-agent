@@ -4,6 +4,7 @@ Single implementation of the Ollama nomic-embed-text embedding call,
 used by retrieval.py and unified_memory.py.
 """
 
+import collections
 import hashlib
 import logging
 import threading
@@ -11,9 +12,9 @@ from typing import Optional, List
 
 logger = logging.getLogger(__name__)
 
-_embedding_cache: dict[str, List[float]] = {}
-_embedding_lock = threading.Lock()
 _CACHE_MAX = 256
+_embedding_cache: collections.OrderedDict[str, List[float]] = collections.OrderedDict()
+_embedding_lock = threading.Lock()
 
 
 def get_embedding(text: str, timeout: float = 3.0) -> Optional[List[float]]:
@@ -29,6 +30,7 @@ def get_embedding(text: str, timeout: float = 3.0) -> Optional[List[float]]:
     key = hashlib.sha256(text[:8000].encode()).hexdigest()
     with _embedding_lock:
         if key in _embedding_cache:
+            _embedding_cache.move_to_end(key)  # LRU: mark as recently used
             return _embedding_cache[key]
 
     try:
@@ -44,9 +46,9 @@ def get_embedding(text: str, timeout: float = 3.0) -> Optional[List[float]]:
             emb = r.json().get("embedding")
             if emb:
                 with _embedding_lock:
-                    if len(_embedding_cache) >= _CACHE_MAX:
-                        _embedding_cache.pop(next(iter(_embedding_cache)))
                     _embedding_cache[key] = emb
+                    if len(_embedding_cache) > _CACHE_MAX:
+                        _embedding_cache.popitem(last=False)  # Evict oldest
                 return emb
     except Exception as e:
         logger.debug("[Embedding] Failed: %s", e)

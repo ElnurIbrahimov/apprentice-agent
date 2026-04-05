@@ -812,14 +812,15 @@ class StrategyBandit:
         Returns:
             Dict mapping category names to lists of arm stat dicts.
         """
-        conn = sqlite3.connect(self._db_path)
-        try:
-            rows = conn.execute(
-                "SELECT strategy, category, alpha, beta, total_pulls, total_reward, last_updated "
-                "FROM strategy_arms ORDER BY category, strategy"
-            ).fetchall()
-        finally:
-            conn.close()
+        with self._lock:
+            conn = sqlite3.connect(self._db_path)
+            try:
+                rows = conn.execute(
+                    "SELECT strategy, category, alpha, beta, total_pulls, total_reward, last_updated "
+                    "FROM strategy_arms ORDER BY category, strategy"
+                ).fetchall()
+            finally:
+                conn.close()
 
         stats: Dict[str, List[Dict]] = {}
         for strategy, category, alpha, beta, pulls, reward, updated in rows:
@@ -838,18 +839,19 @@ class StrategyBandit:
 
     def get_best_strategy(self, category: ProblemCategory) -> Optional[str]:
         """Get the strategy with the highest mean reward for a category."""
-        conn = sqlite3.connect(self._db_path)
-        try:
-            row = conn.execute(
-                """SELECT strategy, alpha / (alpha + beta) as mean_reward
-                   FROM strategy_arms
-                   WHERE category = ?
-                   ORDER BY mean_reward DESC
-                   LIMIT 1""",
-                (category.value,),
-            ).fetchone()
-        finally:
-            conn.close()
+        with self._lock:
+            conn = sqlite3.connect(self._db_path)
+            try:
+                row = conn.execute(
+                    """SELECT strategy, alpha / (alpha + beta) as mean_reward
+                       FROM strategy_arms
+                       WHERE category = ?
+                       ORDER BY mean_reward DESC
+                       LIMIT 1""",
+                    (category.value,),
+                ).fetchone()
+            finally:
+                conn.close()
         return row[0] if row else None
 
     def get_stats_summary(self) -> Dict:

@@ -222,9 +222,11 @@ class MemoryWriteGate:
                         f"(source={candidate.source})"
                     )
         except Exception as e:
-            logger.warning(
-                f"[WriteGate] Secret redaction failed — candidate may contain unredacted secrets: {e}"
+            logger.error(
+                f"[WriteGate] Secret redaction failed — discarding candidate to prevent secret leakage: {e}"
             )
+            return self._decide(MemoryDecisionKind.DISCARD, candidate, 0.0,
+                                reason="redaction_failed_fail_closed")
 
         # 0. Hard noise rejection
         if _is_noise(candidate.content):

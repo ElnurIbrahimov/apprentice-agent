@@ -138,6 +138,12 @@ async def share_project(request: ShareRequest) -> ShareResponse:
     # Cleanup expired first
     _cleanup_expired()
 
+    # Validate entry_point proactively (also validated on serve via _safe_path)
+    try:
+        _safe_path(SHARED_DIR / "test", request.entry_point)
+    except ValueError:
+        raise HTTPException(400, f"Invalid entry_point: {request.entry_point}")
+
     # Limits
     if len(request.files) > MAX_FILES:
         raise HTTPException(400, f"Too many files (max {MAX_FILES})")

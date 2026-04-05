@@ -835,9 +835,9 @@ class ToolExecutor:
             return {"error": f"URL validation failed: {e}"}
         try:
             import requests
-            resp = requests.get(url, timeout=15, headers={"User-Agent": "Aura-Dev-Agent/1.0"})
-            resp.raise_for_status()
-            content = resp.text
+            with requests.get(url, timeout=15, headers={"User-Agent": "Aura-Dev-Agent/1.0"}, stream=False) as resp:
+                resp.raise_for_status()
+                content = resp.text
         except Exception as e:
             return {"error": f"Failed to fetch {url}: {e}"}
         # Strip HTML tags

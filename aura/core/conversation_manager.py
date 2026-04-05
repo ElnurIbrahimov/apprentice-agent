@@ -323,24 +323,26 @@ class ConversationManager:
 
     def _broadcast(self, event: ConversationEvent) -> None:
         """Notify all registered listeners of an event."""
-        # Sync listeners
-        for listener in self._listeners:
+        # Snapshot listener lists to avoid race conditions with
+        # register/unregister modifying them during iteration.
+        sync_listeners = list(self._listeners)
+        async_listeners = list(self._async_listeners)
+
+        for listener in sync_listeners:
             try:
                 listener(event)
             except Exception as e:
                 logger.error(f"[ConvManager] Listener error: {e}")
 
-        # Async listeners — fire and forget
-        for listener in self._async_listeners:
+        # Async listeners — fire and forget via thread-safe scheduling
+        for listener in async_listeners:
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    asyncio.ensure_future(listener(event))
-                else:
-                    loop.run_until_complete(listener(event))
-            except RuntimeError:
-                # No event loop — skip async listeners
-                pass
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(listener(event))
+                except RuntimeError:
+                    # No running event loop — skip async listeners
+                    pass
             except Exception as e:
                 logger.error(f"[ConvManager] Async listener error: {e}")
 

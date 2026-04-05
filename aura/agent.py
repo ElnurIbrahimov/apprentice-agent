@@ -332,11 +332,9 @@ class ApprenticeAgent(KGBrainMixin, SkillManagerMixin, NarrativeMixin, DirectHan
         # Initialize NeuroDream (Tool #24) - Sleep/Dream Memory Consolidation
         self.neurodream = NeuroDreamEngine(
             knowledge_graph=self.tools.get("knowledge_graph"),
-            hybrid_memory=None,
             evoemo=self.tools.get("evoemo"),
             inner_monologue=self.monologue,
-            chromadb=None,
-            idle_threshold_minutes=30
+            idle_threshold_minutes=30,
         )
         logger.debug("[LOADED] NeuroDream - Sleep/dream memory consolidation")
 
@@ -1360,10 +1358,20 @@ IMPORTANT: If the user asks about something you are not sure about, something re
                 except (json.JSONDecodeError, ValueError):
                     return result[:MAX_RESULT]
 
-        # 2. Agent tools dispatch
-        if tool_name in self.tools:
+        # 2. Agent tools dispatch (try loaded tools, then deferred registry)
+        tool = self.tools.get(tool_name)
+        if tool is None:
+            # Try loading from deferred registry
             try:
-                tool = self.tools[tool_name]
+                from aura.tools.deferred_registry import deferred_registry
+                if deferred_registry and hasattr(deferred_registry, 'ensure_tool'):
+                    tool = deferred_registry.ensure_tool(tool_name)
+                    if tool:
+                        self.tools[tool_name] = tool  # Cache for next call
+            except Exception:
+                pass
+        if tool is not None:
+            try:
                 action = args.get("action", "") if isinstance(args, dict) else str(args)
                 if not action:
                     # Build action string from structured args

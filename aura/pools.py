@@ -84,7 +84,7 @@ def _shutdown_all():
                 pool.shutdown(**kwargs)
                 logger.debug(f"[pools] {name} pool shut down")
             except Exception:
-                pass
+                logger.warning(f"[pools] {name} pool shutdown failed", exc_info=True)
 
 
 atexit.register(_shutdown_all)

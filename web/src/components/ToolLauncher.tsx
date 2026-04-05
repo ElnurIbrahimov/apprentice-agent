@@ -222,17 +222,17 @@ function ToolCard({ tool, onSelect }: { tool: Tool; onSelect: (id: ToolId | 'too
   return (
     <button
       onClick={() => onSelect(tool.id)}
-      className="card-hover flex flex-col items-start gap-3 p-4 rounded-xl border border-chat-border hover:border-chat-accent/50 transition-all group text-left hover:shadow-lg hover:shadow-chat-accent/5"
+      className="card-hover flex flex-col items-start gap-2.5 sm:gap-3 p-3 sm:p-4 rounded-xl border border-chat-border hover:border-chat-accent/50 active:scale-[0.97] transition-all group text-left hover:shadow-lg hover:shadow-chat-accent/5"
       style={{ background: 'var(--surface-2)' }}
     >
-      <span className={`flex items-center justify-center w-10 h-10 rounded-lg text-xl ${tool.bg}`}>
+      <span className={`flex items-center justify-center w-9 h-9 sm:w-10 sm:h-10 rounded-lg text-lg sm:text-xl ${tool.bg}`}>
         {tool.icon}
       </span>
-      <div>
+      <div className="min-w-0">
         <div className="text-sm font-semibold text-chat-text group-hover:text-chat-accent transition-colors leading-tight">
           {tool.label}
         </div>
-        <div className="text-xs text-chat-text-secondary mt-0.5 leading-snug">
+        <div className="text-[11px] sm:text-xs text-chat-text-secondary mt-0.5 leading-snug line-clamp-2">
           {tool.desc}
         </div>
       </div>
@@ -253,30 +253,30 @@ export function ToolSubNav({ activeId, onSelect, onBack }: ToolSubNavProps) {
 
   return (
     <div
-      className="flex items-center gap-2 px-4 py-2 border-b border-chat-border overflow-x-auto scrollbar-hide"
+      className="flex items-center gap-1.5 px-3 lg:px-4 py-2 border-b border-chat-border overflow-x-auto scrollbar-hide"
       style={{ background: 'var(--bg-panel)' }}
     >
       {/* Back button */}
       <button
         onClick={onBack}
-        className="flex items-center gap-1.5 shrink-0 px-2.5 py-1.5 rounded-lg text-xs font-medium text-chat-text-secondary hover:text-chat-text hover:bg-chat-assistant transition-colors"
+        className="flex items-center gap-1 shrink-0 px-2.5 py-2 rounded-xl text-xs font-medium text-chat-text-secondary hover:text-chat-text active:scale-95 hover:bg-chat-assistant transition-all"
         aria-label="Back to launcher"
       >
         <ArrowLeftIcon className="w-3.5 h-3.5" />
-        <span>All Tools</span>
+        <span className="hidden sm:inline">All Tools</span>
       </button>
 
-      <span className="text-chat-border shrink-0">|</span>
+      <span className="text-chat-border/30 shrink-0 text-xs">|</span>
 
       {/* Current tool label */}
       {activeTool && (
-        <span className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-chat-accent text-white">
+        <span className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-chat-accent text-white shadow-sm">
           <span>{activeTool.icon}</span>
           <span>{activeTool.label}</span>
         </span>
       )}
       {activeId === 'tools' && (
-        <span className="shrink-0 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-chat-accent text-white">
+        <span className="shrink-0 px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-chat-accent text-white shadow-sm">
           System Tools
         </span>
       )}
@@ -288,7 +288,7 @@ export function ToolSubNav({ activeId, onSelect, onBack }: ToolSubNavProps) {
           <button
             key={tool.id}
             onClick={() => onSelect(tool.id)}
-            className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-chat-text-secondary hover:text-chat-text hover:bg-chat-assistant transition-colors"
+            className="shrink-0 flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-medium text-chat-text-secondary hover:text-chat-text active:scale-95 hover:bg-chat-assistant transition-all"
           >
             <span>{tool.icon}</span>
             <span>{tool.label}</span>

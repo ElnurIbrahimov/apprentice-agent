@@ -140,8 +140,6 @@ class Config:
     # Feature toggles (configurable via env vars)
     KG_BRAIN_ENABLED: bool = os.getenv("KG_BRAIN_ENABLED", "true").lower() in ("true", "1", "yes")
     SKILL_LIBRARY_ENABLED: bool = os.getenv("SKILL_LIBRARY_ENABLED", "true").lower() in ("true", "1", "yes")
-    # LIFE_MODELING_ENABLED removed — aura_life_modeling dead code, module deleted (2026-03-22)
-    # CHROMADB_PATH removed — chromadb removed, memory consolidated to SQLite (2026-03-22)
 
     # Auth (canonical flag — used by middleware + route dependency)
     API_AUTH_ENABLED: bool = os.getenv("AURA_API_AUTH_ENABLED", "true").lower() in ("true", "1", "yes")

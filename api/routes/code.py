@@ -323,7 +323,10 @@ async def execute_code(body: dict):
 
     # Save session state if we got state data
     if state_json:
-        session_mgr.save_state(session_id, state_json)
+        try:
+            session_mgr.save_state(session_id, state_json)
+        except Exception as e:
+            logger.warning("[CodeExec] Failed to save session state: %s", e)
 
     # If executor succeeded and there are no error output blocks, it's a success.
     # An executor failure with no stdout/stderr should NOT report as success.

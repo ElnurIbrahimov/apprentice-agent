@@ -49,6 +49,7 @@ except ImportError:
 # Default timeouts (in seconds)
 LLM_TIMEOUT = 120  # 120 seconds for LLM calls (cloud models need more time)
 WARMUP_TIMEOUT = 10  # 10 seconds for warmup
+STREAM_STALE_TIMEOUT = 45  # seconds without a chunk before aborting stream
 
 # Neuromodulator bounds for safety (multipliers on default values)
 NEURO_MIN_MULTIPLIER = 0.7   # Never reduce below 70% of default
@@ -1109,14 +1110,13 @@ class OllamaBrain:
             tool_calls = None
             input_tokens = 0
             output_tokens = 0
-            _STREAM_STALE_TIMEOUT = 45  # 45s between chunks (was 90s — too slow)
             _last_chunk_time = time.time()
 
             for chunk in stream:
                 now = time.time()
-                if now - _last_chunk_time > _STREAM_STALE_TIMEOUT:
-                    logger.warning(f"[BRAIN] Tool stream stale for {_STREAM_STALE_TIMEOUT}s, aborting")
-                    yield ("error", {"error": f"Stream stale for {_STREAM_STALE_TIMEOUT}s", "model": actual_model})
+                if now - _last_chunk_time > STREAM_STALE_TIMEOUT:
+                    logger.warning(f"[BRAIN] Tool stream stale for {STREAM_STALE_TIMEOUT}s, aborting")
+                    yield ("error", {"error": f"Stream stale for {STREAM_STALE_TIMEOUT}s", "model": actual_model})
                     return
                 _last_chunk_time = now
                 # Ollama streaming returns ChatResponse objects or dicts
@@ -2421,7 +2421,7 @@ class OllamaBrain:
                 m for m in self._get_fallback_chain(actual_model) if m != actual_model
             ]
 
-            _STREAM_STALE_TIMEOUT = 45  # seconds without a chunk -> abort (was 90)
+            _stale_timeout = STREAM_STALE_TIMEOUT
 
             for _try_model in _models_to_try:
                 try:
@@ -2436,8 +2436,8 @@ class OllamaBrain:
                     _stream_timed_out = False
                     for chunk in stream:
                         now = time.time()
-                        if now - _last_chunk_time > _STREAM_STALE_TIMEOUT:
-                            logger.warning(f"[BRAIN] Stream stale for {_STREAM_STALE_TIMEOUT}s, aborting")
+                        if now - _last_chunk_time > _stale_timeout:
+                            logger.warning(f"[BRAIN] Stream stale for {_stale_timeout}s, aborting")
                             _stream_timed_out = True
                             break
                         _last_chunk_time = now
@@ -2450,7 +2450,7 @@ class OllamaBrain:
                             _stream_in_tok = _resp_get(chunk, "prompt_eval_count", 0) or 0
                             _stream_out_tok = _resp_get(chunk, "eval_count", 0) or 0
                     if _stream_timed_out:
-                        raise TimeoutError(f"Stream stale for {_STREAM_STALE_TIMEOUT}s")
+                        raise TimeoutError(f"Stream stale for {_stale_timeout}s")
                     actual_model = _try_actual
                     self._last_model_used = actual_model
                     break

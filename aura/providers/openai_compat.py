@@ -106,7 +106,7 @@ class OpenAICompatProvider(BaseProvider):
     def _sync_chat(self, url: str, headers: dict, body: dict) -> dict:
         """Non-streaming chat — single JSON response."""
         try:
-            resp = self._session.post(url, headers=headers, json=body, timeout=120)
+            resp = self._session.post(url, headers=headers, json=body, timeout=(10, 120))
         except requests.exceptions.RequestException as e:
             logger.error(f"[{self._provider_name.upper()}] Request failed: {e}")
             raise ConnectionError(f"{self._display_name} request failed: {e}")

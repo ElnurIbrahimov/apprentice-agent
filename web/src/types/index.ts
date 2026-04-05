@@ -111,7 +111,7 @@ export interface ResearchProgress {
 }
 
 export interface WebSocketMessage {
-  type: 'chat' | 'chunk' | 'done' | 'error' | 'ping' | 'pong' | 'stopped' | 'proactive' | 'tool_status' | 'citations' | 'tool_trace' | 'research_progress' | 'hand_event' | 'hand_approval_request' | 'conv_sync';
+  type: 'chat' | 'chunk' | 'done' | 'error' | 'ping' | 'pong' | 'stopped' | 'proactive' | 'tool_status' | 'citations' | 'tool_trace' | 'action_trace' | 'research_progress' | 'hand_event' | 'hand_approval_request' | 'conv_sync';
   content?: string;
   message?: string;
   response?: string;
@@ -305,6 +305,70 @@ export interface FleetTask {
 
 // Tab types
 export type TabId = 'chat' | 'create' | 'tools' | 'insights' | 'settings';
+
+// ─── Consciousness Dashboard ───
+export interface DriveState {
+  curiosity: number;
+  competence: number;
+  social: number;
+  coherence: number;
+  [key: string]: number;
+}
+
+export interface CognitiveLoad {
+  breath_rate: number;
+  glow_intensity: number;
+  total_load?: number;
+  breakdown?: Record<string, number>;
+}
+
+export interface ToMSummary {
+  emotional_state?: { valence: number; arousal: number; engagement: number; frustration: number };
+  style?: { verbosity: number; formality: number; technical_depth: number };
+  top_topics?: Array<{ topic: string; level: string }>;
+  full_model?: string;
+  style_guidance?: string;
+}
+
+// ─── Insights Feed ───
+export interface CuriosityTarget {
+  entity_id: string;
+  label: string;
+  gap_type: string;
+  question?: string;
+  urgency?: number;
+}
+
+export interface DriveAction {
+  drive: string;
+  action: string;
+  description: string;
+  priority: number;
+}
+
+export interface ProactiveSuggestion {
+  suggestion: string;
+  has_suggestion: boolean;
+  beliefs?: Record<string, number>;
+}
+
+// ─── World Model ───
+export interface WorldProject {
+  id: string;
+  label: string;
+  type: string;
+  confidence?: number;
+  access_count?: number;
+  last_accessed?: string;
+}
+
+export interface WorldGoal {
+  id: string;
+  label: string;
+  type: string;
+  confidence?: number;
+  access_count?: number;
+}
 
 // A-MEM (Agentic Memory)
 export interface AMEMNote {

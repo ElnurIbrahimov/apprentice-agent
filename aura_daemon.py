@@ -689,7 +689,7 @@ class IPCServer:
                 # Validate auth token before processing any command
                 import hmac
                 msg_token = msg.get("token", "")
-                if not hmac.compare_digest(msg_token, self._auth_token):
+                if not msg_token or not self._auth_token or not hmac.compare_digest(msg_token, self._auth_token):
                     logger.warning("IPC rejected: invalid auth token")
                     conn.send(json.dumps({"status": "error", "reason": "invalid auth token"}).encode())
                     return

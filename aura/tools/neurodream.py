@@ -204,23 +204,20 @@ class NeuroDreamEngine:
     def __init__(
         self,
         knowledge_graph=None,
-        hybrid_memory=None,
         evoemo=None,
         inner_monologue=None,
-        chromadb=None,
         brain=None,
         data_dir: str = "data/neurodream",
         idle_threshold_minutes: int = 30,
-        max_vram_gb: float = 4.0
+        max_vram_gb: float = 4.0,
+        **_deprecated_kwargs,
     ):
         """Initialize NeuroDream engine.
 
         Args:
             knowledge_graph: KnowledgeGraphTool instance
-            hybrid_memory: Deprecated (ignored). UnifiedMemory used instead.
             evoemo: EvoEmoTool instance
             inner_monologue: InnerMonologueTool instance
-            chromadb: Deprecated (ignored). UnifiedMemory used instead.
             brain: Brain instance for LLM calls and conversation access
             data_dir: Directory for dream data
             idle_threshold_minutes: Minutes of inactivity before auto-sleep
@@ -231,7 +228,7 @@ class NeuroDreamEngine:
         self.monologue = inner_monologue
         self.brain = brain
 
-        # Unified memory (lazy-loaded, replaces chromadb + hybrid_memory)
+        # Unified memory (lazy-loaded)
         self._unified_memory = None
 
         self.data_dir = Path(data_dir)

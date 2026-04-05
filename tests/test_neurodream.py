@@ -71,10 +71,8 @@ def neurodream_engine(temp_data_dir, mock_kg, mock_evoemo, mock_monologue):
     """Create a NeuroDream engine with mock dependencies."""
     engine = NeuroDreamEngine(
         knowledge_graph=mock_kg,
-        hybrid_memory=None,
         evoemo=mock_evoemo,
         inner_monologue=mock_monologue,
-        chromadb=None,
         data_dir=temp_data_dir,
         idle_threshold_minutes=1,  # Short for testing
         max_vram_gb=2.0

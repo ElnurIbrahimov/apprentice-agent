@@ -180,13 +180,14 @@ class TestAgenticLoop:
 # ---------------------------------------------------------------------------
 class TestHealthCheck:
     def test_health_check_ok_with_mock(self, mock_ollama, patched_config):
-        """Health check should return None (= OK) when mock Ollama is running."""
+        """Health check should return (True, models) when mock Ollama is running."""
         from aura.brain import _ollama_health_check
-        result = _ollama_health_check()
-        assert result is None, f"Expected None (healthy), got: {result}"
+        ok, models = _ollama_health_check()
+        assert ok is True, f"Expected ok=True, got: {ok}"
+        assert isinstance(models, list)
 
     def test_health_check_detects_down_ollama(self, monkeypatch):
-        """Health check should return an error string when Ollama is unreachable."""
+        """Health check should return (False, []) when Ollama is unreachable."""
         # Point to a port that nothing is listening on
         monkeypatch.setenv("OLLAMA_HOST", "http://127.0.0.1:19999")
         # Reload Config to pick up the changed env var
@@ -194,10 +195,9 @@ class TestHealthCheck:
         Config.OLLAMA_HOST = "http://127.0.0.1:19999"
 
         from aura.brain import _ollama_health_check
-        result = _ollama_health_check()
-        assert result is not None, "Expected an error string, got None"
-        assert isinstance(result, str)
-        assert len(result) > 0
+        ok, models = _ollama_health_check()
+        assert ok is False, f"Expected ok=False, got: {ok}"
+        assert models == []
 
 
 # ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@
 
 Lazy-loading module: tool classes and functions are NOT imported at package
 load time.  Instead, ``__getattr__`` resolves them on first access so that
-heavy dependencies (torch, networkx, chromadb, sounddevice, numpy, etc.)
+heavy dependencies (torch, networkx, sounddevice, numpy, etc.)
 are only pulled in when actually needed.
 
 Failed imports are logged as warnings and the symbol resolves to None.
@@ -152,6 +152,7 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "AudioTranscriberTool":     (".audio_transcriber",    "AudioTranscriberTool"),
     # Research
     "ResearchTool":             (".research_tool",        "ResearchTool"),
+    "DeepResearchTool":         (".deep_research",        "DeepResearchTool"),
     # Tier 1 Quick Wins
     "ObsidianTool":             (".obsidian_tool",        "ObsidianTool"),
     "GitHubTool":               (".github_tool",          "GitHubTool"),

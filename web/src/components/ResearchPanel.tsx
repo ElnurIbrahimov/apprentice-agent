@@ -643,39 +643,58 @@ export function ResearchPanel() {
                     Sources ({sources.length})
                   </p>
                   <div className="space-y-2">
-                    {sources.map((src, i) => (
-                      <a
-                        key={i}
-                        id={`source-${i + 1}`}
-                        href={src.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-start gap-3 rounded-lg border border-chat-border bg-surface-1 px-3 py-2.5 hover:border-chat-accent/50 transition-colors group scroll-mt-4"
-                      >
-                        <span className="flex-shrink-0 text-[10px] font-bold text-chat-accent w-4 mt-0.5">
-                          [{i + 1}]
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-medium text-chat-text truncate group-hover:text-chat-accent transition-colors">
-                            {src.title || src.url}
-                          </p>
-                          <p className="text-[10px] text-chat-text-secondary truncate mt-0.5">{src.url}</p>
-                          {src.snippet && (
-                            <p className="text-[11px] text-chat-text-secondary mt-1 line-clamp-2 leading-relaxed">
-                              {src.snippet}
+                    {sources.map((src, i) => {
+                      let domain = '';
+                      try { domain = new URL(src.url).hostname.replace(/^www\./, ''); } catch { /* ignore */ }
+                      return (
+                        <a
+                          key={i}
+                          id={`source-${i + 1}`}
+                          href={src.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-start gap-3 rounded-xl border border-chat-border bg-surface-1 px-3 py-2.5 hover:border-chat-accent/50 transition-colors group scroll-mt-4"
+                        >
+                          <span className="flex-shrink-0 text-[10px] font-bold text-chat-accent w-4 mt-0.5">
+                            [{i + 1}]
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-medium text-chat-text truncate group-hover:text-chat-accent transition-colors">
+                              {src.title || src.url}
                             </p>
-                          )}
-                          {typeof src.score === 'number' && (
-                            <div className="flex items-center gap-1.5 mt-1.5">
-                              <div className="flex-1 h-1 rounded-full bg-surface-2 overflow-hidden">
-                                <div className="h-full rounded-full bg-gradient-to-r from-purple-500 to-blue-400" style={{ width: `${Math.min(100, Math.round(src.score * 100))}%` }} />
-                              </div>
-                              <span className="text-[10px] text-chat-text-secondary">{Math.round(src.score * 100)}%</span>
+                            <div className="flex items-center gap-1.5 mt-1">
+                              {domain && (
+                                <>
+                                  <img
+                                    src={`https://www.google.com/s2/favicons?domain=${domain}&sz=16`}
+                                    alt=""
+                                    className="w-3.5 h-3.5 rounded-sm flex-shrink-0"
+                                    loading="lazy"
+                                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                                  />
+                                  <span className="text-[10px] font-medium truncate" style={{ color: 'var(--text-tertiary)' }}>
+                                    {domain}
+                                  </span>
+                                </>
+                              )}
                             </div>
-                          )}
-                        </div>
-                      </a>
-                    ))}
+                            {src.snippet && (
+                              <p className="text-[11px] text-chat-text-secondary mt-1 line-clamp-2 leading-relaxed">
+                                {src.snippet}
+                              </p>
+                            )}
+                            {typeof src.score === 'number' && (
+                              <div className="flex items-center gap-1.5 mt-1.5">
+                                <div className="flex-1 h-1 rounded-full bg-surface-2 overflow-hidden">
+                                  <div className="h-full rounded-full bg-gradient-to-r from-purple-500 to-blue-400" style={{ width: `${Math.min(100, Math.round(src.score * 100))}%` }} />
+                                </div>
+                                <span className="text-[10px] text-chat-text-secondary">{Math.round(src.score * 100)}%</span>
+                              </div>
+                            )}
+                          </div>
+                        </a>
+                      );
+                    })}
                   </div>
                 </div>
               )}

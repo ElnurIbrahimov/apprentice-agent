@@ -8,6 +8,7 @@ import { useSettingsStore, applyFontSize, applyTheme, applyColorPreset } from '.
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { OnboardingFlow } from './components/OnboardingFlow';
 import { BottomTabBar } from './components/BottomTabBar';
+import { haptic } from './utils/haptics';
 import { ToolLauncher, ToolSubNav } from './components/ToolLauncher';
 import type { ToolId } from './components/ToolLauncher';
 import {
@@ -56,6 +57,12 @@ const CapturePanel = lazy(() => import('./components/CapturePanel').then(m => ({
 const WisebasePanel = lazy(() => import('./components/WisebasePanel').then(m => ({ default: m.WisebasePanel })));
 const SlidesPanel = lazy(() => import('./components/SlidesPanel').then(m => ({ default: m.SlidesPanel })));
 const RecordPanel = lazy(() => import('./components/RecordPanel').then(m => ({ default: m.RecordPanel })));
+const ConsciousnessPanel = lazy(() => import('./components/ConsciousnessPanel').then(m => ({ default: m.ConsciousnessPanel })));
+const InsightsFeed = lazy(() => import('./components/InsightsFeed').then(m => ({ default: m.InsightsFeed })));
+const WorldModelPanel = lazy(() => import('./components/WorldModelPanel').then(m => ({ default: m.WorldModelPanel })));
+const MorningBriefingCard = lazy(() => import('./components/MorningBriefingCard').then(m => ({ default: m.MorningBriefingCard })));
+const DreamInsightsPanel = lazy(() => import('./components/DreamInsightsPanel').then(m => ({ default: m.DreamInsightsPanel })));
+const EvolutionTracker = lazy(() => import('./components/EvolutionTracker').then(m => ({ default: m.EvolutionTracker })));
 
 import type { TabId } from './types';
 
@@ -68,7 +75,7 @@ const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: 
 ];
 
 type CreateSubTab = 'code' | 'webcreator' | 'image';
-type InsightsSubTab = 'monitor' | 'activity' | 'memory' | 'knowledge' | 'hands' | 'queue' | 'advanced';
+type InsightsSubTab = 'monitor' | 'feed' | 'world' | 'briefing' | 'dreams' | 'evolution' | 'activity' | 'memory' | 'knowledge' | 'hands' | 'queue' | 'advanced';
 type ToolsSubTab = 'launcher' | 'system' | ToolId;
 
 function TabSkeleton() {
@@ -85,16 +92,17 @@ function TabSkeleton() {
 
 function SubTabBar({ tabs, active, onChange }: { tabs: { id: string; label: string }[]; active: string; onChange: (id: string) => void }) {
   return (
-    <div className="flex items-center gap-1 px-4 py-2 border-b border-chat-border overflow-x-auto scrollbar-hide">
+    <div className="flex items-center gap-1.5 px-3 lg:px-4 py-2 border-b border-chat-border overflow-x-auto scrollbar-hide snap-x snap-mandatory">
       {tabs.map((tab) => (
         <button
           key={tab.id}
-          onClick={() => onChange(tab.id)}
-          className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-colors ${
+          onClick={() => { haptic(8); onChange(tab.id); }}
+          className={`flex-shrink-0 snap-start px-3.5 py-2 rounded-xl text-xs sm:text-sm font-medium transition-all duration-200 ${
             active === tab.id
-              ? 'bg-chat-accent text-white'
-              : 'text-chat-text-secondary hover:text-chat-text hover:bg-chat-assistant'
+              ? 'bg-chat-accent text-white shadow-sm'
+              : 'text-chat-text-secondary hover:text-chat-text active:scale-95 hover:bg-chat-assistant'
           }`}
+          style={{ minHeight: 36 }}
         >
           {tab.label}
         </button>
@@ -320,10 +328,15 @@ function MainApp() {
           <div className="h-full flex flex-col">
             <SubTabBar
               tabs={[
-                { id: 'monitor', label: 'Monitor' },
+                { id: 'monitor', label: 'Mind' },
+                { id: 'feed', label: 'Insights' },
+                { id: 'briefing', label: 'Briefing' },
+                { id: 'dreams', label: 'Dreams' },
+                { id: 'evolution', label: 'Evolution' },
+                { id: 'world', label: 'World' },
                 { id: 'activity', label: 'Activity' },
                 { id: 'memory', label: 'Memory' },
-                { id: 'knowledge', label: 'Knowledge' },
+                { id: 'knowledge', label: 'Graph' },
                 { id: 'hands', label: 'Hands' },
                 { id: 'queue', label: 'Queue' },
                 { id: 'advanced', label: 'Advanced' },
@@ -332,14 +345,16 @@ function MainApp() {
               onChange={(id) => setInsightsSubTab(id as InsightsSubTab)}
             />
             <div className="flex-1 overflow-hidden">
-              {insightsSubTab === 'monitor' && (
-                <div className="h-full overflow-y-auto p-4 space-y-4 tab-panel-scroll">
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    <ThoughtStream />
-                    <AuraPanel />
-                  </div>
+              {insightsSubTab === 'monitor' && <ConsciousnessPanel />}
+              {insightsSubTab === 'feed' && <InsightsFeed />}
+              {insightsSubTab === 'briefing' && (
+                <div className="h-full overflow-y-auto p-3 sm:p-4 space-y-4 tab-panel-scroll">
+                  <MorningBriefingCard />
                 </div>
               )}
+              {insightsSubTab === 'dreams' && <DreamInsightsPanel />}
+              {insightsSubTab === 'evolution' && <EvolutionTracker />}
+              {insightsSubTab === 'world' && <WorldModelPanel />}
               {insightsSubTab === 'activity' && <ActivityTimeline />}
               {insightsSubTab === 'memory' && <MemoryTimeline />}
               {insightsSubTab === 'knowledge' && <KnowledgeGraphExplorer />}
@@ -348,6 +363,8 @@ function MainApp() {
               {insightsSubTab === 'advanced' && (
                 <div className="h-full overflow-y-auto p-4 space-y-4 tab-panel-scroll">
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <ThoughtStream />
+                    <AuraPanel />
                     <ReasoningTreePanel />
                     <NeuroDreamPanel />
                     <AMEMPanel />
@@ -385,29 +402,32 @@ function MainApp() {
       {/* Toast notifications */}
       <ToastContainer toasts={toasts} onDismiss={removeToast} />
 
-      {/* Offline indicator banner */}
+      {/* Connection status — floating pill instead of full-width banner */}
       {connectionStatus !== 'connected' && (
         <div
           role="status"
           aria-live="polite"
-          className={`fixed top-0 inset-x-0 z-[60] py-1.5 text-center text-xs font-medium transition-all duration-300 ${
-            connectionStatus === 'connecting'
-              ? 'bg-yellow-500/90 text-black'
-              : 'bg-red-600/90 text-white'
-          }`}
+          className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] animate-spring-scale"
+          style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}
         >
-          {connectionStatus === 'connecting' ? (
-            <span className="flex items-center justify-center gap-1">
-              Reconnecting
-              <span className="inline-flex gap-0.5">
-                <span className="animate-bounce" style={{ animationDelay: '0ms' }}>.</span>
-                <span className="animate-bounce" style={{ animationDelay: '150ms' }}>.</span>
-                <span className="animate-bounce" style={{ animationDelay: '300ms' }}>.</span>
-              </span>
-            </span>
-          ) : (
-            'Connection lost'
-          )}
+          <div
+            className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-medium shadow-lg ${
+              connectionStatus === 'connecting'
+                ? 'text-yellow-200'
+                : 'text-red-200'
+            }`}
+            style={{
+              background: connectionStatus === 'connecting'
+                ? 'rgba(234, 179, 8, 0.9)'
+                : 'rgba(220, 38, 38, 0.9)',
+              backdropFilter: 'blur(12px)',
+              WebkitBackdropFilter: 'blur(12px)',
+              color: connectionStatus === 'connecting' ? '#000' : '#fff',
+            }}
+          >
+            <span className={`w-2 h-2 rounded-full ${connectionStatus === 'connecting' ? 'bg-yellow-900 animate-pulse' : 'bg-red-300'}`} />
+            {connectionStatus === 'connecting' ? 'Reconnecting...' : 'Connection lost'}
+          </div>
         </div>
       )}
 
@@ -449,15 +469,15 @@ function MainApp() {
       {/* Main content */}
       <main className="flex-1 flex flex-col min-w-0">
         {/* Header with tabs */}
-        <header className="flex items-center justify-between px-4 py-2 border-b border-chat-border" style={{ background: 'var(--bg-panel)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
-          <div className="flex items-center">
+        <header className="flex items-center justify-between px-3 lg:px-4 py-1.5 lg:py-2 border-b border-chat-border" style={{ background: 'var(--bg-panel)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' }}>
+          <div className="flex items-center gap-2">
             <button
               onClick={toggleSidebar}
-              className="p-2 -ml-2 text-chat-text-secondary hover:text-chat-text active:text-white rounded-lg lg:hidden touch-target"
+              className="p-2 -ml-1 text-chat-text-secondary hover:text-chat-text active:scale-90 rounded-xl lg:hidden touch-target transition-all duration-150"
             >
-              <Bars3Icon className="w-6 h-6" />
+              <Bars3Icon className="w-5 h-5" />
             </button>
-            <span className="ml-2 text-chat-text font-semibold lg:hidden">AURA</span>
+            <span className="text-chat-text font-semibold text-sm tracking-wide lg:hidden" style={{ color: 'var(--chat-accent)' }}>AURA</span>
           </div>
 
           {/* Tab buttons — hidden on mobile (bottom bar used instead) */}
@@ -481,14 +501,19 @@ function MainApp() {
             })}
           </nav>
 
-          {/* Mobile search button */}
-          <button
-            onClick={() => setShowMobileSearch(true)}
-            className="p-2 text-chat-text-secondary hover:text-chat-text rounded-lg lg:hidden touch-target"
-            aria-label="Search conversations"
-          >
-            <MagnifyingGlassIcon className="w-5 h-5" />
-          </button>
+          {/* Mobile header right: active tab label + search */}
+          <div className="flex items-center gap-1 lg:hidden">
+            <span className="text-xs text-chat-text-secondary font-medium mr-1">
+              {TABS.find(t => t.id === activeTab)?.label}
+            </span>
+            <button
+              onClick={() => setShowMobileSearch(true)}
+              className="p-2 text-chat-text-secondary hover:text-chat-text active:scale-90 rounded-xl touch-target transition-all duration-150"
+              aria-label="Search conversations"
+            >
+              <MagnifyingGlassIcon className="w-5 h-5" />
+            </button>
+          </div>
         </header>
 
         {/* Tab content — ChatContainer is always mounted to keep WebSocket alive */}
@@ -517,9 +542,9 @@ function MainApp() {
     {/* Mobile search overlay */}
     {showMobileSearch && (
       <>
-        <div className="fixed inset-0 z-[180] bg-black/60 backdrop-blur-sm lg:hidden" onClick={() => { setShowMobileSearch(false); setMobileSearchQuery(''); }} />
-        <div className="fixed inset-x-0 top-0 z-[190] lg:hidden" style={{ background: 'var(--surface-1)', borderBottom: '1px solid var(--border-default)' }}>
-          <div className="flex items-center gap-2 px-4 py-3">
+        <div className="fixed inset-0 z-[180] bg-black/60 backdrop-blur-sm lg:hidden animate-fade-in" onClick={() => { setShowMobileSearch(false); setMobileSearchQuery(''); }} />
+        <div className="fixed inset-x-0 top-0 z-[190] lg:hidden animate-slide-down" style={{ background: 'var(--surface-1)', borderBottom: '1px solid var(--border-default)', borderRadius: '0 0 16px 16px' }}>
+          <div className="flex items-center gap-3 px-4 py-3" style={{ paddingTop: 'max(12px, env(safe-area-inset-top, 0px))' }}>
             <MagnifyingGlassIcon className="w-5 h-5 text-chat-text-secondary flex-shrink-0" />
             <input
               autoFocus
@@ -528,12 +553,19 @@ function MainApp() {
               value={mobileSearchQuery}
               onChange={(e) => setMobileSearchQuery(e.target.value)}
               className="flex-1 bg-transparent text-chat-text outline-none text-base"
+              style={{ fontSize: 16 }}
             />
-            <button onClick={() => { setShowMobileSearch(false); setMobileSearchQuery(''); }} className="text-chat-text-secondary p-1">
+            <button
+              onClick={() => { setShowMobileSearch(false); setMobileSearchQuery(''); }}
+              className="p-1.5 rounded-lg text-chat-text-secondary active:bg-white/10 transition-colors"
+            >
               <XMarkIcon className="w-5 h-5" />
             </button>
           </div>
-          <div className="max-h-[60vh] overflow-y-auto px-2 pb-3">
+          <div className="max-h-[60vh] overflow-y-auto px-2 pb-3 overscroll-contain">
+            {filteredConversations.length === 0 && !mobileSearchQuery && (
+              <div className="text-center text-sm py-8" style={{ color: 'var(--text-tertiary)' }}>No recent conversations</div>
+            )}
             {filteredConversations.map((conv) => (
               <button
                 key={conv.id}
@@ -541,14 +573,15 @@ function MainApp() {
                   useChatStore.getState().setCurrentConversationId(conv.id);
                   setShowMobileSearch(false);
                   setMobileSearchQuery('');
+                  setActiveTab('chat');
                 }}
-                className="w-full text-left px-3 py-2.5 rounded-lg transition-colors"
+                className="w-full text-left px-3 py-3 rounded-xl active:bg-white/8 transition-colors"
                 style={{ color: 'var(--text-primary)' }}
-                onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-panel-hover)')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
               >
-                <div className="text-sm truncate">{conv.title || 'Untitled'}</div>
-                <div className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>{new Date(conv.updated_at * 1000).toLocaleDateString()}</div>
+                <div className="text-sm truncate font-medium">{conv.title || 'Untitled'}</div>
+                <div className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+                  {conv.updated_at ? new Date(conv.updated_at * 1000).toLocaleDateString() : ''}
+                </div>
               </button>
             ))}
             {mobileSearchQuery && filteredConversations.length === 0 && (

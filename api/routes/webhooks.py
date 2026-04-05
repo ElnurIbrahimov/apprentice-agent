@@ -152,8 +152,9 @@ async def _route_to_agent(task_description: str, context: Dict[str, Any] = None)
             prompt = f"[Webhook Task] {task_description}"
             if context:
                 prompt += f"\n\nContext: {json.dumps(context, indent=2, default=str)}"
-            result = await loop.run_in_executor(
-                None, agent_service.process_message, prompt
+            result = await asyncio.wait_for(
+                loop.run_in_executor(None, agent_service.process_message, prompt),
+                timeout=120,  # 2 minute max for webhook agent processing
             )
             # Notify surfaces with the finding
             if result:
@@ -163,6 +164,9 @@ async def _route_to_agent(task_description: str, context: Dict[str, Any] = None)
                     summary = summary[:1500] + "..."
                 await _notify_surfaces(f"Investigation complete:\n{summary}")
             return result
+    except asyncio.TimeoutError:
+        logger.error(f"[Webhooks] Agent routing timed out after 120s: {task_description[:100]}")
+        await _notify_surfaces(f"Webhook task timed out: {task_description[:100]}")
     except Exception as e:
         logger.error(f"[Webhooks] Agent routing failed: {e}")
         await _notify_surfaces(f"Webhook task failed: {task_description}\nError: {e}")

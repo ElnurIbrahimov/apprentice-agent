@@ -162,6 +162,15 @@ class TelegramStore:
                 self._conn.close()
                 self._conn = None
 
+    # Allowed column names for dynamic SQL construction — prevents SQL injection
+    _SETTINGS_COLUMNS = frozenset({
+        "language", "keyboard_enabled", "digest_enabled", "first_name",
+        "username", "custom_model", "custom_instructions", "tts_enabled",
+    })
+    _SKILL_STATE_COLUMNS = frozenset({
+        "last_exchange", "pending_action", "create_state",
+    })
+
     # ==================== USER SETTINGS ====================
 
     def get_user_settings(self, user_id: str) -> dict:
@@ -172,6 +181,9 @@ class TelegramStore:
             return dict(row) if row else {}
 
     def set_user_setting(self, user_id: str, **kwargs) -> None:
+        bad_keys = set(kwargs) - self._SETTINGS_COLUMNS
+        if bad_keys:
+            raise ValueError(f"Invalid setting columns: {bad_keys}")
         with self._lock:
             conn = self._get_conn()
             existing = conn.execute(
@@ -405,6 +417,9 @@ class TelegramStore:
             }
 
     def set_skill_state(self, user_id: str, **kwargs) -> None:
+        bad_keys = set(kwargs) - self._SKILL_STATE_COLUMNS
+        if bad_keys:
+            raise ValueError(f"Invalid skill state columns: {bad_keys}")
         serialized = {k: json.dumps(v) for k, v in kwargs.items()}
         with self._lock:
             conn = self._get_conn()

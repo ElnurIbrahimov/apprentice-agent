@@ -133,8 +133,22 @@ export default function MiniApp() {
     if (!tg) return;
     tg.ready();
     tg.expand();
-    tg.setHeaderColor('#030303');
-    tg.setBackgroundColor('#030303');
+
+    // Adapt to Telegram's theme (dark or light)
+    const bgColor = tg.themeParams?.bg_color || '#030303';
+    const secBg = tg.themeParams?.secondary_bg_color || '#121214';
+    tg.setHeaderColor(secBg);
+    tg.setBackgroundColor(bgColor);
+
+    // Set CSS vars from Telegram theme for native look
+    const root = document.documentElement;
+    if (tg.themeParams?.bg_color) root.style.setProperty('--tg-theme-bg-color', tg.themeParams.bg_color);
+    if (tg.themeParams?.text_color) root.style.setProperty('--tg-theme-text-color', tg.themeParams.text_color);
+    if (tg.themeParams?.hint_color) root.style.setProperty('--tg-theme-hint-color', tg.themeParams.hint_color);
+    if (tg.themeParams?.link_color) root.style.setProperty('--tg-theme-link-color', tg.themeParams.link_color);
+    if (tg.themeParams?.button_color) root.style.setProperty('--tg-theme-button-color', tg.themeParams.button_color);
+    if (tg.themeParams?.button_text_color) root.style.setProperty('--tg-theme-button-text-color', tg.themeParams.button_text_color);
+    if (tg.themeParams?.secondary_bg_color) root.style.setProperty('--tg-theme-secondary-bg-color', tg.themeParams.secondary_bg_color);
 
     // Validate initData with backend
     const initData = (tg as any).initData;
@@ -425,12 +439,22 @@ function ChatTab({ tg, sendToChatRef }: { tg?: NonNullable<Window['Telegram']>['
             <div className="chat-empty-icon">
               <BreathingDot />
             </div>
-            <p className="chat-empty-title">Talk to AURA</p>
-            <p className="chat-empty-sub">Ask anything, explore ideas, or just chat.</p>
+            <p className="chat-empty-title">What should we explore?</p>
+            <p className="chat-empty-sub">Research, create, code — powered by AI.</p>
             <div className="chat-quick-actions">
-              {['What can you do?', 'Search for AI news', 'Tell me about yourself'].map((text) => (
-                <button key={text} className="quick-action" onClick={() => sendMessage(text)}>
-                  {text}
+              {[
+                { text: 'Research AI news', icon: '\uD83D\uDD0D' },
+                { text: 'Write me a poem', icon: '\u270F\uFE0F' },
+                { text: 'What can you do?', icon: '\u2728' },
+                { text: 'Help me learn', icon: '\uD83D\uDCDA' },
+              ].map((item) => (
+                <button
+                  key={item.text}
+                  className="quick-action"
+                  onClick={() => { tg?.HapticFeedback?.impactOccurred('light'); sendMessage(item.text); }}
+                >
+                  <span style={{ marginRight: 6 }}>{item.icon}</span>
+                  {item.text}
                 </button>
               ))}
             </div>

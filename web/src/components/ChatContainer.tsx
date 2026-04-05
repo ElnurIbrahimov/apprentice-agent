@@ -617,56 +617,63 @@ export function ChatContainer() {
             ))}
           </div>
         ) : messages.length === 0 ? (
-          // Empty state with enhanced styling
           <div className="flex flex-col items-center justify-center h-full text-chat-text-secondary relative px-4 sm:px-6">
-            {/* NextGen welcome heading */}
-            <h1 className="text-3xl sm:text-5xl font-light tracking-tight mb-4 text-center animate-fade-in text-gradient-hero"
+            {/* Animated breathing glow behind title */}
+            <div className="absolute top-1/4 w-48 h-48 sm:w-64 sm:h-64 rounded-full opacity-20 animate-pulse-glow pointer-events-none"
+              style={{ background: 'radial-gradient(circle, var(--chat-accent) 0%, transparent 70%)', filter: 'blur(40px)' }}
+            />
+
+            {/* Welcome heading */}
+            <h1 className="text-3xl sm:text-5xl font-light tracking-tight mb-3 sm:mb-4 text-center animate-fade-in text-gradient-hero relative"
               style={{ letterSpacing: '-0.04em' }}
             >
               What should we explore?
             </h1>
 
-            <p className="text-center max-w-md text-chat-text-secondary mb-4 leading-relaxed animate-fade-in animation-delay-100">
+            <p className="text-center max-w-md text-chat-text-secondary mb-3 leading-relaxed text-sm sm:text-base animate-fade-in animation-delay-100">
               Research, create, code, and compare — powered by 40+ AI models.
             </p>
-            <p className="text-center text-xs text-chat-text-tertiary mb-10 animate-fade-in animation-delay-200">
+            <p className="text-center text-xs text-chat-text-tertiary mb-8 sm:mb-10 animate-fade-in animation-delay-200">
               Upload files, use voice, or pick a starting point
             </p>
 
-            {/* NextGen suggestion cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-2xl">
-              {QUICK_ACTIONS.map((action, index) => {
-                const Icon = action.icon;
-                return (
-                  <button
-                    key={action.text}
-                    onClick={() => handleSend(action.text)}
-                    disabled={isDisabled}
-                    aria-label={action.text}
-                    className={`
-                      group flex flex-col gap-3 p-5 text-left
-                      disabled:opacity-50 disabled:cursor-not-allowed
-                      animate-slide-up-fade transition-all duration-300
-                      bg-surface-1 border border-chat-border rounded-xl backdrop-blur-sm
-                      hover:bg-surface-2 hover:border-chat-text-secondary/20
-                      ${index === 0 ? 'animation-delay-100' : ''}
-                      ${index === 1 ? 'animation-delay-200' : ''}
-                      ${index === 2 ? 'animation-delay-300' : ''}
-                      ${index === 3 ? 'animation-delay-400' : ''}
-                    `}
-                  >
-                    <div className="w-9 h-9 rounded-lg bg-surface-2 flex items-center justify-center">
-                      <Icon className={`w-4 h-4 ${action.color}`} />
-                    </div>
-                    <span className="text-sm font-medium text-chat-text group-hover:text-white transition-colors">
-                      {action.text}
-                    </span>
-                    <span className="text-xs text-chat-text-secondary mt-0.5">
-                      {action.subtitle}
-                    </span>
-                  </button>
-                );
-              })}
+            {/* Suggestion cards — grid on desktop, horizontal scroll on mobile */}
+            <div className="w-full max-w-2xl">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                {QUICK_ACTIONS.map((action, index) => {
+                  const Icon = action.icon;
+                  return (
+                    <button
+                      key={action.text}
+                      onClick={() => { haptic(25); handleSend(action.text); }}
+                      disabled={isDisabled}
+                      aria-label={action.text}
+                      className="group flex items-start gap-3 sm:flex-col sm:gap-3 p-4 sm:p-5 text-left
+                        disabled:opacity-50 disabled:cursor-not-allowed
+                        transition-all duration-300
+                        bg-surface-1 border border-chat-border rounded-2xl sm:rounded-xl backdrop-blur-sm
+                        hover:bg-surface-2 hover:border-chat-text-secondary/20
+                        active:scale-[0.97]"
+                      style={{
+                        animation: `spring-up 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) ${150 + index * 80}ms both`,
+                      }}
+                    >
+                      <div className="w-10 h-10 sm:w-9 sm:h-9 rounded-xl sm:rounded-lg flex items-center justify-center flex-shrink-0"
+                        style={{ background: 'var(--surface-2)' }}>
+                        <Icon className={`w-5 h-5 sm:w-4 sm:h-4 ${action.color}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <span className="text-sm font-medium text-chat-text group-hover:text-white transition-colors block leading-snug">
+                          {action.text}
+                        </span>
+                        <span className="text-xs text-chat-text-secondary mt-1 block">
+                          {action.subtitle}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
         ) : (
@@ -694,10 +701,15 @@ export function ChatContainer() {
         {isUserScrolledUp && messages.length > 0 && (
           <button
             onClick={() => {
+              haptic(10);
               setIsUserScrolledUp(false);
               messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
             }}
-            className="absolute bottom-32 right-6 z-10 p-2 bg-chat-accent hover:brightness-110 text-white rounded-full shadow-lg transition-all"
+            className="absolute bottom-24 sm:bottom-32 right-4 sm:right-6 z-10 p-2.5 sm:p-2 text-white rounded-full shadow-xl animate-spring-scale"
+            style={{
+              background: 'var(--chat-accent)',
+              boxShadow: '0 4px 20px rgba(124, 58, 237, 0.4)',
+            }}
             aria-label="Scroll to bottom"
           >
             <ChevronDownIcon className="w-5 h-5" />

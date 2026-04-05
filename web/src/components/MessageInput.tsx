@@ -5,6 +5,7 @@ import {
   PaperAirplaneIcon, StopCircleIcon,
 } from '@heroicons/react/24/outline';
 import { AttachmentList } from './AttachmentPreview';
+import { ActionSheet } from './BottomSheet';
 import { useFileUpload, isSupported } from '../hooks/useFileUpload';
 import { useChatStore } from '../store/chatStore';
 import { useSettingsStore } from '../store/settingsStore';
@@ -12,6 +13,18 @@ import { haptic } from '../utils/haptics';
 import { sounds } from '../utils/sounds';
 import { toast } from './Toast';
 import type { FileAttachment } from '../types';
+
+// Mobile detection hook
+function useIsMobile() {
+  const [mobile, setMobile] = useState(false);
+  useEffect(() => {
+    const check = () => setMobile(window.innerWidth < 1024);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+  return mobile;
+}
 
 // Action modes
 type ActionMode = 'none' | 'search' | 'research' | 'deep_research' | 'swarm' | 'agent' | 'compare';
@@ -83,6 +96,7 @@ export function MessageInput({
 
   const { selectedModel, availableModels, setSelectedModel, setAvailableModels } = useChatStore();
   const { settings } = useSettingsStore();
+  const isMobile = useIsMobile();
 
   // Fetch available models on mount
   useEffect(() => {
@@ -360,7 +374,7 @@ export function MessageInput({
 
   return (
     <div
-      className="px-3 sm:px-4 pb-3 sm:pb-6 pt-2 sm:pt-3 transition-all duration-200 input-safe-area"
+      className="px-2.5 sm:px-4 pb-2 sm:pb-6 pt-1.5 sm:pt-3 transition-all duration-200 input-safe-area"
       style={{ background: isDragOver ? 'rgba(124,58,237,0.05)' : 'transparent' }}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -431,17 +445,17 @@ export function MessageInput({
             rows={1}
             className="bg-transparent text-chat-text outline-none resize-none w-full input-textarea"
             style={{
-              padding: '14px 16px 6px',
+              padding: '12px 14px 4px',
               fontSize: '16px',
-              lineHeight: 1.6,
-              minHeight: 48,
-              maxHeight: 120,
+              lineHeight: 1.5,
+              minHeight: 44,
+              maxHeight: 140,
             }}
           />
 
           {/* Bottom row */}
-          <div className="flex items-center gap-2 px-3 pb-3 pt-1">
-            {/* + button with dropdown */}
+          <div className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 pb-2.5 sm:pb-3 pt-0.5">
+            {/* + button — opens dropdown (desktop) or bottom sheet (mobile) */}
             <div className="relative" ref={plusMenuRef}>
               <button
                 type="button"
@@ -462,26 +476,27 @@ export function MessageInput({
                 <PlusIcon className="w-4 h-4" />
               </button>
 
-              {/* + Dropdown */}
-              {showPlusMenu && (
+              {/* Desktop dropdown */}
+              {showPlusMenu && !isMobile && (
                 <div
                   style={{
                     position: 'absolute',
-                    bottom: 40,
+                    bottom: 44,
                     left: 0,
-                    minWidth: 200,
-                    maxHeight: 'calc(100vh - 120px)',
+                    minWidth: 220,
+                    maxWidth: 'min(280px, calc(100vw - 2rem))',
+                    maxHeight: 'calc(100vh - 160px)',
                     overflowY: 'auto',
                     background: 'var(--surface-1)',
                     border: '1px solid var(--border-default)',
-                    borderRadius: 12,
-                    backdropFilter: 'blur(20px)',
-                    boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+                    borderRadius: 14,
+                    backdropFilter: 'blur(24px)',
+                    WebkitBackdropFilter: 'blur(24px)',
+                    boxShadow: '0 12px 40px rgba(0,0,0,0.35)',
                     padding: '6px',
                     zIndex: 50,
                   }}
                 >
-                  {/* Attach files */}
                   <button
                     type="button"
                     onClick={() => { handleFileSelect(); setShowPlusMenu(false); }}
@@ -491,7 +506,6 @@ export function MessageInput({
                     Add photos & files
                   </button>
                   <div style={{ height: 1, background: 'var(--border-default)', margin: '4px 6px' }} />
-                  {/* Mode options */}
                   {([
                     { mode: 'search' as ActionMode, icon: MagnifyingGlassIcon, label: 'Search', desc: 'Quick web search' },
                     { mode: 'research' as ActionMode, icon: GlobeAltIcon, label: 'Research', desc: 'Comprehensive research' },
@@ -519,6 +533,36 @@ export function MessageInput({
                   ))}
                 </div>
               )}
+
+              {/* Mobile bottom sheet */}
+              <ActionSheet
+                open={showPlusMenu && isMobile}
+                onClose={() => setShowPlusMenu(false)}
+                title="Actions"
+                items={[
+                  {
+                    icon: <PhotoIcon className="w-5 h-5" />,
+                    label: 'Add photos & files',
+                    sublabel: 'Images, PDFs, code files',
+                    onPress: () => { handleFileSelect(); setShowPlusMenu(false); },
+                  },
+                  ...([
+                    { mode: 'search' as ActionMode, icon: <MagnifyingGlassIcon className="w-5 h-5" />, label: 'Search', desc: 'Quick web search' },
+                    { mode: 'research' as ActionMode, icon: <GlobeAltIcon className="w-5 h-5" />, label: 'Research', desc: 'Comprehensive research' },
+                    { mode: 'deep_research' as ActionMode, icon: <BeakerIcon className="w-5 h-5" />, label: 'Deep Research', desc: '20+ sources' },
+                    { mode: 'agent' as ActionMode, icon: <CpuChipIcon className="w-5 h-5" />, label: 'Agent', desc: 'Autonomous execution' },
+                    { mode: 'swarm' as ActionMode, icon: <UserGroupIcon className="w-5 h-5" />, label: 'Swarm', desc: 'Multi-agent parallel' },
+                    { mode: 'compare' as ActionMode, icon: <ScaleIcon className="w-5 h-5" />, label: 'Compare', desc: 'Compare 3 models' },
+                  ]).map(({ mode, icon, label, desc }) => ({
+                    icon,
+                    label,
+                    sublabel: desc,
+                    active: actionMode === mode,
+                    activeColor: MODE_COLORS[mode],
+                    onPress: () => { setActionMode(actionMode === mode ? 'none' : mode); setShowPlusMenu(false); },
+                  })),
+                ]}
+              />
             </div>
 
             {/* Active mode chip */}
@@ -678,23 +722,25 @@ export function MessageInput({
               </button>
             </div>
 
-            {/* Send / Stop */}
+            {/* Send / Stop — premium morphing button */}
             {isLoading && onStop ? (
               <button
                 type="button"
-                onClick={onStop}
+                onClick={() => { haptic(25); onStop(); }}
                 aria-label="Stop generation"
+                className="animate-spring-scale"
                 style={{
-                  width: 40, height: 40, borderRadius: 10,
-                  background: 'var(--surface-2)',
-                  border: '1px solid var(--border-default)',
+                  width: 40, height: 40, borderRadius: 12,
+                  background: 'rgba(239, 68, 68, 0.15)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   cursor: 'pointer',
                   flexShrink: 0,
+                  transition: 'all 0.2s',
                 }}
               >
-                <svg className="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="currentColor">
-                  <rect x="6" y="6" width="12" height="12" rx="1" />
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="#f87171">
+                  <rect x="6" y="6" width="12" height="12" rx="2" />
                 </svg>
               </button>
             ) : (
@@ -703,18 +749,20 @@ export function MessageInput({
                 disabled={!canSend}
                 aria-label="Send message"
                 style={{
-                  width: 40, height: 40, borderRadius: 10,
-                  background: canSend ? 'var(--text-primary)' : 'var(--surface-2)',
+                  width: 40, height: 40,
+                  borderRadius: canSend ? 20 : 12,
+                  background: canSend ? 'var(--chat-accent)' : 'var(--surface-2)',
                   border: 'none',
-                  color: canSend ? 'var(--bg-base)' : 'var(--text-tertiary)',
+                  color: canSend ? '#fff' : 'var(--text-tertiary)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   cursor: canSend ? 'pointer' : 'not-allowed',
-                  boxShadow: canSend ? '0 2px 8px var(--border-strong)' : 'none',
-                  transition: 'all 0.2s',
+                  boxShadow: canSend ? '0 4px 16px rgba(124, 58, 237, 0.4)' : 'none',
+                  transition: 'all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1)',
                   flexShrink: 0,
+                  transform: canSend ? 'scale(1)' : 'scale(0.9)',
                 }}
               >
-                <PaperAirplaneIcon className="w-4 h-4" style={{ transform: 'rotate(-45deg)' }} />
+                <PaperAirplaneIcon className="w-4 h-4" style={{ transform: 'rotate(-45deg) translateX(1px)' }} />
               </button>
             )}
           </div>
