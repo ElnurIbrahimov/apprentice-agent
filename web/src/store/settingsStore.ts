@@ -10,6 +10,9 @@ export interface Settings {
   autoScroll: boolean;
   soundEnabled: boolean;
   colorPreset: ColorPreset;
+  onboardingDone: boolean;
+  userName: string;
+  backendUrl: string;
 }
 
 interface SettingsState {
@@ -25,6 +28,9 @@ const defaultSettings: Settings = {
   autoScroll: true,
   soundEnabled: false,
   colorPreset: 'aura',
+  onboardingDone: false,
+  userName: '',
+  backendUrl: '',
 };
 
 // Map font size to CSS class

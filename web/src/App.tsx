@@ -6,6 +6,7 @@ import { CommandPalette } from './components/CommandPalette';
 import { useChatStore } from './store/chatStore';
 import { useSettingsStore, applyFontSize, applyTheme, applyColorPreset } from './store/settingsStore';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { OnboardingFlow } from './components/OnboardingFlow';
 import { BottomTabBar } from './components/BottomTabBar';
 import { ToolLauncher, ToolSubNav } from './components/ToolLauncher';
 import type { ToolId } from './components/ToolLauncher';
@@ -29,6 +30,7 @@ const AMEMPanel = lazy(() => import('./components/AMEMPanel').then(m => ({ defau
 const ReasoningTreePanel = lazy(() => import('./components/ReasoningTreePanel').then(m => ({ default: m.ReasoningTreePanel })));
 const ActivityTimeline = lazy(() => import('./components/ActivityTimeline').then(m => ({ default: m.ActivityTimeline })));
 const MemoryTimeline = lazy(() => import('./components/MemoryTimeline').then(m => ({ default: m.MemoryTimeline })));
+const KnowledgeGraphExplorer = lazy(() => import('./components/KnowledgeGraphExplorer').then(m => ({ default: m.KnowledgeGraphExplorer })));
 const HandsDashboard = lazy(() => import('./components/HandsDashboard'));
 const TaskQueuePanel = lazy(() => import('./components/TaskQueuePanel').then(m => ({ default: m.TaskQueuePanel })));
 const SettingsPage = lazy(() => import('./components/SettingsPage').then(m => ({ default: m.SettingsPage })));
@@ -66,7 +68,7 @@ const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: 
 ];
 
 type CreateSubTab = 'code' | 'webcreator' | 'image';
-type InsightsSubTab = 'monitor' | 'activity' | 'memory' | 'hands' | 'queue' | 'advanced';
+type InsightsSubTab = 'monitor' | 'activity' | 'memory' | 'knowledge' | 'hands' | 'queue' | 'advanced';
 type ToolsSubTab = 'launcher' | 'system' | ToolId;
 
 function TabSkeleton() {
@@ -101,7 +103,7 @@ function SubTabBar({ tabs, active, onChange }: { tabs: { id: string; label: stri
   );
 }
 
-function App() {
+function MainApp() {
   const { sidebarOpen, setSidebarOpen, toggleSidebar, conversations, connectionStatus } = useChatStore();
   const { settings } = useSettingsStore();
   const { toasts, removeToast } = useToastStore();
@@ -321,6 +323,7 @@ function App() {
                 { id: 'monitor', label: 'Monitor' },
                 { id: 'activity', label: 'Activity' },
                 { id: 'memory', label: 'Memory' },
+                { id: 'knowledge', label: 'Knowledge' },
                 { id: 'hands', label: 'Hands' },
                 { id: 'queue', label: 'Queue' },
                 { id: 'advanced', label: 'Advanced' },
@@ -339,6 +342,7 @@ function App() {
               )}
               {insightsSubTab === 'activity' && <ActivityTimeline />}
               {insightsSubTab === 'memory' && <MemoryTimeline />}
+              {insightsSubTab === 'knowledge' && <KnowledgeGraphExplorer />}
               {insightsSubTab === 'hands' && <HandsDashboard />}
               {insightsSubTab === 'queue' && <TaskQueuePanel />}
               {insightsSubTab === 'advanced' && (
@@ -601,6 +605,20 @@ function App() {
     )}
     </>
   );
+}
+
+function App() {
+  const { settings, updateSettings } = useSettingsStore();
+
+  if (!settings.onboardingDone) {
+    return (
+      <OnboardingFlow
+        onComplete={() => updateSettings({ onboardingDone: true })}
+      />
+    );
+  }
+
+  return <MainApp />;
 }
 
 export default App;
