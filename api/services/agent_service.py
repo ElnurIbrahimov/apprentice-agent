@@ -25,6 +25,34 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+import re
+
+def _filter_skill_json(text: str) -> str:
+    """Remove skill learning JSON artifacts from chat responses.
+
+    The skill learner sometimes bleeds raw JSON into responses like:
+    {"name": "...", "trigger_patterns": [...], "procedure": "..."}
+    This should never be shown to the user.
+    """
+    # Remove "Analyze these successful interactions..." prompt blocks
+    text = re.sub(
+        r'Analyze these successful interactions and extract a reusable skill\..*?Respond ONLY with the JSON,? no other text\.?',
+        '', text, flags=re.DOTALL
+    )
+    # Remove skill definition JSON blocks
+    text = re.sub(
+        r'\{[^{}]*"name"\s*:.*?"trigger_patterns"\s*:.*?"procedure"\s*:.*?\}',
+        '', text, flags=re.DOTALL
+    )
+    # Remove "Create a skill definition with:" instruction blocks
+    text = re.sub(
+        r'Create a skill definition with:.*?Respond in this exact JSON format:',
+        '', text, flags=re.DOTALL
+    )
+    # Clean up excessive whitespace left behind
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
 # Truth Spine singleton — shared across all chat() calls to avoid per-call disk I/O
 _truth_spine_instance = None
 _truth_spine_lock = threading.Lock()
@@ -1160,15 +1188,65 @@ Provide a well-structured, informative summary with key findings and cite source
 
             enriched_message = message + screen_hint if screen_hint else message
 
-            # Parliament routing removed
+            # ===== AGENT RUN FOR RESEARCH/SEARCH =====
+            # When action mode is research/search, use full ReAct agent loop with tools
+            # instead of falling through to plain LLM chat
+            if detected_action in ("research", "search", "agent") and hasattr(agent, 'run'):
+                logger.info(f"[AgentService] Using agent.run() for {detected_action} mode")
+                try:
+                    import queue as _queue
+                    result_q = _queue.Queue()
+
+                    def _run_agent():
+                        try:
+                            result = agent.run(enriched_message, timeout_seconds=120)
+                            result_q.put(result)
+                        except Exception as e:
+                            result_q.put({"response": f"Research failed: {e}", "timeout": True})
+
+                    t = threading.Thread(target=_run_agent, daemon=True)
+                    t.start()
+
+                    yield {"type": "tool_status", "tool_name": "agent", "tool_action": f"running {detected_action}"}
+
+                    t.join(timeout=125)
+                    if not result_q.empty():
+                        result = result_q.get_nowait()
+                        response_text = result.get("response", "") if isinstance(result, dict) else str(result)
+                        if response_text:
+                            # Filter out skill learning JSON from response
+                            response_text = _filter_skill_json(response_text)
+                            yield {"type": "chunk", "content": response_text}
+                    else:
+                        yield {"type": "chunk", "content": "The research is taking longer than expected. Please try again with a more specific query."}
+
+                    yield {"type": "tool_status", "tool_name": "", "tool_action": ""}
+                    yield {"type": "done", "mood": self._get_mood(), "model_used": effective_model or "agent_run"}
+                    return
+                except Exception as e:
+                    logger.error(f"[AgentService] Agent run failed for {detected_action}: {e}", exc_info=True)
+                    yield {"type": "chunk", "content": f"Research encountered an error. Falling back to standard response.\n\n"}
+                    # Fall through to standard streaming
 
             # ===== STANDARD STREAMING =====
             if hasattr(brain, 'think_stream'):
                 full_response = ""
                 yield {"type": "tool_status", "tool_name": "brain", "tool_action": "thinking"}
+                chunk_buffer = ""
                 for chunk in brain.think_stream(enriched_message, model_override=effective_model):
                     full_response += chunk
+                    chunk_buffer += chunk
+                    # Check if buffer contains skill learning artifacts
+                    if '"trigger_patterns"' in chunk_buffer or 'Analyze these successful interactions' in chunk_buffer:
+                        # Accumulate and filter at the end instead of streaming garbage
+                        continue
                     yield {"type": "chunk", "content": chunk}
+                    chunk_buffer = ""
+                # Flush any held-back content (filtered)
+                if chunk_buffer:
+                    cleaned = _filter_skill_json(chunk_buffer)
+                    if cleaned.strip():
+                        yield {"type": "chunk", "content": cleaned}
                 yield {"type": "tool_status", "tool_name": "", "tool_action": ""}  # clear status
 
                 # Single memory write via UnifiedMemory (consolidated from 3 systems, 2026-03-22)
