@@ -47,6 +47,13 @@ export interface Context {
   action?: string;
 }
 
+export interface ProactiveMessage {
+  id: string;
+  text: string;
+  /** ISO timestamp or unix ms — when the message was generated */
+  timestamp: number;
+}
+
 export interface SendOpts {
   override?: string;
   modelKey?: string;

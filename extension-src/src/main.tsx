@@ -2,7 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import './styles/globals.css';
-import { connectWS, fetchStatus } from './ws';
+import { connectWS, fetchStatus, startProactivePoll } from './ws';
 import { initBackendUrl } from './api';
 import ext from './ext';
 import { useStore } from './store';
@@ -15,6 +15,7 @@ async function init() {
   fetchStatus();
   setInterval(fetchStatus, 30_000);
   connectWS();
+  startProactivePoll();
   initShortcuts(useStore);
 }
 init();

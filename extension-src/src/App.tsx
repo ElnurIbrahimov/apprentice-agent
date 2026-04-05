@@ -5,6 +5,7 @@ import Rail from './components/Rail';
 import ErrorBoundary from './components/ErrorBoundary';
 import ChatPanel from './panels/ChatPanel';
 import CommandPalette from './components/CommandPalette';
+import ProactiveNotifications from './components/ProactiveCard';
 import ext from './ext';
 import type { PanelId } from './types';
 
@@ -182,6 +183,15 @@ export default function App() {
     return () => ext?.runtime?.onMessage?.removeListener(handler);
   }, [setPanel, setPendingCtx]);
 
+  const handleProactiveAccept = React.useCallback((text: string) => {
+    // Switch to chat panel and send the text via the shared aura-send event
+    setPanel('chat');
+    // Small delay so panel transition starts before the message is sent
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('aura-send', { detail: { text } }));
+    }, 80);
+  }, [setPanel]);
+
   return (
     <>
     <div className="grain" aria-hidden="true" />
@@ -189,6 +199,7 @@ export default function App() {
       {/* Main content area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
         <Header />
+        <ProactiveNotifications onAccept={handleProactiveAccept} />
         <div className={`flex-1 relative panel-container ${transitioning ? 'panel-transitioning' : ''}`}>
           {/* ChatPanel always mounted — keeps WebSocket alive */}
           <div

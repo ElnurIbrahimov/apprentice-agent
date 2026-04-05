@@ -60,7 +60,7 @@ export function buildStylesheet(): string {
 }
 
 .fab-pill.hover {
-  padding: ${FAB.pillPaddingHover};
+  padding: ${FAB.pillPadding};
 }
 
 .fab-pill.dragging {

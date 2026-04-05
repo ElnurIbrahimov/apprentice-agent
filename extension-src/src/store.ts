@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Message, StreamState, Context, PanelId, ThinkingLevel, ConversationMeta } from './types';
+import type { Message, StreamState, Context, PanelId, ThinkingLevel, ConversationMeta, ProactiveMessage } from './types';
 import { HTTP, API_KEY } from './api';
 import ext from './ext';
 import * as db from './utils/db';
@@ -60,6 +60,10 @@ interface AuraStore {
   activeStream: StreamState | true | null;
   pendingCtx: Context | null;
 
+  // Page context toggle
+  pageContextEnabled: boolean;
+  pageContext: { text: string; title?: string; url?: string } | null;
+
   // Conversation History
   conversations: ConversationMeta[];
   activeConversationId: string | null;
@@ -83,6 +87,12 @@ interface AuraStore {
   mdlDirectList: string[];
   mdlListsLoaded: boolean;
 
+  // Proactive Suggestions
+  proactiveMessages: ProactiveMessage[];
+  addProactiveMessage: (msg: ProactiveMessage) => void;
+  dismissProactive: (id: string) => void;
+  acceptProactive: (id: string, sendFn: (text: string) => void) => void;
+
   // Actions
   setWs: (ws: WebSocket | null) => void;
   setWsReady: (ready: boolean) => void;
@@ -104,6 +114,8 @@ interface AuraStore {
   addMessage: (msg: Message) => void;
   setActiveStream: (stream: StreamState | true | null) => void;
   setPendingCtx: (ctx: Context | null) => void;
+  setPageContextEnabled: (on: boolean) => void;
+  setPageContext: (ctx: { text: string; title?: string; url?: string } | null) => void;
   setThinkingMode: (on: boolean) => void;
   setThinkingLevel: (level: ThinkingLevel) => void;
   setDeepResearch: (on: boolean) => void;
@@ -208,6 +220,8 @@ export const useStore = create<AuraStore>((set, get) => {
     messages: [],
     activeStream: null,
     pendingCtx: null,
+    pageContextEnabled: false,
+    pageContext: null,
     conversations: [],
     activeConversationId: null,
     historyLoaded: false,
@@ -224,6 +238,7 @@ export const useStore = create<AuraStore>((set, get) => {
     mdlChatgptList: [],
     mdlDirectList: [],
     mdlListsLoaded: false,
+    proactiveMessages: [],
 
     setWs: (ws) => set({ ws }),
     setWsReady: (wsReady) => set({ wsReady }),
@@ -274,6 +289,8 @@ export const useStore = create<AuraStore>((set, get) => {
     },
     setActiveStream: (activeStream) => set({ activeStream }),
     setPendingCtx: (pendingCtx) => set({ pendingCtx }),
+    setPageContextEnabled: (pageContextEnabled) => set({ pageContextEnabled }),
+    setPageContext: (pageContext) => set({ pageContext }),
     setThinkingMode: (thinkingMode) => {
       set({ thinkingMode });
       ext?.storage?.local?.set({ thinkingMode });
@@ -395,6 +412,33 @@ export const useStore = create<AuraStore>((set, get) => {
     },
 
     getModel: (feature) => get().featureModels[feature] || null,
+
+    addProactiveMessage: (msg) => {
+      set(s => {
+        const existing = s.proactiveMessages.find(m => m.id === msg.id);
+        if (existing) return s;
+        const msgs = [...s.proactiveMessages, msg].slice(-2);
+        return { proactiveMessages: msgs };
+      });
+    },
+
+    dismissProactive: (id) => {
+      set(s => ({ proactiveMessages: s.proactiveMessages.filter(m => m.id !== id) }));
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (API_KEY) headers['X-API-Key'] = API_KEY;
+      fetch(`${HTTP}/api/proactive/dismiss`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ id }),
+      }).catch(() => {});
+    },
+
+    acceptProactive: (id, sendFn) => {
+      const msg = get().proactiveMessages.find(m => m.id === id);
+      if (!msg) return;
+      set(s => ({ proactiveMessages: s.proactiveMessages.filter(m => m.id !== id) }));
+      sendFn(msg.text);
+    },
 
     // --- Conversation History (IndexedDB with chrome.storage fallback) ---
 

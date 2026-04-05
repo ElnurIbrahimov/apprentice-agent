@@ -6,14 +6,14 @@ import ContextBar from '../components/ContextBar';
 import InputBar from '../components/InputBar';
 import DropZone from '../components/DropZone';
 import { PAGE_KEYWORDS } from '../ws';
-import { getPageContentCached, getCurrentTab } from '../ext';
+import { getPageContentCached, getCurrentTab, clearPageContentCache } from '../ext';
 import { API_KEY, HTTP as API_HTTP } from '../api';
 import type { StreamState, FileAttachment } from '../types';
 import { speak } from '../tts';
 import { ChevronDown, Brain, Pen, Square } from 'lucide-react';
 
 export default function ChatPanel() {
-  const { messages, addMessage, activeStream, setActiveStream, setPendingCtx, saveCurrentConversation } = useStore();
+  const { messages, addMessage, activeStream, setActiveStream, setPendingCtx, saveCurrentConversation, pageContextEnabled, pageContext, setPageContext } = useStore();
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const streamingMsgId = useRef<string | null>(null);
@@ -23,6 +23,30 @@ export default function ChatPanel() {
   const isAutoScrolling = useRef(false);
   const [fileAttachments, setFileAttachments] = useState<FileAttachment[]>([]);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Auto-refresh page context when user navigates to a new tab/URL
+  const lastPageUrlRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!pageContextEnabled) return;
+
+    const checkForNavigation = async () => {
+      const tab = await getCurrentTab();
+      if (!tab?.ok || !tab.url) return;
+      if (tab.url === lastPageUrlRef.current) return;
+      // URL changed — refresh context
+      lastPageUrlRef.current = tab.url;
+      clearPageContentCache();
+      const resp = await getPageContentCached();
+      if (resp?.ok && resp.text) {
+        setPageContext({ text: resp.text.slice(0, 20000), title: resp.title, url: resp.url });
+      }
+    };
+
+    // Poll every 2s for URL changes (extensions can't easily listen to tab nav from popup)
+    checkForNavigation();
+    const interval = setInterval(checkForNavigation, 2000);
+    return () => clearInterval(interval);
+  }, [pageContextEnabled, setPageContext]);
 
   // Check if user is near the bottom
   const isNearBottom = useCallback(() => {
@@ -90,8 +114,14 @@ export default function ChatPanel() {
 
     let full = text;
 
-    // Auto page context
-    if (!st.pendingCtx) {
+    // Inject persistent page context if toggle is on
+    const { pageContextEnabled: pageCtxOn, pageContext: pageCtx } = useStore.getState();
+    if (pageCtxOn && pageCtx?.text) {
+      full = `[Page context: ${pageCtx.title || pageCtx.url || 'current page'}]\n${pageCtx.text}\n\n---\n${text}`;
+    }
+
+    // Auto page context (skip if persistent page context toggle is on — already injected above)
+    if (!st.pendingCtx && !pageCtxOn) {
       if (PAGE_KEYWORDS.test(text)) {
         const pageResp = await getPageContentCached();
         if (pageResp?.ok && pageResp.text) {

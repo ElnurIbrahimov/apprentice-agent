@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
-import { Brain, Globe, FileText, X, Paperclip, Mic, Hash, Zap, Image as ImageIcon, FileCode, RefreshCw } from 'lucide-react';
+import { Brain, Globe, FileText, X, Paperclip, Mic, Hash, Zap, Image as ImageIcon, FileCode, RefreshCw, BookOpen } from 'lucide-react';
 import { useStore } from '../store';
 import { getPageContentCached, clearPageContentCache } from '../ext';
 import ModelPill from './ModelPill';
@@ -86,7 +86,7 @@ const MAX_TEXTAREA_HEIGHT = Math.ceil(MAX_VISIBLE_LINES * LINE_HEIGHT_PX) + 20; 
 const MAX_POPUP_ITEMS = 6;
 
 export default function InputBar({ onSend, featureKey = 'chat', placeholder, disabled, fileAttachments = [], onRemoveAttachment, onFilesAdded }: Props) {
-  const { thinkingMode, setThinkingMode, thinkingLevel, setThinkingLevel, deepResearch, setDeepResearch, activeStream, setPendingCtx, pendingCtx } = useStore();
+  const { thinkingMode, setThinkingMode, thinkingLevel, setThinkingLevel, deepResearch, setDeepResearch, activeStream, setPendingCtx, pendingCtx, pageContextEnabled, setPageContextEnabled, pageContext, setPageContext } = useStore();
   const [showThinkTooltip, setShowThinkTooltip] = useState(false);
   const thinkLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -420,6 +420,29 @@ export default function InputBar({ onSend, featureKey = 'chat', placeholder, dis
     }
   };
 
+  const togglePageContext = useCallback(async () => {
+    const next = !pageContextEnabled;
+    setPageContextEnabled(next);
+    if (next) {
+      setPageLoading(true);
+      try {
+        clearPageContentCache();
+        const resp = await getPageContentCached();
+        if (resp?.ok && resp.text) {
+          setPageContext({ text: resp.text.slice(0, 20000), title: resp.title, url: resp.url });
+        } else {
+          // Failed to get page — turn off
+          setPageContextEnabled(false);
+          setPageContext(null);
+        }
+      } finally {
+        setPageLoading(false);
+      }
+    } else {
+      setPageContext(null);
+    }
+  }, [pageContextEnabled, setPageContextEnabled, setPageContext]);
+
   // Drag-and-drop on input area
   const [isDragOver, setIsDragOver] = useState(false);
   const dragCounter = useRef(0);
@@ -618,6 +641,23 @@ export default function InputBar({ onSend, featureKey = 'chat', placeholder, dis
         </div>
       )}
 
+      {/* Page context active indicator */}
+      {pageContextEnabled && pageContext && (
+        <div className="input-page-ctx-bar">
+          <BookOpen size={11} className="input-page-ctx-icon" />
+          <span className="input-page-ctx-label">
+            Chatting with: <strong>{pageContext.title ? (pageContext.title.length > 40 ? pageContext.title.slice(0, 40) + '…' : pageContext.title) : (pageContext.url || 'this page')}</strong>
+          </span>
+          <button
+            onClick={() => { setPageContextEnabled(false); setPageContext(null); }}
+            className="input-ctx-remove"
+            aria-label="Disable page context"
+          >
+            <X size={11} />
+          </button>
+        </div>
+      )}
+
       {/* Glass input wrapper */}
       <div
         className={`input-glass-wrap ${isFocused ? 'input-focused' : ''} ${hasText ? 'has-text' : ''} ${isRecording ? 'input-recording' : ''}`}
@@ -783,6 +823,16 @@ export default function InputBar({ onSend, featureKey = 'chat', placeholder, dis
                 <RefreshCw size={10} />
               </button>
             )}
+            <button
+              onClick={togglePageContext}
+              disabled={pageLoading}
+              className={`input-pill ${pageContextEnabled ? 'input-pill-page-ctx-active' : ''}`}
+              title={pageContextEnabled ? 'Disable: Chat with this page' : 'Enable: Chat with this page'}
+              style={{ opacity: pageLoading ? 0.5 : 1 }}
+            >
+              <BookOpen size={11} />
+              <span>This page</span>
+            </button>
           </div>
 
           {/* Right side: char count, kbd hint, model, send */}

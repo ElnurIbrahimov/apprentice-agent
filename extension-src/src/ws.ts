@@ -183,6 +183,16 @@ export function connectWS() {
       return;
     }
 
+    // Proactive suggestion pushed from backend daemon
+    if (d.type === 'proactive' && d.id && d.text) {
+      useStore.getState().addProactiveMessage({
+        id: d.id,
+        text: d.text,
+        timestamp: d.timestamp || Date.now(),
+      });
+      return;
+    }
+
     const { activeStream } = useStore.getState();
     if (!activeStream || activeStream === true) return;
 
@@ -322,6 +332,47 @@ export async function fetchStatus() {
       store.setBackendStatus('offline');
     }
   }
+}
+
+// --- Proactive message polling ---
+// Polls /api/proactive/messages every 60s when backend is online.
+// WebSocket push (above) is preferred; polling is the fallback.
+let _proactivePollTimer: ReturnType<typeof setInterval> | null = null;
+
+async function pollProactiveMessages() {
+  const store = useStore.getState();
+  if (store.backendStatus !== 'online') return;
+  try {
+    const headers: Record<string, string> = {};
+    if (API_KEY) headers['X-API-Key'] = API_KEY;
+    const r = await fetch(`${HTTP}/api/proactive/messages`, {
+      headers,
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!r.ok) return;
+    const data = await r.json();
+    const msgs: any[] = Array.isArray(data) ? data : (data.messages || []);
+    for (const m of msgs) {
+      if (m.id && m.text) {
+        store.addProactiveMessage({
+          id: m.id,
+          text: m.text,
+          timestamp: m.timestamp || Date.now(),
+        });
+      }
+    }
+  } catch { /* non-fatal */ }
+}
+
+export function startProactivePoll() {
+  if (_proactivePollTimer) return;
+  // Initial fetch after 5s to let connection settle
+  setTimeout(pollProactiveMessages, 5000);
+  _proactivePollTimer = setInterval(pollProactiveMessages, 60_000);
+}
+
+export function stopProactivePoll() {
+  if (_proactivePollTimer) { clearInterval(_proactivePollTimer); _proactivePollTimer = null; }
 }
 
 // Page-context keywords -- auto-inject page content when matched

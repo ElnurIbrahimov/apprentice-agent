@@ -1460,6 +1460,57 @@ header,
 :root.light .input-ctx-icon { color: var(--pl); }
 :root.light .input-ctx-title { color: var(--pl); }
 
+/* ---- Page context active pill ---- */
+.input-pill-page-ctx-active {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  border-color: rgba(5, 150, 105, 0.6);
+  color: #fff;
+  box-shadow: 0 0 0 2px rgba(5, 150, 105, 0.2);
+}
+.input-pill-page-ctx-active:hover {
+  background: linear-gradient(135deg, #047857 0%, #065f46 100%);
+  border-color: rgba(5, 150, 105, 0.7);
+}
+:root.light .input-pill-page-ctx-active {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  border-color: rgba(5, 150, 105, 0.5);
+  box-shadow: 0 0 0 2px rgba(5, 150, 105, 0.15);
+}
+
+/* ---- Page context active bar ---- */
+.input-page-ctx-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: rgba(5, 150, 105, 0.1);
+  border: 1px solid rgba(5, 150, 105, 0.2);
+  border-radius: 10px;
+  font-size: 11px;
+  animation: ctxSlideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.input-page-ctx-icon {
+  color: #10b981;
+  flex-shrink: 0;
+}
+.input-page-ctx-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+  color: #10b981;
+}
+.input-page-ctx-label strong {
+  font-weight: 600;
+}
+:root.light .input-page-ctx-bar {
+  background: rgba(5, 150, 105, 0.06);
+  border-color: rgba(5, 150, 105, 0.15);
+}
+:root.light .input-page-ctx-label { color: #059669; }
+:root.light .input-page-ctx-icon { color: #059669; }
+
 /* ---- Light theme attachments ---- */
 :root.light .input-attachment-pill {
   background: rgba(37, 99, 235, 0.08);

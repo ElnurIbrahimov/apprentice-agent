@@ -4,7 +4,7 @@ import { Sidebar } from './components/Sidebar';
 import { ToastContainer, useToastStore } from './components/Toast';
 import { CommandPalette } from './components/CommandPalette';
 import { useChatStore } from './store/chatStore';
-import { useSettingsStore, applyFontSize, applyTheme } from './store/settingsStore';
+import { useSettingsStore, applyFontSize, applyTheme, applyColorPreset } from './store/settingsStore';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { BottomTabBar } from './components/BottomTabBar';
 import { ToolLauncher, ToolSubNav } from './components/ToolLauncher';
@@ -28,6 +28,7 @@ const ToolsPanel = lazy(() => import('./components/ToolsPanel').then(m => ({ def
 const AMEMPanel = lazy(() => import('./components/AMEMPanel').then(m => ({ default: m.AMEMPanel })));
 const ReasoningTreePanel = lazy(() => import('./components/ReasoningTreePanel').then(m => ({ default: m.ReasoningTreePanel })));
 const ActivityTimeline = lazy(() => import('./components/ActivityTimeline').then(m => ({ default: m.ActivityTimeline })));
+const MemoryTimeline = lazy(() => import('./components/MemoryTimeline').then(m => ({ default: m.MemoryTimeline })));
 const HandsDashboard = lazy(() => import('./components/HandsDashboard'));
 const TaskQueuePanel = lazy(() => import('./components/TaskQueuePanel').then(m => ({ default: m.TaskQueuePanel })));
 const SettingsPage = lazy(() => import('./components/SettingsPage').then(m => ({ default: m.SettingsPage })));
@@ -65,7 +66,7 @@ const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: 
 ];
 
 type CreateSubTab = 'code' | 'webcreator' | 'image';
-type InsightsSubTab = 'monitor' | 'activity' | 'hands' | 'queue' | 'advanced';
+type InsightsSubTab = 'monitor' | 'activity' | 'memory' | 'hands' | 'queue' | 'advanced';
 type ToolsSubTab = 'launcher' | 'system' | ToolId;
 
 function TabSkeleton() {
@@ -147,6 +148,11 @@ function App() {
     }
   }, [settings.theme]);
 
+  // Apply color preset
+  useEffect(() => {
+    applyColorPreset(settings.colorPreset ?? 'aura');
+  }, [settings.colorPreset]);
+
   // Keyboard shortcuts
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
 
@@ -203,6 +209,17 @@ function App() {
     return () => document.removeEventListener('aura:switch-tab', handler);
   }, []);
 
+  // Listen for tool-open events (from tool suggestion chips)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { toolId } = (e as CustomEvent).detail;
+      setActiveTab('tools');
+      setToolsSubTab(toolId as ToolsSubTab);
+    };
+    document.addEventListener('aura:tool-open', handler);
+    return () => document.removeEventListener('aura:tool-open', handler);
+  }, []);
+
   // Detect mobile viewport
   useEffect(() => {
     const checkMobile = () => {
@@ -253,7 +270,7 @@ function App() {
               />
             )}
 
-            <div className="flex-1 overflow-hidden">
+            <div className="flex-1 overflow-hidden tab-panel-scroll">
               {/* Launcher grid */}
               {showLauncher && (
                 <ToolLauncher
@@ -303,6 +320,7 @@ function App() {
               tabs={[
                 { id: 'monitor', label: 'Monitor' },
                 { id: 'activity', label: 'Activity' },
+                { id: 'memory', label: 'Memory' },
                 { id: 'hands', label: 'Hands' },
                 { id: 'queue', label: 'Queue' },
                 { id: 'advanced', label: 'Advanced' },
@@ -320,6 +338,7 @@ function App() {
                 </div>
               )}
               {insightsSubTab === 'activity' && <ActivityTimeline />}
+              {insightsSubTab === 'memory' && <MemoryTimeline />}
               {insightsSubTab === 'hands' && <HandsDashboard />}
               {insightsSubTab === 'queue' && <TaskQueuePanel />}
               {insightsSubTab === 'advanced' && (
