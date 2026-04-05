@@ -144,6 +144,110 @@ TASK_KEYWORDS: dict[str, list[tuple[str, int]]] = {
     ],
 }
 
+# ── Embedding-based task classification ──
+# Exemplar phrases per category, used to compute centroid embeddings.
+_CATEGORY_EXEMPLARS: dict[str, list[str]] = {
+    "code_gen": [
+        "implement a new feature", "create a REST API endpoint", "build a function that",
+        "scaffold the project", "write a class for", "generate code to handle",
+    ],
+    "small_edit": [
+        "fix the typo", "rename the variable", "change the color to",
+        "update the import", "modify the return value", "swap the order of",
+    ],
+    "reasoning": [
+        "explain how this works", "why does this fail", "analyze the performance",
+        "compare these approaches", "what would happen if", "review the architecture",
+    ],
+    "frontend": [
+        "build a landing page", "style the component", "add a button that",
+        "create a form with", "fix the CSS layout", "responsive design for",
+    ],
+    "long_context": [
+        "summarize this document", "read the entire file", "analyze all the logs",
+        "review the full codebase", "compare these two large files",
+    ],
+    "tool_dispatch": [
+        "run the tests", "search for files", "find the definition",
+        "execute the script", "check git status", "list the directory",
+    ],
+    "throughput": [
+        "process all files", "batch update", "migrate the database",
+        "refactor across the codebase", "update all imports",
+    ],
+}
+
+# Cache for computed centroids
+_category_centroids: dict[str, list[float]] = {}
+_centroids_computed: bool = False
+
+
+def _ensure_centroids() -> None:
+    """Lazily compute category centroids from exemplar embeddings."""
+    global _category_centroids, _centroids_computed
+    if _centroids_computed:
+        return
+    _centroids_computed = True  # Set early to avoid retry on failure
+    try:
+        import ollama
+        import numpy as np
+
+        for cat, exemplars in _CATEGORY_EXEMPLARS.items():
+            embeddings = []
+            for ex in exemplars:
+                try:
+                    resp = ollama.embed(model="nomic-embed-text:latest", input=ex)
+                    if resp and "embeddings" in resp and resp["embeddings"]:
+                        embeddings.append(resp["embeddings"][0])
+                except Exception:
+                    continue
+            if embeddings:
+                _category_centroids[cat] = np.mean(embeddings, axis=0).tolist()
+    except ImportError:
+        pass  # numpy or ollama not available
+    except Exception:
+        pass  # Ollama not running, etc.
+
+
+def classify_task_embedding(prompt: str) -> "tuple[str, float] | None":
+    """Classify a prompt using embedding cosine similarity.
+
+    Returns (category, confidence) or None if embeddings unavailable.
+    """
+    _ensure_centroids()
+    if not _category_centroids:
+        return None
+
+    try:
+        import ollama
+        import numpy as np
+
+        resp = ollama.embed(model="nomic-embed-text:latest", input=prompt)
+        if not resp or "embeddings" not in resp or not resp["embeddings"]:
+            return None
+
+        prompt_vec = np.array(resp["embeddings"][0])
+
+        best_cat, best_sim = None, -1.0
+        for cat, centroid in _category_centroids.items():
+            centroid_vec = np.array(centroid)
+            # Cosine similarity
+            dot = float(np.dot(prompt_vec, centroid_vec))
+            norm = float(np.linalg.norm(prompt_vec) * np.linalg.norm(centroid_vec))
+            sim = dot / (norm + 1e-8)
+            if sim > best_sim:
+                best_sim = sim
+                best_cat = cat
+
+        if best_cat and best_sim > 0.5:
+            return (best_cat, best_sim)
+    except ImportError:
+        pass  # numpy or ollama not available
+    except Exception:
+        pass  # Embedding call failed
+
+    return None
+
 
 # ── Strategy bandit integration (optional) ──
 # Maps bandit ProblemCategory values → router task categories
@@ -171,11 +275,20 @@ _ROUTER_TO_BANDIT_CATEGORY = {
 
 
 def classify_task(prompt: str) -> Tuple[str, float]:
-    """Classify a prompt into a task category using weighted keyword scoring.
+    """Classify a prompt into a task category.
+
+    Tries embedding-based classification first (more accurate),
+    falls back to keyword matching if embeddings unavailable.
 
     Returns (category, confidence) where confidence is 0.0-1.0.
     Falls back to 'orchestrator' when no keywords match or confidence is too low.
     """
+    # Try embedding-based classification (more accurate)
+    emb_result = classify_task_embedding(prompt)
+    if emb_result and emb_result[1] > 0.6:
+        return emb_result
+
+    # Fall back to keyword-based classification
     prompt_lower = prompt.lower()
 
     scores: dict[str, int] = {}

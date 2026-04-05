@@ -71,9 +71,10 @@ def _inject_context(step: ChainStep, prev_output: str) -> str:
     if len(prev_output) > MAX_PREV_OUTPUT_CHARS:
         prev_output = "...\n" + prev_output[-MAX_PREV_OUTPUT_CHARS:]
 
-    # Explicit placeholder
+    # Explicit placeholder — single replacement to avoid injection via prev_output
     if "{prev}" in prompt:
-        return prompt.replace("{prev}", prev_output)
+        idx = prompt.index("{prev}")
+        return prompt[:idx] + prev_output + prompt[idx + 6:]
 
     # Auto-prepend context
     return f"Based on the following context:\n\n{prev_output}\n\n{prompt}"

@@ -5,6 +5,8 @@ export interface ConversationMeta {
   title: string;
   timestamp: number;
   messageCount: number;
+  folder?: string;
+  pinned?: boolean;
 }
 
 export interface FileAttachment {

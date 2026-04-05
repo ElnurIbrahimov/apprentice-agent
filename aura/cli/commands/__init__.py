@@ -32,6 +32,8 @@ from .ui_commands import (
 from .system_commands import (
     handle_hook, handle_mcp, handle_audit, handle_evolve,
 )
+from .copy_command import handle_copy
+from .snippet_command import handle_snippet
 
 def _handle_voice(agent, args, context=None, **kwargs):
     from aura.cli.voice_mode import run_voice_mode
@@ -94,6 +96,8 @@ COMMAND_REGISTRY: dict[str, Callable[..., Any]] = {
     "/merge": handle_merge,
     "/voice": _handle_voice,
     "/changes": handle_changes,
+    "/copy": handle_copy,
+    "/snippet": handle_snippet,
 }
 
 

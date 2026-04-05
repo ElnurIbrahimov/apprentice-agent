@@ -11,6 +11,23 @@ Priority tiers (always shown first → dropped first):
 import os
 from rich.text import Text
 
+_SPARK_CHARS = "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588"  # ▁▂▃▄▅▆▇█
+
+
+def _build_sparkline(values: list[float], width: int = 8) -> str:
+    """Render values as a Unicode sparkline."""
+    if not values:
+        return ""
+    recent = values[-width:]
+    lo, hi = min(recent), max(recent)
+    span = hi - lo if hi > lo else 1.0
+    chars = []
+    for v in recent:
+        idx = int((v - lo) / span * (len(_SPARK_CHARS) - 1))
+        idx = max(0, min(len(_SPARK_CHARS) - 1, idx))
+        chars.append(_SPARK_CHARS[idx])
+    return "".join(chars)
+
 
 def _terminal_width() -> int:
     """Return current terminal width, defaulting to 80."""
@@ -27,6 +44,7 @@ def build_status_bar(
     token_limit: int = 128000,
     permission_mode: str = "careful",
     cost_usd: float = 0.0,
+    last_turn_cost: float = 0.0,
     bg_indicator: str = "",
     research_indicator: str = "",
     mood_indicator: str = "",       # accepted but ignored (removed from output)
@@ -35,6 +53,7 @@ def build_status_bar(
     session_title: str = "",
     message_count: int = 0,
     project_type: str = "",
+    cost_history: "list[float] | None" = None,
     as_ansi: bool = False,
     _term_width: int | None = None,  # for testing
 ) -> "Text | list[tuple[str, str]]":
@@ -56,6 +75,9 @@ def build_status_bar(
 
     # -- Cost --
     cost_str = f"${cost_usd:.3f}" if cost_usd > 0.001 else ""
+
+    # -- Turn cost (C2) --
+    turn_cost_str = f"+${last_turn_cost:.4f}" if last_turn_cost > 0.0001 else ""
 
     # -- Context gauge --
     pct = int(100 * token_used / max(token_limit, 1))
@@ -131,6 +153,15 @@ def build_status_bar(
     if cost_str:
         candidates.append((1, "cost", len(cost_str)))
 
+    # P1: turn cost (>= 100, only if nonzero)
+    if turn_cost_str:
+        candidates.append((1, "turn_cost", len(turn_cost_str)))
+
+    # P1: cost sparkline (>= 100, only if enough history)
+    if cost_history and len(cost_history) >= 2:
+        _sparkline = _build_sparkline(cost_history)
+        candidates.append((1, "sparkline", len(_sparkline)))
+
     # P3: indicators — shown if they have content AND width permits
     if research_indicator:
         candidates.append((3, "research", len(research_indicator)))
@@ -186,6 +217,16 @@ def build_status_bar(
             _ansi_sep()
             parts.append(("", cost_str))
 
+        # Turn cost (P1)
+        if "turn_cost" in included:
+            parts.append(("ansibrightyellow", f" {turn_cost_str}"))
+
+        # Cost sparkline (P1)
+        if "sparkline" in included and cost_history:
+            _spark = _build_sparkline(cost_history)
+            _ansi_sep()
+            parts.append(("ansibrightyellow", _spark))
+
         # Context gauge (P1)
         if "gauge" in included:
             _ansi_sep()
@@ -237,7 +278,16 @@ def build_status_bar(
 
     # Cost (P1)
     if "cost" in included:
-        rich_parts.append(Text(cost_str, style="dim"))
+        cost_text = Text(cost_str, style="dim")
+        # Turn cost appended inline with session cost (P1)
+        if "turn_cost" in included:
+            cost_text.append(f" {turn_cost_str}", style="yellow")
+        rich_parts.append(cost_text)
+
+    # Cost sparkline (P1)
+    if "sparkline" in included and cost_history:
+        _spark = _build_sparkline(cost_history)
+        rich_parts.append(Text(_spark, style="yellow"))
 
     # Context gauge (P1)
     if "gauge" in included:

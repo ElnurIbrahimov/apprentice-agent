@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { StopIcon } from '@heroicons/react/24/outline';
+import { StopIcon, ClipboardDocumentIcon } from '@heroicons/react/24/outline';
 
 /* ── Types ── */
 type SpeakState = 'idle' | 'speaking' | 'paused';
@@ -480,10 +480,19 @@ export function VoicePanel() {
 
           <div className="flex-1" />
 
-          {/* Char count */}
+          {/* Char count + copy */}
           <span className="text-[10px] text-chat-text-secondary">
             {text.length} chars · {text.trim() ? text.trim().split(/\s+/).length : 0} words
           </span>
+          {text.trim() && (
+            <button
+              onClick={() => { navigator.clipboard.writeText(text); }}
+              className="text-chat-text-secondary hover:text-chat-text p-1 rounded transition-colors"
+              title="Copy text"
+            >
+              <ClipboardDocumentIcon className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
 
         {/* Text area */}

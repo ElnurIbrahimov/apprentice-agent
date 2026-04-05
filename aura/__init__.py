@@ -1,6 +1,6 @@
 """AURA - Autonomous Universal Reasoning Agent."""
 
-__version__ = "4.7.0"
+from aura._version import __version__
 __all__ = ["ApprenticeAgent", "OllamaBrain"]
 
 

@@ -17,7 +17,14 @@ _session_ok = True
 # ---------------------------------------------------------------------------
 # Persistent bottom toolbar (updated by display.show_status_bar)
 # ---------------------------------------------------------------------------
-_bottom_toolbar_content = None
+_bottom_toolbar_content = ""  # Empty string so toolbar renders immediately
+
+# ---------------------------------------------------------------------------
+# Cached git branch (refreshed every 10s to avoid subprocess on every prompt)
+# ---------------------------------------------------------------------------
+_git_branch_cache: str = ""
+_git_branch_ts: float = 0.0
+_GIT_BRANCH_TTL: float = 10.0
 
 
 def set_bottom_toolbar(content):
@@ -97,6 +104,7 @@ SLASH_COMMANDS = [
     ("/chain", "Run prompt pipelines (step1 -> step2 -> ...)"),
     ("/changes", "Show files modified in this session"),
     ("/channels", "Show active channel bridges and status"),
+    ("/snippet", "Manage prompt templates/snippets"),
 ]
 
 # Subcommand completions for commands that accept them
@@ -124,6 +132,7 @@ SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
         ("list", "List saved sessions"),
         ("new", "Start a new session"),
         ("delete", "Delete a session"),
+        ("export", "Export session to markdown"),
     ],
     "/agent": [
         ("research", "Research specialist"),
@@ -194,6 +203,11 @@ SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
         ("run", "Run a saved chain"),
         ("delete", "Delete a saved chain"),
     ],
+    "/snippet": [
+        ("save", "Save a new snippet"),
+        ("list", "List all snippets"),
+        ("delete", "Delete a snippet"),
+    ],
 }
 
 
@@ -207,7 +221,7 @@ def create_session():
         from prompt_toolkit.styles import Style
         from prompt_toolkit.formatted_text import HTML
         from prompt_toolkit.key_binding import KeyBindings
-        from prompt_toolkit.completion import Completer, Completion
+        from prompt_toolkit.completion import Completer, Completion, merge_completers
 
         class SlashCompleter(Completer):
             """Show slash command and subcommand completions when typing /."""
@@ -244,6 +258,70 @@ def create_session():
                                     display=sub,
                                     display_meta=desc,
                                 )
+
+        class FilePathCompleter(Completer):
+            """Complete file paths when not typing a slash command."""
+            _CODE_EXTS = {'.py', '.js', '.ts', '.tsx', '.jsx', '.go', '.rs', '.java',
+                          '.json', '.yaml', '.yml', '.md', '.toml', '.html', '.css',
+                          '.sh', '.sql', '.c', '.cpp', '.h', '.cfg', '.ini', '.env'}
+            _MAX = 15
+
+            def get_completions(self, document, complete_event):
+                import os
+                text = document.text_before_cursor
+                if text.lstrip().startswith("/"):
+                    return
+
+                # Find the word being typed
+                word = document.get_word_before_cursor(WORD=True)
+                if not word or len(word) < 2:
+                    return
+
+                # Try to interpret as a path
+                try:
+                    if os.sep in word or "/" in word:
+                        parent = os.path.dirname(word)
+                        prefix = os.path.basename(word).lower()
+                    else:
+                        parent = "."
+                        prefix = word.lower()
+
+                    if not os.path.isdir(parent):
+                        return
+
+                    count = 0
+                    for entry in sorted(os.listdir(parent)):
+                        if count >= self._MAX:
+                            break
+                        if entry.startswith("."):
+                            continue  # Skip hidden files
+
+                        full = os.path.join(parent, entry)
+                        entry_lower = entry.lower()
+
+                        if not entry_lower.startswith(prefix):
+                            continue
+
+                        is_dir = os.path.isdir(full)
+                        _, ext = os.path.splitext(entry)
+
+                        if not is_dir and ext.lower() not in self._CODE_EXTS:
+                            continue
+
+                        display = entry + "/" if is_dir else entry
+                        completion_text = os.path.join(parent, entry) if parent != "." else entry
+                        if is_dir:
+                            completion_text += "/"
+
+                        yield Completion(
+                            completion_text,
+                            start_position=-len(word),
+                            display=display,
+                            display_meta="dir" if is_dir else ext,
+                        )
+                        count += 1
+                except (OSError, PermissionError):
+                    return
 
         # Get theme accent for prompt styling
         try:
@@ -322,7 +400,7 @@ def create_session():
         session = PromptSession(
             history=FileHistory(str(HISTORY_FILE)),
             auto_suggest=AutoSuggestFromHistory(),
-            completer=SlashCompleter(),
+            completer=merge_completers([SlashCompleter(), FilePathCompleter()]),
             complete_while_typing=True,
             complete_in_thread=True,
             multiline=True,
@@ -336,6 +414,26 @@ def create_session():
     except Exception:
         _session_ok = False
         return None
+
+
+def _get_git_branch() -> str:
+    """Get current git branch with TTL cache to avoid subprocess per prompt."""
+    global _git_branch_cache, _git_branch_ts
+    import time
+    now = time.monotonic()
+    if now - _git_branch_ts < _GIT_BRANCH_TTL:
+        return _git_branch_cache
+    _git_branch_ts = now
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, timeout=2, cwd=".",
+        )
+        _git_branch_cache = result.stdout.strip() if result.returncode == 0 else ""
+    except Exception:
+        _git_branch_cache = ""
+    return _git_branch_cache
 
 
 def _get_prompt_prefix() -> list:
@@ -355,16 +453,7 @@ def _get_prompt_prefix() -> list:
     else:
         project = os.path.basename(cwd)
 
-    branch = ""
-    try:
-        import subprocess
-        result = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True, text=True, timeout=2, cwd="."
-        )
-        branch = result.stdout.strip() if result.returncode == 0 else ""
-    except Exception:
-        pass
+    branch = _get_git_branch()
 
     # Prompt with left border for visual structure
     parts = []

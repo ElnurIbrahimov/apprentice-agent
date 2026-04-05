@@ -147,6 +147,56 @@ class ConversationTree:
         self.current_branch = current.parent_id
         return {"merged": len(new_messages), "target": parent.name, "from": old_branch}
 
+    def render_tree_graph(self) -> list[str]:
+        """Render branch tree in git-log-graph ASCII style.
+
+        Example output:
+          * main (12 messages) <- current
+          |\\
+          | * fork-1 "refactor" (+5 since fork)
+          |
+          * fork-2 "bugfix" (+3 since fork)
+        """
+        lines = []
+
+        def _render_branch(branch_id: str, depth: int = 0, is_last: bool = True):
+            branch = self.branches.get(branch_id)
+            if not branch:
+                return
+
+            prefix = "  " * depth
+            connector = "* "
+
+            msg_count = len(branch.history)
+            name = branch.name or branch.id
+            current_marker = " <- current" if branch.id == self.current_branch else ""
+
+            # Show fork point info for non-main branches
+            fork_info = ""
+            if branch.parent_id and branch.fork_point > 0:
+                new_msgs = msg_count - branch.fork_point
+                fork_info = f" (+{new_msgs} since fork)" if new_msgs > 0 else ""
+
+            lines.append(f"{prefix}{connector}{name} ({msg_count} msgs){fork_info}{current_marker}")
+
+            # Get children
+            children = [bid for bid, b in self.branches.items() if b.parent_id == branch_id]
+
+            for i, child_id in enumerate(children):
+                is_last_child = (i == len(children) - 1)
+                if depth == 0:
+                    lines.append(f"{prefix}|\\")
+                else:
+                    lines.append(f"{prefix}|")
+                _render_branch(child_id, depth + 1, is_last_child)
+
+        _render_branch("main")
+
+        if not lines:
+            lines.append("  (no branches)")
+
+        return lines
+
     def sync_history(self, history: list) -> None:
         """Sync external history list into the current branch.
 

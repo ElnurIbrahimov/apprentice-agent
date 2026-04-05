@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Plus, Sun, Moon, RefreshCw, Download, Clock, Server } from 'lucide-react';
+import { Plus, Sun, Moon, RefreshCw, Download, Clock, Server, Image as ImageIcon } from 'lucide-react';
 import { useStore } from '../store';
 import { fetchStatus } from '../ws';
 import { exportChat } from '../exportChat';
+import { exportConversationAsImage } from '../utils/exportUtils';
 import { getServerLabel } from '../api';
 import ConversationHistory from './ConversationHistory';
 import ext from '../ext';
@@ -261,6 +262,33 @@ export default function Header() {
                       {item.label}
                     </button>
                   ))}
+                  <button
+                    onClick={() => {
+                      const msgs = useStore.getState().messages;
+                      if (msgs?.length) exportConversationAsImage(msgs);
+                      setExportOpen(false);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      width: '100%',
+                      padding: '7px 12px',
+                      background: 'none',
+                      border: 'none',
+                      borderTop: '1px solid var(--b1)',
+                      color: 'var(--tx)',
+                      fontSize: '11px',
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                      transition: 'background 0.1s',
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--b1)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
+                  >
+                    <ImageIcon size={11} /> Export as Image
+                  </button>
                 </div>
               )}
             </div>

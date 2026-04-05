@@ -7,6 +7,68 @@ from ..context import get_ctx
 logger = logging.getLogger(__name__)
 
 
+class ErrorTracker:
+    """Track repeated tool errors for deduplication."""
+
+    def __init__(self, max_recent: int = 5):
+        self._recent: list[str] = []
+        self._max = max_recent
+
+    def record(self, error: str) -> str:
+        """Record an error. Returns augmented message if repeated."""
+        normalized = error.strip()[:200]
+        count = self._recent.count(normalized)
+        self._recent.append(normalized)
+        if len(self._recent) > self._max:
+            self._recent.pop(0)
+        if count > 0:
+            return f"{error}\n(This error has occurred {count + 1} times recently)"
+        return error
+
+    def clear(self):
+        self._recent.clear()
+
+
+def handle_export_session(agent, arg, context) -> "str | None":
+    """Export the current session to a markdown or JSON file."""
+    from ..display import console, show_info, show_error
+    from ..context import get_ctx
+
+    ctx = get_ctx()
+    session_id = ""
+    if ctx and ctx.session:
+        session_id = getattr(ctx.session, 'session_id', '')
+
+    if not session_id:
+        show_error("No active session to export.")
+        return None
+
+    try:
+        from ..activity_log import ActivityLog
+        log = ActivityLog()
+    except Exception as e:
+        show_error(f"Activity log unavailable: {e}")
+        return None
+
+    fmt = "markdown"
+    if arg and "--json" in arg:
+        fmt = "json"
+
+    content = log.export_session(session_id, format=fmt)
+    if not content:
+        show_error("No interactions found for this session.")
+        return None
+
+    from pathlib import Path
+    import time
+    ext = "json" if fmt == "json" else "md"
+    filename = f"session_{session_id[:12]}_{int(time.time())}.{ext}"
+    outpath = Path.cwd() / filename
+    outpath.write_text(content, encoding="utf-8")
+    show_info(f"Exported to {outpath.name} ({len(content)} chars)")
+    return None
+
+
 def handle_sessions(agent, arg, context) -> Optional[str]:
     from aura.core.session import AgenticSession
     session_mgr = AgenticSession()
@@ -44,6 +106,8 @@ def handle_sessions(agent, arg, context) -> Optional[str]:
             console.print(f"  Deleted session: {target}")
         else:
             console.print(f"  Session not found: {target}")
+    elif subcmd == "export":
+        return handle_export_session(agent, " ".join(parts_arg[1:]) if len(parts_arg) > 1 else "", context)
     elif subcmd == "new":
         ctx = get_ctx()
         if ctx and ctx.session:
@@ -113,6 +177,7 @@ def handle_compact(agent, arg, context) -> Optional[str]:
 
 
 def handle_retry(agent, arg, context) -> Optional[str]:
+    """Re-run the last prompt with optional model tier escalation."""
     from ..context import get_ctx
     from ..display import show_info as _retry_info, show_error as _retry_error, show_response as _retry_response
 
@@ -132,6 +197,30 @@ def handle_retry(agent, arg, context) -> Optional[str]:
     if not last_prompt:
         _retry_error("Nothing to retry — no previous prompt.")
         return
+
+    # Check if last run errored and suggest tier escalation
+    had_error = getattr(loop, '_loop_error', False)
+    if had_error:
+        escalation_map = {"fast": "balanced", "balanced": "max"}
+        current_tier = getattr(loop, '_current_tier', None) or getattr(loop, 'tier', 'balanced')
+        if current_tier in escalation_map:
+            next_tier = escalation_map[current_tier]
+            try:
+                from ..display import show_warning as _retry_warn
+                _retry_warn(f"Last attempt failed on '{current_tier}' tier.")
+            except ImportError:
+                _retry_info(f"Last attempt failed on '{current_tier}' tier.")
+
+            try:
+                choice = input(f"  Retry with '{next_tier}' tier? (y/n): ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                return
+
+            if choice in ("y", "yes"):
+                # Temporarily override the tier for this retry
+                if hasattr(loop, 'router') and loop.router:
+                    loop.router.tier = next_tier
+                _retry_info(f"Escalated to '{next_tier}' tier.")
 
     _retry_info(f"Retrying: {last_prompt[:60]}...")
     try:
@@ -266,38 +355,11 @@ def handle_branches(agent, arg, context) -> Optional[str]:
         _br_console.print("  No branches.")
         return
 
+    # Render using git-log-graph ASCII style
+    graph_lines = tree.render_tree_graph()
     _br_console.print()
-    current_id = tree.current_branch
-
-    def _render_branch(branch, prefix="", is_last=True):
-        """Render a single branch line with tree connectors."""
-        is_current = branch.id == current_id
-        marker = "[bold green]*[/bold green] " if is_current else "  "
-        current_label = " [bold green]<- current[/bold green]" if is_current else ""
-        connector = "\\-- " if is_last else "|-- "
-        msg_count = len(branch.history)
-
-        if branch.id == "main":
-            _br_console.print(f"  {marker}[bold]{branch.name}[/bold] ({msg_count} messages){current_label}")
-        else:
-            fork_new = msg_count - branch.fork_point
-            name_display = f'"{branch.name}"' if branch.name != branch.id else ""
-            _br_console.print(
-                f"  {prefix}{connector}{marker}[cyan]{branch.id}[/cyan] "
-                f"{name_display} ({msg_count} msgs, +{fork_new} since fork){current_label}"
-            )
-
-        children = tree.get_children(branch.id)
-        for i, child in enumerate(children):
-            child_is_last = (i == len(children) - 1)
-            child_prefix = prefix + ("    " if is_last else "|   ")
-            _render_branch(child, child_prefix, child_is_last)
-
-    # Start from main
-    main = tree.branches.get("main")
-    if main:
-        _render_branch(main)
-
+    for line in graph_lines:
+        _br_console.print(f"  {line}")
     _br_console.print()
 
 

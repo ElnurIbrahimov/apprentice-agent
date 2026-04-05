@@ -1,0 +1,237 @@
+# AURA EXTENSION IMPLEMENTATION PLAN
+## Deep Research Citations & Service Worker Keepalive
+
+---
+
+## IMPROVEMENT 1: DEEP RESEARCH WITH BETTER CITATIONS
+
+### Changes to ResearchPanel.tsx
+
+#### A. Add Citation Anchor State (after line 303)
+```
+const [citationAnchors, setCitationAnchors] = useState<Map<number, string>>(new Map());
+```
+
+#### B. New Function: assignCitationNumbers()
+Location: Above doQuickResearch (around line 350)
+
+Purpose: Post-processes report HTML to inject inline citation link [1], [2], etc.
+- Input: html string, number of sources
+- Output: { html with citations injected, anchors map }
+- Only inject if sources.length > 0
+- Skip Scholar mode (already has citations in sources list)
+
+Algorithm:
+1. Find all patterns /\[(\d+)\](?!\()/ in HTML
+2. Verify 1 <= N <= sources.length
+3. Replace with <a href="#source-N" class="citation-link">[N]</a>
+4. Return modified HTML
+
+#### C. Update doQuickResearch() (line 361)
+After line 407 (when report is done):
+- Call assignCitationNumbers(resultHtml, sources.length)
+- Set both resultHtml and citationAnchors from result
+
+#### D. Update doDeepResearch() (line 423)
+After each research_chunk event (line 566):
+- Call assignCitationNumbers on updated HTML
+- Store anchors map
+
+#### E. Add CitationReference Component
+New functional component to render clickable [N] badges
+- Takes: num (number), onClick handler
+- Renders: styled blue underlined [N]
+- Color: var(--pl) for link blue
+
+#### F. Update Sources Header (line 1293)
+- Add id="sources-section" to main container
+- Change label to include: "Sources ({sources.length})"
+- Add visual badge showing count
+
+#### G. Add "Copy All Sources" Button (after line 1220)
+- Position: after Export .md button
+- For Scholar: copyAllSources() formats via formatCitation()
+- For Quick/Deep: "- [Title](URL)" markdown format
+- Action: copy to clipboard, show "Copied!" feedback
+
+#### H. Each Source Item Needs Anchor ID (line 1312)
+Change div key to include id:
+```
+<div key={s.index ?? idx} id={`source-${s.index ?? idx + 1}`} ...>
+```
+
+#### I. Add CSS for Citation Links
+In ResearchPanel or global styles:
+```
+.citation-link {
+  color: var(--pl);
+  text-decoration: underline;
+  cursor: pointer;
+  font-weight: 500;
+  transition: opacity 0.15s ease;
+}
+
+.citation-link:hover { opacity: 0.8; }
+
+[id^="source-"] { scroll-margin-top: 40px; }
+
+.sources-count-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: rgba(var(--pl-rgb), 0.08);
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--pl);
+}
+```
+
+#### J. Ensure Deep Mode Shows Incremental Source Count
+Already done at line 1140, but verify:
+- setSourceCount() is called on each research_source event (line 556)
+- Display updates: "Analyzed X/50+ sources" or "Found X academic sources"
+
+---
+
+## IMPROVEMENT 2: SERVICE WORKER KEEPALIVE
+
+### Changes to ws.ts
+
+#### A. Add Ping Constants (after line 12)
+```
+const PING_INTERVAL = 25_000;        // 25 seconds
+const PING_GRACE_PERIOD = 5_000;     // Don't ping if msg < 5s ago
+```
+
+#### B. Add Module-Level Ping State (after line 11)
+```
+let _pingTimer: ReturnType<typeof setInterval> | null = null;
+let _lastMessageTime = 0;
+```
+
+#### C. Add Helper Functions (after clearWsTimers, line 17)
+```typescript
+function recordMessageTime() {
+  _lastMessageTime = Date.now();
+}
+
+function startPingLoop(socket: WebSocket) {
+  if (_pingTimer) return;
+  _pingTimer = setInterval(() => {
+    const now = Date.now();
+    const { activeStream } = useStore.getState();
+    if (socket.readyState === WebSocket.OPEN && 
+        (now - _lastMessageTime) > PING_GRACE_PERIOD &&
+        activeStream) {
+      socket.send(JSON.stringify({ type: 'ping' }));
+    }
+  }, PING_INTERVAL);
+}
+
+function stopPingLoop() {
+  if (_pingTimer) {
+    clearInterval(_pingTimer);
+    _pingTimer = null;
+  }
+}
+```
+
+#### D. Call startPingLoop in socket.onopen (line 81)
+After useStore.getState().setWs(socket), add:
+```
+startPingLoop(socket);
+```
+
+#### E. Call stopPingLoop in socket.onclose (line 98)
+At the very start, add:
+```
+stopPingLoop();
+```
+
+#### F. Record Message Time in socket.onmessage (line 153)
+At the very start, add:
+```
+recordMessageTime();
+```
+
+#### G. Verify Pong Handling (line 160)
+Already present: `if (d.type === 'auth_ok' || d.type === 'pong') return;`
+No changes needed — pongs are already ignored.
+
+---
+
+### Changes to background.ts
+
+#### A. Register Alarm at Top Level (after line 34)
+```typescript
+// Register health check alarm (4-minute interval)
+chrome.alarms.create('aura-health-check', { periodInMinutes: 4 });
+```
+
+#### B. Add Alarm Handler (after alarm registration)
+```typescript
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== 'aura-health-check') return;
+  // Trigger health check via message
+  chrome.runtime.sendMessage({
+    type: 'HEALTH_CHECK'
+  }).catch(() => {
+    // Sidebar not active, that's OK
+  });
+});
+```
+
+#### C. Add HEALTH_CHECK Message Type (message interface section, ~line 200)
+```typescript
+interface HealthCheckMessage {
+  type: 'HEALTH_CHECK';
+}
+```
+
+#### D. Add HEALTH_CHECK Handler (in chrome.runtime.onMessage listener)
+```typescript
+if (msg.type === 'HEALTH_CHECK') {
+  // WS/HTTP status will be checked by existing mechanisms
+  respond({ ok: true });
+  return;
+}
+```
+
+---
+
+## TESTING CHECKLIST
+
+IMPROVEMENT 1:
+- [ ] Quick mode: inline [1], [2] appear in report text
+- [ ] Quick mode: clicking [N] scrolls to source #N
+- [ ] Deep mode: source count updates as sources arrive
+- [ ] "Copy all sources" copies all sources as markdown/citations
+- [ ] Source section has id="sources-section"
+- [ ] Each source has id="source-N"
+- [ ] Scholar mode citations still work
+- [ ] BibTeX export still functional
+
+IMPROVEMENT 2:
+- [ ] Open DevTools → Service Workers tab
+- [ ] Start research (or chat) — observe service worker stays alive
+- [ ] Check Network tab — see { type: 'ping' } messages every ~25s
+- [ ] Ping only sends during activeStream (not idle)
+- [ ] Grace period prevents duplicate pings
+- [ ] Closing WS stops ping loop
+- [ ] Alarm fires every 4 minutes (check DevTools → Application → Alarms)
+- [ ] Unplug network mid-research → reconnect works
+
+---
+
+## KEY IMPLEMENTATION NOTES
+
+1. Citation Anchors: HTML <a> tags with data-citation attribute, not just text
+2. Source List: Each source div must have id="source-N" where N = s.index
+3. Ping Timing: 25s keeps SW alive, 5s grace prevents message storms
+4. No Backend Changes: Pings handled at existing websocket level
+5. Alarm is Safety Net: Primary keepalive is ping loop + HTTP polling
+6. All improvements are UI-only, can be deployed independently
+
+---

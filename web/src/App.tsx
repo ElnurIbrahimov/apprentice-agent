@@ -217,7 +217,7 @@ function App() {
     return () => window.removeEventListener('resize', checkMobile);
   }, [setSidebarOpen]);
 
-  const renderTabContent = () => {
+  const renderTabContent = useCallback(() => {
     switch (activeTab) {
       case 'create':
         return (
@@ -342,7 +342,7 @@ function App() {
       default:
         return null;
     }
-  };
+  }, [activeTab, createSubTab, insightsSubTab, toolsSubTab]);
 
   return (
     <>
@@ -474,7 +474,7 @@ function App() {
               placeholder="Search conversations..."
               value={mobileSearchQuery}
               onChange={(e) => setMobileSearchQuery(e.target.value)}
-              className="flex-1 bg-transparent text-chat-text outline-none text-sm"
+              className="flex-1 bg-transparent text-chat-text outline-none text-base"
             />
             <button onClick={() => { setShowMobileSearch(false); setMobileSearchQuery(''); }} className="text-chat-text-secondary p-1">
               <XMarkIcon className="w-5 h-5" />

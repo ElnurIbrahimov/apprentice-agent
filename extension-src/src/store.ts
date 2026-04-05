@@ -2,13 +2,17 @@ import { create } from 'zustand';
 import type { Message, StreamState, Context, PanelId, ThinkingLevel, ConversationMeta } from './types';
 import { HTTP, API_KEY } from './api';
 import ext from './ext';
+import * as db from './utils/db';
 
 // --- Conversation history constants ---
-const MAX_CONVERSATIONS = 50;
-const MAX_MESSAGES_PER_CONVERSATION = 100;
+const MAX_CONVERSATIONS = 500;
+const MAX_MESSAGES_PER_CONVERSATION = 1000;
+const USE_IDB = db.isIndexedDBAvailable();
 const CONV_LIST_KEY = 'aura_conversations';
 const ACTIVE_CONV_KEY = 'aura_active_conversation';
+const CONV_FOLDERS_KEY = 'aura_conv_folders';
 const convStorageKey = (id: string) => `aura_chat_${id}`;
+let _idbMigrated = false;
 
 // --- Storage helpers (chrome.storage.local) ---
 function storageGet(keys: string[]): Promise<Record<string, any>> {
@@ -119,6 +123,14 @@ interface AuraStore {
   deleteConversation: (id: string) => Promise<void>;
   clearAllHistory: () => Promise<void>;
   newConversation: () => Promise<void>;
+
+  // Folder & Pin Actions
+  folders: string[];
+  createFolder: (name: string) => Promise<void>;
+  deleteFolder: (name: string) => Promise<void>;
+  renameFolder: (oldName: string, newName: string) => Promise<void>;
+  moveToFolder: (convId: string, folder?: string) => Promise<void>;
+  pinConversation: (convId: string, pinned: boolean) => Promise<void>;
 }
 
 export const useStore = create<AuraStore>((set, get) => {
@@ -151,9 +163,14 @@ export const useStore = create<AuraStore>((set, get) => {
     }
   });
 
-  // Load saved autoSpeak pref
-  ext?.storage?.local?.get(['autoSpeak'], (d: any) => {
-    set({ autoSpeak: !!d?.autoSpeak });
+  // Load saved autoSpeak + thinking/research prefs
+  ext?.storage?.local?.get(['autoSpeak', 'thinkingMode', 'thinkingLevel', 'deepResearch'], (d: any) => {
+    set({
+      autoSpeak: !!d?.autoSpeak,
+      thinkingMode: !!d?.thinkingMode,
+      thinkingLevel: d?.thinkingLevel || 'medium',
+      deepResearch: !!d?.deepResearch,
+    });
   });
 
   // Load saved custom instructions & user name
@@ -162,6 +179,11 @@ export const useStore = create<AuraStore>((set, get) => {
       customInstructions: d?.customInstructions || '',
       userName: d?.userName || '',
     });
+  });
+
+  // Load saved conversation folders
+  ext?.storage?.local?.get([CONV_FOLDERS_KEY], (d: any) => {
+    set({ folders: d?.[CONV_FOLDERS_KEY] || [] });
   });
 
   // Load saved theme
@@ -189,6 +211,7 @@ export const useStore = create<AuraStore>((set, get) => {
     conversations: [],
     activeConversationId: null,
     historyLoaded: false,
+    folders: [],
     thinkingMode: false,
     thinkingLevel: 'medium' as ThinkingLevel,
     deepResearch: false,
@@ -251,9 +274,18 @@ export const useStore = create<AuraStore>((set, get) => {
     },
     setActiveStream: (activeStream) => set({ activeStream }),
     setPendingCtx: (pendingCtx) => set({ pendingCtx }),
-    setThinkingMode: (thinkingMode) => set({ thinkingMode }),
-    setThinkingLevel: (thinkingLevel) => set({ thinkingLevel }),
-    setDeepResearch: (deepResearch) => set({ deepResearch }),
+    setThinkingMode: (thinkingMode) => {
+      set({ thinkingMode });
+      ext?.storage?.local?.set({ thinkingMode });
+    },
+    setThinkingLevel: (thinkingLevel) => {
+      set({ thinkingLevel });
+      ext?.storage?.local?.set({ thinkingLevel });
+    },
+    setDeepResearch: (deepResearch) => {
+      set({ deepResearch });
+      ext?.storage?.local?.set({ deepResearch });
+    },
     setAutoSpeak: (autoSpeak) => {
       set({ autoSpeak });
       ext?.storage?.local?.set({ autoSpeak });
@@ -364,17 +396,44 @@ export const useStore = create<AuraStore>((set, get) => {
 
     getModel: (feature) => get().featureModels[feature] || null,
 
-    // --- Conversation History ---
+    // --- Conversation History (IndexedDB with chrome.storage fallback) ---
 
     loadConversationList: async () => {
-      const data = await storageGet([CONV_LIST_KEY, ACTIVE_CONV_KEY]);
-      const convs: ConversationMeta[] = data[CONV_LIST_KEY] || [];
-      const activeId: string | null = data[ACTIVE_CONV_KEY] || null;
-      set({ conversations: convs, historyLoaded: true });
+      try {
+        // Migrate from chrome.storage to IndexedDB on first load
+        if (USE_IDB && !_idbMigrated) {
+          _idbMigrated = true;
+          await db.initDB();
+          const old = await storageGet([CONV_LIST_KEY]);
+          const oldConvs: ConversationMeta[] = old[CONV_LIST_KEY] || [];
+          if (oldConvs.length > 0) {
+            for (const meta of oldConvs) {
+              const msgData = await storageGet([convStorageKey(meta.id)]);
+              const msgs = msgData[convStorageKey(meta.id)] || [];
+              await db.saveConversation(meta, msgs).catch(() => {});
+            }
+            console.log(`[Aura] Migrated ${oldConvs.length} conversations to IndexedDB`);
+          }
+        }
 
-      // Restore last active conversation
-      if (activeId && convs.some(c => c.id === activeId)) {
-        await get().loadConversation(activeId);
+        let convs: ConversationMeta[];
+        if (USE_IDB) {
+          convs = await db.getAllConversations();
+        } else {
+          const data = await storageGet([CONV_LIST_KEY]);
+          convs = data[CONV_LIST_KEY] || [];
+        }
+
+        const activeData = await storageGet([ACTIVE_CONV_KEY]);
+        const activeId: string | null = activeData[ACTIVE_CONV_KEY] || null;
+        set({ conversations: convs, historyLoaded: true });
+
+        if (activeId && convs.some(c => c.id === activeId)) {
+          await get().loadConversation(activeId);
+        }
+      } catch (err) {
+        console.error('[Aura] Failed to load conversations:', err);
+        set({ conversations: [], historyLoaded: true });
       }
     },
 
@@ -385,66 +444,72 @@ export const useStore = create<AuraStore>((set, get) => {
       const convId = s.activeConversationId || crypto.randomUUID();
       if (!s.activeConversationId) set({ activeConversationId: convId });
 
-      // Build title from first user message, truncated
       const firstUserMsg = s.messages.find(m => m.role === 'user');
       const title = firstUserMsg
         ? firstUserMsg.text.slice(0, 60) + (firstUserMsg.text.length > 60 ? '...' : '')
         : 'New conversation';
 
-      // Strip base64 image data from messages before persisting
       const messagesToSave = s.messages.slice(-MAX_MESSAGES_PER_CONVERSATION).map(m => ({
         id: m.id,
         role: m.role,
         text: m.text,
         timestamp: m.timestamp,
         thinkingContent: m.thinkingContent,
-      }));
+      })) as Message[];
 
+      // Preserve existing folder/pinned state
+      const existing = s.conversations.find(c => c.id === convId);
       const meta: ConversationMeta = {
         id: convId,
         title,
         timestamp: Date.now(),
         messageCount: s.messages.length,
+        folder: existing?.folder,
+        pinned: existing?.pinned,
       };
 
-      // Update conversations list
       let convs = [...s.conversations];
-      const existingIdx = convs.findIndex(c => c.id === convId);
-      if (existingIdx >= 0) {
-        convs[existingIdx] = meta;
-      } else {
-        convs.unshift(meta);
-      }
-      // Cap at MAX_CONVERSATIONS — remove oldest
+      const idx = convs.findIndex(c => c.id === convId);
+      if (idx >= 0) convs[idx] = meta; else convs.unshift(meta);
+
       if (convs.length > MAX_CONVERSATIONS) {
         const removed = convs.splice(MAX_CONVERSATIONS);
-        // Clean up storage for removed conversations
-        const keysToRemove = removed.map(c => convStorageKey(c.id));
-        storageRemove(keysToRemove).catch(() => {});
+        for (const c of removed) {
+          if (USE_IDB) db.deleteConversation(c.id).catch(() => {});
+          else storageRemove([convStorageKey(c.id)]).catch(() => {});
+        }
       }
-      // Sort by timestamp descending
-      convs.sort((a, b) => b.timestamp - a.timestamp);
+      convs.sort((a, b) => {
+        if (a.pinned && !b.pinned) return -1;
+        if (!a.pinned && b.pinned) return 1;
+        return b.timestamp - a.timestamp;
+      });
 
       set({ conversations: convs });
-      await storageSet({
-        [CONV_LIST_KEY]: convs,
-        [ACTIVE_CONV_KEY]: convId,
-        [convStorageKey(convId)]: messagesToSave,
-      });
+
+      if (USE_IDB) {
+        await db.saveConversation(meta, messagesToSave);
+      } else {
+        await storageSet({
+          [CONV_LIST_KEY]: convs,
+          [ACTIVE_CONV_KEY]: convId,
+          [convStorageKey(convId)]: messagesToSave,
+        });
+      }
+      await storageSet({ [ACTIVE_CONV_KEY]: convId });
     },
 
     loadConversation: async (id: string) => {
-      const data = await storageGet([convStorageKey(id)]);
-      const messages: Message[] = data[convStorageKey(id)] || [];
-      set({
-        messages,
-        activeConversationId: id,
-        activeStream: null,
-        conversationId: null,
-        pendingCtx: null,
-      });
+      let messages: Message[] = [];
+      if (USE_IDB) {
+        const loaded = await db.loadConversation(id);
+        messages = loaded?.messages || [];
+      } else {
+        const data = await storageGet([convStorageKey(id)]);
+        messages = data[convStorageKey(id)] || [];
+      }
+      set({ messages, activeConversationId: id, activeStream: null, conversationId: null, pendingCtx: null });
       await storageSet({ [ACTIVE_CONV_KEY]: id });
-      // Tell backend to clear since we're loading a different conversation
       const s = get();
       if (s.wsReady && s.ws?.readyState === WebSocket.OPEN) {
         fetch(`${HTTP}/api/chat/clear`, { method: 'POST', headers: API_KEY ? { 'X-API-Key': API_KEY } : {} }).catch(() => {});
@@ -455,9 +520,12 @@ export const useStore = create<AuraStore>((set, get) => {
       const s = get();
       const convs = s.conversations.filter(c => c.id !== id);
       set({ conversations: convs });
-      await storageSet({ [CONV_LIST_KEY]: convs });
-      await storageRemove([convStorageKey(id)]);
-      // If we deleted the active one, clear chat
+      if (USE_IDB) {
+        await db.deleteConversation(id);
+      } else {
+        await storageSet({ [CONV_LIST_KEY]: convs });
+        await storageRemove([convStorageKey(id)]);
+      }
       if (s.activeConversationId === id) {
         set({ messages: [], activeConversationId: null, conversationId: null });
         await storageRemove([ACTIVE_CONV_KEY]);
@@ -466,32 +534,79 @@ export const useStore = create<AuraStore>((set, get) => {
 
     clearAllHistory: async () => {
       const s = get();
-      const keysToRemove = s.conversations.map(c => convStorageKey(c.id));
-      keysToRemove.push(CONV_LIST_KEY, ACTIVE_CONV_KEY);
+      if (USE_IDB) {
+        for (const c of s.conversations) await db.deleteConversation(c.id).catch(() => {});
+      } else {
+        const keys = s.conversations.map(c => convStorageKey(c.id));
+        keys.push(CONV_LIST_KEY, ACTIVE_CONV_KEY);
+        await storageRemove(keys);
+      }
       set({ conversations: [], activeConversationId: null });
-      await storageRemove(keysToRemove);
     },
 
     newConversation: async () => {
       const s = get();
-      // Save current conversation first if it has messages
-      if (s.messages.length > 0) {
-        await s.saveCurrentConversation();
-      }
-      // Clear for a new conversation
-      set({
-        messages: [],
-        activeStream: null,
-        conversationId: null,
-        activeConversationId: null,
-        pendingCtx: null,
-        thinkingMode: false,
-        deepResearch: false,
-      });
+      if (s.messages.length > 0) await s.saveCurrentConversation();
+      set({ messages: [], activeStream: null, conversationId: null, activeConversationId: null, pendingCtx: null });
       await storageRemove([ACTIVE_CONV_KEY]);
-      // Tell backend to clear
       if (s.wsReady && s.ws?.readyState === WebSocket.OPEN) {
         fetch(`${HTTP}/api/chat/clear`, { method: 'POST', headers: API_KEY ? { 'X-API-Key': API_KEY } : {} }).catch(() => {});
+      }
+    },
+
+    // --- Folder & Pin Management ---
+
+    createFolder: async (name: string) => {
+      const s = get();
+      if (s.folders.includes(name)) return;
+      const folders = [...s.folders, name];
+      set({ folders });
+      await storageSet({ [CONV_FOLDERS_KEY]: folders });
+    },
+    deleteFolder: async (name: string) => {
+      const s = get();
+      const folders = s.folders.filter(f => f !== name);
+      const convs = s.conversations.map(c => c.folder === name ? { ...c, folder: undefined } : c);
+      set({ folders, conversations: convs });
+      await storageSet({ [CONV_FOLDERS_KEY]: folders });
+      if (USE_IDB) {
+        for (const c of convs.filter(c => !c.folder)) await db.saveConversationMeta(c).catch(() => {});
+      }
+    },
+    renameFolder: async (oldName: string, newName: string) => {
+      const s = get();
+      if (!s.folders.includes(oldName) || s.folders.includes(newName)) return;
+      const folders = s.folders.map(f => f === oldName ? newName : f);
+      const convs = s.conversations.map(c => c.folder === oldName ? { ...c, folder: newName } : c);
+      set({ folders, conversations: convs });
+      await storageSet({ [CONV_FOLDERS_KEY]: folders });
+      if (USE_IDB) {
+        for (const c of convs.filter(c => c.folder === newName)) await db.saveConversationMeta(c).catch(() => {});
+      }
+    },
+    moveToFolder: async (convId: string, folder?: string) => {
+      const s = get();
+      const convs = s.conversations.map(c => c.id === convId ? { ...c, folder } : c);
+      set({ conversations: convs });
+      const conv = convs.find(c => c.id === convId);
+      if (conv) {
+        if (USE_IDB) await db.saveConversationMeta(conv).catch(() => {});
+        else await storageSet({ [CONV_LIST_KEY]: convs });
+      }
+    },
+    pinConversation: async (convId: string, pinned: boolean) => {
+      const s = get();
+      const convs = s.conversations.map(c => c.id === convId ? { ...c, pinned } : c);
+      convs.sort((a, b) => {
+        if (a.pinned && !b.pinned) return -1;
+        if (!a.pinned && b.pinned) return 1;
+        return b.timestamp - a.timestamp;
+      });
+      set({ conversations: convs });
+      const conv = convs.find(c => c.id === convId);
+      if (conv) {
+        if (USE_IDB) await db.saveConversationMeta(conv).catch(() => {});
+        else await storageSet({ [CONV_LIST_KEY]: convs });
       }
     },
   };

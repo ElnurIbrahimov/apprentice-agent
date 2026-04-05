@@ -25,7 +25,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from api.routes import chat, status, upload, features, multi_agent, reasoning_tree, proactive, memory, context, conversation_starters, thinking, idle_behaviors, self_improvement, thinking_mode, tools_new, activity, multi_model, knowledge, search, pdf, transcribe, ocr, image_gen, agent_action, build as build_route, models as models_route, summarize, youtube, math as math_route, research, evolution, artifacts, feed, providers as providers_route, code as code_route, webhooks as webhooks_route, generate as generate_route, share as share_route, hands as hands_route
+from api.routes import chat, status, upload, features, multi_agent, reasoning_tree, proactive, memory, context, conversation_starters, thinking, idle_behaviors, self_improvement, thinking_mode, tools_new, activity, multi_model, knowledge, search, pdf, transcribe, ocr, image_gen, agent_action, build as build_route, models as models_route, summarize, youtube, math as math_route, research, evolution, artifacts, feed, providers as providers_route, code as code_route, webhooks as webhooks_route, generate as generate_route, share as share_route, hands as hands_route, telegram_miniapp as telegram_miniapp_route
 try:
     from api.routes import reliability as reliability_route
     _reliability_available = True
@@ -40,9 +40,7 @@ except Exception as _ae:
     logger.warning(f"[API] Auth routes unavailable: {_ae}")
     auth_route = None
     _auth_available = False
-_consciousness_available = False
 # Lazy-loaded agent_service (import removed - now lazy in routes)
-# from api.services.agent_service import agent_service
 
 
 @asynccontextmanager
@@ -451,6 +449,7 @@ app.include_router(code_route.router)
 app.include_router(webhooks_route.router)
 app.include_router(generate_route.router)
 app.include_router(share_route.router)
+app.include_router(telegram_miniapp_route.router)
 if _reliability_available and reliability_route:
     app.include_router(reliability_route.router)
 if _auth_available and auth_route:

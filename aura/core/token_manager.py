@@ -93,26 +93,36 @@ class ContextWindowManager:
         self.budget = self.max_tokens - reserve_output
         self._compaction_count = 0
 
+    def _get_thresholds(self) -> tuple[float, float]:
+        """Adaptive compaction thresholds based on context window size (C4)."""
+        if self.max_tokens <= 8192:
+            return (0.60, 0.75)
+        elif self.max_tokens <= 32768:
+            return (0.70, 0.85)
+        else:
+            return (0.80, 0.90)
+
     def check_and_compact(self, messages: list[dict], brain=None) -> list[dict]:
         """Called each iteration. Returns (possibly compacted) messages.
 
         Strategy:
         1. Estimate current token usage
-        2. If < 70% budget: return unchanged
-        3. If 70-85%: truncate large tool results
-        4. If > 85%: summarize oldest 2/3 of messages
+        2. If below low threshold: return unchanged
+        3. If between low and high: truncate large tool results
+        4. If above high threshold: summarize oldest 2/3 of messages
         """
+        low_thresh, high_thresh = self._get_thresholds()
         used = estimate_messages_tokens(messages)
         pct = used / self.budget if self.budget > 0 else 0
 
-        if pct < 0.70:
+        if pct < low_thresh:
             return messages
 
-        if pct < 0.85:
+        if pct < high_thresh:
             logger.info(f"[ContextMgr] {pct:.0%} used — truncating large tool results")
             return self._truncate_tool_results(messages)
 
-        # > 85% — aggressive compaction
+        # Above high threshold — aggressive compaction
         logger.info(f"[ContextMgr] {pct:.0%} used — summarizing old messages")
         compacted = self._summarize_old(messages, brain)
         self._compaction_count += 1
@@ -211,3 +221,35 @@ class ContextWindowManager:
             "model": self.model,
             "compactions": self._compaction_count,
         }
+
+
+class TokenAccumulator:
+    """Track token counts incrementally to avoid re-scanning full history (C5)."""
+
+    def __init__(self):
+        self._total: int = 0
+        self._counted: int = 0
+
+    def update(self, messages: list[dict]) -> int:
+        """Return total tokens. Only counts new messages since last call."""
+        if len(messages) < self._counted:
+            # History was compacted — recount everything
+            self._total = estimate_messages_tokens(messages)
+            self._counted = len(messages)
+        elif len(messages) > self._counted:
+            new_msgs = messages[self._counted:]
+            self._total += estimate_messages_tokens(new_msgs)
+            self._counted = len(messages)
+        return self._total
+
+    def reset(self):
+        self._total = 0
+        self._counted = 0
+
+
+def estimate_messages_remaining(current_tokens: int, limit: int, avg_per_msg: float) -> int:
+    """Estimate how many more messages fit in the context window."""
+    if avg_per_msg <= 0:
+        return 0
+    remaining = max(0, limit - current_tokens)
+    return int(remaining / avg_per_msg)

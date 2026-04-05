@@ -87,11 +87,14 @@ export function ModelsPanel() {
     setLoading(true);
     setError(null);
     try {
-      /* Models */
-      const modRes = await fetch('/api/models');
+      const [modRes, statusRes, rolesRes] = await Promise.all([
+        fetch('/api/models'),
+        fetch('/api/status').catch(() => null),
+        fetch('/api/models/roles').catch(() => null),
+      ]);
+
       if (!modRes.ok) throw new Error(`Failed to fetch models (${modRes.status})`);
       const modData = await modRes.json();
-
       const entries: ModelEntry[] = [
         ...(modData.chatgpt_models || []).map((n: string) => ({ name: n, category: 'chatgpt' as const })),
         ...(modData.cloud_models || []).map((n: string) => ({ name: n, category: 'cloud' as const })),
@@ -100,26 +103,14 @@ export function ModelsPanel() {
       ];
       setModels(entries);
 
-      /* Status */
-      try {
-        const statusRes = await fetch('/api/status');
-        if (statusRes.ok) {
-          const statusData: StatusInfo = await statusRes.json();
-          setActiveModel(statusData.active_model || statusData.model || null);
-        }
-      } catch {
-        /* non-fatal */
+      if (statusRes?.ok) {
+        const statusData: StatusInfo = await statusRes.json();
+        setActiveModel(statusData.active_model || statusData.model || null);
       }
 
-      /* Roles — graceful 404 */
-      try {
-        const rolesRes = await fetch('/api/models/roles');
-        if (rolesRes.ok) {
-          const rolesData = await rolesRes.json();
-          setRoles(rolesData);
-        }
-      } catch {
-        /* non-fatal */
+      if (rolesRes?.ok) {
+        const rolesData = await rolesRes.json();
+        setRoles(rolesData);
       }
     } catch (e: any) {
       setError(e.message || 'Failed to load models');

@@ -124,6 +124,22 @@ def _pick_session_interactive(sessions: List[Dict], current_session_id: str) -> 
             if offset + max_visible < total:
                 fragments.append(("class:dim", f"  ... {total - offset - max_visible} more below\n"))
 
+        # Preview pane for selected session
+        selected_session = None
+        for orig_i, session in filtered:
+            if orig_i == state["idx"]:
+                selected_session = session
+                break
+        if selected_session:
+            preview_msgs = (selected_session.get("messages") or [])[-2:]
+            if preview_msgs:
+                fragments.append(("class:dim", "  " + "\u2500" * 40 + "\n"))
+                for pm in preview_msgs:
+                    role = (pm.get("role") or "?")[:10]
+                    text = ((pm.get("content") or "") or "")[:80].replace("\n", " ")
+                    style = "class:hint" if role == "user" else "class:dim"
+                    fragments.append((style, f"  {role}: {text}\n"))
+
         # Footer
         fragments.append(("class:separator", " " + "\u2500" * 75 + "\n"))
         if filter_text[0]:

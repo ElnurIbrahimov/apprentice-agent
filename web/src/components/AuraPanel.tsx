@@ -69,7 +69,12 @@ export function AuraPanel() {
   if (!status) {
     return (
       <div className="bg-chat-sidebar rounded-lg p-4">
-        <h3 className="text-chat-text font-medium mb-2">🤖 AURA ALIVE</h3>
+        <h3 className="text-chat-text font-medium mb-2 flex items-center gap-2">
+          <span className="flex items-center justify-center w-6 h-6 rounded-md bg-purple-500/15">
+            <SparklesIcon className="w-4 h-4 text-purple-400" />
+          </span>
+          AURA Status
+        </h3>
         <div className="text-chat-text-secondary text-sm">{loading ? 'Loading...' : 'AURA not loaded'}</div>
       </div>
     );
@@ -78,7 +83,12 @@ export function AuraPanel() {
   if (!status.enabled) {
     return (
       <div className="bg-chat-sidebar rounded-lg p-4">
-        <h3 className="text-chat-text font-medium mb-2">🤖 AURA ALIVE</h3>
+        <h3 className="text-chat-text font-medium mb-2 flex items-center gap-2">
+          <span className="flex items-center justify-center w-6 h-6 rounded-md bg-purple-500/15">
+            <SparklesIcon className="w-4 h-4 text-purple-400" />
+          </span>
+          AURA Status
+        </h3>
         <div className="text-chat-text-secondary text-sm">AURA not loaded</div>
       </div>
     );

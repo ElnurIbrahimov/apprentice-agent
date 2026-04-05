@@ -50,15 +50,41 @@ def run_picker(
     result: list[Optional[str]] = [None]
     state = {"idx": 0, "scroll": 0}
 
-    # ── filtering ────────────────────────────────────────────────────────
+    # ── filtering with fuzzy scoring ────────────────────────────────────
+    def _score_item(q: str, it: PickerItem) -> int:
+        """Score picker item against query. 0 = no match. Higher = better."""
+        label = it.label.lower()
+        desc = it.description.lower()
+        if q == label:
+            return 100
+        if label.startswith(q):
+            return 50
+        if q in label:
+            return 25
+        if q in desc:
+            return 15
+        qi = 0
+        for ch in label:
+            if qi < len(q) and ch == q[qi]:
+                qi += 1
+        if qi == len(q):
+            return 10
+        qi = 0
+        for ch in desc:
+            if qi < len(q) and ch == q[qi]:
+                qi += 1
+        if qi == len(q):
+            return 5
+        return 0
+
     def _filtered() -> list[tuple[int, PickerItem]]:
         q = filter_text[0].lower()
         if not q:
             return list(enumerate(items))
-        return [
-            (i, it) for i, it in enumerate(items)
-            if q in it.label.lower() or q in it.description.lower()
-        ]
+        scored = [(i, it, _score_item(q, it)) for i, it in enumerate(items)]
+        scored = [(i, it, s) for i, it, s in scored if s > 0]
+        scored.sort(key=lambda x: -x[2])
+        return [(i, it) for i, it, _ in scored]
 
     def _find_pos(filtered: list[tuple[int, PickerItem]]) -> int:
         return next((j for j, (oi, _) in enumerate(filtered) if oi == state["idx"]), 0)

@@ -1,4 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import {
   PaperAirplaneIcon,
   StopIcon,
@@ -426,12 +430,14 @@ export function MathPanel() {
           )}
 
           {solution ? (
-            <pre className="text-sm text-chat-text whitespace-pre-wrap leading-relaxed font-mono">
-              {solution}
+            <div className="text-sm text-chat-text leading-relaxed prose prose-invert prose-sm max-w-none">
+              <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                {solution}
+              </ReactMarkdown>
               {isGenerating && (
                 <span className="inline-block w-1.5 h-4 bg-purple-400 animate-pulse ml-0.5 align-middle" />
               )}
-            </pre>
+            </div>
           ) : !error && (
             <div className="flex flex-col items-center justify-center h-full text-chat-text-secondary text-sm gap-3">
               <div className="text-4xl select-none" aria-hidden>∑</div>

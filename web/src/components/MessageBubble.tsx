@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
-import type { Message, Citation } from '../types';
+import type { Message, Citation, FileAttachment } from '../types';
 import { useChatStore } from '../store/chatStore';
 import { ModelCompare } from './ModelCompare';
 import { CodeBlock } from './CodeBlock';
@@ -34,13 +34,13 @@ function CitationTooltip({ citation, position }: { citation: Citation; position:
         border: '1px solid rgba(139, 92, 246, 0.3)',
         borderRadius: 10,
         padding: '10px 12px',
-        boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+        boxShadow: 'var(--shadow-tooltip)',
         backdropFilter: 'blur(16px)',
       }}
     >
       <div className="text-xs font-medium text-purple-300 truncate">{citation.title || citation.url}</div>
       {citation.snippet && (
-        <div className="text-[11px] text-gray-400 mt-1.5 leading-relaxed line-clamp-3">{citation.snippet}</div>
+        <div className="text-[11px] text-chat-text-secondary mt-1.5 leading-relaxed line-clamp-3">{citation.snippet}</div>
       )}
       <div className="text-[10px] text-gray-600 mt-1.5 truncate">{citation.url}</div>
     </div>
@@ -132,9 +132,9 @@ function CitationList({ citations, messageId }: { citations: Citation[]; message
   const setHoveredCitation = useChatStore((s) => s.setHoveredCitation);
 
   return (
-    <div className="mt-3 border-t border-gray-700/50 pt-2 text-xs">
+    <div className="mt-3 border-t border-chat-border pt-2 text-xs">
       <div className="flex items-center justify-between mb-1.5">
-        <span className="text-gray-500 font-medium">Sources</span>
+        <span className="text-chat-text-secondary font-medium">Sources</span>
         <button
           onClick={() => setCitationsPanelOpen(true)}
           className="text-[10px] text-purple-400 hover:text-purple-300 transition-colors"
@@ -185,7 +185,7 @@ function CitationList({ citations, messageId }: { citations: Citation[]; message
       {hasMore && (
         <button
           onClick={() => setExpanded(!expanded)}
-          className="mt-1 text-gray-500 hover:text-gray-300 transition-colors"
+          className="mt-1 text-chat-text-secondary hover:text-chat-text transition-colors"
         >
           {expanded ? 'Show fewer' : `Show ${citations.length - 3} more source${citations.length - 3 !== 1 ? 's' : ''}...`}
         </button>
@@ -304,7 +304,7 @@ interface MessageBubbleProps {
   message: Message;
   animateIn?: boolean;
   animationIndex?: number;
-  onRegenerate?: (userMessage: string, attachments?: any[]) => void;
+  onRegenerate?: (userMessage: string, attachments?: FileAttachment[]) => void;
   onStop?: () => void;
   onOpenArtifact?: (code: string, type: ArtifactType) => void;
 }
@@ -479,7 +479,7 @@ export const MessageBubble = memo(function MessageBubble({ message, animateIn = 
           {!isEditing && (
             <button
               onClick={handleEditStart}
-              className="self-center opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-lg hover:bg-white/[0.06] text-chat-text-secondary hover:text-chat-text"
+              className="self-center sm:opacity-0 sm:group-hover:opacity-100 opacity-40 transition-opacity p-2 rounded-lg hover:bg-white/[0.06] text-chat-text-secondary hover:text-chat-text"
               aria-label="Edit message"
             >
               <PencilIcon className="w-3.5 h-3.5" />
@@ -695,25 +695,25 @@ export const MessageBubble = memo(function MessageBubble({ message, animateIn = 
             )}
             {/* Actions — visible on hover when not streaming */}
             {!isStreaming && (
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="flex items-center gap-1 sm:opacity-0 sm:group-hover:opacity-100 opacity-60 transition-opacity">
                 <button
                   onClick={handleCopy}
                   aria-label="Copy message"
-                  className="flex items-center gap-0.5 p-0.5 rounded hover:text-chat-text"
+                  className="flex items-center gap-0.5 p-1.5 rounded hover:text-chat-text"
                 >
                   {copied
-                    ? <><CheckIcon className="w-3.5 h-3.5 text-green-400" /><span className="text-green-400">Copied</span></>
-                    : <ClipboardDocumentIcon className="w-3.5 h-3.5" />
+                    ? <><CheckIcon className="w-4 h-4 text-green-400" /><span className="text-green-400">Copied</span></>
+                    : <ClipboardDocumentIcon className="w-4 h-4" />
                   }
                 </button>
                 {onRegenerate && (
                   <button
                     onClick={handleCtxRegenerate}
                     aria-label="Retry"
-                    className="p-0.5 rounded hover:text-chat-text"
+                    className="p-1.5 rounded hover:text-chat-text"
                     title="Retry"
                   >
-                    <ArrowPathIcon className="w-3.5 h-3.5" />
+                    <ArrowPathIcon className="w-4 h-4" />
                   </button>
                 )}
               </div>

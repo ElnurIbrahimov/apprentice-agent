@@ -14,6 +14,7 @@ export function NeuroDreamPanel() {
   const [status, setStatus] = useState<NeuroDreamStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   const fetchStatus = async () => {
     setLoading(true);
@@ -22,8 +23,10 @@ export function NeuroDreamPanel() {
       if (res.ok) {
         const data = await res.json();
         setStatus(data);
+        setFetchError(null);
       }
     } catch (e) {
+      setFetchError('Failed to connect to NeuroDream');
       console.error('Failed to fetch NeuroDream status:', e);
     }
     setLoading(false);
@@ -52,6 +55,14 @@ export function NeuroDreamPanel() {
     }
     setActionLoading(false);
   };
+
+  if (fetchError) {
+    return (
+      <div className="bg-chat-sidebar rounded-lg p-4">
+        <div className="text-xs text-amber-400">{fetchError}</div>
+      </div>
+    );
+  }
 
   if (!status) {
     return (

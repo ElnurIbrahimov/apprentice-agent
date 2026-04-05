@@ -63,7 +63,7 @@ def build_context_gauge(used: int, limit: int) -> str:
     bar = "█" * filled + "░" * (8 - filled)
     return f"[{color}]{used_str}[/{color}]/{limit_str} [{color}]{bar}[/{color}] {pct_int}%"
 
-def build_context_breakdown(system_tokens: int, history_tokens: int, tools_tokens: int, limit: int) -> str:
+def build_context_breakdown(system_tokens: int, history_tokens: int, tools_tokens: int, limit: int, message_count: int = 0) -> str:
     """Build detailed context breakdown for /context command."""
     total = system_tokens + history_tokens + tools_tokens
     lines = [
@@ -78,4 +78,15 @@ def build_context_breakdown(system_tokens: int, history_tokens: int, tools_token
     lines.append(f"  Usage:          [{color}]{pct:.0f}%[/{color}]")
     if pct > 80:
         lines.append(f"\n  [yellow]⚠ Context is {pct:.0f}% full — consider /compact[/yellow]")
+
+    # Remaining messages projection (C3)
+    if message_count > 0 and history_tokens > 0:
+        avg_per_msg = history_tokens / message_count
+        remaining = max(0, limit - total)
+        est_remaining = int(remaining / avg_per_msg) if avg_per_msg > 0 else 0
+        if est_remaining > 0:
+            lines.append(f"  Remaining:      ~{est_remaining} more messages")
+        else:
+            lines.append(f"  [red]Context nearly full — use /compact[/red]")
+
     return "\n".join(lines)

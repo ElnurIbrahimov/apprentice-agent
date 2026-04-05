@@ -82,7 +82,7 @@ export function SystemStatsPanel({ status }: SystemStatsPanelProps) {
               <div className="flex-1 h-1.5 bg-chat-border/30 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-gradient-to-r from-purple-500 to-pink-500 rounded-full transition-all duration-500"
-                  style={{ width: `${Math.min(100, (status.memory_count / 500) * 100)}%` }}
+                  style={{ width: `${Math.min(100, (status.memory_count / Math.max(status.memory_count, 50)) * 100)}%` }}
                 />
               </div>
               <span className="text-xs text-chat-text font-mono w-10 text-right">{status.memory_count}</span>
@@ -92,7 +92,7 @@ export function SystemStatsPanel({ status }: SystemStatsPanelProps) {
               <div className="flex-1 h-1.5 bg-chat-border/30 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-gradient-to-r from-blue-500 to-cyan-500 rounded-full transition-all duration-500"
-                  style={{ width: `${Math.min(100, (status.query_count / 200) * 100)}%` }}
+                  style={{ width: `${Math.min(100, (status.query_count / Math.max(status.query_count, 20)) * 100)}%` }}
                 />
               </div>
               <span className="text-xs text-chat-text font-mono w-10 text-right">{status.query_count}</span>

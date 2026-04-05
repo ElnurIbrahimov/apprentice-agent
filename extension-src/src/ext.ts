@@ -23,6 +23,10 @@ export async function getPageContentCached(): Promise<any> {
   return resp;
 }
 
+export function clearPageContentCache(): void {
+  _pageCache.clear();
+}
+
 export async function getCurrentTab(): Promise<any> {
   return new Promise(r => ext.runtime.sendMessage({ type: 'GET_CURRENT_TAB' }, r));
 }

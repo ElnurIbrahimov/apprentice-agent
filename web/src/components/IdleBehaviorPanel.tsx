@@ -168,10 +168,9 @@ export function IdleBehaviorPanel() {
                             key={i}
                             className={`w-1 h-3 rounded-full transition-colors ${
                               i < intensityConfig.bars
-                                ? 'bg-current opacity-80'
+                                ? `${behaviorConfig.color.replace('text-', 'bg-')} opacity-80`
                                 : 'bg-chat-border/30'
                             }`}
-                            style={{ color: behaviorConfig.color.replace('text-', '') }}
                           />
                         ))}
                       </div>

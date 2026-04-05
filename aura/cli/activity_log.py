@@ -73,6 +73,11 @@ class ActivityLog:
                     INSERT INTO interactions_fts(interactions_fts, rowid, prompt, response) VALUES('delete', old.id, old.prompt, old.response);
                 END
             """)
+            # Migration: add embedding column for semantic search
+            try:
+                conn.execute("ALTER TABLE interactions ADD COLUMN embedding BLOB DEFAULT NULL")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
             conn.commit()
         finally:
             conn.close()
@@ -92,6 +97,18 @@ class ActivityLog:
             )
             row_id = cursor.lastrowid
             conn.commit()
+            # Optionally compute and store embedding for semantic search
+            try:
+                import ollama
+                import struct
+                resp = ollama.embed(model="nomic-embed-text:latest", input=f"{prompt} {(response or '')[:500]}")
+                if resp and "embeddings" in resp and resp["embeddings"]:
+                    emb = resp["embeddings"][0]
+                    blob = struct.pack(f'{len(emb)}f', *emb)
+                    conn.execute("UPDATE interactions SET embedding = ? WHERE id = ?", (blob, row_id))
+                    conn.commit()
+            except Exception:
+                pass  # Non-fatal — embedding storage is optional
             return row_id
         except Exception as e:
             logger.warning("[ActivityLog] Failed to log interaction: %s", e)
@@ -121,6 +138,54 @@ class ActivityLog:
             return []
         finally:
             conn.close()
+
+    def semantic_search(self, query: str, limit: int = 20) -> list[dict]:
+        """Semantic search using embedding cosine similarity. Falls back to FTS5."""
+        try:
+            import ollama
+            import struct
+            import math
+
+            resp = ollama.embed(model="nomic-embed-text:latest", input=query)
+            if not resp or "embeddings" not in resp or not resp["embeddings"]:
+                return self.search(query, limit)
+
+            query_emb = resp["embeddings"][0]
+
+            conn = sqlite3.connect(str(self._db_path), timeout=10)
+            try:
+                rows = conn.execute(
+                    "SELECT id, timestamp, session_id, prompt, response, model, embedding "
+                    "FROM interactions WHERE embedding IS NOT NULL "
+                    "ORDER BY timestamp DESC LIMIT 500"
+                ).fetchall()
+            finally:
+                conn.close()
+
+            scored = []
+            for row in rows:
+                emb_blob = row[6]  # embedding column
+                if not emb_blob:
+                    continue
+                n = len(emb_blob) // 4
+                row_emb = struct.unpack(f'{n}f', emb_blob)
+
+                # Cosine similarity
+                dot = sum(a * b for a, b in zip(query_emb, row_emb))
+                norm_q = math.sqrt(sum(a * a for a in query_emb))
+                norm_r = math.sqrt(sum(a * a for a in row_emb))
+                sim = dot / (norm_q * norm_r + 1e-8)
+
+                if sim > 0.3:
+                    scored.append((dict(zip(
+                        ["id", "timestamp", "session_id", "prompt", "response", "model"],
+                        row[:6]
+                    )), sim))
+
+            scored.sort(key=lambda x: -x[1])
+            return [r for r, _ in scored[:limit]]
+        except Exception:
+            return self.search(query, limit)  # FTS5 fallback
 
     def get_recent(self, limit: int = 20) -> List[Dict]:
         """Get recent interactions."""

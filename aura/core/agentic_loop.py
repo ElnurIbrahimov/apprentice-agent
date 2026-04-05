@@ -205,8 +205,8 @@ def _compact_history(history: list[dict]) -> list[dict]:
         console.print(
             f"  [dim italic]Context compacted: {n_compressed} messages summarized into conversation summary[/]"
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"[AgenticLoop] Compaction console print failed: {e}")
 
     return [summary_msg] + recent_msgs
 
@@ -496,8 +496,8 @@ class ToolExecutor:
                 parsed = _json.loads(action)
                 if isinstance(parsed, dict):
                     return parsed
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[AgenticLoop] write_file JSON parse failed: {e}")
             return {"error": f"Could not parse write_file arguments from: {action[:100]}"}
         elif tool_name == "edit_file":
             try:
@@ -505,8 +505,8 @@ class ToolExecutor:
                 parsed = _json.loads(action)
                 if isinstance(parsed, dict):
                     return parsed
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[AgenticLoop] edit_file JSON parse failed: {e}")
             return {"error": "Could not parse edit_file arguments"}
         elif tool_name == "git":
             return {"action": action}
@@ -593,8 +593,8 @@ class ToolExecutor:
             )
             if result.get("success") and result.get("files"):
                 suggestions = [f["path"] for f in result["files"][:5]]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[AgenticLoop] File suggestion glob failed: {e}")
 
         if not suggestions:
             # Try partial match — strip extension and search broader
@@ -608,8 +608,8 @@ class ToolExecutor:
                     )
                     if result.get("success") and result.get("files"):
                         suggestions = [f["path"] for f in result["files"][:5]]
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[AgenticLoop] Partial file suggestion failed: {e}")
 
         error_msg = f"File not found: {resolved_path}"
         if suggestions:
@@ -681,8 +681,8 @@ class ToolExecutor:
         if _cp:
             try:
                 _cp.snapshot(path, label=f"before edit: {Path(path).name}")
-            except Exception:
-                pass  # Don't fail the edit if checkpoint fails
+            except Exception as e:
+                logger.debug(f"[AgenticLoop] Edit checkpoint failed (non-fatal): {e}")
 
         # Step 1: dry-run to preview
         preview = self.code_edit.edit(
@@ -702,6 +702,23 @@ class ToolExecutor:
             show_diff(path, args["old_string"], args["new_string"])
         except Exception as e:
             logger.debug(f"[AgenticLoop] non-critical: {e}")
+
+        # H2: Interactive accept/reject for careful mode
+        if not getattr(self, '_trust_all_edits', False):
+            perm_mode = getattr(self.permissions, 'mode', 'auto_edit') if self.permissions else 'auto_edit'
+            if perm_mode == 'careful':
+                try:
+                    import sys
+                    sys.stderr.write("  Apply this edit? [y/n/all]: ")
+                    sys.stderr.flush()
+                    choice = input().strip().lower()
+                    if choice == "all":
+                        self._trust_all_edits = True
+                    elif choice not in ("y", "yes", ""):
+                        return {"success": False, "skipped": True, "message": "Edit rejected by user"}
+                except (EOFError, KeyboardInterrupt):
+                    return {"success": False, "skipped": True, "message": "Edit cancelled"}
+
         # Step 3: apply for real
         result = self.code_edit.edit(
             path=path,
@@ -722,8 +739,8 @@ class ToolExecutor:
         if _cp and os.path.exists(path):
             try:
                 _cp.snapshot(path, label=f"before write: {Path(path).name}")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[AgenticLoop] Write checkpoint failed (non-fatal): {e}")
         result = self.fs.write_file(path=path, content=args["content"], overwrite=True)
 
         # Broadcast to Artifacts live-preview if file is previewable
@@ -743,12 +760,14 @@ class ToolExecutor:
                 try:
                     with open(path, "r", encoding="utf-8", errors="replace") as f:
                         content = f.read()
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"[AgenticLoop] Artifact file read failed: {e}")
                     return
             if content:
                 try:
                     filename = os.path.relpath(path, self.project_root)
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"[AgenticLoop] relpath failed, using basename: {e}")
                     filename = Path(path).name
                 filename = filename.replace("\\", "/")
                 broadcast_artifact(filename, content)
@@ -870,7 +889,8 @@ class ToolExecutor:
                     cmd = f"npx vitest run {target}" if target else "npx vitest run"
                 else:
                     cmd = f"npx jest {target}" if target else "npx jest"
-            except Exception:
+            except Exception as e:
+                logger.debug(f"[AgenticLoop] package.json test detection failed: {e}")
                 cmd = f"npm test -- {target}" if target else "npm test"
         elif os.path.exists(os.path.join(cwd, "Cargo.toml")):
             cmd = f"cargo test {target}" if target else "cargo test"
@@ -934,6 +954,11 @@ class AgenticLoop:
         # Action mode detected by intent classifier (set per run())
         self._current_action_mode = None
 
+        # Budget warning flags (C1) and per-turn cost tracking (C2)
+        self._budget_warned_50 = False
+        self._budget_warned_80 = False
+        self.last_turn_cost = 0.0
+
         # Hot files: recently read/edited file paths and content snapshots
         # Persists across iterations within a task so the LLM remembers what it was working on
         self._hot_files: list[str] = []  # recently touched file paths (max 10)
@@ -963,13 +988,30 @@ class AgenticLoop:
                 logger.debug(f"[AgenticLoop] MCP client init failed (non-fatal): {e}")
         self.executor._mcp_client = self._mcp_client
 
+        # H1: Cost estimation toggle
+        self._show_cost_estimates_enabled = False
+        if aura_config:
+            self._show_cost_estimates_enabled = aura_config.get("cost_estimate", False)
+
+        # H2: Diff preview accept/reject toggle
+        self._trust_all_edits = False
+
+        # H5: Response cache
+        self._response_cache = None
+        try:
+            from .response_cache import ResponseCache
+            self._response_cache = ResponseCache()
+        except Exception:
+            pass
+
     def __del__(self):
         """Clean up MCP connections to prevent process leaks."""
         try:
             if hasattr(self, '_mcp_client') and self._mcp_client:
                 self._mcp_client.disconnect_all()
-        except Exception:
-            pass
+        except Exception as e:
+            # Can't use logger in __del__ reliably, but at least bind the exception
+            pass  # MCP cleanup during GC — best-effort
 
     def cancel(self):
         """Signal the loop to stop after the current LLM/tool call finishes."""
@@ -1039,8 +1081,8 @@ class AgenticLoop:
                             for r in relevant
                         )
                         system_prompt += f"\n\n## Relevant codebase context\n{chunks}"
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[AgenticLoop] Codebase context injection failed: {e}")
 
         # Pre-load files mentioned in the prompt
         try:
@@ -1059,8 +1101,8 @@ class AgenticLoop:
                         file_contents.append(f"### {fp}\n```\n{content}\n```")
                 if file_contents and len(system_prompt) < 22000:
                     system_prompt += "\n\n## Pre-loaded files from prompt\n" + "\n".join(file_contents)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[AgenticLoop] File pre-load failed: {e}")
 
         # Adaptive plan context: inject current plan so LLM knows what to do next
         try:
@@ -1068,8 +1110,8 @@ class AgenticLoop:
                 plan_ctx = self._planner.current_plan.to_prompt_context()
                 if plan_ctx:
                     system_prompt += "\n\n" + plan_ctx
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[AgenticLoop] Plan context injection failed: {e}")
 
         # Hot files: inject recently touched file paths so LLM remembers
         # what it was working on across iterations and after context compaction
@@ -1136,8 +1178,93 @@ class AgenticLoop:
                             break
                         lines.append(line.rstrip())
                     self._hot_file_contents[path] = "\n".join(lines)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[AgenticLoop] Hot file read failed for {path}: {e}")
+
+    def _estimate_cost(self, prompt: str) -> dict:
+        """Estimate cost based on task category and historical data."""
+        try:
+            from .router import classify_task
+            category, confidence = classify_task(prompt)
+
+            # Historical averages per category (fallback defaults)
+            _AVG_ITERS = {"code_gen": 5, "small_edit": 2, "reasoning": 1,
+                          "frontend": 4, "tool_dispatch": 3, "orchestrator": 3}
+            _COST_PER_ITER = 0.005  # ~$0.005 per iteration average
+
+            est_iters = _AVG_ITERS.get(category, 3)
+            # Check router outcome stats for better estimate
+            if hasattr(self, '_router') and self._router:
+                stats = getattr(self._router, '_outcome_stats', {})
+                for key, data in stats.items():
+                    if key[0] == category and data.get("count", 0) >= 3:
+                        est_iters = data["total_iters"] / data["count"]
+                        break
+
+            est_cost = est_iters * _COST_PER_ITER
+            return {"estimated_cost": est_cost, "estimated_iterations": int(est_iters), "category": category}
+        except Exception:
+            return {"estimated_cost": 0, "estimated_iterations": 0, "category": "unknown"}
+
+    def _inject_smart_context(self, prompt: str, system_prompt: str) -> str:
+        """Embed prompt and find most relevant project files to inject."""
+        try:
+            import ollama
+            import numpy as np
+
+            resp = ollama.embed(model="nomic-embed-text:latest", input=prompt)
+            if not resp or "embeddings" not in resp or not resp["embeddings"]:
+                return system_prompt
+            prompt_vec = np.array(resp["embeddings"][0])
+
+            # Score candidate files
+            import glob as _glob
+            candidates = []
+            for ext in ("*.py", "*.js", "*.ts", "*.go", "*.rs", "*.java"):
+                candidates.extend(_glob.glob(os.path.join(self.project_root, "**", ext), recursive=True))
+            candidates = [f for f in candidates[:50] if os.path.getsize(f) < 50000]
+
+            # Remove files already in hot_files
+            hot = set(getattr(self, '_hot_files', {}).keys())
+            candidates = [f for f in candidates if f not in hot][:30]
+
+            if not candidates:
+                return system_prompt
+
+            scored = []
+            for fpath in candidates:
+                rel = os.path.relpath(fpath, self.project_root)
+                try:
+                    file_resp = ollama.embed(model="nomic-embed-text:latest", input=rel)
+                    if file_resp and file_resp.get("embeddings"):
+                        file_vec = np.array(file_resp["embeddings"][0])
+                        sim = float(np.dot(prompt_vec, file_vec) / (np.linalg.norm(prompt_vec) * np.linalg.norm(file_vec) + 1e-8))
+                        scored.append((fpath, sim))
+                except Exception:
+                    continue
+
+            scored.sort(key=lambda x: -x[1])
+            top = scored[:3]
+
+            if not top or top[0][1] < 0.3:
+                return system_prompt
+
+            parts = []
+            for fpath, score in top:
+                try:
+                    with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
+                        content = f.read(8000)
+                    rel = os.path.relpath(fpath, self.project_root)
+                    parts.append(f"### {rel} (relevance={score:.2f})\n```\n{content}\n```")
+                except Exception:
+                    continue
+
+            if parts and len(system_prompt) < 25000:
+                system_prompt += "\n\n## Auto-detected relevant files\n" + "\n".join(parts)
+
+            return system_prompt
+        except (ImportError, Exception):
+            return system_prompt
 
     def plan_first(self, prompt: str) -> dict:
         """Generate a plan without executing anything. Returns plan dict.
@@ -1196,6 +1323,13 @@ class AgenticLoop:
         self._loop_error = False
         self._verification_done = False  # Only verify once per run
 
+        # Capture baseline cost for per-turn cost tracking (C2)
+        _prev_cost = 0.0
+        try:
+            _prev_cost = self.brain.get_session_stats().get("cost_usd", 0.0)
+        except Exception:
+            pass
+
         # Reset cancellation for this run
         self._cancel_event.clear()
 
@@ -1238,12 +1372,32 @@ class AgenticLoop:
                                 f"  [dim cyan]plan[/dim cyan] {len(plan.steps)} steps generated",
                                 highlight=False,
                             )
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"[AgenticLoop] Plan console print failed: {e}")
         except Exception as e:
             logger.debug(f"[AgenticLoop] Adaptive planning failed (non-fatal): {e}")
 
         system_prompt = self._build_system_prompt(prompt)
+
+        # H4: Smart context injection via embeddings
+        system_prompt = self._inject_smart_context(prompt, system_prompt)
+
+        # H5: Inject learned corrections
+        try:
+            from .correction_tracker import CorrectionTracker
+            _ct = CorrectionTracker()
+            _corrections = _ct.to_system_prompt_fragment(prompt)
+            if _corrections:
+                system_prompt += "\n\n" + _corrections
+        except Exception:
+            pass
+
+        # H1: Cost estimation before execution
+        if self._show_cost_estimates_enabled and self.budget_usd:
+            estimate = self._estimate_cost(prompt)
+            if estimate["estimated_cost"] > 0.005:
+                sys.stderr.write(f"\n  Estimated: ~${estimate['estimated_cost']:.3f}, ~{estimate['estimated_iterations']} iterations ({estimate['category']})\n")
+                sys.stderr.flush()
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -1280,8 +1434,8 @@ class AgenticLoop:
                             self.session.save()
                         try:
                             _store_interaction(prompt, final_response)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"[AgenticLoop] Store interaction failed: {e}")
                         self._current_action_mode = None
                         return {
                             "success": True,
@@ -1316,13 +1470,25 @@ class AgenticLoop:
             except Exception as e:
                 logger.debug(f"[AgenticLoop] Planner tick/replan failed (non-fatal): {e}")
 
-            # Budget check (before any injection or model call)
+            # Budget check with intermediate warnings (C1)
             if self.budget_usd is not None:
                 stats = self.brain.get_session_stats()
-                if stats["cost_usd"] >= self.budget_usd:
+                cost = stats.get("cost_usd", 0.0)
+                pct = cost / self.budget_usd if self.budget_usd > 0 else 0
+
+                if cost >= self.budget_usd:
                     final_response = f"Budget limit reached (${self.budget_usd:.2f}). Stopping."
                     self._loop_error = True
                     break
+
+                if not self._budget_warned_80 and pct >= 0.80:
+                    self._budget_warned_80 = True
+                    sys.stderr.write(f"\n  \033[33m\u25b3 Budget 80% used (${cost:.3f}/${self.budget_usd:.2f})\033[0m\n")
+                    sys.stderr.flush()
+                elif not self._budget_warned_50 and pct >= 0.50:
+                    self._budget_warned_50 = True
+                    sys.stderr.write(f"\n  \033[33m\u25b3 Budget 50% used (${cost:.3f}/${self.budget_usd:.2f})\033[0m\n")
+                    sys.stderr.flush()
 
             # Mid-turn steering: inject queued user messages (after budget check,
             # and only after the first iteration so the original prompt runs clean)
@@ -1451,10 +1617,16 @@ class AgenticLoop:
             if not tool_calls:
                 if not content:
                     # Empty response — retry with a nudge instead of showing "(No response)"
-                    logger.warning(f"[AgenticLoop] Empty response from model on iteration {self.iteration}, nudging")
+                    self._empty_response_count = getattr(self, '_empty_response_count', 0) + 1
+                    if self._empty_response_count > 3:
+                        logger.error(f"[AgenticLoop] {self._empty_response_count} consecutive empty responses — aborting loop")
+                        final_response = "The model failed to generate a response after multiple attempts. Please try again with a clearer prompt."
+                        break
+                    logger.warning(f"[AgenticLoop] Empty response #{self._empty_response_count} from model on iteration {self.iteration}, nudging")
                     messages.append({"role": "assistant", "content": ""})
                     messages.append({"role": "user", "content": "Continue. Execute the task using tools."})
                     continue
+                self._empty_response_count = 0  # Reset on successful response
 
                 # ── Completion verification ──
                 # Only verify when: verification enabled, 2+ iterations ran,
@@ -1599,8 +1771,8 @@ class AgenticLoop:
                         if tool_name in ("edit_file", "write_file", "shell", "run_tests"):
                             result_snippet = tool_result[:100] if tool_result else ""
                             self._planner.advance_step(result=result_snippet)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[AgenticLoop] Planner advance failed: {e}")
 
                 if on_tool_call:
                     on_tool_call(tool_name, args, tool_result)
@@ -1671,6 +1843,13 @@ class AgenticLoop:
         # Clean up action mode state and restore original model override
         self._current_action_mode = None
         self.model_override = _original_model_override
+
+        # Compute per-turn cost (C2)
+        try:
+            _end_cost = self.brain.get_session_stats().get("cost_usd", 0.0)
+            self.last_turn_cost = _end_cost - _prev_cost
+        except Exception:
+            self.last_turn_cost = 0.0
 
         hit_error = getattr(self, '_loop_error', False)
         return {

@@ -66,7 +66,7 @@ export function InnerThoughtsPanel() {
         className="w-full p-3 flex items-center justify-between hover:bg-chat-assistant/80 transition-colors"
       >
         <div className="flex items-center gap-3 flex-1 min-w-0">
-          <span className="text-lg shrink-0">{icon}</span>
+          <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-purple-500/15 text-base shrink-0">{icon}</span>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <span className="text-chat-text font-medium text-sm">Inner Thoughts</span>

@@ -19,6 +19,12 @@ const DEVICE_WIDTHS: Record<DeviceSize, string> = {
   mobile: '375px',
 };
 
+const DEVICE_FRAMES: Record<DeviceSize, { outer: string; inner: string; notch: boolean }> = {
+  desktop: { outer: '', inner: '', notch: false },
+  tablet:  { outer: 'rounded-[20px] border-[8px] border-gray-700 shadow-2xl', inner: 'rounded-[12px]', notch: false },
+  mobile:  { outer: 'rounded-[36px] border-[10px] border-gray-800 shadow-2xl relative', inner: 'rounded-[26px]', notch: true },
+};
+
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
@@ -144,10 +150,11 @@ export function WebCreator() {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [exportedCode, setExportedCode] = useState('');
   const [isExporting, setIsExporting] = useState(false);
   const [editMode, setEditMode] = useState(false);
-  const [colorPalette, setColorPalette] = useState<typeof COLOR_PALETTES[0] | null>(null);
+  const [colorPalette, setColorPalette] = useState<typeof COLOR_PALETTES[0] | null>(COLOR_PALETTES[0]);
   const [customColors, setCustomColors] = useState({ primary: '#7c3aed', secondary: '#a78bfa', accent: '#c4b5fd', bg: '#0f0a1a' });
   const [selectedElement, setSelectedElement] = useState<string | null>(null);
   const [collapsedCategories, setCollapsedCategories] = useState<Record<string, boolean>>({});
@@ -686,7 +693,7 @@ Rules:
                             onClick={() => handleSend(t.prompt)}
                             className="flex items-center gap-2 px-2.5 py-2 rounded-lg border border-chat-border hover:border-purple-500/40 hover:bg-purple-500/5 text-left transition-all group bg-surface-1"
                           >
-                            <span className="text-base flex-shrink-0">{t.icon}</span>
+                            <span className="flex items-center justify-center w-7 h-7 rounded-md bg-purple-500/10 text-sm flex-shrink-0">{t.icon}</span>
                             <span className="text-[11px] font-medium text-chat-text group-hover:text-white transition-colors leading-tight">{t.label}</span>
                           </button>
                         ))}
@@ -783,16 +790,29 @@ Rules:
 
         {/* Chat input */}
         <div className="p-3 border-t border-chat-border flex-shrink-0">
-          {/* Selected element badge */}
+          {/* Selected element badge with actions */}
           {selectedElement && (
             <div className="flex items-center gap-1.5 mb-2 px-2 py-1.5 rounded-md bg-purple-500/10 border border-purple-500/20">
               <CursorArrowRaysIcon className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
               <span className="text-[11px] text-purple-300 flex-1 truncate">
-                Selected: {selectedElement}
+                {selectedElement}
               </span>
               <button
+                onClick={() => { handleSend(`Redesign ${selectedElement} — make it more modern and visually striking`); setSelectedElement(null); }}
+                className="text-[10px] px-1.5 py-0.5 rounded bg-purple-600/40 text-purple-200 hover:bg-purple-600/60 transition-colors flex-shrink-0"
+              >Regen</button>
+              <button
+                onClick={() => { handleSend(`Remove ${selectedElement} from the page completely`); setSelectedElement(null); }}
+                className="text-[10px] px-1.5 py-0.5 rounded bg-red-600/30 text-red-300 hover:bg-red-600/50 transition-colors flex-shrink-0"
+              >Delete</button>
+              <button
+                onClick={() => { setInput(`Restyle ${selectedElement}: `); textareaRef.current?.focus(); }}
+                className="text-[10px] px-1.5 py-0.5 rounded text-chat-text-secondary hover:text-chat-text transition-colors flex-shrink-0"
+                style={{ background: 'var(--surface-2)' }}
+              >Style</button>
+              <button
                 onClick={() => { setSelectedElement(null); setInput(''); }}
-                className="text-purple-400 hover:text-purple-200 transition-colors flex-shrink-0"
+                className="text-purple-400/60 hover:text-purple-200 transition-colors flex-shrink-0"
               >
                 <XMarkIcon className="w-3.5 h-3.5" />
               </button>
@@ -971,20 +991,50 @@ Rules:
 
           {/* Version controls */}
           {versions.length > 0 && (
-            <>
-              <span className="text-[10px] text-chat-text-secondary mr-1">v{versionIndex + 1}/{versions.length}</span>
+            <div className="relative flex items-center">
               <button onClick={handleUndo} disabled={versionIndex <= 0} className="p-1 text-chat-text-secondary hover:text-chat-text disabled:opacity-30">
                 <ArrowUturnLeftIcon className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => setShowVersionHistory(!showVersionHistory)}
+                className="text-[10px] text-chat-text-secondary hover:text-chat-text px-1 cursor-pointer"
+                title="Version history"
+              >
+                v{versionIndex + 1}/{versions.length}
               </button>
               <button onClick={handleRedo} disabled={versionIndex >= versions.length - 1} className="p-1 text-chat-text-secondary hover:text-chat-text disabled:opacity-30">
                 <ArrowUturnRightIcon className="w-3.5 h-3.5" />
               </button>
-            </>
+              {/* Version popover */}
+              {showVersionHistory && (
+                <div className="absolute bottom-full right-0 mb-2 w-52 max-h-56 overflow-y-auto rounded-lg border border-chat-border shadow-xl z-50 py-1" style={{ background: 'var(--surface-1)' }}>
+                  <div className="px-3 py-1.5 text-[10px] text-chat-text-secondary font-medium border-b border-chat-border">Versions</div>
+                  {versions.map((v, i) => (
+                    <button
+                      key={i}
+                      onClick={() => { setVersionIndex(i); setCurrentHtml(v.html); setShowVersionHistory(false); }}
+                      className={`w-full text-left px-3 py-1.5 text-[11px] hover:bg-white/5 flex items-center justify-between ${i === versionIndex ? 'text-chat-accent' : 'text-chat-text-secondary'}`}
+                    >
+                      <span>v{i + 1}</span>
+                      <span className="text-[9px] text-chat-text-secondary/50">
+                        {new Date(v.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {' · '}{(v.html.length / 1024).toFixed(1)}KB
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
 
           {/* Actions */}
-          <button onClick={handleDownload} disabled={!currentHtml} className="p-1 text-chat-text-secondary hover:text-chat-text disabled:opacity-30" title="Download HTML">
-            <ArrowDownTrayIcon className="w-3.5 h-3.5" />
+          <button
+            onClick={handleDownload}
+            disabled={!currentHtml}
+            className="flex items-center gap-1 px-2 py-1 text-[10px] rounded border border-chat-border text-chat-text-secondary hover:text-chat-text hover:border-purple-500/40 disabled:opacity-30 transition-colors"
+            title="Download as HTML file"
+          >
+            <ArrowDownTrayIcon className="w-3.5 h-3.5" />HTML
           </button>
           <button onClick={handleOpenNewTab} disabled={!currentHtml} className="p-1 text-chat-text-secondary hover:text-chat-text disabled:opacity-30" title="Open in new tab">
             <ArrowTopRightOnSquareIcon className="w-3.5 h-3.5" />
@@ -1019,11 +1069,17 @@ Rules:
           {showPreview && (
             <div className={`${viewMode === 'split' ? 'w-1/2 border-r border-chat-border' : 'flex-1'} overflow-auto flex justify-center`} style={{ background: currentHtml ? 'white' : 'var(--surface-1)' }}>
               {currentHtml ? (
-                <div style={{ width: DEVICE_WIDTHS[device], maxWidth: '100%', height: '100%' }} className="transition-all duration-300">
+                <div
+                  style={{ width: DEVICE_WIDTHS[device], maxWidth: '100%', height: device === 'desktop' ? '100%' : '90%' }}
+                  className={`transition-all duration-300 ${DEVICE_FRAMES[device].outer} ${device !== 'desktop' ? 'my-4 mx-auto' : ''} overflow-hidden`}
+                >
+                  {DEVICE_FRAMES[device].notch && (
+                    <div className="absolute top-1 left-1/2 -translate-x-1/2 w-24 h-5 bg-gray-800 rounded-b-xl z-10" />
+                  )}
                   <iframe
                     srcDoc={srcdoc}
                     sandbox="allow-scripts allow-same-origin"
-                    className="w-full h-full border-none"
+                    className={`w-full h-full border-none ${DEVICE_FRAMES[device].inner}`}
                     title="Website preview"
                   />
                 </div>

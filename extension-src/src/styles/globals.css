@@ -638,6 +638,17 @@ pre code {
 .md-body strong { font-weight: 600; }
 .md-body em { font-style: italic; color: var(--pl2); }
 
+/* Citation links in research reports */
+.md-body .citation-link {
+  color: var(--pl);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.85em;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.md-body .citation-link:hover { opacity: 0.7; }
+
 /* Grammar diff */
 .gr-ins {
   background: rgba(16, 185, 129, 0.18);
@@ -2117,6 +2128,72 @@ pre .chdr span {
   color: var(--tx);
   background: var(--b1);
 }
+
+/* Tabs */
+.conv-history-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px 10px 4px;
+  overflow-x: auto;
+  flex-shrink: 0;
+  scrollbar-width: none;
+}
+.conv-history-tabs::-webkit-scrollbar { display: none; }
+.conv-history-tab {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 8px;
+  border-radius: var(--r-sm);
+  border: none;
+  background: none;
+  color: var(--mu);
+  font-size: 10px;
+  font-family: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s, background 0.15s;
+}
+.conv-history-tab:hover { background: var(--s2); color: var(--tx); }
+.conv-history-tab.active { background: var(--p); color: #fff; }
+
+/* Item actions & dropdown */
+.conv-history-item-actions {
+  position: relative;
+  flex-shrink: 0;
+}
+.conv-history-dropdown {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  min-width: 140px;
+  background: var(--s1);
+  border: 1px solid var(--b2);
+  border-radius: var(--r-sm);
+  box-shadow: var(--sh-md);
+  z-index: 200;
+  padding: 4px 0;
+  display: flex;
+  flex-direction: column;
+}
+.conv-history-dropdown button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: none;
+  background: none;
+  color: var(--tx);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  transition: background 0.1s;
+}
+.conv-history-dropdown button:hover { background: var(--s2); }
+.conv-history-dropdown-sub { display: flex; flex-direction: column; }
 
 /* Search */
 .conv-history-search {

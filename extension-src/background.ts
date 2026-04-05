@@ -25,6 +25,14 @@ let BACKEND_API_KEY = '';
   } catch {}
 })();
 
+// ── Service worker keepalive alarm ──────────────────────────────────────────
+ext.alarms?.create('aura-health-check', { periodInMinutes: 4 });
+ext.alarms?.onAlarm?.addListener((alarm: chrome.alarms.Alarm) => {
+  if (alarm.name !== 'aura-health-check') return;
+  // Wake-up ping — sidebar will handle WS reconnect if needed
+  ext.runtime.sendMessage({ type: 'HEALTH_CHECK' }).catch(() => {});
+});
+
 // Listen for settings changes
 ext.storage.onChanged.addListener((changes, area) => {
   if (area === 'local') {
@@ -523,6 +531,10 @@ const MENU_IDS = {
   translateDe: 'aura-translate-de',
   translateZh: 'aura-translate-zh',
   improve: 'aura-improve',
+  define: 'aura-define',
+  rewrite: 'aura-rewrite',
+  generateCode: 'aura-generate-code',
+  addToKb: 'aura-add-to-kb',
   saveMemory: 'aura-save-memory',
 } as const;
 
@@ -539,6 +551,10 @@ const MENU_ACTION_MAP: Record<string, { action: string; prefix?: string }> = {
   [MENU_IDS.translateFr]: { action: 'translate', prefix: 'Translate to French:\n\n' },
   [MENU_IDS.translateDe]: { action: 'translate', prefix: 'Translate to German:\n\n' },
   [MENU_IDS.translateZh]: { action: 'translate', prefix: 'Translate to Chinese:\n\n' },
+  [MENU_IDS.define]: { action: 'define', prefix: 'Define this term:\n\n' },
+  [MENU_IDS.rewrite]: { action: 'rewrite', prefix: 'Rewrite this text:\n\n' },
+  [MENU_IDS.generateCode]: { action: 'generate-code', prefix: 'Generate code based on this description:\n\n' },
+  [MENU_IDS.addToKb]: { action: 'save' },
   [MENU_IDS.saveMemory]: { action: 'save' },
 };
 
@@ -643,11 +659,51 @@ ext.runtime.onInstalled.addListener((): void => {
       contexts: ['selection'],
     });
 
+    // Define
+    ext.contextMenus.create({
+      id: MENU_IDS.define,
+      parentId: MENU_IDS.parent,
+      title: 'Define this',
+      contexts: ['selection'],
+    });
+
+    // Rewrite
+    ext.contextMenus.create({
+      id: MENU_IDS.rewrite,
+      parentId: MENU_IDS.parent,
+      title: 'Rewrite',
+      contexts: ['selection'],
+    });
+
+    // Generate code
+    ext.contextMenus.create({
+      id: MENU_IDS.generateCode,
+      parentId: MENU_IDS.parent,
+      title: 'Generate code from this',
+      contexts: ['selection'],
+    });
+
+    // Separator before save actions
+    ext.contextMenus.create({
+      id: 'aura-sep-2',
+      parentId: MENU_IDS.parent,
+      type: 'separator',
+      contexts: ['selection'],
+    });
+
     // Save to memory
     ext.contextMenus.create({
       id: MENU_IDS.saveMemory,
       parentId: MENU_IDS.parent,
       title: 'Save to memory',
+      contexts: ['selection'],
+    });
+
+    // Add to knowledge base
+    ext.contextMenus.create({
+      id: MENU_IDS.addToKb,
+      parentId: MENU_IDS.parent,
+      title: 'Add to knowledge base',
       contexts: ['selection'],
     });
   });
@@ -665,8 +721,8 @@ ext.contextMenus.onClicked.addListener(
     const pageUrl: string = tab?.url || '';
     const pageTitle: string = tab?.title || '';
 
-    // "Save to memory" goes directly to the backend, no sidebar needed
-    if (menuId === MENU_IDS.saveMemory) {
+    // "Save to memory" / "Add to KB" go directly to the backend, no sidebar needed
+    if (menuId === MENU_IDS.saveMemory || menuId === MENU_IDS.addToKb) {
       fetch(`${BACKEND}/api/knowledge/save`, {
         method: 'POST',
         headers: backendHeaders(),

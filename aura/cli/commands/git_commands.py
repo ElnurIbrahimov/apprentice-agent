@@ -102,7 +102,8 @@ def handle_pr(agent, arg, context) -> Optional[str]:
     if result["success"]:
         _pr_console.print(f"[green]PR created: {result['url']}[/green]")
     else:
-        _pr_console.print(f"[red]{result['error']}[/red]")
+        from ..display import show_error as _pr_err
+        _pr_err(result['error'])
 
 
 def handle_branch(agent, arg, context) -> Optional[str]:
@@ -116,7 +117,8 @@ def handle_branch(agent, arg, context) -> Optional[str]:
     if result["success"]:
         _branch_console.print(f"[green]Created branch: {result['branch']}[/green]")
     else:
-        _branch_console.print(f"[red]{result['message']}[/red]")
+        from ..display import show_error as _branch_err
+        _branch_err(result['message'])
 
 
 def handle_stash(agent, arg, context) -> Optional[str]:
@@ -127,7 +129,8 @@ def handle_stash(agent, arg, context) -> Optional[str]:
     if result["success"]:
         _stash_console.print(f"[green]Stashed: {desc}[/green]")
     else:
-        _stash_console.print(f"[red]{result.get('stderr', 'Stash failed')}[/red]")
+        from ..display import show_error as _stash_err
+        _stash_err(result.get('stderr', 'Stash failed'))
 
 
 def handle_blame(agent, arg, context) -> Optional[str]:
@@ -144,4 +147,5 @@ def handle_blame(agent, arg, context) -> Optional[str]:
         _blame_console.print(f"  Commit: [dim]{result.get('commit_message', '?')}[/dim]")
         _blame_console.print(f"  Line:   {result.get('content', '?')}")
     else:
-        _blame_console.print(f"[red]{result.get('error', result.get('stderr', 'Blame failed'))}[/red]")
+        from ..display import show_error as _blame_err
+        _blame_err(result.get('error', result.get('stderr', 'Blame failed')))

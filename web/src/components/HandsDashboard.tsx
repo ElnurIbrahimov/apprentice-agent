@@ -1,38 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { usePolling } from '../hooks/usePolling';
-
-// ── Types ───────────────────────────────────────────────────────────────────
-
-interface HandStats {
-  name: string;
-  description: string;
-  state: string;
-  total_runs: number;
-  total_cost: number;
-  consecutive_failures: number;
-  last_run: string | null;
-  last_run_ts: number;
-  last_error: string | null;
-  model_preference: string;
-  idle_only: boolean;
-  trigger_on_drive: string | null;
-}
-
-interface HandHistoryEntry {
-  timestamp: string;
-  action_type: string;
-  action_data: Record<string, unknown>;
-  agent_id: string;
-}
-
-interface ApprovalRequest {
-  request_id: string;
-  hand_name: string;
-  tool_name: string;
-  args: Record<string, unknown>;
-  timestamp: number;
-  age_seconds: number;
-}
+import type { HandStats, HandHistoryEntry, ApprovalRequest } from '../types';
 
 // ── State config ────────────────────────────────────────────────────────────
 
@@ -64,7 +32,16 @@ function HandCard({ hand, onAction }: {
   onAction: (name: string, action: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [handHistory, setHandHistory] = useState<HandHistoryEntry[]>([]);
   const cfg = STATE_CONFIG[hand.state] ?? STATE_CONFIG.inactive;
+
+  useEffect(() => {
+    if (!expanded) return;
+    fetch(`/api/hands/history?limit=10&hand=${encodeURIComponent(hand.name)}`)
+      .then(r => r.json())
+      .then(data => setHandHistory(data.history || []))
+      .catch(() => {});
+  }, [expanded, hand.name]);
 
   return (
     <div className={`rounded-lg border border-chat-border/20 ${cfg.bg} overflow-hidden`}>
@@ -95,6 +72,25 @@ function HandCard({ hand, onAction }: {
             <p>Idle only: {hand.idle_only ? 'Yes' : 'No'}</p>
           </div>
 
+          {/* Per-hand run history dots */}
+          {handHistory.length > 0 && (
+            <div className="mb-3">
+              <p className="text-[10px] text-chat-text-secondary/50 font-medium mb-1.5 uppercase tracking-wide">Recent Runs</p>
+              <div className="flex gap-1.5 flex-wrap">
+                {handHistory.map((entry, i) => {
+                  const data = entry.action_data;
+                  const success = data.success as boolean;
+                  return (
+                    <div key={i}
+                      title={`${entry.timestamp} — ${String(data.summary || '').slice(0, 80)}`}
+                      className={`w-2.5 h-2.5 rounded-full ${success ? 'bg-green-500/70' : 'bg-red-500/70'}`}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {hand.last_error && (
             <p className="text-[11px] text-red-400/80 mb-2 truncate">
               Error: {hand.last_error}
@@ -116,14 +112,30 @@ function HandCard({ hand, onAction }: {
               >
                 Activate
               </button>
-            ) : hand.state === 'active' ? (
+            ) : hand.state === 'paused' ? (
+              <button
+                onClick={() => onAction(hand.name, 'activate')}
+                className="px-3 py-1 text-[11px] rounded bg-green-500/20 text-green-300 hover:bg-green-500/30 transition-colors"
+              >
+                Resume
+              </button>
+            ) : null}
+            {['active', 'running'].includes(hand.state) && (
+              <button
+                onClick={() => onAction(hand.name, 'pause')}
+                className="px-3 py-1 text-[11px] rounded bg-yellow-500/20 text-yellow-300 hover:bg-yellow-500/30 transition-colors"
+              >
+                Pause
+              </button>
+            )}
+            {['active', 'running', 'paused'].includes(hand.state) && (
               <button
                 onClick={() => onAction(hand.name, 'deactivate')}
                 className="px-3 py-1 text-[11px] rounded bg-gray-500/20 text-gray-300 hover:bg-gray-500/30 transition-colors"
               >
                 Deactivate
               </button>
-            ) : null}
+            )}
           </div>
         </div>
       )}
@@ -237,6 +249,31 @@ export default function HandsDashboard() {
         </span>
       </div>
 
+      {/* Stats summary */}
+      {hands.length > 0 && (() => {
+        const totalRuns = hands.reduce((s, h) => s + h.total_runs, 0);
+        const totalCost = hands.reduce((s, h) => s + h.total_cost, 0);
+        const activeCount = hands.filter(h => ['active', 'running'].includes(h.state)).length;
+        const successRate = history.length > 0
+          ? Math.round(history.filter(e => (e.action_data as Record<string, unknown>).success === true).length / history.length * 100)
+          : null;
+        return (
+          <div className="grid grid-cols-4 gap-2 p-2.5 rounded-lg border border-chat-border/10" style={{ background: 'var(--surface-1)' }}>
+            {[
+              { label: 'Runs', value: String(totalRuns) },
+              { label: 'Success', value: successRate !== null ? `${successRate}%` : '—' },
+              { label: 'Cost', value: `$${totalCost.toFixed(3)}` },
+              { label: 'Active', value: `${activeCount}/${hands.length}` },
+            ].map(s => (
+              <div key={s.label} className="text-center">
+                <p className="text-[10px] text-chat-text-secondary/50">{s.label}</p>
+                <p className="text-sm font-medium text-chat-text">{s.value}</p>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
+
       {/* Approval Queue */}
       {approvals.length > 0 && (
         <div className="space-y-2">
@@ -251,9 +288,15 @@ export default function HandsDashboard() {
 
       {/* Hand Cards */}
       <div className="space-y-2">
-        {hands.map(hand => (
-          <HandCard key={hand.name} hand={hand} onAction={handleAction} />
-        ))}
+        {hands.length === 0 ? (
+          <div className="text-center py-8 text-chat-text-secondary text-xs">
+            No autonomous hands registered yet.
+          </div>
+        ) : (
+          hands.map(hand => (
+            <HandCard key={hand.name} hand={hand} onAction={handleAction} />
+          ))
+        )}
       </div>
 
       {/* Recent History */}

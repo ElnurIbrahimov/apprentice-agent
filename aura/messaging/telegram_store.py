@@ -132,6 +132,19 @@ class TelegramStore:
                     job_id TEXT NOT NULL,
                     enabled INTEGER DEFAULT 1
                 );
+
+                CREATE TABLE IF NOT EXISTS reaction_feedback (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    chat_id TEXT NOT NULL,
+                    message_id INTEGER NOT NULL,
+                    reactions TEXT NOT NULL,
+                    sentiment TEXT NOT NULL,
+                    timestamp REAL NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_reaction_feedback_user
+                    ON reaction_feedback(user_id, timestamp DESC);
             """)
             conn.commit()
 
@@ -452,3 +465,32 @@ class TelegramStore:
                 logger.warning(f"[TelegramStore] Failed to migrate premium JSON: {e}")
 
         return count
+
+    # ==================== REACTION FEEDBACK ====================
+
+    def save_reaction_feedback(self, user_id: str, chat_id: str, message_id: int,
+                               reactions: str, sentiment: str):
+        """Store a user's emoji reaction as feedback."""
+        with self._lock:
+            self._get_conn().execute(
+                "INSERT INTO reaction_feedback (user_id, chat_id, message_id, reactions, sentiment, timestamp) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (user_id, chat_id, message_id, reactions, sentiment, time.time())
+            )
+            self._get_conn().commit()
+
+    def get_reaction_stats(self, user_id: Optional[str] = None) -> dict:
+        """Get reaction feedback statistics."""
+        with self._lock:
+            conn = self._get_conn()
+            if user_id:
+                rows = conn.execute(
+                    "SELECT sentiment, COUNT(*) as cnt FROM reaction_feedback "
+                    "WHERE user_id = ? GROUP BY sentiment", (user_id,)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT sentiment, COUNT(*) as cnt FROM reaction_feedback "
+                    "GROUP BY sentiment"
+                ).fetchall()
+            return {row["sentiment"]: row["cnt"] for row in rows}

@@ -349,3 +349,37 @@ export interface HybridResult {
   node_type: string;
   relationships: string[];
 }
+
+// ── Hands ──
+
+export interface HandStats {
+  name: string;
+  description: string;
+  state: string;
+  total_runs: number;
+  total_tokens: number;
+  total_cost: number;
+  consecutive_failures: number;
+  last_run: string | null;
+  last_run_ts: number;
+  last_error: string | null;
+  model_preference: string;
+  idle_only: boolean;
+  trigger_on_drive: string;
+}
+
+export interface HandHistoryEntry {
+  timestamp: string;
+  action_type: string;
+  action_data: Record<string, unknown>;
+  agent_id: string;
+}
+
+export interface ApprovalRequest {
+  request_id: string;
+  hand_name: string;
+  tool_name: string;
+  args: Record<string, unknown>;
+  timestamp: string;
+  age_seconds: number;
+}

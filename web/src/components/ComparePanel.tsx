@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   PaperAirplaneIcon, StopIcon, ArrowsRightLeftIcon,
   ClipboardDocumentIcon, CheckIcon, EyeIcon, EyeSlashIcon,
+  TrashIcon, ChartBarIcon, TrophyIcon,
 } from '@heroicons/react/24/outline';
 
 /* ── Types ── */
@@ -27,6 +28,132 @@ const PRESETS = [
 ];
 
 const VOTES_KEY = 'aura-compare-votes';
+const RATINGS_KEY = 'aura-elo-ratings';
+
+interface VoteRecord {
+  prompt: string;
+  modelA: string;
+  modelB: string;
+  winner: 'A' | 'B' | 'tie';
+  timestamp: number;
+}
+
+function calculateElo(votes: VoteRecord[]): Record<string, number> {
+  const ratings: Record<string, number> = {};
+  const K = 32;
+  for (const v of votes) {
+    if (!ratings[v.modelA]) ratings[v.modelA] = 1200;
+    if (!ratings[v.modelB]) ratings[v.modelB] = 1200;
+    const ra = ratings[v.modelA], rb = ratings[v.modelB];
+    const ea = 1 / (1 + Math.pow(10, (rb - ra) / 400));
+    const eb = 1 - ea;
+    const sa = v.winner === 'A' ? 1 : v.winner === 'tie' ? 0.5 : 0;
+    const sb = 1 - sa;
+    ratings[v.modelA] = Math.round(ra + K * (sa - ea));
+    ratings[v.modelB] = Math.round(rb + K * (sb - eb));
+  }
+  return ratings;
+}
+
+function EloLeaderboard() {
+  const [sortAsc, setSortAsc] = useState(false);
+  const votes: VoteRecord[] = JSON.parse(localStorage.getItem(VOTES_KEY) || '[]');
+  const ratings = useMemo(() => calculateElo(votes), [votes]);
+
+  const stats = useMemo(() => {
+    const s: Record<string, { wins: number; losses: number; ties: number; comparisons: number }> = {};
+    for (const v of votes) {
+      for (const m of [v.modelA, v.modelB]) {
+        if (!s[m]) s[m] = { wins: 0, losses: 0, ties: 0, comparisons: 0 };
+        s[m].comparisons++;
+      }
+      if (v.winner === 'A') { s[v.modelA].wins++; s[v.modelB].losses++; }
+      else if (v.winner === 'B') { s[v.modelB].wins++; s[v.modelA].losses++; }
+      else { s[v.modelA].ties++; s[v.modelB].ties++; }
+    }
+    return s;
+  }, [votes]);
+
+  const sorted = useMemo(() =>
+    Object.entries(ratings)
+      .sort(([, a], [, b]) => sortAsc ? a - b : b - a)
+      .map(([model, elo], i) => ({ rank: i + 1, model, elo, ...(stats[model] || { wins: 0, losses: 0, ties: 0, comparisons: 0 }) })),
+    [ratings, stats, sortAsc]
+  );
+
+  if (sorted.length === 0) {
+    return <div className="flex-1 flex items-center justify-center text-chat-text-secondary text-sm">No votes recorded yet. Run a comparison and vote!</div>;
+  }
+
+  return (
+    <div className="flex-1 overflow-y-auto p-4">
+      <div className="text-[10px] text-chat-text-secondary mb-3">{votes.length} total votes recorded</div>
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-chat-text-secondary border-b border-chat-border">
+            <th className="text-left py-2 px-1 w-8">#</th>
+            <th className="text-left py-2 px-1">Model</th>
+            <th className="text-right py-2 px-1 cursor-pointer hover:text-chat-text" onClick={() => setSortAsc(!sortAsc)}>
+              ELO {sortAsc ? '↑' : '↓'}
+            </th>
+            <th className="text-right py-2 px-1">W/L/T</th>
+            <th className="text-right py-2 px-1">Win %</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((m) => (
+            <tr key={m.model} className="border-b border-chat-border/30 hover:bg-surface-1">
+              <td className="py-2 px-1 text-chat-text-secondary">{m.rank}</td>
+              <td className="py-2 px-1 text-chat-text font-medium truncate max-w-[180px]">{m.model.split('/').pop()}</td>
+              <td className="py-2 px-1 text-right font-mono text-chat-accent font-semibold">{m.elo}</td>
+              <td className="py-2 px-1 text-right text-chat-text-secondary">{m.wins}/{m.losses}/{m.ties}</td>
+              <td className="py-2 px-1 text-right text-chat-text-secondary">{m.comparisons > 0 ? Math.round(m.wins / m.comparisons * 100) : 0}%</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function VoteHistoryPanel() {
+  const [refreshKey, setRefreshKey] = useState(0);
+  const votes: VoteRecord[] = JSON.parse(localStorage.getItem(VOTES_KEY) || '[]').reverse();
+
+  const clearHistory = () => {
+    localStorage.removeItem(VOTES_KEY);
+    localStorage.removeItem(RATINGS_KEY);
+    setRefreshKey(k => k + 1);
+  };
+
+  if (votes.length === 0) {
+    return <div className="flex-1 flex items-center justify-center text-chat-text-secondary text-sm">No vote history yet.</div>;
+  }
+
+  return (
+    <div className="flex-1 overflow-y-auto p-4" key={refreshKey}>
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-[10px] text-chat-text-secondary">{votes.length} votes</span>
+        <button onClick={clearHistory} className="flex items-center gap-1 text-[10px] text-red-400/60 hover:text-red-400 transition-colors">
+          <TrashIcon className="w-3 h-3" />Clear All
+        </button>
+      </div>
+      <div className="space-y-1.5">
+        {votes.map((v, i) => (
+          <div key={i} className="flex items-center gap-2 text-xs py-1.5 px-2 rounded-lg border border-chat-border/20" style={{ background: 'var(--surface-1)' }}>
+            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${v.winner === 'A' ? 'bg-green-600/20 text-green-400' : v.winner === 'B' ? 'bg-blue-600/20 text-blue-400' : 'bg-yellow-600/20 text-yellow-400'}`}>
+              {v.winner === 'A' ? 'A wins' : v.winner === 'B' ? 'B wins' : 'Tie'}
+            </span>
+            <span className="text-chat-text-secondary truncate flex-1">{v.prompt.slice(0, 60)}{v.prompt.length > 60 ? '…' : ''}</span>
+            <span className="text-[10px] text-chat-text-secondary/50 flex-shrink-0">
+              {new Date(v.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 /* ── Streaming helper ── */
 async function streamGenerate(
@@ -181,6 +308,7 @@ export function ComparePanel() {
   const [blindMode, setBlindMode] = useState(false);
   const [vote, setVote] = useState<'A' | 'B' | 'tie' | null>(null);
   const [revealed, setRevealed] = useState(false);
+  const [activeTab, setActiveTab] = useState<'compare' | 'leaderboard' | 'history'>('compare');
 
   const abortA = useRef<AbortController | null>(null);
   const abortB = useRef<AbortController | null>(null);
@@ -235,7 +363,9 @@ export function ComparePanel() {
       prompt, modelA, modelB, winner,
       timestamp: Date.now(),
     });
-    localStorage.setItem(VOTES_KEY, JSON.stringify(votes.slice(-50)));
+    const capped = votes.slice(-100);
+    localStorage.setItem(VOTES_KEY, JSON.stringify(capped));
+    localStorage.setItem(RATINGS_KEY, JSON.stringify(calculateElo(capped)));
   }, [blindMode, prompt, modelA, modelB]);
 
   const handleRun = useCallback(async () => {
@@ -364,8 +494,25 @@ export function ComparePanel() {
         </div>
       </div>
 
+      {/* Tab bar */}
+      <div className="flex gap-1 px-4 py-1.5 border-b border-chat-border flex-shrink-0">
+        {([['compare', 'Compare'], ['leaderboard', 'Leaderboard'], ['history', 'History']] as const).map(([id, label]) => (
+          <button
+            key={id}
+            onClick={() => setActiveTab(id)}
+            className={`text-xs px-3 py-1.5 rounded-md transition-colors ${activeTab === id ? 'bg-chat-accent text-white' : 'text-chat-text-secondary hover:text-chat-text'}`}
+            style={activeTab !== id ? { background: 'var(--surface-1)' } : undefined}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'leaderboard' && <EloLeaderboard />}
+      {activeTab === 'history' && <VoteHistoryPanel />}
+
       {/* Side-by-side panes */}
-      <div className="flex-1 overflow-hidden flex flex-col md:flex-row gap-3 p-3">
+      {activeTab === 'compare' && <><div className="flex-1 overflow-hidden flex flex-col md:flex-row gap-3 p-3">
         <ModelPane
           label={blindMode ? 'Response A' : 'Model A'}
           model={modelA}
@@ -386,28 +533,28 @@ export function ComparePanel() {
 
       {/* Voting row */}
       {!isGenerating && stateA.output && stateB.output && (
-        <div className="flex-shrink-0 border-t border-chat-border" style={{ background: 'var(--surface-0)' }}>
+        <div className="flex-shrink-0 border-t border-chat-border animate-slide-up-fade" style={{ background: 'var(--surface-0)' }}>
           <div className="flex items-center justify-center gap-3 py-3">
             <button
               onClick={() => handleVote('A')}
-              className={`px-4 py-2 rounded-lg text-sm transition-colors ${vote === 'A' ? 'bg-green-600 text-white' : 'bg-surface-2 text-chat-text-secondary hover:text-chat-text'}`}
+              className={`px-4 py-2 rounded-lg text-sm transition-colors animation-delay-100 ${vote === 'A' ? 'bg-green-600 text-white' : 'bg-surface-2 text-chat-text-secondary hover:text-chat-text'}`}
               style={vote !== 'A' ? { background: 'var(--surface-2)' } : undefined}
             >
-              👈 {blindMode ? 'Response A' : modelA || 'Model A'} is better
+              A wins — {blindMode ? 'Response A' : modelA || 'Model A'}
             </button>
             <button
               onClick={() => handleVote('tie')}
-              className={`px-4 py-2 rounded-lg text-sm transition-colors ${vote === 'tie' ? 'bg-yellow-600 text-white' : 'bg-surface-2 text-chat-text-secondary hover:text-chat-text'}`}
+              className={`px-4 py-2 rounded-lg text-sm transition-colors animation-delay-200 ${vote === 'tie' ? 'bg-yellow-600 text-white' : 'bg-surface-2 text-chat-text-secondary hover:text-chat-text'}`}
               style={vote !== 'tie' ? { background: 'var(--surface-2)' } : undefined}
             >
-              🤝 Tie
+              Tie
             </button>
             <button
               onClick={() => handleVote('B')}
-              className={`px-4 py-2 rounded-lg text-sm transition-colors ${vote === 'B' ? 'bg-green-600 text-white' : 'bg-surface-2 text-chat-text-secondary hover:text-chat-text'}`}
+              className={`px-4 py-2 rounded-lg text-sm transition-colors animation-delay-300 ${vote === 'B' ? 'bg-green-600 text-white' : 'bg-surface-2 text-chat-text-secondary hover:text-chat-text'}`}
               style={vote !== 'B' ? { background: 'var(--surface-2)' } : undefined}
             >
-              {blindMode ? 'Response B' : modelB || 'Model B'} is better 👉
+              B wins — {blindMode ? 'Response B' : modelB || 'Model B'}
             </button>
           </div>
 
@@ -419,6 +566,7 @@ export function ComparePanel() {
           )}
         </div>
       )}
+      </>}
     </div>
   );
 }

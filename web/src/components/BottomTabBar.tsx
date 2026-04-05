@@ -66,8 +66,8 @@ export function BottomTabBar({ activeTab, onTabChange }: BottomTabBarProps) {
             style={{ minHeight: 44 }}
             aria-label={tab.label}
           >
-            <Icon className="w-5 h-5" />
-            {isActive && <span className="text-[9px] font-medium">{tab.label}</span>}
+            <Icon className={`w-5 h-5 ${isActive ? '' : 'opacity-70'}`} />
+            <span className={`text-[10px] font-medium ${isActive ? '' : 'text-chat-text-tertiary'}`}>{tab.label}</span>
           </button>
         );
       })}

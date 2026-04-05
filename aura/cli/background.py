@@ -226,6 +226,28 @@ def notify_completion(task: BackgroundTask) -> None:
         pass
 
 
+def notify_operation_complete(operation: str, summary: str, success: bool = True) -> None:
+    """Send desktop notification for any completed long operation."""
+    try:
+        import os
+        if os.name == "nt":
+            try:
+                from winotify import Notification
+                toast = Notification(
+                    app_id="AURA",
+                    title=f"{'Done' if success else 'Failed'}: {operation[:40]}",
+                    msg=summary[:100],
+                )
+                toast.show()
+                return
+            except ImportError:
+                pass
+        # Fallback: terminal bell
+        print("\a", end="", flush=True)
+    except Exception:
+        pass
+
+
 def create_background_indicator(manager: BackgroundManager) -> str:
     """Status bar indicator for running background tasks."""
     count = manager.running_count

@@ -47,7 +47,11 @@ _MODE_SHORT = {
 
 
 def cycle_permission_mode(current: str) -> str:
-    """Cycle to the next permission mode."""
+    """Cycle to the next permission mode.
+
+    PLAN mode is entered via /plan, not cycling. If currently in PLAN or
+    PLAN_APPROVE, cycling moves to CAREFUL (first in cycle order).
+    """
     try:
         current_mode = PermissionMode(current)
     except ValueError:
@@ -55,7 +59,8 @@ def cycle_permission_mode(current: str) -> str:
     try:
         idx = _MODE_ORDER.index(current_mode)
     except ValueError:
-        idx = 0  # Fall back to start of cycle
+        # Current mode not in cycle order (e.g. PLAN) — enter at CAREFUL
+        return _MODE_ORDER[0].value
     next_idx = (idx + 1) % len(_MODE_ORDER)
     return _MODE_ORDER[next_idx].value
 

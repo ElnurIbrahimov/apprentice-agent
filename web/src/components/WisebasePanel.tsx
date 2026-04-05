@@ -287,8 +287,8 @@ export function WisebasePanel() {
         storedViaApi = true;
         fetchMemories();
       }
-    } catch {
-      // Ignore — endpoint may not exist
+    } catch (e) {
+      console.warn('[Wisebase] Memory API unavailable:', e);
     }
 
     // Get AI confirmation/rephrasing regardless
@@ -509,8 +509,22 @@ export function WisebasePanel() {
                       {entry.category}
                     </span>
                   )}
+                  {entry.id && (
+                    <button
+                      onClick={async () => {
+                        try {
+                          await fetch(`/api/memory/${entry.id}`, { method: 'DELETE' });
+                          fetchMemories();
+                        } catch { /* ignore */ }
+                      }}
+                      className="text-[10px] text-red-400/60 hover:text-red-400 ml-auto transition-colors"
+                      title="Delete memory"
+                    >
+                      Delete
+                    </button>
+                  )}
                   {entry.relevance !== undefined && (
-                    <span className="text-[10px] text-emerald-400 font-medium ml-auto">
+                    <span className={`text-[10px] text-emerald-400 font-medium ${entry.id ? '' : 'ml-auto'}`}>
                       {Math.round(entry.relevance * 100)}% match
                     </span>
                   )}
@@ -656,8 +670,8 @@ export function WisebasePanel() {
                   ) : (
                     <BookOpenIcon className="w-3.5 h-3.5 text-indigo-400" />
                   )}
-                  <span className={`text-[10px] font-medium ${addSuccess ? 'text-emerald-400' : 'text-indigo-400'}`}>
-                    {addSuccess ? 'Stored + confirmed' : 'AURA confirms...'}
+                  <span className={`text-[10px] font-medium ${addSuccess ? 'text-emerald-400' : isAdding ? 'text-indigo-400' : 'text-amber-400'}`}>
+                    {addSuccess ? 'Stored + confirmed' : isAdding ? 'Processing...' : 'Acknowledged (not stored)'}
                   </span>
                   {isAdding && (
                     <div className="ml-auto shimmer-bar h-1.5 w-10" />

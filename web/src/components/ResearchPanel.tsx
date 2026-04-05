@@ -1,10 +1,13 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, Children } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   MagnifyingGlassIcon,
   ClipboardDocumentIcon,
   ClockIcon,
   StopIcon,
   CheckIcon,
+  ArrowDownTrayIcon,
 } from '@heroicons/react/24/outline';
 
 /* ── Types ── */
@@ -14,6 +17,7 @@ interface ResearchSource {
   title: string;
   url: string;
   snippet: string;
+  score?: number;
 }
 
 interface HistoryEntry {
@@ -47,6 +51,33 @@ function formatTimestamp(ts: number): string {
 
 function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n) + '…' : s;
+}
+
+/* ── Citation linker ── */
+const citationRegex = /\[(\d+)\]/g;
+function renderWithCitations(text: string, sourcesLen: number): React.ReactNode {
+  const parts: React.ReactNode[] = [];
+  let last = 0;
+  let match;
+  citationRegex.lastIndex = 0;
+  while ((match = citationRegex.exec(text)) !== null) {
+    const num = parseInt(match[1], 10);
+    if (num >= 1 && num <= sourcesLen) {
+      if (match.index > last) parts.push(text.slice(last, match.index));
+      parts.push(
+        <a
+          key={match.index}
+          href={`#source-${num}`}
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); document.getElementById(`source-${num}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }}
+          className="text-[10px] font-bold text-chat-accent hover:text-purple-300 cursor-pointer no-underline bg-chat-accent/10 px-0.5 rounded align-super"
+        >[{num}]</a>
+      );
+      last = match.index + match[0].length;
+    }
+  }
+  if (last === 0) return text;
+  parts.push(text.slice(last));
+  return <>{parts}</>;
 }
 
 /* ── Main Component ── */
@@ -256,6 +287,26 @@ export function ResearchPanel() {
       setTimeout(() => setCopied(false), 2000);
     });
   }, [finalReport, history, activeHistoryIdx]);
+
+  const handleDownloadMarkdown = useCallback(() => {
+    const reportText = activeHistoryIdx !== null ? history[activeHistoryIdx]?.report : finalReport;
+    if (!reportText) return;
+    const activeSources = activeHistoryIdx !== null ? history[activeHistoryIdx]?.sources ?? [] : sources;
+    const activeTopic = activeHistoryIdx !== null ? history[activeHistoryIdx]?.topic : topic;
+    const sourcesSection = activeSources.length > 0
+      ? '\n\n---\n\n## Sources\n\n' + activeSources.map((s, i) =>
+          `[${i + 1}] **${s.title || s.url}**  \n${s.url}${s.snippet ? `  \n> ${s.snippet}` : ''}`
+        ).join('\n\n')
+      : '';
+    const fullMd = `# ${activeTopic}\n\n${reportText}${sourcesSection}`;
+    const blob = new Blob([fullMd], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `research-${(activeTopic || 'report').slice(0, 30).replace(/\s+/g, '-').toLowerCase()}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [finalReport, sources, topic, history, activeHistoryIdx]);
 
   const loadHistoryEntry = useCallback((idx: number) => {
     const entry = history[idx];
@@ -487,6 +538,17 @@ export function ResearchPanel() {
               )}
             </button>
           )}
+          {hasReport && (
+            <button
+              onClick={handleDownloadMarkdown}
+              className="flex items-center gap-1.5 text-xs text-chat-text-secondary hover:text-chat-text transition-colors px-2 py-1 rounded-md"
+              style={{ background: 'var(--border-subtle)' }}
+              title="Download as Markdown file"
+            >
+              <ArrowDownTrayIcon className="w-3.5 h-3.5" />
+              Download
+            </button>
+          )}
         </div>
 
         {/* Report content */}
@@ -527,11 +589,37 @@ export function ResearchPanel() {
                 </div>
               )}
 
-              {/* Report body — rendered as plain text preserving whitespace/structure */}
-              <div className="text-sm text-chat-text leading-relaxed whitespace-pre-wrap font-mono-off">
-                {displayReport}
-                {isGenerating && (
-                  <span className="inline-block w-1.5 h-4 bg-purple-400 animate-pulse ml-0.5 align-middle rounded-sm" />
+              {/* Report body */}
+              <div className="text-sm text-chat-text leading-relaxed
+                [&_h1]:text-base [&_h1]:font-semibold [&_h1]:text-chat-text [&_h1]:mt-4 [&_h1]:mb-2
+                [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:text-chat-text [&_h2]:mt-3 [&_h2]:mb-1.5
+                [&_h3]:text-xs [&_h3]:font-semibold [&_h3]:text-chat-text-secondary [&_h3]:mt-2 [&_h3]:mb-1
+                [&_ul]:list-disc [&_ul]:pl-4 [&_ul]:space-y-0.5 [&_ol]:list-decimal [&_ol]:pl-4 [&_ol]:space-y-0.5
+                [&_li]:text-sm [&_strong]:font-semibold [&_strong]:text-chat-text
+                [&_code]:bg-surface-2 [&_code]:px-1 [&_code]:rounded [&_code]:text-xs [&_code]:font-mono
+                [&_blockquote]:border-l-2 [&_blockquote]:border-chat-accent [&_blockquote]:pl-3 [&_blockquote]:text-chat-text-secondary [&_blockquote]:italic
+                [&_a]:text-chat-accent [&_a]:underline [&_a]:underline-offset-2 [&_p]:mb-2
+              ">
+                {isGenerating ? (
+                  <span className="whitespace-pre-wrap">
+                    {displayReport}
+                    <span className="inline-block w-1.5 h-4 bg-purple-400 animate-pulse ml-0.5 align-middle rounded-sm" />
+                  </span>
+                ) : (
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      p: ({ children: c }) => (
+                        <p className="mb-2">
+                          {Children.map(c, (child) =>
+                            typeof child === 'string' ? renderWithCitations(child, sources.length) : child
+                          )}
+                        </p>
+                      ),
+                    }}
+                  >
+                    {displayReport}
+                  </ReactMarkdown>
                 )}
               </div>
               <div ref={reportEndRef} />
@@ -546,15 +634,16 @@ export function ResearchPanel() {
                     {sources.map((src, i) => (
                       <a
                         key={i}
+                        id={`source-${i + 1}`}
                         href={src.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-start gap-3 rounded-lg border border-chat-border bg-surface-1 px-3 py-2.5 hover:border-chat-accent/50 transition-colors group"
+                        className="flex items-start gap-3 rounded-lg border border-chat-border bg-surface-1 px-3 py-2.5 hover:border-chat-accent/50 transition-colors group scroll-mt-4"
                       >
                         <span className="flex-shrink-0 text-[10px] font-bold text-chat-accent w-4 mt-0.5">
                           [{i + 1}]
                         </span>
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           <p className="text-xs font-medium text-chat-text truncate group-hover:text-chat-accent transition-colors">
                             {src.title || src.url}
                           </p>
@@ -563,6 +652,14 @@ export function ResearchPanel() {
                             <p className="text-[11px] text-chat-text-secondary mt-1 line-clamp-2 leading-relaxed">
                               {src.snippet}
                             </p>
+                          )}
+                          {typeof src.score === 'number' && (
+                            <div className="flex items-center gap-1.5 mt-1.5">
+                              <div className="flex-1 h-1 rounded-full bg-surface-2 overflow-hidden">
+                                <div className="h-full rounded-full bg-gradient-to-r from-purple-500 to-blue-400" style={{ width: `${Math.min(100, Math.round(src.score * 100))}%` }} />
+                              </div>
+                              <span className="text-[10px] text-chat-text-secondary">{Math.round(src.score * 100)}%</span>
+                            </div>
                           )}
                         </div>
                       </a>

@@ -52,6 +52,8 @@ class CheckpointManager:
         """Snapshot multiple files. Returns checkpoint ID."""
         with self._lock:
             cp_id = f"cp_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+            if not re.match(r'^cp_\d+_[a-f0-9]{8}$', cp_id):
+                raise ValueError(f"Generated checkpoint ID failed validation: {cp_id}")
             cp_dir = self._dir / cp_id
             cp_dir.mkdir(parents=True, exist_ok=True)
 

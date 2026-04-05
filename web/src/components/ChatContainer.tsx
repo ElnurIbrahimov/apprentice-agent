@@ -44,21 +44,25 @@ const QUICK_ACTIONS = [
     text: 'Research the latest breakthroughs in AI',
     subtitle: 'Deep web research with citations',
     icon: GlobeAltIcon,
+    color: 'text-blue-400',
   },
   {
     text: 'Generate a Python data visualization',
     subtitle: 'Code interpreter with live output',
     icon: CommandLineIcon,
+    color: 'text-green-400',
   },
   {
     text: 'Compare models on a creative task',
     subtitle: 'Side-by-side model comparison',
     icon: ScaleIcon,
+    color: 'text-amber-400',
   },
   {
     text: 'Build me a landing page',
     subtitle: 'Web creator with live preview',
     icon: CpuChipIcon,
+    color: 'text-purple-400',
   },
 ];
 
@@ -480,7 +484,7 @@ export function ChatContainer() {
         onTouchStart={handleDrawerTouchStart}
         onTouchMove={handleDrawerTouchMove}
         onTouchEnd={handleDrawerTouchEnd}
-        style={{ viewTransitionName: 'chat-messages' }}
+        style={{ viewTransitionName: 'chat-messages', WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain' } as React.CSSProperties}
         className="flex-1 overflow-y-auto relative messages-scroll">
         {isSwitchingConversation && messages.length === 0 ? (
           <div className="animate-pulse space-y-4 p-4">
@@ -490,15 +494,10 @@ export function ChatContainer() {
           </div>
         ) : messages.length === 0 ? (
           // Empty state with enhanced styling
-          <div className="flex flex-col items-center justify-center h-full text-chat-text-secondary relative px-6">
+          <div className="flex flex-col items-center justify-center h-full text-chat-text-secondary relative px-4 sm:px-6">
             {/* NextGen welcome heading */}
-            <h1 className="text-5xl font-light tracking-tight mb-4 text-center animate-fade-in"
-              style={{
-                background: 'linear-gradient(180deg, #fff 0%, rgba(255,255,255,0.4) 100%)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                letterSpacing: '-0.04em',
-              }}
+            <h1 className="text-3xl sm:text-5xl font-light tracking-tight mb-4 text-center animate-fade-in text-gradient-hero"
+              style={{ letterSpacing: '-0.04em' }}
             >
               What should we explore?
             </h1>
@@ -533,7 +532,7 @@ export function ChatContainer() {
                     `}
                   >
                     <div className="w-9 h-9 rounded-lg bg-surface-2 flex items-center justify-center">
-                      <Icon className="w-4 h-4 text-chat-text" />
+                      <Icon className={`w-4 h-4 ${action.color}`} />
                     </div>
                     <span className="text-sm font-medium text-chat-text group-hover:text-white transition-colors">
                       {action.text}
@@ -574,7 +573,7 @@ export function ChatContainer() {
               setIsUserScrolledUp(false);
               messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
             }}
-            className="absolute bottom-24 right-6 z-10 p-2 bg-purple-600 hover:bg-purple-500 text-white rounded-full shadow-lg transition-all"
+            className="absolute bottom-24 right-6 z-10 p-2 bg-chat-accent hover:brightness-110 text-white rounded-full shadow-lg transition-all"
             aria-label="Scroll to bottom"
           >
             <ChevronDownIcon className="w-5 h-5" />
@@ -707,7 +706,7 @@ export function ChatContainer() {
       {hasCitationsInConversation && (
         <button
           onClick={toggleCitationsPanel}
-          className="fixed bottom-24 right-6 z-20 flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-medium transition-all duration-200"
+          className="fixed bottom-36 right-6 z-20 flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-medium transition-all duration-200"
           style={{
             background: citationsPanelOpen
               ? 'rgba(139, 92, 246, 0.3)'

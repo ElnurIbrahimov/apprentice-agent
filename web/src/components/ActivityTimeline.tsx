@@ -10,10 +10,21 @@ const CATEGORY_CONFIG: Record<string, {
 }> = {
   tool:      { icon: '🔧', color: 'text-blue-400',   bg: 'bg-blue-500/10',   label: 'Tools' },
   memory:    { icon: '🧠', color: 'text-purple-400', bg: 'bg-purple-500/10', label: 'Memory' },
-  emotion:   { icon: '💫', color: 'text-pink-400',   bg: 'bg-pink-500/10',   label: 'Emotion' },
-  proactive: { icon: '⚡', color: 'text-yellow-400', bg: 'bg-yellow-500/10', label: 'Proactive' },
+  emotion:   { icon: '💜', color: 'text-pink-400',   bg: 'bg-pink-500/10',   label: 'Emotion' },
+  proactive: { icon: '⚡', color: 'text-amber-400',  bg: 'bg-amber-500/10',  label: 'Proactive' },
   strategy:  { icon: '🎯', color: 'text-green-400',  bg: 'bg-green-500/10',  label: 'Strategy' },
   system:    { icon: '⚙️', color: 'text-gray-400',   bg: 'bg-gray-500/10',   label: 'System' },
+};
+
+// Sub-type icons for proactive daemon events (prevents visual monotony)
+const PROACTIVE_SUBTYPE_ICONS: Record<string, string> = {
+  prepare: '📋',
+  suggest: '💡',
+  notify:  '🔔',
+  observe: '👁',
+  analyze: '📊',
+  remind:  '⏰',
+  monitor: '📡',
 };
 
 const ALL_CATEGORIES = ['all', 'tool', 'memory', 'emotion', 'proactive', 'strategy'] as const;
@@ -39,19 +50,32 @@ function formatRelTime(ts: number): string {
 
 // ── EventCard ────────────────────────────────────────────────────────────────
 
+function getEventIcon(event: ActivityEvent, cfg: typeof CATEGORY_CONFIG[string]): string {
+  if (event.category === 'proactive' && event.summary) {
+    // Extract sub-type from "Daemon: prepare — ..." format
+    const match = event.summary.match(/(?:Daemon:\s*)?(\w+)/i);
+    if (match) {
+      const subtype = match[1].toLowerCase();
+      if (subtype in PROACTIVE_SUBTYPE_ICONS) return PROACTIVE_SUBTYPE_ICONS[subtype];
+    }
+  }
+  return cfg.icon;
+}
+
 function EventCard({ event, isExpanded, onToggle }: {
   event: ActivityEvent;
   isExpanded: boolean;
   onToggle: () => void;
 }) {
   const cfg = CATEGORY_CONFIG[event.category] ?? CATEGORY_CONFIG.system;
+  const icon = getEventIcon(event, cfg);
   return (
     <div className={`rounded-lg border border-chat-border/20 ${cfg.bg} overflow-hidden`}>
       <button
         onClick={onToggle}
         className="w-full px-3 py-2 flex items-center gap-2.5 text-left hover:brightness-110 transition-all"
       >
-        <span className="text-sm shrink-0">{cfg.icon}</span>
+        <span className={`flex items-center justify-center w-7 h-7 rounded-md text-sm shrink-0 ${cfg.bg}`}>{icon}</span>
         <div className="flex-1 min-w-0">
           <p className="text-xs text-chat-text truncate">{event.summary}</p>
           <p className="text-[10px] text-chat-text-secondary/60 mt-0.5">

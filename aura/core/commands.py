@@ -17,6 +17,7 @@ def handle_subcommand(command: str, args) -> int:
     """Dispatch subcommand. Returns exit code."""
     handlers = {
         "init": cmd_init,
+        "setup": cmd_setup,
         "doctor": cmd_doctor,
         "config": cmd_config,
         "models": cmd_models,
@@ -187,31 +188,51 @@ def cmd_doctor(args) -> int:
 
 
 def cmd_config(args) -> int:
-    """Show current configuration."""
+    """Show current configuration including AURA.md overrides."""
     from aura.config import Config
+    from aura.core.context import get_aura_md_config
 
     print("\nAura Configuration\n")
 
+    # Global config
+    print("  Global:")
     config_items = [
         ("Model (fast)", Config.MODEL_FAST),
         ("Model (reason)", Config.MODEL_REASON),
         ("Model (code)", Config.MODEL_CODE),
         ("Ollama host", getattr(Config, "OLLAMA_HOST", "http://localhost:11434")),
     ]
-
     for label, value in config_items:
-        print(f"  {label:20s}: {value}")
+        print(f"    {label:20s}: {value}")
 
-    # Show chains
+    # Model chains
     chains = {
         "Fast chain": getattr(Config, "MODEL_FAST_CHAIN", []),
         "Reason chain": getattr(Config, "MODEL_REASON_CHAIN", []),
         "Code chain": getattr(Config, "MODEL_CODE_CHAIN", []),
     }
-    print()
-    for label, chain in chains.items():
-        if chain:
-            print(f"  {label}: {' -> '.join(chain)}")
+    has_chains = any(chains.values())
+    if has_chains:
+        print()
+        print("  Model chains:")
+        for label, chain in chains.items():
+            if chain:
+                print(f"    {label}: {' -> '.join(chain)}")
+
+    # Project-level AURA.md overrides
+    aura_config = get_aura_md_config(os.getcwd())
+    if aura_config:
+        print()
+        print("  Project (AURA.md):")
+        for key in ["tier", "model", "test_cmd", "auto_test", "max_iterations", "budget"]:
+            val = aura_config.get(key)
+            if val is not None:
+                print(f"    {key:20s}: {val}")
+        perms = aura_config.get("permissions")
+        if perms:
+            print(f"    {'permissions':20s}: {perms}")
+    else:
+        print(f"\n  No AURA.md found in {os.getcwd()} (run: aura init)")
 
     print()
     return 0
@@ -270,9 +291,19 @@ def cmd_commit(args) -> int:
     if getattr(args, 'all', False):
         git.add(cwd, files=".")
 
-    # Get diff of staged changes (--cached shows staged, not unstaged)
-    staged_result = git._run_git(["diff", "--cached"], cwd) if hasattr(git, '_run_git') else git.diff(cwd)
-    diff_text = staged_result.get("output", staged_result.get("diff", ""))
+    # Get diff of staged changes
+    try:
+        staged_proc = subprocess.run(
+            ["git", "diff", "--cached", "--stat"],
+            capture_output=True, text=True, timeout=10, cwd=cwd,
+        )
+        staged_diff_proc = subprocess.run(
+            ["git", "diff", "--cached"],
+            capture_output=True, text=True, timeout=10, cwd=cwd,
+        )
+        diff_text = staged_diff_proc.stdout
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        diff_text = diff_result.get("diff", "")
 
     if not diff_text:
         print("No staged changes. Use 'git add' first or pass --all.")
@@ -282,19 +313,28 @@ def cmd_commit(args) -> int:
     print("Generating commit message...")
     try:
         agent = ApprenticeAgent()
+        # Use more diff context for better messages
+        max_diff = 8000
+        truncated = f"\n... (truncated {len(diff_text) - max_diff} chars)" if len(diff_text) > max_diff else ""
         prompt = f"""Generate a concise git commit message for these changes.
 Return ONLY the commit message (1-2 lines), no explanation.
 
 Diff:
-{diff_text[:3000]}"""
+{diff_text[:max_diff]}{truncated}"""
 
         result = agent.brain.think(prompt, use_history=False)
-        message = result.strip().strip('"').strip("'")
+        message = result.strip().strip('"').strip("'").strip("`")
 
         # Clean up common LLM artifacts
-        for prefix in ["commit message:", "here's", "here is"]:
+        for prefix in ["commit message:", "here's the commit message:", "here's",
+                        "here is the commit message:", "here is", "message:"]:
             if message.lower().startswith(prefix):
-                message = message[len(prefix):].strip()
+                message = message[len(prefix):].strip().strip('"').strip("'")
+                break
+
+        if not message:
+            print("Error: LLM returned empty commit message.")
+            return 1
 
     except Exception as e:
         print(f"Error generating message: {e}")
@@ -325,11 +365,35 @@ Diff:
 
 
 def cmd_cost(args) -> int:
-    """Show session cost breakdown."""
-    # This shows the cost from a fresh brain — mainly useful
-    # after a session when called from the REPL
-    print("\nSession cost info is available during active sessions.")
-    print("Use '/cost' in interactive mode, or check the summary after one-shot runs.\n")
+    """Show session cost breakdown from activity log."""
+    try:
+        from aura.cli.activity_log import ActivityLog
+        log = ActivityLog()
+        stats = log.get_stats()
+    except (ImportError, OSError) as e:
+        print(f"\nCould not read activity log: {e}")
+        print("Cost data is tracked during interactive sessions.\n")
+        return 1
+
+    print("\nAura Cost Summary\n")
+    total_cost = stats.get("total_cost_usd", 0.0)
+    total_sessions = stats.get("total_sessions", 0)
+    total_messages = stats.get("total_messages", 0)
+    total_tokens = stats.get("total_tokens", 0)
+
+    print(f"  Total cost:     ${total_cost:.4f}")
+    print(f"  Sessions:       {total_sessions}")
+    print(f"  Messages:       {total_messages}")
+    print(f"  Tokens:         {total_tokens:,}")
+
+    # Per-model breakdown if available
+    model_costs = stats.get("model_costs", {})
+    if model_costs:
+        print(f"\n  By model:")
+        for model, cost in sorted(model_costs.items(), key=lambda x: x[1], reverse=True):
+            print(f"    {model:30s} ${cost:.4f}")
+
+    print()
     return 0
 
 
@@ -472,3 +536,113 @@ def _detect_test_cmd(project_root: str) -> str:
         return "go test ./..."
 
     return ""
+
+
+def cmd_setup(args) -> int:
+    """Interactive setup wizard for configuring Aura in a project."""
+    cwd = os.getcwd()
+    project_name = Path(cwd).name
+
+    print(f"\n  Aura Setup Wizard for '{project_name}'\n")
+
+    # Step 1: Detect project type
+    print("  Step 1: Detecting project...")
+    try:
+        from aura.tools.code_search import CodeSearchTool
+        searcher = CodeSearchTool()
+        info = searcher.detect_project_type(cwd)
+        project_type = info.get("project_type", "unknown")
+        frameworks = info.get("frameworks", [])
+        stack = info.get("stack", [])
+        if project_type != "unknown":
+            print(f"    Detected: {project_type} ({', '.join(stack)})")
+        else:
+            print("    Could not auto-detect project type.")
+    except Exception:
+        project_type = "unknown"
+        frameworks = []
+        stack = []
+        print("    Could not auto-detect (code_search unavailable).")
+
+    # Step 2: Choose tier
+    print("\n  Step 2: Choose model tier")
+    print("    fast     — Quick responses, lower cost")
+    print("    balanced — Good balance of speed and quality (recommended)")
+    print("    max      — Best quality, higher cost")
+    tier = _prompt("    Tier", "balanced")
+    if tier not in ("fast", "balanced", "max"):
+        print(f"    Invalid tier '{tier}', using 'balanced'.")
+        tier = "balanced"
+
+    # Step 3: Model
+    model = _prompt("\n  Step 3: Model (or 'auto' for smart routing)", "auto")
+
+    # Step 4: Test command
+    detected_test = _detect_test_cmd(cwd)
+    default_test = detected_test or "pytest"
+    test_cmd = _prompt(f"\n  Step 4: Test command", default_test)
+    auto_test_str = _prompt("    Auto-run tests after edits? [y/n]", "y")
+    auto_test = auto_test_str.lower() in ("y", "yes")
+
+    # Step 5: API keys
+    print("\n  Step 5: Checking API keys...")
+    for key_name in ["OLLAMA_API_KEY", "BRAVE_API_KEY", "TAVILY_API_KEY"]:
+        has = bool(os.environ.get(key_name))
+        print(f"    {key_name}: {'found' if has else 'not set'}")
+
+    # Step 6: Generate AURA.md
+    print("\n  Step 6: Creating AURA.md...")
+    aura_md_path = os.path.join(cwd, "AURA.md")
+
+    if os.path.exists(aura_md_path):
+        overwrite = _prompt("    AURA.md already exists. Overwrite? [y/n]", "n")
+        if overwrite.lower() not in ("y", "yes"):
+            print("    Kept existing AURA.md.")
+            print(f"\n  Setup complete! Run 'aura' to start.\n")
+            return 0
+
+    # Build content
+    lines = ["---", f"tier: {tier}"]
+    if model and model != "auto":
+        lines.append(f"model: {model}")
+    if test_cmd:
+        lines.append(f"test_cmd: {test_cmd}")
+    if auto_test:
+        lines.append("auto_test: true")
+    lines.extend([
+        "# permissions:",
+        "#   shell: auto",
+        "#   edit_file: auto",
+        "---",
+        "",
+        f"# {project_name}",
+        "",
+    ])
+    if stack:
+        lines.append(f"Stack: {', '.join(stack)}")
+    if frameworks:
+        lines.append(f"Frameworks: {', '.join(frameworks)}")
+    lines.extend([
+        "",
+        "## Instructions",
+        "",
+        "<!-- Add project-specific instructions for Aura here -->",
+        "",
+    ])
+
+    content = "\n".join(lines)
+    with open(aura_md_path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+    print(f"    Created {aura_md_path}")
+    print(f"\n  Setup complete! Run 'aura' to start.\n")
+    return 0
+
+
+def _prompt(text: str, default: str) -> str:
+    """Prompt with a default value shown in brackets."""
+    try:
+        value = input(f"{text} [{default}]: ").strip()
+        return value if value else default
+    except (EOFError, KeyboardInterrupt):
+        return default

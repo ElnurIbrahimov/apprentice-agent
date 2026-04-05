@@ -5,7 +5,7 @@ import sys
 from typing import Any, NoReturn
 
 
-def run_agentic_oneshot(agent: Any, prompt: str, args: Any) -> NoReturn:
+def run_agentic_oneshot(agent: Any, prompt: str, args: Any, bridge: Any = None) -> NoReturn:
     from .display import show_banner, console
     from aura.core.agentic_loop import run_agentic
     from aura.core.context import gather_context, get_aura_md_config
@@ -19,7 +19,7 @@ def run_agentic_oneshot(agent: Any, prompt: str, args: Any) -> NoReturn:
     context = gather_context(project_root)
     aura_config = get_aura_md_config(project_root)
 
-    tier = aura_config.get("tier", args.tier)
+    tier = args.tier or aura_config.get("tier", "balanced")
     budget = args.budget or aura_config.get("budget")
     router = ModelRouter(tier=tier, budget_usd=budget)
     model = args.model or aura_config.get("model") or None
@@ -49,21 +49,35 @@ def run_agentic_oneshot(agent: Any, prompt: str, args: Any) -> NoReturn:
     console.print(f"  [dim]Model: {display_model} | Tier: {tier}[/dim]")
     console.print()
 
-    result = run_agentic(
-        brain=agent.brain,
-        prompt=prompt,
-        project_root=project_root,
-        permissions=permissions,
-        model_override=model,
-        max_iterations=args.max_iterations,
-        budget_usd=budget,
-        context=context,
-        trust_mode=args.trust,
-        aura_config=aura_config,
-        router=router,
-    )
+    try:
+        result = run_agentic(
+            brain=agent.brain,
+            prompt=prompt,
+            project_root=project_root,
+            permissions=permissions,
+            model_override=model,
+            max_iterations=args.max_iterations,
+            budget_usd=budget,
+            context=context,
+            trust_mode=args.trust,
+            aura_config=aura_config,
+            router=router,
+        )
+    except KeyboardInterrupt:
+        console.print("\n  [red]Aborted.[/red]")
+        sys.exit(130)
+    except Exception as e:
+        console.print(f"\n  [red]Agent execution failed: {e}[/red]")
+        sys.exit(1)
+    finally:
+        if bridge:
+            bridge.stop()
 
-    stats = agent.brain.get_session_stats()
-    console.print(f"\n  [dim]{result['iterations']} iterations, {result['tool_calls']} tool calls, ${stats['cost_usd']:.4f}[/dim]")
+    try:
+        stats = agent.brain.get_session_stats()
+        cost = stats.get("cost_usd", 0.0)
+    except (AttributeError, TypeError, KeyError):
+        cost = 0.0
+    console.print(f"\n  [dim]{result['iterations']} iterations, {result['tool_calls']} tool calls, ${cost:.4f}[/dim]")
 
     sys.exit(0 if result.get("success") else 1)

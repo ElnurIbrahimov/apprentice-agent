@@ -213,7 +213,7 @@ export function RecordPanel() {
         recognitionRef.current = recognition;
         recognition.continuous = true;
         recognition.interimResults = true;
-        recognition.lang = 'en-US';
+        recognition.lang = navigator.language || 'en-US';
 
         recognition.onresult = (event: any) => {
           let interim = '';

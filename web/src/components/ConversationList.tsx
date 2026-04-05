@@ -334,7 +334,7 @@ export function ConversationList() {
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Search..."
-          className="w-full px-3 py-1.5 pl-8 text-xs bg-chat-input border border-chat-border/50 rounded-lg text-chat-text placeholder-chat-text-secondary/50 outline-none focus:border-purple-500/50 transition-colors"
+          className="w-full px-3 py-2 pl-8 text-[16px] sm:text-xs bg-chat-input border border-chat-border/50 rounded-lg text-chat-text placeholder-chat-text-secondary/50 outline-none focus:border-purple-500/50 transition-colors"
         />
         <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-chat-text-secondary/50 pointer-events-none" />
         {searchQuery && (
@@ -342,7 +342,7 @@ export function ConversationList() {
             onClick={() => setSearchQuery('')}
             className="absolute right-2 top-1/2 -translate-y-1/2 text-chat-text-secondary/50 hover:text-chat-text"
           >
-            <XMarkIcon className="w-3 h-3" />
+            <XMarkIcon className="w-4 h-4" />
           </button>
         )}
       </div>
@@ -372,7 +372,9 @@ export function ConversationList() {
                     key={conv.id}
                     onClick={() => handleSwitch(conv.id)}
                     onContextMenu={(e) => handleContextMenu(e, conv.id)}
-                    className={`group flex items-center gap-2 px-2.5 py-2 rounded-lg cursor-pointer transition-all duration-150 ${
+                    role="button"
+                    tabIndex={0}
+                    className={`group flex items-center gap-2 px-2.5 py-3 rounded-lg cursor-pointer transition-all duration-150 ${
                       conv.id === currentConversationId
                         ? 'bg-purple-600/20 border border-purple-500/30'
                         : 'hover:bg-chat-assistant/30 border border-transparent'
@@ -392,7 +394,7 @@ export function ConversationList() {
                             if (e.key === 'Enter') handleRenameSubmit();
                             if (e.key === 'Escape') setEditingId(null);
                           }}
-                          className="flex-1 bg-chat-input border border-purple-500/50 rounded px-1.5 py-0.5 text-xs text-chat-text outline-none"
+                          className="flex-1 bg-chat-input border border-purple-500/50 rounded px-1.5 py-1 text-[16px] sm:text-xs text-chat-text outline-none"
                         />
                         <button onClick={handleRenameSubmit} className="p-0.5 text-green-400 hover:text-green-300">
                           <CheckIcon className="w-3.5 h-3.5" />
@@ -426,17 +428,17 @@ export function ConversationList() {
                       <div className="flex items-center gap-0.5 flex-shrink-0 opacity-50 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                         <button
                           onClick={(e) => { e.stopPropagation(); handleRenameStart(conv.id, conv.title); }}
-                          className="p-1 text-chat-text-secondary/50 hover:text-chat-text rounded transition-colors"
+                          className="p-1.5 text-chat-text-secondary/50 hover:text-chat-text rounded transition-colors"
                           title="Rename"
                         >
-                          <PencilIcon className="w-3 h-3" />
+                          <PencilIcon className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); handleSaveToMemory(conv.id); }}
-                          className="p-1 text-chat-text-secondary/50 hover:text-purple-400 rounded transition-colors"
+                          className="p-1.5 text-chat-text-secondary/50 hover:text-purple-400 rounded transition-colors"
                           title="Save to Memory"
                         >
-                          <BookmarkIcon className="w-3 h-3" />
+                          <BookmarkIcon className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={(e) => handleDeleteClick(e, conv.id)}
@@ -456,6 +458,11 @@ export function ConversationList() {
               </div>
             );
           })}
+          {filtered.length === 0 && (
+            <div className="text-center py-6 text-chat-text-secondary/60 text-xs">
+              {searchQuery ? 'No conversations match your search' : 'No conversations yet'}
+            </div>
+          )}
         </div>
       )}
 

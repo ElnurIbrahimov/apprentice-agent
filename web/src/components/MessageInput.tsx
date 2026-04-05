@@ -145,7 +145,11 @@ export function MessageInput({
       }
     };
     document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    document.addEventListener('touchstart', handler as EventListener);
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      document.removeEventListener('touchstart', handler as EventListener);
+    };
   }, []);
 
   // Cleanup speech recognition on unmount
@@ -170,7 +174,7 @@ export function MessageInput({
     const recognition = new SR();
     recognition.continuous = false;
     recognition.interimResults = false;
-    recognition.lang = 'en-US';
+    recognition.lang = navigator.language || 'en-US';
     recognition.onresult = (event: any) => {
       const transcript = event.results[0][0].transcript;
       if (mountedRef.current) {
@@ -385,7 +389,7 @@ export function MessageInput({
                 disabled={disabled}
                 aria-label="More options"
                 style={{
-                  width: 36, height: 36, borderRadius: 8,
+                  width: 40, height: 40, borderRadius: 10,
                   background: showPlusMenu ? 'var(--surface-3)' : 'var(--surface-2)',
                   border: '1px solid var(--border-default)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -519,6 +523,7 @@ export function MessageInput({
                       bottom: 36,
                       right: 0,
                       width: 240,
+                      maxWidth: 'calc(100vw - 2rem)',
                       maxHeight: 320,
                       background: 'var(--surface-1)',
                       border: '1px solid var(--border-default)',
@@ -562,7 +567,7 @@ export function MessageInput({
               disabled={disabled}
               aria-label={isListening ? 'Stop listening' : 'Voice input'}
               style={{
-                width: 36, height: 36, borderRadius: 8,
+                width: 40, height: 40, borderRadius: 10,
                 background: isListening ? 'rgba(239,68,68,0.2)' : voiceError ? 'rgba(239,68,68,0.15)' : 'transparent',
                 border: voiceError ? '1px solid rgba(239,68,68,0.4)' : 'none',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -583,7 +588,7 @@ export function MessageInput({
                 onClick={onStop}
                 aria-label="Stop generation"
                 style={{
-                  width: 36, height: 36, borderRadius: 8,
+                  width: 40, height: 40, borderRadius: 10,
                   background: 'var(--surface-2)',
                   border: '1px solid var(--border-default)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -601,7 +606,7 @@ export function MessageInput({
                 disabled={!canSend}
                 aria-label="Send message"
                 style={{
-                  width: 36, height: 36, borderRadius: 8,
+                  width: 40, height: 40, borderRadius: 10,
                   background: canSend ? 'var(--text-primary)' : 'var(--surface-2)',
                   border: 'none',
                   color: canSend ? 'var(--bg-base)' : 'var(--text-tertiary)',

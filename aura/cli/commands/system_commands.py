@@ -26,14 +26,16 @@ def handle_hook(agent, arg, context) -> Optional[str]:
                 _hook_mgr.add(parts_h[0], parts_h[1])
                 _hook_console.print(f"[green]Hook added: {parts_h[0]} -> {parts_h[1]}[/green]")
             except ValueError as e:
-                _hook_console.print(f"[red]{e}[/red]")
+                from ..display import show_error as _hook_err
+                _hook_err(str(e))
         else:
             _hook_console.print("[dim]Usage: /hook add <event> <command>[/dim]")
     elif sub[0] == "remove" and len(sub) > 1:
         if _hook_mgr.remove(sub[1]):
             _hook_console.print(f"[green]Hook removed: {sub[1]}[/green]")
         else:
-            _hook_console.print(f"[red]Hook not found: {sub[1]}[/red]")
+            from ..display import show_error as _hook_err2
+            _hook_err2(f"Hook not found: {sub[1]}")
 
 
 def handle_mcp(agent, arg, context) -> Optional[str]:

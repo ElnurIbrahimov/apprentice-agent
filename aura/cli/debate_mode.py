@@ -220,15 +220,15 @@ def run_debate(brain, question: str, user_models: Optional[str] = None) -> Debat
 
     lock = threading.Lock()
 
+    # Shared timeout pool for all debaters (avoids per-debater executor leak)
+    timeout_pool = ThreadPoolExecutor(max_workers=len(positions))
+
     def _run_debater(pos: DebatePosition):
         cfg = ROLE_CONFIG[pos.role]
         prompt = f"Question: {question}"
         start = time.time()
         try:
-            # Use a per-model timeout to prevent one slow model from stalling the debate
-            from concurrent.futures import ThreadPoolExecutor as _TP, TimeoutError as _TE
-            _p = _TP(max_workers=1)
-            fut = _p.submit(
+            fut = timeout_pool.submit(
                 brain.think,
                 prompt,
                 system_prompt=cfg["system"],
@@ -237,18 +237,17 @@ def run_debate(brain, question: str, user_models: Optional[str] = None) -> Debat
             )
             try:
                 response = fut.result(timeout=DEBATER_TIMEOUT)
-            finally:
-                _p.shutdown(wait=False)
+            except FuturesTimeoutError:
+                with lock:
+                    pos.error = f"Timed out after {DEBATER_TIMEOUT}s"
+                    pos.elapsed = time.time() - start
+                    pos.done = True
+                return
             # think() can return str or dict
             if isinstance(response, dict):
                 response = response.get("response", response.get("content", str(response)))
             with lock:
                 pos.argument = response or "(no response)"
-                pos.elapsed = time.time() - start
-                pos.done = True
-        except FuturesTimeoutError:
-            with lock:
-                pos.error = f"Timed out after {DEBATER_TIMEOUT}s"
                 pos.elapsed = time.time() - start
                 pos.done = True
         except Exception as e:
@@ -273,6 +272,7 @@ def run_debate(brain, question: str, user_models: Optional[str] = None) -> Debat
                     live.update(_build_debate_display(result, "debating"))
             # Final update with all positions done
             live.update(_build_debate_display(result, "synthesizing"))
+        timeout_pool.shutdown(wait=False)
 
         # Phase 2: Judge synthesis
         from aura.config import Config

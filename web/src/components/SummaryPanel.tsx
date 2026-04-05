@@ -264,66 +264,24 @@ export function SummaryPanel() {
         {/* ── Left: Input panel ── */}
         <div className="flex flex-col md:w-[420px] md:min-w-[320px] border-b md:border-b-0 md:border-r border-chat-border flex-shrink-0 max-md:max-h-[55vh]">
 
-          {/* Input mode toggle */}
-          <div className="flex gap-1 p-3 border-b border-chat-border flex-shrink-0">
-            <button
-              onClick={() => setInputMode('text')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                inputMode === 'text'
-                  ? 'bg-chat-accent text-white'
-                  : 'text-chat-text-secondary hover:text-chat-text'
-              }`}
-              style={inputMode !== 'text' ? { background: 'var(--surface-1)' } : {}}
-            >
-              <DocumentTextIcon className="w-3.5 h-3.5" />
-              Text
-            </button>
-            <button
-              onClick={() => setInputMode('url')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                inputMode === 'url'
-                  ? 'bg-chat-accent text-white'
-                  : 'text-chat-text-secondary hover:text-chat-text'
-              }`}
-              style={inputMode !== 'url' ? { background: 'var(--surface-1)' } : {}}
-            >
-              <LinkIcon className="w-3.5 h-3.5" />
-              URL
-            </button>
+          {/* Header */}
+          <div className="flex items-center gap-2 p-3 border-b border-chat-border flex-shrink-0">
+            <DocumentTextIcon className="w-4 h-4 text-chat-text-secondary" />
+            <span className="text-xs font-medium text-chat-text-secondary">Paste text to summarize</span>
           </div>
 
           {/* Input area */}
           <div className="flex-1 p-3 overflow-hidden flex flex-col gap-2">
-            {inputMode === 'text' ? (
-              <textarea
-                value={inputText}
-                onChange={e => setInputText(e.target.value)}
-                placeholder="Paste your text here..."
-                className="flex-1 w-full p-3 rounded-lg bg-surface-1 border border-chat-border text-chat-text text-sm resize-none outline-none focus:border-chat-accent placeholder-chat-text-secondary/50 leading-relaxed"
-                disabled={isGenerating}
-              />
-            ) : (
-              <div className="flex flex-col gap-2">
-                <input
-                  type="url"
-                  value={urlInput}
-                  onChange={e => setUrlInput(e.target.value)}
-                  placeholder="https://example.com/article"
-                  className="w-full p-3 rounded-lg bg-surface-1 border border-chat-border text-chat-text text-sm outline-none focus:border-chat-accent placeholder-chat-text-secondary/50"
-                  disabled={isGenerating}
-                  onKeyDown={e => { if (e.key === 'Enter') handleSummarize(); }}
-                />
-                <p className="text-[10px] text-chat-text-secondary px-1">
-                  Note: The model cannot fetch URLs directly. It will summarize based on what it knows, or suggest you paste the content.
-                </p>
-              </div>
-            )}
-
-            {inputMode === 'text' && (
-              <div className="text-[10px] text-chat-text-secondary text-right">
-                {inputWordCount} {inputWordCount === 1 ? 'word' : 'words'}
-              </div>
-            )}
+            <textarea
+              value={inputText}
+              onChange={e => setInputText(e.target.value)}
+              placeholder="Paste your text here..."
+              className="flex-1 w-full p-3 rounded-lg bg-surface-1 border border-chat-border text-chat-text text-sm resize-none outline-none focus:border-chat-accent placeholder-chat-text-secondary/50 leading-relaxed"
+              disabled={isGenerating}
+            />
+            <div className="text-[10px] text-chat-text-secondary text-right">
+              {inputWordCount} {inputWordCount === 1 ? 'word' : 'words'}
+            </div>
           </div>
 
           {/* Options */}

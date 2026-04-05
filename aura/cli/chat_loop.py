@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -16,7 +17,7 @@ def _rewind_picker(cp_mgr: Any, console: Any) -> bool:
     for i, cp in enumerate(cps[:10]):
         ts = _time.strftime("%H:%M:%S", _time.localtime(cp["timestamp"]))
         files = ", ".join(
-            f["original_path"].split("/")[-1].split("\\")[-1]
+            os.path.basename(f["original_path"])
             for f in cp["files"]
         )
         console.print(f"  {i+1}. [{ts}] {cp['label']} ({files})")
@@ -29,7 +30,7 @@ def _rewind_picker(cp_mgr: Any, console: Any) -> bool:
         selected = cps[int(choice) - 1]
         if cp_mgr.restore(selected["id"]):
             files = ", ".join(
-                f["original_path"].split("/")[-1].split("\\")[-1]
+                os.path.basename(f["original_path"])
                 for f in selected["files"]
             )
             console.print(f"[green]Restored: {files}[/green]")
@@ -52,7 +53,10 @@ def _display_channel_message(console: Any, msg: Any) -> None:
     body = Text()
     body.append(f"\u2502 ", style="dim cyan")
     body.append(f"{msg.user_name}: ", style="bold")
-    body.append(msg.text[:500])
+    display_text = msg.text[:500]
+    if len(msg.text) > 500:
+        display_text += "..."
+    body.append(display_text)
 
     bottom = "\u2514" + "\u2500" * (width)
 

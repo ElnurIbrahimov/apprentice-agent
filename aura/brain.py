@@ -20,6 +20,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 from .config import Config
 from .identity import get_identity_prompt
 from .core.token_manager import estimate_messages_tokens, get_context_window
+from .prompt_builder import SystemPromptBuilder, classify_budget, build_budget_instruction
 
 # ChatGPT OAuth client (optional — uses ChatGPT Plus/Pro subscription)
 try:
@@ -483,19 +484,14 @@ class OllamaBrain:
         self._conversations_index_cache: dict | None = None
         self._conversations_index_lock = threading.Lock()
 
-        # Project context cache (initialized here for thread safety)
-        self._project_ctx_cache = None
-        self._project_ctx_ts: float = 0.0
-        self._project_ctx_cwd: str = ""
+        # System prompt builder (owns project context + subsystem caches)
+        self._prompt_builder = SystemPromptBuilder()
 
         # Migrate legacy history and initialize conversations
         self._migrate_legacy_history()
         self._load_history()
 
-        # System prompt additions TTL cache (Fix 4: prevent 8+ module queries per rapid message)
-        self._cached_system_additions: Optional[str] = None
-        self._system_additions_ts: float = 0.0
-        self._system_additions_lock = threading.RLock()
+        # (system additions cache moved into SystemPromptBuilder)
 
         # ALMA Emotional Intelligence
         self._alma_enabled = ALMA_AVAILABLE
@@ -521,18 +517,18 @@ class OllamaBrain:
         try:
             if hasattr(self, 'client') and self.client is not None:
                 self.client._client.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[BRAIN] Local client close failed: {e}")
         try:
             if hasattr(self, '_cloud_client') and self._cloud_client is not None:
                 self._cloud_client._client.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[BRAIN] Cloud client close failed: {e}")
         try:
             if hasattr(self, '_chatgpt_client'):
                 self._chatgpt_client = None
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[BRAIN] ChatGPT client cleanup failed: {e}")
         logger.debug("[BRAIN] HTTP clients closed")
 
     def _get_client_for_model(self, model: str) -> tuple:
@@ -1466,7 +1462,8 @@ class OllamaBrain:
                         )
                     else:
                         index = []
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"[BRAIN] Conversation index parse failed: {e}")
                     index = []
             for entry in index:
                 if entry["id"] == self._current_conversation_id:
@@ -1945,114 +1942,9 @@ class OllamaBrain:
         except Exception as e:
             logger.warning(f"[BRAIN] Auto-compact submission failed: {e}")
 
-    def _get_cached_system_additions(self) -> str:
-        """Return TTL-cached subsystem additions for the system prompt.
-
-        Queries all consciousness/emotion/user-model modules and caches the
-        combined result for 12 seconds. This prevents 8+ module round-trips on
-        every rapid sequential message. Thread-safe via _system_additions_lock.
-        """
-        with self._system_additions_lock:
-            if self._cached_system_additions is not None and (time.time() - self._system_additions_ts) < 12.0:
-                return self._cached_system_additions
-
-            additions = []
-            _PER_SOURCE_CAP = 1000  # max chars per subsystem
-            _TOTAL_CAP = 2000       # max chars for all additions combined
-
-            def _cap(text: str, source: str) -> str:
-                """Cap a subsystem's contribution and log if it was oversized."""
-                if text and len(text) > _PER_SOURCE_CAP:
-                    logger.warning(
-                        f"[BRAIN] Subsystem '{source}' returned {len(text)} chars, capping to {_PER_SOURCE_CAP}"
-                    )
-                    # Try to cut at a sentence boundary; fall back to hard cut
-                    cut = text[:_PER_SOURCE_CAP].rfind('. ')
-                    return text[:cut + 1] if cut > _PER_SOURCE_CAP // 2 else text[:_PER_SOURCE_CAP]
-                return text
-
-            # === LEARNED CONTEXT INJECTION (Phase 4D: Letta-style) ===
-            try:
-                from aura.tools.neurodream import get_neurodream
-                nd = get_neurodream()
-                learned_ctx = nd.get_learned_context_prompt()
-                if learned_ctx:
-                    additions.append(_cap(learned_ctx, "NeuroDream"))
-            except Exception as e:
-                logger.debug(f"[Brain] non-critical: {e}")
-            # === CALENDAR CONTEXT INJECTION (Phase 5D) ===
-            try:
-                from aura.proactive.monitors.calendar_monitor import get_calendar_monitor
-                cm = get_calendar_monitor()
-                cal_ctx = cm.get_context_for_prompt()
-                if cal_ctx:
-                    additions.append(_cap(cal_ctx, "CalendarMonitor"))
-            except Exception as e:
-                logger.debug(f"[Brain] non-critical: {e}")
-            # === SELF-MODEL INJECTION (Phase 6B: Metacognitive Self-Improvement) ===
-            try:
-                from aura.consciousness.metacognition import get_metacognitive_engine
-                mc = get_metacognitive_engine()
-                self_model_ctx = mc.get_self_model_prompt()
-                if self_model_ctx:
-                    additions.append(_cap(self_model_ctx, "MetacognitionEngine"))
-            except Exception as e:
-                logger.debug(f"[Brain] non-critical: {e}")
-            # === USER MODEL INJECTION (Phase 6C / ADV-04: Theory of Mind) ===
-            try:
-                if Config.MULTI_USER_ENABLED:
-                    from aura.multi_user import get_multi_user_manager
-                    manager = get_multi_user_manager()
-                    user_model = manager.get_active_user_model()
-                    if user_model:
-                        user_model_ctx = user_model.get_context_for_prompt()
-                        if user_model_ctx:
-                            additions.append(_cap(user_model_ctx, "TheoryOfMind/MultiUser"))
-                else:
-                    from aura.proactive.theory_of_mind import get_theory_of_mind
-                    tom = get_theory_of_mind()
-                    user_model_ctx = tom.get_context_for_prompt()
-                    if user_model_ctx:
-                        additions.append(_cap(user_model_ctx, "TheoryOfMind"))
-            except Exception as e:
-                logger.debug(f"[Brain] non-critical: {e}")
-            # === MOTIVATION INJECTION (Phase 6E: Intrinsic Motivation) ===
-            try:
-                from aura.consciousness.intrinsic_motivation import get_intrinsic_motivation
-                im = get_intrinsic_motivation()
-                motivation_ctx = im.get_context_for_prompt()
-                if motivation_ctx:
-                    additions.append(_cap(motivation_ctx, "IntrinsicMotivation"))
-            except Exception as e:
-                logger.debug(f"[Brain] non-critical: {e}")
-            # Global Workspace Theory injection removed
-            # === WORLD STATE INJECTION (ADV-02: Persistent World Model) ===
-            try:
-                from aura.consciousness.world_model import get_world_model
-                wm = get_world_model()
-                world_ctx = wm.get_context_summary()
-                if world_ctx:
-                    additions.append(_cap(world_ctx, "WorldModel"))
-            except Exception as e:
-                logger.debug(f"[Brain] non-critical: {e}")
-            result = "\n\n".join(additions)
-            # Cap total additions to prevent context overflow
-            if len(result) > _TOTAL_CAP:
-                logger.warning(f"[BRAIN] System additions total {len(result)} chars (from {len(additions)} sources), truncating to {_TOTAL_CAP}")
-                result = result[:_TOTAL_CAP]
-            self._cached_system_additions = result
-            self._system_additions_ts = time.time()
-            return result
-
     @staticmethod
     def _classify_budget(query: str) -> int:
-        q = query.lower().strip()
-        # Only classify truly minimal responses (yes/no/ok) as small
-        if q in ("yes", "no", "ok", "thanks", "thx", "bye", "k"):
-            return Config.BUDGET_SMALL   # one-word replies
-        if any(kw in q for kw in ("explain", "analyze", "compare", "research", "write", "implement")):
-            return Config.BUDGET_LARGE   # complex
-        return Config.BUDGET_MEDIUM       # default (greetings, questions, etc.)
+        return classify_budget(query)
 
     def _build_neuro_llm_options(self, prompt: str, neuro: dict) -> dict:
         """Build neuromodulator-adjusted LLM options. Shared by think() and think_stream()."""
@@ -2139,7 +2031,7 @@ class OllamaBrain:
 
     @staticmethod
     def _build_budget_instruction(budget: int) -> str:
-        return f"\n\n[Response budget: ~{budget} tokens. Be appropriately concise.]"
+        return build_budget_instruction(budget)
 
     def _build_full_system_prompt(
         self,
@@ -2147,199 +2039,16 @@ class OllamaBrain:
         system_prompt: Optional[str],
         tone_modifier: Optional[str],
     ) -> str:
-        """Build the complete system prompt for a think/think_stream call.
-
-        Shared by think() and think_stream() to avoid duplicate logic:
-        identity → caller system_prompt → subsystem context (TTL-cached) →
-        emotional tone → ALMA modulation → budget instruction.
-        """
-        identity_prompt = get_identity_prompt()
-        full = f"{identity_prompt}\n\n{system_prompt}" if system_prompt else identity_prompt
-
-        # === WEB SEARCH INSTRUCTION ===
-        web_search_instruction = (
-            "IMPORTANT: If the user asks about something you are not sure about, "
-            "something recent, current events, news, real-time data (dates, prices, "
-            "weather, scores, stock prices, exchange rates), or asks you to look "
-            "something up or verify information — you MUST use the web_search or "
-            "tavily tool to search the internet FIRST. Do NOT guess or make up "
-            "answers. Always verify uncertain facts by searching."
+        """Build the complete system prompt — delegates to SystemPromptBuilder."""
+        return self._prompt_builder.build(
+            prompt,
+            system_prompt,
+            tone_modifier,
+            action_mode=self._action_mode,
+            alma_enabled=self._alma_enabled,
+            auto_emotional_tone=self._auto_emotional_tone,
+            skill_list_fn=getattr(self, 'skill_list_summaries', None),
         )
-        full = f"{full}\n\n{web_search_instruction}"
-
-        # === DESIGN SYSTEM INJECTION (frontend/rapid/artifact modes) ===
-        try:
-            from aura.prompts.design_system import DESIGN_SYSTEM_PROMPT, DESIGN_SYSTEM_MODES
-            if self._action_mode and self._action_mode in DESIGN_SYSTEM_MODES:
-                full = f"{full}\n\n{DESIGN_SYSTEM_PROMPT}"
-                logger.debug(f"[BRAIN] Design system prompt injected for mode: {self._action_mode}")
-        except ImportError:
-            logger.debug("[BRAIN] aura.prompts.design_system not available")
-
-        # === SUBSYSTEM CONTEXT INJECTION (cached, TTL=12s) ===
-        # Side-effect calls (observe/record) still run every time; only context
-        # retrieval is cached to avoid 8+ module round-trips on rapid messages.
-        try:
-            if Config.MULTI_USER_ENABLED:
-                from aura.multi_user import get_multi_user_manager
-                manager = get_multi_user_manager()
-                user_model = manager.get_active_user_model()
-                if user_model:
-                    user_model.observe_message(prompt, role="user")
-            else:
-                from aura.proactive.theory_of_mind import get_theory_of_mind
-                tom = get_theory_of_mind()
-                tom.observe_message(prompt, role="user")
-        except Exception as e:
-            logger.debug(f"[Brain] non-critical: {e}")
-        try:
-            from aura.consciousness.intrinsic_motivation import get_intrinsic_motivation
-            get_intrinsic_motivation().record_interaction()  # Satisfies social drive
-        except Exception as e:
-            logger.debug(f"[Brain] non-critical: {e}")
-        sys_additions = self._get_cached_system_additions()
-        if sys_additions:
-            full = f"{full}\n\n{sys_additions}"
-
-        # === PROJECT CONTEXT INJECTION (AURA.md + auto-detect fallback) ===
-        try:
-            _now = time.time()
-            _cwd = os.getcwd()
-            # 60-second cache to avoid re-detecting every query
-            if (self._project_ctx_cache is None
-                    or _now - self._project_ctx_ts > 60
-                    or self._project_ctx_cwd != _cwd):
-                from aura.tools.project_context import detect_and_load_context
-                self._project_ctx_cache = detect_and_load_context(_cwd)
-                self._project_ctx_ts = _now
-                self._project_ctx_cwd = _cwd
-
-            ctx = self._project_ctx_cache
-            if ctx and ctx.get("has_aura_md"):
-                full = f"{full}\n\n## Active Project Context\n{ctx['aura_md_content']}"
-            elif ctx and ctx.get("project_type") and ctx["project_type"] != "unknown":
-                parts = [f"**Type:** {ctx['project_type']}"]
-                if ctx.get("stack"):
-                    parts.append(f"**Stack:** {', '.join(ctx['stack'])}")
-                if ctx.get("frameworks"):
-                    parts.append(f"**Frameworks:** {', '.join(ctx['frameworks'])}")
-                if ctx.get("key_files"):
-                    parts.append(f"**Key Files:** {', '.join(ctx['key_files'][:10])}")
-                full = f"{full}\n\n## Auto-Detected Project Context\n" + "\n".join(parts)
-        except Exception as e:
-            logger.debug(f"[Brain] non-critical: {e}")
-        # === SEMANTIC CODEBASE CONTEXT ===
-        # Skip expensive operations if prompt is already near 12K cap
-        MAX_SYSTEM_PROMPT_CHARS = 25000
-        try:
-            from aura.tools.codebase_index import CodebaseIndex
-            _cwd = os.getcwd()
-            _idx_db = Path("data/codebase_index/index.db")
-            # Also check legacy path
-            _idx_db_legacy = Path(_cwd) / ".aura" / "index.db"
-            if (_idx_db.exists() or _idx_db_legacy.exists()) and len(full) < MAX_SYSTEM_PROMPT_CHARS - 1000:
-                idx = CodebaseIndex(_cwd)
-                try:
-                    if idx.stats()["total_chunks"] > 0:
-                        relevant = idx.search(prompt, top_k=3)
-                        if relevant and relevant[0]["score"] > 0.3:
-                            ctx_parts = []
-                            for r in relevant:
-                                if r["score"] > 0.3:
-                                    ctx_parts.append(f"**{r['file_path']}:{r['line_start']}** ({r['kind']} `{r['name']}`):\n```\n{r['content'][:300]}\n```")
-                            if ctx_parts:
-                                full = f"{full}\n\n## Relevant Code\n" + "\n\n".join(ctx_parts)
-                finally:
-                    idx.close()
-        except Exception as e:
-            logger.debug(f"[BRAIN] Code context retrieval failed: {e}")
-
-        # === PROGRESSIVE SKILL CATALOG ===
-        # Show available skills so the LLM knows it can load full procedures on demand.
-        # skill_list_summaries() comes from SkillManagerMixin — may not be present yet.
-        if len(full) < MAX_SYSTEM_PROMPT_CHARS - 1500:
-            try:
-                if hasattr(self, 'skill_list_summaries') and callable(self.skill_list_summaries):
-                    skill_summaries = self.skill_list_summaries()
-                    if skill_summaries:
-                        skill_lines = "\n".join(
-                            f"- {s['name']}: {s.get('description', 'no description')}"
-                            for s in skill_summaries
-                        )
-                        # Cap skill section to 500 chars to stay within budget
-                        if len(skill_lines) > 500:
-                            skill_lines = skill_lines[:500].rsplit("\n", 1)[0]
-                        full = f"{full}\n\n[Available Skills - use load_skill tool to load full procedures]\n{skill_lines}"
-            except Exception as e:
-                logger.debug(f"[BRAIN] Skill catalog injection failed: {e}")
-
-        # === DEFERRED TOOL LISTING ===
-        # Show tools that exist but aren't loaded yet — LLM can activate via tool_search.
-        if len(full) < MAX_SYSTEM_PROMPT_CHARS - 1000:
-            try:
-                from aura.tools.loader import get_deferred_tool_list
-                deferred_tools = get_deferred_tool_list()
-                if deferred_tools:
-                    tool_lines = "\n".join(
-                        f"- {t['name']}: {t.get('description', 'no description')}"
-                        for t in deferred_tools
-                    )
-                    # Cap deferred tools section to 800 chars
-                    if len(tool_lines) > 800:
-                        tool_lines = tool_lines[:800].rsplit("\n", 1)[0]
-                    full = f"{full}\n\n[Additional Tools - use tool_search to find and activate]\n{tool_lines}"
-            except ImportError:
-                logger.debug("[BRAIN] aura.tools.loader.get_deferred_tool_list not available yet")
-            except Exception as e:
-                logger.debug(f"[BRAIN] Deferred tool listing failed: {e}")
-
-        # One-liner instruction for skill/tool discovery (always added if space permits)
-        hint = "Use load_skill or tool_search when a task matches a listed skill or requires a specialized tool."
-        if len(full) + len(hint) + 4 < MAX_SYSTEM_PROMPT_CHARS:
-            full = f"{full}\n\n{hint}"
-
-        # Apply emotional style prompt — behavioral directives from ALMA
-        # The style prompt already encodes verbosity/formality/enthusiasm as behavior
-        if tone_modifier:
-            full = f"{full}\n\n{tone_modifier}"
-        elif self._alma_enabled and self._auto_emotional_tone:
-            try:
-                from aura.emotion.integration import get_emotional_style_prompt
-                alma_style = get_emotional_style_prompt()
-                if alma_style:
-                    full = f"{full}\n\n{alma_style}"
-            except Exception as e:
-                logger.debug(f"[BRAIN] ALMA style prompt failed: {e}")
-        # === EPISODIC MEMORY AUTO-RECALL ===
-        # Surface relevant past context for non-trivial queries (best-effort, never blocks)
-        # Skip if already near budget cap
-        if len(prompt) > 25 and len(full) < MAX_SYSTEM_PROMPT_CHARS - 500:
-            try:
-                from aura.memory.unified_memory import get_unified_memory
-                um_results = get_unified_memory().query(prompt, k=3)
-                if um_results:
-                    memory_ctx = "\n\n## Relevant Past Context\n"
-                    for m in um_results:
-                        ts = m.metadata.get("created_at", "")[:10] if m.metadata.get("created_at") else ""
-                        memory_ctx += f"- [{ts}] {m.content[:120]}\n"
-                    full = f"{full}{memory_ctx}"
-            except Exception as e:
-                logger.debug(f"[Brain] non-critical: {e}")
-        budget = self._classify_budget(prompt)
-        full = f"{full}{self._build_budget_instruction(budget)}"
-
-        # Safety: cap system prompt to ~12K chars (~3K tokens) to leave room
-        # for conversation history and response in the model's context window.
-        if len(full) > MAX_SYSTEM_PROMPT_CHARS:
-            logger.warning(f"[BRAIN] System prompt too large ({len(full)} chars), truncating to {MAX_SYSTEM_PROMPT_CHARS}")
-            cut = full[:MAX_SYSTEM_PROMPT_CHARS].rfind('\n\n')
-            if cut > MAX_SYSTEM_PROMPT_CHARS // 2:
-                full = full[:cut]
-            else:
-                full = full[:MAX_SYSTEM_PROMPT_CHARS]
-            full += "\n\n[System context truncated for length]"
-
-        return full
 
     # -----------------------------------------------------------------
     # Shared setup / teardown for think() and think_stream()
@@ -3099,7 +2808,8 @@ class OllamaBrain:
                 default=None
             )
             return result is not None
-        except Exception:
+        except Exception as e:
+            logger.debug(f"[BRAIN] Model keep-alive failed: {e}")
             return False
 
     def unload_all_models(self) -> dict:

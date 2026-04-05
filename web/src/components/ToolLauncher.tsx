@@ -12,6 +12,7 @@ interface Tool {
   id: ToolId;
   label: string;
   icon: string;
+  bg: string;   // Tailwind bg class for icon container
   desc: string;
 }
 
@@ -24,45 +25,45 @@ const TOOL_GROUPS: ToolGroup[] = [
   {
     label: 'AI Tools',
     tools: [
-      { id: 'ask',      label: 'Ask',      icon: '💬', desc: 'Quick Q&A' },
-      { id: 'search',   label: 'Search',   icon: '🔍', desc: 'Web search' },
-      { id: 'research', label: 'Research', icon: '📚', desc: 'Deep analysis' },
-      { id: 'agent',    label: 'Agent',    icon: '🤖', desc: 'Autonomous tasks' },
-      { id: 'compare',  label: 'Compare',  icon: '⚖️', desc: 'Model comparison' },
+      { id: 'ask',      label: 'Ask',      icon: '💬', bg: 'bg-blue-500/15',    desc: 'Quick Q&A' },
+      { id: 'search',   label: 'Search',   icon: '🔍', bg: 'bg-cyan-500/15',    desc: 'Web search' },
+      { id: 'research', label: 'Research', icon: '🔬', bg: 'bg-violet-500/15',  desc: 'Deep analysis' },
+      { id: 'agent',    label: 'Agent',    icon: '🤖', bg: 'bg-emerald-500/15', desc: 'Autonomous tasks' },
+      { id: 'compare',  label: 'Compare',  icon: '⚖️', bg: 'bg-amber-500/15',   desc: 'Model comparison' },
     ],
   },
   {
     label: 'Writing',
     tools: [
-      { id: 'write',     label: 'Write',     icon: '✍️', desc: 'Content creation' },
-      { id: 'translate', label: 'Translate', icon: '🌐', desc: 'Multi-language' },
-      { id: 'summary',   label: 'Summary',   icon: '📋', desc: 'Summarize text' },
-      { id: 'grammar',   label: 'Grammar',   icon: '✅', desc: 'Grammar check' },
+      { id: 'write',     label: 'Write',     icon: '✏️', bg: 'bg-orange-500/15',  desc: 'Content creation' },
+      { id: 'translate', label: 'Translate', icon: '🌐', bg: 'bg-sky-500/15',     desc: 'Multi-language' },
+      { id: 'summary',   label: 'Summary',   icon: '📋', bg: 'bg-teal-500/15',    desc: 'Summarize text' },
+      { id: 'grammar',   label: 'Grammar',   icon: '📝', bg: 'bg-green-500/15',   desc: 'Grammar check' },
     ],
   },
   {
     label: 'Media',
     tools: [
-      { id: 'pdf',     label: 'PDF',     icon: '📄', desc: 'PDF analysis' },
-      { id: 'ocr',     label: 'OCR',     icon: '👁️', desc: 'Image text' },
-      { id: 'capture', label: 'Capture', icon: '📸', desc: 'Screenshot analysis' },
-      { id: 'youtube', label: 'YouTube', icon: '▶️', desc: 'Video analysis' },
+      { id: 'pdf',     label: 'PDF',     icon: '📄', bg: 'bg-red-500/15',     desc: 'PDF analysis' },
+      { id: 'ocr',     label: 'OCR',     icon: '🔎', bg: 'bg-indigo-500/15',  desc: 'Image text' },
+      { id: 'capture', label: 'Capture', icon: '📸', bg: 'bg-fuchsia-500/15', desc: 'Screenshot analysis' },
+      { id: 'youtube', label: 'YouTube', icon: '▶️', bg: 'bg-rose-500/15',    desc: 'Video analysis' },
     ],
   },
   {
     label: 'Audio',
     tools: [
-      { id: 'voice',  label: 'Voice',  icon: '🔊', desc: 'Text to speech' },
-      { id: 'record', label: 'Record', icon: '🎙️', desc: 'Audio recording' },
+      { id: 'voice',  label: 'Voice',  icon: '🔊', bg: 'bg-purple-500/15',  desc: 'Text to speech' },
+      { id: 'record', label: 'Record', icon: '🎙️', bg: 'bg-pink-500/15',    desc: 'Audio recording' },
     ],
   },
   {
     label: 'Productivity',
     tools: [
-      { id: 'math',     label: 'Math',     icon: '🔢', desc: 'Math solver' },
-      { id: 'slides',   label: 'Slides',   icon: '📊', desc: 'Presentations' },
-      { id: 'wisebase', label: 'Wisebase', icon: '🧠', desc: 'Knowledge base' },
-      { id: 'models',   label: 'Models',   icon: '⚙️', desc: 'Model manager' },
+      { id: 'math',     label: 'Math',     icon: '🧮', bg: 'bg-blue-500/15',   desc: 'Math solver' },
+      { id: 'slides',   label: 'Slides',   icon: '📊', bg: 'bg-amber-500/15',  desc: 'Presentations' },
+      { id: 'wisebase', label: 'Wisebase', icon: '📚', bg: 'bg-violet-500/15', desc: 'Knowledge base' },
+      { id: 'models',   label: 'Models',   icon: '⚙️', bg: 'bg-slate-500/15',  desc: 'Model manager' },
     ],
   },
 ];
@@ -170,10 +171,12 @@ function ToolCard({ tool, onSelect }: { tool: Tool; onSelect: (id: ToolId | 'too
   return (
     <button
       onClick={() => onSelect(tool.id)}
-      className="flex flex-col items-start gap-2 p-3 rounded-xl border border-chat-border hover:border-chat-accent transition-colors group text-left"
+      className="flex flex-col items-start gap-3 p-4 rounded-xl border border-chat-border hover:border-chat-accent/50 transition-all group text-left hover:shadow-lg hover:shadow-chat-accent/5"
       style={{ background: 'var(--surface-2)' }}
     >
-      <span className="text-2xl leading-none">{tool.icon}</span>
+      <span className={`flex items-center justify-center w-10 h-10 rounded-lg text-xl ${tool.bg}`}>
+        {tool.icon}
+      </span>
       <div>
         <div className="text-sm font-semibold text-chat-text group-hover:text-chat-accent transition-colors leading-tight">
           {tool.label}

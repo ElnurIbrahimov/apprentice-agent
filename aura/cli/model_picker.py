@@ -135,12 +135,22 @@ def _pick_model_interactive(current_model: str) -> Optional[str]:
     if not raw_items:
         return None
 
-    # Build PickerItem list with pre-formatted descriptions
+    # Build PickerItem list with pre-formatted descriptions and status indicators
+    available_models = set(_fetch_all_models())
     picker_items: list[Any] = []
     for model, role, ctx in raw_items:
         model_display = model.replace(":cloud", "").replace(":latest", "")
-        # Build description from role tag + context + current marker
-        desc_parts = []
+        # Determine availability status
+        is_cloud = ":cloud" in model or "-cloud" in model
+        is_chatgpt = model.startswith("chatgpt:") or role == "chatgpt"
+        is_auto = model == "auto"
+        is_api = ctx == "api"
+        if is_auto or is_cloud or is_chatgpt or is_api or model in available_models:
+            status = "\u2713 "  # checkmark — ready
+        else:
+            status = "\u2717 "  # cross — offline/unavailable
+        # Build description from status + role tag + context + current marker
+        desc_parts = [status]
         if role:
             desc_parts.append(role)
         if ctx:

@@ -57,6 +57,10 @@ class HandManager:
             name = hand.name
             if name in self._hands:
                 logger.warning(f"[HandManager] Overwriting existing hand: {name}")
+            # Recovery: if hand is stuck in RUNNING from a prior crash, reset it
+            if hand.state == HandState.RUNNING:
+                logger.warning(f"[HandManager] Hand {name} stuck in RUNNING (stale), resetting to COOLDOWN")
+                hand._state = HandState.COOLDOWN
             self._hands[name] = hand
             logger.info(f"[HandManager] Registered hand: {name} (v{hand.manifest.version})")
 
@@ -243,11 +247,20 @@ class HandManager:
             return result
 
         finally:
-            # State transition
-            if hand.state == HandState.PAUSED:
-                hand.state = HandState.INACTIVE  # Deactivation was requested during run
-            elif hand.state == HandState.RUNNING:
-                hand.state = HandState.COOLDOWN
+            # State transition — wrapped in try/except to prevent leaving hand
+            # stuck in RUNNING if the transition itself fails
+            try:
+                if hand.state == HandState.PAUSED:
+                    hand.state = HandState.INACTIVE  # Deactivation was requested during run
+                elif hand.state == HandState.RUNNING:
+                    hand.state = HandState.COOLDOWN
+            except Exception as state_err:
+                logger.error(f"[HandManager] State transition failed for {name}: {state_err}")
+                # Force to COOLDOWN rather than leaving in RUNNING
+                try:
+                    hand._state = HandState.COOLDOWN
+                except Exception:
+                    pass
 
     def check_and_run(
         self,

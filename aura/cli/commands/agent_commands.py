@@ -126,7 +126,8 @@ def handle_fleet(agent, arg, context) -> Optional[str]:
         response = response.get("response", response.get("content", str(response)))
     subtasks = parse_decomposition(response)
     if not subtasks:
-        _fleet_console.print("[red]Could not decompose task into sub-tasks.[/red]")
+        from ..display import show_error as _fleet_err
+        _fleet_err("Could not decompose task into sub-tasks.")
         return
     fleet = FleetRun(goal=task, tasks=subtasks)
     render_fleet_dashboard(_fleet_console, fleet)
@@ -239,12 +240,14 @@ def handle_debate(agent, arg, context) -> Optional[str]:
         return
     question, user_models = parse_debate_args(arg)
     if not question:
-        _debate_console.print("[red]No question provided.[/red]")
+        from ..display import show_error as _debate_err
+        _debate_err("No question provided.")
         return
     try:
         run_debate(agent.brain, question, user_models=user_models)
     except Exception as e:
-        _debate_console.print(f"[red]Debate failed: {e}[/red]")
+        from ..display import show_error as _debate_err2
+        _debate_err2(f"Debate failed: {e}")
 
 
 def handle_chain(agent, arg, context) -> Optional[str]:

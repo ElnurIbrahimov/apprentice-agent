@@ -300,10 +300,10 @@ export function ProactiveDaemonPanel() {
             </button>
           </div>
 
-          {/* Test message button */}
+          {/* Test message button — only works when daemon is running */}
           <button
             onClick={sendTestMessage}
-            disabled={loading}
+            disabled={loading || !status?.running}
             className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs bg-gradient-to-r from-pink-600/20 to-purple-600/20 hover:from-pink-600/30 hover:to-purple-600/30 text-pink-300 rounded-lg border border-pink-500/30 transition-all disabled:opacity-50"
           >
             <span>💬</span>

@@ -96,6 +96,18 @@
   --mood-glow: var(--glow-purple);
   --mood-bg-tint: transparent;
   --mood-mesh-1: #2a0052;
+
+  /* Scrollbar */
+  --scrollbar-thumb: #4d4d4f;
+  --scrollbar-thumb-hover: #666;
+
+  /* User bubble */
+  --user-bubble-bg: #fff;
+  --user-bubble-text: #000;
+  --user-bubble-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+
+  /* Tooltip */
+  --shadow-tooltip: 0 8px 32px rgba(0, 0, 0, 0.5);
 }
 
 /* =============================================
@@ -167,9 +179,22 @@ html.light {
   --chat-accent: #7c3aed;
   --chat-accent-hover: #6d28d9;
   --chat-input: #f8fafc;
+
+  /* Scrollbar */
+  --scrollbar-thumb: #c1c5cd;
+  --scrollbar-thumb-hover: #a0a5af;
+
+  /* User bubble */
+  --user-bubble-bg: #7c3aed;
+  --user-bubble-text: #fff;
+  --user-bubble-shadow: 0 4px 20px rgba(124, 58, 237, 0.2);
+
+  /* Tooltip */
+  --shadow-tooltip: 0 8px 32px rgba(0, 0, 0, 0.15);
 }
 
-/* System theme: follow OS preference */
+/* System theme: follow OS preference
+   NOTE: Keep tokens in sync with html.light above */
 @media (prefers-color-scheme: light) {
   html.system {
     color-scheme: light;
@@ -225,6 +250,13 @@ html.light {
     --chat-accent: #7c3aed;
     --chat-accent-hover: #6d28d9;
     --chat-input: #f8fafc;
+
+    --scrollbar-thumb: #c1c5cd;
+    --scrollbar-thumb-hover: #a0a5af;
+    --user-bubble-bg: #7c3aed;
+    --user-bubble-text: #fff;
+    --user-bubble-shadow: 0 4px 20px rgba(124, 58, 237, 0.2);
+    --shadow-tooltip: 0 8px 32px rgba(0, 0, 0, 0.15);
   }
 }
 
@@ -278,25 +310,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #4d4d4f;
+  background: var(--scrollbar-thumb);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #666;
-}
-
-html.light ::-webkit-scrollbar-thumb,
-html.system ::-webkit-scrollbar-thumb {
-  background: #c1c5cd;
-}
-html.light ::-webkit-scrollbar-thumb:hover,
-html.system ::-webkit-scrollbar-thumb:hover {
-  background: #a0a5af;
-}
-@media (prefers-color-scheme: dark) {
-  html.system ::-webkit-scrollbar-thumb { background: #4d4d4f; }
-  html.system ::-webkit-scrollbar-thumb:hover { background: #666; }
+  background: var(--scrollbar-thumb-hover);
 }
 
 /* =============================================
@@ -370,23 +389,9 @@ html.light .grain { opacity: 0.02; }
    ============================================= */
 
 .user-bubble {
-  background: #fff;
-  color: #000;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
-}
-
-html.light .user-bubble {
-  background: #7c3aed;
-  color: #fff;
-  box-shadow: 0 4px 20px rgba(124, 58, 237, 0.2);
-}
-
-@media (prefers-color-scheme: light) {
-  html.system .user-bubble {
-    background: #7c3aed;
-    color: #fff;
-    box-shadow: 0 4px 20px rgba(124, 58, 237, 0.2);
-  }
+  background: var(--user-bubble-bg);
+  color: var(--user-bubble-text);
+  box-shadow: var(--user-bubble-shadow);
 }
 
 /* =============================================
@@ -398,6 +403,8 @@ html.light .user-bubble {
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--border-light);
+  border-top: 2px solid var(--mood-accent, transparent);
+  transition: border-top-color 2s ease;
 }
 
 .glass-subtle {
@@ -409,13 +416,6 @@ html.light .user-bubble {
 /* =============================================
    EMOTION-AWARE UI (mood variables from useMoodTheme)
    ============================================= */
-
-/* Sidebar gets a subtle mood-colored top border glow */
-.glass {
-  border-top: 2px solid transparent;
-  border-image: linear-gradient(90deg, var(--mood-accent, transparent), transparent) 1;
-  transition: border-image 2s ease;
-}
 
 /* Send button uses mood accent */
 .send-btn-active.has-text {
@@ -459,6 +459,13 @@ html.light .user-bubble {
 
 .text-gradient-purple {
   background: linear-gradient(135deg, #8b5cf6 0%, #3b82f6 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.text-gradient-hero {
+  background: linear-gradient(180deg, var(--text-primary) 0%, var(--text-tertiary) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -1109,7 +1116,7 @@ html.light .user-bubble {
   display: none;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 1023px) {
   .bottom-sheet-backdrop {
     display: block;
     position: fixed;
@@ -1126,7 +1133,7 @@ html.light .user-bubble {
     left: 0;
     right: 0;
     bottom: 0;
-    height: 95vh;
+    height: 95dvh;
     z-index: 910;
     background: rgba(10, 10, 14, 0.85);
     backdrop-filter: blur(24px);
@@ -1135,23 +1142,24 @@ html.light .user-bubble {
     border-bottom: none;
     border-radius: 16px 16px 0 0;
     will-change: transform;
-    touch-action: none;
     overscroll-behavior: contain;
   }
 
   .bottom-sheet-handle-area {
     display: flex;
     justify-content: center;
-    padding: 10px 0 6px;
+    padding: 16px 0 8px;
     cursor: grab;
     flex-shrink: 0;
+    touch-action: none;
+    min-height: 44px;
   }
 
   .bottom-sheet-handle {
-    width: 32px;
+    width: 36px;
     height: 4px;
     border-radius: 2px;
-    background: rgba(255, 255, 255, 0.25);
+    background: rgba(255, 255, 255, 0.3);
   }
 
   .bottom-sheet-title {
@@ -1190,7 +1198,7 @@ html.light .user-bubble {
   display: none;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 1023px) {
   .swipe-edge-hint {
     display: block;
     position: fixed;
@@ -1363,21 +1371,22 @@ html.light .user-bubble {
     width: 4px;
   }
 
-  /* Prevent text selection on buttons during tap */
-  button {
+  /* Prevent text selection on buttons during tap + eliminate 300ms delay */
+  button, a, [role="button"] {
     -webkit-user-select: none;
     user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  /* Prevent tap highlight flash on clickable divs */
+  [onClick], [role="button"] {
     -webkit-tap-highlight-color: transparent;
   }
 }
 
 /* Mobile chat improvements */
-@media (max-width: 768px) {
-  /* Action buttons always visible on mobile (no hover) */
-  .group .opacity-0 {
-    opacity: 0.5 !important;
-  }
-
+@media (max-width: 1023px) {
   /* Code blocks: ensure horizontal scroll works */
   .shiki-block, pre {
     max-width: calc(100vw - 48px);
@@ -1664,7 +1673,7 @@ html.light .proactive-card {
 }
 
 /* Swipe drawer light */
-@media (max-width: 768px) {
+@media (max-width: 1023px) {
   html.light .swipe-drawer {
     background: rgba(255, 255, 255, 0.95);
     border-right-color: rgba(0, 0, 0, 0.08);

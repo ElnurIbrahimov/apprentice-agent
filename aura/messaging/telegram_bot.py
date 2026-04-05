@@ -22,6 +22,8 @@ from pathlib import Path
 import json
 import base64
 import uuid
+import queue
+import threading
 
 # Per-user rate limiting
 _msg_timestamps: Dict[str, list] = defaultdict(list)
@@ -404,6 +406,7 @@ try:
         CallbackQueryHandler,
         PreCheckoutQueryHandler,
         ChatMemberHandler,
+        MessageReactionHandler,
         ContextTypes,
         filters
     )
@@ -1036,6 +1039,18 @@ class TelegramBot(BasePlatform):
         # Location sharing state (backed by store)
         self._user_locations: Dict[str, dict] = {}
 
+        # === World-class UX improvements ===
+        # Per-user processing locks (backpressure — one message at a time)
+        self._user_locks: Dict[str, asyncio.Lock] = {}
+        self._processing_users: set = set()
+
+        # Conversation context window (sliding window of recent messages)
+        self._chat_history: Dict[str, list] = defaultdict(list)
+        self._MAX_CONTEXT_MESSAGES = 10
+
+        # Failed messages for retry
+        self._failed_messages: Dict[str, str] = {}
+
         # Digest job tracking (backed by store)
         self._digest_job_ids: Dict[str, str] = self.store.get_digest_jobs()
 
@@ -1126,6 +1141,8 @@ class TelegramBot(BasePlatform):
         self.app.add_handler(CallbackQueryHandler(self._handle_stars_callback, pattern="^stars_"))
         self.app.add_handler(CallbackQueryHandler(self._handle_action_callback, pattern="^act_"))
         self.app.add_handler(CallbackQueryHandler(self._handle_pin_callback, pattern="^pin_"))
+        self.app.add_handler(CallbackQueryHandler(self._handle_retry_callback, pattern="^retry_"))
+        self.app.add_handler(CallbackQueryHandler(self._handle_onboarding_callback, pattern="^onboard_"))
         self.app.add_handler(PreCheckoutQueryHandler(self._handle_pre_checkout))
         self.app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, self._handle_successful_payment))
 
@@ -1172,6 +1189,24 @@ class TelegramBot(BasePlatform):
         # ChatMember handler — bot added/removed from groups
         self.app.add_handler(ChatMemberHandler(self._handle_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
 
+        # Mini App web_app_data handler (commands from Mini App tools tab)
+        self.app.add_handler(MessageHandler(
+            filters.StatusUpdate.WEB_APP_DATA,
+            self._handle_webapp_data
+        ))
+
+        # Edited message handler (re-process edits)
+        self.app.add_handler(MessageHandler(
+            filters.UpdateType.EDITED_MESSAGE & filters.TEXT,
+            self._handle_edited_message
+        ))
+
+        # Reaction feedback capture
+        try:
+            self.app.add_handler(MessageReactionHandler(self._handle_reaction_update))
+        except Exception as e:
+            logger.debug(f"[Telegram] MessageReactionHandler not available: {e}")
+
         # Message handler (must be last)
         self.app.add_handler(MessageHandler(
             filters.TEXT & ~filters.COMMAND,
@@ -1181,22 +1216,52 @@ class TelegramBot(BasePlatform):
         # Error handler
         self.app.add_error_handler(self._handle_error)
 
-        # Start polling
+        # Start bot (webhook or polling)
         self.is_running = True
+        _allowed_updates = [
+            "message", "edited_message", "inline_query", "chosen_inline_result",
+            "my_chat_member", "chat_member", "callback_query",
+            "pre_checkout_query", "message_reaction",
+        ]
 
-        # Initialize and start
         await self.app.initialize()
         await self.app.start()
-        await self.app.updater.start_polling(
-            drop_pending_updates=True,
-            allowed_updates=[
-                "message", "inline_query", "chosen_inline_result",
-                "my_chat_member", "chat_member", "callback_query",
-                "pre_checkout_query", "message_reaction",
-            ]
-        )
 
-        logger.info("Telegram bot started successfully!")
+        # Webhook mode: set TELEGRAM_WEBHOOK_URL to enable
+        # e.g. https://yourdomain.com/api/telegram/webhook
+        webhook_url = os.environ.get("TELEGRAM_WEBHOOK_URL", "").strip()
+        webhook_secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "").strip()
+        webhook_port = int(os.environ.get("TELEGRAM_WEBHOOK_PORT", "8443"))
+
+        if webhook_url:
+            # Generate a secret token if none provided
+            if not webhook_secret:
+                webhook_secret = hashlib.sha256(self.token.encode()).hexdigest()[:32]
+
+            await self.app.bot.set_webhook(
+                url=webhook_url,
+                secret_token=webhook_secret,
+                allowed_updates=_allowed_updates,
+                drop_pending_updates=True,
+            )
+            # Start built-in webhook server
+            # Listens on 0.0.0.0:webhook_port — Nginx proxies to this
+            await self.app.updater.start_webhook(
+                listen="0.0.0.0",
+                port=webhook_port,
+                url_path="/api/telegram/webhook",
+                webhook_url=webhook_url,
+                secret_token=webhook_secret,
+            )
+            logger.info(f"Telegram bot started in WEBHOOK mode on port {webhook_port}")
+            logger.info(f"Webhook URL: {webhook_url}")
+        else:
+            # Polling mode (default — no webhook URL configured)
+            await self.app.updater.start_polling(
+                drop_pending_updates=True,
+                allowed_updates=_allowed_updates,
+            )
+            logger.info("Telegram bot started in POLLING mode")
 
         # Expose bot instance + event loop for scheduler callbacks
         global _active_bot_instance, _active_event_loop
@@ -1242,6 +1307,23 @@ class TelegramBot(BasePlatform):
             logger.info("[Telegram] Bot commands menu set successfully")
         except Exception as e:
             logger.warning(f"[Telegram] Could not set bot commands: {e}")
+
+        # Set Mini App as persistent menu button (replaces hamburger menu)
+        webapp_url = os.environ.get("TELEGRAM_WEBAPP_URL", "").strip()
+        if webapp_url:
+            try:
+                from telegram import MenuButtonWebApp, WebAppInfo
+                await self.bot.set_chat_menu_button(
+                    menu_button=MenuButtonWebApp(
+                        text="Open AURA",
+                        web_app=WebAppInfo(url=webapp_url),
+                    )
+                )
+                logger.info(f"[Telegram] Mini App menu button set: {webapp_url}")
+            except Exception as e:
+                logger.warning(f"[Telegram] Could not set Mini App menu button: {e}")
+        else:
+            logger.info("[Telegram] No TELEGRAM_WEBAPP_URL set — Mini App button skipped")
 
         # Connect proactive system to Telegram
         await self._connect_proactive_system()
@@ -1333,7 +1415,7 @@ class TelegramBot(BasePlatform):
     # ============ COMMAND HANDLERS ============
 
     async def _handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /start command"""
+        """Handle /start — interactive onboarding for new users, quick welcome for returning."""
 
         user = update.effective_user
         chat_id = str(update.effective_chat.id)
@@ -1354,41 +1436,174 @@ class TelegramBot(BasePlatform):
         }
         self._save_state()
 
-        welcome = f"""Hey {user.first_name}!
+        # Check if returning user (has settings already)
+        existing = self.store.get_user_settings(str(user.id))
+        if existing and existing.get("language"):
+            # Returning user — quick welcome
+            reply_markup = self._get_reply_keyboard()
+            await update.message.reply_text(
+                f"Welcome back, {user.first_name}! What's on your mind?",
+                reply_markup=reply_markup,
+            )
+            return
 
-I'm AURA - your AI thinking partner.
-
-I'm not just a chatbot. I remember our conversations, notice patterns, and actually care how things turn out for you.
-
-Quick commands:
-/status - See my current state
-/mood - Check my mood
-/memory - What I remember
-/research <topic> - Deep research
-/search <query> - Web search
-/summarize - Summarize URL or text
-/image <prompt> - Generate an image
-/code <python> - Run Python code
-/model - View/switch AI models
-/compare <prompt> - Compare models side-by-side
-/session - Manage conversation sessions
-/remind <time> <msg> - Set a reminder
-/schedule <interval> <task> - Recurring tasks
-/tasks - List scheduled tasks
-/cancel <id> - Cancel a task
-/agent <specialist> <task> - Run a specialist agent
-/fleet <goal> - Multi-agent parallel run
-/webhook - Webhook integrations
-/help - More info
-
-Inline mode: Type @Aura828Bot in any chat to ask me anything!
-
-Or just talk to me like a friend. What's on your mind?"""
-
-        # Attach persistent reply keyboard by default
+        # === New user onboarding: Step 1 — Language ===
         self.store.set_keyboard_enabled(str(user.id), True)
-        reply_markup = self._get_reply_keyboard()
-        await update.message.reply_text(welcome, reply_markup=reply_markup)
+        await update.message.reply_text(
+            f"Hey {user.first_name}! \U0001f44b\n\n"
+            f"I'm AURA \u2014 your AI thinking partner.\n\n"
+            f"First, what language do you prefer?",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("\U0001f1ec\U0001f1e7 English", callback_data="onboard_lang_en"),
+                    InlineKeyboardButton("\U0001f1f7\U0001f1fa \u0420\u0443\u0441\u0441\u043a\u0438\u0439", callback_data="onboard_lang_ru"),
+                    InlineKeyboardButton("\U0001f1e6\U0001f1ff Az\u0259rbaycanca", callback_data="onboard_lang_az"),
+                ],
+            ]),
+        )
+
+    async def _handle_onboarding_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle onboard_* callbacks for the multi-step onboarding flow."""
+        query = update.callback_query
+        await query.answer()
+        data = query.data
+        user_id = str(query.from_user.id)
+        first_name = query.from_user.first_name or "there"
+
+        # --- Step 1 result: Language selected ---
+        if data.startswith("onboard_lang_"):
+            lang = data.split("_")[-1]
+            self.store.set_user_language(user_id, lang)
+
+            lang_names = {"en": "English", "ru": "\u0420\u0443\u0441\u0441\u043a\u0438\u0439", "az": "Az\u0259rbaycan"}
+            lang_name = lang_names.get(lang, lang)
+
+            # Step 2 — Capability showcase
+            await query.message.edit_text(
+                f"\u2705 Language set to {lang_name}.\n\n"
+                f"Here's what I can do for you:\n\n"
+                f"\U0001f9e0 **Think & Chat** \u2014 I'm not a search engine. I reason, remember context, and have opinions.\n\n"
+                f"\U0001f50d **Deep Research** \u2014 /research any topic \u2014 I search the web, synthesize, and cite sources.\n\n"
+                f"\U0001f3a8 **Create Images** \u2014 /image describe what you want and I'll generate it.\n\n"
+                f"\U0001f4bb **Run Code** \u2014 /code python and I'll execute it live.\n\n"
+                f"\U0001f4ca **Compare AI Models** \u2014 /compare a question across 3 models side by side.\n\n"
+                f"\U0001f4c4 **Read Documents** \u2014 Send me PDFs, code files, images \u2014 I'll analyze them.\n\n"
+                f"\U0001f399 **Voice Messages** \u2014 Send voice, I'll transcribe and respond.\n\n"
+                f"Ready to try?",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("\U0001f680 Let's go!", callback_data="onboard_go"),
+                        InlineKeyboardButton("\U0001f50d Try research", callback_data="onboard_try_research"),
+                    ],
+                    [
+                        InlineKeyboardButton("\U0001f3a8 Try image gen", callback_data="onboard_try_image"),
+                        InlineKeyboardButton("\U0001f4bb Try code", callback_data="onboard_try_code"),
+                    ],
+                ]),
+            )
+
+        # --- Step 2 results: capability demos ---
+        elif data == "onboard_go":
+            reply_markup = self._get_reply_keyboard()
+            await query.message.edit_text(
+                f"You're all set, {first_name}! \U0001f389\n\n"
+                f"Just talk to me like a friend, or use /help to see all commands.\n\n"
+                f"Tip: I have a quick-action keyboard below. Toggle it with /keyboard.",
+            )
+            await self.bot.send_message(
+                chat_id=query.message.chat_id,
+                text="What's on your mind?",
+                reply_markup=reply_markup,
+            )
+
+        elif data == "onboard_try_research":
+            await query.message.edit_text(
+                "\U0001f50d Send me a /research topic and I'll do a deep dive!\n\n"
+                "Example: `/research latest breakthroughs in quantum computing 2026`",
+                parse_mode="Markdown",
+            )
+            reply_markup = self._get_reply_keyboard()
+            await self.bot.send_message(
+                chat_id=query.message.chat_id,
+                text="Try it \u2014 type /research followed by any topic:",
+                reply_markup=reply_markup,
+            )
+
+        elif data == "onboard_try_image":
+            await query.message.edit_text(
+                "\U0001f3a8 Send me /image with a description and I'll generate it!\n\n"
+                "Example: `/image a cyberpunk city at sunset, neon lights reflecting on wet streets`",
+                parse_mode="Markdown",
+            )
+            reply_markup = self._get_reply_keyboard()
+            await self.bot.send_message(
+                chat_id=query.message.chat_id,
+                text="Try it \u2014 type /image followed by a description:",
+                reply_markup=reply_markup,
+            )
+
+        elif data == "onboard_try_code":
+            await query.message.edit_text(
+                "\U0001f4bb Send me /code with Python code and I'll run it!\n\n"
+                "Example: `/code print(sum(range(1, 101)))`",
+                parse_mode="Markdown",
+            )
+            reply_markup = self._get_reply_keyboard()
+            await self.bot.send_message(
+                chat_id=query.message.chat_id,
+                text="Try it \u2014 type /code followed by Python code:",
+                reply_markup=reply_markup,
+            )
+
+    async def _handle_webapp_data(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle data sent from the Telegram Mini App via tg.sendData()."""
+        if not update.effective_message or not update.effective_message.web_app_data:
+            return
+
+        user = update.effective_user
+        if not user or not self._is_user_allowed(user.id):
+            return
+
+        raw = update.effective_message.web_app_data.data
+        chat_id = str(update.effective_chat.id)
+
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            # Treat as plain text command
+            data = {"action": "command", "command": raw}
+
+        action = data.get("action", "")
+
+        if action == "command":
+            # Mini App sent a /command — execute it as if the user typed it
+            command = data.get("command", "").strip()
+            if command:
+                await self.send_typing_indicator(chat_id)
+                # Route through agent if it's not a slash command
+                if command.startswith("/"):
+                    await update.effective_message.reply_text(
+                        f"Running: {command}\n\nType the command directly in chat to execute it."
+                    )
+                else:
+                    await self._run_agent_and_reply(
+                        update, command,
+                        user_id=str(user.id),
+                    )
+        elif action == "settings":
+            # Mini App sent settings update
+            settings = data.get("settings", {})
+            uid = str(user.id)
+            if "language" in settings:
+                self.store.set_user_language(uid, settings["language"])
+            if "model" in settings:
+                self.store.set_user_model(uid, settings["model"])
+            await update.effective_message.reply_text("\u2705 Settings updated from Mini App.")
+        else:
+            # Unknown action — pass through as chat
+            text = data.get("text", raw)
+            await self._run_agent_and_reply(update, text, user_id=str(user.id))
 
     async def _handle_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /help command"""
@@ -2803,6 +3018,10 @@ Status: Online and ready!"""
                             cleared_items.append("State history")
                         self.store.clear_doc_context(user_id)
                         cleared_items.append("Document context")
+                        # Clear conversation context window
+                        if user_id in self._chat_history:
+                            del self._chat_history[user_id]
+                            cleared_items.append("Conversation context")
                         del self._pending_forget[user_id]
                         if cleared_items:
                             cleared_list = "\n".join(f"- {item}" for item in cleared_items)
@@ -2872,8 +3091,18 @@ Status: Online and ready!"""
         except Exception as e:
             logger.debug(f"[Telegram] ConversationManager session bind skipped: {e}")
 
-        # Route through the full agent loop with typing indicator + file artifacts
-        await self._run_agent_and_reply(update, text, conv_id=conv_id, user_id=str(user.id))
+        # Backpressure: per-user lock — one message at a time
+        uid_str = str(user.id)
+        lock = self._get_user_lock(uid_str)
+        if lock.locked():
+            await update.message.reply_text(
+                "\u23f3 Still working on your previous message. I'll get to this next.",
+                reply_to_message_id=update.message.message_id,
+            )
+
+        async with lock:
+            # Route through the full agent loop with typing indicator + file artifacts
+            await self._run_agent_and_reply(update, text, conv_id=conv_id, user_id=uid_str)
 
         self._save_state()
 
@@ -3232,14 +3461,22 @@ Status: Online and ready!"""
 
 
     async def _handle_error(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle errors"""
+        """Handle errors with retry buttons."""
         logger.error(f"Telegram error: {context.error}")
 
         if update and update.effective_chat:
+            user_id = str(update.effective_user.id) if update.effective_user else None
             try:
+                retry_markup = None
+                if user_id:
+                    retry_markup = InlineKeyboardMarkup([[
+                        InlineKeyboardButton("\U0001f504 Retry", callback_data=f"retry_{user_id}"),
+                        InlineKeyboardButton("\U0001f504 Retry (lighter)", callback_data=f"retry_light_{user_id}"),
+                    ]])
                 await self.bot.send_message(
                     chat_id=update.effective_chat.id,
-                    text="Oops, something went wrong. Let me try again..."
+                    text="Something went wrong. Want to try again?",
+                    reply_markup=retry_markup,
                 )
             except Exception as e:
                 logger.debug(f"Could not send error message: {e}")
@@ -3734,58 +3971,124 @@ Status: Online and ready!"""
         """Run the full ReAct agent loop and send the result back to the user.
 
         Flow:
-        1. Send a "Thinking..." placeholder message
-        2. Start a background typing indicator loop
-        3. Run agent.run() in a thread with timeout (full ReAct loop with tools)
-        4. Edit the placeholder with the final response
-        5. Send any file artifacts (screenshots, plots) as photos/documents
-        6. Fall back to agent.chat() / brain.think() on failure
-        7. Track user + assistant messages in ConversationManager (surface attribution)
+        1. Build context-enriched prompt from conversation history
+        2. Send a "Thinking..." placeholder message
+        3. Start a background typing indicator loop
+        4. Run agent.run() in a thread with timeout (full ReAct loop with tools)
+        5. Edit the placeholder with the final response
+        6. Send any file artifacts (screenshots, plots) as photos/documents
+        7. Fall back to agent.chat() / brain.think() on failure
+        8. Track user + assistant messages in ConversationManager + context window
         """
         chat_id = str(update.effective_chat.id)
         start_time = _time.time()
+        original_goal = goal  # Keep original for history/retry
+
+        # Track user message in conversation context window
+        if user_id:
+            self._append_to_history(user_id, "user", goal)
+
+        # Build context-enriched prompt
+        if user_id:
+            goal = self._build_contextual_prompt(user_id, goal)
 
         # Track the user message in ConversationManager
         if conv_id and user_id:
             try:
                 cm = get_conversation_manager()
-                cm.on_message_added(conv_id, "user", goal, "telegram", user_id)
+                cm.on_message_added(conv_id, "user", original_goal, "telegram", user_id)
             except Exception as e:
                 logger.debug(f"[Telegram] ConversationManager user message tracking skipped: {e}")
 
         # Send contextual placeholder based on the goal
-        placeholder_text = self._get_progress_text(goal)
+        placeholder_text = self._get_progress_text(original_goal)
         placeholder = await update.message.reply_text(placeholder_text)
 
-        # Start typing indicator loop (cancelled when done)
+        # Streaming: use a queue to pass chunks from the agent thread
+        chunk_q = queue.Queue(maxsize=500)
+        streamed_text = ""
+        _STREAM_EDIT_INTERVAL = 1.5  # seconds between Telegram message edits
+        _last_edit_time = _time.time()
+        _stream_done = asyncio.Event()
+
+        async def _stream_editor():
+            """Periodically edit the placeholder with accumulated streamed text."""
+            nonlocal streamed_text, _last_edit_time
+            while not _stream_done.is_set():
+                # Drain all available chunks
+                new_chunks = []
+                while True:
+                    try:
+                        chunk = chunk_q.get_nowait()
+                        if chunk is None:  # Sentinel — agent done
+                            _stream_done.set()
+                            break
+                        new_chunks.append(chunk)
+                    except queue.Empty:
+                        break
+
+                if new_chunks:
+                    streamed_text += "".join(new_chunks)
+                    now = _time.time()
+                    # Edit message at most every INTERVAL seconds (Telegram rate limit)
+                    if now - _last_edit_time >= _STREAM_EDIT_INTERVAL and streamed_text.strip():
+                        try:
+                            display = streamed_text[:4000] + (" ..." if len(streamed_text) > 4000 else " \u2588")
+                            await placeholder.edit_text(display)
+                            _last_edit_time = now
+                        except Exception:
+                            pass  # Message unchanged or rate limited
+
+                if not _stream_done.is_set():
+                    await asyncio.sleep(0.3)
+
+        # Start stream editor and typing loop
+        stream_task = asyncio.create_task(_stream_editor())
         typing_task = asyncio.create_task(self._typing_loop(chat_id))
 
+        is_error = False
         try:
             response_text, artifacts = await asyncio.wait_for(
-                asyncio.to_thread(self._run_agent_sync, goal),
+                asyncio.to_thread(self._run_agent_sync, goal, chunk_q),
                 timeout=self._AGENT_TIMEOUT,
             )
         except asyncio.TimeoutError:
             elapsed = _time.time() - start_time
-            logger.warning(f"[Telegram] Agent timed out after {elapsed:.1f}s for: {goal[:80]}")
-            response_text = "That took too long. Try a simpler question or break it into parts."
+            logger.warning(f"[Telegram] Agent timed out after {elapsed:.1f}s for: {original_goal[:80]}")
+            response_text = streamed_text or "That took too long. Try a simpler question or break it into parts."
             artifacts = []
+            is_error = True
         except Exception as e:
             logger.error(f"[Telegram] Agent error: {e}", exc_info=True)
-            response_text = "Something went wrong processing your request. Please try again."
+            response_text = streamed_text or "Something went wrong processing your request."
             artifacts = []
+            is_error = True
         finally:
+            _stream_done.set()
             typing_task.cancel()
+            stream_task.cancel()
             try:
                 await typing_task
             except asyncio.CancelledError:
                 pass
+            try:
+                await stream_task
+            except asyncio.CancelledError:
+                pass
+
+        # Store failed message for retry
+        if is_error and user_id:
+            self._failed_messages[user_id] = original_goal
 
         elapsed = _time.time() - start_time
         logger.info(
             f"[Telegram] Response ready in {elapsed:.1f}s "
             f"({len(response_text)} chars, {len(artifacts)} artifacts)"
         )
+
+        # Track assistant response in conversation context window
+        if user_id and response_text:
+            self._append_to_history(user_id, "assistant", response_text)
 
         # Track the assistant response in ConversationManager
         if conv_id and user_id and response_text:
@@ -3799,15 +4102,21 @@ Status: Online and ready!"""
         if user_id:
             try:
                 self.store.set_skill_state(user_id, last_exchange={
-                    "input": goal[:2000],
+                    "input": original_goal[:2000],
                     "output": response_text[:2000],
                     "timestamp": _time.time(),
                 })
             except Exception:
                 pass
 
-        # Build reply action buttons
-        action_buttons = self._get_action_buttons(update.message.message_id)
+        # Build reply buttons — include retry on errors
+        if is_error and user_id:
+            action_buttons = InlineKeyboardMarkup([[
+                InlineKeyboardButton("\U0001f504 Retry", callback_data=f"retry_{user_id}"),
+                InlineKeyboardButton("\U0001f504 Retry (lighter)", callback_data=f"retry_light_{user_id}"),
+            ]])
+        else:
+            action_buttons = self._get_action_buttons(update.message.message_id)
 
         # Edit the placeholder with the real response + action buttons
         await self._edit_or_send_response(placeholder, chat_id, response_text, update,
@@ -3843,13 +4152,18 @@ Status: Online and ready!"""
         except Exception:
             pass  # Reactions are optional — never break the main flow
 
-    def _run_agent_sync(self, goal: str):
+    def _run_agent_sync(self, goal: str, chunk_queue: queue.Queue = None):
         """Synchronous agent execution — called via asyncio.to_thread.
 
         Returns (response_text, list_of_artifact_paths).
 
+        Args:
+            goal: The prompt to send to the agent.
+            chunk_queue: If provided, enables streaming — text chunks are put
+                         into this queue as they arrive from the LLM.
+
         Priority chain:
-        1. agent.run()  — full ReAct loop with tool calling
+        1. agent.run()  — full ReAct loop with tool calling (with streaming)
         2. agent.chat() — single LLM call with memory/emotion
         3. brain.think() — raw LLM call (last resort)
         """
@@ -3859,10 +4173,20 @@ Status: Online and ready!"""
         response_text = ""
         artifacts = []
 
+        # Build on_chunk callback for streaming
+        on_chunk = None
+        if chunk_queue is not None:
+            def on_chunk(text):
+                try:
+                    chunk_queue.put_nowait(text)
+                except queue.Full:
+                    pass
+
         # === Primary: Full ReAct agent loop ===
         try:
             logger.info(f"[Telegram] agent.run() starting: {goal[:80]}")
-            result = agent.run(goal, timeout_seconds=self._AGENT_TIMEOUT - 5)
+            result = agent.run(goal, timeout_seconds=self._AGENT_TIMEOUT - 5,
+                               on_chunk=on_chunk)
 
             if isinstance(result, dict):
                 response_text = result.get("response", "")
@@ -3896,6 +4220,10 @@ Status: Online and ready!"""
 
         except Exception as e:
             logger.warning(f"[Telegram] agent.run() failed: {e}, falling back to chat()")
+
+        # Signal streaming done for fallback paths
+        if chunk_queue is not None:
+            chunk_queue.put(None)  # Sentinel
 
         # === Fallback 1: agent.chat() ===
         try:
@@ -3958,6 +4286,213 @@ Status: Online and ready!"""
                 await asyncio.sleep(4)
         except asyncio.CancelledError:
             pass
+
+    # ============ BACKPRESSURE / USER LOCKS ============
+
+    def _get_user_lock(self, user_id: str) -> asyncio.Lock:
+        """Get or create a per-user asyncio.Lock for backpressure."""
+        if user_id not in self._user_locks:
+            self._user_locks[user_id] = asyncio.Lock()
+        return self._user_locks[user_id]
+
+    # ============ CONVERSATION CONTEXT WINDOW ============
+
+    def _append_to_history(self, user_id: str, role: str, content: str):
+        """Append a message to the user's sliding context window."""
+        history = self._chat_history[user_id]
+        history.append({
+            "role": role,
+            "content": content[:2000],
+            "timestamp": _time.time()
+        })
+        # Keep only last N messages
+        if len(history) > self._MAX_CONTEXT_MESSAGES:
+            self._chat_history[user_id] = history[-self._MAX_CONTEXT_MESSAGES:]
+
+    def _build_contextual_prompt(self, user_id: str, current_message: str) -> str:
+        """Build a prompt with recent conversation context prepended."""
+        history = self._chat_history.get(user_id, [])
+        if not history:
+            return current_message
+
+        context_lines = []
+        for msg in history[-(self._MAX_CONTEXT_MESSAGES - 1):]:  # Leave room for current
+            prefix = "User" if msg["role"] == "user" else "Aura"
+            context_lines.append(f"{prefix}: {msg['content']}")
+
+        context = "\n".join(context_lines)
+        return (
+            f"[Recent conversation for context — respond to the CURRENT message only]\n"
+            f"{context}\n\n"
+            f"[Current message]\n{current_message}"
+        )
+
+    # ============ EDITED MESSAGE HANDLER ============
+
+    async def _handle_edited_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Re-process edited messages through the agent."""
+        edited = update.edited_message
+        if not edited or not edited.text:
+            return
+
+        user = edited.from_user
+        if not user or not self._is_user_allowed(user.id):
+            return
+
+        if not _check_rate_limit(str(user.id), self.config.get("max_messages_per_minute", 20)):
+            return
+
+        chat_id = str(edited.chat_id)
+        text = edited.text.strip()
+        if not text:
+            return
+
+        # Send acknowledgment
+        await self.send_typing_indicator(chat_id)
+        notice = await self.bot.send_message(
+            chat_id=chat_id,
+            text="✏️ Got your edit, re-processing...",
+            reply_to_message_id=edited.message_id,
+        )
+
+        # Apply backpressure
+        user_id = str(user.id)
+        lock = self._get_user_lock(user_id)
+        async with lock:
+            # Prepend document context if active
+            if hasattr(self, '_build_doc_augmented_text'):
+                text = self._build_doc_augmented_text(user.id, text)
+
+            # Build context-enriched prompt
+            contextual_text = self._build_contextual_prompt(user_id, text)
+
+            # Track in history
+            self._append_to_history(user_id, "user", text)
+
+            # Start typing loop
+            typing_task = asyncio.create_task(self._typing_loop(chat_id))
+            try:
+                response_text, artifacts = await asyncio.wait_for(
+                    asyncio.to_thread(self._run_agent_sync, contextual_text),
+                    timeout=self._AGENT_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                response_text = "That took too long. Try a simpler question."
+                artifacts = []
+            except Exception as e:
+                logger.error(f"[Telegram] Edit re-process error: {e}", exc_info=True)
+                response_text = "Something went wrong re-processing your edit."
+                artifacts = []
+            finally:
+                typing_task.cancel()
+                try:
+                    await typing_task
+                except asyncio.CancelledError:
+                    pass
+
+            # Track response in history
+            self._append_to_history(user_id, "assistant", response_text)
+
+            # Edit the notice with the real response
+            action_buttons = self._get_action_buttons(edited.message_id)
+            await self._edit_or_send_response(notice, chat_id, response_text, update,
+                                              reply_markup=action_buttons)
+
+            for artifact_path in artifacts:
+                await self._send_file_artifact(chat_id, artifact_path, update)
+
+    # ============ REACTION FEEDBACK CAPTURE ============
+
+    async def _handle_reaction_update(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Capture user reactions to bot messages as feedback signals."""
+        reaction = update.message_reaction
+        if not reaction:
+            return
+
+        user_id = str(reaction.user.id) if reaction.user else "unknown"
+        chat_id = str(reaction.chat.id)
+        message_id = reaction.message_id
+
+        new_reactions = []
+        for r in (reaction.new_reaction or []):
+            if hasattr(r, 'emoji'):
+                new_reactions.append(r.emoji)
+        if not new_reactions:
+            return
+
+        positive = {'\U0001f44d', '\u2764\ufe0f', '\U0001f525', '\u2b50', '\U0001f389', '\U0001f4af', '\U0001f44f', '\U0001f929', '\U0001f4aa'}
+        negative = {'\U0001f44e', '\U0001f622', '\U0001f621', '\U0001f92e', '\U0001f4a9'}
+
+        sentiment = 'positive' if any(r in positive for r in new_reactions) else \
+                    'negative' if any(r in negative for r in new_reactions) else 'neutral'
+
+        try:
+            self.store.save_reaction_feedback(
+                user_id=user_id,
+                chat_id=chat_id,
+                message_id=message_id,
+                reactions=json.dumps(new_reactions),
+                sentiment=sentiment,
+            )
+            logger.info(f"[Telegram] Reaction feedback: {sentiment} from {user_id} ({new_reactions})")
+        except Exception as e:
+            logger.debug(f"[Telegram] Could not save reaction feedback: {e}")
+
+    # ============ RETRY CALLBACK HANDLER ============
+
+    async def _handle_retry_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle retry_<user_id> and retry_light_<user_id> callbacks."""
+        query = update.callback_query
+        await query.answer("Retrying...")
+
+        data = query.data  # e.g. "retry_12345" or "retry_light_12345"
+        user_id = str(query.from_user.id)
+        chat_id = str(query.message.chat_id)
+
+        # Retrieve the failed message
+        last_input = self._failed_messages.get(user_id, "")
+        if not last_input:
+            # Fallback: try _last_exchange
+            exchange = self._last_exchange.get(query.from_user.id, {})
+            last_input = exchange.get("input", "")
+        if not last_input:
+            await query.message.reply_text("Nothing to retry — I couldn't find the original message.")
+            return
+
+        is_light = "retry_light_" in data
+
+        # Show typing
+        placeholder = await query.message.reply_text(
+            "\U0001f504 Retrying" + (" with lighter model..." if is_light else "...")
+        )
+        typing_task = asyncio.create_task(self._typing_loop(chat_id))
+
+        try:
+            goal = last_input
+            if is_light:
+                goal = f"[Use a fast, lightweight model] {last_input}"
+
+            response_text, artifacts = await asyncio.wait_for(
+                asyncio.to_thread(self._run_agent_sync, goal),
+                timeout=self._AGENT_TIMEOUT,
+            )
+        except Exception:
+            response_text = "Retry also failed. Please try rephrasing your question."
+            artifacts = []
+        finally:
+            typing_task.cancel()
+            try:
+                await typing_task
+            except asyncio.CancelledError:
+                pass
+
+        # Clear the failed message on success
+        if user_id in self._failed_messages:
+            del self._failed_messages[user_id]
+
+        action_buttons = self._get_action_buttons(query.message.message_id)
+        await self._edit_or_send_response(placeholder, chat_id, response_text, update,
+                                          reply_markup=action_buttons)
 
     async def _edit_or_send_response(self, placeholder, chat_id: str, text: str,
                                      update: Update, reply_markup=None):
@@ -5766,11 +6301,13 @@ Status: Online and ready!"""
         """Build action buttons attached to agent responses."""
         return InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("\U0001f50d Go deeper", callback_data=f"act_deeper_{original_msg_id}"),
-                InlineKeyboardButton("\U0001f4be Save to memory", callback_data=f"act_save_{original_msg_id}"),
+                InlineKeyboardButton("\U0001f504 Regenerate", callback_data=f"act_regenerate_{original_msg_id}"),
+                InlineKeyboardButton("\U0001f4dd Shorter", callback_data=f"act_shorter_{original_msg_id}"),
+                InlineKeyboardButton("\U0001f310 Translate", callback_data=f"act_translate_{original_msg_id}"),
             ],
             [
-                InlineKeyboardButton("\U0001f4e4 Share", callback_data=f"act_share_{original_msg_id}"),
+                InlineKeyboardButton("\U0001f50d Go deeper", callback_data=f"act_deeper_{original_msg_id}"),
+                InlineKeyboardButton("\U0001f4be Save", callback_data=f"act_save_{original_msg_id}"),
                 InlineKeyboardButton("\U0001f4c4 Export", callback_data=f"act_export_{original_msg_id}"),
             ],
         ])
@@ -5859,6 +6396,88 @@ Status: Online and ready!"""
                 os.unlink(filepath)
             except OSError:
                 pass
+
+        elif action == "regenerate":
+            if not last_input:
+                await query.message.reply_text("Nothing to regenerate.")
+                return
+            placeholder = await query.message.reply_text("\U0001f504 Regenerating...")
+            chat_id = str(query.message.chat_id)
+            typing_task = asyncio.create_task(self._typing_loop(chat_id))
+            try:
+                response_text, artifacts = await asyncio.wait_for(
+                    asyncio.to_thread(self._run_agent_sync, last_input),
+                    timeout=self._AGENT_TIMEOUT,
+                )
+            except Exception:
+                response_text = "Regeneration failed. Try asking directly."
+                artifacts = []
+            finally:
+                typing_task.cancel()
+                try:
+                    await typing_task
+                except asyncio.CancelledError:
+                    pass
+            buttons = self._get_action_buttons(query.message.message_id)
+            await self._edit_or_send_response(placeholder, chat_id, response_text, update,
+                                              reply_markup=buttons)
+            # Update stored exchange
+            if user_id:
+                try:
+                    self.store.set_skill_state(user_id, last_exchange={
+                        "input": last_input[:2000],
+                        "output": response_text[:2000],
+                        "timestamp": _time.time(),
+                    })
+                except Exception:
+                    pass
+
+        elif action == "shorter":
+            if not last_output:
+                await query.message.reply_text("Nothing to shorten.")
+                return
+            placeholder = await query.message.reply_text("\U0001f4dd Making it shorter...")
+            goal = (
+                f"Rewrite this response to be much more concise — keep only the key points, "
+                f"remove fluff and redundancy. Original response:\n\n{last_output[:3000]}"
+            )
+            chat_id = str(query.message.chat_id)
+            try:
+                response_text, _ = await asyncio.wait_for(
+                    asyncio.to_thread(self._run_agent_sync, goal),
+                    timeout=self._AGENT_TIMEOUT,
+                )
+            except Exception:
+                response_text = "Could not shorten. Try asking directly."
+            await self._edit_or_send_response(placeholder, chat_id, response_text, update)
+
+        elif action == "translate":
+            if not last_output:
+                await query.message.reply_text("Nothing to translate.")
+                return
+            # Get user's language preference, default to asking for auto-detect
+            target_lang = self.store.get_user_language(user_id) or "en"
+            if target_lang == "en":
+                # If already English, translate to a contextual language
+                goal = (
+                    f"Detect the most likely non-English language the user speaks and translate "
+                    f"this response into that language. If unsure, translate to Russian.\n\n"
+                    f"Text to translate:\n{last_output[:3000]}"
+                )
+            else:
+                goal = (
+                    f"Translate this response into {target_lang}:\n\n{last_output[:3000]}"
+                )
+            placeholder = await query.message.reply_text(f"\U0001f310 Translating...")
+            chat_id = str(query.message.chat_id)
+            try:
+                response_text, _ = await asyncio.wait_for(
+                    asyncio.to_thread(self._run_agent_sync, goal),
+                    timeout=self._AGENT_TIMEOUT,
+                )
+            except Exception:
+                response_text = "Translation failed. Try /lang to set your language."
+            await self._edit_or_send_response(placeholder, chat_id, response_text, update)
 
     # --- 11. Custom Sticker Pack ---
 

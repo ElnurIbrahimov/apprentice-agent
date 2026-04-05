@@ -87,6 +87,16 @@ function downloadFile(content: string, filename: string, mimeType = 'text/markdo
   URL.revokeObjectURL(url);
 }
 
+/** Inject clickable citation links [1], [2] into report HTML */
+function injectCitationLinks(html: string, sourceCount: number): string {
+  if (!sourceCount) return html;
+  return html.replace(/\[(\d+)\](?![\(<])/g, (_match, num) => {
+    const n = parseInt(num, 10);
+    if (n < 1 || n > sourceCount) return _match;
+    return `<a href="#research-source-${n}" class="citation-link" title="Source ${n}">[${n}]</a>`;
+  });
+}
+
 function formatCitation(s: Source): string {
   if (s.citation) return s.citation;
   // Build a best-effort APA-style citation from available fields
@@ -402,9 +412,10 @@ export default function ResearchPanel() {
             if (ev.status === 'done') {
               setStatus(`Done - ${ev.sources?.length || 0} sources`);
               const report = ev.report || '';
+              const srcs = ev.sources || [];
               setResultRaw(report);
-              setResultHtml(md(report));
-              setSources(ev.sources || []);
+              setResultHtml(injectCitationLinks(md(report), srcs.length));
+              setSources(srcs);
             }
           } catch {}
         }
@@ -571,12 +582,12 @@ export default function ResearchPanel() {
               const finalReport = ev.report || rawReport;
               rawReport = finalReport;
               setResultRaw(finalReport);
-              setResultHtml(md(finalReport));
               if (ev.sources) {
                 collectedSources = ev.sources;
                 setSources(ev.sources);
                 setSourceCount(ev.sources.length);
               }
+              setResultHtml(injectCitationLinks(md(finalReport), collectedSources.length));
               // Mark all steps done
               setSteps(prev => prev.map(s => ({ ...s, status: 'done' as const })));
             } else if (ev.status) {
@@ -585,12 +596,12 @@ export default function ResearchPanel() {
                 const report = ev.report || rawReport;
                 rawReport = report;
                 setResultRaw(report);
-                setResultHtml(md(report));
                 if (ev.sources) {
                   collectedSources = ev.sources;
                   setSources(ev.sources);
                   setSourceCount(ev.sources.length);
                 }
+                setResultHtml(injectCitationLinks(md(report), collectedSources.length));
                 // Mark all done
                 setSteps(prev => prev.map(s => ({ ...s, status: 'done' as const })));
               } else {
@@ -748,7 +759,6 @@ export default function ResearchPanel() {
               const finalReport = ev.report || rawReport;
               rawReport = finalReport;
               setResultRaw(finalReport);
-              setResultHtml(md(finalReport));
               if (ev.sources) {
                 collectedSources = ev.sources.map((s: any, i: number) => ({
                   ...s,
@@ -762,6 +772,7 @@ export default function ResearchPanel() {
                 setSources(collectedSources);
                 setSourceCount(collectedSources.length);
               }
+              setResultHtml(injectCitationLinks(md(finalReport), collectedSources.length));
               setSteps(prev => prev.map(s => ({ ...s, status: 'done' as const })));
             } else if (ev.status) {
               // Fallback handling
@@ -769,7 +780,6 @@ export default function ResearchPanel() {
                 const report = ev.report || rawReport;
                 rawReport = report;
                 setResultRaw(report);
-                setResultHtml(md(report));
                 if (ev.sources) {
                   collectedSources = (ev.sources || []).map((s: any, i: number) => ({
                     ...s,
@@ -1307,16 +1317,29 @@ export default function ResearchPanel() {
               </svg>
             </button>
 
+            {/* Copy all sources button */}
+            <button
+              onClick={() => {
+                const text = sources.map((s, i) => `[${i+1}] ${s.title || s.domain || ''} — ${s.url || ''}`).join('\n');
+                navigator.clipboard.writeText(text).catch(() => {});
+              }}
+              style={{ background: 'none', border: '1px solid var(--b1)', borderRadius: 'var(--r-sm)', color: 'var(--mu)', fontSize: '10px', padding: '3px 8px', cursor: 'pointer', fontFamily: 'inherit', alignSelf: 'flex-start' }}
+            >
+              Copy all sources
+            </button>
+
             {/* Source items */}
             {(sourcesExpanded ? sources : sources.slice(0, 5)).map((s: Source, idx: number) => (
               <div
                 key={s.index ?? idx}
+                id={`research-source-${(s.index ?? idx) + (s.index ? 0 : 1)}`}
                 style={{
                   background: 'var(--s2)',
                   border: `1px solid ${isScholar ? 'rgba(180, 83, 9, 0.15)' : 'var(--b1)'}`,
                   borderRadius: 'var(--r-md)',
                   padding: '8px 10px',
                   transition: 'border-color 0.15s ease',
+                  scrollMarginTop: 40,
                 }}
               >
                 <div className="flex items-start gap-2">

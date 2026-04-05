@@ -249,6 +249,9 @@ class ChatSession:
         self._last_ctrl_c_time = 0.0
         self._last_ipc_heartbeat = 0.0
 
+        import threading
+        self._channel_lock = threading.Lock()
+
         self._pending_follow_up: Optional[str] = None
         self._follow_up_depth = 0
         self._MAX_FOLLOW_UP_DEPTH = 3
@@ -283,6 +286,9 @@ class ChatSession:
         # ── Store aura_config for plan-approve check ──
         self._aura_config = aura_config
         self._project_root = project_root
+
+        # H3: Auto-test after each edit
+        self._auto_test_enabled = bool(aura_config.get("auto_test", False)) if aura_config else False
 
     # ── Permission setup ──────────────────────────────────────────────────
 
@@ -545,6 +551,38 @@ class ChatSession:
             permission_mode=self.perm_mode,
         )
 
+    # ── Shared abort handler ────────────────────────────────────────────
+
+    def _handle_ctrl_c_abort(self, streamer: Any) -> bool:
+        """Handle double Ctrl+C abort pattern. Returns True if aborted."""
+        import time as _time
+        now = _time.time()
+        if now - self._last_ctrl_c_time < 5.0:
+            streamer.pause()
+            self.steering.clear()
+            self.agentic.cancel()
+            self.console.print("\n  [red]Aborted.[/red]")
+            self._last_ctrl_c_time = 0.0
+            self.agentic._cancel_event.clear()
+            return True
+        else:
+            self._last_ctrl_c_time = now
+            self.console.print("\n  [dim yellow]Press Ctrl+C again within 5s to abort[/dim yellow]")
+            try:
+                _deadline = _time.time() + 5.0
+                while _time.time() < _deadline:
+                    _time.sleep(0.1)
+            except KeyboardInterrupt:
+                streamer.pause()
+                self.steering.clear()
+                self.agentic.cancel()
+                self.console.print("\n  [red]Aborted.[/red]")
+                self._last_ctrl_c_time = 0.0
+                self.agentic._cancel_event.clear()
+                return True
+            self._last_ctrl_c_time = 0.0
+            return True  # Interrupted but not aborted — still cancel this run
+
     # ── Normal agentic execution ──────────────────────────────────────────
 
     def _run_agent(self, user_input: str) -> Optional[dict]:
@@ -595,6 +633,19 @@ class ChatSession:
                         "tool_name": name,
                         "file_path": args.get("path", args.get("file_path", "")),
                     })
+
+                # H3: Auto-test after each edit
+                if name in ("edit_file", "write_file") and getattr(self, '_auto_test_enabled', False):
+                    try:
+                        test_result = self.agentic._run_auto_test()
+                        if test_result:
+                            self.agentic._conversation_history.append({
+                                "role": "user",
+                                "content": f"[Auto-test failed after editing] {test_result}",
+                            })
+                    except Exception:
+                        pass
+
                 streamer.resume()
 
             result = self.agentic.run(
@@ -605,33 +656,8 @@ class ChatSession:
                 steering_queue=self.steering,
             )
         except KeyboardInterrupt:
-            import time as _time
-            now = _time.time()
-            if now - self._last_ctrl_c_time < 5.0:
-                streamer.pause()
-                self.steering.clear()
-                self.agentic.cancel()
-                self.console.print("\n  [red]Aborted.[/red]")
-                self._last_ctrl_c_time = 0.0
-                self.agentic._cancel_event.clear()
-                return None
-            else:
-                self._last_ctrl_c_time = now
-                self.console.print("\n  [dim yellow]Press Ctrl+C again within 5s to abort[/dim yellow]")
-                try:
-                    _deadline = _time.time() + 5.0
-                    while _time.time() < _deadline:
-                        _time.sleep(0.1)
-                except KeyboardInterrupt:
-                    streamer.pause()
-                    self.steering.clear()
-                    self.agentic.cancel()
-                    self.console.print("\n  [red]Aborted.[/red]")
-                    self._last_ctrl_c_time = 0.0
-                    self.agentic._cancel_event.clear()
-                    return None
-                self._last_ctrl_c_time = 0.0
-                return None
+            self._handle_ctrl_c_abort(streamer)
+            return None
         except Exception as exc:
             streamer.pause()
             from .display import show_error
@@ -737,29 +763,8 @@ class ChatSession:
                     )
                     streamer.finish()
                 except KeyboardInterrupt:
-                    import time as _time
-                    now = _time.time()
-                    if now - self._last_ctrl_c_time < 5.0:
-                        streamer.pause()
-                        self.agentic.cancel()
-                        self.console.print("\n  [red]Aborted.[/red]")
-                        self._last_ctrl_c_time = 0.0
-                        self.agentic._cancel_event.clear()
-                        result = None
-                    else:
-                        self._last_ctrl_c_time = now
-                        self.console.print("\n  [dim yellow]Press Ctrl+C again within 5s to abort[/dim yellow]")
-                        try:
-                            _deadline = _time.time() + 5.0
-                            while _time.time() < _deadline:
-                                _time.sleep(0.1)
-                        except KeyboardInterrupt:
-                            streamer.pause()
-                            self.agentic.cancel()
-                            self.console.print("\n  [red]Aborted.[/red]")
-                            self._last_ctrl_c_time = 0.0
-                            self.agentic._cancel_event.clear()
-                        result = None
+                    self._handle_ctrl_c_abort(streamer)
+                    result = None
                 except Exception as exc:
                     streamer.pause()
                     show_error(str(exc))
@@ -791,14 +796,13 @@ class ChatSession:
         if not self.bridge or not self.bridge.has_pending():
             return
         # Skip if a previous channel message is still being processed
-        if getattr(self, '_channel_processing', False):
+        if not self._channel_lock.acquire(blocking=False):
             return
 
         ch_msg = self.bridge.get_pending_message(timeout=0)
         if ch_msg is None:
+            self._channel_lock.release()
             return
-
-        self._channel_processing = True
 
         def _process():
             try:
@@ -815,7 +819,7 @@ class ChatSession:
             except Exception:
                 logger.debug("channel_response_display_failed", exc_info=True)
             finally:
-                self._channel_processing = False
+                self._channel_lock.release()
 
         import threading
         threading.Thread(target=_process, daemon=True, name="channel-drain").start()
@@ -1026,8 +1030,6 @@ class ChatSession:
                     token_used=self.token_used, token_limit=self.token_limit,
                     permission_mode=self.perm_mode,
                 )
-                # Drain channel messages after plan execution
-                self._drain_channels()
                 continue
 
             # ── Normal execution path ──
@@ -1036,8 +1038,6 @@ class ChatSession:
 
             if result is None:
                 show_error("No response received.")
-                # Drain channel messages after failed execution
-                self._drain_channels()
                 continue
 
             response_text = result.get("response", "")
@@ -1046,8 +1046,6 @@ class ChatSession:
             is_error = result.get("success") is False or any(response_text.startswith(s) for s in _ERROR_SENTINELS)
             if is_error:
                 show_error(response_text)
-                # Drain and continue
-                self._drain_channels()
                 continue
 
             # Context summary
@@ -1148,6 +1146,3 @@ class ChatSession:
                     self.agent._speak(response_text)
                 except (OSError, RuntimeError, AttributeError):
                     logger.warning("tts_speak_failed", exc_info=True)
-
-            # Drain channel messages that arrived during agent execution
-            self._drain_channels()

@@ -698,6 +698,12 @@ def show_info(message: str) -> None:
     console.print(f"  [dim]{message}[/dim]")
 
 
+def show_warning(message: str) -> None:
+    """Display warning with triangle icon."""
+    colors = _get_theme_colors()
+    console.print(f"  [{colors['warning']}]\u25b3[/{colors['warning']}] {message}")
+
+
 def show_help() -> None:
     """Display help with clean aligned text, no heavy borders."""
     colors = _get_theme_colors()
@@ -831,6 +837,7 @@ class StreamingResponse:
         self._spinner_active: bool = False
         self._start_time: float = 0.0
         self._first_chunk_time: float = 0.0
+        self._fade_frames_remaining: int = 0
 
     def start(self) -> None:
         """Begin live rendering context with a themed thinking spinner."""
@@ -867,6 +874,7 @@ class StreamingResponse:
         """Append a text chunk and re-render NEW content since last pause."""
         if self._spinner_active:
             self._spinner_active = False
+            self._fade_frames_remaining = 3  # 3 frames of fade-in
             if not self._first_chunk_time:
                 import time as _t
                 self._first_chunk_time = _t.monotonic()
@@ -876,7 +884,12 @@ class StreamingResponse:
             renderable = self._close_partial_fences(new_content)
             try:
                 md = Markdown(renderable, code_theme=_get_code_theme())
-                self._live.update(Padding(md, (0, 2)))
+                if self._fade_frames_remaining > 0:
+                    self._fade_frames_remaining -= 1
+                    padded = Padding(md, (0, 2), style="dim")
+                else:
+                    padded = Padding(md, (0, 2))
+                self._live.update(padded)
             except (ValueError, TypeError):
                 self._live.update(Padding(Text(new_content), (0, 2)))
 
@@ -898,6 +911,10 @@ class StreamingResponse:
 
     def resume(self) -> None:
         """Resume live rendering after tool call with a fresh spinner."""
+        # Subtle separator between tool output and resumed response
+        colors = _get_theme_colors()
+        console.print(f"  [{colors.get('text_muted', 'dim')}]\u00b7\u00b7\u00b7[/{colors.get('text_muted', 'dim')}]")
+        self._spinner_active = True
         from .spinner import AuraSpinner
         spinner = AuraSpinner()
         self._live = Live(spinner, console=console, refresh_per_second=12, transient=True)

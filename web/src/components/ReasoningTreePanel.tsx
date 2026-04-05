@@ -261,23 +261,6 @@ export function ReasoningTreePanel() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  // Fetch current status
-  const fetchStatus = useCallback(async () => {
-    try {
-      const res = await fetch('/api/reasoning-tree/status');
-      if (res.ok) {
-        const data = await res.json();
-        console.log('[ReasoningTree] Status:', data);
-      }
-    } catch (e) {
-      console.error('[ReasoningTree] Failed to fetch status:', e);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchStatus();
-  }, [fetchStatus]);
-
   const handleThinkDeeply = async () => {
     if (!problem.trim()) return;
 

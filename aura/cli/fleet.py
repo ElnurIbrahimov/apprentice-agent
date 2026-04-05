@@ -215,7 +215,11 @@ class FleetExecutor:
                 on_update(fleet)
             start = time.time()
             try:
-                result = execute_fn(task.description)
+                prompt = task.description
+                if task.files:
+                    file_context = "Relevant files: " + ", ".join(f"`{f}`" for f in task.files)
+                    prompt = f"{file_context}\n\n{prompt}"
+                result = execute_fn(prompt)
                 task.elapsed = time.time() - start
                 if result.get("success"):
                     task.status = SubAgentStatus.DONE

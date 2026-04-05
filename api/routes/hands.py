@@ -100,12 +100,14 @@ async def list_hands() -> Dict[str, Any]:
 @router.get("/history")
 async def get_hand_history(
     limit: int = Query(20, ge=1, le=100),
+    hand: Optional[str] = Query(None),
 ) -> Dict[str, Any]:
     """Get recent Hand execution results from the audit chain."""
     try:
         from aura.security.audit_chain import get_audit_chain
         chain = get_audit_chain()
-        entries = chain.search(action_type="hand_complete", limit=limit)
+        agent_id = f"hand:{hand}" if hand else None
+        entries = chain.search(action_type="hand_complete", agent_id=agent_id, limit=limit)
         return {"history": entries, "count": len(entries)}
     except Exception as e:
         logger.debug(f"[Hands API] History lookup failed: {e}")
@@ -179,6 +181,20 @@ async def deactivate_hand(name: str) -> Dict[str, Any]:
     if manager.deactivate(name):
         return {"status": "deactivated", "hand": name}
     raise HTTPException(status_code=404, detail=f"Unknown hand: {name}")
+
+
+@router.post("/{name}/pause")
+async def pause_hand(name: str) -> Dict[str, Any]:
+    """Pause a Hand (suspend scheduling without deactivating)."""
+    manager = _get_manager()
+    hand = manager._hands.get(name)
+    if not hand:
+        raise HTTPException(status_code=404, detail=f"Unknown hand: {name}")
+    from aura.hands.base import HandState
+    if hand.state in (HandState.ACTIVE, HandState.RUNNING):
+        hand._state = HandState.PAUSED
+        return {"status": "paused", "hand": name}
+    raise HTTPException(status_code=400, detail=f"Hand {name} is {hand.state.value}, cannot pause")
 
 
 @router.post("/{name}/approve")

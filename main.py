@@ -41,7 +41,7 @@ def _suppress_warnings() -> None:
 
 def main() -> None:
     _suppress_warnings()
-    from aura import __version__
+    from aura._version import __version__
     parser = argparse.ArgumentParser(
         description="AURA - Autonomous Universal Reasoning Agent",
         prog="aura"
@@ -51,6 +51,7 @@ def main() -> None:
     # Subcommands
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("init", help="Create AURA.md in current project")
+    subparsers.add_parser("setup", help="Interactive setup wizard for new projects")
     subparsers.add_parser("doctor", help="Check Ollama, models, dependencies")
     subparsers.add_parser("config", help="Show current configuration")
     subparsers.add_parser("models", help="List available models with routing roles")
@@ -74,13 +75,6 @@ def main() -> None:
         "goal",
         nargs="*",
         help="One-shot agentic prompt (e.g., aura 'fix the login bug')"
-    )
-    # --chat is accepted for explicitness but chat is already the default mode
-    # when no goal/prompt is provided. Kept for CLI discoverability.
-    parser.add_argument(
-        "--chat",
-        action="store_true",
-        help="Start in interactive chat mode (default when no prompt given)"
     )
     parser.add_argument(
         "--max-iterations",
@@ -189,6 +183,10 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    # Validate conflicting flags
+    if args.voice and args.prompt:
+        parser.error("--voice and --prompt cannot be used together")
+
     # Handle auth commands (no agent needed)
     if args.login:
         if args.login.lower() == "chatgpt":
@@ -238,13 +236,11 @@ def main() -> None:
                 print(f"  {r['prompt'][:80]}")
         sys.exit(0)
 
-    # Handle exec subcommand — non-interactive agent execution
+    # Handle exec subcommand — convert to non-interactive --prompt path
     if args.command == "exec":
-        exec_prompt = getattr(args, "prompt", None)
-        if not exec_prompt:
+        if not args.prompt:
             print("Usage: aura exec 'your prompt here'")
             sys.exit(1)
-        args.prompt = exec_prompt
         # Fall through to the non-interactive --prompt path below
 
     # Handle subcommands that don't need the full agent
@@ -264,9 +260,16 @@ def main() -> None:
 
     try:
         agent = ApprenticeAgent()
+    except ConnectionError as e:
+        print(f"\n[AURA] Cannot connect to Ollama: {e}")
+        print("Start it with: ollama serve")
+        sys.exit(1)
+    except (FileNotFoundError, PermissionError) as e:
+        print(f"\n[AURA] Config/filesystem error: {e}")
+        sys.exit(1)
     except Exception as e:
         print(f"\n[AURA] Failed to initialize agent: {e}")
-        print("Check that Ollama is running (ollama serve) and your config is valid.")
+        print("Run 'aura doctor' to diagnose the issue.")
         sys.exit(1)
     agent.max_iterations = args.max_iterations
     agent.use_fastpath = not args.no_fastpath
@@ -346,29 +349,33 @@ def main() -> None:
     # Initialize channel bridge if --channels specified
     bridge = None
     if args.channels:
-        from aura.channels.channel_bridge import ChannelBridge
-        bridge = ChannelBridge()
+        try:
+            from aura.channels.channel_bridge import ChannelBridge
+            bridge = ChannelBridge()
 
-        for ch_name in args.channels:
-            if ch_name == 'telegram':
-                from aura.channels.telegram_channel import TelegramChannel
-                bridge.add_channel(TelegramChannel())
-            elif ch_name == 'extension':
-                from aura.channels.extension_channel import ExtensionChannel
-                bridge.add_channel(ExtensionChannel())
-            else:
-                print(f"Unknown channel: {ch_name}")
-                sys.exit(1)
+            for ch_name in args.channels:
+                if ch_name == 'telegram':
+                    from aura.channels.telegram_channel import TelegramChannel
+                    bridge.add_channel(TelegramChannel())
+                elif ch_name == 'extension':
+                    from aura.channels.extension_channel import ExtensionChannel
+                    bridge.add_channel(ExtensionChannel())
+                else:
+                    print(f"Unknown channel: {ch_name}")
+                    sys.exit(1)
 
-        bridge.start()
+            bridge.start()
+        except Exception as e:
+            print(f"[AURA] Channel bridge failed to start: {e}")
+            bridge = None
 
     if args.voice:
         from aura.cli.voice_mode import run_voice_mode
-        run_voice_mode(agent, enable_barge_in=not args.no_barge_in)
+        run_voice_mode(agent, enable_barge_in=not args.no_barge_in, bridge=bridge)
     elif args.goal:
         from aura.cli.oneshot import run_agentic_oneshot
-        prompt = " ".join(args.goal) if isinstance(args.goal, list) else args.goal
-        run_agentic_oneshot(agent, prompt, args)
+        prompt = " ".join(args.goal)
+        run_agentic_oneshot(agent, prompt, args, bridge=bridge)
     else:
         from aura.cli.chat_loop import run_chat_mode
         run_chat_mode(agent, speak=args.speak, trust=args.trust, model=args.model, verbose=args.verbose, tier=args.tier, bridge=bridge)

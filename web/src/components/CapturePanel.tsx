@@ -530,7 +530,7 @@ export function CapturePanel() {
         <div className="flex-1 overflow-y-auto p-4">
           {result ? (
             <div
-              className="text-sm leading-relaxed whitespace-pre-wrap font-mono"
+              className="text-sm leading-relaxed whitespace-pre-wrap"
               style={{ color: 'var(--text-primary)' }}
             >
               {result}

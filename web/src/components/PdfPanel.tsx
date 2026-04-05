@@ -100,7 +100,7 @@ export function PdfPanel() {
     }
   }, [result, isGenerating]);
 
-  const readFileAsText = useCallback((file: File) => {
+  const readFileAsText = useCallback(async (file: File) => {
     setUploadedFileName(file.name);
     setUploadNote('');
     setUploadedText('');
@@ -118,11 +118,27 @@ export function PdfPanel() {
     }
 
     if (ext === 'pdf') {
+      // Try server-side parsing first (handles complex PDFs)
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        const res = await fetch('/api/pdf/parse', { method: 'POST', body: formData });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.text && data.text.length > 50) {
+            setUploadedText(data.text);
+            setUploadNote(`PDF parsed server-side (${data.pages || '?'} pages).`);
+            return;
+          }
+        }
+      } catch {
+        // Server endpoint unavailable — fall back to client-side
+      }
+
+      // Client-side fallback: naive text extraction
       const reader = new FileReader();
       reader.onload = (e) => {
         const raw = e.target?.result as string || '';
-        // Attempt naive text extraction from PDF bytes
-        // Works for text-based PDFs; scanned PDFs will yield garbage
         const text = raw
           .replace(/[^\x20-\x7E\n\r\t]/g, ' ')
           .replace(/ {3,}/g, ' ')
@@ -137,7 +153,7 @@ export function PdfPanel() {
           setUploadedText('');
         } else {
           setUploadedText(text);
-          setUploadNote('PDF text extracted (may contain artifacts for complex layouts).');
+          setUploadNote('PDF text extracted locally (may contain artifacts for complex layouts).');
         }
       };
       reader.onerror = () => setError('Failed to read file.');

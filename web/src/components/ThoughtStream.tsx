@@ -62,7 +62,8 @@ export function ThoughtStream() {
     <div className="bg-chat-sidebar rounded-lg p-4">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-chat-text font-medium flex items-center gap-2">
-          🧠 Inner Monologue
+          <span className="flex items-center justify-center w-6 h-6 rounded-md bg-purple-500/15 text-sm">🧠</span>
+          Inner Monologue
           <span className="text-xs text-chat-text-secondary">({thoughtCount})</span>
         </h3>
         <div className="flex gap-2">
@@ -96,8 +97,10 @@ export function ThoughtStream() {
               }`}
             >
               <div className="flex items-center gap-2 mb-1">
-                <span>{THOUGHT_ICONS[thought.type] || '💭'}</span>
-                <span className="font-medium text-chat-text uppercase text-xs">
+                <span className="flex items-center justify-center w-5 h-5 rounded text-xs bg-white/5">
+                  {THOUGHT_ICONS[thought.type] || '💭'}
+                </span>
+                <span className="font-medium text-chat-text uppercase text-xs tracking-wide">
                   {thought.type}
                 </span>
                 {thought.confidence && (

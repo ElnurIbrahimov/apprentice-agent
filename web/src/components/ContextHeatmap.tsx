@@ -148,7 +148,7 @@ export function ContextHeatmap() {
                       ${pulsingItems.has(item.name) ? 'animate-pulse ring-2 ring-white/30' : ''}
                     `}
                     style={{
-                      backgroundColor: `${item.color}${Math.round(item.opacity * 40).toString(16).padStart(2, '0')}`,
+                      backgroundColor: `${item.color}${Math.round(Math.min(item.opacity, 1) * 200).toString(16).padStart(2, '0')}`,
                       color: item.color,
                       borderLeft: `3px solid ${item.color}`,
                     }}

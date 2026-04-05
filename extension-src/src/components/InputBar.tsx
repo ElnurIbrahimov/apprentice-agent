@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
-import { Brain, Globe, FileText, X, Paperclip, Mic, Hash, Zap, Image as ImageIcon, FileCode } from 'lucide-react';
+import { Brain, Globe, FileText, X, Paperclip, Mic, Hash, Zap, Image as ImageIcon, FileCode, RefreshCw } from 'lucide-react';
 import { useStore } from '../store';
-import { getPageContentCached } from '../ext';
+import { getPageContentCached, clearPageContentCache } from '../ext';
 import ModelPill from './ModelPill';
 import { processFile } from './DropZone';
 import type { ThinkingLevel, FileAttachment } from '../types';
@@ -49,24 +49,8 @@ const THINKING_TOOLTIPS: Record<ThinkingLevel, string> = {
 
 const THINKING_CYCLE: ThinkingLevel[] = ['low', 'medium', 'high'];
 
-/* ── Slash command presets ── */
-interface SlashCommand {
-  command: string;
-  label: string;
-  template: string;
-  icon: string;
-}
-
-const SLASH_PRESETS: SlashCommand[] = [
-  { command: 'explain', label: 'Explain', template: 'Explain this in simple terms: ', icon: '💡' },
-  { command: 'summarize', label: 'Summarize', template: 'Summarize the following: ', icon: '📋' },
-  { command: 'translate', label: 'Translate', template: 'Translate to English: ', icon: '🌐' },
-  { command: 'code', label: 'Code', template: 'Write code for: ', icon: '💻' },
-  { command: 'fix', label: 'Fix', template: 'Fix this code: ', icon: '🔧' },
-  { command: 'improve', label: 'Improve', template: 'Improve this text: ', icon: '✨' },
-  { command: 'email', label: 'Email', template: 'Draft a professional email about: ', icon: '📧' },
-  { command: 'review', label: 'Review', template: 'Review this code for bugs and improvements: ', icon: '🔍' },
-];
+/* ── Slash command presets (imported from data module) ── */
+import { SLASH_COMMANDS } from '../data/slash-commands';
 
 /* ── Autocomplete item type ── */
 interface AutocompleteItem {
@@ -161,11 +145,10 @@ export default function InputBar({ onSend, featureKey = 'chat', placeholder, dis
 
   // Build slash command items
   const slashItems = useMemo<AutocompleteItem[]>(() => {
-    return SLASH_PRESETS.map(s => ({
-      id: `slash-${s.command}`,
-      label: `/${s.command}`,
+    return SLASH_COMMANDS.map(s => ({
+      id: `slash-${s.cmd}`,
+      label: s.cmd,
       sublabel: s.template.slice(0, 40),
-      icon: s.icon,
       type: 'slash' as const,
       value: s.template,
     }));
@@ -424,6 +407,43 @@ export default function InputBar({ onSend, featureKey = 'chat', placeholder, dis
     }
   };
 
+  const refreshPageCtx = async () => {
+    setPageLoading(true);
+    try {
+      clearPageContentCache();
+      const resp = await getPageContentCached();
+      if (resp?.ok && resp.text) {
+        setPendingCtx({ text: resp.text.slice(0, 20000), title: resp.title, url: resp.url, action: 'ask' });
+      }
+    } finally {
+      setPageLoading(false);
+    }
+  };
+
+  // Drag-and-drop on input area
+  const [isDragOver, setIsDragOver] = useState(false);
+  const dragCounter = useRef(0);
+  const handleInputDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (e.dataTransfer.types.includes('Files')) { dragCounter.current++; setIsDragOver(true); }
+  };
+  const handleInputDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounter.current--;
+    if (dragCounter.current <= 0) { dragCounter.current = 0; setIsDragOver(false); }
+  };
+  const handleInputDragOver = (e: React.DragEvent) => { e.preventDefault(); };
+  const handleInputDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounter.current = 0;
+    setIsDragOver(false);
+    const files = Array.from(e.dataTransfer.files);
+    for (const file of files) {
+      const attachment = await processFile(file);
+      if (attachment && onFilesAdded) onFilesAdded([attachment]);
+    }
+  };
+
   const handleSend = () => {
     const raw = textareaRef.current?.value.trim();
     if (!raw || isStreaming || disabled) return;
@@ -599,7 +619,14 @@ export default function InputBar({ onSend, featureKey = 'chat', placeholder, dis
       )}
 
       {/* Glass input wrapper */}
-      <div className={`input-glass-wrap ${isFocused ? 'input-focused' : ''} ${hasText ? 'has-text' : ''} ${isRecording ? 'input-recording' : ''}`}>
+      <div
+        className={`input-glass-wrap ${isFocused ? 'input-focused' : ''} ${hasText ? 'has-text' : ''} ${isRecording ? 'input-recording' : ''}`}
+        onDragEnter={handleInputDragEnter}
+        onDragLeave={handleInputDragLeave}
+        onDragOver={handleInputDragOver}
+        onDrop={handleInputDrop}
+        style={isDragOver ? { borderColor: 'var(--p)', borderStyle: 'dashed' } : undefined}
+      >
 
         {/* Autocomplete popup — positioned above textarea */}
         {acOpen && acItems.length > 0 && (
@@ -745,6 +772,17 @@ export default function InputBar({ onSend, featureKey = 'chat', placeholder, dis
               <FileText size={11} />
               <span>{pageLoading ? '...' : 'Page'}</span>
             </button>
+            {pendingCtx && (
+              <button
+                onClick={refreshPageCtx}
+                disabled={pageLoading}
+                className="input-pill"
+                title="Refresh page context"
+                style={{ opacity: pageLoading ? 0.5 : 1, padding: '2px 5px' }}
+              >
+                <RefreshCw size={10} />
+              </button>
+            )}
           </div>
 
           {/* Right side: char count, kbd hint, model, send */}

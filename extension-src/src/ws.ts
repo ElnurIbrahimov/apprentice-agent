@@ -10,10 +10,27 @@ let _connTimer: ReturnType<typeof setTimeout> | null = null;
 let _staleTimer: ReturnType<typeof setTimeout> | null = null;
 const WS_CONNECT_TIMEOUT = 5_000;
 const WS_STALE_TIMEOUT = 300_000; // 5 min — complex ops (deep research, web creator) can be slow
+const PING_INTERVAL = 25_000; // 25s — keeps service worker alive (Chrome kills after 30s idle)
+const PING_GRACE = 5_000; // Don't ping if message received <5s ago
+let _pingTimer: ReturnType<typeof setInterval> | null = null;
+let _lastMessageTime = 0;
 
 function clearWsTimers() {
   if (_connTimer) { clearTimeout(_connTimer); _connTimer = null; }
   if (_staleTimer) { clearTimeout(_staleTimer); _staleTimer = null; }
+}
+
+function startPingLoop(socket: WebSocket) {
+  if (_pingTimer) return;
+  _pingTimer = setInterval(() => {
+    if (socket.readyState === WebSocket.OPEN && (Date.now() - _lastMessageTime) > PING_GRACE) {
+      socket.send(JSON.stringify({ type: 'ping' }));
+    }
+  }, PING_INTERVAL);
+}
+
+function stopPingLoop() {
+  if (_pingTimer) { clearInterval(_pingTimer); _pingTimer = null; }
 }
 
 function resetStaleTimer(socket: WebSocket) {
@@ -86,6 +103,7 @@ export function connectWS() {
     }
     // Ask if the agent is ready
     socket.send(JSON.stringify({ type: 'ready_check' }));
+    startPingLoop(socket);
     console.log('[Aura] WebSocket connected');
     useStore.getState().setWsReady(true);
     useStore.getState().setWs(socket);
@@ -96,6 +114,7 @@ export function connectWS() {
   };
 
   socket.onclose = () => {
+    stopPingLoop();
     clearWsTimers();
     useStore.getState().setWsReady(false);
     useStore.getState().setWs(null);
@@ -151,6 +170,7 @@ export function connectWS() {
   };
 
   socket.onmessage = (ev) => {
+    _lastMessageTime = Date.now();
     resetStaleTimer(socket);
 
     let d: any;

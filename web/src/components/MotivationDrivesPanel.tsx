@@ -178,16 +178,16 @@ export function MotivationDrivesPanel() {
 
           {/* Stats */}
           <div className="grid grid-cols-3 gap-2 text-xs">
-            <div className="bg-chat-bg/30 rounded px-2 py-1.5 text-center">
+            <div className="bg-chat-bg/30 rounded px-2 py-1.5 text-center" title="Motivation evaluation cycles run">
               <div className="text-chat-text-secondary">Cycles</div>
               <div className="text-chat-text font-mono">{status.stats.assessments_run}</div>
             </div>
-            <div className="bg-chat-bg/30 rounded px-2 py-1.5 text-center">
+            <div className="bg-chat-bg/30 rounded px-2 py-1.5 text-center" title="Actions triggered by drives">
               <div className="text-chat-text-secondary">Actions</div>
               <div className="text-chat-text font-mono">{status.stats.actions_generated}</div>
             </div>
-            <div className="bg-chat-bg/30 rounded px-2 py-1.5 text-center">
-              <div className="text-chat-text-secondary">Pushed</div>
+            <div className="bg-chat-bg/30 rounded px-2 py-1.5 text-center" title="Times a drive exceeded its threshold">
+              <div className="text-chat-text-secondary">Triggered</div>
               <div className="text-chat-text font-mono">{status.stats.preferences_pushed}</div>
             </div>
           </div>

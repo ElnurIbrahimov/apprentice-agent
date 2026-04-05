@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { PlayIcon, StopIcon, ArrowPathIcon, ChevronDownIcon, ChevronUpIcon, SparklesIcon } from '@heroicons/react/24/outline';
+import { PlayIcon, StopIcon, ArrowPathIcon, ChevronDownIcon, ChevronUpIcon, SparklesIcon, XMarkIcon, ClipboardDocumentIcon, ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline';
 import { highlightCode } from '../utils/codeHighlighter';
 import { sanitizeHtml } from '../utils/sanitize';
 import { execute, resetRuntime, subscribe, isReady, type OutputBlock, type VariableInfo } from '../utils/pyodideExecutor';
@@ -54,7 +54,8 @@ function OutputRenderer({ block }: { block: OutputBlock }) {
 }
 
 /* ── Exchange card ── */
-function ExchangeCard({ exchange }: { exchange: Exchange }) {
+function ExchangeCard({ exchange, onRerun }: { exchange: Exchange; onRerun: (code: string) => void }) {
+  const [codeCopied, setCodeCopied] = useState(false);
   const runBadge = exchange.runMode === 'server'
     ? <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400">Server</span>
     : exchange.runMode === 'browser'
@@ -81,12 +82,39 @@ function ExchangeCard({ exchange }: { exchange: Exchange }) {
             <span className="text-[10px] font-semibold uppercase tracking-wider text-purple-400">Python</span>
             {runBadge}
           </div>
-          {exchange.phase === 'executing' && (
-            <span className="text-[10px] text-yellow-400 animate-pulse">Running...</span>
-          )}
-          {exchange.executionTime != null && (
-            <span className="text-[10px] text-chat-text-secondary">{exchange.executionTime.toFixed(2)}s</span>
-          )}
+          <div className="flex items-center gap-1.5">
+            {exchange.phase === 'executing' && (
+              <span className="text-[10px] text-yellow-400 animate-pulse">Running...</span>
+            )}
+            {exchange.executionTime != null && (
+              <span className="text-[10px] text-chat-text-secondary">{exchange.executionTime.toFixed(2)}s</span>
+            )}
+            {exchange.phase === 'idle' && (
+              <>
+                <button
+                  onClick={() => onRerun(exchange.code)}
+                  className="text-[10px] px-1.5 py-0.5 rounded bg-green-600/20 text-green-400 hover:bg-green-600/30 transition-colors flex items-center gap-0.5"
+                  title="Load code back into editor"
+                >
+                  <ArrowPathIcon className="w-3 h-3" />Re-run
+                </button>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(exchange.code);
+                    setCodeCopied(true);
+                    setTimeout(() => setCodeCopied(false), 1500);
+                  }}
+                  className="p-0.5 rounded text-chat-text-secondary hover:text-chat-text transition-colors"
+                  title="Copy code"
+                >
+                  {codeCopied
+                    ? <ClipboardDocumentCheckIcon className="w-3.5 h-3.5 text-green-400" />
+                    : <ClipboardDocumentIcon className="w-3.5 h-3.5" />
+                  }
+                </button>
+              </>
+            )}
+          </div>
         </div>
         {codeHtml ? (
           <div
@@ -206,7 +234,6 @@ export function CodeInterpreter() {
     if (!prompt || isGenerating) return;
 
     setIsGenerating(true);
-    setCode('');
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -278,7 +305,7 @@ export function CodeInterpreter() {
     setIsExecuting(true);
 
     setExchanges((prev) => [
-      ...prev,
+      ...prev.slice(-49),
       { id, code: trimmed, outputs: [], variables: [], phase: 'executing', runMode: 'browser' },
     ]);
     setCode('');
@@ -309,7 +336,7 @@ export function CodeInterpreter() {
 
     setIsExecuting(true);
     const id = newId();
-    setExchanges(prev => [...prev, { id, code: trimmed, outputs: [], variables: [], phase: 'executing', runMode: 'server' }]);
+    setExchanges(prev => [...prev.slice(-49), { id, code: trimmed, outputs: [], variables: [], phase: 'executing', runMode: 'server' }]);
     setCode('');
 
     try {
@@ -345,9 +372,18 @@ export function CodeInterpreter() {
 
   const handleReset = useCallback(() => {
     resetRuntime();
-    // Also reset the server session so state doesn't bleed across resets
     serverSessionId.current = `code-${Date.now().toString(36)}`;
     setExchanges([]);
+  }, []);
+
+  const handleClearExchanges = useCallback(() => {
+    setExchanges([]);
+  }, []);
+
+  const handleRerun = useCallback((codeToLoad: string) => {
+    setCode(codeToLoad);
+    textareaRef.current?.focus();
+    textareaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, []);
 
   return (
@@ -360,14 +396,25 @@ export function CodeInterpreter() {
             {workerReady ? 'Python Ready' : loading || 'Loading...'}
           </span>
         </div>
-        <button
-          onClick={handleReset}
-          className="flex items-center gap-1 px-2 py-1 text-xs text-chat-text-secondary hover:text-chat-text hover:bg-white/[0.06] rounded transition-colors"
-          title="Reset runtime"
-        >
-          <ArrowPathIcon className="w-3.5 h-3.5" />
-          Reset
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={handleClearExchanges}
+            disabled={exchanges.length === 0}
+            className="flex items-center gap-1 px-2 py-1 text-xs text-chat-text-secondary hover:text-chat-text hover:bg-white/[0.06] rounded transition-colors disabled:opacity-30"
+            title="Clear exchange history"
+          >
+            <XMarkIcon className="w-3.5 h-3.5" />
+            Clear
+          </button>
+          <button
+            onClick={handleReset}
+            className="flex items-center gap-1 px-2 py-1 text-xs text-chat-text-secondary hover:text-chat-text hover:bg-white/[0.06] rounded transition-colors"
+            title="Reset runtime + clear"
+          >
+            <ArrowPathIcon className="w-3.5 h-3.5" />
+            Reset
+          </button>
+        </div>
       </div>
 
       {/* Exchanges */}
@@ -402,7 +449,7 @@ export function CodeInterpreter() {
         )}
 
         {exchanges.map((ex) => (
-          <ExchangeCard key={ex.id} exchange={ex} />
+          <ExchangeCard key={ex.id} exchange={ex} onRerun={handleRerun} />
         ))}
       </div>
 
@@ -414,6 +461,14 @@ export function CodeInterpreter() {
             value={code}
             onChange={(e) => setCode(e.target.value)}
             onKeyDown={(e) => {
+              if (e.key === 'Tab') {
+                e.preventDefault();
+                const ta = e.currentTarget;
+                const start = ta.selectionStart;
+                const end = ta.selectionEnd;
+                setCode(code.slice(0, start) + '    ' + code.slice(end));
+                requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = start + 4; });
+              }
               if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                 e.preventDefault();
                 if (runMode === 'server') handleRunServer();

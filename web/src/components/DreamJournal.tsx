@@ -60,7 +60,9 @@ export function DreamJournal({ dreamData }: DreamJournalProps) {
         >
           Dream Consolidation
         </h3>
-        <span className="text-[10px] text-white/30 ml-auto mr-6">Morning Briefing</span>
+        <span className="text-[10px] text-white/30 ml-auto mr-6">
+          {new Date().getHours() < 12 ? 'Morning Briefing' : new Date().getHours() < 17 ? 'Afternoon Reflection' : 'Evening Review'}
+        </span>
       </div>
 
       {/* Insights */}

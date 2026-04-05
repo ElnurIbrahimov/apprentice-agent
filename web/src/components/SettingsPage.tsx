@@ -166,7 +166,7 @@ function ProviderRow({ provider, status, onSave, onRemove }: {
           </button>
         </div>
       ) : (
-        <div className="flex items-center gap-1.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex items-center gap-1.5 flex-shrink-0 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
           <button
             onClick={() => setEditing(true)}
             className="flex items-center gap-1 px-2.5 py-1.5 text-[11px] rounded-lg bg-white/5 text-chat-text-secondary hover:bg-white/10 hover:text-chat-text transition-colors font-medium"

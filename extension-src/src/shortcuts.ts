@@ -107,6 +107,13 @@ export function initShortcuts(store: Store) {
       return;
     }
 
+    // --- Ctrl+Shift+C: Open Compare panel ---
+    if (mod && e.shiftKey && key === 'c') {
+      e.preventDefault();
+      actions.setPanel('compare');
+      return;
+    }
+
     // --- Ctrl+1..9: Switch panels ---
     if (mod && !e.shiftKey && e.key >= '1' && e.key <= '9') {
       e.preventDefault();

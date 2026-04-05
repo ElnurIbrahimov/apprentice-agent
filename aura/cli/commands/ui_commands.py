@@ -94,8 +94,63 @@ def handle_trust(agent, arg, context) -> Optional[str]:
 
 
 def handle_help(agent, arg, context) -> Optional[str]:
-    from ..display import show_help
-    show_help()
+    """Show help. Use /help <command> for detailed help on a specific command."""
+    from ..display import show_help, console
+
+    if not arg or not arg.strip():
+        show_help()
+        return None
+
+    # Show help for specific command
+    cmd = arg.strip()
+    if not cmd.startswith("/"):
+        cmd = f"/{cmd}"
+
+    from . import COMMAND_REGISTRY
+    handler = COMMAND_REGISTRY.get(cmd)
+
+    if handler:
+        doc = handler.__doc__ or "No description available."
+        console.print(f"\n  [bold cyan]{cmd}[/bold cyan]")
+        for line in doc.strip().split("\n"):
+            console.print(f"  {line.strip()}")
+
+        # Built-in examples
+        EXAMPLES = {
+            "/model": ["/model              -- open interactive picker",
+                       "/model qwen3:8b     -- lock to specific model",
+                       "/model auto         -- return to auto-routing"],
+            "/copy": ["/copy               -- copy last response",
+                      "/copy code          -- copy first code block",
+                      "/copy code 2        -- copy 2nd code block"],
+            "/fleet": ["/fleet build auth   -- decompose and run in parallel"],
+            "/chain": ["/chain step1 -> step2 -> step3",
+                       "/chain list         -- show saved chains"],
+            "/test": ["/test               -- run configured test command",
+                      "/test --fix         -- auto-fix on failure"],
+            "/shell": ["/shell ls -la       -- run shell command"],
+            "/grep": ["/grep TODO          -- search for pattern",
+                      "/grep -t py error   -- search .py files"],
+            "/research": ["/research start topic  -- begin research mode",
+                          "/research stop         -- end research mode"],
+            "/debate": ["/debate Should we use X or Y?"],
+        }
+
+        if cmd in EXAMPLES:
+            console.print(f"\n  [dim]Examples:[/dim]")
+            for ex in EXAMPLES[cmd]:
+                console.print(f"    [dim]{ex}[/dim]")
+        console.print()
+    else:
+        console.print(f"  Unknown command: {cmd}")
+        from difflib import get_close_matches
+        known = list(COMMAND_REGISTRY.keys())
+        matches = get_close_matches(cmd, known, n=3, cutoff=0.5)
+        if matches:
+            console.print(f"  Did you mean: {', '.join(matches)}?")
+        console.print()
+
+    return None
 
 
 def handle_quit(agent, arg, context) -> Optional[str]:

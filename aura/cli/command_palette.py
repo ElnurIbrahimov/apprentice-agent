@@ -4,6 +4,7 @@ Ctrl+K opens a palette showing slash commands, recent files, and sessions.
 Uses prompt_toolkit Application (same pattern as model_picker / session_picker).
 """
 from __future__ import annotations
+import time as _time
 from dataclasses import dataclass
 from typing import Any, Optional, List, Dict
 
@@ -17,17 +18,64 @@ class PaletteItem:
         if not self.action:
             self.action = self.label
 
-_usage_counts: Dict[str, int] = {}
+# ── Frecency tracking ───────────────────────────────────────────────────
+
+_usage_data: Dict[str, tuple[int, float]] = {}  # action -> (count, last_used_time)
 
 def record_usage(action: str) -> None:
-    _usage_counts[action] = _usage_counts.get(action, 0) + 1
+    count, _ = _usage_data.get(action, (0, 0.0))
+    _usage_data[action] = (count + 1, _time.time())
 
-def _fuzzy_match(query: str, item: PaletteItem) -> bool:
+def _frecency_score(action: str) -> float:
+    count, last_used = _usage_data.get(action, (0, 0.0))
+    if count == 0:
+        return 0.0
+    recency = max(0.0, 1.0 - (_time.time() - last_used) / 86400)  # decay over 24h
+    return count * 0.6 + recency * 40
+
+# ── Fuzzy scoring ────────────────────────────────────────────────────────
+
+def _fuzzy_score(query: str, item: PaletteItem) -> int:
+    """Score an item against a query. 0 = no match. Higher = better."""
     q = query.lower()
-    return q in item.label.lower() or q in item.description.lower()
+    label = item.label.lower()
+    desc = item.description.lower()
 
-def _sort_items(items: List[PaletteItem]) -> List[PaletteItem]:
-    return sorted(items, key=lambda it: (-_usage_counts.get(it.action, 0), it.category, it.label.lower()))
+    # Exact match on label
+    if q == label:
+        return 100
+    # Prefix match on label
+    if label.startswith(q):
+        return 50
+    # Substring in label
+    if q in label:
+        return 25
+    # Substring in description
+    if q in desc:
+        return 15
+    # Subsequence match (all query chars in order in label)
+    qi = 0
+    for ch in label:
+        if qi < len(q) and ch == q[qi]:
+            qi += 1
+    if qi == len(q):
+        return 10
+    # Same for description
+    qi = 0
+    for ch in desc:
+        if qi < len(q) and ch == q[qi]:
+            qi += 1
+    if qi == len(q):
+        return 5
+    return 0
+
+def _sort_items(items: List[PaletteItem], query: str = "") -> List[PaletteItem]:
+    if query:
+        scored = [(it, _fuzzy_score(query, it)) for it in items]
+        scored = [(it, s) for it, s in scored if s > 0]
+        scored.sort(key=lambda x: (-x[1], -_frecency_score(x[0].action)))
+        return [it for it, _ in scored]
+    return sorted(items, key=lambda it: (-_frecency_score(it.action), it.category, it.label.lower()))
 
 def build_items_from_commands(slash_commands: list[tuple[str, str]]) -> List[PaletteItem]:
     return [PaletteItem(label=c, description=d, category="command") for c, d in slash_commands]

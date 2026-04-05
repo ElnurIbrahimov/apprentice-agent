@@ -80,10 +80,15 @@ class AuraSpinner:
         self._step = step
         self._stall_threshold = 30.0  # seconds before color shifts to warn
         self._tokens = 0
+        self._fade_steps: int = 0
 
     def __rich__(self) -> Text:
         """Called by Rich Live on each refresh — returns fresh frame."""
         return self.render()
+
+    def set_fade(self, steps: int = 3) -> None:
+        """Enable a fade-in effect for the next N render calls."""
+        self._fade_steps = steps
 
     def render(self) -> Text:
         """Render current spinner frame with shimmer verb and stats."""
@@ -101,6 +106,11 @@ class AuraSpinner:
             frame_style = f"bold {accent}"
             verb_base = accent
             verb_shimmer = accent_dim
+
+        # Apply dim during fade-in
+        if self._fade_steps > 0:
+            self._fade_steps -= 1
+            frame_style = f"dim {frame_style}"
 
         t = Text("  ")
         t.append(frame, style=frame_style)

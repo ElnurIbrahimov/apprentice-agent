@@ -80,6 +80,7 @@ export function ImageGenPanel() {
   const [style, setStyle] = useState('None');
   const [isGenerating, setIsGenerating] = useState(false);
   const [genMode, setGenMode] = useState<'auto' | 'svg'>('auto');
+  const [modeNotice, setModeNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [currentImage, setCurrentImage] = useState<GeneratedImage | null>(null);
   const [history, setHistory] = useState<GeneratedImage[]>(() => loadHistory());
@@ -198,6 +199,7 @@ export function ImageGenPanel() {
             // If ComfyUI not running, auto-fallback to SVG
             if (data?.detail?.error?.includes?.('ComfyUI') || data?.error?.includes?.('ComfyUI')) {
               setGenMode('svg');
+              setModeNotice('Image server unavailable — switched to SVG mode');
               imageB64 = await generateSvg(fullPrompt);
             } else {
               throw new Error(data.error || data.detail || `Generation failed (${res.status})`);
@@ -211,6 +213,7 @@ export function ImageGenPanel() {
           // Network error or ComfyUI not running — fallback to SVG
           if (e.message?.includes('ComfyUI') || e.message?.includes('Failed to fetch') || e.message?.includes('NetworkError')) {
             setGenMode('svg');
+            setModeNotice('Image server unavailable — switched to SVG mode');
             imageB64 = await generateSvg(fullPrompt);
           } else {
             throw e;
@@ -403,6 +406,12 @@ export function ImageGenPanel() {
           {error && (
             <div className="text-xs text-red-400 bg-red-500/10 rounded-lg p-2.5">{error}</div>
           )}
+          {modeNotice && (
+            <div className="text-xs text-amber-400 bg-amber-500/10 rounded-lg p-2.5 flex items-center justify-between">
+              <span>{modeNotice}</span>
+              <button onClick={() => setModeNotice(null)} className="text-amber-400/60 hover:text-amber-400 ml-2">×</button>
+            </div>
+          )}
 
           {/* Prompt history */}
           <div>
@@ -475,7 +484,7 @@ export function ImageGenPanel() {
                 onClick={() => { setPrompt(currentImage.prompt); }}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-chat-border text-xs text-chat-text-secondary hover:text-chat-text hover:border-purple-500/30 transition-colors"
               >
-                <ArrowPathIcon className="w-3.5 h-3.5" />Variations
+                <ClipboardDocumentIcon className="w-3.5 h-3.5" />Reuse Prompt
               </button>
             </div>
             <div className="text-xs text-chat-text-secondary text-center max-w-md">

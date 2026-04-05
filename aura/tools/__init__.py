@@ -105,8 +105,6 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "Edge":                     (".knowledge_graph",      "Edge"),
     "NODE_TYPES":               (".knowledge_graph",      "NODE_TYPES"),
     "EDGE_TYPES":               (".knowledge_graph",      "EDGE_TYPES"),
-    "KnowledgeExtractor":       (".kg_extractor",         "KnowledgeExtractor"),
-    "create_extractor":         (".kg_extractor",         "create_extractor"),
     # NeuroDream
     "NeuroDreamEngine":         (".neurodream",           "NeuroDreamEngine"),
     "SleepPhase":               (".neurodream",           "SleepPhase"),

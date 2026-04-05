@@ -2,6 +2,8 @@
 // Uses Telegram's WebApp API: window.Telegram.WebApp
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { EMOTION_COLORS, NEURO_INFO, PERSONALITY_INFO } from './utils/emotionConstants';
 
 // ─── Telegram WebApp type declarations ───
@@ -67,7 +69,7 @@ declare global {
 const API_BASE = `${window.location.protocol}//${window.location.host}/api`;
 const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/chat/stream`;
 
-type TabId = 'chat' | 'dashboard' | 'tools' | 'emotion';
+type TabId = 'chat' | 'dashboard' | 'tools' | 'emotion' | 'settings';
 
 // ─── Interfaces ───
 interface ChatMessage {
@@ -122,6 +124,9 @@ const MOOD_EMOJIS: Record<string, string> = {
 export default function MiniApp() {
   const tg = window.Telegram?.WebApp;
   const [activeTab, setActiveTab] = useState<TabId>('chat');
+  const [validated, setValidated] = useState(false);
+  // Ref to allow tool tab to send messages into the chat WebSocket
+  const sendToChatRef = useRef<((text: string) => void) | null>(null);
 
   // ─── Telegram WebApp init ───
   useEffect(() => {
@@ -130,6 +135,19 @@ export default function MiniApp() {
     tg.expand();
     tg.setHeaderColor('#030303');
     tg.setBackgroundColor('#030303');
+
+    // Validate initData with backend
+    const initData = (tg as any).initData;
+    if (initData) {
+      fetch(`${API_BASE}/telegram/validate-init`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ init_data: initData }),
+      })
+        .then(r => r.json())
+        .then(d => { if (d.valid) setValidated(true); })
+        .catch(() => {});
+    }
   }, [tg]);
 
   // ─── Back button toggles to chat ───
@@ -162,16 +180,25 @@ export default function MiniApp() {
         {user && (
           <span className="miniapp-user">
             {user.first_name}
+            {validated && <span className="miniapp-verified" title="Verified">{'\u2713'}</span>}
           </span>
         )}
       </header>
 
       {/* Tab content */}
       <main className="miniapp-content">
-        {activeTab === 'chat' && <ChatTab tg={tg} />}
+        {activeTab === 'chat' && <ChatTab tg={tg} sendToChatRef={sendToChatRef} />}
         {activeTab === 'dashboard' && <DashboardTab />}
-        {activeTab === 'tools' && <ToolsTab tg={tg} />}
+        {activeTab === 'tools' && <ToolsTab tg={tg} onRunCommand={(cmd) => {
+          // Switch to chat tab and send the command via WebSocket
+          if (sendToChatRef.current) {
+            sendToChatRef.current(cmd);
+          }
+          setActiveTab('chat');
+          tg?.HapticFeedback?.impactOccurred('medium');
+        }} />}
         {activeTab === 'emotion' && <EmotionTab />}
+        {activeTab === 'settings' && <SettingsTab tg={tg} />}
       </main>
 
       {/* Bottom tab bar */}
@@ -181,6 +208,7 @@ export default function MiniApp() {
           { id: 'dashboard' as TabId, label: 'Dashboard', icon: DashIcon },
           { id: 'tools' as TabId, label: 'Tools', icon: ToolsIcon },
           { id: 'emotion' as TabId, label: 'Emotion', icon: EmotionIcon },
+          { id: 'settings' as TabId, label: 'Settings', icon: SettingsIcon },
         ]).map((tab) => (
           <button
             key={tab.id}
@@ -216,7 +244,7 @@ function BreathingDot() {
 // ═══════════════════════════════════════════
 // CHAT TAB
 // ═══════════════════════════════════════════
-function ChatTab({ tg }: { tg?: Window['Telegram'] extends undefined ? never : NonNullable<Window['Telegram']>['WebApp'] }) {
+function ChatTab({ tg, sendToChatRef }: { tg?: NonNullable<Window['Telegram']>['WebApp']; sendToChatRef: React.MutableRefObject<((text: string) => void) | null> }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -369,6 +397,12 @@ function ChatTab({ tg }: { tg?: Window['Telegram'] extends undefined ? never : N
     tg?.HapticFeedback?.impactOccurred('light');
   }, [tg]);
 
+  // Expose sendMessage to parent via ref (for tools tab)
+  useEffect(() => {
+    sendToChatRef.current = sendMessage;
+    return () => { sendToChatRef.current = null; };
+  }, [sendMessage, sendToChatRef]);
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -411,8 +445,16 @@ function ChatTab({ tg }: { tg?: Window['Telegram'] extends undefined ? never : N
               </div>
             )}
             <div className={`chat-msg-bubble ${msg.role}`}>
-              <div className="chat-msg-text">{msg.content}</div>
-              {msg.isStreaming && <span className="streaming-cursor" />}
+              {msg.role === 'assistant' ? (
+                <div className="chat-msg-text markdown-body">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {msg.content}
+                  </ReactMarkdown>
+                  {msg.isStreaming && <span className="streaming-cursor" />}
+                </div>
+              ) : (
+                <div className="chat-msg-text">{msg.content}</div>
+              )}
             </div>
           </div>
         ))}
@@ -583,7 +625,7 @@ function DashboardTab() {
 // ═══════════════════════════════════════════
 // TOOLS TAB
 // ═══════════════════════════════════════════
-function ToolsTab({ tg }: { tg?: NonNullable<Window['Telegram']>['WebApp'] }) {
+function ToolsTab({ tg, onRunCommand }: { tg?: NonNullable<Window['Telegram']>['WebApp']; onRunCommand: (cmd: string) => void }) {
   const quickTools = [
     { id: 'research', label: 'Research', icon: '\u{1F50D}', color: '#8b5cf6', command: '/research ' },
     { id: 'code', label: 'Code', icon: '\u{1F4BB}', color: '#3b82f6', command: '/code ' },
@@ -612,21 +654,65 @@ function ToolsTab({ tg }: { tg?: NonNullable<Window['Telegram']>['WebApp'] }) {
     fetchTools();
   }, []);
 
+  const [selectedTool, setSelectedTool] = useState<string | null>(null);
+  const [toolInput, setToolInput] = useState('');
+
   const handleToolTap = (tool: typeof quickTools[0]) => {
     tg?.HapticFeedback?.impactOccurred('medium');
-    // Send command back to Telegram chat
-    tg?.sendData(JSON.stringify({ action: 'command', command: tool.command }));
+    setSelectedTool(tool.id);
+    setToolInput('');
+  };
+
+  const handleToolRun = () => {
+    if (!selectedTool || !toolInput.trim()) return;
+    const tool = quickTools.find(t => t.id === selectedTool);
+    if (tool) {
+      onRunCommand(`${tool.command}${toolInput.trim()}`);
+      setSelectedTool(null);
+      setToolInput('');
+    }
   };
 
   return (
     <div className="tools-tab">
+      {/* Tool input panel (shown when a tool is selected) */}
+      {selectedTool && (() => {
+        const tool = quickTools.find(t => t.id === selectedTool);
+        if (!tool) return null;
+        return (
+          <div className="tool-input-panel">
+            <div className="tool-input-header">
+              <span className="tool-input-icon">{tool.icon}</span>
+              <span className="tool-input-title">{tool.label}</span>
+              <button className="tool-input-close" onClick={() => setSelectedTool(null)}>&times;</button>
+            </div>
+            <textarea
+              className="tool-input-field"
+              placeholder={`Enter ${tool.label.toLowerCase()} query...`}
+              value={toolInput}
+              onChange={(e) => setToolInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleToolRun(); } }}
+              rows={2}
+              autoFocus
+            />
+            <button
+              className={`tool-run-btn ${toolInput.trim() ? 'active' : ''}`}
+              onClick={handleToolRun}
+              disabled={!toolInput.trim()}
+            >
+              Run {tool.label}
+            </button>
+          </div>
+        );
+      })()}
+
       {/* Quick access grid */}
       <div className="tools-section-label">Quick Actions</div>
       <div className="tools-grid">
         {quickTools.map((tool) => (
           <button
             key={tool.id}
-            className="tool-card"
+            className={`tool-card ${selectedTool === tool.id ? 'selected' : ''}`}
             onClick={() => handleToolTap(tool)}
             style={{ '--tool-color': tool.color } as React.CSSProperties}
           >
@@ -840,6 +926,90 @@ function PADMiniBar({ label, value, color }: { label: string; value: number; col
 
 
 // ═══════════════════════════════════════════
+// SETTINGS TAB
+// ═══════════════════════════════════════════
+function SettingsTab({ tg }: { tg?: NonNullable<Window['Telegram']>['WebApp'] }) {
+  const [language, setLanguage] = useState('en');
+  const [model, setModel] = useState('auto');
+  const [models, setModels] = useState<string[]>([]);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    // Fetch available models
+    fetch(`${API_BASE}/models`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d?.models) setModels(d.models.map((m: any) => m.name || m));
+      })
+      .catch(() => {});
+  }, []);
+
+  const save = () => {
+    tg?.HapticFeedback?.notificationOccurred('success');
+    // Send settings back to bot
+    tg?.sendData(JSON.stringify({
+      action: 'settings',
+      settings: { language, model },
+    }));
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  const langs = [
+    { code: 'en', label: '\u{1F1EC}\u{1F1E7} English' },
+    { code: 'ru', label: '\u{1F1F7}\u{1F1FA} \u0420\u0443\u0441\u0441\u043a\u0438\u0439' },
+    { code: 'az', label: '\u{1F1E6}\u{1F1FF} Az\u0259rbaycan' },
+  ];
+
+  return (
+    <div className="settings-tab">
+      <div className="settings-section">
+        <div className="section-label">Language</div>
+        <div className="settings-option-group">
+          {langs.map(l => (
+            <button
+              key={l.code}
+              className={`settings-option ${language === l.code ? 'active' : ''}`}
+              onClick={() => { setLanguage(l.code); tg?.HapticFeedback?.selectionChanged(); }}
+            >
+              {l.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="settings-section">
+        <div className="section-label">AI Model</div>
+        <select
+          className="settings-select"
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+        >
+          <option value="auto">Auto (recommended)</option>
+          {models.slice(0, 20).map(m => (
+            <option key={m} value={m}>{m}</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="settings-section">
+        <div className="section-label">About</div>
+        <div className="settings-about">
+          <div className="about-row"><span className="about-key">Version</span><span className="about-val">4.3.0</span></div>
+          <div className="about-row"><span className="about-key">Platform</span><span className="about-val">{tg?.platform || 'unknown'}</span></div>
+          <div className="about-row"><span className="about-key">Theme</span><span className="about-val">{tg?.colorScheme || 'dark'}</span></div>
+        </div>
+      </div>
+
+      <button className={`settings-save ${saved ? 'saved' : ''}`} onClick={save}>
+        {saved ? '\u2705 Saved!' : 'Save Settings'}
+      </button>
+    </div>
+  );
+}
+
+
+// ═══════════════════════════════════════════
 // SVG ICONS (inline to avoid dependencies)
 // ═══════════════════════════════════════════
 function ChatIcon({ active }: { active: boolean }) {
@@ -876,6 +1046,15 @@ function EmotionIcon({ active }: { active: boolean }) {
       <path d="M8 14s1.5 2 4 2 4-2 4-2" />
       <line x1="9" y1="9" x2="9.01" y2="9" />
       <line x1="15" y1="9" x2="15.01" y2="9" />
+    </svg>
+  );
+}
+
+function SettingsIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={active ? '#a78bfa' : '#a1a1aa'} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" />
     </svg>
   );
 }

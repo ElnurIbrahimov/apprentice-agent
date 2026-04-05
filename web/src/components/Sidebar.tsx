@@ -6,7 +6,9 @@ import { ConversationList } from './ConversationList';
 import {
   XMarkIcon,
   Cog6ToothIcon,
+  PlusIcon,
 } from '@heroicons/react/24/outline';
+import pkg from '../../package.json';
 
 interface SidebarProps {
   onClose?: () => void;
@@ -47,21 +49,31 @@ export function Sidebar({ onClose }: SidebarProps) {
             </div>
             <div>
               <span className="text-chat-text font-bold text-lg">AURA</span>
-              <div className="text-xs text-chat-text-secondary">v4.3.0 ALIVE</div>
+              <div className="text-xs text-chat-text-secondary">v{pkg.version}</div>
               <AuraStatusLine
                 status={isLoading ? 'Thinking...' : null}
                 isVisible={connectionStatus === 'connected'}
               />
             </div>
           </div>
-          {onClose && (
+          <div className="flex items-center gap-1">
             <button
-              onClick={onClose}
-              className="p-2 text-chat-text-secondary hover:text-chat-text hover:bg-chat-assistant/50 rounded-lg transition-all duration-200 lg:hidden"
+              onClick={() => document.dispatchEvent(new CustomEvent('aura:new-chat'))}
+              className="p-2 text-chat-text-secondary hover:text-chat-text hover:bg-chat-assistant/50 rounded-lg transition-all duration-200"
+              aria-label="New Chat"
+              title="New Chat"
             >
-              <XMarkIcon className="w-5 h-5" />
+              <PlusIcon className="w-5 h-5" />
             </button>
-          )}
+            {onClose && (
+              <button
+                onClick={onClose}
+                className="p-2 text-chat-text-secondary hover:text-chat-text hover:bg-chat-assistant/50 rounded-lg transition-all duration-200 lg:hidden"
+              >
+                <XMarkIcon className="w-5 h-5" />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Conversation list — main body */}

@@ -1,7 +1,8 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { useStore } from '../store';
 import { HTTP, apiFetch, getAuthHeaders } from '../api';
 import { md } from '../markdown';
+import { Copy, Check, Star } from 'lucide-react';
 
 const COMPARE_DEFAULTS = ['minimax-m2.7:cloud', 'qwen3.5:397b-cloud', 'kimi-k2.5:cloud'];
 
@@ -13,6 +14,17 @@ export default function ComparePanel() {
   const [fastest, setFastest] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [markedBest, setMarkedBest] = useState('');
+  const [copied, setCopied] = useState('');
+
+  const gridCols = selected.size <= 3 ? '1fr' : '1fr 1fr';
+
+  const copyResponse = useCallback((model: string, text: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(model);
+      setTimeout(() => setCopied(''), 1500);
+    }).catch(() => {});
+  }, []);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -177,7 +189,7 @@ export default function ComparePanel() {
         {error && <div style={{ color: 'var(--rd)', fontSize: '12px', marginBottom: 8 }}>⚠ {error}</div>}
 
         {loading && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: gridCols, gap: 8 }}>
             {[...selected].map(m => (
               <div key={m} style={{ background: 'var(--s2)', border: '1px solid var(--b1)', borderRadius: 'var(--r-md)', padding: 12, minHeight: 100 }}>
                 <div style={{ fontSize: '11px', color: 'var(--mu)', marginBottom: 8 }}>{m.replace(/:cloud$/, '')}</div>
@@ -188,10 +200,11 @@ export default function ComparePanel() {
         )}
 
         {results.length > 0 && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: gridCols, gap: 8 }}>
             {results.map(r => {
               const isCloud = r.model.includes(':cloud');
               const isFastest = r.model === fastest && !r.error;
+              const isBest = r.model === markedBest;
               const displayName = r.model.replace(/:cloud$/, '');
               const timeLabel = r.elapsed_ms >= 1000 ? (r.elapsed_ms / 1000).toFixed(1) + 's' : r.elapsed_ms + 'ms';
               return (
@@ -199,7 +212,7 @@ export default function ComparePanel() {
                   key={r.model}
                   style={{
                     background: 'var(--s2)',
-                    border: '1px solid var(--b1)',
+                    border: `1px solid ${isBest ? 'var(--gr)' : isFastest ? 'rgba(34,197,94,0.3)' : 'var(--b1)'}`,
                     borderRadius: 'var(--r-md)',
                     overflow: 'hidden',
                     display: 'flex',
@@ -208,11 +221,12 @@ export default function ComparePanel() {
                 >
                   <div
                     className="flex items-center justify-between"
-                    style={{ padding: '8px 10px', borderBottom: '1px solid var(--b1)', background: 'var(--s3)' }}
+                    style={{ padding: '8px 10px', borderBottom: '1px solid var(--b1)', background: isBest ? 'rgba(34,197,94,0.08)' : 'var(--s3)' }}
                   >
                     <div className="flex items-center gap-1.5" style={{ fontSize: '11px', color: 'var(--tx)', minWidth: 0 }}>
                       <span>{isCloud ? '☁' : '🖥'}</span>
                       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayName}</span>
+                      {isBest && <span style={{ fontSize: '10px', color: 'var(--gr)' }}>★ Best</span>}
                     </div>
                     <span
                       style={{
@@ -246,24 +260,28 @@ export default function ComparePanel() {
                     )}
                   </div>
                   {!r.error && (
-                    <div style={{ padding: '6px 10px', borderTop: '1px solid var(--b1)' }}>
+                    <div className="flex items-center gap-2" style={{ padding: '6px 10px', borderTop: '1px solid var(--b1)' }}>
                       <button
                         onClick={() => {
                           setPendingCtx({ text: r.response || '', title: displayName, url: '' });
                           setPanel('chat');
                         }}
-                        style={{
-                          background: 'none',
-                          border: '1px solid var(--b1)',
-                          borderRadius: 'var(--r-sm)',
-                          color: 'var(--mu)',
-                          fontSize: '10px',
-                          padding: '3px 8px',
-                          cursor: 'pointer',
-                          fontFamily: 'inherit',
-                        }}
+                        style={{ background: 'none', border: '1px solid var(--b1)', borderRadius: 'var(--r-sm)', color: 'var(--mu)', fontSize: '10px', padding: '3px 8px', cursor: 'pointer', fontFamily: 'inherit' }}
                       >
                         Send to Chat
+                      </button>
+                      <button
+                        onClick={() => copyResponse(r.model, r.response || '')}
+                        style={{ background: 'none', border: '1px solid var(--b1)', borderRadius: 'var(--r-sm)', color: 'var(--mu)', fontSize: '10px', padding: '3px 8px', cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 3 }}
+                      >
+                        {copied === r.model ? <><Check size={9} /> Copied</> : <><Copy size={9} /> Copy</>}
+                      </button>
+                      <button
+                        onClick={() => setMarkedBest(isBest ? '' : r.model)}
+                        title={isBest ? 'Remove best' : 'Mark as best'}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: isBest ? 'var(--gr)' : 'var(--mu)', padding: '2px 4px', fontFamily: 'inherit', display: 'flex', alignItems: 'center' }}
+                      >
+                        <Star size={11} fill={isBest ? 'var(--gr)' : 'none'} />
                       </button>
                     </div>
                   )}
