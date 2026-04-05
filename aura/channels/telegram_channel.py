@@ -31,124 +31,16 @@ from .bridge import (
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-#  Telegram MarkdownV2 formatting utilities
-#  (Mirrors the full TelegramBot formatter but kept self-contained)
+#  Telegram MarkdownV2 formatting utilities (shared module)
 # ---------------------------------------------------------------------------
 
-_MARKDOWNV2_ESCAPE = re.compile(r'([_*\[\]()~`>#+\-=|{}.!\\])')
-_TELEGRAM_MSG_LIMIT = 4096
-
-
-def _escape_mdv2(text: str) -> str:
-    """Escape special characters for Telegram MarkdownV2."""
-    return _MARKDOWNV2_ESCAPE.sub(r'\\\1', text)
-
-
-def _format_telegram_response(text: str) -> List[str]:
-    """Convert markdown text to Telegram MarkdownV2 and split into chunks.
-
-    Handles code blocks, inline code, bold, italic, links.
-    Returns a list of strings, each <= 4096 chars.
-    """
-    if not text:
-        return [""]
-
-    # --- Phase 1: Extract code blocks and inline code to protect them ---
-    placeholders: Dict[str, str] = {}
-    counter = [0]
-
-    def _save_code_block(m: re.Match) -> str:
-        key = f"\x00CB{counter[0]}\x00"
-        counter[0] += 1
-        lang = m.group(1) or ""
-        code = m.group(2)
-        placeholders[key] = f"```{lang}\n{code}\n```"
-        return key
-
-    def _save_inline_code(m: re.Match) -> str:
-        key = f"\x00IC{counter[0]}\x00"
-        counter[0] += 1
-        placeholders[key] = f"`{m.group(1)}`"
-        return key
-
-    result = re.sub(r'```(\w*)\n?(.*?)```', _save_code_block, text, flags=re.DOTALL)
-    result = re.sub(r'`([^`\n]+)`', _save_inline_code, result)
-
-    # --- Phase 2: Extract links, bold, italic before escaping ---
-    link_phs: Dict[str, str] = {}
-
-    def _save_link(m: re.Match) -> str:
-        key = f"\x00LK{counter[0]}\x00"
-        counter[0] += 1
-        link_text = _escape_mdv2(m.group(1))
-        url = m.group(2)
-        link_phs[key] = f"[{link_text}]({url})"
-        return key
-
-    result = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', _save_link, result)
-
-    fmt_phs: Dict[str, str] = {}
-
-    def _save_bold(m: re.Match) -> str:
-        key = f"\x00BD{counter[0]}\x00"
-        counter[0] += 1
-        inner = _escape_mdv2(m.group(1))
-        fmt_phs[key] = f"*{inner}*"
-        return key
-
-    def _save_italic(m: re.Match) -> str:
-        key = f"\x00IT{counter[0]}\x00"
-        counter[0] += 1
-        inner = _escape_mdv2(m.group(1))
-        fmt_phs[key] = f"_{inner}_"
-        return key
-
-    result = re.sub(r'\*\*(.+?)\*\*', _save_bold, result)
-    result = re.sub(r'__(.+?)__', _save_bold, result)
-    result = re.sub(r'(?<!\*)\*([^*]+?)\*(?!\*)', _save_italic, result)
-    result = re.sub(r'(?<!_)_([^_]+?)_(?!_)', _save_italic, result)
-
-    # --- Phase 3: Escape remaining text ---
-    result = _escape_mdv2(result)
-
-    # --- Phase 4: Restore placeholders (reverse order of extraction) ---
-    for key, val in fmt_phs.items():
-        result = result.replace(_escape_mdv2(key), val)
-    for key, val in link_phs.items():
-        result = result.replace(_escape_mdv2(key), val)
-    for key, val in placeholders.items():
-        result = result.replace(_escape_mdv2(key), val)
-
-    # --- Phase 5: Split into <= 4096-char chunks ---
-    return _split_message(result, _TELEGRAM_MSG_LIMIT)
-
-
-def _split_message(text: str, limit: int) -> List[str]:
-    """Split text into chunks of at most *limit* chars at paragraph breaks."""
-    if len(text) <= limit:
-        return [text]
-
-    chunks: List[str] = []
-    remaining = text
-
-    while remaining:
-        if len(remaining) <= limit:
-            chunks.append(remaining)
-            break
-
-        # Try paragraph break, then newline, then space, then hard cut
-        split_at = remaining.rfind('\n\n', 0, limit)
-        if split_at == -1:
-            split_at = remaining.rfind('\n', 0, limit)
-        if split_at == -1:
-            split_at = remaining.rfind(' ', 0, limit)
-        if split_at == -1:
-            split_at = limit
-
-        chunks.append(remaining[:split_at].rstrip())
-        remaining = remaining[split_at:].lstrip('\n')
-
-    return chunks if chunks else [""]
+from aura.messaging.telegram_formatting import (
+    escape_mdv2 as _escape_mdv2,
+    format_telegram_response as _format_telegram_response,
+    split_message as _split_message,
+    _MARKDOWNV2_ESCAPE,
+    _TELEGRAM_MSG_LIMIT,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -398,14 +290,19 @@ class TelegramChannel(ChannelAdapter):
 
     _rejection_log_count: int = 0
     _rejection_log_last: float = 0.0
+    _rejection_log_reset_at: float = 0.0
 
     def _is_user_allowed(self, user_id: int) -> bool:
         """Check if user is allowed to interact with the bot."""
         import time as _t
         allowed = self._get_allowed_users()
+        now = _t.time()
+        # Daily reset so the counter never silently suppresses logs forever
+        if now - self._rejection_log_reset_at >= 86400:
+            self._rejection_log_count = 0
+            self._rejection_log_reset_at = now
         if not allowed:
             # Rate-limit rejection logs: first 3, then once per 60s
-            now = _t.time()
             self._rejection_log_count += 1
             if self._rejection_log_count <= 3 or (now - self._rejection_log_last) > 60:
                 logger.warning(
@@ -415,7 +312,6 @@ class TelegramChannel(ChannelAdapter):
                 self._rejection_log_last = now
             return False
         if user_id not in allowed:
-            now = _t.time()
             self._rejection_log_count += 1
             if self._rejection_log_count <= 3 or (now - self._rejection_log_last) > 60:
                 logger.warning(

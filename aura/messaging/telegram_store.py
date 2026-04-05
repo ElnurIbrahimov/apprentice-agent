@@ -63,6 +63,7 @@ class TelegramStore:
                     username TEXT,
                     custom_model TEXT,
                     custom_instructions TEXT,
+                    tts_enabled INTEGER DEFAULT 1,
                     created_at TEXT DEFAULT (datetime('now')),
                     updated_at TEXT DEFAULT (datetime('now'))
                 );
@@ -148,6 +149,13 @@ class TelegramStore:
             """)
             conn.commit()
 
+            # Migrate existing databases: add tts_enabled if missing
+            try:
+                conn.execute("ALTER TABLE user_settings ADD COLUMN tts_enabled INTEGER DEFAULT 1")
+                conn.commit()
+            except Exception:
+                pass  # Column already exists
+
     def close(self):
         with self._lock:
             if self._conn:
@@ -206,6 +214,16 @@ class TelegramStore:
 
     def set_keyboard_enabled(self, user_id: str, enabled: bool) -> None:
         self.set_user_setting(user_id, keyboard_enabled=int(enabled))
+
+    def get_tts_enabled(self, user_id: str) -> bool:
+        with self._lock:
+            row = self._get_conn().execute(
+                "SELECT tts_enabled FROM user_settings WHERE user_id = ?", (user_id,)
+            ).fetchone()
+            return bool(row["tts_enabled"]) if row else True
+
+    def set_tts_enabled(self, user_id: str, enabled: bool) -> None:
+        self.set_user_setting(user_id, tts_enabled=int(enabled))
 
     # ==================== PREMIUM ====================
 

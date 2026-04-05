@@ -7,7 +7,7 @@ import logging
 import os
 from collections import OrderedDict
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
