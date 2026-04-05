@@ -35,7 +35,7 @@ def test_slash_commands_has_all_expected():
 
 
 def test_slash_commands_count():
-    assert len(SLASH_COMMANDS) == 55
+    assert len(SLASH_COMMANDS) == 56
 
 
 def test_every_command_has_description():
