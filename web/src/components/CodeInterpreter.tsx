@@ -1,9 +1,11 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { PlayIcon, StopIcon, ArrowPathIcon, ChevronDownIcon, ChevronUpIcon, SparklesIcon, XMarkIcon, ClipboardDocumentIcon, ClipboardDocumentCheckIcon, TrashIcon, ArrowUpIcon, ArrowDownIcon } from '@heroicons/react/24/outline';
+import React, { useState, useRef, useCallback, useEffect, lazy, Suspense } from 'react';
+import { PlayIcon, StopIcon, ArrowPathIcon, ChevronDownIcon, ChevronUpIcon, SparklesIcon, XMarkIcon, ClipboardDocumentIcon, ClipboardDocumentCheckIcon, TrashIcon, ArrowUpIcon, ArrowDownIcon, EyeIcon } from '@heroicons/react/24/outline';
 import { highlightCode } from '../utils/codeHighlighter';
 import { sanitizeHtml } from '../utils/sanitize';
 import { execute, resetRuntime, subscribe, isReady, type OutputBlock, type VariableInfo } from '../utils/pyodideExecutor';
 import { executeJS } from '../utils/jsExecutor';
+
+const MonacoEditor = lazy(() => import('@monaco-editor/react'));
 
 interface Exchange {
   id: string;
@@ -235,18 +237,36 @@ export function CodeInterpreter() {
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [showModelMenu, setShowModelMenu] = useState(false);
+  const [showVars, setShowVars] = useState(false);
+  const [liveVars, setLiveVars] = useState<VariableInfo[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const editorRef = useRef<any>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const serverSessionId = useRef<string>(`code-${Date.now().toString(36)}`);
 
-  // Subscribe to global worker events (ready/loading)
+  // Subscribe to global worker events (ready/loading/error)
   useEffect(() => {
-    return subscribe({
-      onReady: () => { setWorkerReady(true); setLoading(''); },
+    // Timeout: if Pyodide isn't ready in 30s, auto-switch to server mode
+    const timeout = setTimeout(() => {
+      if (!isReady()) {
+        setLoading('');
+        setRunMode('server');
+      }
+    }, 30000);
+
+    const unsub = subscribe({
+      onReady: () => { setWorkerReady(true); setLoading(''); clearTimeout(timeout); },
       onLoading: (stage) => setLoading(stage),
+      onError: (message) => {
+        console.warn('[CodeInterpreter]', message);
+        setLoading('');
+        setRunMode('server');
+        clearTimeout(timeout);
+      },
     });
+    return () => { unsub(); clearTimeout(timeout); };
   }, []);
 
   // Auto-scroll
@@ -396,6 +416,7 @@ export function CodeInterpreter() {
         );
       },
       onVariables: (variables) => {
+        setLiveVars(variables);
         setExchanges((prev) =>
           prev.map((ex) => ex.id === id ? { ...ex, variables } : ex)
         );
@@ -497,8 +518,13 @@ export function CodeInterpreter() {
       <div className="flex items-center justify-between px-4 py-3 border-b border-chat-border flex-shrink-0">
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold text-chat-text">Code Interpreter</h2>
-          <span className={`text-[10px] px-2 py-0.5 rounded-full ${workerReady ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'}`}>
-            {workerReady ? 'Python Ready' : loading || 'Loading...'}
+          <span className={`text-[10px] px-2 py-0.5 rounded-full ${
+            workerReady ? 'bg-green-500/20 text-green-400'
+            : loading ? 'bg-yellow-500/20 text-yellow-400'
+            : runMode === 'server' ? 'bg-blue-500/20 text-blue-400'
+            : 'bg-gray-500/20 text-gray-400'
+          }`}>
+            {workerReady ? 'Browser Ready' : loading ? 'Loading...' : runMode === 'server' ? 'Server Mode' : 'Ready'}
           </span>
         </div>
         <div className="flex items-center gap-1">
@@ -546,10 +572,24 @@ export function CodeInterpreter() {
           </div>
         )}
 
-        {!workerReady && (
+        {!workerReady && exchanges.length === 0 && (
           <div className="text-center text-chat-text-secondary text-sm py-8">
-            <div className="shimmer-bar h-3 w-48 mx-auto mb-3" />
-            <p>{loading || 'Initializing Python runtime...'}</p>
+            {loading ? (
+              <>
+                <div className="shimmer-bar h-3 w-48 mx-auto mb-3" />
+                <p>{loading}</p>
+                <p className="text-[10px] mt-2 text-chat-text-secondary/50">
+                  You can switch to <button onClick={() => setRunMode('server')} className="text-blue-400 hover:underline">Server mode</button> to run code now
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="mb-4">Write Python or JavaScript code below and press Run.</p>
+                <p className="text-[10px] text-chat-text-secondary/50">
+                  Using <span className="text-blue-400">Server</span> mode — code runs on the Aura server
+                </p>
+              </>
+            )}
           </div>
         )}
 
@@ -570,11 +610,31 @@ export function CodeInterpreter() {
         ))}
       </div>
 
+      {/* Variable Inspector */}
+      {showVars && liveVars.length > 0 && (
+        <div className="border-t border-chat-border px-3 py-2 flex-shrink-0 max-h-[140px] overflow-y-auto" style={{ background: 'var(--surface-0)' }}>
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-chat-text-secondary">Variables ({liveVars.length})</span>
+            <button onClick={() => setShowVars(false)} className="text-chat-text-secondary hover:text-chat-text"><XMarkIcon className="w-3 h-3" /></button>
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-1">
+            {liveVars.map(v => (
+              <div key={v.name} className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] border border-chat-border/30" style={{ background: 'var(--surface-1)' }}>
+                <span className="font-semibold text-blue-400 truncate">{v.name}</span>
+                <span className="text-chat-text-secondary/40">:</span>
+                <span className="text-chat-text-secondary/60 text-[10px] truncate" title={v.repr}>{v.type_name}</span>
+                <span className="ml-auto text-[10px] text-chat-text-secondary/40 truncate max-w-[80px]" title={v.repr}>{v.repr}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Input */}
       <div className="border-t border-chat-border p-3 flex-shrink-0">
         <div className="flex gap-2">
           <div className="flex-1 flex flex-col">
-            <div className="flex gap-1 mb-1.5">
+            <div className="flex gap-1 mb-1.5 items-center">
               <button
                 onClick={() => setDefaultLang('python')}
                 className={`text-[10px] px-2 py-0.5 rounded ${defaultLang === 'python' ? 'bg-green-600/30 text-green-400' : 'text-chat-text-secondary'}`}
@@ -583,63 +643,100 @@ export function CodeInterpreter() {
                 onClick={() => setDefaultLang('javascript')}
                 className={`text-[10px] px-2 py-0.5 rounded ${defaultLang === 'javascript' ? 'bg-yellow-600/30 text-yellow-400' : 'text-chat-text-secondary'}`}
               >JavaScript</button>
+              <div className="flex-1" />
+              {liveVars.length > 0 && (
+                <button
+                  onClick={() => setShowVars(v => !v)}
+                  className={`text-[10px] px-2 py-0.5 rounded flex items-center gap-1 transition-colors ${showVars ? 'bg-blue-600/30 text-blue-400' : 'text-chat-text-secondary hover:text-chat-text'}`}
+                  title="Toggle variable inspector"
+                >
+                  <EyeIcon className="w-3 h-3" />
+                  Vars ({liveVars.length})
+                </button>
+              )}
             </div>
-            <textarea
-              ref={textareaRef}
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              onInput={(e) => {
-                const el = e.currentTarget;
-                el.style.height = 'auto';
-                el.style.height = Math.min(el.scrollHeight, 200) + 'px';
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Tab') {
-                  e.preventDefault();
-                  const ta = e.currentTarget;
-                  const start = ta.selectionStart;
-                  const end = ta.selectionEnd;
-                  setCode(code.slice(0, start) + '    ' + code.slice(end));
-                  requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = start + 4; });
-                }
-                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                  e.preventDefault();
-                  if (runMode === 'server') handleRunServer();
-                  else handleRun();
-                }
-              }}
-              placeholder={`Write ${defaultLang === 'javascript' ? 'JavaScript' : 'Python'} code... (Ctrl+Enter to run)`}
-              className="p-3 rounded-lg bg-surface-1 border border-chat-border text-chat-text text-sm font-mono resize-none outline-none focus:border-chat-accent placeholder-chat-text-secondary/50 w-full"
-              style={{ minHeight: 52, maxHeight: 200, overflow: 'auto' }}
-              disabled={runMode === 'browser' && defaultLang === 'python' && !workerReady}
-            />
+            <div className="rounded-lg overflow-hidden border border-chat-border focus-within:border-chat-accent transition-colors" style={{ minHeight: 120, maxHeight: 220 }}>
+              <Suspense fallback={
+                <textarea
+                  ref={textareaRef}
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                      e.preventDefault();
+                      if (runMode === 'server') handleRunServer();
+                      else handleRun();
+                    }
+                  }}
+                  placeholder={`Write ${defaultLang === 'javascript' ? 'JavaScript' : 'Python'} code... (Ctrl+Enter to run)`}
+                  className="p-3 bg-surface-1 text-chat-text text-sm font-mono resize-none outline-none placeholder-chat-text-secondary/50 w-full h-[120px]"
+                />
+              }>
+                <MonacoEditor
+                  height="160px"
+                  language={defaultLang}
+                  theme="vs-dark"
+                  value={code}
+                  onChange={(val) => setCode(val || '')}
+                  onMount={(editor) => {
+                    editorRef.current = editor;
+                    editor.addCommand(
+                      // Monaco.KeyMod.CtrlCmd | Monaco.KeyCode.Enter
+                      2048 | 3,
+                      () => { if (runMode === 'server') handleRunServer(); else handleRun(); }
+                    );
+                  }}
+                  options={{
+                    minimap: { enabled: false },
+                    fontSize: 13,
+                    lineNumbers: 'on',
+                    lineNumbersMinChars: 3,
+                    glyphMargin: false,
+                    folding: false,
+                    scrollBeyondLastLine: false,
+                    automaticLayout: true,
+                    tabSize: 4,
+                    wordWrap: 'on',
+                    padding: { top: 8, bottom: 8 },
+                    overviewRulerLanes: 0,
+                    hideCursorInOverviewRuler: true,
+                    overviewRulerBorder: false,
+                    scrollbar: { vertical: 'auto', horizontal: 'hidden', verticalScrollbarSize: 8 },
+                    renderLineHighlight: 'line',
+                    suggestOnTriggerCharacters: true,
+                    quickSuggestions: true,
+                    parameterHints: { enabled: true },
+                    bracketPairColorization: { enabled: true },
+                  }}
+                />
+              </Suspense>
+            </div>
           </div>
-          <div className="flex flex-col gap-1.5 self-end">
+          <div className="flex flex-col gap-2 self-end">
             <button
               onClick={handleAskAI}
               disabled={!code.trim() || isGenerating || isExecuting}
-              className="px-3 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium transition-colors flex items-center gap-1.5"
+              className="px-3.5 py-2 rounded-lg bg-chat-accent hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium transition-all flex items-center gap-1.5 whitespace-nowrap"
               title="Generate code from description"
             >
               {isGenerating ? (
-                <><StopIcon className="w-3.5 h-3.5" />AI...</>
+                <><StopIcon className="w-3.5 h-3.5" />Generating...</>
               ) : (
                 <><SparklesIcon className="w-3.5 h-3.5" />Ask AI</>
               )}
             </button>
-            <div className="flex items-center gap-1">
-              <div className="flex items-center gap-0.5 text-[10px] text-chat-text-secondary border border-chat-border rounded-md overflow-hidden">
+            <div className="flex items-center gap-1.5">
+              <div className="flex items-center text-[10px] font-medium border border-chat-border rounded-lg overflow-hidden" style={{ background: 'var(--surface-1)' }}>
                 <button
                   onClick={() => setRunMode('browser')}
-                  className={`px-2 py-1 transition-colors ${runMode === 'browser' ? 'bg-green-600/30 text-green-400' : 'hover:text-chat-text'}`}
-                  title="Run in browser (Pyodide)"
+                  className={`px-2.5 py-1.5 transition-colors ${runMode === 'browser' ? 'bg-green-500/20 text-green-400' : 'text-chat-text-secondary hover:text-chat-text'}`}
+                  title={workerReady ? 'Run in browser (Pyodide)' : 'Browser runtime loading...'}
                 >
                   Browser
                 </button>
-                <span className="text-chat-border">|</span>
                 <button
                   onClick={() => setRunMode('server')}
-                  className={`px-2 py-1 transition-colors ${runMode === 'server' ? 'bg-blue-600/30 text-blue-400' : 'hover:text-chat-text'}`}
+                  className={`px-2.5 py-1.5 transition-colors ${runMode === 'server' ? 'bg-blue-500/20 text-blue-400' : 'text-chat-text-secondary hover:text-chat-text'}`}
                   title="Run on server"
                 >
                   Server
@@ -647,11 +744,11 @@ export function CodeInterpreter() {
               </div>
               <button
                 onClick={runMode === 'server' ? handleRunServer : handleRun}
-                disabled={(runMode === 'browser' && defaultLang === 'python' && (!workerReady || !code.trim())) || (runMode === 'server' && !code.trim()) || (defaultLang === 'javascript' && !code.trim()) || isExecuting || isGenerating}
-                className="px-3 py-2 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium transition-colors flex items-center gap-1.5"
+                disabled={!code.trim() || isExecuting || isGenerating || (runMode === 'browser' && defaultLang === 'python' && !workerReady)}
+                className="px-3.5 py-1.5 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium transition-all flex items-center gap-1.5 whitespace-nowrap"
               >
                 {isExecuting ? (
-                  <><StopIcon className="w-3.5 h-3.5" />Run...</>
+                  <><StopIcon className="w-3.5 h-3.5" />Running...</>
                 ) : (
                   <><PlayIcon className="w-3.5 h-3.5" />Run</>
                 )}

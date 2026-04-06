@@ -29,6 +29,7 @@ type ExecutionListener = {
 type GlobalListener = {
   onReady?: () => void;
   onLoading?: (stage: string) => void;
+  onError?: (message: string) => void;
 };
 
 let worker: Worker | null = null;
@@ -66,6 +67,11 @@ function ensureWorker(): Worker {
     }
     if (msg.type === 'loading') {
       globalListeners.forEach((gl) => gl.onLoading?.(msg.stage || 'Loading...'));
+      return;
+    }
+    if (msg.type === 'init_error') {
+      // Pyodide failed to load — notify listeners so UI can fallback to server mode
+      globalListeners.forEach((gl) => gl.onError?.(msg.message || 'Python runtime failed to load'));
       return;
     }
 

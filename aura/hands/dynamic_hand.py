@@ -95,19 +95,16 @@ class DynamicHand(Hand):
             if step_cb:
                 await step_cb(1, f"Searching for: {', '.join(search_queries[:2])}...")
 
-            search_tool = tools.get("web_search") or tools.get("brave_search")
+            from aura.tools.search_fallback import web_search_with_fallback
             for query in search_queries:
-                if not search_tool:
-                    logger.debug(f"[DynamicHand:{hand_name}] No search tool available, skipping query: {query}")
-                    continue
                 try:
-                    result = (
-                        search_tool.execute(query=query, num_results=5)
-                        if hasattr(search_tool, "execute")
-                        else None
-                    )
-                    if result:
-                        raw_findings.append({"query": query, "content": str(result)[:3000]})
+                    result = web_search_with_fallback(query=query, max_results=5)
+                    if result.get("results"):
+                        web_text = "\n".join(
+                            f"- {r.get('title', '')}: {r.get('snippet', '')[:200]} ({r.get('url', '')})"
+                            for r in result["results"][:5]
+                        )
+                        raw_findings.append({"query": query, "content": web_text})
                         iterations += 1
                 except Exception as exc:
                     logger.debug(f"[DynamicHand:{hand_name}] Search failed for '{query}': {exc}")

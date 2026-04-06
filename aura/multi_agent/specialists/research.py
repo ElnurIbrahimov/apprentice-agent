@@ -57,6 +57,16 @@ Example: [TOOL: web_search] latest developments in AI safety 2024"""
 
     max_tool_calls = 3
 
+    def _execute_tool(self, tool_name, action):
+        """Override to use fallback chain for web search."""
+        if tool_name in ("web_search", "search_web", "search"):
+            try:
+                from aura.tools.search_fallback import web_search_with_fallback
+                return web_search_with_fallback(query=action, max_results=8)
+            except ImportError:
+                pass
+        return super()._execute_tool(tool_name, action)
+
     def execute(
         self,
         message: AgentMessage,

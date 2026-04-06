@@ -5,7 +5,7 @@ SOTA upgrades over original:
 - ResultRanker: BM25-inspired + domain authority + snippet quality scoring
 - ResearchCache: SQLite-backed caching for search results and page content
 - HierarchicalSummarizer: per-page LLM summaries → cross-source synthesis
-- Search backend priority: Tavily (if available) → SearXNG fallback
+- Search backend priority: Tavily → Brave → Firecrawl fallback
 - Optional LLM integration with full graceful degradation
 
 v2 STORM-pattern upgrades:
@@ -1078,14 +1078,27 @@ class DeepResearchTool:
         except ImportError:
             pass
 
-        # 2. SearXNG / WebSearchTool (fallback)
+        # 2. Brave Search (if API key set)
+        self.brave = None
         try:
-            from .web_search import WebSearchTool
-            self.searcher = WebSearchTool()
-        except ImportError as e:
-            logger.warning(f"WebSearchTool not available: {e}")
+            from .brave_search import BraveSearchTool
+            if os.getenv("BRAVE_API_KEY"):
+                self.brave = BraveSearchTool()
+                logger.info("[DeepResearch] Brave search backend available")
+        except ImportError:
+            pass
 
-        # 3. Browser for page fetching
+        # 3. Firecrawl (search + scrape fallback)
+        self.firecrawl = None
+        try:
+            from .firecrawl_tool import FirecrawlTool
+            if os.getenv("FIRECRAWL_API_KEY"):
+                self.firecrawl = FirecrawlTool()
+                logger.info("[DeepResearch] Firecrawl search backend available")
+        except ImportError:
+            pass
+
+        # 4. Browser for page fetching
         try:
             from .browser import BrowserTool
             self.browser = BrowserTool()
@@ -1592,7 +1605,7 @@ Return as JSON (no markdown fences):
         return candidates
 
     # ------------------------------------------------------------------
-    #  Search execution (Tavily -> SearXNG)
+    #  Search execution (Tavily -> Brave -> Firecrawl)
     # ------------------------------------------------------------------
 
     def _search(self, query: str, num_results: int = 10) -> Dict:
@@ -1625,21 +1638,39 @@ Return as JSON (no markdown fences):
             except Exception as e:
                 logger.debug(f"[DeepResearch] Tavily search failed: {e}")
 
-        # Fall back to SearXNG
-        if result is None and self.searcher:
+        # Fall back to Brave
+        if result is None and self.brave:
             try:
-                searx_result = self.searcher.search(query, num_results)
-                if searx_result.get("success"):
+                brave_result = self.brave.run(query, count=num_results)
+                if not brave_result.get("error"):
                     results = []
-                    for item in searx_result.get("results", []):
+                    for item in brave_result.get("results", []):
                         results.append({
                             "url": item.get("url", ""),
                             "title": item.get("title", ""),
-                            "snippet": item.get("snippet", ""),
+                            "snippet": item.get("description", ""),
                         })
-                    result = {"success": True, "results": results, "cached": False}
+                    if results:
+                        result = {"success": True, "results": results, "cached": False}
             except Exception as e:
-                logger.debug(f"[DeepResearch] SearXNG search failed: {e}")
+                logger.debug(f"[DeepResearch] Brave search failed: {e}")
+
+        # Fall back to Firecrawl
+        if result is None and self.firecrawl:
+            try:
+                fc_result = self.firecrawl.search(query, limit=num_results)
+                if not fc_result.get("error"):
+                    results = []
+                    for item in fc_result.get("results", []):
+                        results.append({
+                            "url": item.get("url", ""),
+                            "title": item.get("title", ""),
+                            "snippet": item.get("markdown", "")[:300],
+                        })
+                    if results:
+                        result = {"success": True, "results": results, "cached": False}
+            except Exception as e:
+                logger.debug(f"[DeepResearch] Firecrawl search failed: {e}")
 
         if result and result.get("success"):
             # Cache for next time

@@ -47,24 +47,28 @@ const QUICK_ACTIONS = [
     subtitle: 'Deep web research with citations',
     icon: GlobeAltIcon,
     color: 'text-blue-400',
+    actionMode: 'research' as const,
   },
   {
     text: 'Generate a Python data visualization',
     subtitle: 'Code interpreter with live output',
     icon: CommandLineIcon,
     color: 'text-green-400',
+    actionMode: null,
   },
   {
     text: 'Compare models on a creative task',
     subtitle: 'Side-by-side model comparison',
     icon: ScaleIcon,
     color: 'text-amber-400',
+    actionMode: 'compare' as const,
   },
   {
     text: 'Build me a landing page',
     subtitle: 'Web creator with live preview',
     icon: CpuChipIcon,
-    color: 'text-purple-400',
+    color: 'text-blue-400',
+    actionMode: null,
   },
 ];
 
@@ -645,7 +649,7 @@ export function ChatContainer() {
                   return (
                     <button
                       key={action.text}
-                      onClick={() => { haptic(25); handleSend(action.text); }}
+                      onClick={() => { haptic(25); handleSend(action.text, undefined, action.actionMode); }}
                       disabled={isDisabled}
                       aria-label={action.text}
                       className="group flex items-start gap-3 sm:flex-col sm:gap-3 p-4 sm:p-5 text-left
@@ -655,7 +659,7 @@ export function ChatContainer() {
                         hover:bg-surface-2 hover:border-chat-text-secondary/20
                         active:scale-[0.97]"
                       style={{
-                        animation: `spring-up 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) ${150 + index * 80}ms both`,
+                        animation: `spring-up 0.4s var(--ease-spring) ${100 + index * 60}ms both`,
                       }}
                     >
                       <div className="w-10 h-10 sm:w-9 sm:h-9 rounded-xl sm:rounded-lg flex items-center justify-center flex-shrink-0"

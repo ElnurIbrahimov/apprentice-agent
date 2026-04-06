@@ -88,7 +88,6 @@ class ResearcherHand(Hand):
             if step_cb:
                 await step_cb(2, "Querying memory for prior knowledge...")
             findings = []
-            search_tool = tools.get("web_search") or tools.get("brave_search")
 
             # Check existing knowledge via UnifiedMemory
             # (memory_retriever was consolidated into UnifiedMemory — use it directly)
@@ -107,14 +106,18 @@ class ResearcherHand(Hand):
             # Step 3: Search the web for new information
             if step_cb:
                 await step_cb(3, "Searching the web...")
-            if search_tool:
-                try:
-                    results = search_tool.execute(query=topic, num_results=5) if hasattr(search_tool, 'execute') else ""
-                    if results:
-                        findings.append({"source": "web", "content": str(results)[:3000]})
-                        iterations += 1
-                except Exception as e:
-                    logger.debug(f"[Researcher] Web search failed: {e}")
+            try:
+                from aura.tools.search_fallback import web_search_with_fallback
+                search_result = web_search_with_fallback(query=topic, max_results=5)
+                if search_result.get("results"):
+                    web_text = "\n".join(
+                        f"- {r.get('title', '')}: {r.get('snippet', '')[:200]} ({r.get('url', '')})"
+                        for r in search_result["results"][:5]
+                    )
+                    findings.append({"source": "web", "content": web_text})
+                    iterations += 1
+            except Exception as e:
+                logger.debug(f"[Researcher] Web search failed: {e}")
 
             if not findings:
                 return HandResult(

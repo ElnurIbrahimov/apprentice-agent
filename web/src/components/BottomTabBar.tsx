@@ -81,11 +81,16 @@ export function BottomTabBar({ activeTab, onTabChange, badges }: BottomTabBarPro
             aria-label={tab.label}
             aria-current={isActive ? 'page' : undefined}
           >
-            {/* Active glow */}
+            {/* Active indicator line */}
             {isActive && (
               <span
-                className="absolute top-1 w-8 h-8 rounded-full opacity-20 pointer-events-none"
-                style={{ background: 'var(--chat-accent)', filter: 'blur(10px)' }}
+                className="absolute top-0 left-1/2 -translate-x-1/2 h-[2px] rounded-full pointer-events-none"
+                style={{
+                  width: 24,
+                  background: 'var(--chat-accent)',
+                  boxShadow: '0 0 8px var(--chat-accent), 0 0 16px var(--chat-accent)',
+                  transition: 'width 0.2s var(--ease-spring)',
+                }}
               />
             )}
             <div className="relative" style={{ transform: isActive ? 'scale(1.1)' : 'scale(1)', transition: 'transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)' }}>

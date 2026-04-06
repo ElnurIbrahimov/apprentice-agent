@@ -965,7 +965,122 @@ Provide key findings and cite sources."""
             except Exception:
                 logger.debug("stream_idle_activity_record_failed", exc_info=True)
 
-            # ===== DIRECT SEARCH HANDLER =====
+            # ===== EXPLICIT SEARCH MODE (from UI button) =====
+            # When user explicitly clicks "Search" button, ALWAYS do web search
+            if detected_action == "search":
+                logger.info(f"[AgentService] Explicit search mode for: {message[:50]}...")
+                try:
+                    from aura.tools.search_fallback import web_search_with_fallback
+                    search_result = web_search_with_fallback(query=message, max_results=8)
+
+                    if search_result.get("results"):
+                        raw_results = ""
+                        _search_citations = []
+                        for i, r in enumerate(search_result["results"][:8], 1):
+                            title = r.get("title", "No title")
+                            snippet = r.get("snippet", r.get("content", ""))[:200]
+                            url = r.get("url", "")
+                            raw_results += f"{i}. {title}\n   {snippet}\n   URL: {url}\n\n"
+                            if url:
+                                _search_citations.append({"id": i, "title": title, "url": url, "snippet": snippet})
+
+                        # Synthesize with LLM
+                        synthesis_prompt = f"""You are summarizing REAL web search results for: '{message}'
+
+SEARCH RESULTS:
+{raw_results}
+
+STRICT RULES:
+- ONLY use information from the search results above
+- Do NOT add information from your own knowledge
+- Include actual URLs as references
+- If results don't fully answer the query, say so
+- Be concise but accurate, use markdown"""
+
+                        if hasattr(brain, 'think_stream'):
+                            for chunk in brain.think_stream(synthesis_prompt, model_override=effective_model):
+                                yield {"type": "chunk", "content": chunk}
+                        else:
+                            yield {"type": "chunk", "content": brain.think(synthesis_prompt, model_override=effective_model)}
+
+                        if _search_citations:
+                            yield {"type": "citations", "citations": _search_citations}
+                    else:
+                        yield {"type": "chunk", "content": f"No search results found for: {message}"}
+
+                    yield {"type": "done", "mood": self._get_mood(), "model_used": effective_model or "search"}
+                    return
+                except Exception as e:
+                    logger.error(f"[AgentService] Search mode error: {e}")
+                    yield {"type": "chunk", "content": f"Search failed: {e}. Falling back to standard response.\n\n"}
+
+            # ===== EXPLICIT RESEARCH MODE (from UI button) =====
+            if detected_action == "research":
+                logger.info(f"[AgentService] Explicit research mode for: {message[:50]}...")
+                try:
+                    from aura.tools.deep_research import DeepResearchTool
+                    research_tool = DeepResearchTool()
+
+                    yield {"type": "chunk", "content": f"## Researching: {message}\n\n"}
+                    yield {"type": "tool_trace", "event": "start", "tool": "research", "detail": f'Researching "{message[:50]}"', "timestamp": time.time()}
+
+                    import queue as _rq
+                    _rprogress: _rq.Queue = _rq.Queue()
+                    research_tool.set_ws_callback(lambda evt: _rprogress.put(evt))
+
+                    _rstart = time.time()
+                    _rfuture = research_tool._executor.submit(research_tool.research, message, "standard")
+
+                    while not _rfuture.done():
+                        try:
+                            evt = _rprogress.get(timeout=0.25)
+                            yield evt
+                        except _rq.Empty:
+                            pass
+                    while not _rprogress.empty():
+                        try:
+                            yield _rprogress.get_nowait()
+                        except _rq.Empty:
+                            break
+
+                    result = _rfuture.result(timeout=5)
+                    _relapsed = int((time.time() - _rstart) * 1000)
+                    yield {"type": "tool_trace", "event": "done", "tool": "research", "detail": f'{result.get("urls_found", 0)} sources', "elapsed_ms": _relapsed, "timestamp": time.time()}
+
+                    if result.get("success"):
+                        synthesis_prompt = f"""Based on this research, provide a clear summary:
+
+Topic: {message}
+Sources: {result.get('urls_found', 0)} found, {result.get('pages_read', 0)} read
+
+Content:
+{result.get('content', '')[:6000]}
+
+Summarize key findings with [1], [2] citations. Be factual and concise."""
+
+                        if hasattr(brain, 'think_stream'):
+                            for chunk in brain.think_stream(synthesis_prompt, model_override=effective_model):
+                                yield {"type": "chunk", "content": chunk}
+                        else:
+                            yield {"type": "chunk", "content": brain.think(synthesis_prompt, model_override=effective_model)}
+
+                        citations = result.get("citations", [])
+                        if not citations:
+                            for i, s in enumerate(result.get("sources", [])[:10], 1):
+                                if isinstance(s, dict) and s.get("url"):
+                                    citations.append({"id": i, "title": s.get("title", ""), "url": s["url"], "snippet": s.get("snippet", "")})
+                        if citations:
+                            yield {"type": "citations", "citations": citations}
+                    else:
+                        yield {"type": "chunk", "content": f"Research failed: {result.get('error', 'Unknown error')}"}
+
+                    yield {"type": "done", "mood": self._get_mood(), "model_used": effective_model or "research"}
+                    return
+                except Exception as e:
+                    logger.error(f"[AgentService] Research mode error: {e}")
+                    yield {"type": "chunk", "content": f"Research error: {e}. Falling back.\n\n"}
+
+            # ===== DIRECT SEARCH HANDLER (auto-detect from message text) =====
             # Check for direct search before streaming to prevent query hallucination
             if hasattr(agent, '_handle_direct_search'):
                 search_response = agent._handle_direct_search(message)
@@ -1131,8 +1246,8 @@ Provide a well-structured, informative summary with key findings and cite source
                                 topic = topic.replace(trigger, "").strip()
                             topic = topic.strip(" :,.-")
 
-                            from aura.tools.web_search import WebSearchTool
-                            search_results = WebSearchTool().search(topic, num_results=8)
+                            from aura.tools.search_fallback import web_search_with_fallback
+                            search_results = web_search_with_fallback(query=topic, max_results=8)
 
                             if search_results.get("success") and search_results.get("results"):
                                 ctx = "\n".join([f"- {r.get('title','')}: {r.get('snippet','')}" for r in search_results["results"][:8]])
@@ -1188,11 +1303,9 @@ Provide a well-structured, informative summary with key findings and cite source
 
             enriched_message = message + screen_hint if screen_hint else message
 
-            # ===== AGENT RUN FOR RESEARCH/SEARCH =====
-            # When action mode is research/search, use full ReAct agent loop with tools
-            # instead of falling through to plain LLM chat
-            if detected_action in ("research", "search", "agent") and hasattr(agent, 'run'):
-                logger.info(f"[AgentService] Using agent.run() for {detected_action} mode")
+            # ===== AGENT MODE (agentic loop with tools) =====
+            if detected_action == "agent" and hasattr(agent, 'run'):
+                logger.info(f"[AgentService] Using agent.run() for agent mode")
                 try:
                     import queue as _queue
                     result_q = _queue.Queue()
@@ -1202,31 +1315,29 @@ Provide a well-structured, informative summary with key findings and cite source
                             result = agent.run(enriched_message, timeout_seconds=120)
                             result_q.put(result)
                         except Exception as e:
-                            result_q.put({"response": f"Research failed: {e}", "timeout": True})
+                            result_q.put({"response": f"Agent failed: {e}", "timeout": True})
 
                     t = threading.Thread(target=_run_agent, daemon=True)
                     t.start()
 
-                    yield {"type": "tool_status", "tool_name": "agent", "tool_action": f"running {detected_action}"}
+                    yield {"type": "tool_status", "tool_name": "agent", "tool_action": "running agent"}
 
                     t.join(timeout=125)
                     if not result_q.empty():
                         result = result_q.get_nowait()
                         response_text = result.get("response", "") if isinstance(result, dict) else str(result)
                         if response_text:
-                            # Filter out skill learning JSON from response
                             response_text = _filter_skill_json(response_text)
                             yield {"type": "chunk", "content": response_text}
                     else:
-                        yield {"type": "chunk", "content": "The research is taking longer than expected. Please try again with a more specific query."}
+                        yield {"type": "chunk", "content": "The agent task is taking longer than expected. Please try again with a more specific query."}
 
                     yield {"type": "tool_status", "tool_name": "", "tool_action": ""}
                     yield {"type": "done", "mood": self._get_mood(), "model_used": effective_model or "agent_run"}
                     return
                 except Exception as e:
-                    logger.error(f"[AgentService] Agent run failed for {detected_action}: {e}", exc_info=True)
-                    yield {"type": "chunk", "content": f"Research encountered an error. Falling back to standard response.\n\n"}
-                    # Fall through to standard streaming
+                    logger.error(f"[AgentService] Agent run failed: {e}", exc_info=True)
+                    yield {"type": "chunk", "content": f"Agent encountered an error. Falling back to standard response.\n\n"}
 
             # ===== STANDARD STREAMING =====
             if hasattr(brain, 'think_stream'):

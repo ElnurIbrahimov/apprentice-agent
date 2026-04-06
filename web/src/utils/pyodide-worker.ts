@@ -49,29 +49,29 @@ function post(msg: any) {
 }
 
 async function initPyodide() {
-  post({ type: 'loading', stage: 'Downloading Python runtime (~25MB, cached after first load)...' });
+  try {
+    post({ type: 'loading', stage: 'Downloading Python runtime (~25MB, cached after first load)...' });
 
-  // Load Pyodide from CDN
-  importScripts(PYODIDE_CDN + 'pyodide.js');
+    // Load Pyodide from CDN
+    importScripts(PYODIDE_CDN + 'pyodide.js');
 
-  post({ type: 'loading', stage: 'Initializing Python interpreter...' });
-  pyodide = await loadPyodide({
-    indexURL: PYODIDE_CDN,
-    stdout: (text: string) => {
-      // Will be overridden per-execution, but this is the default
-      post({ type: 'output', id: '_init', block: { type: 'stdout', text: text + '\n' } });
-    },
-    stderr: (text: string) => {
-      post({ type: 'output', id: '_init', block: { type: 'stderr', text: text + '\n' } });
-    },
-  });
+    post({ type: 'loading', stage: 'Initializing Python interpreter...' });
+    pyodide = await loadPyodide({
+      indexURL: PYODIDE_CDN,
+      stdout: (text: string) => {
+        post({ type: 'output', id: '_init', block: { type: 'stdout', text: text + '\n' } });
+      },
+      stderr: (text: string) => {
+        post({ type: 'output', id: '_init', block: { type: 'stderr', text: text + '\n' } });
+      },
+    });
 
-  // Load micropip for package management
-  post({ type: 'loading', stage: 'Setting up package manager...' });
-  await pyodide.loadPackage('micropip');
+    // Load micropip for package management
+    post({ type: 'loading', stage: 'Setting up package manager...' });
+    await pyodide.loadPackage('micropip');
 
-  // Set up matplotlib backend for non-interactive (Agg) rendering
-  await pyodide.runPythonAsync(`
+    // Set up matplotlib backend for non-interactive (Agg) rendering
+    await pyodide.runPythonAsync(`
 import sys
 import io
 
@@ -83,8 +83,13 @@ except ImportError:
     pass
 `);
 
-  isReady = true;
-  post({ type: 'ready' });
+    isReady = true;
+    post({ type: 'ready' });
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    console.error('[Pyodide Worker] Init failed:', msg);
+    post({ type: 'init_error', message: `Python runtime failed to load: ${msg}. Use Server mode instead.` });
+  }
 }
 
 /**

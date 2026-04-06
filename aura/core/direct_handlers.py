@@ -223,12 +223,243 @@ class DirectHandlersMixin:
     # Direct web search
     # ------------------------------------------------------------------
 
-    def _handle_direct_search(self, message: str, synthesize: bool = True) -> Optional[str]:
-        """Handle explicit search requests directly, bypassing agent loop.
+    # ------------------------------------------------------------------
+    # Search intent classifier — signal-scoring approach
+    # ------------------------------------------------------------------
 
-        This prevents the LLM's planning phase from hallucinating different queries.
-        User says "search for AI news" -> searches for "AI news" exactly.
-        Results are then synthesized by the LLM for better presentation.
+    # Words that HARD-BLOCK search (user is talking about local work)
+    _SEARCH_BLOCKERS = frozenset([
+        'my code', 'my file', 'my project', 'this file', 'this code',
+        'this function', 'this class', 'this module', 'this bug',
+        'fix this', 'edit this', 'run this', 'explain this',
+        'refactor', 'debug this', 'compile', 'deploy this',
+        'write a function', 'write a script', 'write a class',
+        'write code', 'create a file', 'make a component',
+        'merge conflict', 'git commit', 'git push', 'pull request',
+        'unit test', 'test case', 'run tests', 'npm', 'pip install',
+        'import error', 'syntax error', 'type error', 'traceback',
+        'stack trace', 'error message',
+    ])
+
+    # Explicit search commands (+10 score, instant trigger)
+    _SEARCH_COMMANDS = re.compile(
+        r'^(?:search|google|look\s*up|find\s+(?:online|on\s+the\s+web|info|information|out\s+about))\b', re.I
+    )
+
+    # Temporal/recency words (+3 each)
+    _TEMPORAL_WORDS = frozenset([
+        'latest', 'newest', 'recent', 'current', 'new', 'now',
+        'today', 'yesterday', 'this week', 'this month', 'this year',
+        'just released', 'just announced', 'just launched', 'just dropped',
+        'breaking', 'trending', 'upcoming', 'right now',
+        '2024', '2025', '2026', '2027',
+    ])
+
+    # Information-seeking nouns (+2 each)
+    _INFO_VERBS = frozenset([
+        'news', 'updates', 'update', 'developments', 'announcements',
+        'announcement', 'releases', 'release', 'changelog',
+        'review', 'reviews', 'comparison', 'benchmark', 'benchmarks',
+        'pricing', 'price', 'cost', 'specs', 'specifications',
+        'features', 'roadmap', 'schedule', 'timeline',
+        'status', 'availability', 'eta',
+        'info', 'information', 'details', 'overview', 'summary',
+        'breakthroughs', 'breakthrough', 'progress', 'results',
+        'rumors', 'rumor', 'rumours', 'rumour', 'leak', 'leaks',
+        'drama', 'controversy', 'scandal', 'crash', 'outage',
+        'version', 'changelog', 'compatibility',
+    ])
+
+    # Real-world knowledge domains (+2 if topic is about these)
+    _WORLD_DOMAINS = frozenset([
+        # AI/ML
+        'ai', 'ml', 'gpt', 'llm', 'llms', 'model', 'models', 'claude',
+        'openai', 'google', 'meta', 'microsoft', 'apple', 'nvidia', 'amd', 'intel',
+        'anthropic', 'deepmind', 'mistral', 'gemma', 'gemini', 'llama', 'phi',
+        'qwen', 'deepseek', 'sora', 'midjourney', 'dall-e', 'chatgpt',
+        'copilot', 'cursor', 'windsurf', 'codeium', 'tabnine', 'replit',
+        # Tech / frameworks
+        'python', 'javascript', 'typescript', 'rust', 'go', 'java', 'swift', 'kotlin',
+        'react', 'nextjs', 'vue', 'angular', 'svelte', 'remix', 'astro',
+        'docker', 'kubernetes', 'aws', 'gcp', 'azure', 'vercel', 'cloudflare',
+        'supabase', 'firebase', 'mongodb', 'postgres', 'redis',
+        # Crypto / finance
+        'crypto', 'bitcoin', 'btc', 'ethereum', 'eth', 'solana', 'sol',
+        'binance', 'coinbase', 'ftx', 'defi', 'nft',
+        'stock', 'stocks', 'market', 'economy', 'inflation', 'recession',
+        'nasdaq', 'sp500', 'dow', 'fed', 'interest rate',
+        # Geopolitics / society
+        'war', 'election', 'elections', 'politics', 'climate', 'covid', 'pandemic',
+        'trump', 'biden', 'putin', 'china', 'russia', 'ukraine', 'taiwan',
+        'eu', 'nato', 'un', 'sanctions', 'tariff', 'tariffs',
+        'law', 'regulation', 'policy', 'supreme court', 'congress',
+        # Space / tech companies
+        'spacex', 'nasa', 'tesla', 'starlink', 'boeing', 'amazon',
+        # Consumer tech
+        'iphone', 'android', 'samsung', 'pixel', 'macbook', 'windows',
+        'steam', 'playstation', 'xbox', 'nintendo', 'switch',
+        # Entertainment
+        'movie', 'film', 'series', 'show', 'album', 'song', 'spotify', 'netflix',
+        # Sports
+        'tournament', 'championship', 'olympics', 'world cup', 'nba', 'nfl', 'fifa',
+        # Science
+        'research', 'paper', 'study', 'breakthrough', 'discovery',
+        'vaccine', 'treatment', 'fda', 'clinical trial',
+    ])
+
+    # Sentence-level patterns that strongly imply web search (+3)
+    _IMPLICIT_SEARCH = re.compile(
+        r'(?:'
+        r'what\s+happened\s+(?:to|with|at|in)\b'       # "what happened to X"
+        r'|.+\s+(?:drama|controversy|scandal|backlash|outage|hack|breach|leak|layoffs?|acquisition|merger|ipo|bankrupt)'  # "X drama/scandal"
+        r'|.+\s+(?:vs\.?|versus|compared\s+to|better\s+than|or)\s+.+'  # "X vs Y" comparisons
+        r'|.+\b(?:latest|update|news|release|version)\s*$'  # trailing "X latest/news"
+        r')', re.I
+    )
+
+    # Question patterns that signal factual queries (+2)
+    _FACTUAL_Q = re.compile(
+        r'(?:^|\b)(?:'
+        r'whats\s+\w+'                                                              # "whats happening"
+        r'|what(?:\'s|\s+is|\s+are|\s+was|\s+were|\s+happened|\s+about)'            # "what is/are/was..."
+        r'|who(?:\'s|\s+is|\s+are|\s+was|\s+were|\s+won|\s+lost|\s+got|\s+made)'   # "who won/lost..."
+        r'|when(?:\'s|\s+is|\s+was|\s+did|\s+does|\s+will)'                         # "when is/did..."
+        r'|where(?:\'s|\s+is|\s+are|\s+can|\s+did)'                                 # "where is/can..."
+        r'|how\s+(?:much|many|long|far|old|big|fast|well|good)'                     # "how much/many..."
+        r'|is\s+there|are\s+there|has\s+there|have\s+there'                         # "is/are there..."
+        r'|(?:has|have|did|does|will)\s+.+?\s+(?:been|come|released|launched|announced|started|happened|changed|dropped|shipped|crashed|failed|closed|collapsed|surged|spiked|won|lost)'  # "has X been released" / "did X crash"
+        r'|(?:is|are)\s+.+?\s+(?:out|available|released|live|ready|dead|gone|down)'  # "is X out/available"
+        r'|any\s+(?:news|updates?|info|word|details?|sign|chance)'                   # "any news/updates..."
+        r'|show\s+me'                                                                 # "show me..."
+        r')\b', re.I
+    )
+
+    # Patterns that extract a clean topic from common sentence structures
+    _TOPIC_EXTRACTORS = [
+        # "X news/updates/release" → X
+        re.compile(r'^(?:any|the|latest|recent|new|give\s+me)?\s*(?:news|updates?|info|information|details?|developments?|word)\s+(?:on|about|for|regarding|from)\s+(.+)', re.I),
+        # "whats/what's new/happening with X"
+        re.compile(r'whats?\s+(?:is\s+)?(?:new|happening|going\s+on|up|the\s+(?:deal|story|latest|status|situation))\s+(?:with|in|at|on|for|about)\s+(.+)', re.I),
+        re.compile(r'what(?:\'s|\s+is)\s+(?:new|happening|going\s+on|up|the\s+(?:deal|story|latest|status|situation))\s+(?:with|in|at|on|for|about)\s+(.+)', re.I),
+        # "tell me about X" / "tell me the latest on X"
+        re.compile(r'tell\s+me\s+(?:about\s+)?(?:the\s+)?(?:latest|newest|recent|current)?\s*(?:on|about|for|with|regarding)?\s*(.+)', re.I),
+        # "has/did X been released/announced" (handles hyphens, dots, numbers in names)
+        re.compile(r'(?:has|have|did|when\s+(?:did|does|will|is))\s+(.+?)\s+(?:been\s+)?(?:released?|launched?|announced?|come\s+out|dropped|shipped|started|arrived)', re.I),
+        # "is X out/available/released"
+        re.compile(r'(?:is|are)\s+(.+?)\s+(?:out|available|released|live|ready|here|dead|gone|down)\s*(?:yet|now|already)?', re.I),
+        # "when is/does X come out / release"
+        re.compile(r'when\s+(?:is|does|will|did)\s+(.+?)\s+(?:come\s+out|release|launch|drop|ship|start|arrive|happen)', re.I),
+        # "X latest version / release"
+        re.compile(r'(?:what(?:\'?s|\s+is)\s+)?(?:the\s+)?(?:latest|newest|current|most\s+recent)\s+(?:version|release|build|edition)\s+(?:of\s+)?(.+)', re.I),
+        # "how much is X / price of X"
+        re.compile(r'(?:what(?:\'?s|\s+is)|how\s+much\s+is)\s+(?:the\s+)?(?:current\s+)?(?:price|cost|value|rate)\s+(?:of|for)\s+(.+)', re.I),
+        # "status of X"
+        re.compile(r'(?:what(?:\'?s|\s+is)\s+)?(?:the\s+)?(?:current\s+)?(?:status|state|situation|progress)\s+(?:of|on|with|for)\s+(.+)', re.I),
+        # "what happened to/with X"
+        re.compile(r'what\s+happened\s+(?:to|with|at|in)\s+(.+)', re.I),
+        # "who won/lost/got X" → extract the event/thing
+        re.compile(r'who\s+(?:won|lost|got|made|created|invented|discovered|started|founded)\s+(?:the\s+)?(.+)', re.I),
+        # "show me X" / "get me X"
+        re.compile(r'(?:show|get|give|bring)\s+me\s+(?:the\s+)?(?:latest\s+|recent\s+|current\s+)?(.+)', re.I),
+        # "research/search X" (explicit command — extract topic)
+        re.compile(r'^(?:search|google|look\s*up|research|find)\s+(?:online\s+)?(?:the\s+web\s+)?(?:for\s+|about\s+|on\s+)?(.+)', re.I),
+        # "updates/news on X" (noun-first)
+        re.compile(r'^(?:updates?|news|developments?|announcements?|releases?|info|information)\s+(?:on|about|for|regarding|from)\s+(.+)', re.I),
+        # "check X" / "check on X"
+        re.compile(r'^check\s+(?:online\s+)?(?:the\s+web\s+)?(?:for\s+|on\s+|about\s+)?(.+)', re.I),
+        # "find X" / "find out about X"
+        re.compile(r'^find\s+(?:out\s+)?(?:about\s+|info\s+(?:on|about)\s+)?(.+)', re.I),
+    ]
+
+    def _score_search_intent(self, message: str) -> tuple[int, Optional[str]]:
+        """Score how likely a message needs web search. Returns (score, extracted_query).
+
+        Score interpretation:
+            >= 6: definitely search (explicit command or strong multi-signal)
+            4-5:  probably search (temporal + factual question)
+            <= 3: probably not search
+        """
+        msg = message.lower().strip()
+        words = set(re.split(r'\W+', msg))
+        score = 0
+
+        # --- Hard blockers: return immediately ---
+        if len(msg) < 8:
+            return (0, None)
+        for blocker in self._SEARCH_BLOCKERS:
+            if blocker in msg:
+                return (0, None)
+
+        # --- Explicit search command: +10 (instant win) ---
+        if self._SEARCH_COMMANDS.search(msg):
+            score += 10
+
+        # --- Temporal/recency signals: +3 each (max +6) ---
+        temporal_hits = 0
+        for tw in self._TEMPORAL_WORDS:
+            if tw in msg:
+                temporal_hits += 1
+        score += min(temporal_hits * 3, 6)
+
+        # --- Info-seeking nouns: +2 each (max +4) ---
+        info_hits = sum(1 for w in self._INFO_VERBS if w in words)
+        score += min(info_hits * 2, 4)
+
+        # --- Real-world domain overlap: +2 if any match ---
+        if words & self._WORLD_DOMAINS:
+            score += 2
+
+        # --- Factual question pattern: +2 ---
+        if self._FACTUAL_Q.search(msg):
+            score += 2
+
+        # --- Implicit search sentence patterns: +3 ---
+        if self._IMPLICIT_SEARCH.search(msg):
+            score += 3
+
+        # --- Ends with "?" on a non-trivial message: +1 ---
+        if msg.endswith('?') and len(msg) > 15:
+            score += 1
+
+        # --- "online" / "web" / "internet" / "google" explicit hint: +4 ---
+        if any(h in msg for h in ('online', 'on the web', 'on the internet', 'the web')):
+            score += 4
+
+        # --- Extract query topic ---
+        query = None
+        for extractor in self._TOPIC_EXTRACTORS:
+            m = extractor.search(msg)
+            if m:
+                query = m.group(1).strip()
+                query = re.sub(r'^(?:the|a|an)\s+', '', query)  # strip leading articles
+                query = re.sub(r'[.,!?"\';:]+$', '', query).strip()
+                if len(query) > 2:
+                    break
+                query = None
+
+        # If no extractor matched but score is high, use cleaned full message
+        if not query and score >= 4:
+            query = message.strip()
+            query = re.sub(r'[.,!?"\';:]+$', '', query).strip()
+
+        return (score, query)
+
+    def _needs_web_search(self, message: str) -> Optional[str]:
+        """Detect if a message needs web search via signal scoring.
+
+        Returns the search query if web search is needed, None otherwise.
+        """
+        score, query = self._score_search_intent(message)
+        if score >= 4 and query and len(query) > 2:
+            return query
+        return None
+
+    def _handle_direct_search(self, message: str, synthesize: bool = True) -> Optional[str]:
+        """Handle search requests directly, bypassing agent loop.
+
+        Uses signal-scoring to detect search intent. Explicit commands
+        ("search for X") and strong multi-signal queries ("any news on
+        gemma 4 models") both trigger immediate search with synthesis.
 
         Args:
             message: The user's message
@@ -242,116 +473,20 @@ class DirectHandlersMixin:
         # If user wants comprehensive/detailed research, let it go through full agent loop
         comprehensive_keywords = ['comprehensive', 'detailed', 'in-depth', 'thorough', 'deep dive', 'extensive', 'full analysis']
         if any(kw in message_lower for kw in comprehensive_keywords):
-            return None  # Let full agent loop handle this
+            return None
 
-        # Strip common greeting/name prefixes to allow "hey aura search for X"
-        prefix_patterns = [
-            r'^(?:hey\s+)?(?:aura|assistant|ai|bot)[,!.]?\s*',
-            r'^(?:hi|hello|hey)[,!.]?\s*',
-            r'^(?:okay|ok|yo)[,!.]?\s*',
-            r'^(?:alright|sure|yeah|yep|yes)[,!.]?\s*',
-            r'^(?:let\'?s|lets|can\s+you|could\s+you|please|pls)[,!.]?\s*',
-            r'^(?:i\s+want\s+(?:you\s+)?to|i\s+need\s+(?:you\s+)?to)[,!.]?\s*',
-            r'^(?:go\s+ahead\s+and|now)[,!.]?\s*',
-        ]
-        for prefix in prefix_patterns:
-            message_lower = re.sub(prefix, '', message_lower, flags=re.IGNORECASE).strip()
+        # Score the message
+        score, query = self._score_search_intent(message)
 
-        # Keywords that indicate "search online" intent
-        online_keywords = ['online', 'web', 'internet', 'google', 'latest', 'current', 'recent', 'news', 'today']
+        # Score < 4: not a search request
+        if score < 4 or not query or len(query) < 3:
+            return None
 
-        # Check if this is an ambiguous research request (no topic or unclear intent)
-        ambiguous_patterns = [
-            r'^(?:do\s+)?(?:a\s+)?research$',
-            r'^(?:do\s+)?(?:a\s+)?(?:deep\s+)?search$',
-            r'^(?:can\s+you\s+)?research$',
-            r'^(?:please\s+)?research$',
-            r'^look\s+(?:something\s+)?up$',
-            r'^find\s+(?:something|info|information)$',
-        ]
-
-        for pattern in ambiguous_patterns:
-            if re.match(pattern, message_lower, re.IGNORECASE):
-                return ("I'd be happy to help with research! \U0001f50d\n\n"
-                        "**What would you like me to do?**\n"
-                        "1. **Search online** - Get the latest info from the web\n"
-                        "2. **Use my knowledge** - Answer from what I already know\n\n"
-                        "Just tell me the topic! For example:\n"
-                        "- \"Search online for quantum computing\"\n"
-                        "- \"Tell me about quantum computing\"\n"
-                        "- \"Research latest AI news online\"")
-
-        # Patterns for EXPLICIT ONLINE search requests
-        search_patterns = [
-            # Direct search commands
-            r'^search\s+(?:online\s+)?(?:the\s+web\s+)?(?:for\s+)?["\']?(.+?)["\']?$',
-            r'^(?:web\s+)?search[:\s]+["\']?(.+?)["\']?$',
-            r'^look\s+up\s+["\']?(.+?)["\']?$',
-            r'^google\s+["\']?(.+?)["\']?$',
-            r'^find\s+(?:online|on the web)\s+["\']?(.+?)["\']?$',
-            r'^search\s+for\s+["\']?(.+?)["\']?[.,!?]?$',
-            # Flexible patterns
-            r'^do\s+(?:a\s+)?(?:deep\s+)?search\s+(?:online\s+)?(?:for\s+|about\s+|on\s+)?["\']?(.+?)["\']?$',
-            r'^(?:please\s+)?(?:can\s+you\s+)?search\s+(?:online\s+)?(?:for\s+|about\s+)?["\']?(.+?)["\']?$',
-            r'^(?:deep\s+)?search\s+(?:online\s+)?(?:for\s+|about\s+|on\s+)?["\']?(.+?)["\']?$',
-            # Research with online intent
-            r'^research\s+(?:online\s+)?(?:about\s+|on\s+)?["\']?(.+?)["\']?\s+online$',
-            r'^research\s+online\s+(?:about\s+|on\s+|for\s+)?["\']?(.+?)["\']?$',
-            # News/latest patterns (always online)
-            r'^(?:get|find|show)\s+(?:me\s+)?(?:the\s+)?(?:latest|recent|current)\s+(?:news\s+)?(?:on|about|for)\s+["\']?(.+?)["\']?$',
-            r'^what(?:\'s|\s+is)\s+(?:the\s+)?(?:latest|recent|current)\s+(?:news\s+)?(?:on|about)\s+["\']?(.+?)["\']?$',
-            # Lookup patterns
-            r'^look\s+(?:this\s+)?up[:\s]+["\']?(.+?)["\']?$',
-            r'^(?:can\s+you\s+)?(?:please\s+)?look\s+up\s+["\']?(.+?)["\']?$',
-            # Find info patterns
-            r'^find\s+(?:me\s+)?(?:info|information)\s+(?:on|about)\s+["\']?(.+?)["\']?$',
-            r'^get\s+(?:me\s+)?(?:info|information)\s+(?:on|about)\s+["\']?(.+?)["\']?$',
-        ]
-
-        # Extract the search query
-        query = None
-        for pattern in search_patterns:
-            match = re.match(pattern, message_lower, re.IGNORECASE)
-            if match:
-                query = match.group(1).strip()
-                # Remove trailing punctuation
-                query = re.sub(r'[.,!?]+$', '', query).strip()
-                break
-
-        # If no explicit pattern matched, check for "research X" with online keywords
-        if not query:
-            research_match = re.match(r'^(?:do\s+)?(?:a\s+)?research\s+(?:about\s+|on\s+)?["\']?(.+?)["\']?$', message_lower)
-            if research_match:
-                potential_query = research_match.group(1).strip()
-                # Check if any online keyword is present
-                if any(kw in message_lower for kw in online_keywords):
-                    query = potential_query
-                else:
-                    # Ambiguous - has topic but unclear if online or knowledge
-                    return (f"I can help you research **{potential_query}**! \U0001f50d\n\n"
-                            f"Would you like me to:\n"
-                            f"1. **Search online** - \"search online for {potential_query}\"\n"
-                            f"2. **Use my knowledge** - \"tell me about {potential_query}\"\n\n"
-                            f"Which would you prefer?")
-
-        if not query:
-            return None  # Not an explicit search request
-
-        # Check if web_search tool is available
-        if 'web_search' not in self.tools:
-            return "Web search tool not available."
-
-        logger.debug(f"[DIRECT SEARCH] User query: '{query}'")
+        logger.debug(f"[DIRECT SEARCH] score={score} query='{query}'")
 
         try:
-            # Use fallback chain (Tavily → Brave → SearXNG) instead of SearXNG-only
-            try:
-                from aura.tools.search_fallback import web_search_with_fallback
-                result = web_search_with_fallback(query, max_results=5, tool_registry=self.tools)
-            except ImportError:
-                # Fallback to direct web_search if search_fallback not available
-                tool = self.tools['web_search']
-                result = tool.search(query, num_results=5)
+            from aura.tools.search_fallback import web_search_with_fallback
+            result = web_search_with_fallback(query, max_results=5, tool_registry=self.tools)
 
             if not result.get("success"):
                 return f"Search failed: {result.get('error', 'Unknown error')}"
@@ -371,15 +506,19 @@ class DirectHandlersMixin:
             # Synthesize with LLM if available and requested
             if synthesize and hasattr(self, 'brain'):
                 try:
-                    synthesis_prompt = f"""Based on these web search results for '{query}', provide a helpful summary:
+                    synthesis_prompt = f"""You are summarizing REAL web search results for the query: '{query}'
 
+SEARCH RESULTS:
 {raw_results}
 
-Instructions:
-- Summarize the key information from these results
-- Include relevant URLs as references
-- Keep it concise but informative
-- Format nicely with markdown"""
+STRICT RULES:
+- ONLY use information that appears in the search results above
+- Do NOT add information from your own knowledge — if it's not in the results, don't include it
+- Do NOT make up or fabricate any facts, dates, or details
+- Include the actual URLs from the results as clickable references
+- If the results don't fully answer the query, say so honestly
+- Format with markdown for readability
+- Be concise but accurate"""
 
                     synthesized = self.brain.think(synthesis_prompt)
                     if synthesized and len(synthesized) > 50:

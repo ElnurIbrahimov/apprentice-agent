@@ -53,17 +53,6 @@ class ResearchRequest(BaseModel):
 
 # -- Helpers -------------------------------------------------------------------
 
-def _get_tavily():
-    try:
-        from tavily import TavilyClient
-    except ImportError:
-        raise HTTPException(503, "tavily-python not installed. Run: pip install tavily-python")
-    api_key = os.getenv("TAVILY_API_KEY", "")
-    if not api_key:
-        raise HTTPException(503, "TAVILY_API_KEY not set in environment")
-    return TavilyClient(api_key=api_key)
-
-
 def _domain(url: str) -> str:
     try:
         return urlparse(url).netloc.lstrip("www.")
@@ -74,24 +63,34 @@ def _domain(url: str) -> str:
 def _format_sources(sources: list[dict]) -> str:
     parts = []
     for i, s in enumerate(sources, 1):
-        snippet = s.get("content", "")[:400]
+        snippet = s.get("content", s.get("snippet", ""))[:400]
         parts.append(f"[{i}] {s['title']}\nURL: {s['url']}\n{snippet}")
     return "\n\n".join(parts)
 
 
-async def _run_search(client: "TavilyClient", query: str, max_results: int) -> list[dict]:
-    """Run a single Tavily search in a thread (TavilyClient is sync)."""
-    loop = asyncio.get_running_loop()
-    def _search():
-        return client.search(
-            query,
-            search_depth="advanced",
-            max_results=max_results,
-            include_answer=False,
-        )
+async def _run_search(query: str, max_results: int) -> list[dict]:
+    """Run a web search using fallback chain (Tavily -> Brave -> SearXNG)."""
     try:
-        resp = await loop.run_in_executor(None, _search)
-        return resp.get("results", [])
+        from aura.tools.search_fallback import web_search_with_fallback
+    except ImportError:
+        raise HTTPException(503, "Search fallback module not available")
+
+    loop = asyncio.get_running_loop()
+    try:
+        resp = await loop.run_in_executor(
+            None, lambda: web_search_with_fallback(query=query, max_results=max_results)
+        )
+        results = resp.get("results", [])
+        # Normalize to consistent format
+        normalized = []
+        for r in results:
+            normalized.append({
+                "title": r.get("title", ""),
+                "url": r.get("url", ""),
+                "content": r.get("snippet", r.get("content", "")),
+                "score": r.get("score", 0),
+            })
+        return normalized
     except Exception as e:
         logger.warning("[Research] Search failed for %r: %s", query, e)
         return []
@@ -175,8 +174,6 @@ async def deep_research(req: ResearchRequest):
     from api.utils import validate_model_name
     model = validate_model_name(model)
 
-    tavily = _get_tavily()
-
     async def generate():
         total_sources_target = cfg["max_results"] * cfg["num_queries"]
 
@@ -184,7 +181,7 @@ async def deep_research(req: ResearchRequest):
         yield json.dumps({"type": "research_step", "step": "understanding", "status": "searching", "message": "Searching the web..."}) + "\n"
 
         # Primary search
-        primary_results = await _run_search(tavily, query, cfg["max_results"])
+        primary_results = await _run_search(query, cfg["max_results"])
 
         extra_results: list[dict] = []
         followup_queries: list[str] = []
@@ -195,7 +192,7 @@ async def deep_research(req: ResearchRequest):
 
             yield json.dumps({"type": "research_step", "step": "searching", "status": "searching", "message": f"Running {n_followup} additional searches...", "sub_questions": followup_queries, "sources_target": total_sources_target}) + "\n"
             followup_tasks = [
-                _run_search(tavily, fq, cfg["max_results"])
+                _run_search(fq, cfg["max_results"])
                 for fq in followup_queries
             ]
             followup_batches = await asyncio.gather(*followup_tasks)

@@ -46,6 +46,17 @@ const DASHBOARD_TEMPLATES = [
       { label: 'Content Creator', icon: '🎬', desc: 'Views, subscribers, revenue', prompt: 'Create a content creator dashboard with: subscriber count with growth trend, views line chart, top videos table, revenue card with RPM, audience retention curve, demographics donut chart, upload schedule calendar, and comment sentiment breakdown.' },
     ]
   },
+  {
+    category: 'Industry',
+    templates: [
+      { label: 'Real Estate', icon: '🏠', desc: 'Listings, revenue, occupancy', prompt: 'Create a real estate dashboard with: total portfolio value card, property listings table (address, type, rent, status, occupancy), monthly rental income line chart, occupancy rate gauge, maintenance requests queue, lease expiry timeline, revenue by property bar chart, and vacancy alerts. Professional blue/white theme.' },
+      { label: 'Restaurant', icon: '🍽️', desc: 'Orders, revenue, menu stats', prompt: 'Create a restaurant analytics dashboard with: today\'s revenue/orders/avg ticket KPI cards, hourly orders bar chart, top selling items table with quantity, revenue breakdown by category pie chart, table turnover rate, customer ratings trend, staff performance leaderboard, and peak hours heatmap. Warm amber theme.' },
+      { label: 'Fleet Tracking', icon: '🚚', desc: 'Vehicles, routes, efficiency', prompt: 'Create a fleet tracking dashboard with: active vehicles count card, vehicle status grid (moving/idle/stopped with color dots), fuel efficiency bar chart by vehicle, daily mileage line chart, delivery completion rate gauge, maintenance schedule table, driver performance scores, and cost-per-mile trend. Dark map-style theme.' },
+      { label: 'Patient Health', icon: '🏥', desc: 'Vitals, appointments, records', prompt: 'Create a patient health dashboard with: patient info card (name, age, blood type), vital signs gauges (heart rate, blood pressure, temperature, SpO2), medication schedule table, appointment calendar, lab results trend charts (blood sugar, cholesterol), BMI calculator card, and recent visit notes timeline. Clean medical white/blue theme.' },
+      { label: 'Energy Monitor', icon: '⚡', desc: 'Consumption, solar, costs', prompt: 'Create an energy monitoring dashboard with: current power consumption gauge (kW), daily usage area chart, solar panel generation vs consumption dual line chart, monthly cost bar chart, room-by-room breakdown donut chart, peak/off-peak usage comparison, carbon footprint card, and energy saving tips. Green eco theme.' },
+      { label: 'Warehouse', icon: '📦', desc: 'Inventory, orders, shipping', prompt: 'Create a warehouse management dashboard with: total SKUs and inventory value cards, stock levels by category horizontal bar chart, incoming/outgoing shipments timeline, low stock alerts table (items below reorder point), order fulfillment rate gauge, storage utilization grid map, and daily pick/pack/ship volume chart.' },
+    ]
+  },
 ];
 
 const DASHBOARD_SYSTEM_PROMPT = `You are an expert dashboard designer. Generate a complete, interactive dashboard page.

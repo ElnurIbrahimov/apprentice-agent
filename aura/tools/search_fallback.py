@@ -1,6 +1,6 @@
 """Shared web search fallback chain.
 
-Provides a single function that tries Tavily → Brave → SearXNG in order,
+Provides a single function that tries Tavily → Brave → Firecrawl in order,
 with retry logic, result normalization, and deduplication.
 """
 
@@ -66,7 +66,7 @@ def _normalize_results(result: dict, source: str) -> dict:
             normalized.append({
                 "title": r.get("title", ""),
                 "url": r.get("url", ""),
-                "snippet": r.get("snippet") or r.get("content") or r.get("description") or "",
+                "snippet": r.get("snippet") or r.get("content") or r.get("description") or r.get("markdown", "")[:300] or "",
                 "source": source,
             })
 
@@ -95,7 +95,7 @@ def _deduplicate(results: List[dict]) -> List[dict]:
     return deduped
 
 
-def _retry_call(fn, retries: int = 2, delay: float = 1.0):
+def _retry_call(fn, retries: int = 1, delay: float = 1.0):
     """Simple retry with exponential backoff."""
     last_err = None
     for attempt in range(retries + 1):
@@ -112,6 +112,7 @@ def _retry_call(fn, retries: int = 2, delay: float = 1.0):
 # Lazy-initialized tool instances (module-level singletons)
 _tavily = None
 _brave = None
+_firecrawl = None
 
 
 def web_search_with_fallback(
@@ -119,7 +120,7 @@ def web_search_with_fallback(
     max_results: int = 8,
     tool_registry: Optional[dict] = None,
 ) -> dict:
-    """Execute a web search with Tavily → Brave → SearXNG fallback chain.
+    """Execute a web search with Tavily → Brave → Firecrawl fallback chain.
 
     Args:
         query: Search query string.
@@ -130,7 +131,7 @@ def web_search_with_fallback(
     Returns:
         dict with normalized search results, or {"error": "..."} on total failure.
     """
-    global _tavily, _brave
+    global _tavily, _brave, _firecrawl
 
     # --- Check cache first ---
     cached = _cache_get(query, max_results)
@@ -181,29 +182,27 @@ def web_search_with_fallback(
         errors.append(f"Brave: {e}")
         logger.debug(f"[SearchFallback] Brave failed: {e}")
 
-    # --- SearXNG (self-hosted fallback) ---
+    # --- Firecrawl (search + scrape, last resort) ---
     try:
-        if tool_registry and "web_search" in tool_registry:
-            ws = tool_registry["web_search"]
+        if tool_registry and "firecrawl" in tool_registry:
+            fc = tool_registry["firecrawl"]
+            result = fc.search(query, limit=max_results) if hasattr(fc, 'search') else fc.execute(query)
         else:
-            from aura.tools.web_search import WebSearchTool
-            ws = WebSearchTool()
-        result = _retry_call(lambda: ws.search(query=query, num_results=max_results))
+            if _firecrawl is None:
+                from aura.tools.firecrawl_tool import FirecrawlTool
+                _firecrawl = FirecrawlTool()
+            result = _retry_call(lambda: _firecrawl.search(query=query, limit=max_results))
 
         if _is_good_result(result):
-            normalized = _normalize_results(result, "searxng")
+            normalized = _normalize_results(result, "firecrawl")
             normalized["results"] = _deduplicate(normalized["results"])
             _cache_put(query, max_results, normalized)
-            logger.debug(f"[SearchFallback] SearXNG returned {len(normalized['results'])} results")
+            logger.debug(f"[SearchFallback] Firecrawl returned {len(normalized['results'])} results")
             return normalized
-        # Return SearXNG result even if not great — it's the last resort
-        if isinstance(result, dict):
-            _cache_put(query, max_results, result)
-            return result
-        errors.append(f"SearXNG: {result.get('error', 'no results') if isinstance(result, dict) else 'bad response'}")
+        errors.append(f"Firecrawl: {result.get('error', 'no results') if isinstance(result, dict) else 'bad response'}")
     except Exception as e:
-        errors.append(f"SearXNG: {e}")
-        logger.debug(f"[SearchFallback] SearXNG failed: {e}")
+        errors.append(f"Firecrawl: {e}")
+        logger.debug(f"[SearchFallback] Firecrawl failed: {e}")
 
     # --- All providers failed ---
     error_summary = "; ".join(errors) if errors else "Unknown error"

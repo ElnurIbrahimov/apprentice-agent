@@ -403,20 +403,20 @@ export function MessageInput({
             display: 'flex',
             flexDirection: 'column',
             background: 'var(--bg-panel)',
-            border: isFocused ? '1px solid var(--border-focus)' : '1px solid var(--border-subtle)',
+            border: isFocused ? '1px solid var(--border-strong)' : '1px solid var(--border-subtle)',
             borderRadius: 24,
             backdropFilter: 'blur(24px)',
             WebkitBackdropFilter: 'blur(24px)',
             boxShadow: isFocused
-              ? '0 12px 40px rgba(0,0,0,0.3), 0 0 0 1px var(--border-default), inset 0 1px 0 var(--border-subtle)'
-              : '0 12px 40px rgba(0,0,0,0.3), inset 0 1px 0 var(--border-subtle)',
-            transition: 'border-color 0.3s ease, box-shadow 0.3s ease',
+              ? '0 8px 32px rgba(0,0,0,0.25), 0 0 0 1px var(--border-default), inset 0 1px 0 rgba(255,255,255,0.04)'
+              : '0 4px 24px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.03)',
+            transition: 'border-color var(--duration-normal) var(--ease-out), box-shadow var(--duration-normal) var(--ease-out)',
           }}
         >
           {/* Drag overlay */}
           {isDragOver && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center bg-purple-600/20 border-2 border-dashed border-purple-500 rounded-3xl pointer-events-none">
-              <span className="text-purple-300 font-medium">Drop files here</span>
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-blue-600/20 border-2 border-dashed border-blue-500 rounded-3xl pointer-events-none">
+              <span className="text-blue-300 font-medium">Drop files here</span>
             </div>
           )}
 
@@ -450,6 +450,7 @@ export function MessageInput({
               lineHeight: 1.5,
               minHeight: 44,
               maxHeight: 140,
+              caretColor: 'var(--text-primary)',
             }}
           />
 

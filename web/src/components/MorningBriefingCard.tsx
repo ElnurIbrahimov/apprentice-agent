@@ -71,8 +71,26 @@ export function MorningBriefingCard() {
       }
       if (historyRes.ok) {
         const data = await historyRes.json();
-        const briefings = (data.history || []).filter((h: HandHistoryEntry) => h.hand === 'morning_briefing');
-        if (briefings.length > 0) setLatestBriefing(briefings[0]);
+        const entries = (data.history || []) as Array<Record<string, any>>;
+        for (const entry of entries) {
+          // action_data may be a JSON string or already parsed object
+          let ad = entry.action_data;
+          if (typeof ad === 'string') {
+            try { ad = JSON.parse(ad); } catch { continue; }
+          }
+          const handName = ad?.hand || entry.agent_id?.replace('hand:', '') || '';
+          if (handName === 'morning_briefing' && ad) {
+            setLatestBriefing({
+              hand: 'morning_briefing',
+              summary: ad.summary || '',
+              timestamp: entry.timestamp ? new Date(entry.timestamp * 1000).toISOString() : '',
+              tokens_used: ad.tokens_used,
+              cost_usd: ad.cost_usd,
+              success: ad.success,
+            });
+            break;
+          }
+        }
       }
     } catch { /* silent */ }
     setLoading(false);

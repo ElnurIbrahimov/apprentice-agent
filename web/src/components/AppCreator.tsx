@@ -40,6 +40,32 @@ const APP_TEMPLATES = [
       { label: 'Poll Creator', icon: '📊', desc: 'Create polls, vote, results', prompt: 'Create a poll creator app with: create poll (question + options), share poll link, vote on polls, real-time bar chart results with percentages, total votes count, multiple poll management, and close poll option.' },
     ]
   },
+  {
+    category: 'Communication',
+    templates: [
+      { label: 'Email Client', icon: '✉️', desc: 'Inbox, compose, folders', prompt: 'Create an email client UI with: sidebar (inbox/sent/drafts/spam/trash folders with unread counts), email list (sender, subject, preview, time, star toggle, checkbox), email detail pane (from/to/subject/body, reply/forward buttons), compose modal (to/cc/bcc, subject, rich text body, send button), and search bar. Populate with 10 demo emails.' },
+      { label: 'Video Chat', icon: '📹', desc: 'Grid view, controls, chat', prompt: 'Create a video chat UI (Zoom-like) with: participant grid (4-6 video placeholders with names and mute indicators), bottom toolbar (mute/unmute, video on/off, screen share, chat toggle, reactions, leave), side chat panel with messages, participant list, and meeting info header (title, duration timer, recording indicator).' },
+      { label: 'Discord Clone', icon: '💬', desc: 'Servers, channels, voice', prompt: 'Create a Discord-style chat app with: server sidebar (server icons), channel list sidebar (#general, #random, voice channels), message area (user avatars, messages, timestamps, reactions), message input with emoji/gif/file attach, user list sidebar, and online/offline status indicators. Dark theme, demo data.' },
+    ]
+  },
+  {
+    category: 'Media & Content',
+    templates: [
+      { label: 'Music Player', icon: '🎵', desc: 'Now playing, queue, playlists', prompt: 'Create a music player app with: now playing view (large album art, song/artist, progress bar with seek, play/pause/skip/shuffle/repeat controls, volume slider), playlist sidebar (create/delete playlists), song queue, library view (grid of albums), and search. Dark Spotify-style theme. Add 8 demo songs.' },
+      { label: 'Video Gallery', icon: '📺', desc: 'Grid, player, categories', prompt: 'Create a video streaming app UI with: hero banner (featured video), content rows with horizontal scroll (trending, recommended, recently added), video cards (thumbnail with duration badge, title, views, date), video player page (large player, title, description, related videos sidebar), and category filter tabs.' },
+      { label: 'Photo Gallery', icon: '📷', desc: 'Grid, lightbox, albums', prompt: 'Create a photo gallery app with: masonry grid layout, click to open lightbox (full image, prev/next navigation, close), album sidebar (create albums, drag photos to organize), upload button with drag-drop zone, photo info panel (date, size, tags), and grid/list view toggle. Add 12 placeholder images.' },
+      { label: 'Recipe Book', icon: '🍳', desc: 'Recipes, ingredients, timer', prompt: 'Create a recipe app with: recipe grid (food photos, name, prep time, difficulty badge), recipe detail (full photo, ingredients list with checkbox, step-by-step instructions with timer buttons per step, servings adjuster), add recipe form, search by ingredient, and meal planner calendar view. Warm cream/orange theme.' },
+    ]
+  },
+  {
+    category: 'Utility',
+    templates: [
+      { label: 'Weather App', icon: '🌤️', desc: 'Current, forecast, location', prompt: 'Create a weather app with: current conditions (city, temp large, condition icon, feels like, humidity, wind), hourly forecast horizontal scroll, 7-day forecast list, UV/pressure/visibility extras, location search bar, and dynamic gradient background that changes with weather (sunny=warm, rainy=cool, night=dark). Add demo data for 3 cities.' },
+      { label: 'File Manager', icon: '📁', desc: 'Browse, upload, organize', prompt: 'Create a file manager app with: sidebar (folders tree, favorites, storage bar), breadcrumb navigation, file grid/list toggle view, file cards (icon by type, name, size, date), right-click context menu (rename/delete/move/copy), drag-drop to move, multi-select with checkboxes, upload button, and search. Light clean theme.' },
+      { label: 'Calculator Pro', icon: '🔢', desc: 'Scientific, history, converter', prompt: 'Create a scientific calculator app with: standard mode (0-9, +/-/*/÷, =), scientific mode toggle (sin/cos/tan/log/ln/sqrt/pi/e/power/factorial), calculation history sidebar, unit converter (length/weight/temperature tabs), parentheses support, keyboard input, and dark theme with big LCD-style display.' },
+      { label: 'Fitness Tracker', icon: '💪', desc: 'Workouts, stats, goals', prompt: 'Create a fitness tracker app with: dashboard (daily steps ring, calories, active minutes, distance), workout log (add: type, duration, calories), weekly bar chart, exercise library (filter by muscle group), personal records table, goal setting with progress bars, and streak calendar heatmap. Green health theme.' },
+    ]
+  },
 ];
 
 const APP_SYSTEM_PROMPT = `You are an expert web application developer. Generate a complete, functional single-page web application with HTML, CSS, and JavaScript.

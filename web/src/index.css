@@ -26,7 +26,7 @@
   --border-focus: rgba(255, 255, 255, 0.2);
   --text-primary: #ededed;
   --text-secondary: #a1a1aa;
-  --text-tertiary: #444444;
+  --text-tertiary: #6b6b6b;
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 24px;
@@ -460,6 +460,51 @@ html {
   outline: none;
 }
 
+/* =============================================
+   GLOBAL ANIMATION POLISH
+   ============================================= */
+
+/* GPU-accelerated elements — prevent layout thrashing */
+.animate-spin, .animate-pulse, .animate-ping, .animate-bounce,
+[class*="animate-"], .shimmer-bar, .mesh-blob {
+  will-change: transform, opacity;
+}
+
+/* Respect user's reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .mesh-blob, .animate-ping, .animate-spin {
+    animation: none !important;
+  }
+}
+
+/* Smooth scrolling on all scrollable containers */
+.tab-panel-scroll, .messages-scroll, [class*="overflow-y-auto"] {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Unified spring animation */
+@keyframes spring-up {
+  0% { opacity: 0; transform: translateY(12px) scale(0.97); }
+  70% { transform: translateY(-2px) scale(1.01); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes spring-scale {
+  0% { opacity: 0; transform: scale(0.92); }
+  70% { transform: scale(1.03); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.animate-spring-up { animation: spring-up var(--duration-normal) var(--ease-spring) both; }
+.animate-spring-scale { animation: spring-scale var(--duration-normal) var(--ease-spring) both; }
+
 /* Improve contrast on low-opacity text used for status indicators */
 .status-text {
   color: var(--text-secondary);
@@ -653,7 +698,7 @@ html.light .grain { opacity: 0.02; }
 }
 
 .glow-input-focus:focus-within {
-  box-shadow: 0 0 0 2px var(--accent-purple), 0 0 20px var(--glow-purple);
+  box-shadow: 0 0 0 2px var(--border-focus), 0 0 20px rgba(255, 255, 255, 0.05);
 }
 
 /* =============================================
@@ -1748,6 +1793,16 @@ html.light .grain { opacity: 0.02; }
   .blob-2 { width: 50vw; height: 50vw; filter: blur(80px); }
   .blob-3 { width: 60vw; height: 60vw; filter: blur(80px); }
   .blob-4 { width: 35vw; height: 35vw; filter: blur(80px); }
+
+  /* Tighter padding on small screens */
+  .p-4 { padding: 0.75rem; }
+  .px-4 { padding-left: 0.75rem; padding-right: 0.75rem; }
+
+  /* Stack suggestion cards single column */
+  .grid-cols-2 { grid-template-columns: 1fr; }
+
+  /* Larger touch targets for icon buttons */
+  button > svg:only-child { min-width: 18px; min-height: 18px; }
 }
 
 /* Bottom tab bar spacing on mobile */

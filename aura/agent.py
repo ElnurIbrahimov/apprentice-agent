@@ -2289,6 +2289,39 @@ IMPORTANT: If the user asks about something you are not sure about, something re
             except (ImportError, AttributeError, KeyError, TypeError, ValueError) as e:
                 logger.debug(f"[TemplateLib] Retrieval error: {e}")
 
+        # ===== SEARCH CONTEXT INJECTION =====
+        # If this message might need current information and direct_search didn't
+        # catch it, try a web search and inject results into the system prompt.
+        # This prevents the LLM from hallucinating about current events.
+        _search_context = None
+        try:
+            _search_query = self._needs_web_search(message)
+            if _search_query:
+                logger.debug(f"[SearchInject] Detected search-needed query: '{_search_query[:50]}'")
+                from aura.tools.search_fallback import web_search_with_fallback
+                _search_result = web_search_with_fallback(query=_search_query, max_results=5)
+                if _search_result.get("results"):
+                    _search_lines = []
+                    for _sr in _search_result["results"][:5]:
+                        _title = _sr.get("title", "")
+                        _snippet = _sr.get("snippet", _sr.get("content", ""))[:200]
+                        _url = _sr.get("url", "")
+                        _search_lines.append(f"- {_title}: {_snippet} ({_url})")
+                    _search_context = (
+                        "WEB SEARCH RESULTS (use these as your primary source — "
+                        "do NOT fabricate information beyond what's listed here):\n"
+                        f"Query: {_search_query}\n"
+                        + "\n".join(_search_lines)
+                    )
+                    if system_prompt_addon:
+                        system_prompt_addon = system_prompt_addon + "\n\n" + _search_context
+                    else:
+                        system_prompt_addon = _search_context
+                    logger.debug(f"[SearchInject] Injected {len(_search_result['results'])} results into prompt")
+        except (ImportError, AttributeError, TypeError, ValueError,
+                ConnectionError, TimeoutError, OSError) as _sinj_err:
+            logger.debug(f"[SearchInject] Failed: {_sinj_err}")
+
         # Raw strategy results for rich trace capture
         _mcts_raw_result = None
 
@@ -2482,6 +2515,35 @@ IMPORTANT: If the user asks about something you are not sure about, something re
         task_type = ctx["task_type"]
         tone_modifier = ctx["tone_modifier"]
         system_prompt_addon = ctx["system_prompt_addon"]
+
+        # ===== SEARCH CONTEXT INJECTION (streaming path) =====
+        try:
+            _search_query = self._needs_web_search(message)
+            if _search_query:
+                logger.debug(f"[SearchInject/stream] Detected search-needed: '{_search_query[:50]}'")
+                from aura.tools.search_fallback import web_search_with_fallback
+                _search_result = web_search_with_fallback(query=_search_query, max_results=5)
+                if _search_result.get("results"):
+                    _search_lines = []
+                    for _sr in _search_result["results"][:5]:
+                        _title = _sr.get("title", "")
+                        _snippet = _sr.get("snippet", _sr.get("content", ""))[:200]
+                        _url = _sr.get("url", "")
+                        _search_lines.append(f"- {_title}: {_snippet} ({_url})")
+                    _search_context = (
+                        "WEB SEARCH RESULTS (use these as your primary source — "
+                        "do NOT fabricate information beyond what's listed here):\n"
+                        f"Query: {_search_query}\n"
+                        + "\n".join(_search_lines)
+                    )
+                    if system_prompt_addon:
+                        system_prompt_addon = system_prompt_addon + "\n\n" + _search_context
+                    else:
+                        system_prompt_addon = _search_context
+                    logger.debug(f"[SearchInject/stream] Injected {len(_search_result['results'])} results")
+        except (ImportError, AttributeError, TypeError, ValueError,
+                ConnectionError, TimeoutError, OSError) as _sinj_err:
+            logger.debug(f"[SearchInject/stream] Failed: {_sinj_err}")
 
         # ===== STREAMING LLM RESPONSE =====
         full_response = ""

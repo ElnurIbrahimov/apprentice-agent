@@ -30,6 +30,24 @@ const SLIDE_STYLES: { label: SlideStyle; color: string }[] = [
   { label: 'Colorful',     color: '#f59e0b' },
 ];
 
+const SLIDE_TEMPLATES = [
+  { label: 'Pitch Deck', icon: '📊', desc: 'Startup investor pitch', prompt: 'A startup pitch deck: title slide with company name, problem statement with pain point icons, solution overview with product mockup, market size (TAM/SAM/SOM circles), business model with revenue streams, traction metrics with growth chart, competitive landscape 2x2 matrix, team bios with photos, financial projections line chart, and call-to-action with contact info.' },
+  { label: 'Quarterly Report', icon: '📈', desc: 'Business performance metrics', prompt: 'A quarterly business report: executive summary, revenue breakdown stacked bar chart, customer acquisition metrics (CAC vs LTV), churn analysis funnel, operational KPIs table, regional performance color-coded, team headcount area chart, strategic initiatives progress cards, risk register, and next quarter priorities.' },
+  { label: 'Product Launch', icon: '🚀', desc: 'New product announcement', prompt: 'A product launch presentation: dramatic title with product name, problem journey (3 user pain points), solution reveal with product screenshot, 3 key features (one per slide with demo visuals), comparison table vs competitors, pricing tiers (3 columns, recommended highlighted), customer testimonials, launch timeline, and pre-order CTA.' },
+  { label: 'Thesis Defense', icon: '🎓', desc: 'Academic research presentation', prompt: 'An academic thesis defense: title page with university, outline, literature review with key citations, research hypothesis, methodology (data collection, sample, variables), results with statistical charts and error bars, discussion of findings, limitations, conclusions and future work, and references in academic format.' },
+  { label: 'Tech Architecture', icon: '⚙️', desc: 'System design overview', prompt: 'A technical architecture presentation: system architecture diagram with component boxes, technology stack logos grid, API data flow with animated arrows, database schema, performance metrics (latency, throughput charts), scalability approach, security layers, CI/CD pipeline stages, monitoring dashboard, and Q&A slide. Developer dark theme with syntax-highlight colors.' },
+  { label: 'Sales Demo', icon: '💼', desc: 'Product walkthrough for prospects', prompt: 'A sales demo presentation: product name with main value prop, 3 customer pain points with icons, quick product overview, 4 feature walkthrough slides with screenshots, success metrics (efficiency, cost savings, time saved with before/after numbers), pricing table, customer case study quote, and next steps with booking CTA.' },
+  { label: 'Workshop Agenda', icon: '🎯', desc: 'Training session schedule', prompt: 'A workshop agenda: title with date and instructor, learning outcomes checklist, full-day timeline with break times, 4 individual session detail slides (topic, learning points, activities, timing), hands-on exercise instructions, resources and materials list, and feedback/next steps. Warm educational color scheme.' },
+  { label: 'Marketing Campaign', icon: '📢', desc: 'Campaign strategy and results', prompt: 'A marketing campaign presentation: campaign name and goal, target audience persona card, KPIs with targets, channel strategy (social, email, display, influencer with budget %), creative assets showcase, campaign timeline gantt chart, results overview with percent changes, detailed performance charts (impressions, CTR, conversion funnel, ROI), learnings, and next campaign recommendations.' },
+  { label: 'Case Study', icon: '📋', desc: 'Client success story', prompt: 'A case study presentation: client name and industry, challenge statement, the solution (4 bullet points), implementation timeline with phases, before/after metrics comparison (4 KPIs with % improvement), results showcase (main achievement large number), customer testimonial quote, team collaboration, and ROI summary with contact CTA.' },
+  { label: 'Conference Talk', icon: '🎤', desc: 'Public speaking slides', prompt: 'A conference talk: bold title slide with speaker name, speaker bio with headshot, talk outline (5 main points), opening hook with full-screen visual, 5 content sections (each with title, diagram/chart, key bullets), real-world example with screenshot, key takeaways (3 points with icons), resources with QR code, and Q&A. Minimal dark theme with single accent color.' },
+  { label: 'Company Overview', icon: '🏢', desc: 'Organization introduction', prompt: 'A company overview: mission statement, company values (4 cards with icons), product/service descriptions with hero images, company timeline milestones, team structure org chart, recognition and awards, client logos, and vision for the future. Minimalist white theme with professional typography.' },
+  { label: 'Board Report', icon: '📊', desc: 'Executive summary for leadership', prompt: 'A board report: executive summary bullets, key highlights (3 wins with metrics), strategic progress against annual goals (color-coded status), financial snapshot (revenue, margin, cash), revenue deep-dive by segment, customer metrics (NRR, churn, CAC, LTV), risk register with mitigation, upcoming priorities, and budget forecast chart. Corporate formal design.' },
+  { label: 'Research Findings', icon: '🔬', desc: 'Study results presentation', prompt: 'A research study presentation: study title and authors, research question, literature summary, hypothesis, methodology overview, sample characteristics table, 4 results slides (histogram, box plot, correlation heatmap, grouped bar chart with p-values), discussion, limitations, implications, and references. Academic clean design.' },
+  { label: 'Brand Guidelines', icon: '🎨', desc: 'Brand identity standards', prompt: 'A brand guidelines presentation: brand logo and variations, color palette (primary, secondary, accent with hex codes), typography system (heading and body fonts with sizes), logo usage rules (dos and donts), imagery style guide with examples, iconography style, social media templates, business card and stationery, voice and tone examples, and brand application examples.' },
+  { label: 'Sprint Review', icon: '🔄', desc: 'Agile sprint retrospective', prompt: 'A sprint review presentation: sprint number and dates, sprint goal recap, completed stories (card list with points), demo screenshots of delivered features, velocity chart (last 6 sprints), burndown chart, bugs fixed and technical debt addressed, team feedback (what went well, what to improve), and next sprint planning priorities. Clean dev-friendly design.' },
+];
+
 const SYSTEM_PROMPT = `You are a presentation designer. Generate a complete HTML presentation with inline CSS and JavaScript.
 
 Rules:
@@ -59,12 +77,40 @@ export function SlidesPanel() {
   const [selectedModel, setSelectedModel]   = useState<string | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [showModelMenu, setShowModelMenu]   = useState(false);
+  const [presenterMode, setPresenterMode]  = useState(false);
+  const [presenterTimer, setPresenterTimer] = useState(0);
+  const presenterTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const chatScrollRef  = useRef<HTMLDivElement>(null);
   const abortRef       = useRef<AbortController | null>(null);
   const iframeRef      = useRef<HTMLIFrameElement>(null);
   const modelMenuRef   = useRef<HTMLDivElement>(null);
   const fullscreenRef  = useRef<HTMLDivElement>(null);
+
+  /* ── Presenter timer ── */
+  useEffect(() => {
+    if (presenterMode) {
+      setPresenterTimer(0);
+      presenterTimerRef.current = setInterval(() => setPresenterTimer(t => t + 1), 1000);
+    } else {
+      if (presenterTimerRef.current) clearInterval(presenterTimerRef.current);
+    }
+    return () => { if (presenterTimerRef.current) clearInterval(presenterTimerRef.current); };
+  }, [presenterMode]);
+
+  const formatTimer = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+
+  /* ── Extract speaker notes from HTML ── */
+  const getSpeakerNotes = useCallback((): string[] => {
+    if (!currentHtml) return [];
+    const notes: string[] = [];
+    const re = /data-notes=["']([^"']*)["']/gi;
+    let m;
+    while ((m = re.exec(currentHtml)) !== null) {
+      notes.push(m[1].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>'));
+    }
+    return notes;
+  }, [currentHtml]);
 
   /* ── Auto-scroll chat ── */
   useEffect(() => {
@@ -406,6 +452,27 @@ export function SlidesPanel() {
                 </div>
               </div>
 
+              {/* Quick templates */}
+              <div>
+                <label className="text-[10px] text-chat-text-secondary uppercase tracking-wide mb-1 block">Quick Start</label>
+                <div className="grid grid-cols-2 gap-1 max-h-[180px] overflow-y-auto pr-1">
+                  {SLIDE_TEMPLATES.map(t => (
+                    <button
+                      key={t.label}
+                      onClick={() => { setTopic(t.prompt); }}
+                      className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg border text-left transition-all hover:border-chat-accent/50"
+                      style={{ background: 'var(--surface-1)', borderColor: 'var(--border-default)' }}
+                    >
+                      <span className="text-sm shrink-0">{t.icon}</span>
+                      <div className="min-w-0">
+                        <div className="text-[11px] font-medium text-chat-text truncate">{t.label}</div>
+                        <div className="text-[9px] text-chat-text-secondary truncate">{t.desc}</div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Generate button */}
               <button
                 onClick={handleGenerate}
@@ -584,6 +651,18 @@ export function SlidesPanel() {
             </span>
           )}
 
+          {/* Presenter mode */}
+          <button
+            onClick={() => setPresenterMode(p => !p)}
+            disabled={!currentHtml || totalSlides === 0}
+            className={`px-2 py-1 rounded text-[10px] font-medium transition-colors disabled:opacity-30 ${
+              presenterMode ? 'bg-amber-500/20 text-amber-400' : 'text-chat-text-secondary hover:text-chat-text'
+            }`}
+            title="Toggle presenter view with notes and timer"
+          >
+            {presenterMode ? '✕ Exit Presenter' : '🎤 Present'}
+          </button>
+
           {/* Fullscreen */}
           <button
             onClick={toggleFullscreen}
@@ -609,7 +688,7 @@ export function SlidesPanel() {
         </div>
 
         {/* Preview area */}
-        <div ref={fullscreenRef} className="flex-1 overflow-hidden relative">
+        <div ref={fullscreenRef} className={`${presenterMode ? 'flex-[2]' : 'flex-1'} overflow-hidden relative`}>
           {isGenerating && streamingCode && !currentHtml ? (
             /* Live code stream before first render */
             <pre className="p-4 text-xs font-mono text-green-400 whitespace-pre-wrap leading-relaxed h-full overflow-auto bg-surface-1">
@@ -634,6 +713,47 @@ export function SlidesPanel() {
             </div>
           )}
         </div>
+
+        {/* Presenter panel — notes + timer */}
+        {presenterMode && currentHtml && (
+          <div className="border-t border-chat-border flex-shrink-0 flex" style={{ height: 160, background: 'var(--surface-1)' }}>
+            {/* Speaker notes */}
+            <div className="flex-1 p-3 overflow-y-auto border-r border-chat-border/30">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-chat-text-secondary mb-1.5">Speaker Notes</div>
+              {(() => {
+                const notes = getSpeakerNotes();
+                const note = notes[currentSlide - 1];
+                return note ? (
+                  <p className="text-xs text-chat-text leading-relaxed">{note}</p>
+                ) : (
+                  <p className="text-xs text-chat-text-secondary/40 italic">No notes for this slide</p>
+                );
+              })()}
+            </div>
+            {/* Timer + slide info */}
+            <div className="w-[180px] p-3 flex flex-col items-center justify-center gap-2">
+              <div className="text-2xl font-mono font-bold text-chat-text">{formatTimer(presenterTimer)}</div>
+              <div className="text-[10px] text-chat-text-secondary">Elapsed Time</div>
+              <div className="flex items-center gap-3 mt-1">
+                <div className="text-center">
+                  <div className="text-lg font-bold text-chat-text">{currentSlide}</div>
+                  <div className="text-[9px] text-chat-text-secondary">Current</div>
+                </div>
+                <div className="text-chat-text-secondary/30">/</div>
+                <div className="text-center">
+                  <div className="text-lg font-bold text-chat-text-secondary">{totalSlides}</div>
+                  <div className="text-[9px] text-chat-text-secondary">Total</div>
+                </div>
+              </div>
+              <button
+                onClick={() => setPresenterTimer(0)}
+                className="text-[10px] text-chat-text-secondary hover:text-chat-text mt-1"
+              >
+                Reset Timer
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

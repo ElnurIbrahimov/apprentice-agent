@@ -46,6 +46,27 @@ const GAME_TEMPLATES = [
       { label: 'Checkers', icon: '🔴', desc: 'Board, captures, kings', prompt: 'Create a Checkers/Draughts game. Features: 8x8 board, two player hot-seat, valid move highlighting, mandatory captures, king promotion with crown symbol, multi-jump chains, move history, and resign button.' },
       { label: 'Solitaire', icon: '🃏', desc: 'Klondike, drag cards, auto-complete', prompt: 'Create a Klondike Solitaire game. Features: 7 tableau columns, stock/waste pile, 4 foundation piles, drag-and-drop cards, auto-flip face-down cards, double-click to auto-move to foundation, undo, move counter, timer, and win animation (card cascade).' },
       { label: 'Blackjack', icon: '🎰', desc: 'Hit, stand, split, betting', prompt: 'Create a Blackjack (21) game. Features: deck of 52 cards with suits, hit/stand/double-down buttons, dealer AI (stands on 17), betting system with chip balance, ace as 1 or 11, bust detection, blackjack bonus, insurance option, and hand history.' },
+      { label: 'Chess', icon: '♟️', desc: 'Full rules, legal moves, check', prompt: 'Create a Chess game. Features: 8x8 board with proper piece placement, click-to-select and click-to-move, legal move highlighting, check/checkmate/stalemate detection, move history in algebraic notation, captured pieces display, pawn promotion dialog, undo move, and new game button.' },
+    ]
+  },
+  {
+    category: 'Casual & Quiz',
+    templates: [
+      { label: 'Typing Speed', icon: '⌨️', desc: 'WPM test, accuracy, timer', prompt: 'Create a typing speed test. Features: random paragraph from built-in text library, real-time character highlighting (green correct, red wrong), WPM counter, accuracy percentage, 30/60/120 second mode selector, results screen with WPM graph, and personal best tracking in localStorage.' },
+      { label: 'Quiz Game', icon: '❓', desc: 'Categories, timer, leaderboard', prompt: 'Create a trivia quiz game. Features: 20+ built-in questions across 4 categories (Science, History, Geography, Pop Culture), multiple choice (4 options), 15-second timer per question, score tracking, streak bonus, difficulty indicator, results screen with correct answers review, and high score board.' },
+      { label: 'Clicker Game', icon: '👆', desc: 'Click, upgrades, idle income', prompt: 'Create an idle clicker game. Features: main click button with counter, click multiplier upgrades, auto-clickers (cost increases exponentially), prestige system for reset with bonus, achievements, offline progress calculation, particle effects on click, and upgrade shop sidebar with 8+ upgrades.' },
+      { label: 'Drawing Canvas', icon: '🎨', desc: 'Paint tools, colors, layers', prompt: 'Create a drawing/paint app using Canvas. Features: brush tool (size slider 1-50px), eraser, color picker, fill bucket, shape tools (rectangle, circle, line), undo/redo (20 steps), clear canvas, save as PNG download, and toolbar with active tool indicator. White canvas with dark toolbar.' },
+      { label: 'Crossword', icon: '📰', desc: 'Grid, clues, auto-check', prompt: 'Create a crossword puzzle game. Features: generate a 10x10 grid with built-in word list, across/down clues panel, click cell to type letter, highlight active word, auto-advance to next cell, check button (highlights wrong letters in red), reveal letter hint, timer, and completion celebration.' },
+      { label: 'Card Memory Pro', icon: '🃏', desc: 'Themes, difficulty, multiplayer', prompt: 'Create an advanced memory card game. Features: 3 card themes (animals emoji, flags emoji, numbers), difficulty levels (3x4, 4x4, 5x4, 6x5), smooth 3D flip animations, combo bonus for consecutive matches, timer and move counter, star rating, 2-player mode (alternating turns with score), and best time leaderboard.' },
+    ]
+  },
+  {
+    category: 'Strategy & RPG',
+    templates: [
+      { label: 'Tower Defense', icon: '🏰', desc: 'Build towers, waves, upgrades', prompt: 'Create a tower defense game using Canvas. Features: path that enemies follow, 4 tower types (basic, splash, slow, sniper) with different costs, click to place towers on grid, enemy waves with increasing difficulty, tower upgrade system (3 levels), health bar, gold earned from kills, fast-forward button, and wave counter.' },
+      { label: 'Text Adventure', icon: '📖', desc: 'Story, choices, inventory', prompt: 'Create a text adventure RPG. Features: multi-room dungeon with descriptions, choice buttons (2-4 per scene), inventory system (pick up/use items), health/mana stats, combat encounters (attack/defend/magic/flee), branching storyline with 3 endings, save progress to localStorage, atmospheric dark UI with typewriter text effect.' },
+      { label: 'Dungeon Crawler', icon: '⚔️', desc: 'Roguelike, rooms, loot', prompt: 'Create a roguelike dungeon crawler using Canvas. Features: randomly generated dungeon rooms (BSP algorithm), player movement (WASD/arrows), fog of war, enemy types (3: melee, ranged, boss), turn-based combat, health/attack/defense stats, item pickups (health potions, weapons, armor), minimap, floor counter, and permadeath.' },
+      { label: 'Civilization Lite', icon: '🌍', desc: 'Build, research, conquer', prompt: 'Create a simplified civilization strategy game. Features: hex grid map (15x10), build structures (farm, mine, barracks, wall), resource management (food, gold, production), unit creation (settler, warrior, archer), fog of war, turn-based movement, simple combat (attack value vs defense), tech tree (5 technologies), and victory condition (control 3 cities).' },
     ]
   },
 ];

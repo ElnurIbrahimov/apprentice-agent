@@ -175,7 +175,7 @@ class ResearchMixin:
                 await update.message.reply_text(f"Research error: {str(e)[:200]}")
 
     async def _handle_search(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /search <query> -- quick web search via SearXNG."""
+        """Handle /search <query> -- quick web search via fallback chain."""
         user = update.effective_user
         if not self._is_user_allowed(user.id):
             return
@@ -193,12 +193,11 @@ class ResearchMixin:
         await self.send_typing_indicator(chat_id)
 
         try:
-            from aura.tools.web_search import WebSearchTool
+            from aura.tools.search_fallback import web_search_with_fallback
 
-            tool = WebSearchTool()
-            result = await asyncio.to_thread(tool.search, query, 8)
+            result = await asyncio.to_thread(web_search_with_fallback, query, 8)
 
-            if not result.get("success"):
+            if not result.get("success", True) and result.get("error"):
                 await update.message.reply_text(
                     f"Search failed: {result.get('error', 'Unknown error')}"
                 )
@@ -209,10 +208,11 @@ class ResearchMixin:
                 await update.message.reply_text(f"No results found for: {query}")
                 return
 
-            lines = [f"Search results for: {query}\n"]
+            source = result.get("source", "web")
+            lines = [f"Search results for: {query}  ({source})\n"]
             for i, r in enumerate(results, 1):
                 title = r.get("title", "Untitled")
-                snippet = r.get("snippet", "")[:150]
+                snippet = r.get("snippet", r.get("content", ""))[:150]
                 url = r.get("url", "")
                 lines.append(f"{i}. {title}")
                 if snippet:

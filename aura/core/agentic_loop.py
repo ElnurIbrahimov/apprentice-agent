@@ -804,7 +804,7 @@ class ToolExecutor:
         query = args["query"]
         max_results = args.get("max_results", 8)
 
-        # Shared fallback chain: Tavily → Brave → SearXNG
+        # Shared fallback chain: Tavily → Brave → Firecrawl
         from aura.tools.search_fallback import web_search_with_fallback
         return web_search_with_fallback(query=query, max_results=max_results)
 

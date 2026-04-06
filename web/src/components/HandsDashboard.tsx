@@ -338,7 +338,12 @@ function HandCard({ hand, onAction, onDeleteHand }: {
               <p className="text-[10px] text-chat-text-secondary/50 font-medium mb-1.5 uppercase tracking-wide">Recent Runs</p>
               <div className="flex gap-1.5 flex-wrap">
                 {handHistory.map((entry, i) => {
-                  const data = entry.action_data;
+                  let data: Record<string, unknown> = {};
+                  if (typeof entry.action_data === 'string') {
+                    try { data = JSON.parse(entry.action_data); } catch { /* ignore */ }
+                  } else if (entry.action_data && typeof entry.action_data === 'object') {
+                    data = entry.action_data as Record<string, unknown>;
+                  }
                   const success = data.success as boolean;
                   return (
                     <div key={i}
@@ -549,7 +554,11 @@ export default function HandsDashboard() {
   const pausedCount   = hands.filter(h => h.state === 'paused').length;
   const runningNow    = hands.filter(h => h.state === 'running').length;
   const successRate   = history.length > 0
-    ? Math.round(history.filter(e => (e.action_data as Record<string, unknown>).success === true).length / history.length * 100)
+    ? Math.round(history.filter(e => {
+        let d: any = e.action_data;
+        if (typeof d === 'string') { try { d = JSON.parse(d); } catch { return false; } }
+        return d?.success === true;
+      }).length / history.length * 100)
     : null;
 
   // Today's executions (approximate: within 24h)
@@ -561,7 +570,12 @@ export default function HandsDashboard() {
   // ── Timeline entries built from history ───────────────────────────────────
 
   const timelineEntries: TimelineEntry[] = history.map((entry, i) => {
-    const data = (entry.action_data || {}) as Record<string, unknown>;
+    let data: Record<string, unknown> = {};
+    if (typeof entry.action_data === 'string') {
+      try { data = JSON.parse(entry.action_data); } catch { /* ignore */ }
+    } else if (entry.action_data && typeof entry.action_data === 'object') {
+      data = entry.action_data as Record<string, unknown>;
+    }
     const handName = (data.hand as string) || entry.agent_id?.replace('hand:', '') || '?';
     return {
       id: `${i}-${entry.timestamp}`,

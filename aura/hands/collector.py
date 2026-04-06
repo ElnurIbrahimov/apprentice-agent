@@ -88,7 +88,7 @@ class CollectorHand(Hand):
                 )
 
             logger.info(f"[Collector] Monitoring {len(targets)} targets")
-            search_tool = tools.get("web_search") or tools.get("brave_search")
+            from aura.tools.search_fallback import web_search_with_fallback
 
             # Step 2: Fetch each target (max 3)
             for target in targets[:3]:
@@ -103,11 +103,15 @@ class CollectorHand(Hand):
 
                 # Fetch current content
                 current_content = ""
-                if search_tool and not target_url.startswith("http"):
+                if not target_url.startswith("http"):
                     # Topic-based: search for it
                     try:
-                        results = search_tool.execute(query=target_url, num_results=3) if hasattr(search_tool, 'execute') else ""
-                        current_content = str(results)[:3000] if results else ""
+                        result = web_search_with_fallback(query=target_url, max_results=3)
+                        if result.get("results"):
+                            current_content = "\n".join(
+                                f"- {r.get('title', '')}: {r.get('snippet', '')[:200]}"
+                                for r in result["results"][:3]
+                            )
                     except Exception as e:
                         logger.debug(f"[Collector] Search failed for {target_url}: {e}")
                 elif target_url.startswith("http"):
@@ -117,9 +121,10 @@ class CollectorHand(Hand):
                         if browser_tool and hasattr(browser_tool, 'fetch'):
                             result = browser_tool.fetch(target_url)
                             current_content = result.get("text", "")[:3000] if isinstance(result, dict) else str(result)[:3000]
-                        elif search_tool:
-                            results = search_tool.execute(query=f"site:{target_url}", num_results=1) if hasattr(search_tool, 'execute') else ""
-                            current_content = str(results)[:3000] if results else ""
+                        else:
+                            result = web_search_with_fallback(query=f"site:{target_url}", max_results=1)
+                            if result.get("results"):
+                                current_content = result["results"][0].get("snippet", "")[:3000]
                     except Exception as e:
                         logger.debug(f"[Collector] Fetch failed for {target_url}: {e}")
 
