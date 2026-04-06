@@ -207,58 +207,17 @@ export default function Header() {
           {/* Export dropdown — icon only, no label */}
           {messages.length > 0 && (
             <div ref={exportRef} style={{ position: 'relative', display: 'inline-flex' }}>
-              <button
-                onClick={() => setExportOpen(!exportOpen)}
-                title="Export"
-                aria-label="Export conversation"
-                aria-expanded={exportOpen}
-                style={{
-                  background: 'none', border: 'none', color: 'var(--mu)',
-                  cursor: 'pointer', padding: 2, display: 'flex',
-                }}
-              >
+              <button onClick={() => setExportOpen(!exportOpen)} title="Export" aria-label="Export conversation" aria-expanded={exportOpen} className="btn-ghost">
                 <Download size={13} />
               </button>
               {exportOpen && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    top: '100%',
-                    right: 0,
-                    marginTop: 4,
-                    background: 'var(--s2)',
-                    border: '1px solid var(--b3)',
-                    borderRadius: 6,
-                    boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
-                    zIndex: 50,
-                    minWidth: 155,
-                    overflow: 'hidden',
-                  }}
-                >
+                <div className="dropdown-menu" style={{ position: 'absolute', top: '100%', right: 0, marginTop: 4, minWidth: 155 }}>
                   {[
                     { label: 'Export as Markdown', fmt: 'markdown' as const },
                     { label: 'Export as JSON', fmt: 'json' as const },
                     { label: 'Export as Text', fmt: 'text' as const },
                   ].map((item) => (
-                    <button
-                      key={item.label}
-                      onClick={() => handleExport(item.fmt)}
-                      style={{
-                        display: 'block',
-                        width: '100%',
-                        padding: '7px 12px',
-                        background: 'none',
-                        border: 'none',
-                        color: 'var(--tx)',
-                        fontSize: '11px',
-                        textAlign: 'left',
-                        cursor: 'pointer',
-                        fontFamily: 'inherit',
-                        transition: 'background 0.1s',
-                      }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--b1)')}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
-                    >
+                    <button key={item.label} onClick={() => handleExport(item.fmt)} className="dropdown-item">
                       {item.label}
                     </button>
                   ))}
@@ -268,24 +227,8 @@ export default function Header() {
                       if (msgs?.length) exportConversationAsImage(msgs);
                       setExportOpen(false);
                     }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 5,
-                      width: '100%',
-                      padding: '7px 12px',
-                      background: 'none',
-                      border: 'none',
-                      borderTop: '1px solid var(--b1)',
-                      color: 'var(--tx)',
-                      fontSize: '11px',
-                      textAlign: 'left',
-                      cursor: 'pointer',
-                      fontFamily: 'inherit',
-                      transition: 'background 0.1s',
-                    }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--b1)')}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
+                    className="dropdown-item"
+                    style={{ display: 'flex', alignItems: 'center', gap: 5, borderTop: '1px solid var(--b1)' }}
                   >
                     <ImageIcon size={11} /> Export as Image
                   </button>
@@ -294,34 +237,16 @@ export default function Header() {
             </div>
           )}
 
-          {/* History button — icon only */}
+          {/* History button */}
           <div style={{ position: 'relative', display: 'inline-flex' }}>
-            <button
-              onClick={handleHistoryToggle}
-              title="History"
-              aria-label="Chat history"
-              aria-expanded={historyOpen}
-              style={{
-                background: 'none', border: 'none',
-                color: historyOpen ? 'var(--pl)' : 'var(--mu)',
-                cursor: 'pointer', padding: 2, display: 'flex',
-              }}
-            >
+            <button onClick={handleHistoryToggle} title="History" aria-label="Chat history" aria-expanded={historyOpen} className="btn-ghost" style={{ color: historyOpen ? 'var(--pl)' : undefined }}>
               <Clock size={13} />
             </button>
             <ConversationHistory open={historyOpen} onClose={() => setHistoryOpen(false)} />
           </div>
 
           {/* New button */}
-          <button
-            onClick={handleNewConversation}
-            title="New chat"
-            aria-label="New conversation"
-            style={{
-              background: 'none', border: 'none',
-              color: 'var(--mu)', cursor: 'pointer', padding: 2, display: 'flex',
-            }}
-          >
+          <button onClick={handleNewConversation} title="New chat" aria-label="New conversation" className="btn-ghost">
             <Plus size={14} />
           </button>
         </div>
