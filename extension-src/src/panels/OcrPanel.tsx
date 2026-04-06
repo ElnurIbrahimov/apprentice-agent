@@ -51,11 +51,18 @@ export default function OcrPanel() {
     setPanel('translate');
   };
 
+  const [copyLabel, setCopyLabel] = useState('Copy');
+
   const copy = () => {
     if (!text) return;
     navigator.clipboard.writeText(text).then(() => {
-      const btn = document.getElementById('ocr-copy-btn');
-      if (btn) { btn.textContent = '✓ Copied'; if (copyTimerRef.current) clearTimeout(copyTimerRef.current); copyTimerRef.current = setTimeout(() => { btn.textContent = 'Copy'; }, 1500); }
+      setCopyLabel('✓ Copied');
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopyLabel('Copy'), 1500);
+    }).catch(() => {
+      setCopyLabel('Failed');
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopyLabel('Copy'), 1500);
     });
   };
 
@@ -150,7 +157,6 @@ export default function OcrPanel() {
               <Languages size={13} /> Translate
             </button>
             <button
-              id="ocr-copy-btn"
               onClick={copy}
               style={{
                 flex: 1,
@@ -168,7 +174,7 @@ export default function OcrPanel() {
                 fontFamily: 'inherit',
               }}
             >
-              <Copy size={13} /> Copy
+              <Copy size={13} /> {copyLabel}
             </button>
           </div>
         </>

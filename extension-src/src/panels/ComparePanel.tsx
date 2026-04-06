@@ -41,7 +41,13 @@ export default function ComparePanel() {
   // Shuffle results when blind mode is on
   useEffect(() => {
     if (blindMode && results.length > 0 && !revealed) {
-      setShuffledResults([...results].sort(() => Math.random() - 0.5));
+      // Fisher-Yates unbiased shuffle
+      const arr = [...results];
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      setShuffledResults(arr);
     } else {
       setShuffledResults(results);
     }
