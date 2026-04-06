@@ -1626,6 +1626,30 @@ class AgenticLoop:
                     messages.append({"role": "assistant", "content": ""})
                     messages.append({"role": "user", "content": "Continue. Execute the task using tools."})
                     continue
+
+                # Detect "thinking without acting" — model said it would use tools
+                # but didn't actually call any. Nudge it to execute.
+                _thinking_phrases = (
+                    "let me search", "let me look", "let me find", "i'll search",
+                    "i will search", "let me do a", "let me check", "let me research",
+                    "i'll look up", "let me query", "searching for",
+                )
+                _content_lower = content.lower().strip()
+                _is_thinking_without_acting = (
+                    self.iteration <= 2
+                    and len(content) < 500
+                    and any(_content_lower.startswith(p) or f"\n{p}" in _content_lower for p in _thinking_phrases)
+                    and self.tool_calls_total == 0
+                )
+                if _is_thinking_without_acting:
+                    _nudge_count = getattr(self, '_thinking_nudge_count', 0) + 1
+                    self._thinking_nudge_count = _nudge_count
+                    if _nudge_count <= 2:
+                        logger.warning(f"[AgenticLoop] Model is thinking without acting (nudge #{_nudge_count}): '{content[:80]}...'")
+                        messages.append({"role": "assistant", "content": content})
+                        messages.append({"role": "user", "content": "Don't just describe what you'll do — actually use the available tools now. Call web_search or the appropriate tool to execute."})
+                        continue
+
                 self._empty_response_count = 0  # Reset on successful response
 
                 # ── Completion verification ──
