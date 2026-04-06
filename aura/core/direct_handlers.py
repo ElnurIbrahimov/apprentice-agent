@@ -344,9 +344,14 @@ class DirectHandlersMixin:
         logger.debug(f"[DIRECT SEARCH] User query: '{query}'")
 
         try:
-            # Call web search directly with the exact user query
-            tool = self.tools['web_search']
-            result = tool.search(query, num_results=5)
+            # Use fallback chain (Tavily → Brave → SearXNG) instead of SearXNG-only
+            try:
+                from aura.tools.search_fallback import web_search_with_fallback
+                result = web_search_with_fallback(query, max_results=5, tool_registry=self.tools)
+            except ImportError:
+                # Fallback to direct web_search if search_fallback not available
+                tool = self.tools['web_search']
+                result = tool.search(query, num_results=5)
 
             if not result.get("success"):
                 return f"Search failed: {result.get('error', 'Unknown error')}"

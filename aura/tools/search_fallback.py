@@ -1,12 +1,12 @@
 """Shared web search fallback chain.
 
-Provides a single function that tries Tavily → Brave → SearXNG in order.
-Used by both agent.py (tool dispatch) and agentic_loop.py (direct execution).
+Provides a single function that tries Tavily → Brave → SearXNG in order,
+with retry logic, result normalization, and deduplication.
 """
 
 import logging
 import time
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,83 @@ def _cache_put(query: str, max_results: int, result: dict):
     key = (query.lower().strip(), max_results)
     _search_cache[key] = (time.time(), result)
 
+
+def _is_good_result(result) -> bool:
+    """Check if a search result is valid and usable."""
+    if not isinstance(result, dict):
+        return False
+    # Explicit success flag
+    if result.get("success") is False:
+        return False
+    # Explicit error
+    if "error" in result and result["error"]:
+        return False
+    # Has actual results
+    results = result.get("results", [])
+    if isinstance(results, list) and len(results) > 0:
+        return True
+    # Tavily returns "answer" sometimes
+    if result.get("answer"):
+        return True
+    return False
+
+
+def _normalize_results(result: dict, source: str) -> dict:
+    """Normalize results to a consistent format: {success, query, source, results[{title, url, snippet}]}."""
+    raw_results = result.get("results", [])
+    if isinstance(raw_results, str):
+        # Some tools return results as a string
+        return {"success": True, "source": source, "results": [], "raw_text": raw_results}
+
+    normalized = []
+    for r in raw_results:
+        if isinstance(r, dict):
+            normalized.append({
+                "title": r.get("title", ""),
+                "url": r.get("url", ""),
+                "snippet": r.get("snippet") or r.get("content") or r.get("description") or "",
+                "source": source,
+            })
+
+    return {
+        "success": True,
+        "query": result.get("query", ""),
+        "source": source,
+        "results": normalized,
+        "num_results": len(normalized),
+        # Preserve extra fields from Tavily
+        "answer": result.get("answer"),
+    }
+
+
+def _deduplicate(results: List[dict]) -> List[dict]:
+    """Remove duplicate results by URL."""
+    seen_urls = set()
+    deduped = []
+    for r in results:
+        url = r.get("url", "").rstrip("/").lower()
+        if url and url not in seen_urls:
+            seen_urls.add(url)
+            deduped.append(r)
+        elif not url:
+            deduped.append(r)  # Keep results without URLs
+    return deduped
+
+
+def _retry_call(fn, retries: int = 2, delay: float = 1.0):
+    """Simple retry with exponential backoff."""
+    last_err = None
+    for attempt in range(retries + 1):
+        try:
+            return fn()
+        except Exception as e:
+            last_err = e
+            if attempt < retries:
+                time.sleep(delay * (2 ** attempt))
+                logger.debug(f"[SearchFallback] Retry {attempt + 1}/{retries} after: {e}")
+    raise last_err  # type: ignore
+
+
 # Lazy-initialized tool instances (module-level singletons)
 _tavily = None
 _brave = None
@@ -51,7 +128,7 @@ def web_search_with_fallback(
             registered tool instances instead of creating new ones.
 
     Returns:
-        dict with search results, or {"error": "..."} on total failure.
+        dict with normalized search results, or {"error": "..."} on total failure.
     """
     global _tavily, _brave
 
@@ -60,60 +137,75 @@ def web_search_with_fallback(
     if cached is not None:
         return cached
 
-    # --- Strategy 1: Use tool registry if available ---
-    if tool_registry:
-        for tool_name in ("tavily_search", "brave_search", "web_search"):
-            if tool_name in tool_registry:
-                try:
-                    result = tool_registry[tool_name].execute(f"search {query}")
-                    if isinstance(result, dict) and "error" not in result:
-                        _cache_put(query, max_results, result)
-                        return result
-                    # Some tools return error as a string
-                    if isinstance(result, str) and "error" not in result.lower()[:50]:
-                        wrapped = {"results": result}
-                        _cache_put(query, max_results, wrapped)
-                        return wrapped
-                except Exception as e:
-                    logger.debug(f"[SearchFallback] {tool_name} failed: {e}")
-                    continue
-        # Fall through to direct instantiation if registry tools all failed
+    errors: list[str] = []
 
-    # --- Strategy 2: Direct instantiation ---
-    # Tavily
+    # --- Tavily (best quality, AI-optimized) ---
     try:
-        if _tavily is None:
-            from aura.tools.tavily_tool import TavilyTool
-            _tavily = TavilyTool()
-        result = _tavily.search(query=query, max_results=max_results)
-        if isinstance(result, dict) and "error" not in result:
-            _cache_put(query, max_results, result)
-            return result
-        logger.debug(f"[SearchFallback] Tavily error: {result.get('error', '?')}")
+        if tool_registry and "tavily_search" in tool_registry:
+            result = tool_registry["tavily_search"].execute(f"search {query}")
+        else:
+            if _tavily is None:
+                from aura.tools.tavily_tool import TavilyTool
+                _tavily = TavilyTool()
+            result = _retry_call(lambda: _tavily.search(query=query, max_results=max_results))
+
+        if _is_good_result(result):
+            normalized = _normalize_results(result, "tavily")
+            normalized["results"] = _deduplicate(normalized["results"])
+            _cache_put(query, max_results, normalized)
+            logger.debug(f"[SearchFallback] Tavily returned {len(normalized['results'])} results")
+            return normalized
+        errors.append(f"Tavily: {result.get('error', 'no results') if isinstance(result, dict) else 'bad response'}")
     except Exception as e:
-        logger.debug(f"[SearchFallback] Tavily exception: {e}")
+        errors.append(f"Tavily: {e}")
+        logger.debug(f"[SearchFallback] Tavily failed: {e}")
 
-    # Brave
+    # --- Brave (fresh results, good for news) ---
     try:
-        if _brave is None:
-            from aura.tools.brave_search import BraveSearchTool
-            _brave = BraveSearchTool()
-        result = _brave.run(query=query, count=max_results)
-        if isinstance(result, dict) and "error" not in result:
-            _cache_put(query, max_results, result)
-            return result
+        if tool_registry and "brave_search" in tool_registry:
+            result = tool_registry["brave_search"].execute(f"search {query}")
+        else:
+            if _brave is None:
+                from aura.tools.brave_search import BraveSearchTool
+                _brave = BraveSearchTool()
+            result = _retry_call(lambda: _brave.run(query=query, count=max_results))
+
+        if _is_good_result(result):
+            normalized = _normalize_results(result, "brave")
+            normalized["results"] = _deduplicate(normalized["results"])
+            _cache_put(query, max_results, normalized)
+            logger.debug(f"[SearchFallback] Brave returned {len(normalized['results'])} results")
+            return normalized
+        errors.append(f"Brave: {result.get('error', 'no results') if isinstance(result, dict) else 'bad response'}")
+    except Exception as e:
+        errors.append(f"Brave: {e}")
+        logger.debug(f"[SearchFallback] Brave failed: {e}")
+
+    # --- SearXNG (self-hosted fallback) ---
+    try:
+        if tool_registry and "web_search" in tool_registry:
+            ws = tool_registry["web_search"]
+        else:
+            from aura.tools.web_search import WebSearchTool
+            ws = WebSearchTool()
+        result = _retry_call(lambda: ws.search(query=query, num_results=max_results))
+
+        if _is_good_result(result):
+            normalized = _normalize_results(result, "searxng")
+            normalized["results"] = _deduplicate(normalized["results"])
+            _cache_put(query, max_results, normalized)
+            logger.debug(f"[SearchFallback] SearXNG returned {len(normalized['results'])} results")
+            return normalized
+        # Return SearXNG result even if not great — it's the last resort
         if isinstance(result, dict):
-            logger.debug(f"[SearchFallback] Brave error: {result.get('error', '?')}")
-    except Exception as e:
-        logger.debug(f"[SearchFallback] Brave exception: {e}")
-
-    # SearXNG (final fallback)
-    try:
-        from aura.tools.web_search import WebSearchTool
-        ws = WebSearchTool()
-        result = ws.search(query=query, num_results=max_results)
-        if isinstance(result, dict) and result.get("success"):
             _cache_put(query, max_results, result)
-        return result
+            return result
+        errors.append(f"SearXNG: {result.get('error', 'no results') if isinstance(result, dict) else 'bad response'}")
     except Exception as e:
-        return {"error": f"All search providers failed: {e}"}
+        errors.append(f"SearXNG: {e}")
+        logger.debug(f"[SearchFallback] SearXNG failed: {e}")
+
+    # --- All providers failed ---
+    error_summary = "; ".join(errors) if errors else "Unknown error"
+    logger.error(f"[SearchFallback] All search providers failed: {error_summary}")
+    return {"success": False, "error": f"All search providers failed: {error_summary}", "results": []}
