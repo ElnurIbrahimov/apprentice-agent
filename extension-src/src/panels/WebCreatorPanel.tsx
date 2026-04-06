@@ -1333,7 +1333,7 @@ export default function WebCreatorPanel() {
         setBuildProgressMessage('');
         setTimedStatus('Planning cancelled', 1500);
       } else {
-        const message = err?.message || 'Build planning failed';
+        const message = typeof err?.message === 'string' ? err.message : typeof err === 'string' ? err : 'Build planning failed';
         setBuildStage('error');
         setBuildPlanError(message);
         setBuildProgressMessage(message);
@@ -1883,12 +1883,13 @@ export default function WebCreatorPanel() {
         );
       }
     } catch (err: any) {
-      if (err.name !== 'AbortError') {
-        setStatus(err.message || 'Request failed');
+      if (err?.name !== 'AbortError') {
+        const errText = typeof err?.message === 'string' ? err.message : typeof err === 'string' ? err : 'Request failed';
+        setStatus(errText);
         const errMsg: ChatMessage = {
           id: crypto.randomUUID(),
           role: 'ai',
-          text: `Error: ${err.message || 'Request failed'}`,
+          text: `Error: ${errText}`,
           timestamp: Date.now(),
         };
         setMessages(prev => [...prev, errMsg]);

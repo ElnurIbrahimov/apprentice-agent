@@ -63,7 +63,9 @@ export async function* streamChat(
 
   if (!resp.ok) {
     const d = await resp.json().catch(() => ({}));
-    throw new Error((d as any).detail || `HTTP ${resp.status}`);
+    const detail = (d as any).detail;
+    const msg = typeof detail === 'string' ? detail : detail ? JSON.stringify(detail) : `HTTP ${resp.status}`;
+    throw new Error(msg);
   }
 
   yield* parseSSEStream(resp);
@@ -97,7 +99,9 @@ export async function* streamRawGenerate(
 
   if (!resp.ok) {
     const d = await resp.json().catch(() => ({}));
-    throw new Error((d as any).detail || `HTTP ${resp.status}`);
+    const detail = (d as any).detail;
+    const msg = typeof detail === 'string' ? detail : detail ? JSON.stringify(detail) : `HTTP ${resp.status}`;
+    throw new Error(msg);
   }
 
   yield* parseSSEStream(resp);
@@ -120,7 +124,9 @@ export async function chatFallback(
   });
   if (!resp.ok) {
     const d = await resp.json().catch(() => ({}));
-    throw new Error((d as any).detail || `HTTP ${resp.status}`);
+    const detail = (d as any).detail;
+    const msg = typeof detail === 'string' ? detail : detail ? JSON.stringify(detail) : `HTTP ${resp.status}`;
+    throw new Error(msg);
   }
   const data = await resp.json();
   return data.response || data.text || data.content || data.reply || '';
