@@ -539,6 +539,9 @@ class MediaMixin:
                             os.unlink(wav_path)
                         except OSError:
                             pass
+                    else:
+                        logger.warning(f"[Voice] TTS returned None for user {user.id} — no TTS engine available")
+                        await update.message.reply_text("(Voice reply unavailable — TTS engine not installed. Use /tts off to disable.)")
                 except Exception as e:
                     logger.warning(f"[Voice] TTS reply failed: {e}")
 

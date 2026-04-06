@@ -376,22 +376,17 @@ def cmd_cost(args) -> int:
         return 1
 
     print("\nAura Cost Summary\n")
-    total_cost = stats.get("total_cost_usd", 0.0)
-    total_sessions = stats.get("total_sessions", 0)
-    total_messages = stats.get("total_messages", 0)
-    total_tokens = stats.get("total_tokens", 0)
+    total_cost = stats.get("total_cost", 0.0)
+    total_interactions = stats.get("total_interactions", 0)
+    tokens_in = stats.get("total_tokens_in", 0)
+    tokens_out = stats.get("total_tokens_out", 0)
+    total_tokens = tokens_in + tokens_out
+    total_tool_calls = stats.get("total_tool_calls", 0)
 
     print(f"  Total cost:     ${total_cost:.4f}")
-    print(f"  Sessions:       {total_sessions}")
-    print(f"  Messages:       {total_messages}")
-    print(f"  Tokens:         {total_tokens:,}")
-
-    # Per-model breakdown if available
-    model_costs = stats.get("model_costs", {})
-    if model_costs:
-        print(f"\n  By model:")
-        for model, cost in sorted(model_costs.items(), key=lambda x: x[1], reverse=True):
-            print(f"    {model:30s} ${cost:.4f}")
+    print(f"  Interactions:   {total_interactions}")
+    print(f"  Tokens:         {total_tokens:,} (in: {tokens_in:,} / out: {tokens_out:,})")
+    print(f"  Tool calls:     {total_tool_calls}")
 
     print()
     return 0

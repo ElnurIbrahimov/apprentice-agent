@@ -10,7 +10,6 @@ import {
   ClockIcon,
   CheckCircleIcon,
 } from '@heroicons/react/24/outline';
-import { BookOpenIcon as BookOpenOutlineIcon } from '@heroicons/react/24/outline';
 
 /* ── Types ── */
 type Tab = 'browse' | 'ask' | 'add';

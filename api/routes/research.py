@@ -10,7 +10,6 @@ import asyncio
 from urllib.parse import urlparse
 from typing import Optional
 
-import httpx
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -21,7 +20,15 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/research", tags=["research"], dependencies=[Depends(require_api_key)])
 
-OLLAMA_URL = (os.getenv("OLLAMA_BASE_URL") or os.getenv("OLLAMA_HOST", "http://localhost:11434")) + "/api/generate"
+def _get_ollama_client():
+    """Get an Ollama client that works with both local and cloud models."""
+    try:
+        import ollama
+        host = os.getenv("OLLAMA_BASE_URL") or os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        return ollama.AsyncClient(host=host)
+    except ImportError:
+        return None
+
 def _get_default_research_model():
     try:
         from aura.config import Config
@@ -44,7 +51,7 @@ class ResearchRequest(BaseModel):
     model: Optional[str] = None
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
+# -- Helpers -------------------------------------------------------------------
 
 def _get_tavily():
     try:
@@ -98,17 +105,18 @@ async def _generate_followup_queries(query: str, n: int, model: str) -> list[str
         f"Reply ONLY with a JSON array of {n} short search query strings. No explanation."
     )
     try:
-        async with httpx.AsyncClient(timeout=30) as c:
-            resp = await c.post(OLLAMA_URL, json={"model": model, "prompt": prompt, "stream": False})
-            resp.raise_for_status()
-            raw = resp.json().get("response", "").strip()
-            # Extract JSON array from response (model may wrap it in markdown)
-            start = raw.find("[")
-            end = raw.rfind("]") + 1
-            if start != -1 and end > start:
-                queries = json.loads(raw[start:end])
-                if isinstance(queries, list):
-                    return [str(q) for q in queries[:n]]
+        client = _get_ollama_client()
+        if client is None:
+            raise RuntimeError("ollama package not installed")
+        resp = await client.generate(model=model, prompt=prompt, stream=False)
+        raw = resp.get("response", "").strip()
+        # Extract JSON array from response (model may wrap it in markdown)
+        start = raw.find("[")
+        end = raw.rfind("]") + 1
+        if start != -1 and end > start:
+            queries = json.loads(raw[start:end])
+            if isinstance(queries, list):
+                return [str(q) for q in queries[:n]]
     except Exception as e:
         logger.warning("[Research] Follow-up query generation failed: %s", e)
     # Fallback: basic variants
@@ -138,18 +146,19 @@ async def _synthesize(query: str, sources: list[dict], model: str) -> str:
         "Be specific and cite sources frequently. Write in clear, professional prose."
     )
     try:
-        async with httpx.AsyncClient(timeout=120) as c:
-            resp = await c.post(OLLAMA_URL, json={"model": model, "prompt": prompt, "stream": False})
-            resp.raise_for_status()
-            return resp.json().get("response", "").strip()
-    except httpx.TimeoutException:
+        client = _get_ollama_client()
+        if client is None:
+            raise RuntimeError("ollama package not installed")
+        resp = await client.generate(model=model, prompt=prompt, stream=False)
+        return resp.get("response", "").strip()
+    except asyncio.TimeoutError:
         return "*Report generation timed out. Sources are listed below.*"
     except Exception as e:
         logger.error("[Research] Synthesis failed: %s", e)
         return f"*Report generation failed: {e}*"
 
 
-# ── Endpoint ───────────────────────────────────────────────────────────────────
+# -- Endpoint ------------------------------------------------------------------
 
 @router.post("")
 async def deep_research(req: ResearchRequest):
@@ -169,19 +178,22 @@ async def deep_research(req: ResearchRequest):
     tavily = _get_tavily()
 
     async def generate():
-        # ── Phase 1: Search ──────────────────────────────────────────────────
-        yield json.dumps({"status": "searching", "message": "Searching the web..."}) + "\n"
+        total_sources_target = cfg["max_results"] * cfg["num_queries"]
+
+        # -- Phase 1: Search ---------------------------------------------------
+        yield json.dumps({"type": "research_step", "step": "understanding", "status": "searching", "message": "Searching the web..."}) + "\n"
 
         # Primary search
         primary_results = await _run_search(tavily, query, cfg["max_results"])
 
         extra_results: list[dict] = []
+        followup_queries: list[str] = []
         if cfg["num_queries"] > 1:
             n_followup = cfg["num_queries"] - 1
-            yield json.dumps({"status": "searching", "message": f"Generating {n_followup} follow-up queries..."}) + "\n"
+            yield json.dumps({"type": "research_step", "step": "planning", "status": "searching", "message": f"Generating {n_followup} follow-up queries...", "sub_questions": [], "sources_target": total_sources_target}) + "\n"
             followup_queries = await _generate_followup_queries(query, n_followup, model)
 
-            yield json.dumps({"status": "searching", "message": f"Running {n_followup} additional searches..."}) + "\n"
+            yield json.dumps({"type": "research_step", "step": "searching", "status": "searching", "message": f"Running {n_followup} additional searches...", "sub_questions": followup_queries, "sources_target": total_sources_target}) + "\n"
             followup_tasks = [
                 _run_search(tavily, fq, cfg["max_results"])
                 for fq in followup_queries
@@ -200,8 +212,7 @@ async def deep_research(req: ResearchRequest):
                 all_raw.append(r)
 
         # Cap at desired total
-        total_cap = cfg["max_results"] * cfg["num_queries"]
-        all_raw = all_raw[:total_cap]
+        all_raw = all_raw[:total_sources_target]
 
         # Build clean source list
         sources = [
@@ -216,11 +227,15 @@ async def deep_research(req: ResearchRequest):
             for i, r in enumerate(all_raw)
         ]
 
-        # ── Phase 2: Analyze ─────────────────────────────────────────────────
-        yield json.dumps({"status": "analyzing", "message": f"Analyzing {len(sources)} sources..."}) + "\n"
+        # Emit individual source events (for extension UI progress)
+        for s in sources:
+            yield json.dumps({"type": "research_source", "index": s["index"], "url": s["url"], "title": s["title"], "domain": s["domain"], "snippet": s["snippet"]}) + "\n"
 
-        # ── Phase 3: Write ───────────────────────────────────────────────────
-        yield json.dumps({"status": "writing", "message": "Writing research report..."}) + "\n"
+        # -- Phase 2: Analyze --------------------------------------------------
+        yield json.dumps({"type": "research_step", "step": "synthesizing", "status": "analyzing", "message": f"Analyzing {len(sources)} sources..."}) + "\n"
+
+        # -- Phase 3: Write ----------------------------------------------------
+        yield json.dumps({"type": "research_step", "step": "finalizing", "status": "writing", "message": "Writing research report..."}) + "\n"
 
         report = await _synthesize(query, sources, model)
 
@@ -234,8 +249,9 @@ async def deep_research(req: ResearchRequest):
         if not citations:
             citations = [{"index": s["index"], "title": s["title"], "url": s["url"]} for s in sources]
 
-        # ── Done ─────────────────────────────────────────────────────────────
+        # -- Done --------------------------------------------------------------
         yield json.dumps({
+            "type": "research_done",
             "status": "done",
             "query": query,
             "depth": depth,

@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import { PlusIcon, PlayIcon, TrashIcon, XMarkIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, PlayIcon, XMarkIcon } from '@heroicons/react/24/outline';
 
 interface Task {
   id: string;

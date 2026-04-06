@@ -4,7 +4,6 @@ import {
   ClipboardDocumentCheckIcon,
   StopIcon,
   DocumentTextIcon,
-  LinkIcon,
 } from '@heroicons/react/24/outline';
 import { useChatStore } from '../store/chatStore';
 import { SendToMenu } from './SendToMenu';
@@ -67,7 +66,7 @@ const DRAFT_KEY = 'aura-draft-summary';
 export function SummaryPanel() {
   const [inputMode, setInputMode] = useState<InputMode>('text');
   const [inputText, setInputText] = useState('');
-  const [urlInput, setUrlInput] = useState('');
+  const [urlInput, _setUrlInput] = useState('');
   const [length, setLength] = useState<SummaryLength>('standard');
   const [format, setFormat] = useState<SummaryFormat>('paragraph');
   const [output, setOutput] = useState('');

@@ -547,10 +547,7 @@ export default function HandsDashboard() {
 
   const activeCount   = hands.filter(h => ['active', 'running'].includes(h.state)).length;
   const pausedCount   = hands.filter(h => h.state === 'paused').length;
-  const idleCount     = hands.filter(h => ['inactive', 'cooldown'].includes(h.state)).length;
   const runningNow    = hands.filter(h => h.state === 'running').length;
-  const totalRuns     = hands.reduce((s, h) => s + h.total_runs, 0);
-  const totalCost     = hands.reduce((s, h) => s + h.total_cost, 0);
   const successRate   = history.length > 0
     ? Math.round(history.filter(e => (e.action_data as Record<string, unknown>).success === true).length / history.length * 100)
     : null;

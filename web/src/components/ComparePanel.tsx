@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   PaperAirplaneIcon, StopIcon, ArrowsRightLeftIcon,
   ClipboardDocumentIcon, CheckIcon, EyeIcon, EyeSlashIcon,
-  TrashIcon, ChartBarIcon, TrophyIcon,
+  TrashIcon,
 } from '@heroicons/react/24/outline';
 
 /* ── Types ── */
