@@ -2,9 +2,25 @@ import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { useStore } from '../store';
 import { HTTP, apiFetch, getAuthHeaders } from '../api';
 import { md } from '../markdown';
-import { Copy, Check, Star } from 'lucide-react';
+import { Copy, Check, Star, Eye, EyeOff, Trophy } from 'lucide-react';
 
 const COMPARE_DEFAULTS = ['minimax-m2.7:cloud', 'qwen3.5:397b-cloud', 'kimi-k2.5:cloud'];
+
+// ELO rating system
+const ELO_KEY = 'aura-compare-elo';
+const VOTE_KEY = 'aura-compare-votes';
+function loadElo(): Record<string, number> {
+  try { return JSON.parse(localStorage.getItem(ELO_KEY) || '{}'); } catch { return {}; }
+}
+function saveElo(elo: Record<string, number>) { localStorage.setItem(ELO_KEY, JSON.stringify(elo)); }
+function loadVotes(): Array<{ winner: string; loser: string; prompt: string; date: number }> {
+  try { return JSON.parse(localStorage.getItem(VOTE_KEY) || '[]'); } catch { return []; }
+}
+function saveVotes(v: typeof loadVotes extends () => infer R ? R : never) { localStorage.setItem(VOTE_KEY, JSON.stringify(v.slice(-100))); }
+function calcElo(winner: number, loser: number, k = 32): [number, number] {
+  const expected = 1 / (1 + Math.pow(10, (loser - winner) / 400));
+  return [Math.round(winner + k * (1 - expected)), Math.round(loser + k * (0 - (1 - expected)))];
+}
 
 export default function ComparePanel() {
   const { mdlCloudList, mdlLocalList, setMdlLists, activePanel, setPendingCtx, setPanel } = useStore();
@@ -16,6 +32,44 @@ export default function ComparePanel() {
   const [error, setError] = useState('');
   const [markedBest, setMarkedBest] = useState('');
   const [copied, setCopied] = useState('');
+  const [blindMode, setBlindMode] = useState(false);
+  const [shuffledResults, setShuffledResults] = useState<any[]>([]);
+  const [revealed, setRevealed] = useState(false);
+  const [elo, setElo] = useState(loadElo);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+
+  // Shuffle results when blind mode is on
+  useEffect(() => {
+    if (blindMode && results.length > 0 && !revealed) {
+      setShuffledResults([...results].sort(() => Math.random() - 0.5));
+    } else {
+      setShuffledResults(results);
+    }
+  }, [results, blindMode, revealed]);
+
+  const voteForModel = useCallback((winnerModel: string) => {
+    // Update ELO for winner vs all others
+    const newElo = { ...elo };
+    const loserModels = results.filter(r => r.model !== winnerModel && !r.error).map(r => r.model);
+    for (const loser of loserModels) {
+      const wRating = newElo[winnerModel] || 1200;
+      const lRating = newElo[loser] || 1200;
+      const [newW, newL] = calcElo(wRating, lRating);
+      newElo[winnerModel] = newW;
+      newElo[loser] = newL;
+    }
+    setElo(newElo);
+    saveElo(newElo);
+    // Save vote
+    const prompt = inputRef.current?.value || '';
+    const votes = loadVotes();
+    for (const loser of loserModels) {
+      votes.push({ winner: winnerModel, loser, prompt: prompt.slice(0, 100), date: Date.now() });
+    }
+    saveVotes(votes);
+    setMarkedBest(winnerModel);
+    if (blindMode) setRevealed(true);
+  }, [elo, results, blindMode]);
 
   const gridCols = selected.size <= 3 ? '1fr' : '1fr 1fr';
 
@@ -89,7 +143,22 @@ export default function ComparePanel() {
       >
         <div style={{ fontSize: '10px', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--mu)', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>Models</span>
-          <div className="flex gap-2">
+          <div className="flex gap-2" style={{ alignItems: 'center' }}>
+            <button
+              onClick={() => setBlindMode(b => !b)}
+              title={blindMode ? 'Disable blind mode' : 'Enable blind mode (hide model names)'}
+              style={{ background: blindMode ? 'var(--pg2)' : 'none', border: blindMode ? '1px solid var(--p)' : 'none', cursor: 'pointer', color: blindMode ? 'var(--pl)' : 'var(--mu)', fontSize: '11px', fontFamily: 'inherit', borderRadius: 'var(--r-sm)', padding: '2px 6px', display: 'flex', alignItems: 'center', gap: 3 }}
+            >
+              {blindMode ? <EyeOff size={10} /> : <Eye size={10} />}
+              {blindMode ? 'Blind' : 'Blind'}
+            </button>
+            <button
+              onClick={() => setShowLeaderboard(l => !l)}
+              title="ELO Leaderboard"
+              style={{ background: showLeaderboard ? 'var(--pg2)' : 'none', border: showLeaderboard ? '1px solid var(--p)' : 'none', cursor: 'pointer', color: showLeaderboard ? 'var(--pl)' : 'var(--mu)', fontSize: '11px', fontFamily: 'inherit', borderRadius: 'var(--r-sm)', padding: '2px 6px', display: 'flex', alignItems: 'center', gap: 3 }}
+            >
+              <Trophy size={10} /> ELO
+            </button>
             <button
               onClick={() => setSelected(new Set(allModels))}
               style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--mu)', fontSize: '11px', fontFamily: 'inherit' }}
@@ -184,6 +253,32 @@ export default function ComparePanel() {
         </button>
       </div>
 
+      {/* ELO Leaderboard */}
+      {showLeaderboard && (
+        <div className="flex-shrink-0 p-3" style={{ borderBottom: '1px solid var(--b1)', maxHeight: 180, overflowY: 'auto' }}>
+          <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--mu)', marginBottom: 6 }}>🏆 ELO Leaderboard</div>
+          {Object.keys(elo).length === 0 ? (
+            <div style={{ fontSize: 11, color: 'var(--di)' }}>No votes yet. Compare models and pick a winner!</div>
+          ) : (
+            Object.entries(elo)
+              .sort(([, a], [, b]) => b - a)
+              .map(([model, rating], i) => (
+                <div key={model} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                  <span style={{ fontSize: 10, color: i === 0 ? '#fbbf24' : 'var(--di)', width: 16, fontWeight: 600 }}>
+                    {i === 0 ? '👑' : `${i + 1}.`}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--tx)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {model.replace(/:cloud$/, '')}
+                  </span>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: rating >= 1200 ? '#34d399' : '#f87171' }}>
+                    {rating}
+                  </span>
+                </div>
+              ))
+          )}
+        </div>
+      )}
+
       {/* Results */}
       <div className="flex-1 overflow-y-auto p-3">
         {error && <div style={{ color: 'var(--rd)', fontSize: '12px', marginBottom: 8 }}>⚠ {error}</div>}
@@ -199,13 +294,13 @@ export default function ComparePanel() {
           </div>
         )}
 
-        {results.length > 0 && (
+        {shuffledResults.length > 0 && (
           <div style={{ display: 'grid', gridTemplateColumns: gridCols, gap: 8 }}>
-            {results.map(r => {
+            {shuffledResults.map((r, idx) => {
               const isCloud = r.model.includes(':cloud');
               const isFastest = r.model === fastest && !r.error;
               const isBest = r.model === markedBest;
-              const displayName = r.model.replace(/:cloud$/, '');
+              const displayName = (blindMode && !revealed) ? `Model ${String.fromCharCode(65 + idx)}` : r.model.replace(/:cloud$/, '');
               const timeLabel = r.elapsed_ms >= 1000 ? (r.elapsed_ms / 1000).toFixed(1) + 's' : r.elapsed_ms + 'ms';
               return (
                 <div
@@ -277,11 +372,25 @@ export default function ComparePanel() {
                         {copied === r.model ? <><Check size={9} /> Copied</> : <><Copy size={9} /> Copy</>}
                       </button>
                       <button
-                        onClick={() => setMarkedBest(isBest ? '' : r.model)}
-                        title={isBest ? 'Remove best' : 'Mark as best'}
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: isBest ? 'var(--gr)' : 'var(--mu)', padding: '2px 4px', fontFamily: 'inherit', display: 'flex', alignItems: 'center' }}
+                        onClick={() => voteForModel(r.model)}
+                        disabled={!!markedBest}
+                        title={isBest ? 'Winner!' : 'Vote as best response'}
+                        style={{
+                          background: isBest ? 'rgba(34,197,94,0.15)' : 'none',
+                          border: isBest ? '1px solid rgba(34,197,94,0.3)' : '1px solid var(--b1)',
+                          borderRadius: 'var(--r-sm)',
+                          cursor: markedBest ? 'default' : 'pointer',
+                          color: isBest ? '#34d399' : 'var(--mu)',
+                          padding: '3px 8px',
+                          fontFamily: 'inherit',
+                          fontSize: '10px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 3,
+                          opacity: markedBest && !isBest ? 0.4 : 1,
+                        }}
                       >
-                        <Star size={11} fill={isBest ? 'var(--gr)' : 'none'} />
+                        {isBest ? <><Trophy size={9} /> Winner</> : <><Star size={9} /> Vote</>}
                       </button>
                     </div>
                   )}
