@@ -32,6 +32,7 @@ class MessageRouter:
 
         self.platforms: Dict[str, BasePlatform] = {}
         self.is_running = False
+        self._proactive_task: Optional[asyncio.Task] = None
 
         # Initialize platforms
         self._init_platforms()
@@ -169,10 +170,19 @@ class MessageRouter:
             logger.debug(f"Could not register cross-surface listener: {e}")
 
     async def stop(self):
-        """Stop all platforms"""
+        """Stop all platforms and cancel background tasks."""
 
         logger.info("Stopping Message Router...")
         self.is_running = False
+
+        # Cancel proactive loop task to prevent asyncio leak
+        if self._proactive_task is not None and not self._proactive_task.done():
+            self._proactive_task.cancel()
+            try:
+                await self._proactive_task
+            except asyncio.CancelledError:
+                pass
+            self._proactive_task = None
 
         for name, platform in self.platforms.items():
             try:

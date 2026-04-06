@@ -170,6 +170,8 @@ class TaintTracker:
     and provides guards for sink operations.
     """
 
+    _MAX_SESSIONS = 1000  # Cap to prevent unbounded memory growth
+
     def __init__(self):
         self._lock = threading.Lock()
         self._session_taints: dict[str, TaintLabel] = {}  # session_id → highest taint seen
@@ -183,6 +185,14 @@ class TaintTracker:
         if matches:
             with self._lock:
                 self._detection_count += len(matches)
+                # Evict oldest PUBLIC sessions if at capacity
+                if session_id not in self._session_taints and len(self._session_taints) >= self._MAX_SESSIONS:
+                    public_keys = [k for k, v in self._session_taints.items() if v == TaintLabel.PUBLIC]
+                    if public_keys:
+                        del self._session_taints[public_keys[0]]
+                    else:
+                        # All elevated — evict first entry
+                        del self._session_taints[next(iter(self._session_taints))]
                 current = self._session_taints.get(session_id, TaintLabel.PUBLIC)
                 new_level = highest_taint(matches)
                 priority = TAINT_PRIORITY

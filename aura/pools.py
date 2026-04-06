@@ -92,3 +92,27 @@ def _shutdown_all():
 
 
 atexit.register(_shutdown_all)
+
+
+# ---- Background submit with fallback (moved from brain.py 2026-04-06) ----
+
+_BG_FALLBACK_SEM = threading.Semaphore(8)
+
+
+def bg_submit(fn, *args, **kwargs):
+    """Submit work to the background pool, with fallback for shutdown."""
+    try:
+        bg_pool().submit(fn, *args, **kwargs)
+    except RuntimeError:
+        # Pool shut down — run in daemon thread as last resort, capped at 8
+        if not _BG_FALLBACK_SEM.acquire(blocking=False):
+            logger.warning(
+                "bg_submit: fallback thread cap reached (8), dropping task %s", fn
+            )
+            return
+        def _run_and_release():
+            try:
+                fn(*args, **kwargs)
+            finally:
+                _BG_FALLBACK_SEM.release()
+        threading.Thread(target=_run_and_release, daemon=True).start()

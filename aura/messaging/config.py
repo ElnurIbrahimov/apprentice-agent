@@ -63,10 +63,20 @@ WHATSAPP_CONFIG = {
 
 # ============ GENERAL CONFIG ============
 
+# Surface Priority Tiers
+# - PRIMARY: Web UI, Telegram, Browser Extension — actively maintained, fully tested
+# - EXPERIMENTAL: Discord, Matrix, WhatsApp — basic support, no polish guarantees
+SURFACE_TIERS = {
+    "primary": ["web", "telegram", "extension"],
+    "experimental": ["discord", "matrix", "whatsapp"],
+}
+
 MESSAGING_CONFIG = {
     # Which platforms to enable
     "enable_telegram": True,
-    "enable_whatsapp": False,  # Start with Telegram first
+    "enable_whatsapp": False,      # Experimental — requires Baileys bridge
+    "enable_discord": False,       # Experimental
+    "enable_matrix": False,        # Experimental
 
     # Unified settings
     "typing_indicator_delay": 1.0,  # Seconds to show typing

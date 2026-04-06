@@ -1252,8 +1252,9 @@ class SecureToolExecutor:
         # Lock for thread-safe confirmation handling
         self._confirmation_lock = threading.Lock()
 
-        # Track active sessions
+        # Track active sessions (bounded: evict oldest when exceeding cap)
         self._sessions: Dict[str, float] = {}  # session_id -> created_at
+        self._MAX_SESSIONS = 500
 
         self._register_secure_tools()
 
@@ -1374,6 +1375,11 @@ class SecureToolExecutor:
         """
         session_id = secrets.token_urlsafe(24)
         with self._confirmation_lock:
+            # Evict oldest sessions if at capacity
+            if len(self._sessions) >= self._MAX_SESSIONS:
+                oldest = sorted(self._sessions, key=self._sessions.get)[:len(self._sessions) - self._MAX_SESSIONS + 1]
+                for old_id in oldest:
+                    del self._sessions[old_id]
             self._sessions[session_id] = time.time()
         return session_id
 
