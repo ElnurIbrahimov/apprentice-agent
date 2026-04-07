@@ -1,0 +1,17 @@
+{
+  "nemotron-3-super:cloud": {"code": 0.60, "reason": 0.73, "speed": 1.00, "context": 1.00, "quality": 0.70, "vision": 0},
+  "kimi-k2.5:cloud": {"code": 0.77, "reason": 0.92, "speed": 0.08, "context": 0.26, "quality": 0.90, "vision": 1},
+  "glm-5:cloud": {"code": 0.78, "reason": 0.96, "speed": 0.15, "context": 0.20, "quality": 0.95, "vision": 0},
+  "glm-5.1:cloud": {"code": 0.88, "reason": 0.93, "speed": 0.10, "context": 0.20, "quality": 0.92, "vision": 0},
+  "qwen3.5:397b-cloud": {"code": 0.70, "reason": 0.88, "speed": 0.19, "context": 0.26, "quality": 0.88, "vision": 1},
+  "qwen3.5:cloud": {"code": 0.50, "reason": 0.83, "speed": 0.30, "context": 0.26, "quality": 0.75, "vision": 1},
+  "deepseek-v3.2:cloud": {"code": 0.68, "reason": 0.85, "speed": 0.11, "context": 0.13, "quality": 0.82, "vision": 0},
+  "gemma4:31b-cloud": {"code": 0.72, "reason": 0.85, "speed": 0.23, "context": 0.26, "quality": 0.83, "vision": 1},
+  "minimax-m2.7:cloud": {"code": 0.78, "reason": 0.80, "speed": 0.22, "context": 0.21, "quality": 0.86, "vision": 0},
+  "minimax-m2.5:cloud": {"code": 0.80, "reason": 0.74, "speed": 0.20, "context": 0.20, "quality": 0.82, "vision": 0},
+  "qwen3-coder:480b-cloud": {"code": 0.70, "reason": 0.60, "speed": 0.35, "context": 0.26, "quality": 0.75, "vision": 0},
+  "qwen3-coder-next:cloud": {"code": 0.71, "reason": 0.55, "speed": 0.38, "context": 0.26, "quality": 0.72, "vision": 0},
+  "gpt-oss:120b-cloud": {"code": 0.45, "reason": 0.90, "speed": 0.15, "context": 0.13, "quality": 0.80, "vision": 0},
+  "gemma4:e4b": {"code": 0.35, "reason": 0.69, "speed": 0.50, "context": 0.13, "quality": 0.60, "vision": 1},
+  "gemma4:e2b": {"code": 0.25, "reason": 0.60, "speed": 0.60, "context": 0.13, "quality": 0.50, "vision": 1}
+}
