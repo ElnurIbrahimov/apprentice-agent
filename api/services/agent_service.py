@@ -639,7 +639,7 @@ class AgentService:
             if message.strip().startswith("/think"):
                 return self._handle_thinking_mode_command(message.strip())
 
-            # Detect action mode and auto-select model
+            # Detect action mode (still used for prompt injection, NOT model selection)
             detected_action = detect_action_mode(message)
             effective_model = model_override
 
@@ -679,16 +679,14 @@ class AgentService:
             except Exception:
                 logger.debug("chat_idle_activity_record_failed", exc_info=True)
 
-            if not effective_model and detected_action:
-                effective_model = get_model_for_action(detected_action)
-                if effective_model:
-                    logger.info(f"[AgentService] Chat auto-selected model for {detected_action}: {effective_model}")
-                    _record_thought("connecting", f"action mode: {detected_action} -> {effective_model}", 0.5, "service")
-
-            # Set model override if we have one
+            # Set explicit model override only if user selected one (not auto-detected)
             if effective_model:
                 self.agent.brain.set_model_override(effective_model)
-                logger.info(f"[AgentService] Using model: {effective_model}")
+                logger.info(f"[AgentService] Using explicit model override: {effective_model}")
+
+            # Set routing context on brain (the neural router reads these)
+            self.agent.brain._routing_preference = 'balanced'
+            self.agent.brain._conversation_id = None
 
             # Set action mode for context-aware prompt injection (design system, etc.)
             self.agent.brain.set_action_mode(detected_action)
@@ -907,13 +905,15 @@ Provide key findings and cite sources."""
                 agent.brain.set_model_override(None)
             agent.brain.set_action_mode(None)
 
-    def chat_stream(self, message: str, model_override: Optional[str] = None, action_mode: Optional[str] = None):
+    def chat_stream(self, message: str, model_override: Optional[str] = None, action_mode: Optional[str] = None,
+                     routing_opts: Optional[Dict] = None):
         """Stream a chat response from the agent.
 
         Args:
             message: User message
             model_override: Optional model to use (explicit selection takes priority)
             action_mode: Optional action mode ('search', 'research', 'agent')
+            routing_opts: Optional routing options from WebSocket (preference, feature, etc.)
 
         Yields:
             Response chunks as they're generated
@@ -926,18 +926,21 @@ Provide key findings and cite sources."""
         effective_model = None
         # ===== SETUP PHASE - Brief lock =====
         with self._agent_lock:
-            effective_model = model_override
+            effective_model = model_override or (routing_opts.get("model") if routing_opts else None)
             detected_action = action_mode or detect_action_mode(message)
 
-            if not effective_model and detected_action:
-                effective_model = get_model_for_action(detected_action)
-                if effective_model:
-                    logger.info(f"[AgentService] Auto-selected model for {detected_action}: {effective_model}")
-
-            # Always set override (even None) so Auto mode clears any previous selection
-            self.agent.brain.set_model_override(effective_model)
+            # Set explicit model override only if user selected one (not auto-detected)
             if effective_model:
-                logger.info(f"[AgentService] Streaming with model: {effective_model}")
+                self.agent.brain.set_model_override(effective_model)
+                logger.info(f"[AgentService] Streaming with explicit model override: {effective_model}")
+            else:
+                # Clear any previous override so the neural router decides
+                self.agent.brain.set_model_override(None)
+
+            # Set routing context on brain (the neural router reads these)
+            self.agent.brain._routing_preference = (routing_opts.get('preference', 'balanced') if routing_opts else 'balanced')
+            self.agent.brain._conversation_id = (routing_opts.get('conversation_id') if routing_opts else None)
+            self.agent.brain._has_attachment = bool(routing_opts.get('has_attachment')) if routing_opts else False
 
             # Set action mode for context-aware prompt injection (design system, etc.)
             self.agent.brain.set_action_mode(detected_action)

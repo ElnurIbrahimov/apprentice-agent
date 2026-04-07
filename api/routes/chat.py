@@ -848,11 +848,23 @@ async def websocket_chat(websocket: WebSocket):
                 continue
 
             message = msg.get("message", "")
-            model_override = msg.get("model")  # Optional model override
+            # New routing format (backward compatible with old format)
+            routing = msg.get("routing", {})
+            model_override = routing.get("model") or msg.get("model")  # backward compat
+            preference = routing.get("preference", "balanced")
+            feature = routing.get("feature")
             action_mode = msg.get("action_mode")  # Optional action mode for auto-model selection
-            conversation_id = msg.get("conversation_id")  # Optional conversation context
+            conversation_id = routing.get("conversation_id") or msg.get("conversation_id")  # Optional conversation context
             attachments = msg.get("attachments", [])  # Optional attachments
             surface = msg.get("surface", "web")  # Cross-surface sync: which surface sent this
+            # Build routing_opts for agent_service
+            routing_opts = {
+                "model": model_override,
+                "preference": preference,
+                "feature": feature,
+                "conversation_id": conversation_id,
+                "has_attachment": bool(attachments),
+            }
             _last_attachments = attachments  # Track for outer finally cleanup
             logger.debug(f"[WebSocket] Received message: '{message[:50]}...' model={model_override} action_mode={action_mode} conv={conversation_id} attachments={len(attachments)}")
 
@@ -952,7 +964,7 @@ async def websocket_chat(websocket: WebSocket):
                 def stream_worker():
                     """Run streaming in a separate thread."""
                     try:
-                        for item in _get_agent_service().chat_stream(message, model_override=model_override, action_mode=action_mode):
+                        for item in _get_agent_service().chat_stream(message, model_override=model_override, action_mode=action_mode, routing_opts=routing_opts):
                             if stop_generation.is_set():
                                 logger.info("[WebSocket] Generation stopped by user")
                                 break
@@ -966,6 +978,21 @@ async def websocket_chat(websocket: WebSocket):
                 # Start streaming in background thread
                 stream_thread = threading.Thread(target=stream_worker, daemon=True)
                 stream_thread.start()
+
+                # Send routing info to client (before streaming content)
+                try:
+                    from aura.routing.router import get_router
+                    router = get_router()
+                    # Get last routing result from conversation tracker
+                    conv_profile = router.conversations.get_profile(conversation_id) if conversation_id else None
+                    if conv_profile and conv_profile.last_model:
+                        await websocket.send_json({
+                            "type": "routing",
+                            "model_used": conv_profile.last_model,
+                            "turn": conv_profile.turn_count,
+                        })
+                except Exception:
+                    pass  # non-critical
 
                 # Send chunks as they arrive (truly async, no busy-wait)
                 # Timeout depends on operation complexity:

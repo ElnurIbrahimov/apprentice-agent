@@ -316,103 +316,35 @@ class ModelRouterMixin:
             logger.debug(f"[Brain] non-critical: {e}")
 
     def _select_model(self, prompt: str, task_type=None) -> str:
-        """Select the appropriate model based on task type and complexity.
+        """Select model using the 3-layer neural router.
 
-        SYSTEM 1/SYSTEM 2 HYBRID ROUTING (Kahneman dual-process):
-        - System 1 (fast): Simple queries, high confidence -> MODEL_FAST
-        - System 2 (deliberative): Complex queries, low confidence -> MODEL_REASON
-        - Specialized: Vision/Code tasks use dedicated model chains
-        - Cloud: Complex queries that need cloud-scale models
-
-        Args:
-            prompt: The prompt to analyze
-            task_type: Explicit task type, or None for auto-detection
-
-        Returns:
-            Model name to use
+        Replaces the old System 1/System 2 heuristic routing with
+        profile-based matching that runs in <5ms.
         """
         from aura.brain import TaskType
 
-        # Check for manual override first
+        # Manual override still wins
         if self._model_override:
             logger.info(f"[BRAIN] Using manual model override: {self._model_override}")
             return self._model_override
 
-        # Short conversational queries always use fast model -- skip all escalation logic.
-        # No 397B model needed for "what do you think?" or "how does this work?"
-        words = prompt.split()
-        # Code/dev keywords override the short-query fast-model forcing
-        _CODE_KWS = {
-            'code', 'bug', 'fix', 'debug', 'test', 'tests', 'function',
-            'script', 'error', 'implement', 'refactor', 'compile', 'run',
-            'deploy', 'build', 'import', 'class', 'method', 'api',
-            'database', 'query', 'sql', 'python', 'javascript',
-        }
-        if len(words) <= 5 and any(kw in prompt.lower() for kw in _CODE_KWS):
-            logger.info(f"[BRAIN] Short code query ({len(words)} words) -> code model")
-            return Config.get_model("code")
-        # Trivial queries (<=5 words): always fast model, no escalation possible
-        if len(words) <= 5:
-            logger.info(f"[BRAIN] Trivial query ({len(words)} words) -> fast model (forced)")
-            return Config.MODEL_FAST
-        # Short queries (6-15 words): fast model unless complex
-        if len(words) <= 15 and not self._is_complex_query(prompt):
-            logger.info(f"[BRAIN] Short query ({len(words)} words) -> fast model")
-            return Config.MODEL_FAST
+        # Map legacy task_type to has_attachment
+        has_attachment = (task_type == TaskType.VISION) if task_type else False
 
-        use_cloud = self._is_complex_query(prompt)
-        prompt_lower = prompt.lower()
-
-        # Specialized task routing (Vision/Code have dedicated models)
-        if task_type == TaskType.VISION or any(kw in prompt_lower for kw in ['image', 'picture', 'screenshot', 'photo', 'analyze image']):
-            return Config.get_model("vision")
-
-        if task_type == TaskType.CODE:
-            return Config.get_model("code")
-
-        # Code detection from prompt keywords
-        code_patterns = [
-            'calculate', 'compute', 'factorial', 'fibonacci', 'prime',
-            'print(', 'import ', 'def ', 'python',
-            'code', 'script', 'function', 'algorithm',
-            'debug', 'fix this', 'fix the', 'write a script', 'implement',
-            'refactor', 'class ', 'method', 'variable', 'loop',
-            'error', 'exception', 'traceback', 'bug', 'syntax'
-        ]
-        if any(pattern in prompt_lower for pattern in code_patterns):
-            return Config.get_model("code")
-
-        # Identity questions always use reasoning model
-        identity_patterns = [
-            'what is your name', 'who are you', 'your name', 'are you called',
-            'what should i call you', 'introduce yourself', 'tell me about yourself',
-            'what are you', 'are you an ai', 'are you a bot', 'what model are you'
-        ]
-        if any(pattern in prompt_lower for pattern in identity_patterns):
-            return Config.get_model("reason")
-
-        # System 1/System 2 decision for all other queries
-        use_s2, domain, confidence, reason = self._should_escalate_to_system2(prompt, task_type)
-
-        # Apply explicit thinking-mode override + cognitive load
+        # Use new neural router
         try:
-            from aura.thinking_mode import get_thinking_mode_manager
-            tmm = get_thinking_mode_manager()
-            use_s2, reason = tmm.get_effective_decision(use_s2)
-            # Track this query in cognitive load window
-            was_complex = use_cloud or (task_type == TaskType.CODE)
-            tmm.cognitive_load.record_query(confidence, was_complex, use_s2)
+            from aura.routing.router import get_router
+            result = get_router().route(
+                prompt,
+                preference=getattr(self, '_routing_preference', 'balanced'),
+                conversation_id=getattr(self, '_conversation_id', None),
+                has_attachment=has_attachment,
+            )
+            logger.info(f"[BRAIN] Neural router: {result.model} ({result.reason}) in {result.latency_ms:.1f}ms")
+            return result.model
         except Exception as e:
-            logger.debug(f"[BRAIN] Thinking mode not available: {e}")
-
-        if use_s2:
-            model = Config.get_model("reason")
-            logger.info(f"[BRAIN] System 2 (deliberative): domain={domain}, confidence={confidence:.2f}, reason={reason}, model={model}")
-            return model
-        else:
-            model = Config.MODEL_FAST
-            logger.info(f"[BRAIN] System 1 (fast): domain={domain}, confidence={confidence:.2f}, reason={reason}, model={model}")
-            return model
+            logger.warning(f"[BRAIN] Neural router failed, falling back to Config.MODEL_FAST: {e}")
+            return Config.MODEL_FAST
 
     def get_last_model_used(self) -> str:
         """Get the model used in the last think() call."""
