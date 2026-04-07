@@ -25,7 +25,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from api.routes import chat, status, upload, features, multi_agent, reasoning_tree, proactive, memory, context, conversation_starters, thinking, idle_behaviors, self_improvement, thinking_mode, tools_new, activity, multi_model, knowledge, search, pdf, transcribe, ocr, image_gen, agent_action, build as build_route, models as models_route, summarize, youtube, math as math_route, research, evolution, artifacts, feed, providers as providers_route, code as code_route, webhooks as webhooks_route, generate as generate_route, share as share_route, hands as hands_route, telegram_miniapp as telegram_miniapp_route
+from api.routes import chat, status, upload, features, multi_agent, reasoning_tree, proactive, memory, context, conversation_starters, thinking, idle_behaviors, self_improvement, thinking_mode, tools_new, activity, multi_model, knowledge, search, pdf, transcribe, ocr, image_gen, agent_action, build as build_route, models as models_route, summarize, youtube, math as math_route, research, evolution, artifacts, feed, providers as providers_route, code as code_route, webhooks as webhooks_route, generate as generate_route, share as share_route, hands as hands_route, telegram_miniapp as telegram_miniapp_route, routing as routing_route
 try:
     from api.routes import reliability as reliability_route
     _reliability_available = True
@@ -461,6 +461,7 @@ app.include_router(webhooks_route.router)
 app.include_router(generate_route.router)
 app.include_router(share_route.router)
 app.include_router(telegram_miniapp_route.router)
+app.include_router(routing_route.router)
 if _reliability_available and reliability_route:
     app.include_router(reliability_route.router)
 if _auth_available and auth_route:
