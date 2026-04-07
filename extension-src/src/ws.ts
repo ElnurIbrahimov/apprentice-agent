@@ -193,6 +193,12 @@ export function connectWS() {
       return;
     }
 
+    // Routing decision from neural router
+    if (d.type === 'routing') {
+      useStore.getState().setLastRoutingResult(d);
+      return;
+    }
+
     const { activeStream } = useStore.getState();
     if (!activeStream || activeStream === true) return;
 

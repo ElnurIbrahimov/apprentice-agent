@@ -87,6 +87,12 @@ interface AuraStore {
   mdlDirectList: string[];
   mdlListsLoaded: boolean;
 
+  // Routing
+  routingPreference: 'prefer-fast' | 'balanced' | 'prefer-quality';
+  setRoutingPreference: (pref: 'prefer-fast' | 'balanced' | 'prefer-quality') => void;
+  lastRoutingResult: { model_used: string; reason: string; alternatives: string[]; turn: number } | null;
+  setLastRoutingResult: (result: any) => void;
+
   // Proactive Suggestions
   proactiveMessages: ProactiveMessage[];
   addProactiveMessage: (msg: ProactiveMessage) => void;
@@ -185,6 +191,11 @@ export const useStore = create<AuraStore>((set, get) => {
     });
   });
 
+  // Load saved routing preference
+  ext?.storage?.local?.get(['routingPreference'], (d: any) => {
+    if (d?.routingPreference) set({ routingPreference: d.routingPreference });
+  });
+
   // Load saved custom instructions & user name
   ext?.storage?.local?.get(['customInstructions', 'userName'], (d: any) => {
     set({
@@ -238,6 +249,8 @@ export const useStore = create<AuraStore>((set, get) => {
     mdlChatgptList: [],
     mdlDirectList: [],
     mdlListsLoaded: false,
+    routingPreference: 'balanced' as 'prefer-fast' | 'balanced' | 'prefer-quality',
+    lastRoutingResult: null,
     proactiveMessages: [],
 
     setWs: (ws) => set({ ws }),
@@ -307,6 +320,12 @@ export const useStore = create<AuraStore>((set, get) => {
       set({ autoSpeak });
       ext?.storage?.local?.set({ autoSpeak });
     },
+
+    setRoutingPreference: (routingPreference) => {
+      set({ routingPreference });
+      ext?.storage?.local?.set({ routingPreference });
+    },
+    setLastRoutingResult: (lastRoutingResult) => set({ lastRoutingResult }),
 
     setCustomInstructions: (customInstructions) => {
       set({ customInstructions });

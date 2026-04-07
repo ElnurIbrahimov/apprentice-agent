@@ -162,7 +162,7 @@ export default function ChatPanel() {
       }
     }
 
-    const { pendingCtx: ctx, thinkingMode, thinkingLevel, deepResearch, conversationId, getModel, customInstructions, userName } = useStore.getState();
+    const { pendingCtx: ctx, thinkingMode, thinkingLevel, deepResearch, conversationId, getModel, customInstructions, userName, routingPreference } = useStore.getState();
     if (ctx) {
       full = `[Context: ${ctx.title || ctx.url || 'selection'}]\n${ctx.text}\n\n---\n${text}`;
       setPendingCtx(null);
@@ -225,8 +225,15 @@ export default function ChatPanel() {
       type: 'chat',
       message: full,
       conversation_id: conversationId,
-      model: overrideModel || getModel('chat'),
+      routing: {
+        model: overrideModel || getModel('chat') || null,
+        preference: routingPreference,
+        feature: 'chat',
+        conversation_id: conversationId,
+      },
     };
+    // Backward compat for old backends
+    if (payload.routing.model) payload.model = payload.routing.model;
     if (customInstructions) payload.custom_instructions = customInstructions;
     if (userName) payload.user_name = userName;
     if (thinkingMode) {

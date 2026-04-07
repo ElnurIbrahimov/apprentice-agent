@@ -5,11 +5,11 @@ import { Check, ChevronDown, Zap, Cpu, Cloud, Bot } from 'lucide-react';
 
 /* ── Tier helpers (same logic as ModelPill) ── */
 const FAST_PATTERNS = [
-  'nemotron', 'glm-5',
+  'nemotron', 'glm-5:',
 ];
 const POWER_PATTERNS = [
   '397b', '480b', '120b', 'qwen3.5', 'qwen3-coder', 'gpt-oss',
-  'kimi-k2', 'minimax-m2.7', 'minimax-m2.5',
+  'kimi-k2', 'minimax-m2.7', 'minimax-m2.5', 'glm-5.1', 'gemma4',
 ];
 
 function classifyModel(name: string, source: 'cloud' | 'local' | 'chatgpt'): string {
@@ -155,6 +155,7 @@ export default function ModelsPanel() {
   const {
     featureModels, setModel, mdlCloudList, mdlLocalList, mdlChatgptList,
     loadModels: storeLoadModels, activePanel, mdlListsLoaded,
+    routingPreference, setRoutingPreference,
   } = useStore();
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<'features' | 'models'>('features');
@@ -217,6 +218,36 @@ export default function ModelsPanel() {
             Models
           </div>
           <QuickSetDropdown allModels={allModels} onSet={handleSetAll} />
+        </div>
+
+        {/* Preference tier */}
+        <div style={{
+          display: 'flex', gap: 2,
+          background: 'var(--s2)', borderRadius: 'var(--r-sm)',
+          padding: 2, border: '1px solid var(--b1)',
+          marginBottom: 8,
+        }}>
+          {([
+            { key: 'prefer-fast', label: '\u26A1 Fast', color: '#10b981' },
+            { key: 'balanced', label: '\u2696 Balanced', color: '#a78bfa' },
+            { key: 'prefer-quality', label: '\uD83D\uDC8E Quality', color: '#f59e0b' },
+          ] as const).map(t => (
+            <button
+              key={t.key}
+              onClick={() => setRoutingPreference(t.key as any)}
+              style={{
+                flex: 1, padding: '5px 0',
+                fontSize: '10.5px', fontWeight: 500, fontFamily: 'inherit',
+                borderRadius: 'calc(var(--r-sm) - 2px)',
+                border: 'none', cursor: 'pointer',
+                background: routingPreference === t.key ? 'var(--pg2)' : 'transparent',
+                color: routingPreference === t.key ? t.color : 'var(--mu)',
+                transition: 'all 0.15s',
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
         </div>
 
         {/* Tab switcher */}
