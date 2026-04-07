@@ -40,29 +40,33 @@ def _get_validation_session():
 # ============================================================================
 
 # Verified cloud models via Ollama.com (Pro $20/month subscription)
-# Updated Feb 2026 — all models accessed via Ollama cloud API
+# Updated Apr 2026 — all models accessed via Ollama cloud API
 VERIFIED_CLOUD_MODELS = {
     # Fast / general
-    "kimi-k2.5:cloud",                # General purpose, multimodal, 256K
-    "nemotron-3-super:cloud",         # NVIDIA efficient, fast
+    "kimi-k2.5:cloud",                # 1T/32B MoE, multimodal, 256K, 92% MMLU
+    "nemotron-3-super:cloud",         # 120B/12B Mamba-MoE, 1M ctx, 449 tok/s
+    "glm-5:cloud",                    # 744B/40B MoE, 200K, 69 tok/s, lowest hallucination
     # Reasoning / planning
-    "qwen3.5:397b-cloud",             # Deep planning, MMLU/GPQA leader
-    "qwen3.5:cloud",                  # Lighter variant
-    "deepseek-v3.2:cloud",            # Strong all-rounder
-    "glm-5:cloud",                    # Zhipu AI general model
+    "qwen3.5:397b-cloud",             # 397B/17B MoE, 262K, hybrid thinking, 201 langs
+    "qwen3.5:cloud",                  # 9.65B dense, 262K, multimodal
+    "deepseek-v3.2:cloud",            # 685B/37B MoE, 128K, cheapest ($0.14/M)
+    "gemma4:31b-cloud",               # 31B dense, 256K, multimodal+audio, 85.2% MMLU-Pro
     # Code generation / debugging
-    "minimax-m2.7:cloud",             # SWE-Pro 56.2%, self-evolving, 1M context
-    "minimax-m2.5:cloud",             # 80.2% SWE-Bench, 196K
-    "qwen3-coder:480b-cloud",         # Code-specialized at 480B scale
-    "qwen3-coder-next:cloud",         # Efficient code MoE variant
+    "glm-5.1:cloud",                  # 744B/40B MoE, 200K, +28% coding over GLM-5, 77.8% SWE
+    "minimax-m2.7:cloud",             # 230B/10B MoE, 205K, SWE-Pro 56.2%, self-evolving
+    "minimax-m2.5:cloud",             # 229B/10B MoE, 196K, 80.2% SWE-Bench
+    "qwen3-coder:480b-cloud",         # 480B/35B MoE, 256K, 69.6% SWE-Bench
+    "qwen3-coder-next:cloud",         # 80B/3B MoE, 256K, 71.3% SWE, 172 tok/s
     # General purpose
-    "gpt-oss:120b-cloud",             # OSS GPT-style
+    "gpt-oss:120b-cloud",             # 117B/5.1B MoE, 128K, 97.9% AIME
 }
 
-# Local models kept only for non-chat workloads (embeddings, OCR)
+# Local models (edge inference, embeddings, OCR)
 VERIFIED_LOCAL_MODELS = {
-    "nomic-embed-text:latest",        # RAG/embedding — no cloud equivalent
-    "glm-ocr:latest",                 # OCR — local processing
+    "nomic-embed-text:latest",        # RAG/embedding — 137M, MTEB 62.39
+    "glm-ocr:latest",                 # OCR — 0.9B, OmniDocBench 94.6% #1
+    "gemma4:e4b",                     # Edge — 9.6B dense, 128K, multimodal+audio
+    "gemma4:e2b",                     # Edge — 5.1B dense, 128K, runs on RPi
 }
 
 _tags_cache: dict = {}
@@ -155,38 +159,43 @@ class Config:
 
     # Model chains (first available is used as fallback)
     MODEL_FAST_CHAIN = [
-        "nemotron-3-super:cloud",          # Primary: fast
+        "nemotron-3-super:cloud",          # Primary: 449 tok/s, 1M ctx
         "kimi-k2.5:cloud",                # Fallback: strong general
-        "glm-5:cloud",                     # Fallback: general
+        "glm-5:cloud",                     # Fallback: 69 tok/s, low hallucination
+        "gemma4:31b-cloud",                # Fallback: 104 tok/s, multimodal
     ]
     MODEL_REASON_CHAIN = [
-        "kimi-k2.5:cloud",                # Primary: top agentic, 256K
-        "minimax-m2.7:cloud",             # Fallback: SWE-Pro 56.2%, 1M
-        "qwen3.5:397b-cloud",             # Fallback: hybrid thinking, 256K
-        "glm-5:cloud",                     # Fallback: strong agentic
-        "deepseek-v3.2:cloud",             # Fallback: strong all-rounder
+        "kimi-k2.5:cloud",                # Primary: 92% MMLU, 96.1% AIME, 256K
+        "qwen3.5:397b-cloud",             # Fallback: 87.8 MMLU-Pro, hybrid thinking
+        "glm-5:cloud",                     # Fallback: 96% MMLU, lowest hallucination
+        "gemma4:31b-cloud",                # Fallback: 85.2% MMLU-Pro, 89.2% AIME
+        "deepseek-v3.2:cloud",             # Fallback: 85.0 MMLU-Pro
     ]
     MODEL_CODE_CHAIN = [
-        "minimax-m2.7:cloud",             # Primary: SWE-Pro 56.2%, 1M ctx
+        "minimax-m2.7:cloud",             # Primary: SWE-Pro 56.2%, self-evolving, 205K
         "minimax-m2.5:cloud",             # Fallback: 80.2% SWE-Bench
-        "qwen3-coder:480b-cloud",          # Fallback: 480B code specialist
-        "qwen3-coder-next:cloud",          # Fallback: efficient code MoE
-        "deepseek-v3.2:cloud",             # Fallback: strong at code
+        "glm-5.1:cloud",                  # Fallback: 77.8% SWE, +28% coding over GLM-5
+        "qwen3-coder:480b-cloud",          # Fallback: 69.6% SWE, 480B code specialist
+        "qwen3-coder-next:cloud",          # Fallback: 71.3% SWE, 172 tok/s
+        "deepseek-v3.2:cloud",             # Fallback: 67.8% SWE, cheapest
     ]
     MODEL_VISION_CHAIN = [
-        "kimi-k2.5:cloud",                # Primary: native multimodal
-        "qwen3.5:397b-cloud",             # Fallback: general
+        "kimi-k2.5:cloud",                # Primary: native multimodal, 256K
+        "gemma4:31b-cloud",                # Fallback: native vision+audio, 256K
+        "qwen3.5:397b-cloud",             # Fallback: multimodal, 262K
     ]
     MODEL_THINK_CHAIN = [
-        "qwen3.5:397b-cloud",             # Primary: hybrid think/non-think, 256K
-        "kimi-k2.5:cloud",                # Fallback: strong reasoning
-        "minimax-m2.7:cloud",             # Fallback: deep reasoning, 1M
+        "qwen3.5:397b-cloud",             # Primary: hybrid think/non-think, 262K
+        "kimi-k2.5:cloud",                # Fallback: 96.1% AIME
+        "glm-5:cloud",                     # Fallback: 92.7% AIME, low hallucination
+        "gemma4:31b-cloud",                # Fallback: 89.2% AIME
     ]
     MODEL_LONGCTX_CHAIN = [
-        "minimax-m2.7:cloud",             # Primary: 1M tokens
+        "nemotron-3-super:cloud",          # Primary: 1M tokens, 449 tok/s
+        "minimax-m2.7:cloud",             # Fallback: 205K, self-evolving
         "minimax-m2.5:cloud",              # Fallback: 196K
+        "qwen3.5:397b-cloud",             # Fallback: 262K
         "kimi-k2.5:cloud",                 # Fallback: 256K
-        "qwen3.5:397b-cloud",             # Fallback: 256K
     ]
 
     # Primary defaults

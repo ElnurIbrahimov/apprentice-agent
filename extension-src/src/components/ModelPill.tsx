@@ -19,11 +19,11 @@ const TIERS: TierDef[] = [
 ];
 
 const FAST_PATTERNS = [
-  'nemotron', 'glm-5',
+  'nemotron', 'glm-5:',
 ];
 const POWER_PATTERNS = [
   '397b', '480b', '120b', 'qwen3.5', 'qwen3-coder', 'gpt-oss',
-  'kimi-k2', 'minimax-m2.7', 'minimax-m2.5',
+  'kimi-k2', 'minimax-m2.7', 'minimax-m2.5', 'glm-5.1', 'gemma4',
 ];
 
 function classifyModel(name: string, source: 'cloud' | 'local' | 'chatgpt'): string {
