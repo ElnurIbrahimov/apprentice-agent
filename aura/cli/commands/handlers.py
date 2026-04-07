@@ -27,6 +27,7 @@ from .tool_commands import (
 from .ui_commands import (
     handle_model, handle_theme, handle_mood, handle_speak,
     handle_trust, handle_help, handle_quit, handle_tasks,
+    handle_routing,
 )
 from .system_commands import (
     handle_hook, handle_mcp, handle_audit, handle_evolve,
@@ -44,4 +45,5 @@ __all__ = [
     "handle_cost", "handle_undo", "handle_diff", "handle_git",
     "handle_pr", "handle_branch", "handle_stash", "handle_blame",
     "handle_test", "handle_watch", "handle_mcp", "print_result",
+    "handle_routing",
 ]

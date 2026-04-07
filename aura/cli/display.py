@@ -727,6 +727,7 @@ def show_help() -> None:
         ]),
         ("Model & Session", [
             ("/model [name]", "Pick or set model"),
+            ("/routing", "Show neural routing status"),
             ("/sessions", "Manage sessions"),
             ("/compact", "Compress conversation"),
             ("/clear", "Clear conversation"),

@@ -30,6 +30,7 @@ class ChatSession:
         verbose: bool = False,
         tier: Optional[str] = None,
         bridge: Any = None,
+        preference: Optional[str] = None,
     ) -> None:
         from .context import CLIContext, set_ctx
         from .display import (
@@ -116,6 +117,11 @@ class ChatSession:
             aura_config=aura_config,
             router=chat_router,
         )
+
+        # ── Neural routing preference ──
+        _PREF_MAP = {"fast": "prefer-fast", "balanced": "balanced", "quality": "prefer-quality"}
+        self._routing_preference = _PREF_MAP.get(preference or "balanced", "balanced")
+        agent.brain._routing_preference = self._routing_preference
 
         # ── Checkpoint ──
         try:

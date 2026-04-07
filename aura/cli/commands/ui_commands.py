@@ -163,6 +163,38 @@ def handle_quit(agent, arg, context) -> Optional[str]:
     sys.exit(0)
 
 
+def handle_routing(agent, arg, context) -> Optional[str]:
+    """Show current neural routing status and conversation profile."""
+    from ..display import console as _routing_console
+    try:
+        from aura.routing.router import get_router
+        router = get_router()
+
+        # Current conversation profile
+        conv_id = "default"
+        try:
+            ctx = get_ctx()
+            if ctx and hasattr(ctx, 'agentic_loop'):
+                conv_id = getattr(ctx.agentic_loop, '_conversation_id', None) or 'default'
+        except Exception:
+            pass
+
+        profile = router.conversations.get_profile(conv_id)
+
+        _routing_console.print()
+        _routing_console.print("[bold cyan]  Routing Status[/bold cyan]")
+        _routing_console.print(f"  Preference: {getattr(agent.brain, '_routing_preference', 'balanced')}")
+        _routing_console.print(f"  Conversation: {profile.turn_count} turns, {profile.total_tokens} tokens")
+        _routing_console.print(f"  Code mode: {'ON' if profile.in_code_mode else 'off'}")
+        _routing_console.print(f"  Complexity trend: {profile.complexity_trend:+.2f}")
+        _routing_console.print(f"  Last model: {profile.last_model or 'none'}")
+        _routing_console.print(f"  Regens: {profile.regen_count}, Switches: {profile.model_switches}")
+        _routing_console.print()
+    except Exception as e:
+        from ..display import console as _err_console
+        _err_console.print(f"  [red]Routing info unavailable: {e}[/red]")
+
+
 def handle_tasks(agent, arg, context) -> Optional[str]:
     from ..display import console as _tasks_console
     ctx = get_ctx()

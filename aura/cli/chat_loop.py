@@ -94,8 +94,9 @@ def _display_channel_response(console: Any, msg: Any, response_text: str) -> Non
     console.print(f"  [green]{bottom}[/green]")
 
 
-def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: Optional[str] = None, verbose: bool = False, tier: Optional[str] = None, bridge: Any = None) -> None:
+def run_chat_mode(agent: Any, speak: bool = False, trust: bool = False, model: Optional[str] = None, verbose: bool = False, tier: Optional[str] = None, bridge: Any = None, preference: Optional[str] = None) -> None:
     from .chat_session import ChatSession
     session = ChatSession(agent, speak=speak, trust=trust, model=model,
-                          verbose=verbose, tier=tier, bridge=bridge)
+                          verbose=verbose, tier=tier, bridge=bridge,
+                          preference=preference)
     session.run()

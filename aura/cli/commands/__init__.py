@@ -28,6 +28,7 @@ from .tool_commands import (
 from .ui_commands import (
     handle_model, handle_theme, handle_mood, handle_speak,
     handle_trust, handle_help, handle_quit, handle_tasks,
+    handle_routing,
 )
 from .system_commands import (
     handle_hook, handle_mcp, handle_audit, handle_evolve,
@@ -96,6 +97,7 @@ COMMAND_REGISTRY: dict[str, Callable[..., Any]] = {
     "/merge": handle_merge,
     "/voice": _handle_voice,
     "/changes": handle_changes,
+    "/routing": handle_routing,
     "/copy": handle_copy,
     "/snippet": handle_snippet,
 }

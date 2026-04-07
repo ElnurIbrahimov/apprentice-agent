@@ -158,6 +158,12 @@ def main() -> None:
         help="Trust mode: auto-approve all tool calls (no prompts)"
     )
     parser.add_argument(
+        "--preference",
+        choices=["fast", "balanced", "quality"],
+        default="balanced",
+        help="Routing preference tier: fast (speed), balanced (default), quality (best output)"
+    )
+    parser.add_argument(
         "--model",
         type=str,
         default=None,
@@ -378,7 +384,7 @@ def main() -> None:
         run_agentic_oneshot(agent, prompt, args, bridge=bridge)
     else:
         from aura.cli.chat_loop import run_chat_mode
-        run_chat_mode(agent, speak=args.speak, trust=args.trust, model=args.model, verbose=args.verbose, tier=args.tier, bridge=bridge)
+        run_chat_mode(agent, speak=args.speak, trust=args.trust, model=args.model, verbose=args.verbose, tier=args.tier, bridge=bridge, preference=args.preference)
 
 
 if __name__ == "__main__":
