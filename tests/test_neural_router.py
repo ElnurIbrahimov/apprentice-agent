@@ -300,3 +300,61 @@ class TestLearning:
         task_dims = {"code": 0.9, "reason": 0.0, "speed": 0.0, "context": 0.0, "quality": 0.0, "vision": 0.0}
         process_feedback("regeneration", "test:cloud", task_dims, store)
         assert store.get("test:cloud")["code"] >= 0.0
+
+
+class TestRouter:
+    def _make_router(self, tmp_path):
+        import json
+        from aura.routing.router import Router
+        data = {
+            "fast:cloud": {"code": 0.3, "reason": 0.4, "speed": 1.0, "context": 0.5, "quality": 0.5, "vision": 0},
+            "code:cloud": {"code": 0.95, "reason": 0.5, "speed": 0.2, "context": 0.5, "quality": 0.8, "vision": 0},
+            "vision:cloud": {"code": 0.5, "reason": 0.7, "speed": 0.3, "context": 0.5, "quality": 0.8, "vision": 1},
+        }
+        path = tmp_path / "profiles.json"
+        path.write_text(json.dumps(data))
+        return Router(profiles_path=str(path))
+
+    def test_explicit_model_bypasses_router(self, tmp_path):
+        router = self._make_router(tmp_path)
+        result = router.route("anything", model="my-explicit:cloud")
+        assert result.model == "my-explicit:cloud"
+        assert result.reason == "explicit_override"
+
+    def test_auto_routes_short_to_fast(self, tmp_path):
+        router = self._make_router(tmp_path)
+        result = router.route("hello")
+        assert result.model == "fast:cloud"
+
+    def test_auto_routes_code_to_code_model(self, tmp_path):
+        router = self._make_router(tmp_path)
+        result = router.route("debug this Python function: def foo(): pass")
+        assert result.model == "code:cloud"
+
+    def test_auto_routes_vision_with_attachment(self, tmp_path):
+        router = self._make_router(tmp_path)
+        result = router.route("what is this", has_attachment=True)
+        assert result.model == "vision:cloud"
+
+    def test_preference_affects_result(self, tmp_path):
+        router = self._make_router(tmp_path)
+        fast_result = router.route("explain something moderately complex to me", preference="prefer-fast")
+        quality_result = router.route("explain something moderately complex to me", preference="prefer-quality")
+        assert fast_result.model in ("fast:cloud", "code:cloud", "vision:cloud")
+        assert quality_result.model in ("fast:cloud", "code:cloud", "vision:cloud")
+
+    def test_route_returns_metadata(self, tmp_path):
+        router = self._make_router(tmp_path)
+        result = router.route("hello there")
+        assert hasattr(result, "model")
+        assert hasattr(result, "reason")
+        assert hasattr(result, "task_dimensions")
+        assert hasattr(result, "alternatives")
+
+    def test_conversation_context_influences_routing(self, tmp_path):
+        router = self._make_router(tmp_path)
+        conv = "test-conv"
+        for _ in range(3):
+            router.route("fix def calc(): return x * 2", conversation_id=conv)
+        result = router.route("now test it", conversation_id=conv)
+        assert result.model == "code:cloud"
