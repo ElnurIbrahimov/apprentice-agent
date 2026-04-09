@@ -81,11 +81,11 @@ def check_and_suggest() -> Optional[str]:
     top = weak[:3]
     if len(top) == 1:
         s = top[0]
-        skill_names = s["name"]
+        s["name"]
         skill_ids = s["id"]
         detail = f"{s['name']} has been underperforming ({s['success_rate']:.0%} success rate over {s['total_uses']} uses)"
     else:
-        skill_names = ", ".join(s["name"] for s in top)
+        ", ".join(s["name"] for s in top)
         skill_ids = ",".join(s["id"] for s in top)
         details = [f"{s['name']} ({s['success_rate']:.0%})" for s in top]
         detail = f"These skills have been underperforming: {', '.join(details)}"

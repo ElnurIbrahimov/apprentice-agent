@@ -1206,7 +1206,6 @@ class DeepResearchTool:
 
             # Valid types from knowledge_graph module
             valid_node_types = {"concept", "entity", "person", "project", "tool", "event"}
-            valid_edge_types = {"relates_to", "is_a", "part_of", "causes", "uses"}
 
             entities_to_add = []
 
@@ -1497,7 +1496,7 @@ Return as JSON (no markdown fences):
                 # Validate structure
                 perspectives = plan.get("perspectives", [])
                 outline = plan.get("outline", [])
-                key_entities = plan.get("key_entities", [])
+                plan.get("key_entities", [])
 
                 if not perspectives or not outline:
                     logger.debug("[DeepResearch] STORM plan missing fields, using default")

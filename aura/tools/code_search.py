@@ -437,7 +437,7 @@ class _SemanticIndex:
     def search(self, query: str, root: str, k: int = 10) -> List[dict]:
         """Embed query, compare against stored chunks, return top-k."""
         conn = self._get_conn()
-        root_path = Path(root).resolve()
+        Path(root).resolve()
 
         query_emb = self._embed(query)
         if query_emb is None:
@@ -1270,7 +1270,7 @@ class CodeSearchTool:
 
             # Detect Python frameworks
             reqs = root / "requirements.txt"
-            pyproject = root / "pyproject.toml"
+            root / "pyproject.toml"
             if reqs.exists():
                 try:
                     text = reqs.read_text(encoding="utf-8").lower()

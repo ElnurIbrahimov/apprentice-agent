@@ -360,7 +360,7 @@ class TestChannelsActive:
 
     def test_channels_directory_exists(self):
         channels_path = Path(__file__).parent.parent / "aura" / "channels"
-        assert channels_path.exists(), f"aura/channels should exist — it contains TelegramChannel and ExtensionChannel"
+        assert channels_path.exists(), "aura/channels should exist — it contains TelegramChannel and ExtensionChannel"
 
     def test_channels_has_key_modules(self):
         """Verify key channel modules are present."""
@@ -395,7 +395,7 @@ class TestStatusRouterAuth:
 
     def test_status_router_has_auth_dependency(self):
         from api.routes.status import router
-        dep_names = [str(d) for d in (router.dependencies or [])]
+        [str(d) for d in (router.dependencies or [])]
         assert len(router.dependencies) > 0, "Status router should have require_api_key dependency"
 
     def test_health_endpoint_is_public(self):
@@ -505,8 +505,6 @@ class TestAuthFailClosed:
 
     def test_fail_closed_when_key_missing(self):
         """When auth enabled but no key, should raise 503 not silently disable."""
-        import os
-        from unittest.mock import patch
         from fastapi import HTTPException
 
         # Patch env: auth enabled, no key

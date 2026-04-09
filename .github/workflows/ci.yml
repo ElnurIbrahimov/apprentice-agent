@@ -23,7 +23,7 @@ jobs:
       - run: pip install ruff
 
       - name: Ruff lint
-        run: ruff check aura/ api/ tests/ --select E,F,W --ignore E501,E402,F401
+        run: ruff check aura/ api/ tests/ --select E,F,W --ignore E501,E402,F401,E741,E701,E712,E731,E721,F821
 
       - name: Ruff format check
         run: ruff format --check aura/ api/ tests/

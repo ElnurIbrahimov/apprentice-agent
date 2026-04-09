@@ -206,7 +206,7 @@ class AgentCoreMixin:
             text = f"[Respond in {user_lang}] {text}"
 
         # Forum support: capture message_thread_id for topic-aware replies
-        thread_id = getattr(update.message, 'message_thread_id', None)
+        getattr(update.message, 'message_thread_id', None)
 
         # Bind to conversation via ConversationManager (cross-surface sync)
         conv_id = None

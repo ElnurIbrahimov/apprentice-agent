@@ -26,8 +26,8 @@ def test_manager_add_and_get():
 def test_manager_toggle():
     mgr = DisclosureManager()
     mgr.add_section("s1", "title", "content")
-    assert mgr.toggle("s1") == True  # was False, now True
-    assert mgr.toggle("s1") == False  # back to False
+    assert mgr.toggle("s1") is True  # was False, now True
+    assert mgr.toggle("s1") is False  # back to False
 
 def test_manager_verbose():
     mgr = DisclosureManager()

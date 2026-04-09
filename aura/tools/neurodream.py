@@ -1365,7 +1365,7 @@ class NeuroDreamEngine:
 
         try:
             # Get most connected nodes as key topics
-            stats = self.kg.get_stats()
+            self.kg.get_stats()
 
             # Find clusters of related concepts
             if hasattr(self.kg, 'graph'):

@@ -691,7 +691,7 @@ class ActiveInferenceEngine:
     def update_beliefs(self, observations: Dict[str, float]) -> BeliefState:
         """Update beliefs from observations."""
         # Always update simplified engine (for backward compat)
-        simple_beliefs = self._simple_engine.update_beliefs(observations)
+        self._simple_engine.update_beliefs(observations)
 
         if self.use_pymdp:
             try:

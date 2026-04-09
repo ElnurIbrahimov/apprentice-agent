@@ -1268,7 +1268,7 @@ class GatewayDaemon:
             from aura.emotion.alma_engine import alma_engine
             state = alma_engine.get_emotional_state()
             if state:
-                pad = state.get("pad", {})
+                state.get("pad", {})
                 mood = state.get("mood", {})
                 warmth = mood.get("warmth", 0.5)
                 energy = mood.get("energy", 0.5)
@@ -1491,7 +1491,7 @@ class GatewayDaemon:
                 elif boundary_type == "idle_pause":
                     return None  # Don't message for idle pauses
                 elif boundary_type == "app_switch":
-                    to_app = payload.get("to_app", "")
+                    payload.get("to_app", "")
                     return None  # App switches are too frequent to message about
 
         elif event.source == "system":

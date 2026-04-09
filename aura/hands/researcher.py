@@ -240,7 +240,7 @@ class ResearcherHand(Hand):
 
         # Source 1: Curiosity scanner targets
         try:
-            drives = context.get("drive_urgencies", {})
+            context.get("drive_urgencies", {})
             curiosity_targets = context.get("curiosity_targets", [])
             if curiosity_targets:
                 candidates.extend(curiosity_targets[:3])

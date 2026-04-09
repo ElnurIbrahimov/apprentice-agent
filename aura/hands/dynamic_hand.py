@@ -169,8 +169,8 @@ class DynamicHand(Hand):
                 + getattr(brain, "_session_output_tokens", 0)
             )
             tokens_used = end_tokens - start_tokens
-            end_cost = getattr(brain, "_session_cost_usd", 0.0)
-            start_cost = getattr(brain, "_session_cost_usd", 0.0)  # approximation; delta may be 0 before first LLM call
+            getattr(brain, "_session_cost_usd", 0.0)
+            getattr(brain, "_session_cost_usd", 0.0)  # approximation; delta may be 0 before first LLM call
 
             if not summary:
                 return HandResult(

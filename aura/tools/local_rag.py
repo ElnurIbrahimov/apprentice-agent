@@ -302,60 +302,60 @@ def _chunk_pdf_pages(path: "Path") -> List[Dict[str, Any]]:
         offset = 0
 
         for page_idx, page in enumerate(doc):
-        page_text = page.get_text().strip()
-        if not page_text:
-            continue
+            page_text = page.get_text().strip()
+            if not page_text:
+                continue
 
-        page_num = page_idx + 1
+            page_num = page_idx + 1
 
-        if len(page_text) <= MAX_SECTION_CHARS:
-            chunks.append({
-                "content": page_text,
-                "chunk_type": "page",
-                "name": f"page_{page_num}",
-                "start_offset": offset,
-                "line_start": page_num,  # Repurposed as page number for PDFs
-                "line_end": page_num,
-                "page": page_num,
-            })
-        else:
-            # Split large pages on paragraph boundaries
-            paragraphs = re.split(r'\n\n+', page_text)
-            current_chunk = ""
-            para_idx = 0
+            if len(page_text) <= MAX_SECTION_CHARS:
+                chunks.append({
+                    "content": page_text,
+                    "chunk_type": "page",
+                    "name": f"page_{page_num}",
+                    "start_offset": offset,
+                    "line_start": page_num,  # Repurposed as page number for PDFs
+                    "line_end": page_num,
+                    "page": page_num,
+                })
+            else:
+                # Split large pages on paragraph boundaries
+                paragraphs = re.split(r'\n\n+', page_text)
+                current_chunk = ""
+                para_idx = 0
 
-            for para in paragraphs:
-                para = para.strip()
-                if not para:
-                    continue
-                if len(current_chunk) + len(para) + 2 > MAX_SECTION_CHARS and current_chunk:
+                for para in paragraphs:
+                    para = para.strip()
+                    if not para:
+                        continue
+                    if len(current_chunk) + len(para) + 2 > MAX_SECTION_CHARS and current_chunk:
+                        chunks.append({
+                            "content": current_chunk.strip(),
+                            "chunk_type": "paragraph",
+                            "name": f"page_{page_num}_part_{para_idx}",
+                            "start_offset": offset,
+                            "line_start": page_num,
+                            "line_end": page_num,
+                            "page": page_num,
+                        })
+                        offset += len(current_chunk)
+                        para_idx += 1
+                        current_chunk = para
+                    else:
+                        current_chunk = (current_chunk + "\n\n" + para) if current_chunk else para
+
+                if current_chunk.strip():
                     chunks.append({
                         "content": current_chunk.strip(),
-                        "chunk_type": "paragraph",
-                        "name": f"page_{page_num}_part_{para_idx}",
+                        "chunk_type": "paragraph" if para_idx > 0 else "page",
+                        "name": f"page_{page_num}" + (f"_part_{para_idx}" if para_idx > 0 else ""),
                         "start_offset": offset,
                         "line_start": page_num,
                         "line_end": page_num,
                         "page": page_num,
                     })
-                    offset += len(current_chunk)
-                    para_idx += 1
-                    current_chunk = para
-                else:
-                    current_chunk = (current_chunk + "\n\n" + para) if current_chunk else para
 
-            if current_chunk.strip():
-                chunks.append({
-                    "content": current_chunk.strip(),
-                    "chunk_type": "paragraph" if para_idx > 0 else "page",
-                    "name": f"page_{page_num}" + (f"_part_{para_idx}" if para_idx > 0 else ""),
-                    "start_offset": offset,
-                    "line_start": page_num,
-                    "line_end": page_num,
-                    "page": page_num,
-                })
-
-        offset += len(page_text) + 2  # account for page separator
+            offset += len(page_text) + 2  # account for page separator
     finally:
         doc.close()
     return chunks
@@ -803,7 +803,6 @@ class LocalRAG:
 
             # Update embeddings array
             if new_embeddings:
-                new_emb_array = np.array(new_embeddings)
                 if self.embeddings is None:
                     # Rebuild embeddings for all chunks
                     all_embeddings = []

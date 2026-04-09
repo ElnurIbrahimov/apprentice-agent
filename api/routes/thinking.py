@@ -310,7 +310,7 @@ class ThinkingStateManager:
     def decay_thoughts(self):
         """Decay old thoughts with differential rates for real vs template."""
         with self._lock:
-            now = time.time()
+            time.time()
             to_remove = []
 
             for thought in self._active_thoughts:

@@ -292,7 +292,7 @@ def cmd_commit(args) -> int:
 
     # Get diff of staged changes
     try:
-        staged_proc = subprocess.run(
+        subprocess.run(
             ["git", "diff", "--cached", "--stat"],
             capture_output=True, text=True, timeout=10, cwd=cwd,
         )

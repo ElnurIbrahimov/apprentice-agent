@@ -169,7 +169,7 @@ def test_slash_completer_class_exists():
 
 def test_slash_commands_descriptions_not_duplicated():
     """Each command should have a unique description (detect copy-paste errors)."""
-    descriptions = [desc for _, desc in SLASH_COMMANDS]
+    [desc for _, desc in SLASH_COMMANDS]
     # Aliases can share descriptions (e.g., /shell and /bash both say "Execute shell command")
     # But non-alias commands should have distinct descriptions
     non_alias_cmds = {}

@@ -130,7 +130,6 @@ class FastPathHandler:
             return "What would you like me to remember?"
 
         # Store in AURA memory if available
-        stored = False
         if self.memory:
             try:
                 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
@@ -138,7 +137,6 @@ class FastPathHandler:
                     self.memory.add_entry("learned_facts", "User-Specific", f"[{timestamp}] {fact}", importance=0.8)
                 elif hasattr(self.memory, 'store'):
                     self.memory.store(f"[{timestamp}] {fact}", {"type": "user_fact", "importance": 0.8})
-                stored = True
             except Exception as e:
                 logger.warning(f"Memory storage error: {e}")
 

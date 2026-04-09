@@ -213,7 +213,7 @@ class TestMemoryRecallInfluencesResponse:
         brain = MagicMock()
         brain.think.return_value = "Based on your preference for Python..."
 
-        response = brain.think(
+        brain.think(
             "What framework should I use?",
             system_prompt=system_prompt_addon,
             task_type=None,
@@ -332,7 +332,6 @@ class TestEndToEndConversationFlow:
         stored_memories = []
 
         # Override store() to capture writes in-memory (no real DB)
-        original_store = unified_memory.store
         def mock_store(**kwargs):
             stored_memories.append(kwargs)
             return {"mock": "stored"}

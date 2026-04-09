@@ -138,7 +138,7 @@ class TestConfigThresholds:
 
 class TestRequestIDMiddleware:
     def test_response_has_valid_uuid(self):
-        fastapi = pytest.importorskip("fastapi")
+        pytest.importorskip("fastapi")
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
         from api.middleware import RequestIDMiddleware
@@ -161,7 +161,7 @@ class TestRequestIDMiddleware:
         assert str(parsed) == rid
 
     def test_client_provided_id_is_reused(self):
-        fastapi = pytest.importorskip("fastapi")
+        pytest.importorskip("fastapi")
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
         from api.middleware import RequestIDMiddleware
@@ -188,7 +188,8 @@ class TestPathTraversalPrefixConfusion:
 
     def test_rejects_sibling_directory(self):
         from pathlib import Path
-        import tempfile, os
+        import tempfile
+        import os
 
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp) / "shared"
@@ -248,7 +249,7 @@ class TestSessionIdValidationCodeReset:
     """Test session ID validation on code/session/reset endpoint."""
 
     def test_rejects_traversal_session_id(self):
-        fastapi = pytest.importorskip("fastapi")
+        pytest.importorskip("fastapi")
         from fastapi.testclient import TestClient
         from api.main import app
         client = TestClient(app)
@@ -256,7 +257,7 @@ class TestSessionIdValidationCodeReset:
         assert resp.status_code in (400, 403)
 
     def test_rejects_empty_session_id(self):
-        fastapi = pytest.importorskip("fastapi")
+        pytest.importorskip("fastapi")
         from fastapi.testclient import TestClient
         from api.main import app
         client = TestClient(app)
@@ -292,7 +293,8 @@ class TestToolUsageTrackerThreadSafety:
     def test_has_lock(self):
         import threading
         from aura.tools.tool_builder import ToolUsageTracker
-        import tempfile, os
+        import tempfile
+        import os
         db_path = os.path.join(tempfile.gettempdir(), "test_usage_tracker.db")
         try:
             tracker = ToolUsageTracker(db_path=db_path)

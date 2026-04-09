@@ -265,7 +265,7 @@ def run_debate(brain, question: str, user_models: Optional[str] = None) -> Debat
         transient=False,
     ) as live:
         with ThreadPoolExecutor(max_workers=3) as pool:
-            futures = {pool.submit(_run_debater, p): p for p in positions}
+            {pool.submit(_run_debater, p): p for p in positions}
             while not all(p.done for p in positions):
                 time.sleep(0.5)
                 with lock:

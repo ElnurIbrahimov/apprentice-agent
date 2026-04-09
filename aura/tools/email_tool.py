@@ -1657,7 +1657,7 @@ class EmailTool:
         if action_lower.startswith("fetch") or action_lower in ("inbox", "check", "check mail"):
             unread_only = "unread" in action_lower
             limit = kwargs.get("limit", 10)
-            folder = kwargs.get("folder", "INBOX")
+            kwargs.get("folder", "INBOX")
             return self.inbox(limit=limit, unread_only=unread_only)
 
         # Read specific email
@@ -1704,7 +1704,7 @@ class EmailTool:
         # Search
         if action_lower.startswith("search") or action_lower.startswith("find"):
             query = kwargs.get("query") or (action.split(None, 1)[-1] if len(action.split()) > 1 else "")
-            folder = kwargs.get("folder", "INBOX")
+            kwargs.get("folder", "INBOX")
             return self.search(query)
 
         # Mark read/unread

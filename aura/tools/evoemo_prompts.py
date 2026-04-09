@@ -278,7 +278,7 @@ def format_for_emotion(text: str, emotion: str) -> str:
     Optionally format text based on emotional state.
     For example, add acknowledgment prefix for frustrated users.
     """
-    style = get_response_style(emotion)
+    get_response_style(emotion)
 
     # Add acknowledgment for certain emotions
     if should_acknowledge(emotion, 75):

@@ -323,7 +323,7 @@ class KGBrainMixin:
     def episodic_consolidate(self) -> dict:
         try:
             from aura.memory.store import get_memory_store
-            store = get_memory_store()
+            get_memory_store()
             return {"success": True, "message": "Consolidation via UnifiedMemory"}
         except ImportError as e:
             return {"success": False, "error": str(e)}

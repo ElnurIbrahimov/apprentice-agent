@@ -1229,7 +1229,6 @@ class APITesterTool:
 
                 # Build headers from parameters
                 headers = {}
-                body = None
                 json_body = None
 
                 params = operation.get("parameters", []) + path_item.get("parameters", [])

@@ -247,7 +247,7 @@ class TestActiveInferencePyMDP:
     def test_c_vector_no_drift(self):
         engine = ActiveInferenceEngine(use_pymdp=True)
         # Record original C values
-        c0_original = engine._pymdp_agent.C[0].copy()
+        engine._pymdp_agent.C[0].copy()
 
         # Set preferences multiple times
         for _ in range(10):

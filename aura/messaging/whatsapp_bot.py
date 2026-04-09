@@ -216,7 +216,7 @@ class WhatsAppBot(BasePlatform):
         phone = remote_jid.split("@")[0]
         text = data.get("text", "")
         push_name = data.get("pushName", "")
-        message_id = data.get("id", "")
+        data.get("id", "")
 
         # Check if allowed
         # Normalize: strip '+' from both sides for comparison

@@ -754,7 +754,7 @@ Include 'if __name__ == "__main__": pytest.main([__file__, "-x", "-q"])' at the 
                 logger.debug(f"[ToolBuilder] GEPA registration skipped for {tool_name}: no LLM available")
                 return
 
-            adapter = AuraSkillAdapter(config=config, llm_func=llm_func)
+            AuraSkillAdapter(config=config, llm_func=llm_func)
 
             # Read tool code as the "procedure text" for GEPA
             tool_code = Path(tool_path).read_text(encoding='utf-8')

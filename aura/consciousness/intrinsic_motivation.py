@@ -711,7 +711,7 @@ class IntrinsicMotivationEngine:
         Returns summary of the cycle.
         """
         # 1. Assess all drives
-        drives = self.assess_drives()
+        self.assess_drives()
 
         # 2. Generate motivated actions
         actions = self.generate_actions()

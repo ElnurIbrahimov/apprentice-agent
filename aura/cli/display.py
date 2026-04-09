@@ -632,7 +632,7 @@ def show_response(text: str, model: str = "", stream: bool = True) -> None:
 def show_response_attribution(model: str, elapsed: float, tokens: int = 0) -> None:
     """Show model + time + tokens after each response."""
     from .spinner import _format_elapsed
-    colors = _get_theme_colors()
+    _get_theme_colors()
 
     t = Text("  ")
     # Model name — trim common suffixes

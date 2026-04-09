@@ -132,7 +132,7 @@ def test_old_callback_signature():
 
     mcts = MCTSReasoning(llm_func=mock_llm, config=MCTSConfig(max_iterations=2))
     mcts.on_iteration_complete = old_callback
-    result = mcts.search("What is 2+2?")
+    mcts.search("What is 2+2?")
     # Should not raise TypeError, and callback should have been called
     assert len(calls) > 0
     assert calls[0][0] == 1  # first iteration

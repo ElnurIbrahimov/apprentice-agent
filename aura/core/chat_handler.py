@@ -450,7 +450,7 @@ class ChatMixin:
         tone_modifier = ctx["tone_modifier"]
         thinking_prefix = ctx["thinking_prefix"]
         system_prompt_addon = ctx["system_prompt_addon"]
-        is_simple = ctx["is_simple"]
+        ctx["is_simple"]
 
         # ===== Strategy Bandit — Adaptive Reasoning Strategy Selection =====
         bandit_selection = None

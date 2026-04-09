@@ -589,7 +589,7 @@ class MarketplaceTool:
                 return {"success": False, "error": f"Tool file not found: {tool_file}"}
 
             with open(tool_file, "r", encoding="utf-8") as f:
-                tool_code = f.read()
+                f.read()
 
             # Create plugin folder structure
             publish_dir = self.base_path / "plugins" / tool_name

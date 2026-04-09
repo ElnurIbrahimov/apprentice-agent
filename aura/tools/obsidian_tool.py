@@ -402,7 +402,7 @@ class ObsidianTool:
             else self._get_all_md_files()
         )
         todo_pattern = re.compile(r"[-*]\s+\[\s*[ x]?\s*\]\s+(.+)", re.IGNORECASE)
-        heading_pattern = re.compile(r"^#+\s+(.+)", re.MULTILINE)
+        re.compile(r"^#+\s+(.+)", re.MULTILINE)
         all_items = []
         for f in files:
             try:

@@ -391,7 +391,6 @@ class MiscMixin:
                 )
             except Exception:
                 response_text = "Regeneration failed. Try asking directly."
-                artifacts = []
             finally:
                 typing_task.cancel()
                 try:

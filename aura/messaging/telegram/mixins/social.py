@@ -160,7 +160,6 @@ class SocialMixin:
             )
         except Exception:
             response_text = "Retry also failed. Please try rephrasing your question."
-            artifacts = []
         finally:
             typing_task.cancel()
             try:

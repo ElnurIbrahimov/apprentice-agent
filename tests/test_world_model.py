@@ -130,7 +130,7 @@ class TestProjectCRUD:
         """Can filter projects by status."""
         wm.add_project("Active1")
         wm.add_project("Active2")
-        p3 = wm.add_project("Paused1", status=ProjectStatus.PAUSED)
+        wm.add_project("Paused1", status=ProjectStatus.PAUSED)
 
         active = wm.get_projects_by_status(ProjectStatus.ACTIVE)
         assert len(active) == 2
@@ -296,7 +296,7 @@ class TestBeliefCRUD:
     def test_get_current_excludes_superseded(self, wm):
         """get_current_beliefs only returns valid_to=None beliefs."""
         b1 = wm.add_belief("Belief A")
-        b2 = wm.add_belief("Belief B")
+        wm.add_belief("Belief B")
         wm.supersede_belief(b1.id, "Belief A revised")
 
         current = wm.get_current_beliefs()
@@ -637,7 +637,7 @@ class TestPersistence:
         proj = wm1.add_project("Survivor", technologies=["python"])
         goal = wm1.add_goal("Persist data", horizon=GoalHorizon.SHORT_TERM)
         belief = wm1.add_belief("Test belief", category=BeliefCategory.PREFERENCE)
-        rel = wm1.add_relationship("TestPerson", role="tester")
+        wm1.add_relationship("TestPerson", role="tester")
         wm1.set_environment("os", "tool", "Windows")
 
         proj_id = proj.id

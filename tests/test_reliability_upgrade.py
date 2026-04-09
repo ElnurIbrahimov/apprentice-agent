@@ -523,7 +523,7 @@ class TestDreamConsolidator(unittest.TestCase):
             return None
         consolidator._summarize_cluster = fake_summarize
 
-        report = consolidator.run_cycle(user_id="test_user")
+        consolidator.run_cycle(user_id="test_user")
         # 2 memories → 1 cluster of size 2 → below min=5 → no summaries
         self.assertEqual(summarize_calls[0], 0)
 

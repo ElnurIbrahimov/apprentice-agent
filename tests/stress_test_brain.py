@@ -254,7 +254,7 @@ def run_stress_test():
     # RESULTS SUMMARY
     # ========================================================================
     print(f"\n{'='*70}")
-    print(f"  RESULTS SUMMARY")
+    print("  RESULTS SUMMARY")
     print(f"{'='*70}")
 
     ok_count = sum(1 for r in results if r.status == "OK")
@@ -271,7 +271,7 @@ def run_stress_test():
     print(f"  Total time:      {total_elapsed:.1f}s ({total_elapsed/total:.1f}s avg)")
 
     # Per-category breakdown
-    print(f"\n  Per Category:")
+    print("\n  Per Category:")
     for cat_name, _ in ALL_TESTS:
         cat_results = [r for r in results if r.category == cat_name]
         cat_ok = sum(1 for r in cat_results if r.status == "OK")
@@ -282,7 +282,7 @@ def run_stress_test():
 
     # Response time distribution
     times = sorted(r.elapsed for r in results)
-    print(f"\n  Response times:")
+    print("\n  Response times:")
     print(f"    Min:     {times[0]:.1f}s")
     print(f"    Median:  {times[len(times)//2]:.1f}s")
     print(f"    P90:     {times[int(len(times)*0.9)]:.1f}s")
@@ -290,13 +290,13 @@ def run_stress_test():
     print(f"    Max:     {times[-1]:.1f}s")
 
     # Check history state
-    print(f"\n  Brain state:")
+    print("\n  Brain state:")
     print(f"    History length:     {len(brain.conversation_history)}")
     print(f"    Query count:        {brain._query_count}")
     print(f"    Total query count:  {brain._total_query_count}")
 
     # Check background executor health
-    print(f"\n  Background executor:")
+    print("\n  Background executor:")
     pending = _BG_EXECUTOR._work_queue.qsize() if hasattr(_BG_EXECUTOR, '_work_queue') else '?'
     print(f"    Pending tasks: {pending}")
 
@@ -327,7 +327,7 @@ def run_stress_test():
         verdict = "FAILING"
     print(f"  VERDICT: {verdict} ({success_rate:.0f}% success rate)")
     # Edge cases with empty input are expected to potentially fail
-    real_failures = [r for r in failures if r.prompt.strip()]
+    [r for r in failures if r.prompt.strip()]
     real_total = sum(1 for r in results if r.prompt.strip())
     real_rate = sum(1 for r in results if r.success and r.prompt.strip()) / real_total * 100 if real_total else 0
     print(f"  (Excluding empty-input edge cases: {real_rate:.0f}% success)")

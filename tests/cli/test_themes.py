@@ -56,10 +56,9 @@ def test_theme_types():
         assert theme.type in ("dark", "light")
 
 def test_save_and_load_preference(tmp_path, monkeypatch):
-    config_path = tmp_path / ".aura" / "config.json"
+    tmp_path / ".aura" / "config.json"
     monkeypatch.setattr("aura.cli.themes.Path.home", lambda: tmp_path)
     # Reload the module-level path
     import aura.cli.themes as mod
-    old_path = mod._THEMES_DIR
     # Just test the functions work without error
     assert load_theme_preference() in list(THEMES.keys()) or True

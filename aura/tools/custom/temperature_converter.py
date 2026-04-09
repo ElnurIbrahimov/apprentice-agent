@@ -138,7 +138,7 @@ class TemperatureConverterTool:
             celsius_pos = action_lower.find('celsius')
             fahrenheit_pos = action_lower.find('fahrenheit')
             number_match = re.search(r'-?\d+(?:\.\d+)?', action_lower)
-            number_pos = number_match.start() if number_match else -1
+            number_match.start() if number_match else -1
 
             if celsius_pos != -1 and (fahrenheit_pos == -1 or celsius_pos < fahrenheit_pos):
                 return self.celsius_to_fahrenheit(temp_value)
