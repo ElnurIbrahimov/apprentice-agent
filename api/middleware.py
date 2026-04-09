@@ -71,6 +71,9 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
             logger.info("[Auth] API key authentication disabled (set AURA_API_KEY and AURA_API_AUTH_ENABLED=true to enable)")
 
     async def dispatch(self, request: Request, call_next):
+        # Re-check env var each request so runtime overrides (e.g. tests) work
+        if os.environ.get("AURA_API_AUTH_ENABLED", "").lower() in ("false", "0", "no"):
+            return await call_next(request)
         if not self.enabled:
             return await call_next(request)
 
