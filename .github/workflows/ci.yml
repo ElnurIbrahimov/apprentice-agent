@@ -44,6 +44,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
+          pip install ".[api,memory,telegram]"
           pip install pytest pytest-asyncio pytest-cov numpy
 
       - name: Run unit tests
